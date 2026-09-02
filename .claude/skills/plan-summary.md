@@ -1,0 +1,1 @@
+/Users/sg/Code/claude-template/.claude/skills/plan-summary.md

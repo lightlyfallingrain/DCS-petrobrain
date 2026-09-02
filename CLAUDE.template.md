@@ -1,0 +1,1 @@
+/Users/sg/Code/claude-template/CLAUDE.template.md

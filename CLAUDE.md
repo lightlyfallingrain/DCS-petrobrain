@@ -1,3 +1,6 @@
+@CLAUDE.template.md
+@.claude/docs/agents.template.md
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -25,3 +28,11 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 - **Cross-machine setup**: DCS World runs on a separate Windows PC; primary development is on this Mac. Manual-copy workflow — see `world-model/WORKFLOW.md`. Raw extracted data lives under `world-model/data/raw/` and is gitignored; never commit it.
 - **Read-only against DCS.** Never modify the DCS installation.
 - Python 3.11+, type-hinted throughout, `mypy --strict` (see `world-model/pyproject.toml`). Spatial library choices are not yet locked — decide during Milestone 1-2 and record the decision + rationale in `world-model/research/`.
+
+## Subprojects
+
+Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory. Currently: `world-model/CLAUDE.md`.
+
+## Agents
+
+7 template agent roles live in `.claude/agents/` (architect, implementer, reviewer, debugger, performance-reviewer, security, dod) — see `AGENTS.md` for role sequences. All default to `claude-sonnet-5`, except `dod` which uses `claude-haiku-4-5-20251001` (cheap final gate). For architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.

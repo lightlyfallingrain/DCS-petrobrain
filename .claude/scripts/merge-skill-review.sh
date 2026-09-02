@@ -1,0 +1,1 @@
+/Users/sg/Code/claude-template/.claude/scripts/merge-skill-review.sh
