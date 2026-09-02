@@ -36,3 +36,5 @@ Each major component under this repo may carry its own `<subproject>/CLAUDE.md` 
 ## Agents
 
 7 template agent roles live in `.claude/agents/` (architect, implementer, reviewer, debugger, performance-reviewer, security, dod) — see `AGENTS.md` for role sequences. All default to `claude-sonnet-5`, except `dod` which uses `claude-haiku-4-5-20251001` (cheap final gate). For architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
+
+**Skip `performance-reviewer` and `security` for now** — this phase is an offline single-user local pipeline with no hot path and no untrusted-input surface yet. Do not insert them into the default role sequence from `AGENTS.md`. Only run either when the user explicitly asks for it.
