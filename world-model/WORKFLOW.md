@@ -2,14 +2,36 @@
 
 DCS World is installed on a Windows PC. Primary development happens on a Mac. This is a manual-copy workflow by default, with an escape hatch to run Claude Code directly on Windows for extraction-heavy sessions.
 
-## Default: manual copy
+## Default: manual copy via `win-mac-sync`
 
-1. On Windows, run extraction/probe scripts (plain Python or WSL bash) directly against the DCS installation (e.g. `Mods/terrains/<theatre>/RasterCharts`, Lua probe output, etc.).
-2. Scripts write **only raw extracted artifacts** to a local folder — no processing, no pipeline logic on the Windows side.
-3. Copy that folder to this repo under `data/raw/dcs/<theatre>/` (gitignored, so any transfer method — AirDrop, USB, syncthing, cloud drive — is fine).
-4. All processing, reconciliation, and querying happens on the Mac against `data/raw/`.
+`win-mac-sync` (repo root) is a local symlink to a Dropbox-synced folder shared
+between the Mac and the Windows DCS machine — **not part of this repo, not
+tracked by git.** It's a scratch transfer channel only, with two
+subdirectories: `run-wsl/` and `wsl-output/`.
 
-Keep extraction scripts themselves under version control (`tools/` or a `windows/` subfolder) even though their output isn't — so the extraction step is reproducible, not a one-off manual hack.
+1. Canonical probe/extraction scripts live under version control at
+   `world-model/tools/wsl/` (WSL-bash scripts, run against the DCS
+   installation — e.g. `Mods/terrains/<theatre>/RasterCharts`, Lua probe
+   output, etc.).
+2. To run one: copy it from `world-model/tools/wsl/` into `win-mac-sync/run-wsl/`
+   (now synced to the Windows machine via Dropbox), then run it there in WSL
+   bash.
+3. Scripts require two env vars set on the Windows/WSL side:
+   - `DCS_INSTALL_PATH` — DCS World install directory.
+   - `DCS_SAVED_GAMES_PATH` — DCS Saved Games directory.
+4. Scripts write **only raw extracted artifacts** into `win-mac-sync/wsl-output/`
+   — no processing, no pipeline logic on the Windows side.
+5. Once `win-mac-sync/wsl-output/` syncs back to the Mac, treat it as temp
+   storage: copy anything worth keeping into the repo — findings into
+   `research/`, raw pipeline input into `data/raw/dcs/<theatre>/` — then it can
+   be cleared. Nothing of record should live only in `win-mac-sync/`.
+6. All processing, reconciliation, and querying happens on the Mac against
+   `data/raw/`.
+
+Keep extraction scripts themselves under version control
+(`world-model/tools/wsl/` for WSL/Windows-side scripts, `tools/` for Mac-side
+probes) even though their output isn't — so the extraction step is
+reproducible, not a one-off manual hack.
 
 ## Escape hatch: Claude Code on Windows
 
