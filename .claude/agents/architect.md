@@ -42,11 +42,12 @@ Mission Interpreter and Petrobrain Runtime modules do not exist yet — do not c
 When asked to plan a feature or resolve a design question:
 
 1. **Understand the goal** — restate it in one sentence to confirm your understanding
-2. **Identify affected modules** — list every module/file that will change or be created
-3. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
-4. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
-5. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep
-6. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
+2. **Identify unverified DCS-internals dependencies** — if the plan depends on DCS file formats, coordinate/projection behavior, scripting-API availability, or any other claim not already confirmed in `world-model/research/`, invoke the `investigator` agent to resolve it **before** finalizing the plan. Do this proactively — do not wait for the user to ask, and do not plan around an assumption you could instead verify. Skip this step only when the relevant fact is already recorded in `world-model/research/` or `docs/concept/`.
+3. **Identify affected modules** — list every module/file that will change or be created
+4. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
+5. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
+6. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
+7. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
 
 ---
 
