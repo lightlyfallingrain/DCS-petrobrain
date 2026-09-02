@@ -129,7 +129,7 @@ The feature is done. Perform knowledge harvest, then commit and merge:
 7. Run `git status` to confirm what is staged
 8. Commit all staged changes with a message summarizing the feature
 9. Determine the current branch name with `git branch --show-current`
-10. Switch to master: `git checkout master`
+10. Switch to main: `git checkout main`
 11. Merge the feature branch: `git merge --no-ff <featurebranch> -m "Merge <featurebranch>: <one-line feature summary>"`
 12. Verify the merge succeeded with `git log --oneline -5`
 

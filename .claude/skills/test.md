@@ -4,12 +4,11 @@ description: Run the project test command with filtered output (failures and sum
 type: user-invocable
 ---
 
-Run in `{{PROJECT_DIR}}`:
+Run in `/Users/sg/Code/DCS-petrobrain`:
 
 ```
-{{TEST_COMMAND}} 2>&1 \
-  | grep -vE '{{BUILD_NOISE_PATTERN}}' \
-  | grep -vE '{{TEST_NOISE_PATTERN}}'
+pytest world-model/tests -q 2>&1 \
+  | grep -vE '^(platform |rootdir:|configfile:|plugins:|cachedir:|collecting |collected )'
 ```
 
 Report:

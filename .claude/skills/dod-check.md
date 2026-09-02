@@ -13,7 +13,7 @@ Runs every mechanical DoD check — quality gates, code violation scans, file si
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-cd {{PROJECT_DIR}}
+cd /Users/sg/Code/DCS-petrobrain
 
 FEATURE="${1:-}"
 PASS="✓ PASS"
@@ -41,29 +41,37 @@ echo "| Check | Status | Notes |"
 echo "|-------|--------|-------|"
 
 # Format check
-FMT_OUT=$({{FORMAT_CHECK_COMMAND}} 2>&1 || true)
-if [ -z "$FMT_OUT" ]; then
-  result "Format" "PASS" "No formatting changes needed"
+FMT_OUT=$(ruff format --check world-model/src world-model/tests 2>&1 || true)
+if echo "$FMT_OUT" | grep -q "would be reformatted\|would reformat"; then
+  result "Format" "FAIL" "Run \`ruff format world-model/src world-model/tests\` to fix"
 else
-  result "Format" "FAIL" "Run \`{{FORMAT_FIX_COMMAND}}\` to fix"
+  result "Format" "PASS" "No formatting changes needed"
 fi
 
 # Lint check
-LINT_ERRORS=$({{LINT_COMMAND}} 2>&1 | grep -E "^(error|Error)" | head -3 || true)
-if [ -z "$LINT_ERRORS" ]; then
+LINT_OUT=$(ruff check world-model/src world-model/tests 2>&1 || true)
+if echo "$LINT_OUT" | grep -q "^All checks passed"; then
   result "Lint" "PASS" "0 errors/warnings"
 else
-  COUNT=$({{LINT_COMMAND}} 2>&1 | grep -c "^error" || echo "?")
-  result "Lint" "FAIL" "$COUNT error(s): ${LINT_ERRORS%%$'\n'*}"
+  COUNT=$(echo "$LINT_OUT" | grep -cE "^world-model/" || echo "?")
+  result "Lint" "FAIL" "$COUNT error(s): $(echo "$LINT_OUT" | head -1)"
+fi
+
+# Type check
+MYPY_OUT=$(mypy world-model/src 2>&1 || true)
+if echo "$MYPY_OUT" | grep -q "^Success: no issues found"; then
+  result "Types (mypy --strict)" "PASS" "no issues found"
+else
+  result "Types (mypy --strict)" "FAIL" "$(echo "$MYPY_OUT" | tail -1)"
 fi
 
 # Test suite
-TEST_OUT=$({{TEST_COMMAND}} 2>&1 || true)
-if echo "$TEST_OUT" | grep -qE "{{TEST_PASS_PATTERN}}"; then
-  SUMMARY=$(echo "$TEST_OUT" | grep -E "{{TEST_SUMMARY_PATTERN}}" | tail -1 || echo "passed")
+TEST_OUT=$(pytest world-model/tests -q 2>&1 || true)
+if echo "$TEST_OUT" | grep -qE "^[0-9]+ passed"; then
+  SUMMARY=$(echo "$TEST_OUT" | grep -E "^[0-9]+ (passed|failed)" | tail -1 || echo "passed")
   result "Tests" "PASS" "$SUMMARY"
 else
-  FAILED=$(echo "$TEST_OUT" | grep -cE "{{TEST_FAIL_PATTERN}}" || echo "?")
+  FAILED=$(echo "$TEST_OUT" | grep -cE "^FAILED " || echo "?")
   result "Tests" "FAIL" "$FAILED test(s) failed"
 fi
 
@@ -75,12 +83,12 @@ echo ""
 echo "| Check | Status | Findings |"
 echo "|-------|--------|---------|"
 
-SRC="{{SOURCE_DIR}}"
-EXT="{{SOURCE_EXT}}"
+SRC="world-model/src"
+EXT="py"
 
 # Debug output left in code
-DEBUG=$(grep -rn "{{DEBUG_OUTPUT_PATTERN}}" "$SRC" --include="*.$EXT" 2>/dev/null \
-  | grep -v "{{TEST_FILE_PATTERN}}" || true)
+DEBUG=$(grep -rn "print(\|pdb.set_trace\|breakpoint()" "$SRC" --include="*.$EXT" 2>/dev/null \
+  | grep -v "_test.py\|test_" || true)
 if [ -z "$DEBUG" ]; then
   result "No debug output" "PASS" "0 occurrences"
 else
@@ -89,8 +97,7 @@ else
 fi
 
 # TODO / FIXME / debug markers
-MARKERS=$(grep -rn "TODO\|FIXME\|HACK\|XXX" "$SRC" --include="*.$EXT" 2>/dev/null \
-  | grep -v "//.*TODO\|//.*FIXME\|#.*TODO" || true)
+MARKERS=$(grep -rn "TODO\|FIXME\|HACK\|XXX" "$SRC" --include="*.$EXT" 2>/dev/null || true)
 if [ -z "$MARKERS" ]; then
   result "No TODO/FIXME markers" "PASS" "0 occurrences"
 else
@@ -98,9 +105,9 @@ else
   result "No TODO/FIXME markers" "FAIL" "$COUNT marker(s) found"
 fi
 
-# Error suppression in critical paths
-UNWRAP=$(grep -rn "{{ERROR_SUPPRESS_PATTERN}}" "{{CRITICAL_SOURCE_DIRS}}" --include="*.$EXT" 2>/dev/null \
-  | grep -v "{{TEST_FILE_PATTERN}}" || true)
+# Error suppression in critical paths (bare except / silent pass)
+UNWRAP=$(grep -rn "except:\|except Exception:\s*$\|except Exception:\s*pass" "$SRC" --include="*.$EXT" 2>/dev/null \
+  | grep -v "_test.py\|test_" || true)
 if [ -z "$UNWRAP" ]; then
   result "No error suppression in critical paths" "PASS" "0 occurrences"
 else
@@ -108,24 +115,15 @@ else
   result "No error suppression in critical paths" "FAIL" "$COUNT occurrence(s)"
 fi
 
-# Forbidden imports / banned patterns
-FORBIDDEN=$(grep -rn "{{FORBIDDEN_IMPORT_PATTERN}}" "$SRC" --include="*.$EXT" 2>/dev/null || true)
-if [ -z "$FORBIDDEN" ]; then
-  result "No forbidden imports" "PASS" ""
-else
-  COUNT=$(echo "$FORBIDDEN" | wc -l | tr -d ' ')
-  result "No forbidden imports" "FAIL" "$COUNT occurrence(s) of {{FORBIDDEN_IMPORT_PATTERN}}"
-fi
-
 echo ""
 
 # ── File Size Check ───────────────────────────────────────────────────────────
-echo "## File Size (>{{MAX_FILE_LINES}} lines = must split)"
+echo "## File Size (>400 lines = must split)"
 echo ""
 OVERSIZED=$(find "$SRC" -name "*.$EXT" | xargs wc -l 2>/dev/null \
-  | awk -v max={{MAX_FILE_LINES}} '$1 > max && $2 != "total"' | sort -rn || true)
+  | awk -v max=400 '$1 > max && $2 != "total"' | sort -rn || true)
 if [ -z "$OVERSIZED" ]; then
-  echo "| $PASS | All files within {{MAX_FILE_LINES}} line limit |"
+  echo "| $PASS | All files within 400 line limit |"
   echo "|--------|----------------------------------------------|"
 else
   echo "| File | Lines | Action |"
@@ -142,7 +140,7 @@ echo ""
 echo "## Staging"
 echo ""
 UNTRACKED=$(git status --porcelain | grep "^??" | awk '{print $2}' \
-  | grep -E "\.({{STAGED_EXTENSIONS}})$" || true)
+  | grep -E "\.(py|toml|md)$" || true)
 if [ -z "$UNTRACKED" ]; then
   echo "| $PASS | No untracked source/config files |"
   echo "|--------|----------------------------------|"
@@ -196,7 +194,6 @@ print_detail() {
 print_detail "Debug Output Findings" "$DEBUG"
 print_detail "TODO/FIXME Findings" "$MARKERS"
 print_detail "Error Suppression Findings" "$UNWRAP"
-print_detail "Forbidden Import Findings" "$FORBIDDEN"
 
 # ── Final Verdict ──────────────────────────────────────────────────────────────
 echo "---"
@@ -206,28 +203,3 @@ else
   echo "## Verdict: **FAIL** — see failures above"
 fi
 ```
-
-<!--
-Configuration placeholders:
-
-PROJECT_DIR              — absolute path to project root
-SOURCE_DIR               — source directory, e.g. src/
-SOURCE_EXT               — file extension without dot, e.g. rs, ts, py
-CRITICAL_SOURCE_DIRS     — dirs where error suppression is banned, e.g. "src/data src/api"
-MAX_FILE_LINES           — line limit before split required, e.g. 400
-STAGED_EXTENSIONS        — pipe-separated extensions to check staging, e.g. "rs|toml|md|wgsl"
-
-FORMAT_CHECK_COMMAND     — e.g. "cargo fmt --check" or "npx prettier --check ."
-FORMAT_FIX_COMMAND       — e.g. "cargo fmt" or "npx prettier --write ."
-LINT_COMMAND             — e.g. "cargo clippy -- -D warnings" or "npx eslint . --max-warnings 0"
-TEST_COMMAND             — e.g. "cargo test" or "npm test"
-
-TEST_PASS_PATTERN        — regex matching passing output, e.g. "test result: ok" or "passing"
-TEST_FAIL_PATTERN        — regex matching failed tests, e.g. "FAILED$" or "failing"
-TEST_SUMMARY_PATTERN     — regex for summary line, e.g. "test result:" or "[0-9]+ passing"
-
-DEBUG_OUTPUT_PATTERN     — e.g. "println!\|dbg!\|eprintln!" or "console\.log\|console\.debug"
-ERROR_SUPPRESS_PATTERN   — e.g. "\.unwrap()\|\.expect(" or "!\."
-TEST_FILE_PATTERN        — exclude test files, e.g. "cfg(test)\|mod tests" or "\.test\."
-FORBIDDEN_IMPORT_PATTERN — banned pattern, e.g. "tokio::" or "eval(" — leave empty to skip
--->

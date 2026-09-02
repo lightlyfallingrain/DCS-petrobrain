@@ -1,8 +1,8 @@
 # world-model/CLAUDE.md
 
-Subproject instructions for the DCS World Model Builder. Augments the root `CLAUDE.md` — read that first for overall Petrobrain architecture and working conventions; this file adds stack/testing/structure specifics that apply only within `world-model/`.
+Subproject instructions for the DCS World Model Builder. Augments the root `CLAUDE.md` — read that first for overall Petrobrain architecture; this file adds stack/testing/structure specifics that apply only within `world-model/`.
 
-See `README.md`, `ROADMAP.md`, `WORKFLOW.md` in this directory for project design, milestone status, and the Mac/Windows cross-machine workflow.
+See `README.md`, `ROADMAP.md`, `WORKFLOW.md` in this directory for project design, milestone status, and the Mac/Windows cross-machine workflow. See `docs/CONVENTIONS.md` for the non-negotiable working rules (DCS reconnaissance, provenance/confidence, read-only DCS access).
 
 ## Tech stack
 

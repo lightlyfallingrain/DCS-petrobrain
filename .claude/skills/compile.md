@@ -4,10 +4,10 @@ description: Run the project build command with filtered output (errors and warn
 type: user-invocable
 ---
 
-Run in `{{PROJECT_DIR}}`:
+Run in `/Users/sg/Code/DCS-petrobrain`:
 
 ```
-{{COMPILE_COMMAND}} 2>&1 | grep -vE '{{BUILD_NOISE_PATTERN}}'
+ruff check world-model/src world-model/tests 2>&1
 ```
 
 Report:

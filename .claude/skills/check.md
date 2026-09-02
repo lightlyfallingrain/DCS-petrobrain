@@ -4,19 +4,9 @@ description: Run a fast compilation/syntax check without a full build
 type: user-invocable
 ---
 
-Run `{{CHECK_COMMAND}}` in `{{PROJECT_DIR}}` and report the result.
+Run `mypy world-model/src` in `/Users/sg/Code/DCS-petrobrain` and report the result.
 
 - If it exits 0: print **PASS** — no errors
 - If it exits non-zero: print **FAIL** and show all error output
 
 This is the fast feedback gate (no full build / codegen). Use it after each logical implementation step to catch errors early. Use `/done` only when the full feature is ready for the Definition of Done checklist.
-
-<!--
-Rust example:
-  CHECK_COMMAND = cargo check
-  PROJECT_DIR   = /path/to/project
-
-TypeScript example:
-  CHECK_COMMAND = npx tsc --noEmit
-  PROJECT_DIR   = /path/to/project
--->
