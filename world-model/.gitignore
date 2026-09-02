@@ -1,0 +1,10 @@
+data/raw/
+data/processed/
+data/world-model/
+*.gpkg
+*.sqlite
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
