@@ -4,7 +4,7 @@
 
 World Model Builder — Milestone 0/1. See `world-model/ROADMAP.md` for full milestone list and status.
 
-- [ ] M0 — record installed DCS version + confirm Syria terrain present, in `world-model/research/`.
+- [x] M0 — record installed DCS version + confirm Syria terrain present, in `world-model/research/`.
 - [ ] M1 — prove DCS x/z ↔ lat/lon transform for Syria against a known real-world control point; measure error.
 
 ## Milestones

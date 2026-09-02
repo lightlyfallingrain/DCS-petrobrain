@@ -15,7 +15,9 @@ subdirectories: `run-wsl/` and `wsl-output/`.
    output, etc.).
 2. To run one: copy it from `world-model/tools/wsl/` into `win-mac-sync/run-wsl/`
    (now synced to the Windows machine via Dropbox), then run it there in WSL
-   bash.
+   bash. **Always copy — never edit/run scripts directly inside
+   `win-mac-sync/run-wsl/`**, since it's gitignored and not version-controlled;
+   the copy step keeps the script in the repo as source of truth.
 3. Scripts require two env vars set on the Windows/WSL side:
    - `DCS_INSTALL_PATH` — DCS World install directory.
    - `DCS_SAVED_GAMES_PATH` — DCS Saved Games directory.
