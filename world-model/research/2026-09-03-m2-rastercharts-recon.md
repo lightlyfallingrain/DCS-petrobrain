@@ -1317,3 +1317,138 @@ im.crop((100, 750, 400, 950)).resize((900, 600)).save("/tmp/crop_hama.png")  # H
 - Whether the sign-flip convention found here (x-tile-index south-increasing vs. z-tile-index
   east-increasing) holds for the `32m` sheets (`aa`/`ab`/`xab`/`xac`) too, or is specific to
   the `64m` `aa` sheet tested — not cross-checked against a 32m-tier tile this session.
+
+---
+
+## Session 11 (2026-09-03) — Vegetation/scenery query API and "Alt" mode contour data: is there DCS-native truth beyond raster tiles?
+
+**DCS version:** 2.9.29.27278 (unchanged; not re-verified live this session — pure API/forum research, no local probe run). **Theatre:** Syria (screenshot only; no live-mission probe this session).
+
+### Question
+
+Session 10 flagged an unresolved, high-value question: is any of what F10's "Alt" mode
+renders — individual tree positions, terrain contour geometry — queryable via DCS's
+scripting/export API, rather than only observable by screenshotting the rendered client?
+If so, it could supersede both RasterCharts and clipmap satellite imagery as DCS-native
+truth for the World Model's terrain/vegetation layer. This session researches the
+documented API surface (no live-mission probe access this session) and community precedent.
+
+### Findings
+
+- **Session 10's "Alt" mode attribution for `alt-map.jpg` is correct — this note's own
+  attempted correction (session 11's initial draft) was wrong and is retracted.** The
+  top-left text ("MAP") is a fixed UI label unrelated to the Map/Alt/Sat toggle — it does
+  not change based on which mode is active. The actual mode indicator is the three
+  buttons top-right: whichever of Map/Alt/Sat is currently selected renders with a
+  lighter/highlighted blue fill, the other two stay dark. User confirmed by direct
+  visual check: in `alt-map.jpg`, **"Alt" is the highlighted (lighter blue) button** —
+  same pattern session 5 already relied on to identify `satellite-imagery.jpg` as "Sat"
+  mode (lighter/highlighted "Sat" button there). So `alt-map.jpg` is confirmed Alt mode,
+  and the individual tree-crown icons / contour-like terrain shading / individual
+  building footprints it shows are genuinely Alt-mode-specific content, not just "Map"
+  mode at high zoom. — **evidence:** user-confirmed (direct visual identification of
+  the highlighted button) — **source:** user, this session.
+- **No documented tree/vegetation-specific scripting API exists.** `Object.Category` (the enum
+  `world.searchObjects` filters on) has exactly five members: `UNIT, WEAPON, STATIC, SCENERY,
+  BASE` — no vegetation/forest/tree category. — **evidence:** documented — **source:** ED
+  official scripting docs (`digitalcombatsimulator.com/en/support/faq/1259/` "Object"), via
+  WebSearch summary.
+- **`SceneryObject` (the class returned for `Object.Category.SCENERY`) is documented by ED as
+  "all objects placed on the map. Bridges, buildings, etc."** — no mention of vegetation, trees,
+  or forest anywhere in the class description or its method list (`getLife`, plus inherited
+  `isExist/destroy/getCategory/getTypeName/getPoint/getPosition/getVelocity/inAir/getName/
+  getDesc/hasAttribute`). — **evidence:** documented — **source:** Hoggit wiki
+  `DCS_Class_Scenery_Object`, via WebFetch.
+- **`land.getSurfaceType` has no FOREST value.** Its enum is `land.SurfaceType = {LAND=1,
+  SHALLOW_WATER=2, WATER=3, ROAD=4, RUNWAY=5}`. An ED Core Wish List forum thread titled
+  "land.getSurfaceType small enhancement" explicitly requests FOREST be added as a new value —
+  strong indirect confirmation the enhancement had not shipped as of that thread, i.e. forest/
+  vegetation cover is not distinguishable via this function. — **evidence:** documented (enum
+  values, Hoggit wiki `DCS_func_getSurfaceType`) + forum-claim-unverified (that FOREST is still
+  absent as of the currently-installed 2.9.29.27278 — the wishlist thread's date/resolution
+  status was not read, only its title/existence) — **source:** Hoggit wiki, ED forum wishlist
+  thread title via WebSearch summary (thread body not fetched — forum.dcs.world blocks WebFetch,
+  see prior sessions and memory `forum-dcs-world-fetch.md`).
+- **No community precedent found for extracting individual tree/vegetation-object positions
+  from a DCS terrain.** Searches for tree-extraction tooling returned only reskinning mods
+  ("Better Trees for Syria/Caucasus/Mariana Islands" — texture replacements for existing
+  SpeedTree-rendered foliage, not repositioning tools) and one ED forum thread title ("Forests
+  .edm — DCS Mods") whose search summary indicates modders could find individual tree `.edm`
+  model files but reported difficulty locating a "forest" `.edm` — consistent with, but not
+  proof of, forests being a procedural/rendering-time scatter over a density parameter rather
+  than a table of discretely placed, individually addressable objects. — **evidence:**
+  forum-claim-unverified (thread not fetched directly, only its title/one-line search summary)
+  — **source:** WebSearch results, ED forum thread titles ("Better Trees for Syria V2",
+  "Forests .edm"), not independently verified against thread content.
+- **A directly on-point forum thread exists but was not read**: "is there a way to detect a
+  FORREST or CITY as validated spawn terrain type?" (forum.dcs.world/topic/315439) — title
+  strongly suggests this is other mission-scripting users hitting exactly this same gap
+  (no forest surface-type query) and discussing workarounds. Not fetched — forum.dcs.world
+  blocks WebFetch (403), consistent with prior sessions. — **evidence:** gap, flagged for
+  manual follow-up — **source:** WebSearch title only.
+- **Dense elevation sampling via `land.getHeight` → contour-line-equivalent data is standard,
+  already-planned GIS work, not a gap requiring Alt-mode reverse-engineering.** Converting a
+  regular elevation grid to contour lines (marching-squares / GDAL `gdal_contour`-class
+  algorithms) is a solved, well-documented cartographic technique requiring only a grid of
+  height samples, which `land.getHeight` already provides per-point (M1 precedent: this class
+  of API needs a live mission, matching `coord.LOtoLL`). — **evidence:** documented (general
+  GIS technique, not DCS-specific) — **source:** general GIS references via WebSearch
+  (vterrain.org, GRASS-Wiki contour-lines-to-DEM); combined with M1's already-established
+  `land.getHeight` availability.
+- **`docs/concept/WORLD_MODEL_BUILDER.md` already anticipates this exact path** and does not
+  currently list "extract Alt-mode's rendering directly" as a milestone: Milestone 4 is "Create
+  an extraction/probing mechanism that can sample DCS terrain elevation over a small region.
+  Generate a grid," and the "Elevation-derived features" section explicitly lists ridgeline/
+  valley/slope/aspect extraction as *algorithms to run against a DCS elevation grid once
+  generated* ("Prefer established GIS algorithms/libraries over LLM inference"). This is the
+  same grid-then-derive approach this session's research supports independently — the concept
+  doc's plan was already the right shape before this session, it just hadn't been explicitly
+  connected to the "Alt mode" question. — **evidence:** documented (project's own concept doc)
+  — **source:** `docs/concept/WORLD_MODEL_BUILDER.md` lines ~442-470, ~628-634 (Milestone 4,
+  "Elevation-derived features").
+
+### Reproducible Test
+
+None run this session — pure documentation/API research, no live-mission probe. A follow-up
+probe (not yet written) would be: from a running Syria mission with mission-scripting access,
+call `world.searchObjects(Object.Category.SCENERY, <a volume over the forest polygon visible
+in alt-map.jpg, centered roughly on 36°10'N 36°31'E>, handler)` and check whether any returned
+objects have type names suggesting vegetation (as opposed to only bridges/buildings/etc as
+documented) — this would empirically confirm or refute the "SCENERY never contains vegetation"
+inference, which is currently based on ED's category description, not a live test.
+
+### Possible Approaches
+
+- **Treat "Alt" mode's rendering as a UI visualization of data DCS already exposes
+  elsewhere (elevation via `land.getHeight`), not a separate asset needing reverse-engineering.**
+  The terrain-contour half of the original concern is already covered by the existing Milestone
+  4 + "Elevation-derived features" plan; no new research or pipeline work is implied by this
+  session's findings for that half.
+- **Treat individual tree/vegetation positions as very likely NOT available via any documented
+  API**, based on convergent (but each individually weak) evidence: no SCENERY-adjacent
+  vegetation category, no FOREST surface type, no community tooling for tree-position
+  extraction despite an obvious modding/AI-pathfinding use case that would have surfaced such a
+  tool if one existed. Recommend **not** scoping a "vegetation layer via scripting API"
+  milestone; if forest/treeline geometry is wanted in the World Model at all, the fallback is
+  extracting **forest polygon coverage** (not individual trees) from OSM landuse=forest/natural=
+  wood tags per the existing external-GIS augmentation path in `WORLD_MODEL_BUILDER.md`, cross-
+  validated against DCS's own rendered forest polygon shape (visible in F10 screenshots, e.g.
+  `alt-map.jpg`) as a coarse geometry sanity check rather than a source of individual-tree truth.
+- **If precise per-tree data is ever considered worth pursuing** (e.g. for line-of-sight/
+  concealment modeling), the empirical `world.searchObjects(SCENERY, ...)` probe above is cheap
+  to run and would settle the question definitively rather than relying on inference from
+  documentation — recommend this only if a concrete future use case needs it, not
+  speculatively now.
+
+### Unresolved
+
+- Whether `world.searchObjects(Object.Category.SCENERY, ...)` genuinely never returns
+  vegetation objects — inferred from ED's category description, not empirically probed against
+  a live mission this session.
+- Content of forum.dcs.world/topic/315439 ("is there a way to detect a FORREST or CITY as
+  validated spawn terrain type?") — directly on-point, title only, not fetched (403 on
+  WebFetch). If the user can paste this thread's content, it would likely resolve the vegetation-
+  query question more definitively than the indirect evidence gathered this session.
+- Whether the ED wishlist thread requesting FOREST as a `getSurfaceType` value is still open
+  (i.e. FOREST is still absent) as of DCS 2.9.29.27278 specifically, or whether it shipped since
+  — thread date/status not read.
