@@ -33,7 +33,7 @@ Your sole responsibility is reconnaissance: resolve a specific uncertain questio
 
 1. **The installed DCS installation itself** — primary evidence. Inspect `Mods/terrains/<terrain>/`, scripting environment, exported data, cockpit Lua where relevant. Remember: DCS runs on a separate Windows machine (see `world-model/WORKFLOW.md`) — if you cannot reach it directly, say so explicitly and describe the probe script someone should run there.
 2. **Small reproducible local probes** — write a minimal script that tests one specific claim, rather than trusting a forum post.
-3. **Eagle Dynamics forums** — evidence and leads, not authoritative documentation.
+3. **Eagle Dynamics forums** — evidence and leads, not authoritative documentation. If automated fetch of a forum thread (or similar page) returns 403/blocked, do not record it as an unread gap — ask the user to open the URL manually and paste the content back.
 4. **Hoggit DCS World Wiki** — practical scripting-API reference; confirm which environment (mission scripting vs. export) a function is actually available in.
 5. **GitHub / community projects** (DCS-gRPC, Olympus, LotATC, Tacview converters, moving-map projects, etc.) — may contain already-solved projection/extraction/coordinate problems. Check licenses before suggesting reuse.
 
