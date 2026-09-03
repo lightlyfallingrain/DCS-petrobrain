@@ -11,3 +11,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [clipmap container format](clipmap-container-format.md) — `.tif.clipmap` byte-level structure (header, zlib-chunked BC3/BC1 tiles), decode recipe. Confirms clipmap = real satellite imagery, distinct from RasterCharts.
 - [forum.dcs.world fetch unreliable](forum-dcs-world-fetch.md) — always ask user to paste forum content manually, don't record as unread gap.
 - [research file session numbering](research-file-session-numbering.md) — check for concurrent session-number collisions before appending to a shared research/*.md file.
+- [M4 elevation recon](project_m4_elevation_recon.md) — land.getHeight is Mission-Scripting-only, no offline heightmap exists; net.log bypasses io/lfs sandbox for bulk output; SRTM .hgt recommended over Copernicus COG (no new dep).

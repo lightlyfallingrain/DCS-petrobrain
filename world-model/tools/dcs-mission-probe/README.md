@@ -28,3 +28,20 @@ See each script's header comment for exact trigger wiring and known caveats
   every `world.getAirbases()` entry, to cross-check against
   community-derived (pydcs) projection parameters. See
   `world-model/research/2026-09-02-m1-coordinate-transform.md`.
+- `elevation_probe.lua` — dumps `land.getHeight` output for a hardcoded grid
+  of DCS (x, z) points over the Gemerek bbox, to compare against an external
+  DEM (SRTM). **Prerequisite (probe-only, one-time manual step, never for
+  pipeline code): uncomment the `io`/`lfs` lines in the installed
+  `Scripts/MissionScripting.lua`** — user-authorized for investigation
+  probes specifically (see `world-model/research/2026-09-03-m4-elevation-recon.md`
+  and `plans/m4-dcs-elevation/plan.md`). Unlike `coord_probe.lua`, this probe
+  writes its own dedicated output file (`elevation_probe_output.jsonl`) via
+  `io.open` directly, rather than relying on `net.log`/`dcs.log` — no grep
+  step needed, collect the file directly via
+  `world-model/tools/wsl/collect_elevation_log.sh`. Revert the
+  `MissionScripting.lua` edit once M4's probe runs are done, unless
+  continuing to use it for a later probe. Currently holds the **Stage 2**
+  full 10x10 (100-point) grid; Stage 1's 8-point smoke test already ran
+  successfully and its real output is hardcoded into
+  `tests/test_dcs_grid.py`'s fixture — re-running this script overwrites
+  Stage 1's output file, which is expected and safe.

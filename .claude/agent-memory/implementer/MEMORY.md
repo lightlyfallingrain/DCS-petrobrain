@@ -12,3 +12,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M2 raster open questions](project_m2_raster_open_questions.md) — RasterCharts `level` semantics unresolved (clipmap analogy doesn't transfer); test_coordinates.py I001 recurred 3x, needs root-cause not re-fix.
 - [Overpass needs User-Agent](project_overpass_user_agent.md) — urllib default has none; overpass-api.de returns HTTP 406 with no payload until one is set.
 - [Draw attribution into rendered images](feedback_render_attribution_into_image.md) — OSM attribution must be `draw.text`'d onto overlay PNGs, not just printed to stdout; `world-model/tools/` isn't in the mandated check commands but new tool files should still be checked individually.
+- [No outbound network access](project_no_outbound_network_access.md) — Bash curl/wget denied even with dangerouslyDisableSandbox; flag external dataset fetches (DEM tiles etc.) as manual-fetch blockers, don't retry.

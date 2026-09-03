@@ -12,3 +12,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [ruff cwd-dependent isort](project_ruff_cwd_dependent_isort.md) — world-model ruff check's I001 verdict flips by cwd (no known-first-party config); flip direction is unstable across sessions, re-check fresh; canonical-command failure is a required fix.
 - [Check agent-memory files are staged](feedback_check_agent_memory_staged.md) — run full `git status`, not just feature diff; other agents' memory writes can be left uncommitted, breaking DoD.
 - [Attribution on artifact, not just logs](feedback_attribution_on_artifact_not_just_logs.md) — M3: OSM attribution must be burned into the saved image, not just printed/logged in docs.
+- [M4 elevation review outcome](m4-elevation-review-outcome.md) — approved w/ minor fixes; code/tests/checks clean, third recurrence of unstaged agent-memory files as the only blocker.
