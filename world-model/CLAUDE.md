@@ -10,6 +10,7 @@ See `README.md`, `ROADMAP.md`, `WORKFLOW.md` in this directory for project desig
 - Formatter/linter: `ruff format` / `ruff check`.
 - Test runner: `pytest`.
 - **Coordinate transforms: `pyproj`** (M1 decision). Used for DCS x/z <-> WGS84 lat/lon via `+proj=tmerc +axis=neu`, in `src/coordinates/`. This decision is scoped to coordinate transforms only — the separate spatial-storage question (GeoPackage/SpatiaLite/FlatGeobuf/GeoPandas etc., needed by M2/M5) is still **not yet chosen**; do not read the transform-library pick as having settled it. Decide storage during M2/M5, record rationale in `research/`, then update this line.
+- **Raster tile decoding: `pillow`** (M2 decision). RasterCharts tiles are standard DXT5/BC3 DDS images (NVTT-built, no ED-proprietary encoding) — Pillow's built-in DDS plugin (9.1+) decodes them with no extra native deps, in `src/raster/`. See `world-model/research/2026-09-03-m2-rastercharts-recon.md` for the format recon behind this choice.
 
 ## Commands
 
