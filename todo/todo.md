@@ -5,7 +5,8 @@
 World Model Builder — Milestone 0/1. See `world-model/ROADMAP.md` for full milestone list and status.
 
 - [x] M0 — record installed DCS version + confirm Syria terrain present, in `world-model/research/`.
-- [ ] M1 — prove DCS x/z ↔ lat/lon transform for Syria against a known real-world control point; measure error.
+- [x] M1 (recon) — prove DCS x/z ↔ lat/lon transform for Syria against a known real-world control point; measure error. pydcs tmerc params confirmed against live install; real-world residual ~1.0-1.3km (terrain-placement error, not projection defect). See `world-model/research/2026-09-03-m1-coordinate-transform-verification.md`.
+- [ ] M1 (implement) — build `src/coordinates/` per `plans/m1-coordinate-transform/plan.md`, with control-point tests.
 
 ## Milestones
 

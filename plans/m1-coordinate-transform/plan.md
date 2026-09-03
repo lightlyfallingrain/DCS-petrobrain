@@ -1,0 +1,67 @@
+### Goal
+Implement and test a DCS local x/z ↔ WGS84 lat/lon coordinate transform for the Syria theatre, validated against at least one independently-sourced real-world control point with measured error, per Milestone 1.
+
+### Pre-Implementation Investigation (done this session)
+
+Invoked `investigator` before finalizing this plan, since the transform design depended on unverified DCS-internals claims. Findings written to `world-model/research/2026-09-02-m1-coordinate-transform.md` (staged). Summary:
+
+- **Projection**: Transverse Mercator (`+proj=tmerc`), NOT the folklore "Lambert Conformal Conic per theatre" — no ED/forum source supports Lambert. Confirmed via `pydcs` (LGPL-3.0) source, which fits per-theatre `tmerc` parameters empirically by calling `coord.LOtoLL` live in-game.
+- **Syria's fitted parameters** (from pydcs, **not yet cross-checked against our installed 2.9.29.27278 copy**): `central_meridian=39, false_easting=282801.0, false_northing=-3879865.9999999935, scale_factor=0.9996, lat_0=0`. Axis convention: DCS `x`=north, `z`=east (ED-documented, FAQ), wired into PROJ as `+axis=neu`.
+- **Origin is not a directly-readable Lua constant** (at least not found by filename search of `DCS-files.txt`) — pydcs derives it empirically via live `coord.LOtoLL` calls. Whether Syria's `entry.lua` states it directly is unresolved — pending `probe_syria_terrain_lua.sh`.
+- **`coord.LOtoLL`/`coord.LLtoLO`**: Mission Scripting environment only — require a running mission, not callable from the offline Mac pipeline. Confirmed via Hoggit wiki.
+- **Circularity risk, confirmed real**: pydcs's own "known" airbase lat/lons are themselves derived from `coord.LOtoLL` — not independent. Any control-point test must pair a DCS-native point with a real-world lat/lon that was never derived from DCS.
+- **Control point**: Damascus International (OSDI). pydcs's DCS-native Damascus point, run through the fitted projection, lands **1.6 km** from the published real-world ARP (33.41139°N/36.51556°E). This is a genuine independent cross-check — it rules out a wrong projection family (a bad axis-order variant gave 327 km error) but leaves an unexplained ~1.6 km residual not yet good enough for a final accuracy claim.
+- **Two probes prepared, not yet run** (need the Windows DCS box): `world-model/tools/wsl/probe_syria_terrain_lua.sh` (read-only grep of Syria terrain Lua for projection keywords) and `world-model/tools/dcs-mission-probe/coord_probe.lua` (+ README) (live-mission probe dumping `coord.LOtoLL` for the theatre origin and every Syria airbase — this is what actually closes the "not yet verified against the installed copy" gap and would explain the 1.6 km residual).
+- **License note**: pydcs is LGPL-3.0. Reusing its per-theatre *parameter values* as a documented starting hypothesis is fine; reusing its *code* carries copyleft obligations — so our implementation writes the transform ourselves against `pyproj`, using pydcs's numbers only as data, with provenance recorded.
+
+This is why M1 is staged below into a "provisional" phase (can implement and test now, with parameters explicitly flagged low-confidence) and a "confirmed" phase (blocking on the two Windows-side probes) — per root `CLAUDE.md`, unverified community claims must not be silently encoded as fact, and per `world-model/CLAUDE.md`, a control-point test is required regardless, so we build it now against the best currently-available evidence rather than blocking all progress on a Windows round-trip.
+
+### Spatial Library Decision (this milestone's required decision)
+
+**Decision: `pyproj` for coordinate transforms.** It directly supports the required `+proj=tmerc +axis=neu` transform (already validated by the investigator's reproducible test), is the standard Python binding to PROJ, is well-typed enough for `mypy --strict` with minimal stub work, and has no server/runtime footprint — consistent with "prefer the simplest solution" and the project's offline single-user pipeline shape.
+
+This decision is scoped to **coordinate transforms only**. The separate "spatial storage" decision (GeoPackage vs SpatiaLite vs FlatGeobuf, per `docs/concept/WORLD_MODEL_BUILDER.md` "Spatial Storage") is **deferred** — it isn't needed until M2 (raster) / M5 (persistent DB) and shouldn't be forced now. Record this scoping explicitly in `world-model/CLAUDE.md`'s "Tech stack" section so it isn't misread later as "spatial libraries fully decided."
+
+Add `pyproj` to `world-model/pyproject.toml` `dependencies`.
+
+### Affected Modules / Files
+
+- `world-model/pyproject.toml` — add `pyproj` dependency.
+- `world-model/src/coordinates/__init__.py` — new. Public API: `dcs_to_wgs84(theatre: str, x: float, z: float) -> tuple[float, float]`, `wgs84_to_dcs(theatre: str, lat: float, lon: float) -> tuple[float, float]`. This is the single place coordinate math lives, per the concept doc's "do not scatter coordinate math throughout the application."
+- `world-model/src/coordinates/projections.py` — new. Per-theatre projection parameter registry as a typed dataclass (`central_meridian`, `false_easting`, `false_northing`, `scale_factor`, plus explicit `source: str` and `confidence: Literal["provisional", "confirmed"]` fields) and a lookup dict keyed by theatre name. Confidence starts `"provisional"` for Syria; flips to `"confirmed"` only after the live-install probe closes the gap. This satisfies the provenance/confidence invariant at the parameter level, not just at the feature-fusion level.
+- `world-model/tests/control_points.py` — new. Small typed data module: theatre, name, dcs `(x, z)`, real-world `(lat, lon)`, and the real-world source (e.g. "published OSDI ARP, cross-referenced Wikipedia + SkyVector"). Starts with Damascus; structured so more points (Beirut, Latakia, Incirlik) can be appended once `coord_probe.lua` output gives their DCS-native coordinates.
+- `world-model/tests/test_coordinates.py` — new. Round-trip test (`dcs_to_wgs84` then `wgs84_to_dcs` returns the original point within float tolerance) plus the control-point accuracy test asserting Damascus error is within an explicit, documented threshold (see Stage 2).
+- `world-model/tools/report_control_point_errors.py` — new, optional/stage-4. Human-readable diagnostic table (theatre, point, DCS coord, transformed lat/lon, real-world lat/lon, error in metres) reusing `tests/control_points.py` — satisfies the concept doc's "Testing Philosophy" call for inspectable, quantitative diagnostics beyond a pass/fail test.
+- `world-model/research/2026-09-02-m1-coordinate-transform.md` — already written by investigator (staged); update after probes run with confirmed/refuted parameters and the resolved Damascus residual explanation.
+- `world-model/CLAUDE.md` — update "Tech stack" section: record `pyproj` decision and scope note (transforms only, storage still open).
+- `world-model/ROADMAP.md` — flip M1 checkbox once the confirmed phase closes.
+- No changes to `docs/concept/WORLD_MODEL_BUILDER.md` (reference doc, not implementation).
+
+### Implementation Plan
+
+1. **Minimal working version (provisional parameters).** Add `pyproj` dependency. Implement `projections.py` with Syria's pydcs-derived parameters, `source="pydcs (github.com/pydcs/dcs), empirically fitted via coord.LOtoLL — not yet cross-checked against installed DCS 2.9.29.27278"`, `confidence="provisional"`. Implement `dcs_to_wgs84`/`wgs84_to_dcs` in `coordinates/__init__.py` using `pyproj.Transformer` built from the registry entry, raising `ValueError` for unknown theatres. No hardcoding of Syria-specific logic outside the registry — the transform function itself must be theatre-agnostic so a second theatre only requires a new registry entry.
+
+2. **Validate correctness against the control point.** Add `tests/control_points.py` with the Damascus point (from investigator's reproducible test: DCS `(x=-178652.320313, z=52081.296875)` vs published ARP `33.41139°N, 36.51556°E`). Add `tests/test_coordinates.py`: (a) round-trip test with tight tolerance (this validates internal consistency of the `pyproj` wiring, independent of parameter correctness), (b) control-point test asserting error ≤ 2000 m, with an inline comment stating the current measured value (~1594 m) and that this threshold is provisional pending live-install confirmation — per `world-model/CLAUDE.md`, this is the required control-point test for any coordinate transform. Run `ruff format`, `ruff check`, `mypy --strict`, `pytest` before considering this stage done.
+
+3. **Close the verification gap (blocking on Windows-side probes, user-run).** Hand off the two already-prepared probe scripts for the user to run per `WORKFLOW.md`:
+   - `world-model/tools/wsl/probe_syria_terrain_lua.sh` — copy to `win-mac-sync/run-wsl/`, run in WSL, sync output back, check whether Syria's `entry.lua` states projection parameters directly (would upgrade evidence from "community-tool-derived" to "documented").
+   - `world-model/tools/dcs-mission-probe/coord_probe.lua` — requires actually running a mission in DCS (not just WSL); dumps live `coord.LOtoLL` output for the theatre origin and every Syria airbase to `Saved Games/DCS/Logs/`. Watch for the documented `io`/`lfs` sandboxing caveat (script has a read-only-compliant fallback noted in its header — do not edit `MissionScripting.lua` to work around it).
+   Once results sync back: compare live `coord.LOtoLL(Damascus)` against both the pydcs-fitted parameters and the published ARP. If they match closely, the 1.6 km residual is DCS-side (airbase reference point ≠ published ARP) and the pydcs parameters can flip to `confidence="confirmed"` as-is. If live output diverges from pydcs's parameters, refit or hand-adjust the registry entry using the live data as ground truth, and tighten the control-point test threshold accordingly. Update `research/2026-09-02-m1-coordinate-transform.md` with the outcome either way — this is the step that actually satisfies "prove the transform... measure error" rather than "prove pydcs's transform is roughly plausible."
+
+4. **Refine — diagnostics and additional control points.** Add `tools/report_control_point_errors.py` for a human-inspectable error table. If `coord_probe.lua` output includes other well-documented airports (Beirut-Rafic Hariri, Latakia Bassel Al-Assad, Incirlik), add them to `tests/control_points.py` as additional independent cross-checks — strengthens the error report beyond a single point, per the concept doc's "Validation" section, without expanding M1's scope beyond "prove the transform, measure error."
+
+5. **Close out.** Update `world-model/CLAUDE.md` tech-stack section and `world-model/ROADMAP.md` M1 checkbox once Stage 3 confirms parameters against the live install. Do not flip the ROADMAP checkbox on Stage 2 alone — "provisional" is not "done" for a project invariant that explicitly forbids encoding unverified claims as fact.
+
+### Risks & Unknowns
+
+- **Parameters are currently third-party-derived, not ED-documented or install-confirmed.** Stage 1-2 code must not present Syria's projection parameters as settled fact — the `confidence` field exists specifically so downstream code/tests can distinguish "best current estimate" from "verified." Do not let this distinction erode in later milestones.
+- **`io`/`lfs` sandboxing in Mission Scripting is unconfirmed** for this DCS version — `coord_probe.lua` may fail to write output. A read-only-compliant fallback (`trigger.action.outText` transcription) is documented in the script but untested; Stage 3 may need a manual-transcription round-trip if the file-write path fails.
+- **The ~1.6 km Damascus residual has multiple plausible explanations** (DCS airbase placement vs. real-world ARP vs. pydcs fitting precision) that Stage 3 is designed to disambiguate, but if live-probe results are themselves noisy or the residual doesn't resolve cleanly, the control-point threshold may need to stay loose (kilometre-scale) longer than desired — worth surfacing to the user if it happens, since it affects how much confidence M2 (raster registration) can borrow from M1.
+- **pydcs is LGPL-3.0.** Plan uses its parameter *values* as a documented starting hypothesis, not its code — confirm this reuse boundary is acceptable; flagged here rather than silently assumed.
+- **Single theatre, single primary control point at M1 scope.** This is intentional (matches "Milestone 1 — One coordinate"), but means M1 alone doesn't prove the transform approach generalizes to a second theatre with different projection parameters — that's implicitly a later-milestone concern, not a Stage 1-4 gap, but worth naming so it isn't assumed solved.
+
+### Decisions Requiring User Input
+
+- Confirm the pyproj-for-transforms / storage-deferred split above is the intended scope for "the spatial-library decision this milestone is supposed to make," rather than expecting a storage-engine choice (GeoPackage/SpatiaLite) at M1 too.
+- Confirm it's acceptable to implement and commit Stage 1-2 (provisional parameters, control-point test with a documented ~1.6 km-scale threshold) now, with Stage 3 (Windows-side probe run, parameter confirmation) as a follow-up the user runs manually per `WORKFLOW.md` — versus blocking all implementation until the probes are run first.
+- Confirm reuse of pydcs's (LGPL-3.0) fitted parameter *values* (not code) as the initial hypothesis is acceptable, given the project has no other current path to these numbers short of the live-mission probe.
