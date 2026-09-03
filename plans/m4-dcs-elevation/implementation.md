@@ -192,3 +192,56 @@ the real output into `data/raw/dcs/<date>/`, run `inspect_elevation.py` against 
 100-point delta report, write the M4 research note recording that report, and do Stage 3
 (performance/completeness spot-check: point count in == point count out, one mission run, no
 retries) and Stage 4 close-out.
+
+---
+
+### Addendum 3 — full grid synced, Stage 3/4 close-out, M4 done
+
+Full 100-point probe output synced back:
+`world-model/data/raw/dcs/2026-09-03/elevation_probe_output_full_grid.jsonl` (gitignored raw
+input, not committed).
+
+**Stage 3 — performance/completeness spot-check:** 100 points requested, 100 lines returned, 0
+nulls. `parse_probe_output` + `inspect_elevation.py compare` completed instantly against the
+100-line file (not a performance-sensitive path at this scale, no profiling needed, matching the
+plan's expectation).
+
+**DEM comparison (real data, `tools/inspect_elevation.py compare`):** mean delta +13.89m, median
++16.61m, stddev 28.02m, range -86.09m (`r0c0`, bbox SW corner) to +69.19m (`r7c2`). Full analysis
+in the new research note (`world-model/research/2026-09-03-m4-dcs-elevation.md`) — summary: **the
+`-86m` corner_sw outlier flagged after Stage 1's 8-point sample is confirmed real, and part of a
+larger spatially-coherent pattern**, not an isolated glitch. 9 of 100 points have `|delta| > 50m`;
+8 of those 9 cluster along the bbox's west edge (rows 0-2 and row 5 of column 0/1) and one
+diagonal band through the grid's middle. Walking the west edge row-by-row shows a smooth gradient
+(-86m -> -80m -> -60m -> -18m -> +21m -> +59m -> ...), not a discontinuous jump — the signature of
+a real, localized terrain feature that DCS's mesh and SRTM3's 90m grid resolve differently, not a
+transform bug (which the plan's Risks section says would show up as a discontinuous or
+sign-flipping pattern) and not a systematic vertical datum offset (which would show as a
+roughly-constant shift across the whole grid, not one concentrated in two specific
+sub-regions with the rest of the grid mostly positive). This distinction is exactly what the plan
+asked to be made explicit in the research note, not glossed over.
+
+**Files changed (this addendum):**
+- `world-model/data/raw/dcs/2026-09-03/elevation_probe_output_full_grid.jsonl` — moved from
+  `win-mac-sync/wsl-output/`. Gitignored, not committed.
+- `world-model/research/2026-09-03-m4-dcs-elevation.md` — new. Records the extraction-mechanism
+  confirmation, Stage 1 and Stage 2 results, the full delta-report stats table, the outlier
+  pattern analysis above (with the explicit bug-vs-datum-mismatch-vs-terrain-noise distinction the
+  plan required), the vertical-datum open question (not resolved this session, no evidence of a
+  problem in this dataset), and a flag that the `MissionScripting.lua` io/lfs edit's revert status
+  was not confirmed this session.
+- `world-model/CLAUDE.md` — added an "Elevation / DEM: SRTM (M4 decision)" line to the Tech stack
+  section, same style as the existing pyproj/Pillow entries, noting the dynamic-resolution
+  handling and pointing at both M4 research notes.
+- `world-model/ROADMAP.md` — flipped M4's checkbox, summarizing what was built and the headline
+  delta-report numbers, matching the style of the M1-M3 entries above it.
+
+**Checks (re-run after this addendum):** `ruff format --check`/`ruff check` (`src`+`tests`),
+`mypy --strict` (`src`), `pytest world-model/tests -q` — all pass, 30 passed, no regressions.
+
+**M4: done.** All four plan stages complete: (1) extraction mechanism confirmed via live smoke
+test, (2) full grid + DEM comparison run and analyzed, (3) point-count/performance spot-check
+clean, (4) research note written, `CLAUDE.md`/`ROADMAP.md` updated, full verification passing.
+One item intentionally left open, flagged rather than silently resolved: whether the user has
+reverted the `MissionScripting.lua` io/lfs edit — not a pipeline decision, noted in the research
+note for the user to confirm.
