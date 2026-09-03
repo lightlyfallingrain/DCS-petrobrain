@@ -594,3 +594,299 @@ truth-layer raster target (vs. RasterCharts' independent chart geodesy) was rais
 open architectural question. User's decision: **pursue both tracks in parallel** —
 continue validating RasterCharts' registration hypothesis (per the existing M2 plan)
 while also tasking Investigator to locate and probe the satellite-imagery asset.
+
+---
+
+## 2026-09-03 (session 7) — Stage 1 of M2 plan: registration-hypothesis validation via known-feature control points
+
+(Numbered session 7 to avoid colliding with a concurrently-run investigator session's "Session 6" — satellite-imagery-location findings — appended independently below; both sessions ran in parallel without shared context.)
+
+**DCS version:** 2.9.29.27278 (unchanged). **Theatre:** Syria.
+
+### Question
+
+Per `plans/m2-raster-understanding/plan.md` Stage 1 (blocking gate before
+`src/raster/registration.py` is written): does the x/z-arithmetic hypothesis from session 2
+(tile edge = scale_meters × 1024px; tile grid index `x{N}_z{N}` encodes DCS-native ground
+position) hold up against real content, using the primary path — a visible feature with a
+known real-world WGS84 location, mapped through M1's already-solved `wgs84_to_dcs` transform
+and compared to its pixel/tile position?
+
+### Findings
+
+- **Two independent real-world control points were identified on the 5 already-decoded
+  `64maa00` sample tiles, both from the same sheet/x-index (`x0`), at different z-indices**:
+  Sivas city center (visible, labeled, tile `x0_z1`) and the Erzincan VOR/DME/NDB navaid box
+  (visible, labeled, tile `x0_z4`). — **evidence:** reproduced-locally (direct visual read of
+  `/tmp/64maa00_x0_z1.png`, `/tmp/64maa00_x0_z4.png`) — **source:** decoded PNGs per session 3's
+  decode command.
+- **Published real-world coordinates**: Sivas city center 39.75056°N, 37.01500°E (Wikipedia,
+  39°45′02″N 37°00′54″E). Erzincan Airport (LTCD) ARP 39.71000°N, 39.52694°E (SkyVector/
+  Wikipedia, 39°42′36″N 39°31′37″E) — used as a stand-in for the VOR/DME/NDB, which is normally
+  co-located at or very near the airport reference point; this substitution adds up to
+  roughly ~1 km of uncertainty on top of pixel-reading error, not itself independently
+  confirmed. — **evidence:** documented (published aeronautical/geographic sources) —
+  **source:** WebSearch, Wikipedia + SkyVector, see citations above.
+- **Running both points through M1's existing `wgs84_to_dcs("Syria", lat, lon)` gives**:
+  Sivas → DCS (x=522090.5, z=112740.8); Erzincan → DCS (x=515837.6, z=327970.3). Delta
+  (Erzincan − Sivas) = (dx=−6253, dz=+215229), i.e. Erzincan sits ~215 km further in +z with
+  almost no x change — consistent with real geography (Erzincan is ~2.5° east of Sivas, at
+  almost the same latitude). — **evidence:** reproduced-locally (ran `coordinates.wgs84_to_dcs`
+  directly, `world-model/src/coordinates/__init__.py`) — **source:** this session's probe.
+- **Pixel positions read by eye**: Sivas's built-up-area marker sits near the top-right of tile
+  `x0_z1`, roughly pixel (820, 30) of 1024×1024. The Erzincan VOR/DME/NDB navaid icon (small
+  symbol the label box's leader line points to, not the label box itself) sits near the
+  top-right of tile `x0_z4`, roughly pixel (830, 90). Both estimates are by-eye, no
+  feature-center detection — **evidence:** reproduced-locally (visual) — **source:** same PNGs.
+- **Applying the x/z-arithmetic hypothesis (64m scale ⇒ 65,536 m/tile) to convert (tile z-index,
+  pixel_x) into a z-offset from a common origin**: Sivas ⇒ (1 + 820/1024) × 65,536 ≈ 118,036 m;
+  Erzincan ⇒ (4 + 830/1024) × 65,536 ≈ 315,269 m. Predicted Δz between the two tiles/pixels ≈
+  197,376 m, versus the M1-transform-derived actual Δz of 215,229 m — a discrepancy of ≈17,850 m,
+  about 9% of the predicted span. Solving each point independently for a common origin_z (i.e.
+  `origin_z = dcs_z − tile_arithmetic_z`) gives origin_z ≈ −5,295 from Sivas and ≈ +12,701 from
+  Erzincan — two independent estimates about 18,000 m apart. — **evidence:** inferred (arithmetic
+  combining a reproduced-locally transform result with by-eye pixel reads) — **source:** this
+  session's calculation, reasoning above.
+- **The hypothesis is directionally confirmed and roughly order-of-magnitude consistent, but
+  not tight enough yet to fix a precise affine.** The z-tile-index does track DCS z (east)
+  correctly in sign and rough magnitude (predicted span 197 km vs. actual 215 km, same order,
+  same direction, not off by a tile or a sign error) — this rules out gross hypothesis failure
+  (e.g. wrong scale constant, swapped axes, or a tile-index-to-meters relationship off by a
+  factor of 2+). The ~9% residual and ~18 km origin disagreement are within plausible bounds for
+  by-eye pixel-position error alone (±50 px at 64 m/px = ±3,200 m per point, i.e. up to ~6,400 m
+  combined) plus the Erzincan-ARP-vs-VOR substitution (~1 km) — but 18 km exceeds that combined
+  budget by roughly 3×, so some of the residual is likely a genuine (if modest) hypothesis
+  simplification, not pure measurement noise — most plausibly non-zero sheet/tile overlap or a
+  small origin offset not being purely "tile_index × 65536," rather than the core scale
+  assumption being wrong. — **evidence:** inferred — **source:** reasoning from the two data
+  points above; cannot be disambiguated from only 2 points on one axis.
+- **This test only exercises the z (east) tile axis** — both sample points are on `x0`, so the
+  x (north) tile-index axis is completely unvalidated this session. No sample tile at a
+  different x-index was available to decode. — **evidence:** gap, explicitly scoped by available
+  samples — **source:** n/a.
+
+### Reproducible Test
+
+```python
+import sys; sys.path.insert(0, "src")
+from coordinates import wgs84_to_dcs
+sivas = wgs84_to_dcs("Syria", 39.75056, 37.01500)
+erzincan = wgs84_to_dcs("Syria", 39.71000, 39.52694)
+# Sivas: (522090.5, 112740.8); Erzincan: (515837.6, 327970.3)
+```
+Pixel positions read visually from `/tmp/64maa00_x0_z1.png` (Sivas ≈ (820,30)) and
+`/tmp/64maa00_x0_z4.png` (Erzincan navaid icon ≈ (830,90)) — re-derive by opening the PNGs
+(decode command in session 3) and inspecting directly; these are by-eye reads, not
+automated feature detection, and a different reader may get materially different pixel
+estimates (±30-50px plausible), which is itself part of why this stays "provisional."
+
+### Possible Approaches
+
+- **Before `registration.py` is written**, get at least one more control point off the
+  x-axis (a different x-index tile, e.g. `x1_z*` or `x7_z*` from the same sheet) to validate
+  the north/south tile axis the same way — currently completely untested. This is the single
+  highest-value follow-up for tightening confidence.
+- **Automate pixel-position reading** (e.g. template-match the navaid box glyph, or OCR the
+  UTM grid labels once a margin tile with full-precision labels is found) rather than relying
+  on by-eye estimates — would shrink the dominant error source in this test.
+- **Cross-check against the UTM-grid path** (session 3's secondary path) once a margin/corner
+  tile with an unambiguous full-precision grid label is decoded — an independent `pyproj`-based
+  affine from the chart's own printed grid would let the ~18 km origin discrepancy be attributed
+  definitively to either pixel-reading error or a real registration-formula gap (e.g. overlap
+  between sheets, or origin not being a clean multiple of tile edge length).
+- Given the ~9% residual is plausible-but-not-negligible, `registration.py`'s `confidence`
+  field should be `"provisional"` if built from this data alone — not `"confirmed"` — per the
+  plan's existing guidance not to over-claim from an empirical fit.
+
+### Unresolved
+
+- The x (north) tile-index axis is untested — no sample at a different x-index exists yet.
+- Whether the ~18 km origin discrepancy is pure by-eye pixel-reading error or reflects a real
+  simplification in the arithmetic hypothesis (e.g. sheet overlap, non-zero true origin offset)
+  cannot be distinguished with only 2 points on 1 axis — a 3rd control point (held out, per the
+  plan's Stage 4 suggestion) would help distinguish "noisy fit" from "systematic bias."
+- Whether the Erzincan Airport ARP is close enough to the actual VOR/DME/NDB antenna position
+  to be a valid stand-in — not independently confirmed, only assumed standard co-location
+  practice.
+- Precise affine (origin + scale) is not yet fixed — this session establishes the hypothesis is
+  *directionally sound* (right order of magnitude, right sign, right axis), which is what Stage 1
+  asked for, but Stage 2's `registration.py` will need either a tighter empirical fit (more
+  control points, automated pixel detection) or the UTM-grid cross-check to reach a defensible
+  `"provisional"` affine with a stated error tolerance.
+
+---
+
+## Session 6 (2026-09-03) — Locating satellite-mode imagery: `Mods/terrains/Syria/clipmaps/colortexture/`
+
+**DCS version:** 2.9.29.27278 (unchanged, per M0; not re-verified this session — no live
+access). **Theatre:** Syria.
+
+### Question
+
+Session 5 raised, but left unverified, the hypothesis that F10's photorealistic
+"satellite" map mode is sourced from the same texture data that paints DCS's 3D terrain
+mesh — i.e. lives natively in DCS's own x/z tiling scheme, not an external chart product
+like `RasterCharts`. This session: (1) confirms visually what "satellite" mode looks like
+(via the user-provided screenshot), (2) searches `DCS-files.txt` (M0's full filesystem
+listing) for a plausible on-disk location distinct from `RasterCharts`, (3) checks
+whether DCS terrain-modding community documentation corroborates the finding, and (4)
+writes a probe script for the next live-access session. No live DCS/WSL access was
+available this session — all filesystem findings are from the existing static listing.
+
+### Findings
+
+- **`satellite-imagery.jpg` (user screenshot, Aleppo region, same view as session 5's
+  other two modes) is a photorealistic orthophoto-style texture** — muted tan/brown
+  ground tones, visible field boundaries and settlement footprints as raw imagery texture
+  (not symbolized cartography), no contour lines, no UTM grid, no chart typography. Clearly
+  distinct from both `dcs-rendered-map.jpg` (vector/symbolized) and `paper-map.jpg`
+  (confirmed scanned military chart, session 3). — **evidence:** reproduced-locally
+  (direct visual inspection) — **source:**
+  `world-model/data/raw/dcs/2026-09-03/f10-map-modes/satellite-imagery.jpg`.
+- **`Mods/terrains/Syria/clipmaps/` is a strong, distinct candidate location for this
+  imagery, separate from `RasterCharts`.** Full one-level directory survey of
+  `Mods/terrains/Syria/` in `DCS-files.txt` shows `clipmaps/` alongside `RasterCharts/`,
+  `surface/`, `vfsTextures/`, etc. `clipmaps/` contains exactly three subdirectories:
+  `colortexture/`, `normalmap/`, `splatmap/` — a base-color + normal + surface-blend-weight
+  texture set, which is precisely the standard input trio for texturing a 3D terrain mesh
+  in a real-time renderer. `colortexture/` has scale-tiered subdirectories `1m`, `4m`, `8m`,
+  `16m`, `128m` (some with `(spring)`/`(winter)` seasonal variants: `1m(spring)`,
+  `4m(spring)`, `4m(winter)`, `8m(spring)`, `16m(spring)`, `16m(winter)`,
+  `128m(spring)`, `128m(winter)`); `normalmap/` has `4m`, `8m`, `16m`, `128m`;
+  `splatmap/` has `1m`, `4m`, `4m(winter)`, `8m`, `16m`, `16m(winter)`, `128m`. Tile
+  filenames follow `{scale}m{sheet}{level}.tif.clipmap`, e.g.
+  `clipmaps/colortexture/16m/16mAA00.tif.clipmap`,
+  `clipmaps/colortexture/128m/128mxAB-1.tif.clipmap` — same `{sheet}{level}` grammar
+  (`AA`/`AB`/`xAB`, level suffix `-1`/`00`/etc.) as `RasterCharts`'s tiles and Caucasus's
+  `RasterCharts` tile pyramid (sessions 1–2), but a different container extension
+  (`.tif.clipmap` vs. `RasterCharts`'s `.tif.dds`-inside-zip) and a different parent
+  directory entirely. — **evidence:** reproduced-locally (grep over the M0 filesystem
+  listing) — **source:** `world-model/data/raw/dcs/2026-09-02/DCS-files.txt`, exact
+  matched paths as above (2,006 total lines under `clipmaps/`).
+- **"Clipmap" is a well-established, generically-documented real-time terrain-rendering
+  technique — not DCS-specific** — a level-of-detail texture/geometry streaming scheme
+  using nested grids that shift with the camera, first popularized by NVIDIA's GPU Gems 2
+  ch. 2 ("Terrain Rendering Using GPU-Based Geometry Clipmaps") and widely reused across
+  large-terrain engines (flight sims, open-world games) specifically to stream a
+  base-color ground texture (often literally aerial/satellite photography) onto a terrain
+  mesh at multiple resolutions around the camera. The directory name plus the
+  `colortexture`/`normalmap`/`splatmap` trio matches this pattern closely: `colortexture`
+  is the base-color (RGB) layer a clipmap streams, exactly the role satellite-style ground
+  imagery would play. — **evidence:** documented (established graphics-literature
+  technique, independent of DCS) for what a "clipmap" generically is; **inferred** that
+  DCS's specific `clipmaps/colortexture/` implements this pattern using real-world-derived
+  imagery (plausible from naming/structure, not confirmed against actual pixel content) —
+  **source:** NVIDIA GPU Gems 2 ch. 2 (developer.nvidia.com/gpugems/gpugems2/...), general
+  web search.
+- **An ED forum thread title directly corroborates that `.clipmap` files are a
+  known, community-recognized terrain-texture asset that modders want to edit**: "A tool
+  or software to open/edit Clipmap files (Nevada) - DCS Modding - ED Forums"
+  (`forum.dcs.world/topic/332961-a-tool-or-software-to-openedit-clipmap-files-nevada/`).
+  This is from the Nevada (NTTR) terrain, not Syria, but confirms the `.clipmap` asset
+  type/extension is a general DCS terrain-engine convention, not something unique to one
+  theatre — consistent with the `.tif.clipmap` naming already found for Syria. Thread body
+  was **not read this session** — title only, from web search results; automated fetch of
+  `forum.dcs.world` is known-unreliable (403 blocks, per prior sessions' experience and
+  the `M2 RasterCharts recon` memory) — **evidence:** forum-claim-unverified (title only,
+  content unread) — **source:** WebSearch result title; user should open the thread URL
+  above manually and paste content back if the `.clipmap` format/tooling detail matters
+  before committing to a decode approach.
+- **No DCS terrain-modding tutorial or SDK documentation specifically describing the
+  `clipmaps/colortexture` pipeline, its exact tile format, or its coordinate
+  registration was found this session** — web search on DCS terrain-creation/modding
+  surfaced general texture-mod discussion (aerial-photography-based texture packs like
+  "DCS Enhanced Terrain," CGTC for Caucasus) and passing mentions of "clipmap textures
+  loading" (memory-consumption context in patch notes), but no primary technical spec.
+  This is a negative finding from search coverage only — a full read of
+  `forum.dcs.world/topic/271289-creating-custom-terrainmap-for-dcs-world/` (an ED
+  thread specifically about building custom terrains, which very plausibly covers this
+  pipeline since terrain authors must author these assets themselves) was not attempted
+  this session and is a promising next lead, but automated fetch of `forum.dcs.world`
+  content is unreliable — recommend the user open it manually. — **evidence:** inferred
+  (absence-from-search, weak) — **source:** WebSearch only, `forum.dcs.world` threads
+  found but not fetched.
+- **The tile-naming grammar's reuse across `RasterCharts` and `clipmaps` (same
+  `{sheet}{level}` scheme, same apparent `AA`/`AB`/`xAB` region-code convention) is
+  consistent with both being produced/tiled by the same underlying `landscape5` terrain
+  engine tooling** (the same engine module named literally in `RasterCharts`'s `.sup5`
+  header string `landscape5::sup5File`, session 2) — **but this does not mean they share
+  registration/geodesy.** `RasterCharts` is confirmed (session 3, visual inspection) to be
+  a scanned real-world military chart with its own external UTM/chart datum;
+  `clipmaps/colortexture` painting the terrain mesh directly would, if confirmed, be
+  registered natively in DCS x/z by construction (the mesh itself has no other
+  coordinate system) — the shared naming grammar is a tooling-convention coincidence, not
+  evidence the two share a coordinate frame. — **evidence:** inferred — **source:**
+  reasoning from confirmed naming patterns across sessions 1–2 and this session.
+
+### Reproducible Test
+
+Not yet run this session (no live Windows/WSL access). Wrote
+`world-model/tools/wsl/probe_syria_satellite_texture.sh`, mirroring
+`probe_syria_rastercharts.sh`'s pattern: lists `clipmaps/colortexture/`'s scale-tier
+subdirectories, does a full recursive listing (path + size) of the `1m` tier (the
+highest-resolution tier, the most likely satellite-mode source), reports per-tier file
+count and total size, hex-dumps the first 64 bytes of one sample `.tif.clipmap` file, and
+copies up to 5 sample `colortexture/1m` files plus one `normalmap` and one `splatmap`
+sample into `wsl-output/` for local format inspection. Unlike `RasterCharts` (a single
+zip), `clipmaps/` is plain files on disk directly under the DCS install, so this script
+does directory listing/`cp`, not `unzip -l`/extraction — no zip container to open. Deploy
+per `WORKFLOW.md`: copy into `win-mac-sync/run-wsl/`, run in WSL with
+`DCS_INSTALL_PATH` set, sync `wsl-output/` back, then copy the report + sample files into
+`world-model/data/raw/dcs/<date>/` for follow-up analysis (reuse session 3's DDS-decode
+approach if `.tif.clipmap` turns out to share DDS's magic bytes/header layout — not yet
+known; the extension is different from `RasterCharts`'s `.tif.dds` so the container format
+should not be assumed identical without checking the actual header).
+
+### Possible Approaches
+
+- **If `.tif.clipmap`'s header turns out to be a plain DDS (or similar standard texture
+  container) despite the different extension**, the same direct-header-parse and Pillow
+  decode approach from sessions 2–3 should work unmodified — worth checking the magic
+  bytes (`DDS `/`0x44445320`) first before assuming a new format needs reverse-engineering.
+- **If `.tif.clipmap` is a genuinely different/proprietary container** (plausible — the
+  distinct extension may signal DCS's clipmap streaming system wraps the texture in its
+  own mip/tile metadata beyond what a factory DDS header carries), the ED forum thread on
+  Nevada `.clipmap` files (link above) is the most promising documentation lead — ask the
+  user to open and paste it, since automated fetch is unreliable here.
+- **Registration path if confirmed to paint the terrain mesh:** unlike `RasterCharts`,
+  which needed either `.sup5` reverse-engineering or a UTM-grid/control-point empirical
+  fit (sessions 2–3), a texture confirmed to be the terrain mesh's own base color would
+  need no independent geodesy at all — the DCS x/z ↔ WGS84 transform already solved in M1
+  (`world-model/src/coordinates/`) would directly apply, and only the tile-index-to-x/z
+  offset arithmetic (same style as `RasterCharts`'s session 2 `x{N}_z{N}` hypothesis, but
+  for `clipmaps`'s own `{sheet}{level}` naming, which lacks visible `x`/`z` tile-position
+  substrings in the names seen so far — worth checking whether that's inside `.tif.clipmap`
+  metadata instead) would need resolving. This is a meaningfully smaller unknown than
+  `RasterCharts`'s registration problem, if confirmed.
+- **Given `clipmaps/colortexture` has multiple resolution tiers (1m up to 128m) plus
+  seasonal variants**, once format/registration is confirmed this asset would also let the
+  pipeline choose a resolution/season tradeoff explicitly — a design question for
+  Architect, not resolved here.
+
+### Unresolved
+
+- Actual container/pixel format of `.tif.clipmap` files (DDS-compatible header or
+  something else) — requires running the probe script above against the live install and
+  inspecting the sample files' magic bytes/header structure, mirroring session 2's DDS
+  header parse.
+- Whether `clipmaps/colortexture` content visually matches `satellite-imagery.jpg` (same
+  Aleppo-region content, same photorealistic character) — requires decoding a sample tile
+  covering that area and comparing, the same visual-match validation session 3 used for
+  `RasterCharts`.
+- Whether `clipmaps/colortexture`'s tiling scheme maps to DCS x/z coordinates by simple
+  arithmetic (as hypothesized for `RasterCharts` in session 2) or requires its own
+  separate derivation — no `x{N}_z{N}`-style substrings were observed in the `clipmaps`
+  filenames sampled so far (unlike `RasterCharts`'s naming), so the registration
+  mechanism may differ and needs its own investigation once file contents are available.
+- Whether `clipmaps/colortexture` is actually the same asset F10's satellite mode reads,
+  or merely a plausible sibling (e.g. F10 satellite mode could instead read yet another,
+  still-unlocated asset, with `clipmaps` feeding only the 3D cockpit-view terrain and not
+  the F10 map renderer) — the shared "photorealistic ground imagery" character is
+  suggestive but not proof of code-path identity; only decoding and visually comparing
+  tile content against the screenshot (next step above) can raise this from inferred to
+  reproduced-locally.
+- Full content of `forum.dcs.world/topic/332961-...` (Nevada `.clipmap` tooling thread)
+  and `forum.dcs.world/topic/271289-creating-custom-terrainmap-for-dcs-world/` (custom
+  terrain creation) — both found by title/URL only, not read, due to unreliable automated
+  fetch of `forum.dcs.world`. Ask the user to open these manually if `.tif.clipmap`
+  decoding proves difficult from header inspection alone.

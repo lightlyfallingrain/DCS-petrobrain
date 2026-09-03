@@ -76,3 +76,43 @@ zone 37S/37N confirmed) that doesn't need `.sup5` or the x/z-arithmetic hypothes
 resolve — but no sampled tile has a full unabbreviated grid label yet (only truncated
 2-digit values), so it's not executable from what's decoded so far. Full findings:
 `world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 3 section).
+
+**Session 6 (2026-09-03) — F10 "satellite" imagery is a SEPARATE asset from
+RasterCharts, candidate location found.** `Mods/terrains/Syria/clipmaps/` (2,006 entries
+in `DCS-files.txt`) has three sibling dirs — `colortexture/`, `normalmap/`, `splatmap/`
+— the standard base-color/normal/blend-weight trio for texturing a 3D terrain mesh.
+`colortexture/` has resolution tiers `1m,4m,8m,16m,128m` (some with `(spring)`/`(winter)`
+variants), tiles named `{scale}m{sheet}{level}.tif.clipmap` (same `{sheet}{level}`
+naming grammar as RasterCharts — `AA`/`AB`/`xAB`, level suffix — but a DIFFERENT
+extension/container and a DIFFERENT parent dir, not the same asset). "Clipmap" is a
+well-documented generic real-time terrain-texture-streaming technique (NVIDIA GPU Gems 2
+ch.2), independent of DCS — strong circumstantial fit for "terrain mesh's own base
+texture," which — unlike RasterCharts (confirmed external scanned chart, own datum) —
+would be natively DCS x/z registered if confirmed. NOT YET pixel-verified: no live
+access this session, `.tif.clipmap`'s container format is unconfirmed (don't assume it's
+DDS just because RasterCharts' `.tif.dds` was — different extension, check magic bytes
+first). ED forum thread title `forum.dcs.world/topic/332961-...clipmap-files-nevada`
+confirms `.clipmap` is a recognized general DCS terrain-engine asset type (title only,
+not read — forum.dcs.world fetch still unreliable). Probe script written:
+`world-model/tools/wsl/probe_syria_satellite_texture.sh` (dir listing + sample-file copy,
+not unzip — clipmaps are plain files on disk, no zip container). Full findings:
+`world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 6 section).
+
+**Session 7 (2026-09-03) — Stage 1 plan gate: x/z-arithmetic hypothesis directionally
+CONFIRMED, not yet tight enough for a fixed affine.** Used Sivas city center (tile
+`x0_z1`) and Erzincan VOR/DME/NDB (tile `x0_z4`) as control points: looked up published
+WGS84 coords, ran through M1's `wgs84_to_dcs("Syria", lat, lon)`, compared the resulting
+DCS z-delta (215,229 m) against the tile-arithmetic-predicted z-delta (197,376 m, from
+64m×1024px=65,536m/tile × 3 tile-index steps + by-eye pixel offsets). ~9% residual, right
+order of magnitude, right sign, right axis — rules out gross hypothesis failure (wrong
+scale constant, swapped axes, off-by-tile). Two independent origin_z estimates (from each
+point alone) disagree by ~18km, which exceeds plausible by-eye pixel-reading error alone
+(~±6.4km budget) — likely a real but modest simplification (sheet overlap or non-clean
+origin), not proof the core hypothesis is wrong. **Only the z (east) tile axis was
+tested — x (north) axis completely unvalidated, no sample at a different x-index exists.**
+Recommend: get an x-axis control point before `registration.py`; `confidence` should be
+`"provisional"` not `"confirmed"` if built from this alone. Full findings + reproducible
+calc: `world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 7 section,
+labeled that way specifically to avoid colliding with a concurrent session's own
+"Session 6" satellite-imagery findings — check heading text, not just number, when
+multiple investigator sessions run in parallel on the same research doc same day).
