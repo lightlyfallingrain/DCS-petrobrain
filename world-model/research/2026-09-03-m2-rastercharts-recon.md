@@ -595,6 +595,42 @@ open architectural question. User's decision: **pursue both tracks in parallel**
 continue validating RasterCharts' registration hypothesis (per the existing M2 plan)
 while also tasking Investigator to locate and probe the satellite-imagery asset.
 
+### Session 10 (2026-09-03, user correction) — a fourth F10 mode: "Alt" (altitude map)
+
+User provided a fourth screenshot, `world-model/data/raw/dcs/2026-09-03/f10-map-modes/alt-map.jpg`,
+zoomed in much further than the three session-5 screenshots. All four screenshots actually
+show the same three F10 UI buttons — **Map / Alt / Sat** (visible top-right in every
+screenshot, including the three from session 5) — meaning session 5's `dcs-rendered-map.jpg`
+was the **"Map"** mode specifically, not a fourth undocumented mode; **"Alt"** is the one not
+yet examined until now.
+
+- **"Alt" mode, per the user, is the *the* ground truth for the in-game world** — at
+  sufficiently high zoom it draws individual trees and terrain contour lines (confirmed
+  visually in `alt-map.jpg`: individual tree-crown icons scattered across forest polygons,
+  faint terrain contour lines visible in the tan/desert area, a tan/orange highlighted
+  polygon around a small settlement with individual building footprints). It does **not**
+  display altitude as numbers despite the name. — **evidence:** user domain knowledge
+  (mode purpose/truth-status) + reproduced-locally (visual content of the screenshot) —
+  **source:** user, this session; `alt-map.jpg`.
+- **This reframes the mode inventory from session 5**: it's not "rendered map (vector,
+  engine-only) / paper map (RasterCharts) / satellite (clipmaps)" as three peers — "Alt"
+  is a *fourth*, and per the user's characterization is more authoritative than the
+  general "Map" mode session 5 examined (which is likely a stylized/generalized vector
+  rendering derived from the same underlying truth, not the truth layer itself). Whether
+  "Map" mode is literally derived from "Alt" mode's data or independently generalized is
+  not yet known.
+- **Unresolved, high-value follow-up**: whether any of what "Alt" mode draws — individual
+  tree positions, terrain contour geometry — is queryable via DCS's scripting/export API
+  (e.g. something in the family of `land.getHeight`/`land.getSurfaceType`, or a dedicated
+  vegetation/scenery query, if one exists) from outside a live rendering context, and
+  whether it's accessible offline (unlikely, per M1's precedent that `coord.LOtoLL`-class
+  APIs need a live mission) or only observable by rendering/screenshotting the client at
+  various zoom/pan states. If individual tree/contour data is genuinely queryable, this
+  would be DCS-native truth data superior to both RasterCharts (external chart geodesy)
+  and clipmap satellite imagery (registration to DCS x/z still unsolved) for building the
+  World Model's terrain/vegetation layer — but this is untested; no Lua API research has
+  been done on this specific question yet. — **evidence:** unresolved / gap.
+
 ---
 
 ## 2026-09-03 (session 7) — Stage 1 of M2 plan: registration-hypothesis validation via known-feature control points
