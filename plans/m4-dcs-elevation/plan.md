@@ -19,12 +19,13 @@ Summary relevant to this plan:
   undocumented binary formats (`.ng5`, `.surface5`, `.tile`, `.sup4`); `terrain.cfg.lua.pak.crypt`
   is packed and encrypted. `land.getHeight` via a live-mission trigger script (same pattern as
   M1's `coord.LOtoLL` probe) is the only known extraction route.
-- **`io`/`lfs` sandbox status is not directly confirmed on this install**, but strongly and
-  convergently reported (3+ independent sources, matching function/variable names) as stripped by
-  default in `MissionScripting.lua`. This is now **not load-bearing**: `net.log(string)`
-  (Hoggit-documented, separate module from `os`/`io`/`lfs`, untouched by the sandbox) writes to
-  `Saved Games/DCS/Logs/dcs.log`, which can be read afterward as a normal read-only log file. M4's
-  probe uses `net.log`, not `io.open`, so it works whether or not `io`/`lfs` are actually open.
+- **`io`/`lfs` sandbox status**: stripped by default in `MissionScripting.lua` (3+ convergent
+  community sources). User has since directly authorized (this session, not relayed) manually
+  uncommenting the `io`/`lfs` lines in the installed `MissionScripting.lua` for investigation
+  probes specifically — never for pipeline code, not a long-term change. M4's probe therefore uses
+  `io.open` to write its own dedicated log file, rather than routing through `net.log`/`dcs.log`.
+  See `world-model/CLAUDE.md`-adjacent memory note; this is a standing per-project preference for
+  future probes too, not a one-off exception.
 - **DEM choice: SRTM (`.hgt`, ~30 m), not Copernicus GLO-30.** SRTM's `.hgt` is a flat big-endian
   int16 grid, parseable with stdlib `struct`/`array` — zero new dependency, consistent with the
   `pyproj`/stdlib/`Pillow` stack M1-M3 already established. Copernicus GLO-30 has friendlier
@@ -32,36 +33,36 @@ Summary relevant to this plan:
   a COG-aware TIFF library) to read correctly — a disproportionate new dependency for this
   milestone's stated goal.
 
-**Flag before this plan proceeds** (see "Decisions Requiring User Input"): the investigator's
-research note also records, unprompted, that "the user has indicated willingness to manually edit
-`MissionScripting.lua` to open io/lfs." No such instruction has been given to me (Architect) in
-this conversation, and no agent-relayed statement counts as user authorization to alter a
-non-negotiable invariant (`CLAUDE.md`: "Never modify the DCS installation"). This plan does **not**
-rely on or plan around an edited install — it uses `net.log`, which needs no such edit and works
-identically either way — but the discrepancy needs the user's direct confirmation before anyone
-acts on it, not silent pass-through.
+**Resolved**: the investigator's research note had flagged, unprompted, that "the user has
+indicated willingness to manually edit `MissionScripting.lua` to open io/lfs" — with no record of
+that instruction anywhere in this conversation at plan-drafting time. The user has since confirmed
+directly, in-session: `MissionScripting.lua` may be manually edited to unlock `io`/`lfs` for
+investigation/probe scripts (not pipeline code, not a permanent change), and probes should prefer
+io/lfs over `net.log` when available so output goes straight to its own log file. This plan now
+uses that approach for `elevation_probe.lua`. Requires a one-time manual edit before Stage 1's
+probe run: uncomment the `io`/`lfs` lines in the installed `Scripts/MissionScripting.lua`.
 
 ### Affected Modules / Files
 
 - `world-model/tools/dcs-mission-probe/elevation_probe.lua` — new. Mirrors `coord_probe.lua`'s
   structure/header-comment conventions. Iterates a hardcoded grid of DCS `(x, z)` points (generated
   offline in Python, pasted in as a literal Lua table — no runtime grid-generation logic needed in
-  Lua), calls `land.getHeight({x=.., y=z})` per point, and emits one `net.log("ELEV_PROBE " ..
-  json)` line per point. No `io`/`lfs` usage.
-- `world-model/tools/dcs-mission-probe/README.md` — add the new script's entry + workflow note
-  (output is `dcs.log`, not a dedicated file — different collection step from `coord_probe.lua`).
-- `world-model/tools/wsl/collect_elevation_log.sh` — new, read-only. Greps
-  `Saved Games/DCS/Logs/dcs.log` for the `ELEV_PROBE` prefix, writes matching lines to
-  `win-mac-sync/wsl-output/`. Pure read of an existing DCS-managed log — no installation change.
-- `world-model/tools/wsl/probe_missionscripting_sandbox.sh` — new, read-only, optional/cheap.
-  `cat`s the installed `Scripts/MissionScripting.lua` (no mission launch required) so the io/lfs
-  finding can be upgraded from "convergent community evidence" to "reproduced locally." Not
-  load-bearing for M4's design (see above) but cheap enough to run anyway; output goes to
-  `research/` as a one-line addendum to the M4 recon note, not into pipeline code.
+  Lua), calls `land.getHeight({x=.., y=z})` per point, and writes one JSON line per point via
+  `io.open(...):write(...)` to a dedicated output file (not `dcs.log`). Header comment must note
+  the prerequisite: `io`/`lfs` uncommented in the installed `Scripts/MissionScripting.lua` before
+  running (investigation-probe-only exception — never required for pipeline code).
+- `world-model/tools/dcs-mission-probe/README.md` — add the new script's entry + the
+  `MissionScripting.lua` io/lfs prerequisite (one-time manual edit, probe-only, not a permanent
+  install change) + workflow note (output is the probe's own file, collected directly — no
+  `dcs.log` grep step needed, unlike a `net.log`-based probe).
+- `world-model/tools/wsl/collect_elevation_log.sh` — new, read-only. Copies the probe's own output
+  file from `Saved Games/DCS/` into `win-mac-sync/wsl-output/`. Pure read — no installation change
+  itself (the `MissionScripting.lua` edit is a separate, explicit manual step documented in the
+  probe's README, not performed by this script).
 - `world-model/src/elevation/__init__.py` — new package, mirrors `coordinates/`/`osm/` structure.
 - `world-model/src/elevation/dcs_grid.py` — new. `DcsElevationSample` (frozen dataclass: `x: float,
-  z: float, height_m: float`); `parse_net_log(path: Path) -> list[DcsElevationSample]` extracts and
-  parses `ELEV_PROBE` lines from a collected `dcs.log` excerpt (stdlib `json`/regex, no new dep).
+  z: float, height_m: float`); `parse_probe_output(path: Path) -> list[DcsElevationSample]` parses
+  the probe's own JSON-lines output file (stdlib `json`, no new dep).
 - `world-model/src/elevation/dem.py` — new. `SrtmTile` wrapping one `.hgt` file (stdlib
   `struct`/`array` parse per the recon note's documented format: 3601×3601 big-endian int16,
   row-major from NW corner, void `-32768`); `height_at(lat: float, lon: float) -> float` with
@@ -76,12 +77,13 @@ acts on it, not silent pass-through.
   `.hgt` sample and assert `height_at(...)` against a published real-world elevation for a known
   point in the study region (e.g. a Sivas/Gemerek-area airfield elevation, cross-checked against
   M1's existing ARP data where available) within a stated tolerance.
-- `world-model/tests/test_dcs_grid.py` — new. Parses a small **hardcoded fixture** (literal
-  `ELEV_PROBE` log lines copied from the one-shot live probe run, with a provenance comment — same
-  pattern `tests/test_osm_features.py` uses) — no dependency on a live `dcs.log` in tests.
+- `world-model/tests/test_dcs_grid.py` — new. Parses a small **hardcoded fixture** (literal probe
+  output lines copied from the one-shot live probe run, with a provenance comment — same pattern
+  `tests/test_osm_features.py` uses) — no dependency on a live probe output file in tests.
 - `world-model/research/<date>-m4-dcs-elevation.md` — new dated research note recording: the grid
-  extent/spacing actually used, `net.log` throughput/line-count behavior observed, the DCS-vs-SRTM
-  delta table and summary stats, and the MissionScripting.lua sandbox-check addendum if run.
+  extent/spacing actually used, the DCS-vs-SRTM delta table and summary stats, and confirmation
+  that the `MissionScripting.lua` io/lfs edit was probe-only (reverted or left as user prefers —
+  note which).
 - `world-model/CLAUDE.md` — add an "Elevation / DEM: SRTM (M4 decision)" line to the Tech stack
   section, same style as the existing pyproj/Pillow entries.
 - `world-model/ROADMAP.md` — flip M4's checkbox once the diagnostic runs and the user has reviewed
@@ -97,13 +99,13 @@ consumed as-is.
    Gemerek bbox already established in M2/M3 (`south=39.170, west=36.050, north=39.195,
    east=36.090` — reuses the held-out, independently-validated tile registration, keeps M4
    consistent with M1-M3 rather than opening a new region). Write `elevation_probe.lua` with just
-   those points, run it once in a throwaway mission (same manual workflow as `coord_probe.lua`:
-   trigger, `TIME MORE 5`, `DO SCRIPT FILE`), collect `dcs.log` via
-   `collect_elevation_log.sh`, and confirm: (a) `land.getHeight` returns plausible meter values,
-   not nil/error — this is the first real confirmation of Finding 4/the "Unresolved" item in the
-   recon note; (b) `net.log` lines survive intact (no truncation/rotation issue) — resolves the
-   recon note's "untested at scale" flag, at small N first. Only proceed to a full grid once this
-   smoke test passes. Write `dcs_grid.parse_net_log` against the real output.
+   those points — after uncommenting `io`/`lfs` in the installed `Scripts/MissionScripting.lua` —
+   run it once in a throwaway mission (same manual workflow as `coord_probe.lua`: trigger, `TIME
+   MORE 5`, `DO SCRIPT FILE`), collect the probe's output file via `collect_elevation_log.sh`, and
+   confirm: (a) `land.getHeight` returns plausible meter values, not nil/error — this is the first
+   real confirmation of Finding 4/the "Unresolved" item in the recon note; (b) `io.open`/`write`
+   works as expected under the edited sandbox, no truncation issue. Only proceed to a full grid
+   once this smoke test passes. Write `dcs_grid.parse_probe_output` against the real output.
 2. **Validate correctness — full grid + DEM comparison.** Expand the Lua grid to cover the full
    Gemerek bbox at a stated spacing (proposed: ~300 m spacing, ~10×10 ≈ 100 points — adjust if
    Stage 1's `net.log` line count suggests a different comfortable ceiling). Re-run the mission
@@ -120,11 +122,11 @@ consumed as-is.
    needed), confirm `collect_elevation_log.sh` + `parse_net_log` complete instantly against a ~100
    line log excerpt (not a performance-sensitive path at this scale, no profiling needed), and spot
    check no grid points were silently dropped (expected point count == parsed point count).
-4. **Refine / close out.** Run the optional `probe_missionscripting_sandbox.sh` read-only check if
-   convenient (cheap, upgrades an existing recon finding but isn't load-bearing). Write the dated
-   research note, add the `world-model/CLAUDE.md` stack line, run the full verification sequence
-   (`ruff format`, `ruff check`, `mypy --strict`, `pytest`), get user sign-off on the delta report,
-   flip M4's `ROADMAP.md` checkbox.
+4. **Refine / close out.** Write the dated research note (including whether the
+   `MissionScripting.lua` io/lfs edit was left in place or reverted after the probe runs), add the
+   `world-model/CLAUDE.md` stack line, run the full verification sequence (`ruff format`, `ruff
+   check`, `mypy --strict`, `pytest`), get user sign-off on the delta report, flip M4's
+   `ROADMAP.md` checkbox.
 
 ### Risks & Unknowns
 
@@ -132,11 +134,9 @@ consumed as-is.
   (same documented environment) has been confirmed in M1. Stage 1's smoke test is the first real
   test of this; if it behaves unexpectedly (wrong argument shape, unavailable, wildly implausible
   values), the whole extraction mechanism needs rethinking before Stage 2, not after.
-- **`net.log`'s practical throughput/line-length/rotation behavior is untested** — Hoggit's own
-  docs flag the full argument set as undocumented. Stage 1's small-N smoke test exists specifically
-  to catch this before a ~100-point run is built around it. If it proves awkward at scale, the
-  recon note's fallback is a `io.open`-based write (same as `coord_probe.lua`), which reopens the
-  io/lfs sandbox question as load-bearing again — worth deciding then, not preemptively.
+- **`io`/`lfs` behavior under the edited sandbox is untested at scale** — Stage 1's small-N smoke
+  test exists specifically to catch any write/flush/truncation issue before a ~100-point run is
+  built around it.
 - **Vertical datum mismatch between DCS and SRTM is a real, currently unaddressed risk.** SRTM
   heights are typically referenced to the EGM96 geoid; it is not established what vertical
   reference DCS's own terrain art uses (this wasn't investigated this session — out of scope for
@@ -150,21 +150,17 @@ consumed as-is.
 - **SRTM access friction** (NASA Earthdata login vs. `viewfinderpanoramas.org` no-login mirror) —
   resolved below, but flagged since it's a one-time manual step either way, not a scripted fetch
   (unlike M3's Overpass call).
-- The unprompted "user has indicated willingness to edit MissionScripting.lua" note from the
-  investigator's research file is **not acted on** in this plan and should not be treated as
-  authorization — see "Decisions Requiring User Input."
+- **Reverting the `MissionScripting.lua` edit**: since io/lfs access is probe-only and explicitly
+  not for long-term use, close-out should note whether the user reverted the edit after M4's probe
+  runs are done — not this plan's decision to make, but worth surfacing so it isn't silently
+  forgotten as a standing install modification.
 
 ### Decisions Requiring User Input
 
-- **io/lfs / `MissionScripting.lua` edit — needs your direct confirmation, not a relayed one.**
-  The investigator's recon note states you'd indicated willingness to de-sanitize `io`/`lfs` on the
-  DCS install. I have no record of that instruction in this conversation, and editing
-  `MissionScripting.lua` would be a deliberate, scoped exception to `CLAUDE.md`'s "never modify the
-  DCS installation" invariant — not something I'll plan around on an agent's say-so. This plan
-  defaults to the `net.log` approach (needs no install edit, works identically whether io/lfs are
-  open or not). If you do want to authorize an install edit for some other reason, say so
-  explicitly here and I'll fold it in as a documented exception; otherwise this is a non-issue and
-  the plan proceeds as written.
+- **io/lfs / `MissionScripting.lua` edit — resolved.** User confirmed directly, in-session:
+  probes may uncomment `io`/`lfs` in the installed `MissionScripting.lua`; probe-only, not
+  permanent, never for pipeline code. Plan updated to use `io.open` in `elevation_probe.lua`
+  accordingly.
 - **SRTM source**: NASA Earthdata (official USGS/NASA channel, now requires a free account signup)
   vs. `viewfinderpanoramas.org` (no login, third-party-processed derivative redistributing the same
   `.hgt` format). This plan defaults to `viewfinderpanoramas.org` for zero setup friction — say if
