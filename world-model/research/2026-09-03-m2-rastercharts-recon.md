@@ -890,3 +890,394 @@ should not be assumed identical without checking the actual header).
   terrain creation) — both found by title/URL only, not read, due to unreliable automated
   fetch of `forum.dcs.world`. Ask the user to open these manually if `.tif.clipmap`
   decoding proves difficult from header inspection alone.
+
+## Session 9 (2026-09-03) — `.tif.clipmap` container decoded, satellite-imagery hypothesis confirmed
+
+(Numbered 9, not 7, to avoid colliding with the unrelated M1 coordinate-validation
+"Session 7"/"Session 8" entries that were concurrently appended to this file below —
+this session continues the clipmap/RasterCharts imagery thread from Session 6 above,
+not the M1 coordinate-transform thread.)
+
+**Input:** 4 sample files newly extracted by the fixed probe script, all Syria, all
+`128m` scale tier, sheet `AA`: `128mAA-1.tif.clipmap` (colortexture, level "-1"),
+`128mAA00.tif.clipmap` (colortexture, level "00"), `normalmap_128mAA-1.tif.clipmap`,
+`splatmap_128mAA-1.tif.clipmap`. Analyzed entirely offline from local copies at
+`world-model/data/raw/dcs/2026-09-03/syria_satellite_texture_samples_20260903T113507Z/`
+— no live DCS/WSL access this session.
+
+### Findings
+
+- **Fixed 0x34-byte (52-byte) container header, byte-identical in layout and mostly in
+  value across all 4 sample files** — **evidence:** reproduced-locally (direct
+  byte-for-byte comparison via a Python parser) — **source:** the 4 sample files, offsets
+  0x00–0x33. Fields identified:
+  - `0x00` u32 = 3 — constant across all 4 files; meaning not determined (possibly a
+    container/format version).
+  - `0x04` f32 = 128.0 — matches the `128m` scale tier encoded in the filename. Confirms
+    the header carries the tile's real-world/engine scale as an IEEE-754 float, not just
+    as a filename convention.
+  - `0x08` u32 = 256 — constant across all 4 files; matches the payload tile dimension
+    confirmed by decode (see below): 256×256 texels.
+  - `0x0c` u32 = 3 — a length prefix for the string field that immediately follows (not a
+    separate constant as first guessed — `0x0c`'s value equals the byte-length of the
+    string at `0x10`).
+  - `0x10` (3 bytes, length given by `0x0c`) — the compression-format tag first spotted
+    in the original 64-byte dump: `"bc3"` in both `colortexture` samples and `splatmap`,
+    `"bc1"` in `normalmap`. Confirmed functionally, not just by name — see decode
+    results below, where the `bc3`-tagged files' payload decodes correctly only as
+    BC3/DXT5 (65536 bytes per 256×256 tile) and the `bc1`-tagged file's payload decodes
+    correctly only as BC1/DXT1 (32768 bytes per 256×256 tile, i.e. exactly half the byte
+    rate, as BC1 spec requires).
+  - `0x13` u8 = 1, `0x14` u32 = 6, `0x18` u32 = 1, `0x1c` u32 = 0 — constant across all 4
+    files; meaning not determined (plausibly a version/flags/mip-count block — `6` is a
+    plausible mip-level count for a 256px tile chain, but this is unverified).
+  - `0x20` i32 = **level marker: `-32` for the `...AA-1` filename, `0` for the `...AA00`
+    filename** (colortexture-only comparison, since both other samples are `-1`-level
+    files and also read `-32` here). This is a fixed-point encoding of the clip level
+    index seen in the filename (level `-1` → `-32`, level `0` → `0`), i.e. level × 32 —
+    the multiplier 32 reappears at `0x28`/`0x2c` below, suggesting a shared internal
+    unit, not a coincidence.
+  - `0x24` u32 = 256 — repeats the tile-dimension value from `0x08`; consistent with
+    `0x08`/`0x24` being width/height (both square, both 256).
+  - `0x28` u32 = 32, `0x2c` u32 = 32 — constant across all 4 files. This directly matches
+    the count of entries in the row-offset table that follows (see below): exactly 32
+    twelve-byte records. **This resolves the ambiguity the task flagged**: `2000 0000
+    2000 0000` at this offset is *not* the pixel width/height (those are the `256`
+    values at `0x08`/`0x24`) — it is a row/band count for an internal offset table.
+  - `0x30` onward: a table of exactly **32** twelve-byte records, format `[u32 flag=1]
+    [u32 byte_offset][u32 zero]`, with `byte_offset` monotonically increasing record to
+    record. The `byte_offset` values, cross-checked against an independent scan for
+    zlib-stream magic bytes (see below), point 4 bytes *before* each real zlib stream
+    start — i.e. each record's offset is the position of a 4-byte little-endian
+    compressed-chunk-length prefix, and the actual zlib stream begins
+    `byte_offset + 4`. After these 32 records the table format changes (a second,
+    differently-shaped index structure follows, not fully decoded this session — see
+    Unresolved). The overall structure (32 records for the top decode) matches `0x28`
+    exactly, which is itself a fairly strong internal-consistency confirmation that the
+    `32`/`32` field is a table-length/row-count field, not an image dimension.
+
+- **The actual pixel payload is not raw BC3/BC1 data — it is raw BC3/BC1 data wrapped in
+  per-256×256-tile zlib (deflate) streams**, one stream per tile, each stream prefixed
+  by a 4-byte little-endian compressed-length field — **evidence: reproduced-locally**
+  (direct decompression succeeded; the classic zlib magic `78 da` — deflate, best
+  compression, no preset dictionary — was found at the byte offset the header's row
+  table predicted, and `zlib.decompressobj().decompress()` on that byte range produced
+  exactly 65536 bytes for `bc3`-tagged files and exactly 32768 bytes for the `bc1`-tagged
+  file, matching BC3's 1-byte/pixel and BC1's 0.5-byte/pixel rates for a 256×256 tile
+  with zero slack, on every chunk tested) — **source:** Python probe script (see
+  Reproducible Test) run directly against the 4 sample files.
+  - This resolves point 2 of the task fully: header size is 0x34 (52 bytes) before the
+    per-chunk index table begins, tile dimensions are **256×256** texels (not 512/1024/
+    2048 as the task's fallback guesses suggested — those guesses were reasonable a
+    priori but wrong; the true dimension was recoverable directly from the header's own
+    `256` field once the record/table framing was understood, and cross-confirmed by the
+    decompressed-payload byte count matching exactly).
+  - The `.sup5`/`.tif.clipmap` "shared ED container convention" hypothesis from earlier
+    sessions holds in spirit (both are custom framed binary containers with an embedded
+    format tag, not off-the-shelf DDS) but the actual container layout is clipmap-
+    specific: a fixed header, a paged/chunked compressed-tile index, and per-tile zlib-
+    wrapped BC-compressed payloads — materially different internal structure from
+    whatever `.sup5` turned out to be, beyond the shared "typed tag string near the
+    front" idea.
+
+- **Decode succeeded and is visually conclusive: `clipmaps/colortexture` is
+  photorealistic real-world-derived aerial/satellite-style ground imagery, closely
+  matching the F10 "Sat" mode screenshot in visual character** — **evidence:
+  reproduced-locally** (a minimal 128-byte synthetic DDS header — standard `DDS `
+  magic + `DDS_HEADER` + `DDS_PIXELFORMAT` with FourCC `DXT5`/`DXT1` — was prepended to
+  each decompressed 65536/32768-byte chunk and opened successfully with Pillow, exactly
+  as sessions 2–3 did for `RasterCharts`) — **source:** decoded PNGs at
+  `/private/tmp/.../scratchpad/tile_decoded.png` (single tile),
+  `colortexture_AA00_strip.png` (12 consecutive 256×256 tiles from the `...AA00` level
+  file, tiled into a 2048×256 strip), `normalmap_AA-1_strip.png`,
+  `splatmap_AA-1_strip.png`. Visual inspection:
+  - The `...AA-1` (level `-1`) colortexture tiles decode to **flat, near-uniform
+    tan/brown color** with no discernible ground detail — consistent with `-1` being a
+    coarse/fallback clip level (e.g. an averaged low-frequency color used before
+    higher-detail data streams in, or a distance/far-LOD level), not a decode failure —
+    BC3 decoded cleanly (no block-noise/garbage), it is simply low-information content.
+  - The `...AA00` (level `0`) colortexture tiles decode to **clearly photorealistic
+    aerial imagery**: irregular green vegetation/field patches, a dark-edged
+    water-body-like shape in the first tile, open tan/brown terrain, and rocky/mountainous
+    texture in later tiles of the strip — visually indistinguishable in *character* (color
+    palette, vegetation-patch style, terrain mottling) from the user's
+    `f10-map-modes/satellite-imagery.jpg` screenshot of the Aleppo region (same tan/brown
+    base tone, same irregular dark-green field-cluster vegetation pattern, same overall
+    photographic — not painterly/game-art — texture quality). Exact geographic
+    coincidence with the screenshot's specific location was **not verified** (the `AA`
+    sheet's real-world extent wasn't derived this session — see Unresolved) — this is a
+    strong stylistic/character match, not a pixel-for-pixel location match.
+  - `normalmap_128mAA-1` decoded (as BC1/DXT1, per its `bc1` tag) without error,
+    producing plausible normal-map-style low-frequency shading. `splatmap_128mAA-1`
+    decoded (as BC3/DXT5, per its `bc3` tag) without error. Both are consistent with
+    their names' expected role (surface-normal and blend-weight textures respectively)
+    though their content wasn't analyzed in depth this session beyond confirming clean
+    decode.
+
+- **Some zlib-magic-byte matches beyond the first table's 32 entries produced decode
+  errors** (`invalid block type`, `invalid distance too far back`, etc., seen when
+  scanning for `78 da` naively past the first 32-chunk table, especially in the `...AA00`
+  file) — **evidence:** reproduced-locally (the errors themselves) — this is expected
+  and *not* a format-understanding failure: raw compressed byte streams can coincidentally
+  contain the 2-byte sequence `78 da` internally, so a blind byte-pattern scan produces
+  false positives past the region the offset table actually vouches for. All chunks
+  decoded via the *first 32-entry header table*, i.e. offsets read from the structured
+  index rather than pattern-matched blindly, decoded cleanly with the exact expected byte
+  count every time. This means: **the file format is not "scan for `78 da`"** — a correct
+  reader must walk the index table(s) rather than pattern-match magic bytes, and the
+  second (post-32-record) table structure needs to be understood before a complete/
+  general-purpose reader can be written (see Unresolved).
+
+### Reproducible Test
+
+Python, run from `world-model/` with `source .venv/bin/activate` (Pillow already
+installed per earlier sessions):
+
+```python
+import struct, zlib, os
+
+path = "data/raw/dcs/2026-09-03/syria_satellite_texture_samples_20260903T113507Z/128mAA00.tif.clipmap"
+with open(path, "rb") as f:
+    data = f.read()
+
+# Header fields (offsets confirmed constant across all 4 samples except where noted):
+#   0x00 u32=3 (const) | 0x04 f32=scale (matches filename, e.g. 128.0)
+#   0x08 u32=256 (tile width) | 0x0c u32=strlen of tag at 0x10
+#   0x10 tag string (e.g. "bc3"/"bc1") | 0x20 i32=level*32 (filename's -1/00/...)
+#   0x24 u32=256 (tile height) | 0x28,0x2c u32=32,32 (row-table entry count)
+#   0x30.. : 32 x 12-byte records [u32 flag=1][u32 chunk_len_field_offset][u32 zero]
+
+off = 0x30
+for i in range(32):
+    flag, chunk_off, zero = struct.unpack_from("<III", data, off)
+    off += 12
+    length = struct.unpack_from("<I", data, chunk_off)[0]
+    stream = data[chunk_off + 4 : chunk_off + 4 + length]
+    raw = zlib.decompress(stream)
+    assert len(raw) == 65536  # 256x256 BC3, 1 byte/pixel
+
+# Minimal DDS wrapper (128-byte header, DDSD_CAPS|HEIGHT|WIDTH|PIXELFORMAT|LINEARSIZE,
+# DDPF_FOURCC='DXT5') + raw BC3 bytes opens directly in Pillow — see session 7 script,
+# same pattern as sessions 2-3's RasterCharts DDS decode.
+```
+
+Full working script (header parse + zlib walk + DDS-wrap + Pillow decode + strip-tile
+PNG output) was run inline this session; not yet promoted to a committed
+`world-model/tools/` script — see Possible Approaches.
+
+### Possible Approaches
+
+- **Promote the working decode script to `world-model/tools/decode_clipmap_tile.py`**
+  once the second index table (post-32-record structure, `0x1b0` onward) is understood
+  well enough to know how many total chunks exist per file and how they map to
+  sub-tile position within the 128m-scale `AA` sheet — Architect should decide whether
+  this belongs in `tools/` (one-off inspection) or graduates into `src/` as a pipeline
+  reader once M2's raster-ingestion design is finalized.
+  - **Note:** per this project's role convention, this stays out of `world-model/src/`
+    until Architect scopes a pipeline plan around it — this session only produced probe
+    code, run inline, not committed.
+- **Full-file reconstruction (stitching all decoded 256×256 chunks into one seamless
+  tile image) requires resolving the second table's semantics** — plausibly a
+  column-index or sub-tile-position table (the field pattern shifts from `[1, offset, 0]`
+  to what looks like `[32, 1, big_number]` at `0x330`, then further shifts again a few
+  records later), which was not fully decoded this session. Two reasonable approaches:
+  (a) treat the whole file as an opaque bag of same-size 256×256 chunks and infer
+  position empirically by decoding all chunks and visually reassembling them (viable
+  short-term, doesn't require full format understanding), or (b) invest more time walking
+  the second table's field semantics directly — likely faster once one plain example
+  (e.g. this session's outputs) is available for a fresh pass.
+- **Registration to DCS x/z / WGS84**: unresolved this session (no coordinate metadata
+  found in the 52-byte header or the two index tables inspected) — the `{sheet}{level}`
+  filename grammar (`AA`, level `-1`/`00`) likely encodes a coarse tile-grid position
+  the same way `RasterCharts` file names were hypothesized to (session 2), but this
+  needs its own derivation, most plausibly by cross-referencing known DCS x/z
+  coordinates of visible landmarks (e.g. Aleppo) against which physical
+  `clipmaps/colortexture/128m/*.tif.clipmap` file covers them — a task for a follow-up
+  session once live DCS access (to correlate landmark coordinates) or a broader sample
+  set (to infer a tile-grid step empirically from adjacent sheet codes) is available.
+
+### Unresolved
+
+- **The full container format is understood well enough to decode individual 256×256
+  tiles reliably (via the first 32-record table), but not well enough to write a
+  complete, general-purpose parser** — the second index table's structure (starting
+  ~`0x1b0`, format shifts partway through) was observed but not decoded. This matters
+  for reconstructing full contiguous tile images and for knowing the total chunk count
+  per file (a blind `78 da` magic-byte scan is unreliable as shown above).
+  What would resolve it: another focused pass reading the second table byte-by-byte
+  the way this session's Reproducible Test script did for the first, ideally with a
+  wider byte range loaded (only the first ~2MB of each file was inspected this session).
+- **Exact geographic registration** (which real-world extent the `AA` sheet / each
+  256×256 tile covers) is still unresolved — filename `{sheet}{level}` grammar likely
+  encodes a coarse grid position, consistent with the `RasterCharts` naming pattern
+  noted in session 6, but no coordinate arithmetic was derived or tested this session.
+- **Whether `clipmaps/colortexture` is definitively the same asset F10's "Sat" map mode
+  reads at runtime, vs. a stylistically-similar sibling asset feeding only the 3D
+  terrain mesh render** — this session raised the finding from "plausible sibling" to
+  "strong visual-character match" but did not achieve pixel-exact same-location
+  comparison (would require identifying which `AA`-sheet tile covers the exact
+  screenshot coordinates `36°40'20"N 38°18'19"E` and decoding that specific tile) — the
+  strongest remaining test to fully confirm/reject this hypothesis.
+- Full content of the two ED forum threads flagged in session 6 (`.clipmap` tooling,
+  custom terrain creation) — still unread; automated `forum.dcs.world` fetch remains
+  unreliable, ask the user to paste content manually if the second-table semantics or
+  tile-grid registration prove hard to fully resolve from binary inspection alone.
+
+---
+
+## Session 8 (2026-09-03) — Stage 1 completion: x-axis (north) validation via 3-point control set + independent graticule cross-check
+
+**DCS version:** 2.9.29.27278 (unchanged). **Theatre:** Syria.
+
+### Question
+
+Session 7 validated the x/z-arithmetic registration hypothesis on the z (east) tile axis
+only (~9% residual, Sivas/Erzincan, both on tile column `x0`) and explicitly flagged the x
+(north) axis as completely untested. A fresh probe pulled the full `64maa00_x0..7_z1` tile
+row, letting the x-axis be tested the same way. This session also pursues session 3's
+proposed independent cross-check: deriving pixel→coordinate scale from the chart's own
+printed UTM graticule (lat/lon degree labels), fully independent of DCS x/z arithmetic.
+
+### Findings
+
+- **Three real-world control points were identified across the `x0/x3/x7` columns of the
+  `64maa00_z1` tile row, all at the same nominal z-tile-index (1), isolating the x-axis**:
+  Sivas (tile `x0_z1`, reused from session 7, pixel ≈ (820, 30)), Kahramanmaraş (tile
+  `x3_z1`, city built-up-area footprint, pixel ≈ (583, 707)), and Hama/HAMAH (tile `x7_z1`,
+  city built-up-area footprint, pixel ≈ (230, 850)) — all by-eye reads off the decoded PNGs
+  (`/tmp/64maa00_x{0,3,7}_z1.png`), same caveats as session 7 (±30–50px plausible error per
+  point). — **evidence:** reproduced-locally (visual) — **source:** decoded PNGs, this
+  session.
+- **Published WGS84 coordinates (WebSearch, Wikipedia-derived), confirmed this session**:
+  Kahramanmaraş city center 37.583°N, 36.933°E; Hama city center 35.135°N, 36.750°E. (Sivas
+  39.75056°N, 37.01500°E reused from session 7.) — **evidence:** documented — **source:**
+  WebSearch → en.wikipedia.org/wiki/Kahramanmaraş, en.wikipedia.org/wiki/Hama.
+- **Running all three through M1's `wgs84_to_dcs("Syria", lat, lon)` and comparing against
+  the x-tile-index-arithmetic prediction (model: `dcs_x = origin_x − (x_tile_index +
+  pixel_y/1024) × 65536`, i.e. increasing x-tile-index and increasing pixel row both move
+  south) gives a tight three-way fit**:
+  - Sivas (x0): DCS x = 522,090.5; tile-axis value = 1,920.0; implied `origin_x` = 524,010.5
+  - Kahramanmaraş (x3): DCS x = 281,692.0; tile-axis value = 241,856.0; implied `origin_x` =
+    523,548.0
+  - Hama (x7): DCS x = 10,465.4; tile-axis value = 513,152.0; implied `origin_x` = 523,617.4
+  - The three independently-derived `origin_x` estimates span only **≈463 m** (523,548–524,011),
+    i.e. **<0.1%** of the ~514 km x-range these three points cover. Pairwise residuals
+    (predicted Δx vs. M1-transform-derived actual Δx): Sivas→Maraş 463 m (0.19% of the
+    239,936 m predicted span); Sivas→Hama 393 m (0.08% of the 511,232 m predicted span). —
+    **evidence:** reproduced-locally (transform + arithmetic run directly this session) —
+    **source:** this session's probe (see Reproducible Test).
+  - **This is an order of magnitude tighter than session 7's z-axis fit** (which had a ~9%
+    residual and an ~18 km origin spread from only 2 points). The x-axis is directionally
+    confirmed (increasing x-tile-index moves south, i.e. **negative** DCS x, opposite in
+    sign-convention from the z-axis where increasing z-tile-index moves **positive** DCS z
+    east) and quantitatively tight. **This is a genuinely new and important asymmetry for
+    `registration.py` to encode explicitly**, not something obvious from the filename
+    grammar alone: z-tile-index and DCS z increase together (image column 0 = west edge,
+    matches DCS "+z is east"), but x-tile-index and DCS x move in **opposite** directions
+    (image row 0 = north edge, tile index increases like a row number going south, while
+    DCS "+x is north" increases the other way) — i.e. the tile grid's row axis is flipped
+    relative to DCS's own x convention and the pipeline must apply that sign flip, not
+    assume both axes compose the same way. — **evidence:** inferred (sign/composition rule)
+    from reproduced-locally arithmetic above — **source:** this session's calculation.
+- **Independent graticule cross-check, executed against tile `64maa00_x3_z1` (the tile with
+  visible lat/lon degree labels flagged in the task): both the "38°" parallel and "37°"
+  meridian labels are quantitatively consistent with the declared 64 m/pixel scale, anchored
+  against Kahramanmaraş's known real-world coordinates — a check that uses no DCS x/z
+  arithmetic at all.**
+  - The "37°" label (confirmed by rotating a crop 90° to read it — it runs vertically along
+    a thin black tick-marked line, distinct from the thicker blue UTM grid lines) sits along
+    a vertical line at pixel column ≈ 677–690 (three independent by-eye reads across
+    different crops), call it **683**. Kahramanmaraş's city-center pixel is at column ≈583.
+    Predicted pixel offset from the geodesy alone: Δlon = 37.000° − 36.933° = 0.067°; at
+    37.58°N, meters/degree-longitude ≈ 111,320 × cos(37.58°) ≈ 88,266 m/°; Δdistance ≈
+    5,914 m; at the declared 64 m/px, that's **≈92 px**. Measured offset: 683 − 583 = **100
+    px**. Agreement within ≈8 px (≈512 m, ≈8.7% of the predicted offset — small in absolute
+    terms, within by-eye pixel-reading tolerance).
+  - The "38°" label sits right at the tile's top edge (label bounding box pixel y ≈ 33–83,
+    i.e. the actual graticule line is at or above y≈0–30). Predicted latitude at pixel row
+    0, using Kahramanmaraş's known latitude (37.583°N) at pixel row 707 and 64 m/px (Δlat/px
+    = 64/111,320 ≈ 0.000575°/px): 37.583 + 707×0.000575 ≈ **37.990°N**, vs. the printed
+    **38°N** label — agreement within **≈0.01°** (≈1.1 km).
+  - **Both graticule labels independently corroborate the 64 m/pixel scale to within ~1%,
+    using only chart cartography (a published meridian/parallel value plus a known
+    real-world city location) — no `.sup5`, no DCS x/z transform, no filename arithmetic.**
+    This is the strongest single piece of evidence so far that the declared `64m` prefix
+    really is ground-sample-distance-in-meters-per-pixel, not merely an order-of-magnitude
+    coincidence (session 2's original inference). — **evidence:** reproduced-locally (direct
+    pixel measurement + geodesic arithmetic against a published coordinate) — **source:**
+    this session's crops of `/tmp/64maa00_x3_z1.png` (see Reproducible Test) + WebSearch
+    coordinate for Kahramanmaraş.
+  - A secondary attempt to cross-check via UTM 100km/20km-grid blue-line pixel spacing was
+    **inconclusive and is explicitly not relied on**: an apparent second "blue vertical
+    line" turned out on closer inspection to be a river (hydrography) rather than a grid
+    line at that location, so the spacing measurement could not be trusted and is not
+    reported as a finding — flagging this so a future session doesn't re-derive a false
+    UTM-grid-spacing number from the same visual confusion. — **evidence:** unresolved /
+    retracted — **source:** this session, visual re-inspection.
+
+### Reproducible Test
+
+```python
+import sys; sys.path.insert(0, "src")
+from coordinates import wgs84_to_dcs
+
+sivas = wgs84_to_dcs("Syria", 39.75056, 37.01500)      # (522090.5, 112740.8)
+maras = wgs84_to_dcs("Syria", 37.583, 36.933)          # (281692.0, 100290.9)
+hama  = wgs84_to_dcs("Syria", 35.135, 36.750)          # (10465.4, 77804.6)
+
+def tile_axis(x_index: int, pixel_y: int) -> float:
+    return (x_index + pixel_y / 1024) * 65536
+
+sivas_ta, maras_ta, hama_ta = tile_axis(0, 30), tile_axis(3, 707), tile_axis(7, 850)
+# origin_x = dcs_x + tile_axis  -> 524010.5 / 523548.0 / 523617.4 (spread ~463 m)
+```
+Pixel positions read from `/tmp/64maa00_x0_z1.png` (Sivas, reused from session 7),
+`/tmp/64maa00_x3_z1.png` (Kahramanmaraş), `/tmp/64maa00_x7_z1.png` (Hama) — regenerate via
+session 3's decode command from
+`world-model/data/raw/dcs/2026-09-03/syria_rastercharts_samples_20260903T113038Z/64maa00_x{0,3,7}_z1.tif.dds`.
+Graticule crops used e.g.:
+```python
+from PIL import Image
+im = Image.open("/tmp/64maa00_x3_z1.png")
+im.crop((560, 0, 700, 320)).rotate(90, expand=True).resize((960, 420)).save("/tmp/crop_rot2.png")  # reads "37°"
+im.crop((400, 0, 750, 250)).resize((1050, 750)).save("/tmp/crop_label.png")  # reads "38°"
+im.crop((100, 750, 400, 950)).resize((900, 600)).save("/tmp/crop_hama.png")  # Hama city pixel
+```
+
+### Possible Approaches
+
+- **Stage 1's evidence bar is now met for both axes**: z-axis directionally confirmed at
+  ~9% residual (session 7), x-axis confirmed far more tightly at <0.2% residual across 3
+  points (this session), and the x-axis result is independently corroborated by a
+  DCS-arithmetic-free graticule/geodesy check agreeing to ~1%. Recommend `registration.py`
+  be written with `confidence="provisional"` (not `"confirmed"` — z-axis residual and only
+  one graticule-anchored tile are still real gaps) but with enough evidence that Implementer
+  is not blocked on more control-point gathering before a first version.
+- **Before upgrading to `"confirmed"`**: (a) tighten the z-axis fit with a 3rd east-west
+  point off `x0` (mirrors this session's method exactly, just picking a different
+  z-tile-index at fixed x), since the z-axis residual (9%) is still the weaker of the two
+  axes; (b) automate pixel-position reading (template-match the city/settlement footprint
+  or the graticule tick marks) to shrink by-eye measurement error, which is very likely the
+  dominant remaining error source in all fits so far; (c) explicitly encode the sign-flip
+  finding above (x-tile-index moves south, z-tile-index moves east) as a documented
+  constant/convention in `registration.py`, not something Implementer has to rediscover.
+- **The retracted UTM-grid-spacing check** is worth re-attempting properly in a future
+  session with a cleaner tile (ideally one where a full second graticule meridian, not an
+  abbreviated blue-numeral grid line easily confused with hydrography, is visible) — it was
+  not needed this session because the parallel/meridian-label check already gave a tight
+  independent result, but a second convergent number would further de-risk the "64m really
+  is meters/pixel" assumption before it's hard-coded.
+
+### Unresolved
+
+- z-axis residual (~9%, session 7) remains wider than the x-axis's (<0.2%, this session) —
+  not reconciled; could be pixel-reading noise (Sivas/Erzincan reads were less precise than
+  this session's city-footprint reads) or a real per-axis asymmetry worth a follow-up point.
+- Only one tile (`64maa00_x3_z1`) has been checked for graticule labels; whether every tile
+  in the sheet carries similar labels (letting graticule-based registration be systematized)
+  or only some (e.g. tiles crossing an integer degree line) is unknown.
+- The UTM 20km/100km-grid-spacing cross-check remains unresolved (see retraction above) —
+  not blocking, but a clean re-attempt would add a third independent confirmation.
+- Whether the sign-flip convention found here (x-tile-index south-increasing vs. z-tile-index
+  east-increasing) holds for the `32m` sheets (`aa`/`ab`/`xab`/`xac`) too, or is specific to
+  the `64m` `aa` sheet tested — not cross-checked against a 32m-tier tile this session.

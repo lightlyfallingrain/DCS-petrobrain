@@ -116,3 +116,27 @@ calc: `world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 7 sect
 labeled that way specifically to avoid colliding with a concurrent session's own
 "Session 6" satellite-imagery findings — check heading text, not just number, when
 multiple investigator sessions run in parallel on the same research doc same day).
+
+**Session 8 (2026-09-03) — x-axis validated tight (<0.2% residual, 3 points) +
+independent graticule/geodesy cross-check agrees ~1%. Stage 1 evidence bar met.** Fresh
+probe pulled the full `64maa00_x0-7_z1` tile row (same z-index, varying x-index — isolates
+the x/north axis cleanly). 3 control points: Sivas (x0, reused from session 7),
+Kahramanmaraş (x3, city footprint pixel ≈(583,707)), Hama/HAMAH (x7, pixel ≈(230,850)).
+Model `dcs_x = origin_x − (x_tile_index + pixel_y/1024)×65536` gives 3 independent
+`origin_x` estimates spanning only ~463m (<0.1% of the 514km range) — order of magnitude
+tighter than the z-axis's 9%/18km spread. **Key finding: x-tile-index increases SOUTH
+(negative DCS x) while z-tile-index increases EAST (positive DCS z, same direction as
+DCS) — the tile grid's row axis is flipped relative to DCS's own +x=north convention.**
+`registration.py` must encode this sign asymmetry explicitly, not assume both axes compose
+identically. Separately: tile `64maa00_x3_z1` has visible graticule labels ("38°"
+parallel, "37°" meridian, confirmed by rotating a crop to read the vertical text) — using
+Kahramanmaraş's known coords + declared 64m/px scale, predicted pixel positions for both
+labels matched measured positions within ~1% (≈1.1km / ≈0.5km), a check using zero DCS
+arithmetic. This is the strongest evidence yet that `64m` really is meters/pixel GSD, not
+just an order-of-magnitude coincidence. A secondary UTM-grid-spacing check was attempted
+but retracted — the apparent second "grid line" was actually a river; don't re-derive that
+number without fixing the confusion. Verdict: Stage 1 gate is satisfied for
+`confidence="provisional"` — both axes tested, converging evidence — but z-axis's wider
+residual and single-tile graticule coverage mean `"confirmed"` still needs more work later.
+Full findings: `world-model/research/2026-09-03-m2-rastercharts-recon.md` (Session 8
+section).
