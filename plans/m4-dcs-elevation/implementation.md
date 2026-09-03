@@ -82,3 +82,43 @@ None yet — both planned test files depend on real data this stage cannot fabri
   3601 — this is a robustness choice beyond what the plan strictly asked for (which named
   3601×3601 explicitly), but costs nothing and avoids a silent wrong-size read if
   viewfinderpanoramas.org's mirror ever serves SRTM3-resolution tiles for a fringe region.
+
+---
+
+### Addendum — Stage 1 confirmed against real probe output
+
+Live probe output synced back (8 points, `world-model/data/raw/dcs/2026-09-03/elevation_probe_output.jsonl`,
+gitignored raw input, immutable). `land.getHeight` worked as documented (no nils/errors, all 8
+points returned a height) and `io.open` under the edited `MissionScripting.lua` wrote/flushed the
+full file with no truncation — both of Stage 1's open questions (recon note "Unresolved") are now
+resolved by direct reproduction. Heights ranged 1163.18–1339.91m, consistent with the Sivas
+plateau region the Gemerek bbox sits in — no implausible values (e.g. near-zero or absurdly high)
+that would indicate a wrong argument shape or nil-handling bug.
+
+**Files changed (this addendum):**
+- `world-model/tests/test_dcs_grid.py` — new. Hardcodes the real 8-point fixture (literal JSON
+  lines copied from the live probe run, provenance comment pointing at
+  `data/raw/dcs/2026-09-03/elevation_probe_output.jsonl`), mirroring `test_osm_features.py`'s
+  pattern. Four tests: parses all 8 points in order, parses one point's fields exactly
+  (`corner_sw`), asserts the fixture's raw heights fall in a plausible 1000-1500m band for this
+  region (Stage 1's core confirmation, not just a parser test), and asserts a `null` `height_m`
+  raises `ValueError` naming the failed point.
+- `world-model/data/raw/dcs/2026-09-03/elevation_probe_output.jsonl` — moved from
+  `win-mac-sync/wsl-output/` per `collect_elevation_log.sh`/`wsl-probe-sync` workflow. Gitignored,
+  not committed; referenced by path/provenance comment from `test_dcs_grid.py` instead.
+
+**Checks (re-run after this addendum):** `ruff format --check`, `ruff check`, `mypy --strict`
+(`src`+`tests`), `pytest world-model/tests -q` — all pass, 25 passed (21 prior + 4 new).
+
+**Stage 1: done.** Both risks flagged in the plan ("Risks & Unknowns": `land.getHeight` never
+called live; `io`/`lfs` write behavior under the edited sandbox untested at scale) are now
+resolved by direct reproduction at small-N. Not yet attempted at the ~100-point Stage 2 scale —
+if `io.open`/`write` throughput degrades at that size, Stage 2 would need to re-flag it, but
+nothing in this run suggests a problem.
+
+**Stage 2 status: blocked, not started.** Needs (a) the full ~300m-spacing grid probe run (new
+`elevation_probe.lua` grid + another live mission run), and (b) the SRTM `.hgt` tile
+(`N39E036.hgt`) for the DEM comparison — still not available (this sandbox has no outbound
+network access, see "Notable Discoveries" above; the user has not yet supplied the tile either).
+Per the coordinator's explicit instruction this session: do not fabricate the tile or its data to
+proceed past this point.
