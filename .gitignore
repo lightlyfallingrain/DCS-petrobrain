@@ -1,3 +1,7 @@
 # Dropbox-synced scratch channel between Mac and Windows DCS machine —
 # not part of this repo. See world-model/WORKFLOW.md.
 /win-mac-sync
+
+# skill canditates, not worth tracking in repo
+.claude/agent-memory/skill-candidates.md
+
