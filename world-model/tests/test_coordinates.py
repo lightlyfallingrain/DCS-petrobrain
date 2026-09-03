@@ -1,6 +1,6 @@
 import pytest
-from control_points import CONTROL_POINTS, ControlPoint, haversine_distance_m
 
+from control_points import CONTROL_POINTS, ControlPoint, haversine_distance_m
 from coordinates import dcs_to_wgs84, wgs84_to_dcs
 
 

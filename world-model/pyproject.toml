@@ -16,3 +16,17 @@ mypy_path = "src:tests"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff.lint.isort]
+# Ruff's isort auto-detects first-party packages from a `src` root relative
+# to wherever it resolves the project root to be. When invoked with paths
+# from the repo root (e.g. `ruff check world-model/src world-model/tests`,
+# the canonical command per world-model/CLAUDE.md), that resolution differs
+# from invoking with cwd=world-model/, causing local packages (`coordinates`,
+# `raster`, `control_points`) to flip between "first-party" and "third-party"
+# import-sort buckets depending on invocation cwd -- the root cause of a
+# recurring I001 finding across M1/M2 sessions (see
+# world-model/research/2026-09-03-m2-rastercharts-recon.md session 12 and
+# plans/m2-raster-understanding/implementation.md). Declaring these
+# explicitly makes the classification invocation-cwd-independent.
+known-first-party = ["coordinates", "raster", "control_points"]
