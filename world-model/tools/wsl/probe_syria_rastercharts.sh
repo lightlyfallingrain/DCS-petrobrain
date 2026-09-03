@@ -99,9 +99,15 @@ mkdir -p "$samples_dir"
   fi
   echo
 
-  echo "--- Extracting up to 5 sample entries for local format inspection ---"
-  # List entry names only, skip the unzip header/footer lines, take first 5.
+  echo "--- Extracting sample entries for local format inspection ---"
+  # First 5 (same as before, kept for continuity) plus a handful of
+  # x!=0 tiles from the same 64maa00 sheet/z-row, so the registration
+  # hypothesis's north (x) axis has something to test against — the
+  # original first-5 sample was entirely x0 (alphabetical listing
+  # artifact), which left x untested in the M2 Stage 1 recon session.
   mapfile -t sample_entries < <(unzip -Z1 "$zip_path" | grep -v '/$' | head -5)
+  mapfile -t x_axis_entries < <(unzip -Z1 "$zip_path" | grep -E '^64maa00_x[1-7]_z1\.tif\.dds$')
+  sample_entries+=("${x_axis_entries[@]}")
   for entry in "${sample_entries[@]}"; do
     echo "extracting: $entry"
     unzip -o -j "$zip_path" "$entry" -d "$samples_dir" || echo "  FAILED to extract $entry"
