@@ -59,3 +59,20 @@ extraction — not yet run against the live install).
 
 Reading RasterCharts needs only filesystem access, no live-mission Mission Scripting escape hatch
 (unlike M1's `coord.LOtoLL`) — see [[project_syria_projection]].
+
+**Session 3 (2026-09-03) — major reframe: tiles are scanned real paper charts, not
+satellite/rendered imagery.** Decoded 5 sample DDS→PNG with Pillow (`pip install`ed ad
+hoc into `world-model/.venv`, NOT in `pyproject.toml` yet). Visual content: classic
+1:250,000-class military topo/aeronautical chart cartography (brown contours in feet,
+UTM grid with "UTM GRID ZONE DESIGNATION 37S" printed on tile z0, abbreviated 2-digit
+blue grid-line numerals, a `VOR·DME·NDB ERZİNCAN` navaid box on tile z4 — navaid
+overprint implies an aeronautical series like JOG-A, not plain topo JOG). Place names
+(Gemerek, Sivas, Kangal, Divriği, Erzincan) confirm the `64maa00` sheet covers
+central-eastern Turkey, well north of Syria proper — DCS's "Syria" theatre extent
+reaches deep into Turkey. Chart-series ID (JOG-A 1:250k) is plausible pattern-matching
+only, NOT confirmed against a primary spec. Key implication: the tile's own printed UTM
+grid is, in principle, an INDEPENDENT registration path (pixel↔WGS84 via pyproj UTM,
+zone 37S/37N confirmed) that doesn't need `.sup5` or the x/z-arithmetic hypothesis to
+resolve — but no sampled tile has a full unabbreviated grid label yet (only truncated
+2-digit values), so it's not executable from what's decoded so far. Full findings:
+`world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 3 section).

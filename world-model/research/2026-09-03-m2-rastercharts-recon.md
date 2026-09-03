@@ -376,3 +376,170 @@ directly confirms it's a per-tile manifest and pins down the record boundaries.
 - No DDS-to-image decode was performed this session (no suitable tool locally
   available) — the registration hypothesis above is unverified against actual pixel
   content.
+
+---
+
+## 2026-09-03 (session 3) — Visual decode of 5 sample tiles: content is a scanned military topo/aeronautical chart, not satellite/rendered imagery
+
+**DCS version:** 2.9.29.27278 (unchanged). **Theatre:** Syria.
+
+### Question
+
+Session 2 flagged "no DDS-to-image decode was performed" as the key blocker on the
+registration hypothesis. This session decodes the 5 already-extracted sample tiles
+(Pillow, installed ad hoc into `world-model/.venv`, not yet added to `pyproject.toml`)
+and inspects them visually to (a) confirm what kind of raster content this actually is,
+(b) attempt chart-series/scale identification, and (c) assess whether the tile's own
+printed grid is sufficient for independent georeferencing.
+
+### Findings
+
+- **The RasterCharts tiles are a scanned real-world military topographic/aeronautical
+  chart, not satellite imagery and not a DCS-rendered map.** All 5 decoded samples
+  (`64maa00_x0_z{0,1,2,3,4}`) show classic paper-chart cartography: brown contour lines
+  with foot-elevation labels (`5000`,`6000`,`7000`...), tan/khaki hypsometric tint at
+  higher elevations, red/brown roads, blue hydrography, place-name labels in
+  serif/typewriter chart fonts, and dashed "approximate alignment" boundary lines — none
+  of which DCS's in-engine terrain renderer or a satellite-derived orthophoto would
+  produce. — **evidence:** reproduced-locally (direct visual inspection of decoded PNGs)
+  — **source:** `/tmp/64maa00_x0_z{0..4}.png`, decoded from
+  `data/raw/dcs/2026-09-03/syria_rastercharts_samples_20260903T090447Z/*.tif.dds`.
+- **The chart covers real Turkish terrain south-central of the DCS "Syria" theatre's
+  namesake area, not Syria itself** — confirmed by legible place-name labels:
+  `Gemerek`, `KARABABA DAĞI` (tile z0), `SİVAS`, `ULAŞ`, `ŞARKIŞLA`, `Altınyayla`,
+  `Yeniapardi` (z1), `KANGAL`, `Çetinkaya`, `Ateşali` (z2), `DİVRİĞİ`, `KEMALİYE`,
+  `Fırat Nehri` labeled `(Euphrates)` (z3), and `ERZİNCAN` with a `VOR·DME·NDB ERZİNCAN`
+  navaid box (z4) — all in Sivas/Erzincan provinces, central-eastern Turkey, well north
+  of the Syrian border. This confirms and sharpens the prior session's note that DCS's
+  "Syria" map extent reaches into Turkey — the `64maa00` sheet/tile-row sampled here is
+  specifically the Turkish interior, not the Syria/Lebanon coastal area the theatre is
+  named for. — **evidence:** reproduced-locally (place names read directly off tiles,
+  cross-checked against general knowledge of Turkish provincial geography) — **source:**
+  same PNGs.
+- **In-tile printed grid is a UTM graticule with explicit zone designation, consistent
+  with a standard 1:250,000-scale-class military/aeronautical chart series (JOG-A,
+  Joint Operations Graphic – Air, or a close equivalent), moderate confidence.** Tile z0
+  shows dashed tick-mark lines labeled "UTM GRID ZONE DESIGNATION 37S" running the full
+  tile height — direct visual confirmation of the prior session's read. Tiles z1–z4 show
+  large blue two/three-digit numerals (`82`, `96`, `114`→ misread as `11 4`, `12`)
+  positioned at regular blue grid-line crossings — this is the standard JOG/TPC/ONC
+  convention of labeling each UTM grid line with an abbreviated (2–3 digit) coordinate
+  value, printed large where space allows. Tile z4 additionally shows a `VOR·DME·NDB
+  ERZİNCAN` navigation-aid annotation box — a hallmark of *aeronautical* overprint
+  charts (JOG-A, TPC, ONC), not a purely topographic series (plain JOG/JOG-G lack navaid
+  symbology). Grid-line spacing relative to tile content (a handful of grid lines
+  crossing each 1024×1024 tile, consistent with ~10 km spacing at the 32 km/tile ground
+  extent implied by the 32m-scale/1024px hypothesis from session 2) most closely matches
+  the 10 km UTM grid interval standard to 1:250,000-scale JOG-A sheets, rather than the
+  coarser 100 km-only grid typical of 1:500,000 TPC or 1:1,000,000 ONC. This scale/series
+  identification is plausible and internally consistent but **not confirmed against an
+  actual published JOG-A specification or a real reference sheet this session** — web
+  search corroborated only the general fact that 1:250,000-class military topo charts
+  use single/double-digit abbreviated UTM grid-line labels and print a "Grid Zone
+  Designation" in the margin; it did not confirm JOG-A specifically vs. a similar
+  in-house/allied chart series. — **evidence:** inferred (plausible chart-series/scale
+  identification from cartographic convention matching) — **source:** direct tile
+  inspection + WebSearch (general UTM/MGRS grid-labeling convention references, no
+  JOG-A-specific primary source located).
+- **The printed UTM grid, if 2+ labeled grid-line intersections can be identified with
+  their full coordinate values (zone + easting/northing), is in principle sufficient to
+  derive an independent pixel→WGS84 affine transform for a tile, without needing
+  DCS-internal metadata (`.sup5`, or the x/z-index arithmetic hypothesis) at all.**
+  Reasoning: a UTM grid is a known, invertible projection (a specific case of
+  Transverse Mercator with defined zone/false-easting/false-northing) — given zone
+  `37S` (confirmed printed on z0) and at least two grid-line labels with unambiguous
+  full easting/northing values (the abbreviated 2-digit labels seen so far, e.g. `82`,
+  `96`, are ambiguous without knowing the omitted leading digits — real 1:250,000 sheets
+  print at least one full 6-digit-class label per sheet, typically in a margin or corner
+  tile, which was not among the 5 samples decoded this session), the pixel-space
+  positions of two known grid intersections plus known grid spacing (10 km, per the
+  scale hypothesis above) fully determine the tile's affine transform via standard
+  `pyproj` UTM-zone-37N inverse projection — **this is a genuinely separate and
+  independent registration path from both the `.sup5` investigation and the x/z
+  filename-arithmetic hypothesis**, and would not depend on either resolving. It does
+  **not**, by itself, give the DCS-internal x/z ↔ chart-pixel mapping — that composition
+  still requires either the x/z arithmetic hypothesis (session 2) to hold, or a separate
+  link step (e.g. matching a chart-identifiable real-world feature, such as `SİVAS`'s
+  known WGS84 location, against M1's already-solved DCS x/z ↔ WGS84 transform to derive
+  the offset empirically). — **evidence:** inferred (methodologically sound reasoning
+  from confirmed grid presence; not yet executed against real numbers) — **source:**
+  reasoning from tile visual content above + M1's existing `pyproj`-based DCS x/z ↔
+  WGS84 transform (`world-model/src/coordinates/`, per M1 recon).
+- **None of the 5 sampled tiles contains an unambiguous full-precision grid-line label**
+  (only 2-digit abbreviated numerals were visible: `82`, `96`, `11`/`4` split, `40`/`30`/
+  `20`, `12`) — every visible number is a truncated/abbreviated UTM coordinate value,
+  which is standard chart practice for interior grid lines (full values are normally
+  printed only at sheet corners/margins, which these interior tiles are not). This means
+  the registration approach in the finding above is not yet executable from what's
+  already decoded — it needs either a margin/corner tile (likely `x0_z0` or the sheet's
+  edge tiles, not necessarily among the `x0_z0..4` column sampled) or cross-referencing
+  the abbreviated values against the already-known approximate location (Sivas/Erzincan
+  province) to disambiguate the omitted leading digits by inspection, which is possible
+  but not done this session. — **evidence:** reproduced-locally (absence noted directly
+  from the 5 decoded images) — **source:** same PNGs.
+
+### Reproducible Test
+
+Decode used this session (reusable, ad hoc — not yet a committed `world-model/tools/`
+script; Pillow was `pip install`ed directly into `world-model/.venv`, not added to
+`pyproject.toml`):
+```sh
+cd world-model && source .venv/bin/activate
+python3 -c "from PIL import Image; \
+Image.open('data/raw/dcs/2026-09-03/syria_rastercharts_samples_20260903T090447Z/<name>.tif.dds')\
+.convert('RGB').save('/tmp/<name>.png')"
+```
+Then visual inspection (Read tool / any image viewer) of the resulting PNG.
+
+### Possible Approaches
+
+- **Recommended next concrete step: pull and decode additional tiles specifically
+  chosen to catch a sheet margin or corner** (e.g. `x0_z0` across other sheets, or the
+  extreme-index tiles `x7_z*`/`x*_z7` of the `aa`/`ab`/`xab`/`xac` groups) — margin
+  tiles are far more likely to carry a full unabbreviated UTM coordinate label or a
+  chart legend/title block, which would let the UTM-grid registration path (finding
+  above) actually be executed and cross-checked against the x/z-arithmetic hypothesis
+  from session 2. This is cheaper and more informative than continuing to sample the
+  same interior column.
+- **Alternative/complementary step: identify one visible feature with a well-known
+  precise WGS84 location** — e.g. Erzincan's VOR/DME/NDB station (`ERZİNCAN`, tile z4)
+  or Sivas city center — and look up its published real-world coordinates (aeronautical
+  database, OpenStreetMap, or the FAA/ICAO navaid registry) as an independent anchor.
+  Combined with the tile's pixel position of that feature and M1's already-solved DCS
+  x/z ↔ WGS84 transform, this could let the DCS-internal ↔ chart-pixel link be derived
+  empirically (control-point fit, same method M1 used) even without ever resolving the
+  UTM grid's abbreviated labels or `.sup5`'s structure — this may be the more
+  practically expedient path since it reuses M1's control-point methodology directly
+  rather than requiring exact UTM-grid-label disambiguation.
+- **A dedicated DDS-decode probe script should move from ad hoc `.venv` use into
+  `world-model/tools/`, and Pillow's DDS-plugin dependency needs an explicit decision**
+  (add to `pyproject.toml` as a dev/tooling dependency, or keep strictly
+  probe-local/scratch) — this is a call for Architect/Implementer, not resolved here.
+
+### Unresolved
+
+- Whether any sampled or not-yet-sampled tile carries a full unabbreviated UTM
+  coordinate label — needs more tiles decoded, prioritizing margin/corner positions.
+- Exact chart series identity (JOG-A vs. a similar allied/in-house 1:250,000
+  aeronautical-overprint series) — current identification is plausible cartographic
+  pattern-matching only, not confirmed against a primary chart-series specification or
+  a labeled reference sheet.
+- Whether the UTM-grid-derived registration path and the x/z filename-arithmetic
+  hypothesis (session 2) agree once both are actually computed — not yet cross-checked
+  numerically.
+- Whether `pyproj`'s existing UTM support (already a project dependency per M1) is
+  sufficient to invert a JOG-A-style grid directly, or whether false-easting/northing
+  conventions specific to this chart series need separate confirmation.
+
+### Session 4 addendum (2026-09-03, user domain knowledge)
+
+- **DCS's F10 map has three distinct modes: "paper map," satellite imagery, and an
+  internal 3D-rendered map not accessible outside the running engine.** — **evidence:**
+  user-provided domain knowledge — **source:** user, this session. This explains why
+  `RasterCharts` decodes to a scanned aeronautical/topo chart rather than satellite
+  tiles: `RasterCharts` is specifically the "paper map" mode's asset source, a separate
+  pool from whatever feeds satellite mode (location not yet investigated). The internal
+  rendered map being engine-only is consistent with M1's finding that `coord.LOtoLL`
+  requires a live mission. **Implication:** if satellite-mode imagery is ever wanted for
+  the pipeline, it lives elsewhere in the DCS install and needs its own recon — do not
+  assume `RasterCharts` is the only or primary raster asset source for Syria.
