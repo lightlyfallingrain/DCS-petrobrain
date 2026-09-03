@@ -1,142 +1,38 @@
 ---
-name: project-m2-rastercharts
-description: Syria RasterCharts layout, tile format (DXT5 DDS), .sup5 structure, and registration hypothesis — Stage 0 probe run and analyzed 2026-09-03
+name: project_m2_rastercharts
+description: M2 RasterCharts/clipmap recon facts for Syria terrain, plus vegetation/contour API findings.
 metadata:
   type: project
 ---
 
-**Stage 0 probe results (2026-09-03, session 2):** `rasterCharts.zip` = 1280 tiles,
-`{32|64}m{sheet}{level}_x{0-7}_z{0-7}.tif.dds`, sheet ∈ {aa,ab,xab,xac}, level ∈
-{-2,-1,00,01}. 32m: all 4 sheets × all 4 levels (1024 tiles). 64m: only sheets
-{aa,xab} × levels {-1,00} (256 tiles). Tiles are plain **DXT5/BC3 DDS** (standard
-128-byte header, NO DX10 extended header) — `file(1)` reporting "DX10" is WRONG,
-don't trust it for DDS; parse the header directly (fourCC at offset 84). 1024x1024,
-11 mipmaps, built with NVIDIA Texture Tools (tag in header's reserved bytes).
-`.sup5` (615,216 bytes) starts with a generic ED serialization pattern: numeric
-header then a length-prefixed string `landscape5::sup5File` — looks like a
-type-tag from a general engine serialization routine, not a bespoke format. No
-clean integer division of file size against tile/group counts at any header-size
-guess — suggests variable-length (per-tile-name-string) records, not a fixed
-struct array. Only first 64 bytes were dumped; full-file dump still needed.
-**Registration hypothesis (untested):** tile edge in DCS x/z meters = scale_prefix
-× 1024px (32,768m or 65,536m); an 8×8 sheet at 64m ≈ 524km/side, order-of-magnitude
-match for Syria's full theatre extent — plausible but NOT pixel-verified (no DDS
-decoder available locally this session). Full findings:
-`world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 2 section).
+Syria: 1280 DXT5 DDS RasterCharts tiles are scanned real paper charts (JOG-A-like 1:250k, Turkey
+terrain, UTM grid printed in-tile — independent registration path). forum.dcs.world blocks
+WebFetch (403) — see [[forum-dcs-world-fetch]]. F10 satellite mode's likely asset is
+`clipmaps/colortexture/` (separate dir, own probe script), not RasterCharts.
 
-Syria's `Mods/terrains/Syria/RasterCharts/` contains exactly two files: `rasterCharts.sup5` +
-`rasterCharts.zip` — a single archive, no scale-tiered subdirectories. Confirmed via
-`world-model/data/raw/dcs/2026-09-02/DCS-files.txt` (a real recursive filesystem listing from the
-M0 probe against the actual DCS 2.9.29.27278 install), not inference. Afghanistan/Kola/MarianaIslands
-match this same single-archive pattern.
+Stage 1 registration: z-axis ~9% residual (2pt), x-axis <0.2% residual (3pt) + graticule
+cross-check ~1% agreement. x-tile-index increases SOUTH (opposite DCS +x), z-tile-index
+increases EAST (same as DCS +z) — sign flip `registration.py` must encode.
+confidence="provisional" justified.
 
-Caucasus is structurally different: `RasterCharts/{0.25M,0.5M,1M,2M,5M}/` each hold many small
-per-tile zips named like `16m_AA00.zip`, `128mxAB-1.zip` (grid-cell-code + signed row suffix,
-leading number plausibly a scale/GSD in meters — inferred from naming only, not verified). Don't
-assume Syria's simple layout generalizes if the pipeline later covers a tiled theatre.
+**No documented tree/vegetation query API exists.** `Object.Category` = {UNIT, WEAPON, STATIC,
+SCENERY, BASE} — no vegetation category. `SceneryObject` is ED-documented as "bridges,
+buildings, etc" only. `land.getSurfaceType` enum = {LAND, SHALLOW_WATER, WATER, ROAD, RUNWAY} —
+no FOREST value; an ED wishlist thread requests adding one (title only, not confirmed still
+open). No community tooling found for extracting individual tree positions — only texture-
+reskin mods ("Better Trees for ..."). Treat DCS forests as very likely a procedural/render-time
+scatter, not discretely queryable objects, until an empirical `world.searchObjects(SCENERY,...)`
+probe against a live mission proves otherwise. Fallback for a vegetation layer: OSM
+landuse=forest/natural=wood polygons, cross-checked coarsely against DCS's own rendered forest
+polygon shapes.
 
-`.sup5` file format is undocumented in every source checked (ED forum thread
-`forum.dcs.world/topic/226463-` asks the same question but returned HTTP 403 to WebFetch —
-likely bot/UA blocking of forum.dcs.world in general, worth remembering for future sessions).
-Do not confuse `RasterCharts/rasterCharts.sup5` with the separate `Map/<Terrain>.sup5` /
-`Surface/<Terrain>.surface5` terrain-mesh files — different subsystem, same extension pattern.
+**Terrain-contour data does not need separate reverse-engineering.** Dense `land.getHeight`
+grid sampling (already known available, same live-mission-only class as `coord.LOtoLL`) +
+standard marching-squares/GDAL-contour algorithms is sufficient to derive contour-line-
+equivalent geometry — this is exactly what `docs/concept/WORLD_MODEL_BUILDER.md` Milestone 4 +
+"Elevation-derived features" already plans. F10's "Alt" map mode is very likely just a UI
+rendering of data DCS already exposes elsewhere, not a separate asset worth cracking.
 
-No community tool was found (via plain web search only — GitHub code search API was
-unauthenticated/blocked, 401/403) that parses RasterCharts directly; DCS moving-map projects
-(Tacview "DCS Satellite Tiles", Bergison's, DCS LIVE Moving Map) appear to source their own basemap
-imagery instead. Weak/negative finding — worth a real GitHub code search with proper auth before
-concluding no prior art exists.
-
-`forum.dcs.world/topic/292399-raster-charts-for-terrain-mod/` (WebFetch blocked, 403) turned out,
-per the user pasting its actual text, to be about sourcing imagery for *building new* custom
-terrain mods (FAA sectionals via QGIS) — NOT about ED's shipped RasterCharts format/registration.
-Don't re-fetch expecting an answer there. `forum.dcs.world/topic/226463-` (the .sup5 thread) is a
-separate, still-unread thread — don't conflate the two.
-
-Full findings + recommended probe: `world-model/research/2026-09-03-m2-rastercharts-recon.md` and
-`world-model/tools/wsl/probe_syria_rastercharts.sh` (unzip -l + sup5 header hexdump + sample tile
-extraction — not yet run against the live install).
-
-Reading RasterCharts needs only filesystem access, no live-mission Mission Scripting escape hatch
-(unlike M1's `coord.LOtoLL`) — see [[project_syria_projection]].
-
-**Session 3 (2026-09-03) — major reframe: tiles are scanned real paper charts, not
-satellite/rendered imagery.** Decoded 5 sample DDS→PNG with Pillow (`pip install`ed ad
-hoc into `world-model/.venv`, NOT in `pyproject.toml` yet). Visual content: classic
-1:250,000-class military topo/aeronautical chart cartography (brown contours in feet,
-UTM grid with "UTM GRID ZONE DESIGNATION 37S" printed on tile z0, abbreviated 2-digit
-blue grid-line numerals, a `VOR·DME·NDB ERZİNCAN` navaid box on tile z4 — navaid
-overprint implies an aeronautical series like JOG-A, not plain topo JOG). Place names
-(Gemerek, Sivas, Kangal, Divriği, Erzincan) confirm the `64maa00` sheet covers
-central-eastern Turkey, well north of Syria proper — DCS's "Syria" theatre extent
-reaches deep into Turkey. Chart-series ID (JOG-A 1:250k) is plausible pattern-matching
-only, NOT confirmed against a primary spec. Key implication: the tile's own printed UTM
-grid is, in principle, an INDEPENDENT registration path (pixel↔WGS84 via pyproj UTM,
-zone 37S/37N confirmed) that doesn't need `.sup5` or the x/z-arithmetic hypothesis to
-resolve — but no sampled tile has a full unabbreviated grid label yet (only truncated
-2-digit values), so it's not executable from what's decoded so far. Full findings:
-`world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 3 section).
-
-**Session 6 (2026-09-03) — F10 "satellite" imagery is a SEPARATE asset from
-RasterCharts, candidate location found.** `Mods/terrains/Syria/clipmaps/` (2,006 entries
-in `DCS-files.txt`) has three sibling dirs — `colortexture/`, `normalmap/`, `splatmap/`
-— the standard base-color/normal/blend-weight trio for texturing a 3D terrain mesh.
-`colortexture/` has resolution tiers `1m,4m,8m,16m,128m` (some with `(spring)`/`(winter)`
-variants), tiles named `{scale}m{sheet}{level}.tif.clipmap` (same `{sheet}{level}`
-naming grammar as RasterCharts — `AA`/`AB`/`xAB`, level suffix — but a DIFFERENT
-extension/container and a DIFFERENT parent dir, not the same asset). "Clipmap" is a
-well-documented generic real-time terrain-texture-streaming technique (NVIDIA GPU Gems 2
-ch.2), independent of DCS — strong circumstantial fit for "terrain mesh's own base
-texture," which — unlike RasterCharts (confirmed external scanned chart, own datum) —
-would be natively DCS x/z registered if confirmed. NOT YET pixel-verified: no live
-access this session, `.tif.clipmap`'s container format is unconfirmed (don't assume it's
-DDS just because RasterCharts' `.tif.dds` was — different extension, check magic bytes
-first). ED forum thread title `forum.dcs.world/topic/332961-...clipmap-files-nevada`
-confirms `.clipmap` is a recognized general DCS terrain-engine asset type (title only,
-not read — forum.dcs.world fetch still unreliable). Probe script written:
-`world-model/tools/wsl/probe_syria_satellite_texture.sh` (dir listing + sample-file copy,
-not unzip — clipmaps are plain files on disk, no zip container). Full findings:
-`world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 6 section).
-
-**Session 7 (2026-09-03) — Stage 1 plan gate: x/z-arithmetic hypothesis directionally
-CONFIRMED, not yet tight enough for a fixed affine.** Used Sivas city center (tile
-`x0_z1`) and Erzincan VOR/DME/NDB (tile `x0_z4`) as control points: looked up published
-WGS84 coords, ran through M1's `wgs84_to_dcs("Syria", lat, lon)`, compared the resulting
-DCS z-delta (215,229 m) against the tile-arithmetic-predicted z-delta (197,376 m, from
-64m×1024px=65,536m/tile × 3 tile-index steps + by-eye pixel offsets). ~9% residual, right
-order of magnitude, right sign, right axis — rules out gross hypothesis failure (wrong
-scale constant, swapped axes, off-by-tile). Two independent origin_z estimates (from each
-point alone) disagree by ~18km, which exceeds plausible by-eye pixel-reading error alone
-(~±6.4km budget) — likely a real but modest simplification (sheet overlap or non-clean
-origin), not proof the core hypothesis is wrong. **Only the z (east) tile axis was
-tested — x (north) axis completely unvalidated, no sample at a different x-index exists.**
-Recommend: get an x-axis control point before `registration.py`; `confidence` should be
-`"provisional"` not `"confirmed"` if built from this alone. Full findings + reproducible
-calc: `world-model/research/2026-09-03-m2-rastercharts-recon.md` (session 7 section,
-labeled that way specifically to avoid colliding with a concurrent session's own
-"Session 6" satellite-imagery findings — check heading text, not just number, when
-multiple investigator sessions run in parallel on the same research doc same day).
-
-**Session 8 (2026-09-03) — x-axis validated tight (<0.2% residual, 3 points) +
-independent graticule/geodesy cross-check agrees ~1%. Stage 1 evidence bar met.** Fresh
-probe pulled the full `64maa00_x0-7_z1` tile row (same z-index, varying x-index — isolates
-the x/north axis cleanly). 3 control points: Sivas (x0, reused from session 7),
-Kahramanmaraş (x3, city footprint pixel ≈(583,707)), Hama/HAMAH (x7, pixel ≈(230,850)).
-Model `dcs_x = origin_x − (x_tile_index + pixel_y/1024)×65536` gives 3 independent
-`origin_x` estimates spanning only ~463m (<0.1% of the 514km range) — order of magnitude
-tighter than the z-axis's 9%/18km spread. **Key finding: x-tile-index increases SOUTH
-(negative DCS x) while z-tile-index increases EAST (positive DCS z, same direction as
-DCS) — the tile grid's row axis is flipped relative to DCS's own +x=north convention.**
-`registration.py` must encode this sign asymmetry explicitly, not assume both axes compose
-identically. Separately: tile `64maa00_x3_z1` has visible graticule labels ("38°"
-parallel, "37°" meridian, confirmed by rotating a crop to read the vertical text) — using
-Kahramanmaraş's known coords + declared 64m/px scale, predicted pixel positions for both
-labels matched measured positions within ~1% (≈1.1km / ≈0.5km), a check using zero DCS
-arithmetic. This is the strongest evidence yet that `64m` really is meters/pixel GSD, not
-just an order-of-magnitude coincidence. A secondary UTM-grid-spacing check was attempted
-but retracted — the apparent second "grid line" was actually a river; don't re-derive that
-number without fixing the confusion. Verdict: Stage 1 gate is satisfied for
-`confidence="provisional"` — both axes tested, converging evidence — but z-axis's wider
-residual and single-tile graticule coverage mean `"confirmed"` still needs more work later.
-Full findings: `world-model/research/2026-09-03-m2-rastercharts-recon.md` (Session 8
-section).
+Caution: a screenshot the user labeled "Alt mode" (`alt-map.jpg`) actually has an on-screen HUD
+readout saying "MAP" — the Map/Alt/Sat button state wasn't independently confirmed. Don't trust
+user mode-labeling of F10 screenshots without checking the in-image HUD text yourself.
