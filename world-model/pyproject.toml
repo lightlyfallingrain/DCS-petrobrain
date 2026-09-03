@@ -5,6 +5,7 @@ description = "Persistent, queryable semantic geographic model of DCS World thea
 requires-python = ">=3.11"
 dependencies = [
     "pyproj>=3.6",
+    "pillow>=9.1",
 ]
 
 [tool.mypy]
