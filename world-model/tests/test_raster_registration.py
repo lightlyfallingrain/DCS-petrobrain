@@ -13,10 +13,22 @@ Tolerances are asymmetric per axis, reflecting the research findings: the
 x-tile-index (row/south) axis fit tightly (<0.2% residual, session 8) while
 the z-tile-index (column/east) axis fit far more loosely (~9% residual,
 session 7) -- see each constant's comment below for how it was derived.
+
+No held-out point is available yet: all four points below (Sivas,
+Kahramanmaras, Hama, Erzincan) were also the points used to empirically fit
+`origin_x`/`origin_z` in `raster/registration.py` (session 8 used Sivas/
+Kahramanmaras/Hama for `origin_x`; session 7 used Sivas/Erzincan for
+`origin_z`). `test_control_point_maps_to_expected_tile_and_pixel` therefore
+validates that the fitted registration reproduces its own fit inputs (i.e.
+the dcs_to_tile_pixel arithmetic and origin wiring are correct) -- it is
+*not* independent evidence of real-world accuracy, since a wrong fit and a
+test checking that same wrong fit would agree with each other. An
+independent held-out third control point (with its own residual reported)
+is deferred to Stage 4 of `plans/m2-raster-understanding/plan.md`, once
+another usable named feature is identified on a sampled tile.
 """
 
 import pytest
-
 from coordinates import wgs84_to_dcs
 from raster import TileId, dcs_to_pixel, parse_tile_filename, pixel_to_dcs
 from raster.registration import dcs_to_tile_pixel, get_registration
