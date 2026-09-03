@@ -1,1 +1,0 @@
-- [Verify full suite, not just new files](verify_full_suite_not_just_new_files.md) — ruff check on src+tests can flag pre-existing drift in untouched files; fix in its own small commit.
