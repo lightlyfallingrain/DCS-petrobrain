@@ -122,3 +122,73 @@ nothing in this run suggests a problem.
 network access, see "Notable Discoveries" above; the user has not yet supplied the tile either).
 Per the coordinator's explicit instruction this session: do not fabricate the tile or its data to
 proceed past this point.
+
+---
+
+### Addendum 2 — SRTM tile received (SRTM3, not SRTM1); Stage 2 grid + tooling built
+
+The user supplied `world-model/data/raw/dem/N39E036.hgt` (2,884,802 bytes) — **SRTM3 (3
+arc-second, 1201x1201, ~90m), not SRTM1** (1 arc-second, 3601x3601, ~30m) as the recon note had
+anticipated (viewfinderpanoramas.org serves both; the user picked 3"). `dem.py`'s
+`SrtmTile.from_file` already derived grid size dynamically from file length rather than
+hardcoding 3601 (see Addendum 1's "Notable Discoveries" — this was flagged at the time as a
+robustness choice beyond what the plan asked for; it paid off here), so **no functional code
+change was needed** to read the actual tile correctly — verified: `size=1201`,
+`sw_lat=39.0`, `sw_lon=36.0`, and a spot-check `height_at` at the Gemerek control point landed at
+1208.76m (full tile) / 1225.98m (at the Wikipedia-published coordinate specifically, see below) —
+both physically plausible for the region.
+
+**Files changed (this addendum):**
+- `world-model/src/elevation/dem.py` — updated the module/class docstrings to describe both
+  SRTM1 and SRTM3 (previously only described SRTM1/3601, which was now factually wrong for the
+  tile actually in use). Added a `span_deg: float = 1.0` field to `SrtmTile` and generalized
+  `_row_col` to use it instead of a hardcoded `+1` degree assumption — `from_file` still always
+  produces `span_deg=1.0` (real `.hgt` files are always exactly 1x1 degree), but this lets a test
+  construct a `SrtmTile` directly over a small real-data crop with its own true (small)
+  geographic extent, without needing to embed an entire multi-megabyte tile as a fixture.
+- `world-model/tests/test_dem_srtm.py` — new. Fixture is a literal 5x5 crop of real int16 samples
+  read directly from `N39E036.hgt` (rows 979-983, cols 79-83, centered on the Gemerek control
+  point), with `span_deg` set to that crop's true ~0.0033° extent (not fabricated data — a real
+  subset, same pattern as `test_osm_features.py`/`test_dcs_grid.py`). Control-point test:
+  `height_at` at Gemerek's Wikipedia-published coordinate (39.18194N, 36.06806E — the same point
+  already used in `test_raster_registration.py`) against Gemerek's published elevation (1,204m,
+  fetched via WebFetch this session), within 50m tolerance (accounts for SRTM3's ~90m grid plus
+  the published coordinate being a rounded town-center point, not the exact measurement spot).
+  Also: an internal-consistency check against the full-tile reading, an out-of-grid `ValueError`
+  test, a void-sample `ValueError` test, and a bad-filename rejection test.
+- `world-model/tools/dcs-mission-probe/elevation_probe.lua` — replaced the Stage 1 8-point smoke
+  grid with the Stage 2 full grid: 10x10 = 100 points, evenly spaced across the Gemerek bbox
+  (south=39.170, west=36.050, north=39.195, east=36.090), precomputed via
+  `coordinates.wgs84_to_dcs`. Same `io.open`/`pcall` mechanism as Stage 1 (already confirmed
+  working). Header comment updated to explain this overwrites Stage 1's output file (safe --
+  Stage 1's data is preserved in `test_dcs_grid.py`'s fixture) and to note the io/lfs
+  `MissionScripting.lua` prerequisite must still be in place. Re-copied into
+  `win-mac-sync/run-wsl/` for the user to run.
+- `world-model/tools/dcs-mission-probe/README.md` — noted the script now holds the Stage 2 grid.
+- `world-model/tools/inspect_elevation.py` — new CLI (`compare` subcommand), mirrors
+  `inspect_osm_overlay.py`'s pattern. Loads a parsed probe grid + an SRTM tile, transforms each
+  DCS point to lat/lon via `coordinates.dcs_to_wgs84`, looks up the SRTM height, and prints an
+  `elevation_dcs / elevation_external / delta` table (field names per
+  `docs/concept/WORLD_MODEL_BUILDER.md`'s Elevation section) plus mean/min/max/stddev delta
+  summary stats. Smoke-tested against the real Stage 1 8-point fixture + the real `N39E036.hgt`
+  tile (not fabricated): mean delta 3.66m, stddev 37.78m; 7 of 8 points landed within ~32m, one
+  outlier at `corner_sw` (-86.09m) not yet explained — flagged for attention once the full
+  100-point Stage 2 grid is in, not treated as a bug on this 8-point sample alone.
+
+**Checks (re-run after this addendum):** `ruff format --check`/`ruff check` (`src`+`tests`),
+`mypy --strict` (`src`), `pytest world-model/tests -q` — all pass, 30 passed (25 prior + 5 new).
+`tools/inspect_elevation.py` isn't in the mandated check commands (per `world-model/CLAUDE.md`)
+but was formatted/linted/type-checked individually and matches the existing tools/ EXE001
+pattern (shebang present, file not marked executable — same as every other `tools/inspect_*.py`
+and `decode_raster_tile.py`, not fixed here since it's pre-existing repo-wide, out of scope for
+this addendum per the "fix pre-existing drift in its own commit" convention).
+
+**Stage 2 status: probe/tooling ready, still needs one more live mission run.** `test_dem_srtm.py`
+is already complete and passing (it uses a real tile crop directly, independent of the grid probe
+run). What remains blocked on the live run: the full 100-point grid script is staged in
+`win-mac-sync/run-wsl/elevation_probe.lua`; the user needs to run it (io/lfs edit must still be in
+place) and sync the output back via `collect_elevation_log.sh`, after which this session can move
+the real output into `data/raw/dcs/<date>/`, run `inspect_elevation.py` against it for the actual
+100-point delta report, write the M4 research note recording that report, and do Stage 3
+(performance/completeness spot-check: point count in == point count out, one mission run, no
+retries) and Stage 4 close-out.
