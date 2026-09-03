@@ -14,21 +14,28 @@ x-tile-index (row/south) axis fit tightly (<0.2% residual, session 8) while
 the z-tile-index (column/east) axis fit far more loosely (~9% residual,
 session 7) -- see each constant's comment below for how it was derived.
 
-No held-out point is available yet: all four points below (Sivas,
-Kahramanmaras, Hama, Erzincan) were also the points used to empirically fit
-`origin_x`/`origin_z` in `raster/registration.py` (session 8 used Sivas/
-Kahramanmaras/Hama for `origin_x`; session 7 used Sivas/Erzincan for
-`origin_z`). `test_control_point_maps_to_expected_tile_and_pixel` therefore
-validates that the fitted registration reproduces its own fit inputs (i.e.
-the dcs_to_tile_pixel arithmetic and origin wiring are correct) -- it is
-*not* independent evidence of real-world accuracy, since a wrong fit and a
-test checking that same wrong fit would agree with each other. An
-independent held-out third control point (with its own residual reported)
-is deferred to Stage 4 of `plans/m2-raster-understanding/plan.md`, once
-another usable named feature is identified on a sampled tile.
+The four points below (Sivas, Kahramanmaras, Hama, Erzincan) were also the
+points used to empirically fit `origin_x`/`origin_z` in `raster/registration.py`
+(session 8 used Sivas/Kahramanmaras/Hama for `origin_x`; session 7 used Sivas/
+Erzincan for `origin_z`). `test_control_point_maps_to_expected_tile_and_pixel`
+therefore validates that the fitted registration reproduces its own fit
+inputs (i.e. the dcs_to_tile_pixel arithmetic and origin wiring are correct)
+-- it is *not* independent evidence of real-world accuracy, since a wrong fit
+and a test checking that same wrong fit would agree with each other.
+
+`test_held_out_control_point_gemerek` (Stage 4, see
+`world-model/research/2026-09-03-m2-rastercharts-recon.md` session 12) is the
+independent check: Gemerek (a Sivas Province district center) was never used
+to fit `origin_x`/`origin_z` and sits on a previously-unexamined tile
+(`x0_z0`). Its residual (~2px / ~129m on the x-axis, ~86px / ~5.5km on the
+z-axis) is reported and asserted against, not just eyeballed -- it lands
+comfortably inside the existing per-axis tolerances and is consistent with
+(not tighter or looser in a surprising way than) the z-axis's already-
+documented ~9% residual from session 7.
 """
 
 import pytest
+
 from coordinates import wgs84_to_dcs
 from raster import TileId, dcs_to_pixel, parse_tile_filename, pixel_to_dcs
 from raster.registration import dcs_to_tile_pixel, get_registration
@@ -114,6 +121,30 @@ def test_control_point_maps_to_expected_tile_and_pixel(
     expected_py: int,
     expected_px: int,
 ) -> None:
+    dcs_x, dcs_z = wgs84_to_dcs(_THEATRE, real_lat, real_lon)
+    x_tile_index, z_tile_index, px, py = dcs_to_tile_pixel(_THEATRE, dcs_x, dcs_z)
+
+    assert x_tile_index == expected_x_tile
+    assert z_tile_index == expected_z_tile
+    assert py == pytest.approx(expected_py, abs=_ROW_TOLERANCE_PX)
+    assert px == pytest.approx(expected_px, abs=_COLUMN_TOLERANCE_PX)
+
+
+def test_held_out_control_point_gemerek() -> None:
+    """Independent accuracy check (Stage 4): Gemerek was never used to fit
+    `origin_x`/`origin_z` (session 8 fit `origin_x` from Sivas/Kahramanmaras/
+    Hama; session 7 fit `origin_z` from Sivas/Erzincan) and sits on tile
+    `x0_z0`, which none of those four points touch. See
+    `world-model/research/2026-09-03-m2-rastercharts-recon.md` session 12 for
+    the by-eye pixel read (town symbol icon, tile `64maa00_x0_z0.tif.dds`,
+    pixel (490, 975)) and the full residual derivation.
+    """
+    # Gemerek district center, Sivas Province.
+    # https://en.wikipedia.org/wiki/Gemerek (39°10'55"N 36°04'05"E).
+    real_lat, real_lon = 39.18194, 36.06806
+    expected_x_tile, expected_z_tile = 0, 0
+    expected_py, expected_px = 975, 490
+
     dcs_x, dcs_z = wgs84_to_dcs(_THEATRE, real_lat, real_lon)
     x_tile_index, z_tile_index, px, py = dcs_to_tile_pixel(_THEATRE, dcs_x, dcs_z)
 

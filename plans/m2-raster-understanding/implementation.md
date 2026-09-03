@@ -122,3 +122,89 @@ diagnostic, which did not exist yet.
   whether the merge to main (`475d580`) dropped a commit, or whether a
   later, unrelated commit reintroduced the unsorted import. Not investigated
   further here since it's outside Stage 3 scope; re-fixed and noted.
+
+## Stage 4 — Refine
+
+Two Stage 4 items per the plan: (1) confirm the registration/`mark` code picks a sensible
+default sheet/level when scanning multi-sheet/multi-level tile layouts, and (2) add a
+genuinely held-out control point (not one of Sivas/Kahramanmaras/Hama/Erzincan, all of
+which fed `registration.py`'s empirical fit) as an independent accuracy check.
+
+### Files Changed
+- `world-model/tools/inspect_raster.py` — `scan` subcommand gained an optional `--theatre`
+  flag: when given, it looks up that theatre's `RasterRegistration` default
+  `(scale, sheet, level)` group, annotates the matching grid-layout block with
+  `<- '<theatre>' registration default`, and prints a `WARNING:` line if that default group
+  isn't present among the scanned tiles at all. This is the concrete "confirm the code picks
+  the right tile group" diagnostic the plan asked for — a human running `scan --theatre
+  Syria` can see at a glance whether the registration's chosen default is even backed by
+  locally sampled data, rather than only discovering a mismatch when `mark` fails later.
+- `world-model/tests/test_raster_registration.py` — added `test_held_out_control_point_gemerek`
+  and updated the module docstring (the "no held-out point yet" caveat from Stage 3 is now
+  resolved). Gemerek (a Sivas Province district center, published coordinates from
+  Wikipedia) sits on tile `64maa00_x0_z0.tif.dds`, a tile downloaded during the original
+  probe but never used by sessions 7-8's fit or examined for a control point until this
+  session. Residual: ~2px/~129m on the x-axis (row), ~86px/~5,515m on the z-axis (column) —
+  both comfortably inside the existing per-axis tolerances (100px row / 350px column), and
+  the z-axis residual (~8.4% of tile edge) closely matches session 7's already-documented
+  ~9% z-axis residual — an independent confirmation the stated `"provisional"` fit accuracy
+  is realistic, not optimistic.
+- `world-model/research/2026-09-03-m2-rastercharts-recon.md` — appended session 12: the
+  level-semantics review (RasterCharts' `.tif.dds` `level` suffix remains genuinely
+  unresolved — no locally-sampled `RasterCharts` tile exists at any level other than `"00"`,
+  so there's no local content to compare; session 9's clipmap-specific `level*32` header
+  finding is explicitly flagged as *not* transferable evidence, since `clipmaps`'
+  `.tif.clipmap` is a different, custom-header container from `RasterCharts`' plain DXT5 DDS
+  — reasoning by analogy across the two would be exactly the kind of unverified-DCS-internals
+  claim this project's process exists to prevent) and the held-out-point findings/residual
+  derivation above.
+- `world-model/tests/test_coordinates.py` — the recurring `ruff` import-sort (I001) finding
+  reappeared again (third time across Stages 2-4, per the note already in Stage 3's log) and
+  was re-fixed in the same small pass as the other lint fixes this session; still not
+  investigated further (out of Stage 4 scope), see Notable Discoveries below.
+
+### Tests Added
+- `test_held_out_control_point_gemerek` — independent (non-fit-input) control-point check;
+  asserts Gemerek's predicted tile/pixel position against the same tolerance constants the
+  existing fit-input tests use.
+
+### Checks
+- `ruff format --check world-model/src world-model/tests`: pass
+- `ruff check world-model/src world-model/tests`: pass
+- `mypy world-model/src` (strict): pass, 4 source files
+- `mypy src tools tests` (also run with cwd=`world-model/`, per the known `mypy_path`
+  quirk documented in Stage 3's log): pass, 10 source files
+- `pytest world-model/tests -q`: pass, 14 passed
+
+Note: `world-model/tools/` is not in the project's official `ruff format`/`ruff check`
+command scope (`world-model/CLAUDE.md`'s Commands section only lists `src`/`tests`), but
+was spot-checked anyway this session (`ruff format tools`, `ruff check` after fixing) — the
+one real finding (`inspect_raster.py`'s changed print statement needing reformatting) was
+fixed; two pre-existing `EXE001` ("shebang present but file not executable") findings in
+`tools/decode_raster_tile.py` and `tools/inspect_raster.py` were left alone as out of scope
+(neither is new this session, and `tools/` isn't part of the enforced lint surface).
+
+### Notable Discoveries
+- **RasterCharts' `level` semantics are still an open question, deliberately left
+  unresolved rather than guessed at.** No locally-sampled `RasterCharts` tile exists at any
+  level other than `"00"` (confirmed by listing both sample directories) — closing this
+  needs a live-DCS/WSL probe to pull at least one `level != "00"` tile at an already-sampled
+  sheet/x/z, which this session had no access to run. `registration.py`'s
+  `default_level="00"` stays correct regardless of what `level` numerically means, because
+  it's the level the empirical fit was actually run against (sessions 7-8) — but this is a
+  process/provenance justification, not a content-based one, and the module docstring/plan
+  should keep flagging it as such rather than letting a future session assume it was
+  resolved.
+- The `test_coordinates.py` I001 import-sort finding has now reappeared a third time across
+  Stages 2-4 despite being "fixed" in each prior stage's log. This strongly suggests either
+  a `ruff` version/config drift between sessions/environments, or a workflow step (e.g. a
+  merge, a stash pop, an editor auto-format) that's silently reintroducing it — worth an
+  actual investigation (not just another re-fix) before Stage 5/close-out, since re-fixing
+  it a fourth time without finding the cause just defers the same finding to whoever works
+  on this branch next.
+- The held-out control point (Gemerek) landing at almost exactly the z-axis's
+  already-documented ~9% residual, rather than being either much tighter or much looser, is
+  a reassuring but not airtight signal: with only one held-out point, "matches the expected
+  looseness" and "got lucky within a wide tolerance window" aren't fully distinguishable. A
+  second held-out point at a different z-tile-index (not attempted this session, time/sample
+  constrained) would meaningfully strengthen this if pursued later.

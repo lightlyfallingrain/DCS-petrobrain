@@ -13,7 +13,7 @@ tile, and save the result as a PNG for human inspection.
 
 Run from `world-model/`:
 
-    .venv/bin/python tools/inspect_raster.py scan <tile_dir>
+    .venv/bin/python tools/inspect_raster.py scan <tile_dir> [--theatre <theatre>]
     .venv/bin/python tools/inspect_raster.py mark <tile_dir> <theatre> <x> <z> [--out out.png]
 """
 
@@ -27,6 +27,7 @@ sys.path.insert(0, str(_WORLD_MODEL_ROOT / "src"))
 from PIL import Image, ImageDraw
 
 from raster import TileId, dcs_to_pixel, load_tile, parse_tile_filename
+from raster.registration import get_registration
 
 _CROSSHAIR_COLOR = (255, 0, 0)
 _CROSSHAIR_ARM_PX = 20
@@ -46,11 +47,25 @@ def _scan_tiles(tile_dir: Path) -> list[tuple[TileId, Path]]:
     return tiles
 
 
-def cmd_scan(tile_dir: Path) -> None:
+def cmd_scan(tile_dir: Path, theatre: str | None) -> None:
+    """Dump per-tile dimensions/format and per-(scale, sheet, level) grid layout.
+
+    If `theatre` is given, look up its registered default (scale, sheet,
+    level) (see `raster.registration.RasterRegistration`) and annotate
+    whichever scanned group matches it -- this is the concrete check that the
+    registration/`dcs_to_pixel` code picks a tile group that's actually
+    present among the sampled tiles, and makes an absent default visible
+    rather than silently only failing later inside `mark`.
+    """
     tiles = _scan_tiles(tile_dir)
     if not tiles:
         print(f"No *.tif.dds tiles found in {tile_dir}")
         return
+
+    default_group: tuple[int, str, str] | None = None
+    if theatre is not None:
+        reg = get_registration(theatre)
+        default_group = (int(reg.scale_m), reg.default_sheet, reg.default_level)
 
     print(f"{'File':<28} {'Size':<12} {'Mode':<6} scale sheet level x z")
     print("-" * 78)
@@ -69,13 +84,25 @@ def cmd_scan(tile_dir: Path) -> None:
 
     print()
     for (scale, sheet, level), coords in sorted(groups.items()):
-        print(f"Grid layout: {scale}m sheet={sheet!r} level={level!r}")
+        marker = ""
+        if default_group is not None and (scale, sheet, level) == default_group:
+            marker = f"  <- {theatre!r} registration default"
+        print(f"Grid layout: {scale}m sheet={sheet!r} level={level!r}{marker}")
         max_x = max(x for x, _ in coords)
         max_z = max(z for _, z in coords)
         for x in range(max_x + 1):
             row = "".join("#" if (x, z) in coords else "." for z in range(max_z + 1))
             print(f"  x={x}: {row}")
         print()
+
+    if default_group is not None and default_group not in groups:
+        scale, sheet, level = default_group
+        print(
+            f"WARNING: {theatre!r} registration default "
+            f"({scale}m sheet={sheet!r} level={level!r}) is not present "
+            f"among the scanned tiles in {tile_dir} -- dcs_to_pixel would "
+            "resolve coordinates to tiles not sampled here."
+        )
 
 
 def _draw_crosshair(draw: ImageDraw.ImageDraw, px: int, py: int) -> None:
@@ -129,8 +156,7 @@ def cmd_mark(
     _draw_crosshair(ImageDraw.Draw(img), px, py)
     img.save(out_path)
     print(
-        f"DCS ({x}, {z}) -> tile {tile.filename} pixel ({px}, {py}); "
-        f"wrote {out_path}"
+        f"DCS ({x}, {z}) -> tile {tile.filename} pixel ({px}, {py}); wrote {out_path}"
     )
 
 
@@ -142,6 +168,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "scan", help="dump tile dimensions/format/grid layout for a directory"
     )
     scan_parser.add_argument("tile_dir", type=Path)
+    scan_parser.add_argument(
+        "--theatre",
+        default=None,
+        help="annotate the (scale, sheet, level) group this theatre's "
+        "registration would pick as its default, and warn if it's absent",
+    )
 
     mark_parser = subparsers.add_parser(
         "mark", help="render a crosshair marker for a DCS coordinate"
@@ -160,7 +192,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "scan":
-        cmd_scan(args.tile_dir)
+        cmd_scan(args.tile_dir, args.theatre)
     elif args.command == "mark":
         cmd_mark(args.tile_dir, args.theatre, args.x, args.z, args.out)
 
