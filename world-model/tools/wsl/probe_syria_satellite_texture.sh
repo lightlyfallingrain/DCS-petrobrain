@@ -113,21 +113,28 @@ mkdir -p "$samples_dir"
   done
   echo
 
-  echo "--- Sample file: first 64 bytes hex of one 1m colortexture tile (if present) ---"
-  sample_file="$(find "$colortexture_dir/1m" -type f -name '*.tif.clipmap' 2>/dev/null | head -1)"
+  # NOTE: every `find | head` below wraps find in `{ find ... || true; }` —
+  # without this, `head` closing the pipe early after N lines can SIGPIPE
+  # `find` before it finishes walking a large directory (colortexture/1m has
+  # 200+ files); under `set -euo pipefail` that non-zero find exit aborts the
+  # whole script silently mid-report. A prior run of this script died exactly
+  # here for exactly this reason — output cut off with no error message.
+
+  echo "--- Sample file: first 64 bytes hex of one 128m colortexture tile (smallest tier) ---"
+  sample_file="$( { find "$colortexture_dir/128m" -type f -name '*.tif.clipmap' 2>/dev/null || true; } | sort | head -1)"
   if [ -n "${sample_file:-}" ]; then
     echo "sample: $sample_file"
     ls -la "$sample_file"
     xxd -l 64 "$sample_file" || od -A x -t x1z -v "$sample_file" | head -5
   else
-    echo "no .tif.clipmap file found under colortexture/1m"
+    echo "no .tif.clipmap file found under colortexture/128m"
   fi
   echo
 
-  echo "--- Extracting up to 5 sample colortexture files (prefer 1m tier) for local decode ---"
-  mapfile -t sample_entries < <(find "$colortexture_dir/1m" -type f -name '*.tif.clipmap' 2>/dev/null | sort | head -5)
+  echo "--- Extracting 2 sample colortexture files (128m tier, smallest — keeps sync payload light) for local decode ---"
+  mapfile -t sample_entries < <({ find "$colortexture_dir/128m" -type f -name '*.tif.clipmap' 2>/dev/null || true; } | sort | head -2)
   if [ "${#sample_entries[@]}" -eq 0 ]; then
-    mapfile -t sample_entries < <(find "$colortexture_dir" -type f -name '*.tif.clipmap' 2>/dev/null | sort | head -5)
+    mapfile -t sample_entries < <({ find "$colortexture_dir" -type f -name '*.tif.clipmap' 2>/dev/null || true; } | sort | head -2)
   fi
   for entry in "${sample_entries[@]}"; do
     echo "copying: $entry"
@@ -135,11 +142,11 @@ mkdir -p "$samples_dir"
   done
   echo
 
-  echo "--- One normalmap/ and one splatmap/ sample, for comparison ---"
+  echo "--- One normalmap/ and one splatmap/ sample (smallest available tier), for comparison ---"
   for kind in normalmap splatmap; do
     kdir="$clipmaps_dir/$kind"
     if [ -d "$kdir" ]; then
-      one="$(find "$kdir" -type f -name '*.tif.clipmap' 2>/dev/null | head -1)"
+      one="$( { find "$kdir" -type f -name '*.tif.clipmap' 2>/dev/null || true; } | sort | head -1)"
       if [ -n "${one:-}" ]; then
         echo "copying $kind sample: $one"
         cp "$one" "$samples_dir/${kind}_$(basename "$one")" || echo "  FAILED to copy $one"
