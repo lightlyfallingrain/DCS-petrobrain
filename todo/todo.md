@@ -9,6 +9,7 @@ World Model Builder — Milestone 0/1. See `world-model/ROADMAP.md` for full mil
 - [x] M1 (implement) — `src/coordinates/` built per plan, control-point tests pass. Windows/WSL probes run: pydcs Syria tmerc params confirmed against live `coord.LOtoLL` (sub-meter match, 226 points); real-world residual ~1.0-1.3km vs published ARPs, explained as DCS terrain-placement error. See `world-model/research/2026-09-03-m1-coordinate-transform-verification.md`.
 - [x] M2 — Raster understanding. `src/raster/` (Pillow DDS loader + empirical registration), `tools/inspect_raster.py` diagnostic, control-point + held-out-point tests pass. See `world-model/ROADMAP.md` M2 entry and `plans/m2-raster-understanding/`.
 - [x] M3 — OSM overlay. `src/osm/` (Overpass API fetch + in-memory parse), `tools/inspect_osm_overlay.py` diagnostic overlay, tests pass, held-out Gemerek validation. Attribution rendered onto output PNG. Spatial-storage choice deferred to M5. See `world-model/research/2026-09-03-m3-osm-overlay.md` and `plans/m3-osm-overlay/`.
+- [x] M4 — DCS elevation. `src/elevation/` (`land.getHeight` live-mission probe via io/lfs, SRTM3 `.hgt` parsing), `tools/inspect_elevation.py` diagnostic, control-point + real-fixture tests pass. 100-point Gemerek grid vs SRTM3: mean delta +13.89m, west-edge outlier traced to real terrain-mesh-resolution mismatch, not a bug. `MissionScripting.lua` io/lfs edit intentionally left in place (more probes expected M5+). See `world-model/research/2026-09-03-m4-dcs-elevation.md` and `plans/m4-dcs-elevation/`.
 
 ## Milestones
 
