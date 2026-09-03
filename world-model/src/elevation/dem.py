@@ -2,11 +2,19 @@
 
 Format (per `world-model/research/2026-09-03-m4-elevation-recon.md` Finding
 9): one file per 1x1 degree tile, named `<N|S><lat><E|W><lon>.hgt` for the
-tile's south-west corner (e.g. `N39E036.hgt` covers 39-40N, 36-37E). SRTM1
-tiles are a flat 3601x3601 grid of big-endian signed 16-bit samples,
-row-major starting at the tile's north-west corner, with `-32768` marking a
-data void. Parsed with stdlib `struct`/`array` only -- no GDAL/rasterio
-dependency, per the recon note's Finding 12 recommendation.
+tile's south-west corner (e.g. `N39E036.hgt` covers 39-40N, 36-37E). Both
+SRTM1 (1 arc-second, 3601x3601, ~30m) and SRTM3 (3 arc-second, 1201x1201,
+~90m) use the same flat grid of big-endian signed 16-bit samples, row-major
+starting at the tile's north-west corner, with `-32768` marking a data void
+-- they differ only in grid resolution. `SrtmTile.from_file` derives the
+grid size from the file's byte length rather than hardcoding either, so it
+parses whichever resolution it's given. M4's actual tile (Stage 2,
+`data/raw/dem/N39E036.hgt`) is SRTM3 (1201x1201, 2,884,802 bytes) -- the
+user fetched 3 arc-second from viewfinderpanoramas.org, not the 1
+arc-second the recon note anticipated; this module's dynamic sizing meant
+no code change was needed to accommodate that. Parsed with stdlib
+`array` only -- no GDAL/rasterio dependency, per the recon note's Finding 12
+recommendation.
 
 Source: `viewfinderpanoramas.org` no-login mirror (recon Finding 10) -- a
 third-party-processed SRTM derivative, not the raw NASA product; see the
@@ -25,17 +33,24 @@ _FILENAME_RE = re.compile(r"^([NS])(\d{2})([EW])(\d{3})\.hgt$", re.IGNORECASE)
 
 @dataclass(frozen=True)
 class SrtmTile:
-    """One parsed SRTM `.hgt` tile.
+    """One parsed SRTM `.hgt` tile (or a small real-data crop of one, for
+    tests -- see `span_deg`).
 
-    `sw_lat`/`sw_lon` are the tile's south-west corner (whole degrees, from
-    the filename). `samples` is the raw `size x size` grid, row-major from
-    the tile's *north-west* corner (row 0 = northmost).
+    `sw_lat`/`sw_lon` are the grid's south-west corner. `samples` is the raw
+    `size x size` grid, row-major from the *north-west* corner (row 0 =
+    northmost). `span_deg` is the degrees spanned corner-to-corner -- always
+    `1.0` for a real `.hgt` file (`from_file` always sets it that way, since
+    SRTM tiles are always exactly 1x1 degree by format), but a test can
+    construct a `SrtmTile` directly with a smaller `span_deg` to embed a
+    small, literal, real-data crop (e.g. a 5x5 window around one control
+    point) rather than an entire multi-megabyte tile -- see `test_dem_srtm.py`.
     """
 
     sw_lat: float
     sw_lon: float
     size: int
     samples: array  # type: ignore[type-arg]
+    span_deg: float = 1.0
 
     @classmethod
     def from_file(cls, path: Path) -> "SrtmTile":
@@ -74,20 +89,19 @@ class SrtmTile:
     def _row_col(self, lat: float, lon: float) -> tuple[float, float]:
         """Fractional (row, col) into `samples` for (lat, lon).
 
-        Row 0 is the tile's north edge (sw_lat + 1), increasing southward;
-        col 0 is the tile's west edge (sw_lon), increasing eastward. Raises
-        `ValueError` if (lat, lon) falls outside this tile.
+        Row 0 is the grid's north edge (sw_lat + span_deg), increasing
+        southward; col 0 is the west edge (sw_lon), increasing eastward.
+        Raises `ValueError` if (lat, lon) falls outside this grid.
         """
-        if not (
-            self.sw_lat <= lat <= self.sw_lat + 1
-            and self.sw_lon <= lon <= self.sw_lon + 1
-        ):
+        north_lat = self.sw_lat + self.span_deg
+        east_lon = self.sw_lon + self.span_deg
+        if not (self.sw_lat <= lat <= north_lat and self.sw_lon <= lon <= east_lon):
             raise ValueError(
                 f"({lat}, {lon}) falls outside tile "
-                f"[{self.sw_lat}, {self.sw_lat + 1}] x [{self.sw_lon}, {self.sw_lon + 1}]"
+                f"[{self.sw_lat}, {north_lat}] x [{self.sw_lon}, {east_lon}]"
             )
-        row = (self.sw_lat + 1 - lat) * (self.size - 1)
-        col = (lon - self.sw_lon) * (self.size - 1)
+        row = (north_lat - lat) * (self.size - 1) / self.span_deg
+        col = (lon - self.sw_lon) * (self.size - 1) / self.span_deg
         return row, col
 
     def _sample(self, row: int, col: int) -> int:

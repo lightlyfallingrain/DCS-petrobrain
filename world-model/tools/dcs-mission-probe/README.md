@@ -40,4 +40,8 @@ See each script's header comment for exact trigger wiring and known caveats
   step needed, collect the file directly via
   `world-model/tools/wsl/collect_elevation_log.sh`. Revert the
   `MissionScripting.lua` edit once M4's probe runs are done, unless
-  continuing to use it for a later probe.
+  continuing to use it for a later probe. Currently holds the **Stage 2**
+  full 10x10 (100-point) grid; Stage 1's 8-point smoke test already ran
+  successfully and its real output is hardcoded into
+  `tests/test_dcs_grid.py`'s fixture — re-running this script overwrites
+  Stage 1's output file, which is expected and safe.
