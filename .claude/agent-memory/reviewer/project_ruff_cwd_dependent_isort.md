@@ -23,7 +23,16 @@ documented command from the repo root before concluding something broke.
 canonical invocation (repo root, `world-model/src world-model/tests` paths) per
 `world-model/CLAUDE.md` Commands — that's the one that counts. Don't chase cwd-relative
 `ruff check` results as if they were a stable ground truth until `known-first-party` is added to
-pin this down (flagged as an optional fix in `plans/m2-raster-understanding/review.md`'s Stage 3
-section, not yet done as of 2026-09-03).
+pin this down.
+
+**Update (Stage 4 review, 2026-09-03):** the flip direction is not stable across sessions —
+Stage 3 found root-cwd passing / world-model-cwd failing; Stage 4 found the *opposite*
+(root-cwd failing on `test_coordinates.py` and `test_raster_registration.py`, world-model-cwd
+passing). Don't assume a remembered direction still holds — re-run the canonical command fresh
+every time. Critically, this time the failure was on the *canonical* invocation itself, so it
+was a real required fix, not a false alarm to wave off — three fix-and-recur cycles across
+Stages 2-4 without a `known-first-party` config means "this is just a cwd quirk" is no longer a
+safe read; escalate to "add the config" as a required fix rather than re-flagging it as optional
+again. See `plans/m2-raster-understanding/review.md`'s Stage 4 section.
 
 Related: [[m2-raster-registration-approved]]

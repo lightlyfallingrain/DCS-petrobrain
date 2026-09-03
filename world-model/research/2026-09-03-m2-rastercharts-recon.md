@@ -1452,3 +1452,149 @@ inference, which is currently based on ED's category description, not a live tes
 - Whether the ED wishlist thread requesting FOREST as a `getSurfaceType` value is still open
   (i.e. FOREST is still absent) as of DCS 2.9.29.27278 specifically, or whether it shipped since
   — thread date/status not read.
+
+---
+
+## Session 12 (2026-09-03) — M2 Stage 4: level-semantics review, held-out control point
+
+**DCS version:** 2.9.29.27278 (unchanged, per M0; not re-verified live this session — pure
+offline analysis of already-sampled tiles, no WSL access this session). **Theatre:** Syria.
+
+### Question
+
+Stage 4 of `plans/m2-raster-understanding/plan.md`: (1) does the sampled tile set let
+`registration.py`'s hardcoded `default_level="00"` be confirmed as a sensible choice, and
+(2) can a genuinely held-out control point (not one of Sivas/Kahramanmaras/Hama/Erzincan,
+which were all used to fit `origin_x`/`origin_z` in sessions 7-8) be found and used as an
+independent accuracy check on the fitted registration.
+
+### Findings
+
+- **RasterCharts `level` semantics remain genuinely unresolved for the `.tif.dds` container
+  specifically — this session did not close the gap, and did not attempt to guess.** All
+  locally-sampled `RasterCharts` tiles across both sample directories
+  (`syria_rastercharts_samples_20260903T090447Z/`, `..._113038Z/`) are `level="00"` only —
+  no `-2`/`-1`/`01` sample was ever pulled for `RasterCharts` (unlike `clipmaps`, where
+  session 9 sampled both `-1` and `00` for the *different* `.tif.clipmap` container). Without
+  a same-sheet/same-x/z tile at a different level, there is no local content to compare
+  against, and this session had no WSL/live-DCS access to pull one. — **evidence:**
+  reproduced-locally (confirmed by listing both sample directories: `find data/raw/dcs/
+  2026-09-03 -iname '*.dds'` returns only `level="00"` filenames) — **source:** this
+  session's directory listing.
+- **Session 9's `clipmaps`-specific finding (level encoded in the header as `level * 32`,
+  with the `-1`-level colortexture sample decoding to flat near-uniform color vs. `00`
+  decoding to full photorealistic detail) is suggestive but explicitly not transferable to
+  `RasterCharts` as confirmation** — session 6 already flagged that `clipmaps` and
+  `RasterCharts` share only a tiling/naming *convention* (both plausibly built by the same
+  `landscape5` engine tooling), not a shared container format or semantics: `RasterCharts`
+  tiles are plain off-the-shelf DXT5 DDS with no such per-file level-scale header field
+  (session 2's header parse found no analogous field), while `.tif.clipmap` has its own
+  distinct 52-byte custom header where the `level*32` encoding was found. Reasoning by
+  analogy from clipmap's LOD-fallback behavior to RasterCharts' `level` suffix is *plausible*
+  (both would fit a general "coarse fallback vs. full detail" LOD pattern common to tiled
+  chart/texture systems) but would be encoding an unverified DCS-internals claim into
+  `registration.py` if written as fact — this project's process exists specifically to
+  prevent that. Left as an open question for a future `investigator` session with WSL access
+  to pull one same-sheet/x/z tile at a different level (e.g. `64mab-1_x0_z0.tif.dds` if it
+  exists, or any `level != "00"` tile in the `32m` tier) and visually compare against the
+  already-decoded `00`-level tiles. — **evidence:** inferred (reasoning about why the analogy
+  doesn't transfer) — **source:** cross-reference of sessions 2, 6, 9 above.
+- **`default_level="00"` remains a defensible choice on process grounds even without content
+  confirmation**: it's the level Sessions 7-8's control-point fit was actually run against
+  (all pixel reads were taken from `64maa00_*` tiles), so it's the level `registration.py`'s
+  `origin_x`/`origin_z` are valid for by construction — using any other level's tiles with
+  the current registration would be applying a fit to untested content, a strictly worse
+  choice regardless of what `level` numerically means. `tools/inspect_raster.py scan` was
+  extended this session (`--theatre` flag) to make this default visible and to flag if it's
+  ever absent from a sampled directory, rather than requiring a human to cross-reference
+  `registration.py`'s source by hand. — **evidence:** documented (follows directly from how
+  the fit was actually conducted, sessions 7-8) — **source:** `raster/registration.py`'s
+  existing `source` field; this session's `inspect_raster.py` change.
+- **A genuinely held-out control point was identified and used: Gemerek, a Sivas Province
+  district center, visible on tile `64maa00_x0_z0.tif.dds`** — a tile never inspected in
+  sessions 7-8 (those sessions used `x0_z1`, `x3_z1`, `x7_z1`, `x0_z4`; `x0_z0` was
+  downloaded in the original probe but never analyzed for a control point). Gemerek's
+  Wikipedia-published coordinates (39°10'55"N 36°04'05"E = 39.18194°N, 36.06806°E) run
+  through `coordinates.wgs84_to_dcs("Syria", ...)` give DCS (x=461196.8, z=29548.1), which
+  `registration.py`'s `dcs_to_tile_pixel` predicts lands at tile `(x_tile=0, z_tile=0)`,
+  pixel `(px=403, py=977)`. The town's settlement-symbol icon was located by eye (grid-ruler
+  crop, see Reproducible Test) at approximately pixel `(px=490, py=975)` — a residual of
+  **~2 px / ~129 m on the x-axis (row)** and **~86 px / ~5,515 m on the z-axis (column)**. —
+  **evidence:** reproduced-locally (direct pixel measurement against a published coordinate,
+  same method as sessions 7-8) — **source:** this session's crops of
+  `data/raw/dcs/2026-09-03/syria_rastercharts_samples_20260903T090447Z/64maa00_x0_z0.tif.dds`,
+  decoded via the same Pillow command used throughout this recon; Wikipedia
+  (`en.wikipedia.org/wiki/Gemerek`) for the published coordinate.
+- **This held-out residual is well inside both of `test_raster_registration.py`'s existing
+  tolerances (100px row / 350px column) and, on the z-axis specifically, is close in
+  magnitude to (not surprisingly larger than) session 7's already-documented ~9% z-axis
+  residual** (~86px of 1024 ≈ 8.4% of the tile edge, vs. session 7's ~9%) — this is a
+  meaningful independent confirmation: a genuinely unseen point lands almost exactly where
+  the already-known z-axis looseness would predict, rather than being wildly off (which
+  would suggest the fit doesn't generalize) or suspiciously perfect (which might suggest a
+  circularity bug). The x-axis residual (~2px) is far tighter than its own already-generous
+  100px tolerance, consistent with session 8's <0.2%-residual x-axis fit. — **evidence:**
+  inferred (comparison of this session's fresh residual against the prior sessions'
+  documented residuals) — **source:** arithmetic above, cross-referenced against sessions
+  7-8's residual figures.
+- Added `test_held_out_control_point_gemerek` to `world-model/tests/test_raster_registration.py`
+  asserting this residual against the same per-axis tolerances the existing fit-input tests
+  use, and updated `tools/inspect_raster.py mark` was re-run against Gemerek's coordinate to
+  visually confirm the crosshair lands on/immediately adjacent to the town's symbol on the
+  chart (not merely numerically close by coincidence of the tolerance window). — **evidence:**
+  reproduced-locally — **source:** this session's test run and `mark` invocation.
+
+### Reproducible Test
+
+```sh
+cd world-model && source .venv/bin/activate
+python3 -c "
+import sys; sys.path.insert(0, 'src')
+from coordinates import wgs84_to_dcs
+from raster.registration import dcs_to_tile_pixel
+gemerek = wgs84_to_dcs('Syria', 39.18194, 36.06806)
+print(dcs_to_tile_pixel('Syria', *gemerek))  # (0, 0, 403, 977)
+"
+python tools/inspect_raster.py mark \
+  data/raw/dcs/2026-09-03/syria_rastercharts_samples_20260903T090447Z \
+  Syria 461196.75504758395 29548.126430869772
+# -> tile 64maa00_x0_z0.tif.dds pixel (403, 977); crosshair lands beside the
+#    settlement-symbol icons just southwest of the "Gemerek" label.
+python tools/inspect_raster.py scan \
+  data/raw/dcs/2026-09-03/syria_rastercharts_samples_20260903T113038Z --theatre Syria
+# -> annotates "Grid layout: 64m sheet='aa' level='00'  <- 'Syria' registration default"
+```
+By-eye pixel read of the Gemerek settlement-symbol icon used a 6x-upscaled, magenta-gridded
+crop of `64maa00_x0_z0.tif.dds` (decoded per session 3's standard Pillow command) centered
+on the "Gemerek" label — same by-eye methodology as sessions 7-8, same plausible ±30-50px
+error budget.
+
+### Possible Approaches
+
+- **RasterCharts `level` semantics**: the only way to close this without guessing is a
+  live-DCS/WSL probe pulling at least one `level != "00"` `RasterCharts` tile at a sheet/x/z
+  already sampled at `level="00"` (e.g. re-run `probe_syria_rastercharts.sh` with a filter
+  for `level=-1` or `level=01` entries), then visually compare against the corresponding
+  `00`-level tile the way session 9 compared clipmap levels. Not attempted this session —
+  flagged for a follow-up `investigator` session with live access, per this task's own
+  instruction not to guess at unverified DCS internals.
+- **z-axis residual remains the weaker of the two axes** (~9% at session 7, ~8.4% held-out
+  here) — a future tightening pass (automated pixel-position detection instead of by-eye
+  reads, or a UTM-graticule-anchored point) would still be worthwhile before any
+  `confidence="confirmed"` upgrade, per sessions 7-8's existing recommendation; this session's
+  result doesn't change that recommendation, it just adds independent evidence the current
+  `"provisional"` fit's stated residual is realistic rather than optimistic.
+
+### Unresolved
+
+- RasterCharts' `level` (`-2`/`-1`/`00`/`01`) semantics, specifically for the `.tif.dds`
+  container — still open; the `clipmaps`-container finding (session 9) is a plausible analogy,
+  not evidence, for this different file format. Needs a live-DCS probe pulling a non-`00`
+  RasterCharts tile to resolve.
+- Whether the sign-flip/scale registration model holds for the `32m` tier (sheets
+  `aa`/`ab`/`xab`/`xac`) or other levels at all — unchanged from sessions 7-8, still untested;
+  this session's held-out point was still on the same `64m`/`aa`/`00` group as the original
+  fit.
+- Only one held-out point was checked this session (time/sample-availability constrained,
+  not a methodological choice) — a second held-out point on a different z-tile-index (to
+  further stress-test the weaker z-axis specifically) would still add value.
