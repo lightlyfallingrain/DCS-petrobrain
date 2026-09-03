@@ -3,11 +3,15 @@ name = "dcs-world-model"
 version = "0.1.0"
 description = "Persistent, queryable semantic geographic model of DCS World theatres"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pyproj>=3.6",
+]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
+mypy_path = "src:tests"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]

@@ -9,7 +9,7 @@ See `README.md`, `ROADMAP.md`, `WORKFLOW.md` in this directory for project desig
 - Python 3.11+, fully type-hinted, `mypy --strict` (`pyproject.toml`).
 - Formatter/linter: `ruff format` / `ruff check`.
 - Test runner: `pytest`.
-- Spatial libraries (GDAL/GeoPandas/SpatiaLite/GeoPackage etc.) are **not yet chosen** — decide during Milestone 1-2, record the decision and rationale in `research/`, then update this section.
+- **Coordinate transforms: `pyproj`** (M1 decision). Used for DCS x/z <-> WGS84 lat/lon via `+proj=tmerc +axis=neu`, in `src/coordinates/`. This decision is scoped to coordinate transforms only — the separate spatial-storage question (GeoPackage/SpatiaLite/FlatGeobuf/GeoPandas etc., needed by M2/M5) is still **not yet chosen**; do not read the transform-library pick as having settled it. Decide storage during M2/M5, record rationale in `research/`, then update this line.
 
 ## Commands
 
