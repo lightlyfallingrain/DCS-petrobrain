@@ -104,3 +104,114 @@ None.
 ### Verdict
 
 APPROVED
+
+---
+
+## Stage 3 — render + control-point validation (2026-09-03)
+
+Reviewed branch `feature/m2-raster-render-marker` (commits `4b02e4b`, `36723d5`, `4a7c4b6`)
+against `plans/m2-raster-understanding/plan.md`'s Stage 3 spec ("render a known coordinate onto
+the raster"), on top of the already-approved Stage 2 registration code above.
+
+**Checklist run (canonical invocation, repo root, per `world-model/CLAUDE.md` Commands):**
+- `ruff format world-model/src world-model/tests` — pass
+- `ruff check world-model/src world-model/tests` — pass
+- `mypy world-model/src` — pass; also re-verified `mypy --strict world-model/tools world-model/src world-model/tests` (cwd = `world-model/`, matching the implementer's noted `mypy_path` cwd requirement) — pass, 0 issues across 10 files
+- `pytest world-model/tests -q` — 13 passed
+- `git status` — clean on this branch tip (the working-tree diff at review time was limited to
+  unrelated `.claude/agent-memory/implementer/` files from this review session's own tooling, not
+  part of the feature)
+
+**Item-by-item:**
+
+1. **Scope fit — no Stage 4 creep.** The diff is exactly what Stage 3 asks for: the `mark`
+   subcommand (the "render a known DCS coordinate onto the raster" deliverable) plus an honest
+   docstring caveat on the existing control-point test. No held-out third control point was added
+   (correctly deferred to Stage 4, and the deferral is stated explicitly rather than silently
+   dropped), no multi-sheet/multi-level tile-selection logic, no `level`-choice heuristic. Good.
+
+2. **Is the `mark` diagnostic real, not stubbed?** Yes. `cmd_mark` in
+   `world-model/tools/inspect_raster.py` calls the actual `raster.dcs_to_pixel` (Stage 2 code,
+   not reimplemented or duplicated), resolves the covering tile file in the given sample
+   directory, decodes it via the real `raster.load_tile` (Pillow/DDS), draws a crosshair with
+   `PIL.ImageDraw`, and writes a real PNG to disk. It fails loudly (printed message + `sys.exit(1)`,
+   not a silent no-op or a swallowed exception) when the covering tile isn't present locally.
+   Manually re-derivable: `dcs_to_pixel` is a thin wrapper over Stage 2's already-reviewed
+   `registration.dcs_to_tile_pixel`, so no new coordinate math was introduced in `tools/` — the
+   pixel math stays confined to `src/raster/registration.py` as required by this project's
+   "coordinate math confined to the dedicated subsystem" rule.
+
+3. **Pixel-math / crosshair correctness.** Checked directly against `registration.py`: `px`
+   (from `z_frac`) is the in-tile pixel *column*, `py` (from `x_frac`) is the in-tile pixel *row*.
+   `_draw_crosshair(draw, px, py)` draws its horizontal arm as `(px-arm, py) -> (px+arm, py)` and
+   vertical arm as `(px, py-arm) -> (px, py+arm)` — consistent with PIL's `(x=column, y=row)`
+   image-coordinate convention, so the crosshair lands on the intended pixel, not transposed. No
+   off-by-one or axis-swap bug found.
+
+4. **Confidence/provenance honesty.** The new `test_raster_registration.py` docstring paragraph
+   is a genuinely honest correction, not a rubber stamp: it explicitly states that all four
+   control points used by `test_control_point_maps_to_expected_tile_and_pixel` are the *same*
+   points `registration.py`'s empirical fit was derived from, so the test currently validates
+   arithmetic/wiring, not independent real-world accuracy — and names exactly which points fit
+   which axis (Sivas/Kahramanmaras/Hama → `origin_x`; Sivas/Erzincan → `origin_z`), traceable back
+   to the actual research sessions. This is the right instinct per this project's provenance
+   discipline: don't let a passing test imply more confidence than the underlying fit earned. No
+   registration `confidence` value was touched in this stage (still `"provisional"`, correctly
+   left alone).
+
+5. **Checks claim vs. reality — one discrepancy found and run down.** The implementer's summary
+   claims `ruff check world-model/src world-model/tests: pass`, which is true when invoked from
+   the repo root exactly as `world-model/CLAUDE.md`'s Commands section specifies. However, I found
+   that the same command run instead with cwd = `world-model/` (`ruff check src tests`) currently
+   **fails** with two I001 (import-sort) errors in `tests/test_coordinates.py` and
+   `tests/test_raster_registration.py` — and ruff's auto-fix for that cwd wants the *opposite*
+   edit from what this branch's `36723d5` "pre-existing lint drift" commit made (it wants the
+   blank line between the local first-party imports put back, not removed). Root-caused this: with
+   no `[tool.ruff.lint.isort]` config (no `known-first-party` list) in `world-model/pyproject.toml`,
+   ruff's first-party/third-party import grouping for the local `control_points`/`coordinates`/
+   `raster` test-helper and `src/` modules is inferred from cwd-relative module resolution, so the
+   "correct" import order for these two files is not a fixed, cwd-independent property — it flips
+   depending on where the command is run from. This isn't a regression this branch introduced (the
+   underlying config gap is pre-existing, and the canonical repo-root invocation the project
+   documents does pass), but it does mean the `36723d5` commit's stated rationale ("pre-existing
+   lint drift... lost between Stage 2 and main") is an incorrect diagnosis — there was no lost
+   commit; it's cwd nondeterminism, confirmed by re-running against a clean worktree of `main`
+   (which also flips pass/fail with cwd the same way). Not blocking Stage 3, since the mandated
+   command passes, but the root cause should be fixed so future "ruff check passes" claims are
+   actually stable regardless of where a contributor happens to run the command from — notably,
+   `world-model/CLAUDE.md`'s own tool docstrings (e.g. this stage's `inspect_raster.py`) tell
+   contributors to run tools "from `world-model/`", which is exactly the cwd that currently fails.
+
+6. **Unrelated-commit hygiene.** The `test_coordinates.py` I001 fix and the implementation-log
+   restore (`4a7c4b6`, fixing Stage 2's log having been accidentally overwritten) are correctly
+   kept out of the Stage 3 feature commit, matching this project's commit-hygiene convention. The
+   `mark` subcommand not being covered by an automated test (verified manually against local
+   sample tiles instead) is reasonable and consistent with `tools/`'s documented
+   exploratory/diagnostic status — it depends on locally-sampled, gitignored tile files that
+   aren't part of the committed repo, so an automated test would either need to bundle sample
+   fixture tiles (a scope decision not asked for in Stage 3) or skip when absent (weak coverage).
+   Not required for this stage.
+
+### Required Fixes (Stage 3)
+
+None.
+
+### Optional Refinements (Stage 3)
+
+- Add an explicit `[tool.ruff.lint.isort] known-first-party = [...]` (or equivalent) entry to
+  `world-model/pyproject.toml` naming the local `coordinates`, `raster`, `control_points` (and any
+  other `src`/`tests`-local) modules, so `ruff check`'s import-sort verdict for
+  `test_coordinates.py` / `test_raster_registration.py` stops depending on invocation cwd. Right
+  now the two files' "correct" import order genuinely differs between `ruff check` run from the
+  repo root vs. from `world-model/`, which will keep generating confusing false regressions (as it
+  already did once, misdiagnosed as "a commit got lost" in this branch's log) until it's pinned
+  down. Worth doing alongside or shortly after Stage 4, not blocking this stage. (optional)
+- `world-model/tools/inspect_raster.py` has one line (`cmd_mark`'s final `print(...)`) that `ruff
+  format` would rewrap if run against `tools/` — harmless today since `world-model/CLAUDE.md`'s
+  Commands section doesn't include `tools/` in the mandated format/lint scope, but it'll produce
+  unrelated diff noise the next time someone touches this file with format-on-save enabled.
+  Two-second fix, not blocking. (optional)
+
+### Verdict (Stage 3)
+
+APPROVED

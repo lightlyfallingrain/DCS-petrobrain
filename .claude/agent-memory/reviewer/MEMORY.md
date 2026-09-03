@@ -9,3 +9,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Verify transform confidence labels](feedback_transform_confidence_verification.md) — trace confidence="confirmed" back to research note's actual number, don't trust the field name
 - [Provenance pattern reference](provenance_confidence_pattern.md) — `coordinates/projections.py`'s dataclass+confidence+source shape is the template; check new modules against it directly.
 - [M2 raster registration review outcome](m2-raster-registration-approved.md) — Stage 2 approved clean; sign-asymmetry and provisional-confidence handling done correctly on first pass.
+- [ruff cwd-dependent isort](project_ruff_cwd_dependent_isort.md) — world-model ruff check's I001 verdict flips by cwd (no known-first-party config); verify with canonical repo-root command before trusting a "regression".
