@@ -807,3 +807,90 @@ timing, rather than invented here.
 - `pytest world-model/tests -q`: pass (138 passed, up from 137)
 - `luac -p` (Lua syntax check, no DCS runtime needed): all 5 scripts in
   `tools/dcs-mission-probe/` parse clean, including the 3 rewritten this pass.
+
+---
+
+### Implementation Summary — Stage 4 (validate correctness)
+
+Found a reusable, largely-complete stub script left by a prior (accidentally killed, not-for-cause)
+session, verified it matched the current `store`/`query` module signatures, ran it against the real
+`latakia-20km.sqlite`, and used its output to work through every checklist bullet. Two real issues
+surfaced during that run and were investigated and fixed/documented rather than silently reported
+as passes — see Notable Discoveries. Deliverable is the dated research note plus one new pinnable
+test; no `src/` pipeline code changed.
+
+### Files Changed
+- `world-model/tools/analyze_m5_stage4_validation.py` — completed the found stub (it was already a
+  reasonable, nearly-correct starting point, not an empty placeholder). Added: a
+  `_is_subnormal_point`/`_find_corrupted_dcs_road_features`/`_clean_dcs_road_polylines` layer that
+  detects and excludes a corrupted DCS road feature discovered while running the script (see
+  Notable Discoveries); restricted the OSM-displacement sample to DCS road vertices inside the
+  region bbox (the stub's original unfiltered version produced a misleading, coverage-mismatched
+  result); swapped the spot-check table's `(0, 0)` "outside coverage" point for a genuinely far
+  point once `(0, 0)` turned out to be polluted by the corrupted feature; picked a well-formed DCS
+  road feature for the "DCS road vertex" spot-check row instead of the first one by row order
+  (which was the corrupted one). Read-only against the real store, no pipeline/store mutation, per
+  `fetch_m5_stage0_census.py`'s established throwaway-script pattern.
+- `world-model/tests/test_describe_position.py` — added
+  `test_describe_position_control_point_latakia_arp`, the one Stage 4 checklist item that's
+  pinnable in CI (needs only `tests/control_points.py`'s independent, published-ARP source and
+  `describe_position`'s pure `coordinates.dcs_to_wgs84` call — no store content, so it doesn't need
+  the gitignored real `.sqlite`). Asserts a tolerance band (`residual_m <=
+  expected_max_residual_m`), not an exact value, per the checklist's explicit instruction. Existing
+  tests in this file were not modified; module docstring extended to explain why the rest of Stage
+  4 (spot-check table, airfield/cross-subsystem/displacement checks) lives in the research note and
+  analysis script instead of as pinned tests — they all need the real store, which CI never has.
+- `world-model/research/2026-09-04-m5-stage4-validation.md` — the dated deliverable: pass/fail
+  against every checklist bullet, real computed numbers alongside the plan's expected numbers, and
+  full writeups of the two findings below.
+
+### Tests Added
+- `test_describe_position_control_point_latakia_arp` — control-point tolerance-band test against
+  the real OSLK ARP (`tests/control_points.py`), non-circular per M1 Finding 2 / the plan's
+  repeated emphasis (independent published real-world coordinate, not DCS-derived).
+
+### Checks
+- `ruff format --check world-model/src world-model/tests`: pass
+- `ruff check world-model/src world-model/tests`: pass, 0 findings
+- `ruff check world-model/tools/analyze_m5_stage4_validation.py` (individually): clean except the
+  same pre-existing repo-wide `EXE001` non-executable-shebang convention every other `tools/*.py`
+  script carries
+- `mypy --strict world-model/src world-model/tests`: pass (55 source files)
+- `mypy --strict world-model/tools/analyze_m5_stage4_validation.py` (individually): pass
+- `pytest world-model/tests -q`: pass (139 passed, up from 138)
+
+### Notable Discoveries
+- **A real, previously-unconfirmed instance of Stage 2's documented resync-false-positive risk
+  exists in the live Latakia store.** Stage 2's own implementation notes flagged
+  `sync_loss_events` (~2% of matched blocks during the full `.routes` walk) as an open,
+  unresolved risk without proof it was ever harmless. This session found one confirmed instance
+  that made it all the way into the real store: feature `id=3711`
+  (`route:3311@464953201`) decodes to two subnormal-float garbage points followed by 61 points of
+  exact `(0.0, 0.0)` padding, and landed inside the Latakia bbox because one garbage point's
+  near-zero z coordinate happened to fall inside the bbox's z range by coincidence. Its downstream
+  effect is checkable and real, not theoretical: `describe_position(conn, "Syria", 0.0, 0.0)`
+  returns a misleadingly precise `nearest_road` distance of exactly `0.0 m`, sourced entirely from
+  the garbage feature — the exact "plausible-wrong answer instead of an explicit null" failure mode
+  Stage 4's outside-coverage gate exists to catch. **Not fixed this session** (Stage 4 is
+  validation-only per the checklist); flagged for whoever next touches `roadnet`/`ingest_roadnet` —
+  the fix is either tightening `find_next_point_block`'s validation or adding a
+  plausibility/subnormal-value filter to `ingest_roadnet`. Scope: 1 of 131 DCS road features
+  (0.76%).
+- **DCS-vs-OSM road displacement is ~2 orders of magnitude tighter than the plan predicted** (median
+  5.3 m / p90 47.0 m computed, vs. an expected ~1.0-1.3 km carried forward from M1's *point-object*
+  placement-error figure). Investigated rather than reported at face value: an initial unfiltered
+  sample (before restricting to in-bbox DCS points) got a misleading wider spread (p90 13.6 km) due
+  to a real coverage-mismatch bug (DCS routes keep untruncated geometry outside the bbox;
+  `ingest_osm` never fetches OSM data out there), fixed by restricting the sample to the 56,092
+  DCS road vertices actually inside the region bbox. The resulting tight number is plausible, not
+  a bug: M1's figure measures one hand-placed point object's absolute displacement, while DCS and
+  OSM road *centerlines* are both plausibly digitized from the same class of satellite/aerial
+  reference imagery, so two independent tracings of the same real road should agree far more
+  closely than one point's placement error would suggest. Recorded as a genuinely more specific
+  finding than the plan anticipated, not adjusted to look like it matched the prior guess.
+- The airfield spot-checks (gap 1504.28 m vs. expected ~1504 m, ILS axis 2635.04 m vs. expected
+  ~2635 m) landed almost exactly on the plan's own hand-worked Latakia numbers — strong independent
+  confirmation that Stage 1's `ingest_beacons.py` runway-pairing/derivation logic is correct against
+  the real data, not just against the plan's own worked example (which was itself derived from the
+  same real data, so this isn't fully independent, but the near-exact match to a hand-computed
+  figure from a different session is still a meaningful cross-check of no regression since Stage 1).

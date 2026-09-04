@@ -18,11 +18,26 @@ a small **synthetic** grid built directly via `store.writer.insert_grid` --
 this is a wiring test, not a claim about real DCS terrain, so a synthetic
 grid is appropriate here (contrast `test_ingest_probe.py`'s docstring on why
 `elevation.dcs_grid` itself still needs a real fixture once one exists).
+
+Stage 4 adds the control-point tolerance-band test
+(`test_describe_position_control_point_latakia_arp`), the full 6-8 point
+manual spot-check table and the airfield/cross-subsystem/OSM-displacement
+checks called for in `plans/m5-first-persistent-model/checklist.md` live in
+`world-model/research/2026-09-04-m5-stage4-validation.md` and
+`tools/analyze_m5_stage4_validation.py` -- both require the real, gitignored
+`data/world-model/latakia-20km.sqlite`, so they cannot be pinned as CI
+tests (per the project's "real DCS files are gitignored, test fixtures must
+be hardcoded literals" rule). The control-point test below is the one part
+of Stage 4 that *is* pinnable in CI: it needs only `tests/control_points.py`
+-- an independent, non-DCS-derived source (published real-world ARPs) -- and
+`describe_position`'s pure `coordinates.dcs_to_wgs84` call, not any store
+content.
 """
 
 import sqlite3
 from pathlib import Path
 
+from control_points import CONTROL_POINTS, haversine_distance_m
 from query import describe_position
 from store.models import ElevationGrid, Region, StoredFeature, SurfaceGrid
 from store.writer import insert_features, insert_grid, insert_region, open_for_build
@@ -234,3 +249,27 @@ def test_describe_position_grid_absent_still_reports_null(tmp_path: Path) -> Non
 
     assert result.elevation.dcs_m is None
     assert result.surface_type.value is None
+
+
+def test_describe_position_control_point_latakia_arp(tmp_path: Path) -> None:
+    """Control-point test, non-circular per `plans/m5-first-persistent-
+    model/plan.md`'s repeated emphasis (never validate DCS-derived data
+    against DCS-derived data, M1 Finding 2): `describe_position`'s `lat`/
+    `lon` for OSLK's live-DCS `(dcs_x, dcs_z)` must land within
+    `expected_max_residual_m` of the *independently published* real-world
+    ARP -- a tolerance band, not an exact-value assertion (M1's DCS-terrain-
+    art placement error is real and expected, not something to hide).
+    Store content is irrelevant to this check (see module docstring) --
+    an empty-but-valid store is enough since `lat`/`lon` come purely from
+    `coordinates.dcs_to_wgs84`."""
+    conn = open_for_build(tmp_path / "control_point_fixture.sqlite")
+    try:
+        oslk = next(cp for cp in CONTROL_POINTS if cp.name.startswith("Bassel"))
+        result = describe_position(conn, oslk.theatre, oslk.dcs_x, oslk.dcs_z)
+
+        residual_m = haversine_distance_m(
+            result.lat, result.lon, oslk.real_lat, oslk.real_lon
+        )
+        assert residual_m <= oslk.expected_max_residual_m
+    finally:
+        conn.close()
