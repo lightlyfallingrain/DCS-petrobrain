@@ -1,70 +1,71 @@
 ### Review Summary
 
-Reviewed M5 Stage 2 (`src/roadnet/` + `build/ingest_roadnet.py` + `query/describe.py` wiring),
-commits `1720b77` and `1812166` on `feature/m5-first-persistent-model`, against `plan.md`,
-`checklist.md`, and the authoritative `2026-09-04-m5-roadnet-byte-decode.md` byte-format note.
+Stage 3 (`a448c67..HEAD`, commits `6fd853d`..`e9eede5`) delivers the elevation/surface_type
+probe: parser extension, `ingest_probe`, pipeline wiring, three Lua probe rungs, and the live
+DCS round-trip. Verified independently: `ruff format --check`, `ruff check`, `mypy --strict`
+(src+tests), and `pytest` all pass (137 tests). Grid coverage was queried directly against the
+real `data/world-model/latakia-20km.sqlite` — confirmed 1,681/1,681 populated cells for both
+`elevation` and `surface_type`, and `elevation.stats["srtm"]` is genuinely `null` (not a
+placeholder or fabricated value). Scope is correctly held to elevation+surface_type wiring —
+no Stage 4 control-point/tolerance-band tests or formal spot-check tables were added; the
+reported spot-checks are ad-hoc CLI runs in the research note, which is appropriate. The
+incremental ladder (121 → 441 → 1,681) was genuinely followed, evidenced by three separate
+commits and a research note that grew rung-by-rung with real numbers at each step, not
+retrofitted. SRTM delta handling matches the plan exactly: metadata-only in `stats_json`, no
+grid/grid_sample rows, and a real synthetic-tile test (`test_ingest_probe.py`) exercises the
+code path — the honest gap is reported, not silently glossed over. `getSurfaceType`'s output was
+sanity-checked (enum range, spatial plausibility, cross-subsystem RUNWAY/ROAD placement vs. the
+Stage 1 airfield point) before being trusted at scale, as required. `describe_position` needed no
+logic changes — confirmed correct, since Stage 1 already wired grid reads through
+`store.reader.sample_grid`.
 
-Scope fits the plan exactly: `src/roadnet/` only, offline, three rungs in order, no Stage 3
-(elevation/surface_type) probe code anywhere in the diff. Verified independently (not just
-trusted from `implementation.md`):
-
-- `ruff format --check`, `ruff check`, `mypy --strict`, `pytest` all run clean from `world-model/`
-  (51 files formatted, 0 lint findings, 0 mypy errors, 118 passed) — matches the reported numbers.
-- `container.find_next_point_block` implements the mandatory two-stage resync: cheap
-  first/middle/last pre-filter (`_prefilter_plausible`) *then* full N-point validation
-  (`_full_validate`), both gated on the DCS coordinate envelope. This is the pre-filter-then-
-  validate order the byte-decode note calls mandatory (a pre-filter-only shortcut was tested and
-  found to produce false positives — documented in implementation.md's "Notable Discoveries").
-  `test_roadnet_container.py::test_find_next_point_block_resyncs_past_garbage` genuinely proves
-  recovery: it prepends plausible-looking garbage (a small int32 that could pass as a count,
-  an out-of-envelope float64 triple, sentinel-looking negative int32s, unaligned stray bytes)
-  before four real literal position triples, and asserts the match offset lands exactly past the
-  garbage — not just clean-input parsing.
-- `routes.iter_routes` is a true generator over an `mmap` opened read-only; no `mmap[:]`, no
-  `.read()`, no list-building before yielding (grepped for these patterns — none found). Only
-  single-route slices are materialized.
-- `.rn4`'s adjacency section is not decoded and topology rows are never joined to geometry
-  anywhere in the diff — `build/ingest_roadnet.py` doesn't even import `roadnet.rn4`, which is
-  itself the scope guard, and this is pinned by
-  `test_roadnet_rn4.py::test_ingested_road_features_never_carry_a_subtype` end-to-end (through
-  `ingest_roadnet`, not just on the dataclass).
-- Road features carry exactly `subtype=None`, `name=None`, `provenance={"geometry": "dcs"}`,
-  `position_uncertainty_m=0.0`, confirmed in code and in the pinning test.
-- Gate (131 routes in Latakia bbox) and the coverage discrepancy (14,861 walked vs. header's
-  speculated 11,464, ~30% higher) are both reported honestly in `implementation.md` as an open,
-  unresolved finding with two candidate explanations, neither confirmed — not smoothed over.
-  `sync_loss_events=302` (~2%) is reported alongside it, not hidden.
-- `nearest_road` (DCS) and `nearest_road_osm` stay separate in `query/describe.py`, discriminated
-  via the Stage-1-built `provenance_geometry` filter — DCS wins where both answer, and the
-  real-data spot check in implementation.md shows both distances side by side (256.0m DCS vs.
-  136.2m OSM, different nearest roads), satisfying rule 2 (disagreement reported, not hidden).
-- Test fixtures use real literal position/direction triples copied from the byte-decode research
-  note (with provenance in comments/docstrings), consistent with Stage 1's established pattern;
-  no test depends on the real 2.25GB file being present.
-- `extract.py` and `tools/{extract_roadnet_region,inspect_roadnet}.py` from the plan's file list
-  are honestly flagged as not built this session, with a stated reason (out of this session's
-  explicit ask) rather than silently dropped.
+One required fix: the probe scripts do not follow the checklist's mandated
+`timer.scheduleFunction` chunking / append-mode pattern, and the implementation log's Stage 3
+section claims "append-mode `io.write`" for a script that in fact opens the file in `"w"`
+mode once and writes the whole grid in a single blocking loop.
 
 ### Required Fixes
 
-- **Stage agent-memory files not staged.** `.claude/agent-memory/implementer/MEMORY.md` (modified)
-  and `.claude/agent-memory/implementer/project_m5_roadnet_stage2.md` (new, untracked) are both
-  present in the working tree but not `git add`ed. Per CLAUDE.md's Definition of Done ("all
-  new/modified files staged and committed") this blocks a clean working tree. This is the same
-  recurring gap flagged in the M3/M4 reviews (`feedback_check_agent_memory_staged.md`) — stage
-  both files before close-out.
+- **Probe scripts use a single blocking loop, not `timer.scheduleFunction` chunking, contradicting
+  an explicit checklist instruction — and the implementation log misdescribes this as "append-mode
+  `io.write`".** `checklist.md` Stage 3 (line 77) and `plan.md`'s Finding E are unambiguous:
+  "`timer.scheduleFunction` chunking, append-mode `io.write`... never one giant loop holding
+  results in memory." All three scripts (`terrain_probe_smoke.lua`, `terrain_probe_500.lua`,
+  `terrain_probe_full.lua`) instead open the output file once with `io.open(..., "w")`, run a
+  single `for _, p in ipairs(points) do ... end` loop over the entire rung (up to 1,681 points ×
+  2 blocking `land.*` calls each), and close the file only after the whole loop finishes — this is
+  exactly the "one giant loop" pattern Finding E says to avoid, and it is not append mode (it
+  truncates and writes fresh each run, never resuming a partial write). `implementation.md`
+  (line 529) asserts "`pcall`-wrapped calls, append-mode `io.write`, one JSON object per line" for
+  this script, which does not match what the code does — the file is opened in `"w"` mode, and
+  writes only "append" to that one open handle, not across scheduled ticks. The scripts do mirror
+  M4's `elevation_probe.lua` structure, which is true and stated, but M4 ran only 100 points; the
+  checklist raised the bar to explicit chunking specifically for Stage 3's larger workload
+  (1,681 points × 2 calls), and that instruction was not followed and not flagged as a deliberate
+  deviation anywhere in the decision log. In practice DCS did not hang on any of the three live
+  runs (per the research note), so this did not cause a failure this time — but the risk the
+  checklist was written to close (busy-wait-hangs-DCS on a long unscheduled loop) was not actually
+  mitigated, and the report's description of the mitigation being in place is inaccurate. Fix:
+  either rewrite the three scripts to use `timer.scheduleFunction` self-rescheduling chunking with
+  true append-mode writes (`io.open(..., "a")`, opened/closed per chunk or kept open across scheduled
+  calls), or explicitly document in `implementation.md` why the single-loop approach was judged
+  safe for this workload and correct the "append-mode" claim to describe what the code actually
+  does.
 
 ### Optional Refinements
 
-- The coverage discrepancy (14,861 vs. speculated 11,464) and `sync_loss_events=302` are honestly
-  reported but genuinely unresolved. Not a blocker for Stage 2 (the plan's gate only requires
-  non-zero Latakia coverage, which passed), but worth a follow-up probe before anyone treats the
-  DCS road layer's route *count* as authoritative for anything beyond `nearest_road` distance
-  queries — e.g. before using it for a coverage-completeness claim in a future milestone.
-  (optional)
-- `ingest_roadnet`'s `_orientation_deg` returns `None` when the first direction vector is exactly
-  `(0, y, 0)` (dx=dz=0, a vertical or degenerate tangent) — plausible for real data but untested;
-  a small unit test pinning this fallback would close a minor gap. (optional)
+- **The "three independent live runs returned bit-identical results" determinism claim is
+  narrated only, not asserted by any test.** It's a genuine and useful finding recorded in the
+  research note and agent memory, but nothing in `tests/` pins it — a small test that loads the
+  smoke and full fixture subsets (or a literal shared point) and asserts equal `height_m`/
+  `surface_type` would let this claim survive a future refactor rather than resting on a
+  point-in-time manual comparison. Not a checklist requirement, so optional. (optional)
+- **No wall-clock/cost numbers were recorded for any of the three Lua probe rungs**, unlike
+  Stage 2's `.routes` walk which got an explicit timing measurement. The checklist's "stop and
+  reassess if any rung shows non-linear cost" instruction has no data behind it in the research
+  note beyond "it worked, no hang was observed" — worth a rough in-mission timestamp or DCS log
+  timing next time a probe scales up, so the non-linear-cost check has something to compare
+  against. (optional)
 
 ### Verdict
 

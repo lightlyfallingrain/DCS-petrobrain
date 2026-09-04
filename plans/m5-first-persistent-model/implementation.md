@@ -525,11 +525,24 @@ store until the user runs a rung and the result is ingested.
   41x41 grid (`probe_grid_for_region`'s coordinate system, computed offline — no coordinate
   transform needed since the grid is already DCS-native x/z). Every point name is `r{row}c{col}`
   into that shared grid, so `ingest_probe` can place any rung's real output correctly regardless
-  of which rung produced it. Mirrors `elevation_probe.lua`'s (M4) proven structure exactly:
-  `pcall`-wrapped calls, append-mode `io.write`, one JSON object per line — extended with a second
-  `pcall(land.getSurfaceType, ...)` per point, since that function has never been called against
-  this install (documented-only, Hoggit enum `LAND=1, SHALLOW_WATER=2, WATER=3, ROAD=4,
-  RUNWAY=5`, per plan.md Finding C — the exact status `getHeight` held before M4 Stage 1).
+  of which rung produced it. Both `land.getHeight` and `land.getSurfaceType` calls are
+  `pcall`-wrapped per point (`getSurfaceType` since it has never been called against this
+  install, documented-only, Hoggit enum `LAND=1, SHALLOW_WATER=2, WATER=3, ROAD=4, RUNWAY=5`, per
+  plan.md Finding C — the exact status `getHeight` held before M4 Stage 1).
+  **Correction (2026-09-04, Stage 3 review):** this entry originally claimed these scripts
+  "mirror `elevation_probe.lua`'s (M4) proven structure exactly: `pcall`-wrapped calls,
+  append-mode `io.write`". That was wrong on two counts, caught in review: (1) `elevation_probe.lua`
+  itself does not do append-mode/chunked writes — it opens the output file once in `"w"` mode and
+  runs a single blocking `for` loop over all its points, and (2) the scripts as first written
+  copied that exact single-blocking-loop shape, not the checklist's/Finding E's mandated
+  `timer.scheduleFunction` chunking + true append-mode `io.write` ("never one giant loop holding
+  results in memory"). All three scripts were rewritten to actually implement chunking: `CHUNK_SIZE`
+  (20) points processed per `timer.scheduleFunction` tick, each chunk appended via
+  `io.open(..., "a")` after one initial `"w"`-mode truncate, self-rescheduling until every point
+  in the rung is done. This did not require a new live DCS round-trip — the three rungs had
+  already run successfully (see below) and reproducing their real output was not needed, since the
+  fix changes *how* the calls are paced, not what they compute; only the JSON output shape is
+  unchanged and was not expected to (and did not need to) differ.
 - `world-model/tools/wsl/collect_terrain_probe_log.sh` — new WSL collector script, mirrors
   `collect_elevation_log.sh` exactly (same `DCS_SAVED_GAMES_PATH` env-var contract, same
   timestamped copy into `win-mac-sync/wsl-output/`), pointed at `terrain_probe_output.jsonl`.
@@ -736,3 +749,61 @@ no code changes needed.
   established — M4's Gemerek tile doesn't help here, and this is the first M5 stage to actually
   need one. Left for the user to fetch (same manual viewfinderpanoramas.org process M4 used)
   rather than attempted via an unverified automated download this session.
+
+---
+
+### Implementation Summary — Stage 3 review fix (timer.scheduleFunction chunking)
+
+Addressed the reviewer's one required fix (`plans/m5-first-persistent-model/review.md`): the
+three `terrain_probe_*.lua` scripts used a single blocking loop (`io.open(..., "w")` once, one
+`for` loop, close at the end) instead of the checklist's/Finding E's mandated
+`timer.scheduleFunction` self-rescheduling chunking with append-mode `io.write`. The review also
+noted `implementation.md` had misdescribed this as "append-mode `io.write`" when it wasn't, and
+that the "mirrors M4's proven pattern" justification was itself inaccurate — `elevation_probe.lua`
+(M4) never implemented chunking either, despite Finding E's text describing that pattern.
+
+### Files Changed
+- `world-model/tools/dcs-mission-probe/terrain_probe_{smoke,500,full}.lua` — rewritten execution
+  logic (point tables unchanged, byte-for-byte identical to before). Now: one initial
+  `io.open(..., "w")` to truncate/create the file, then `timer.scheduleFunction`-driven
+  `processChunk()` processes `CHUNK_SIZE=20` points per tick, appending via `io.open(..., "a")`
+  each tick, self-rescheduling (`return timer.getTime() + 0.1`) until every point in the rung is
+  processed, then returning `nil` to stop and printing a completion message. Verified with
+  `luac -p` (syntax-only parse, no DCS globals needed) against all three files plus the two
+  pre-existing scripts (`elevation_probe.lua`, `coord_probe.lua`) as a baseline — all parse clean.
+- `world-model/tools/dcs-mission-probe/README.md` — corrected the `terrain_probe_*.lua` entry to
+  describe the actual chunking mechanism, and added an explicit note that `elevation_probe.lua`
+  does *not* chunk (so a future reader doesn't assume it's a template to copy for a larger probe).
+- `plans/m5-first-persistent-model/implementation.md` — corrected the Stage 3 "Files Changed"
+  entry for these scripts in place (see the "Correction (2026-09-04, Stage 3 review)" paragraph
+  above it), rather than silently rewriting history.
+- `world-model/tests/test_terrain_probe.py` — added (optional refinement, reviewer's suggestion)
+  `test_parse_terrain_probe_output_is_deterministic_across_live_rungs`, pinning the
+  smoke-rung-vs-full-rung bit-identical-values finding as an actual assertion using a second
+  literal fixture (`_FULL_RUNG_FIXTURE_LINES`) grep'd directly from the real full-rung capture —
+  confirmed byte-identical to the existing smoke-rung fixture, as the research note already
+  claimed.
+
+### No live DCS round-trip needed
+The fix changes *how* the probe paces its `land.*` calls (chunked/scheduled vs. one blocking
+loop), not what it computes per point — the JSON output shape and the values returned by
+`land.getHeight`/`land.getSurfaceType` for a given `(x, z)` are unaffected. All three rungs had
+already run successfully and their real captures are already ingested into the rebuilt store;
+re-running them was not needed to validate this fix. `luac -p` syntax verification stood in for a
+live re-run, appropriate for a control-flow-only change with no execution semantics DCS's Lua
+runtime would evaluate differently.
+
+### Optional refinement not done: wall-clock timing for the Lua rungs
+No timestamps were recorded during the three live mission runs (unlike Stage 2's `.routes` walk,
+which was timed with an explicit `time` invocation around a standalone script run). Retroactively
+fabricating a number would violate the project's rule against encoding unverified claims as fact.
+Left as a genuine gap for a future probe run to close with an in-mission timestamp or DCS log
+timing, rather than invented here.
+
+### Checks
+- `ruff format --check world-model/src world-model/tests`: pass
+- `ruff check world-model/src world-model/tests`: pass, 0 findings
+- `mypy --strict world-model/src world-model/tests`: pass (55 source files)
+- `pytest world-model/tests -q`: pass (138 passed, up from 137)
+- `luac -p` (Lua syntax check, no DCS runtime needed): all 5 scripts in
+  `tools/dcs-mission-probe/` parse clean, including the 3 rewritten this pass.

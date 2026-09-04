@@ -1,7 +1,8 @@
 --[[
-M5 Stage 3 rung 3/3 -- full 1,681-point grid: dump land.getHeight(...) and land.getSurfaceType(...)
-output for 1681 points of the Latakia 41x41 (500m-spacing, 1,681-point)
-probe grid, from inside a running DCS mission.
+M5 Stage 3 rung 3/3 -- full 1,681-point grid: dump land.getHeight(...) and
+land.getSurfaceType(...) output for 1681 points of the Latakia
+41x41 (500m-spacing, 1,681-point) probe grid, from inside a running DCS
+mission.
 
 Grid coordinate system (see world-model/src/build/pipeline.py's
 `probe_grid_for_region`): origin (row=0, col=0) at DCS x=34934.892,
@@ -16,11 +17,24 @@ docstring on the incremental-ladder / partial-grid design.
 this probe -- treated with the same caution M4 gave land.getHeight before
 its Stage 1 smoke test (see plans/m5-first-persistent-model/plan.md
 Finding C). Documented enum (Hoggit): LAND=1, SHALLOW_WATER=2, WATER=3,
-ROAD=4, RUNWAY=5. This script wraps both calls in pcall, matching
-elevation_probe.lua's (M4) proven pattern -- a failed call for a point
-writes JSON null for that field rather than aborting the whole run;
-ingest_probe.py raises loudly on any null it finds, so a partial failure is
-never silently accepted into the store.
+ROAD=4, RUNWAY=5. Both calls are pcall-wrapped -- a failed call for a
+point writes JSON null for that field rather than aborting the whole run;
+ingest_probe.py raises loudly on any null it finds, so a partial failure
+is never silently accepted into the store.
+
+**Chunked via timer.scheduleFunction, not one blocking loop.** Per the
+M5 checklist and plan.md Finding E ("timer.scheduleFunction chunking,
+append-mode io.write ... never one giant loop holding results in
+memory"): this script processes CHUNK_SIZE points per scheduled tick,
+appending each chunk's lines to the output file (io.open(..., "a")),
+then self-reschedules until every point is done. NOTE: M4's own
+elevation_probe.lua does NOT do this -- it opens the file once in "w"
+mode and runs a single blocking for-loop over all points. That was a
+Stage-3-review finding (M5 checklist review, 2026-09-04): referring to
+"M4's proven pattern" for this script was inaccurate, since M4's script
+never implemented the chunking Finding E describes either. This script
+implements the checklist's chunking requirement directly, not by
+mirroring M4.
 
 **Incremental ladder -- run rungs in order, not all at once.**
 Per the M5 checklist: 100-200pt smoke test first (terrain_probe_smoke.lua),
@@ -39,14 +53,16 @@ HOW TO RUN (manual, in-game on the Windows DCS machine):
 3. In the DCS Mission Editor, create a new mission on the Syria terrain.
 4. Add a trigger: type ONCE, condition TIME MORE 5, action DO SCRIPT FILE,
    pointing at this file.
-5. Save the mission, start it, let it run, then exit. 1681 points is
-   a larger workload than M4's proven n=100 (Finding E) -- if it visibly
-   hangs or DCS becomes unresponsive, stop and report rather than waiting
+5. Save the mission, start it, let it run -- 1681 points at
+   CHUNK_SIZE points/tick will take several ticks to finish; a
+   "terrain_probe: wrote ..." message confirms completion. If DCS visibly
+   hangs or becomes unresponsive, stop and report rather than waiting
    indefinitely; that would be new evidence about a probe-scale ceiling
    Finding E says isn't documented anywhere.
 6. Output is written to Saved Games/DCS/Logs/terrain_probe_output.jsonl
    (one JSON object per line, one line per grid point) -- this OVERWRITES
-   any earlier rung's output from this same script name, so copy it out
+   any earlier rung's output from this same script name (truncated fresh
+   at the start of this run, then appended to per chunk), so copy it out
    (step 7) before running the next rung.
 7. Copy that file into win-mac-sync/wsl-output/ via
    world-model/tools/wsl/collect_terrain_probe_log.sh (run on the
@@ -61,7 +77,7 @@ installation change, but is explicitly user-authorized, scoped to
 investigation probes, and not made by this script.
 --]]
 
--- 1681-point subset of the 41x41 grid (rung 3/3 -- full 1,681-point grid), row/col
+-- 1681-point subset of the 41x41 grid (full 1,681-point grid), row/col
 -- computed offline in Python from build.pipeline.probe_grid_for_region --
 -- see the header comment above for the grid's coordinate system.
 local points = {
@@ -1748,11 +1764,36 @@ local points = {
   { name = "r40c40", x = 54934.8920, z = 15685.0760 },
 }
 
-local logDir = lfs.writedir() .. "Logs/"
-local f = io.open(logDir .. "terrain_probe_output.jsonl", "w")
+local CHUNK_SIZE = 20
+local outputPath = lfs.writedir() .. "Logs/terrain_probe_output.jsonl"
+local index = 1
 
-if f then
-  for _, p in ipairs(points) do
+-- Truncate/create the output file fresh before the first chunk (this is
+-- the "w"-mode open the checklist expects exactly once, at the start --
+-- every chunk after this appends via "a", never re-truncates).
+local initFile = io.open(outputPath, "w")
+if initFile then
+  initFile:close()
+else
+  trigger.action.outText(
+    "terrain_probe: FAILED to create output file at " .. outputPath
+    .. " -- check that io/lfs are uncommented in MissionScripting.lua", 20
+  )
+  return
+end
+
+local function processChunk()
+  local f = io.open(outputPath, "a")
+  if not f then
+    trigger.action.outText(
+      "terrain_probe: FAILED to open output file for append at " .. outputPath, 20
+    )
+    return nil
+  end
+
+  local chunkEnd = math.min(index + CHUNK_SIZE - 1, #points)
+  for i = index, chunkEnd do
+    local p = points[i]
     local okHeight, height = pcall(land.getHeight, { x = p.x, y = p.z })
     local heightStr = "null"
     if okHeight and height ~= nil then
@@ -1772,12 +1813,19 @@ if f then
     f:write(line .. "\n")
   end
   f:close()
+
+  index = chunkEnd + 1
+
+  if index <= #points then
+    -- Self-reschedule for the next chunk, per Finding E's
+    -- timer.scheduleFunction chunking pattern.
+    return timer.getTime() + 0.1
+  end
+
   trigger.action.outText(
-    "terrain_probe: wrote " .. logDir .. "terrain_probe_output.jsonl", 20
+    "terrain_probe: wrote " .. outputPath .. " (" .. #points .. " points)", 20
   )
-else
-  trigger.action.outText(
-    "terrain_probe: FAILED to open output file in " .. logDir
-    .. " -- check that io/lfs are uncommented in MissionScripting.lua", 20
-  )
+  return nil
 end
+
+timer.scheduleFunction(processChunk, nil, timer.getTime() + 1)

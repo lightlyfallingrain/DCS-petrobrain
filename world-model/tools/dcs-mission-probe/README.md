@@ -65,4 +65,17 @@ See each script's header comment for exact trigger wiring and known caveats
   `terrain_probe_output.jsonl`; collect via
   `world-model/tools/wsl/collect_terrain_probe_log.sh` (one run per rung —
   each script overwrites the same output filename, so collect before
-  running the next rung).
+  running the next rung). **Uses `timer.scheduleFunction` chunking with
+  append-mode `io.write`** per the M5 checklist / plan.md Finding E
+  ("never one giant loop holding results in memory") — processes
+  `CHUNK_SIZE` (20) points per scheduled tick, appending each chunk to the
+  output file, then self-reschedules until done. Note this is **not** the
+  same pattern as `elevation_probe.lua` above, despite both being M4/M5
+  DCS terrain probes: `elevation_probe.lua` opens its output file once in
+  `"w"` mode and runs one blocking loop over all its points, which is the
+  "one giant loop" pattern Finding E warns against — that was flagged in
+  M5 Stage 3's review (2026-09-04) as a mismatch between the checklist's
+  instruction and what got built, and fixed in the `terrain_probe_*.lua`
+  scripts directly rather than by retrofitting `elevation_probe.lua`
+  (out of scope, a completed M4 milestone that already ran successfully
+  at its smaller 100-point scale).

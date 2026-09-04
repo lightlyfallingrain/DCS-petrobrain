@@ -42,6 +42,24 @@ _FIXTURE_LINES = [
     '{"name": "r40c40", "x": 54934.8920, "z": 15685.0760, "height_m": 283.9335, "surface_type": 1}',
 ]
 
+# The same 7 grid points, re-sampled from the real *full* (rung 3/3,
+# 1,681-point) capture -- `data/raw/dcs/2026-09-04/terrain_probe_output_full.jsonl`,
+# grep'd directly from that file for these names. Copied here verbatim
+# (byte-identical to `_FIXTURE_LINES` above) to pin the cross-run
+# determinism finding recorded in the research note
+# (`2026-09-04-m5-stage3-smoke-rung.md`, "Rung 3/3 update" -- "all rung-1
+# and rung-2 points recur ... with zero mismatches") as an actual test
+# assertion rather than only a narrated claim.
+_FULL_RUNG_FIXTURE_LINES = [
+    '{"name": "r0c0", "x": 34934.8920, "z": -4314.9240, "height_m": 0.0000, "surface_type": 3}',
+    '{"name": "r0c4", "x": 34934.8920, "z": -2314.9240, "height_m": 0.0000, "surface_type": 3}',
+    '{"name": "r0c16", "x": 34934.8920, "z": 3685.0760, "height_m": 9.1380, "surface_type": 1}',
+    '{"name": "r0c32", "x": 34934.8920, "z": 11685.0760, "height_m": 79.8625, "surface_type": 3}',
+    '{"name": "r12c20", "x": 40934.8920, "z": 5685.0760, "height_m": 27.0237, "surface_type": 5}',
+    '{"name": "r32c20", "x": 50934.8920, "z": 5685.0760, "height_m": 126.6403, "surface_type": 4}',
+    '{"name": "r40c40", "x": 54934.8920, "z": 15685.0760, "height_m": 283.9335, "surface_type": 1}',
+]
+
 
 def _write_fixture(tmp_path: Path) -> Path:
     fixture_path = tmp_path / "terrain_probe_output.jsonl"
@@ -117,6 +135,30 @@ def test_parse_terrain_probe_output_raises_on_null_surface_type(tmp_path: Path) 
 
     with pytest.raises(ValueError, match="failed_point"):
         parse_terrain_probe_output(fixture_path)
+
+
+def test_parse_terrain_probe_output_is_deterministic_across_live_rungs(
+    tmp_path: Path,
+) -> None:
+    """The same 7 grid points, sampled in two separate live DCS mission
+    runs (rung 1's smoke test and rung 3's full grid), produced
+    bit-identical `height_m`/`surface_type` values -- see the module
+    docstring and `_FULL_RUNG_FIXTURE_LINES`'s provenance comment. This
+    pins that real cross-run finding as a test assertion, not just a
+    research-note narration."""
+    smoke_path = _write_fixture(tmp_path)
+    full_path = tmp_path / "terrain_probe_output_full_subset.jsonl"
+    full_path.write_text("\n".join(_FULL_RUNG_FIXTURE_LINES) + "\n", encoding="utf-8")
+
+    smoke_samples = {s.name: s for s in parse_terrain_probe_output(smoke_path)}
+    full_samples = {s.name: s for s in parse_terrain_probe_output(full_path)}
+
+    assert smoke_samples.keys() == full_samples.keys()
+    for name, smoke_sample in smoke_samples.items():
+        assert smoke_sample == full_samples[name], (
+            f"{name}: smoke-rung and full-rung samples diverge "
+            f"({smoke_sample!r} != {full_samples[name]!r})"
+        )
 
 
 def test_parse_terrain_probe_output_skips_blank_lines(tmp_path: Path) -> None:
