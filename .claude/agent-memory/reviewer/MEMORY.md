@@ -14,3 +14,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Attribution on artifact, not just logs](feedback_attribution_on_artifact_not_just_logs.md) — M3: OSM attribution must be burned into the saved image, not just printed/logged in docs.
 - [M4 elevation review outcome](m4-elevation-review-outcome.md) — approved w/ minor fixes; code/tests/checks clean, third recurrence of unstaged agent-memory files as the only blocker.
 - [M5 Stage 0+1 review outcome](m5-stage1-offline-sources-approved.md) — approved clean; both named traps + airfield-derivation overclaim risk all pinned by tests; conservative ambiguity resolution; mypy tests cwd-quirk noted.
+- [M5 Stage 2 roadnet review outcome](m5-stage2-roadnet-approved.md) — approved w/ minor fixes; resync + subtype-null tests genuinely prove claims; route-count discrepancy honestly left open, re-check before M6 trusts it.

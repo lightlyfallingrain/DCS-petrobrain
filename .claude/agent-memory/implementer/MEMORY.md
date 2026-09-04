@@ -16,3 +16,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Respect instructed caps over recomputed margins](feedback_respect_instructed_caps_over_recomputed_margins.md) — if your math shows more headroom than a plan's stated cap, take the cap's max and log the discrepancy, don't exceed it.
 - [pyproj Transformer per-call cost](project_pyproj_transformer_perf.md) — coordinates.py rebuilt a Transformer every call; invisible until M5's OSM-ingest scale (13.6k elements), fixed with functools.cache.
 - [M5 Stage 1 layout](project_m5_stage1_layout.md) — geometry/dcs_data/store/build/query packages landed; nearest_road(DCS)/elevation/surface_type null until Stage 2-3 wire in.
+- [M5 Stage 2 roadnet results](project_m5_roadnet_stage2.md) — gate PASSED (131 routes in Latakia bbox), header route-count field doesn't match walked total, resync pre-filter-only is unsafe.
