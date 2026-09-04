@@ -48,7 +48,7 @@ def _build_query(bbox: BBox) -> str:
     )
 
 
-def fetch_bbox(bbox: BBox, cache_path: Path) -> Path:
+def fetch_bbox(bbox: BBox, cache_path: Path, query: str | None = None) -> Path:
     """Return the path to the cached Overpass JSON response for `bbox`.
 
     If `cache_path` already exists, returns it immediately with no network
@@ -56,13 +56,20 @@ def fetch_bbox(bbox: BBox, cache_path: Path) -> Path:
     raw response body to `cache_path` (creating parent directories as
     needed), and returns `cache_path`.
 
+    `query` overrides the default `highway`/`building`/`place`
+    node/`waterway` query built by `_build_query` -- callers that need a
+    widened tag set (e.g. M5 Stage 0's census fetch) pass their own Overpass
+    QL string instead of duplicating this module's caching/User-Agent/
+    single-call discipline.
+
     Raises `urllib.error.URLError` (or a subclass, e.g. `HTTPError`) if the
     request fails -- no automatic retry.
     """
     if cache_path.exists():
         return cache_path
 
-    query = _build_query(bbox)
+    if query is None:
+        query = _build_query(bbox)
     request = urllib.request.Request(
         _OVERPASS_URL,
         data=query.encode("utf-8"),
