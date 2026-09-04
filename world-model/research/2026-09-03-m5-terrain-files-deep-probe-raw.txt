@@ -1,0 +1,59 @@
+======================================================================
+PART 1 continued: Syria.rn4 full string table + record sampling
+======================================================================
+  header 8xint32: (2, 48, -2019009936, 0, 0, 0, 0, 0)
+  class name: 'landscape4::lRoadNetwork'
+  field immediately after class name: 5
+  string-table count field: 23
+  strings (23 read):
+    - track
+    - secondary
+    - primary
+    - primary_slope
+    - link_slope
+    - secondary_slope
+    - link
+    - viaduct_primary_10
+    - motorway_slope
+    - viaduct_primary
+    - rail_branch
+    - track_balloon
+    - motorway
+    - rail_main
+    - viaduct_motorway
+    - motorway30
+    - motorway30_tunnel
+    - viaduct_link
+    - motorway35
+    - road_tunnel
+    - motorway50
+    - viaduct_rail_10
+    - rail_tunnel
+  binary data region starts at byte offset: 423
+  file size: 2275957360
+  first 64 int32 after string table (raw, unaligned to any assumed record size):
+    (1485156, 1, 0, 190791, 2, 1, 50, 1153181, 127, 1, 0, 185013, 2, 0, 50, 13645, 39, 1, 1, 185018, 2, 3, 100, 57193, 539, 1, 1, 191267, 2, 2, 100, 52894, 953, 1, 2, 185055, 2, 5, 100, 25563, 55, 1, 2, 196171, 2, 4, 100, 1157364, 18, 1, 3, 185023, 2, 7, 50, 1145880, 568, 1, 3, 192481, 2, 6, 50, 16202)
+  64 int32 sampled from file-relative-midpoint offset 1137978680 (record alignment NOT guaranteed here):
+    (-792667151, 1586996360, 12650271, -669253632, 272661123, -114101345, -1899963412, -279064703, 12650270, -1950351360, -1337951606, -278759811, -1178543126, -1783463910, 12650270, -641728512, -499090794, 255207473, -457122838, 1007104179, 12650270, 666894336, 339770019, 789174758, 734059497, -1258291200, -1701271690, 4168537, 0, -520093696, 332913926, -1220546563, -1701271690, 4168537, 0, -486539264, 332913926, -1371541507, -85817026, 4163262, 0, -1694498816, 2124846207, 138407935, 287900130, 12550515, 0, -369098752, -1277123203, -1790971905, -499692398, 12557691, 0, 486539264, -1702582315, -213913604, 657761094, 12561062, 0, 1124073472, -446457618, -247468044, 437032222, 12563682)
+
+======================================================================
+PART 1 continued: Syria.routes header + wider float64 triple sampling
+======================================================================
+  header 8xint32: (2, 48, -2045825944, 0, 0, 0, 0, 0)
+  class name: 'landscape4::lRoutesFile'
+  6 int32 immediately after class name: (3, 11464, 1, 6, -65536, -1)
+  next 8 bytes (expected 0xFF sentinel): ffff000000005701
+  next 2 int32: (813432832, 1045272817)
+  float64 data region starts at byte offset: 99
+  file size: 2251462776
+Traceback (most recent call last):
+  File "/home/sg/Dropbox/Documents/win-mac-sync/run-wsl/_probe_syria_terrain_files_deep.py", line 209, in <module>
+    main()
+  File "/home/sg/Dropbox/Documents/win-mac-sync/run-wsl/_probe_syria_terrain_files_deep.py", line 189, in main
+    routes_sample_triples(routes_path, data_start2)
+  File "/home/sg/Dropbox/Documents/win-mac-sync/run-wsl/_probe_syria_terrain_files_deep.py", line 126, in routes_sample_triples
+    decode_and_report(data_start, n_triples, "start-of-file")
+  File "/home/sg/Dropbox/Documents/win-mac-sync/run-wsl/_probe_syria_terrain_files_deep.py", line 113, in decode_and_report
+    deltas.append((dx**2 + dy**2 + dz**2) ** 0.5)
+                           ~~^^~
+OverflowError: (34, 'Numerical result out of range')

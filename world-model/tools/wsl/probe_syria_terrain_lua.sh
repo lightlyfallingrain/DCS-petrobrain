@@ -10,6 +10,18 @@
 # config states its projection directly. This script reads actual file
 # contents, read-only, from the installed DCS Syria terrain.
 #
+# M5 recon addendum (2026-09-03): the original run of this script only
+# grepped map/towns.lua, MissionGenerator/nodes.lua and
+# MissionGenerator/nodesMap.lua for projection keywords -- it never dumped
+# their full content, so towns.lua's table-opening declaration (lines before
+# its first grep-matched entry) and nodes.lua/nodesMap.lua's actual content
+# (a possible DCS-native road/waypoint topology source) are still unread.
+# This revision adds full-content dumps for entry.lua-adjacent files judged
+# worth reading whole (nodes.lua is small; nodesMap.lua's size is unknown --
+# preview only, to avoid dumping one arbitrarily huge line), plus head/tail
+# of towns.lua to capture its table declaration and closing without
+# re-dumping ~1200 already-captured entries.
+#
 # This is the canonical, version-controlled copy. To run it: copy this file
 # into win-mac-sync/run-wsl/ on the machine where win-mac-sync is synced
 # (Dropbox), then run it there in WSL bash on the Windows DCS machine.
@@ -95,6 +107,41 @@ out_file="$output_dir/syria_terrain_lua_probe_${timestamp}.txt"
     cat "$syria_path/beacons.lua"
   else
     echo "(beacons.lua not found)"
+  fi
+  echo
+
+  echo "=== map/towns.lua: first 10 and last 10 lines (table declaration + closing; entries already captured in full by the grep pass above) ==="
+  if [ -f "$syria_path/map/towns.lua" ]; then
+    echo "-- head --"
+    head -n 10 "$syria_path/map/towns.lua"
+    echo "-- tail --"
+    tail -n 10 "$syria_path/map/towns.lua"
+  else
+    echo "(map/towns.lua not found)"
+  fi
+  echo
+
+  echo "=== Full content of MissionGenerator/nodes.lua (small file, possible road/waypoint topology source) ==="
+  if [ -f "$syria_path/MissionGenerator/nodes.lua" ]; then
+    cat "$syria_path/MissionGenerator/nodes.lua"
+  else
+    echo "(MissionGenerator/nodes.lua not found)"
+  fi
+  echo
+
+  echo "=== MissionGenerator/nodesMap.lua: size + bounded preview (reported as 1 line -- avoid dumping an arbitrarily huge single line in full) ==="
+  nodesmap_fp="$syria_path/MissionGenerator/nodesMap.lua"
+  if [ -f "$nodesmap_fp" ]; then
+    echo "byte size: $(wc -c < "$nodesmap_fp")"
+    echo "line count: $(wc -l < "$nodesmap_fp")"
+    echo "-- first 4000 characters --"
+    head -c 4000 "$nodesmap_fp"
+    echo
+    echo "-- last 2000 characters --"
+    tail -c 2000 "$nodesmap_fp"
+    echo
+  else
+    echo "(MissionGenerator/nodesMap.lua not found)"
   fi
 } > "$out_file"
 

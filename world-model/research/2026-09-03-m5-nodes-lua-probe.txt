@@ -1,0 +1,3283 @@
+=== Syria terrain Lua probe — 20260903T204237Z ===
+Install path: /mnt/f/Games/DCS World
+
+--- entry.lua ---
+(exists, 35 lines)
+-- grep for projection/coordinate keywords --
+(no matches)
+
+--- notInstances.lua ---
+(exists, 443 lines)
+-- grep for projection/coordinate keywords --
+(no matches)
+
+--- radio.lua ---
+(exists, 667 lines)
+-- grep for projection/coordinate keywords --
+(no matches)
+
+--- beacons.lua ---
+(exists, 1737 lines)
+-- grep for projection/coordinate keywords --
+22:		positionGeo = { latitude = 35.228286, longitude = 35.957919 };
+33:		positionGeo = { latitude = 37.540196, longitude = 36.952346 };
+44:		positionGeo = { latitude = 34.586111, longitude = 36.002778 };
+55:		positionGeo = { latitude = 34.227181, longitude = 37.233667 };
+66:		positionGeo = { latitude = 31.696111, longitude = 38.735583 };
+77:		positionGeo = { latitude = 33.769444, longitude = 35.555556 };
+88:		positionGeo = { latitude = 32.004072, longitude = 36.065986 };
+99:		positionGeo = { latitude = 33.482383, longitude = 38.654064 };
+110:		positionGeo = { latitude = 32.333889, longitude = 34.968889 };
+121:		positionGeo = { latitude = 37.540371, longitude = 36.953481 };
+132:		positionGeo = { latitude = 34.213283, longitude = 37.264208 };
+143:		positionGeo = { latitude = 36.862579, longitude = 33.290921 };
+154:		positionGeo = { latitude = 34.993187, longitude = 33.749388 };
+166:		positionGeo = { latitude = 31.834683, longitude = 36.778475 };
+177:		positionGeo = { latitude = 36.990667, longitude = 35.294835 };
+189:		positionGeo = { latitude = 36.975663, longitude = 35.271760 };
+200:		positionGeo = { latitude = 36.970889, longitude = 35.261611 };
+211:		positionGeo = { latitude = 36.940583, longitude = 35.210389 };
+222:		positionGeo = { latitude = 37.724773, longitude = 38.456876 };
+234:		positionGeo = { latitude = 37.739722, longitude = 38.481300 };
+246:		positionGeo = { latitude = 34.595184, longitude = 32.969540 };
+258:		positionGeo = { latitude = 34.588499, longitude = 32.999245 };
+270:		positionGeo = { latitude = 34.583989, longitude = 33.012622 };
+281:		positionGeo = { latitude = 34.583991, longitude = 33.012701 };
+292:		positionGeo = { latitude = 31.964856, longitude = 35.972564 };
+304:		positionGeo = { latitude = 31.977009, longitude = 36.004805 };
+315:		positionGeo = { latitude = 33.807390, longitude = 35.485991 };
+326:		positionGeo = { latitude = 33.836015, longitude = 35.481357 };
+338:		positionGeo = { latitude = 33.828534, longitude = 35.504347 };
+350:		positionGeo = { latitude = 33.807187, longitude = 35.488977 };
+362:		positionGeo = { latitude = 33.808433, longitude = 35.487681 };
+374:		positionGeo = { latitude = 33.835138, longitude = 35.488728 };
+386:		positionGeo = { latitude = 33.805173, longitude = 35.484721 };
+398:		positionGeo = { latitude = 33.903416, longitude = 35.481814 };
+409:		positionGeo = { latitude = 31.998505, longitude = 34.896858 };
+421:		positionGeo = { latitude = 32.012463, longitude = 34.864276 };
+432:		positionGeo = { latitude = 32.013143, longitude = 34.875433 };
+443:		positionGeo = { latitude = 32.002328, longitude = 34.892005 };
+454:		positionGeo = { latitude = 32.018125, longitude = 34.889169 };
+465:		positionGeo = { latitude = 32.019067, longitude = 34.901454 };
+477:		positionGeo = { latitude = 31.993966, longitude = 34.884651 };
+489:		positionGeo = { latitude = 32.011786, longitude = 34.869098 };
+500:		positionGeo = { latitude = 32.016281, longitude = 34.897566 };
+511:		positionGeo = { latitude = 32.011743, longitude = 34.853374 };
+523:		positionGeo = { latitude = 32.015685, longitude = 34.864058 };
+535:		positionGeo = { latitude = 36.876437, longitude = 35.059671 };
+547:		positionGeo = { latitude = 36.901983, longitude = 35.080668 };
+558:		positionGeo = { latitude = 36.880159, longitude = 35.064115 };
+569:		positionGeo = { latitude = 36.884064, longitude = 35.068168 };
+580:		positionGeo = { latitude = 36.883297, longitude = 35.067572 };
+591:		positionGeo = { latitude = 36.907176, longitude = 35.083098 };
+603:		positionGeo = { latitude = 33.434538, longitude = 36.528631 };
+614:		positionGeo = { latitude = 33.412415, longitude = 36.500792 };
+626:		positionGeo = { latitude = 33.365131, longitude = 36.468066 };
+637:		positionGeo = { latitude = 33.407604, longitude = 36.526916 };
+649:		positionGeo = { latitude = 33.487262, longitude = 36.602245 };
+660:		positionGeo = { latitude = 33.335299, longitude = 36.428295 };
+671:		positionGeo = { latitude = 33.385786, longitude = 36.499259 };
+682:		positionGeo = { latitude = 35.289111, longitude = 40.187417 };
+693:		positionGeo = { latitude = 35.291944, longitude = 40.153778 };
+704:		positionGeo = { latitude = 37.907964, longitude = 40.194093 };
+716:		positionGeo = { latitude = 37.880943, longitude = 40.204711 };
+729:		positionGeo = { latitude = 37.903176, longitude = 40.191868 };
+740:		positionGeo = { latitude = 37.876098, longitude = 40.208055 };
+752:		positionGeo = { latitude = 37.912670, longitude = 40.193575 };
+764:		positionGeo = { latitude = 37.873754, longitude = 40.208231 };
+775:		positionGeo = { latitude = 35.160518, longitude = 33.485367 };
+787:		positionGeo = { latitude = 35.152717, longitude = 33.512786 };
+798:		positionGeo = { latitude = 35.156671, longitude = 33.491449 };
+809:		positionGeo = { latitude = 36.952192, longitude = 37.459536 };
+821:		positionGeo = { latitude = 36.944364, longitude = 37.491193 };
+833:		positionGeo = { latitude = 36.953265, longitude = 37.468546 };
+844:		positionGeo = { latitude = 36.951556, longitude = 37.472937 };
+855:		positionGeo = { latitude = 36.298449, longitude = 32.288303 };
+866:		positionGeo = { latitude = 36.300663, longitude = 32.312336 };
+879:		positionGeo = { latitude = 36.298267, longitude = 32.300249 };
+890:		positionGeo = { latitude = 36.299872, longitude = 32.300027 };
+901:		positionGeo = { latitude = 35.233502, longitude = 33.727478 };
+912:		positionGeo = { latitude = 35.231874, longitude = 33.743176 };
+923:		positionGeo = { latitude = 36.362972, longitude = 36.290113 };
+934:		positionGeo = { latitude = 36.374642, longitude = 36.301483 };
+946:		positionGeo = { latitude = 36.355193, longitude = 36.277639 };
+957:		positionGeo = { latitude = 36.363148, longitude = 36.290458 };
+969:		positionGeo = { latitude = 31.234168, longitude = 34.680733 };
+981:		positionGeo = { latitude = 31.755831, longitude = 34.716411 };
+992:		positionGeo = { latitude = 31.768108, longitude = 34.737933 };
+1005:		positionGeo = { latitude = 31.761813, longitude = 34.723660 };
+1016:		positionGeo = { latitude = 37.015611, longitude = 35.448194 };
+1027:		positionGeo = { latitude = 37.012552, longitude = 35.443402 };
+1039:		positionGeo = { latitude = 36.994247, longitude = 35.415483 };
+1051:		positionGeo = { latitude = 37.009487, longitude = 35.435774 };
+1062:		positionGeo = { latitude = 36.991443, longitude = 35.408706 };
+1074:		positionGeo = { latitude = 32.002069, longitude = 36.230275 };
+1085:		positionGeo = { latitude = 32.013630, longitude = 36.212404 };
+1098:		positionGeo = { latitude = 37.996909, longitude = 32.564747 };
+1109:		positionGeo = { latitude = 37.997812, longitude = 32.566604 };
+1121:		positionGeo = { latitude = 37.995729, longitude = 32.557509 };
+1132:		positionGeo = { latitude = 37.968417, longitude = 32.554178 };
+1145:		positionGeo = { latitude = 37.967936, longitude = 32.556528 };
+1158:		positionGeo = { latitude = 37.999037, longitude = 32.564838 };
+1169:		positionGeo = { latitude = 34.860647, longitude = 33.608001 };
+1181:		positionGeo = { latitude = 34.872928, longitude = 33.625131 };
+1192:		positionGeo = { latitude = 34.881007, longitude = 33.630916 };
+1203:		positionGeo = { latitude = 34.823731, longitude = 33.563132 };
+1214:		positionGeo = { latitude = 35.411208, longitude = 35.948517 };
+1225:		positionGeo = { latitude = 35.387479, longitude = 35.949253 };
+1237:		positionGeo = { latitude = 35.397078, longitude = 35.951928 };
+1248:		positionGeo = { latitude = 35.480331, longitude = 35.944991 };
+1259:		positionGeo = { latitude = 35.396808, longitude = 35.951801 };
+1270:		positionGeo = { latitude = 35.411209, longitude = 35.948660 };
+1281:		positionGeo = { latitude = 35.414475, longitude = 35.949512 };
+1293:		positionGeo = { latitude = 35.393957, longitude = 35.949866 };
+1304:		positionGeo = { latitude = 33.485917, longitude = 36.226722 };
+1315:		positionGeo = { latitude = 31.844333, longitude = 36.768847 };
+1327:		positionGeo = { latitude = 31.815141, longitude = 36.762290 };
+1339:		positionGeo = { latitude = 31.825845, longitude = 36.792361 };
+1350:		positionGeo = { latitude = 31.818364, longitude = 36.791312 };
+1361:		positionGeo = { latitude = 36.185997, longitude = 37.223297 };
+1372:		positionGeo = { latitude = 36.173114, longitude = 37.307553 };
+1383:		positionGeo = { latitude = 36.179683, longitude = 37.209378 };
+1394:		positionGeo = { latitude = 31.194762, longitude = 35.038565 };
+1405:		positionGeo = { latitude = 31.214041, longitude = 35.024113 };
+1417:		positionGeo = { latitude = 31.194781, longitude = 35.038916 };
+1428:		positionGeo = { latitude = 31.194998, longitude = 35.044551 };
+1440:		positionGeo = { latitude = 31.213892, longitude = 35.018437 };
+1451:		positionGeo = { latitude = 31.206021, longitude = 35.015679 };
+1462:		positionGeo = { latitude = 34.555739, longitude = 38.266916 };
+1473:		positionGeo = { latitude = 34.552847, longitude = 38.298267 };
+1484:		positionGeo = { latitude = 34.718456, longitude = 32.476168 };
+1495:		positionGeo = { latitude = 34.713934, longitude = 32.494877 };
+1506:		positionGeo = { latitude = 34.723276, longitude = 32.467959 };
+1518:		positionGeo = { latitude = 34.713741, longitude = 32.494490 };
+1529:		positionGeo = { latitude = 34.711733, longitude = 32.505846 };
+1540:		positionGeo = { latitude = 34.716628, longitude = 32.482728 };
+1551:		positionGeo = { latitude = 32.171799, longitude = 37.134339 };
+1564:		positionGeo = { latitude = 32.159572, longitude = 37.148259 };
+1575:		positionGeo = { latitude = 32.152803, longitude = 37.158429 };
+1586:		positionGeo = { latitude = 32.662780, longitude = 35.189551 };
+1598:		positionGeo = { latitude = 32.664872, longitude = 35.187751 };
+1609:		positionGeo = { latitude = 32.677163, longitude = 35.175038 };
+1621:		positionGeo = { latitude = 32.659779, longitude = 35.191273 };
+1632:		positionGeo = { latitude = 32.982520, longitude = 35.572743 };
+1644:		positionGeo = { latitude = 37.458037, longitude = 38.904692 };
+1655:		positionGeo = { latitude = 37.458542, longitude = 38.904844 };
+1666:		positionGeo = { latitude = 37.437269, longitude = 38.884550 };
+1677:		positionGeo = { latitude = 37.463397, longitude = 38.915738 };
+1689:		positionGeo = { latitude = 31.836392, longitude = 34.816875 };
+1700:		positionGeo = { latitude = 31.848832, longitude = 34.818557 };
+1712:		positionGeo = { latitude = 31.825295, longitude = 34.818033 };
+1723:		positionGeo = { latitude = 31.286150, longitude = 34.721537 };
+1734:		positionGeo = { latitude = 34.300489, longitude = 35.699946 };
+
+--- shadingOptions.lua ---
+(exists, 257 lines)
+-- grep for projection/coordinate keywords --
+(no matches)
+
+--- map/towns.lua ---
+(exists, 1187 lines)
+-- grep for projection/coordinate keywords --
+5:["Racetrack for Camel Racing"] = { latitude = 34.403706, longitude = 38.198771, display_name = _("Racetrack for Camel Racing")},
+6:["Marbat El-Hassan Reservoir"] = { latitude = 34.667083, longitude = 38.224691, display_name = _("Marbat El-Hassan Reservoir")},
+7:["Sharqiyah Mine"] = { latitude = 34.199641, longitude = 38.014742, display_name = _("Sharqiyah Mine")},
+8:["Solonchak Sabhat al-Jabbul"] = { latitude = 36.044571, longitude = 37.521323, display_name = _("Solonchak Sabhat al-Jabbul")},
+9:["Aleppo"] = { latitude = 36.219471, longitude = 37.142091, display_name = _("Aleppo")},
+10:["Raqqa"] = { latitude = 35.960290, longitude = 39.015335, display_name = _("Raqqa")},
+11:["Latakia"] = { latitude = 35.525744, longitude = 35.785411, display_name = _("Latakia")},
+12:["Hama"] = { latitude = 35.147288, longitude = 36.757011, display_name = _("Hama")},
+13:["Homs"] = { latitude = 34.731897, longitude = 36.711724, display_name = _("Homs")},
+14:["Palmyra"] = { latitude = 34.565481, longitude = 38.284229, display_name = _("Palmyra")},
+15:["Tartus"] = { latitude = 34.893779, longitude = 35.892245, display_name = _("Tartus")},
+16:["Tripoli"] = { latitude = 34.435775, longitude = 35.837320, display_name = _("Tripoli")},
+17:["Beirut"] = { latitude = 33.861187, longitude = 35.526848, display_name = _("Beirut")},
+18:["Damascus"] = { latitude = 33.518073, longitude = 36.296386, display_name = _("Damascus")},
+19:["Haifa"] = { latitude = 32.796019, longitude = 34.995245, display_name = _("Haifa")},
+20:["Idlib"] = { latitude = 35.930952, longitude = 36.633923, display_name = _("Idlib")},
+21:["Qudssaya"] = { latitude = 33.536740, longitude = 36.234351, display_name = _("Qudssaya")},
+22:["Qudssaya Suburb"] = { latitude = 33.540064, longitude = 36.192270, display_name = _("Qudssaya Suburb")},
+23:["At Tall"] = { latitude = 33.600323, longitude = 36.315657, display_name = _("At Tall")},
+24:["Alassad"] = { latitude = 33.581558, longitude = 36.358940, display_name = _("Alassad")},
+25:["Duma"] = { latitude = 33.571938, longitude = 36.405781, display_name = _("Duma")},
+26:["Harasta"] = { latitude = 33.559036, longitude = 36.366581, display_name = _("Harasta")},
+27:["Arbil"] = { latitude = 33.539070, longitude = 36.366804, display_name = _("Arbil")},
+28:["Madryara"] = { latitude = 33.544681, longitude = 36.395586, display_name = _("Madryara")},
+29:["Ad Dumayr"] = { latitude = 33.643665, longitude = 36.691055, display_name = _("Ad Dumayr")},
+30:["Al Qutayfah"] = { latitude = 33.741700, longitude = 36.594686, display_name = _("Al Qutayfah")},
+31:["Kafr Batna"] = { latitude = 33.514919, longitude = 36.384188, display_name = _("Kafr Batna")},
+32:["Ein Tamra"] = { latitude = 33.518276, longitude = 36.352033, display_name = _("Ein Tamra")},
+33:["Al Mleha"] = { latitude = 33.484569, longitude = 36.373028, display_name = _("Al Mleha")},
+34:["Babbila"] = { latitude = 33.477200, longitude = 36.336357, display_name = _("Babbila")},
+35:["El Hajar Al Aswad"] = { latitude = 33.468749, longitude = 36.309625, display_name = _("El Hajar Al Aswad")},
+36:["Set Zaynab"] = { latitude = 33.448837, longitude = 36.338214, display_name = _("Set Zaynab")},
+37:["Shebaa"] = { latitude = 33.449565, longitude = 36.398202, display_name = _("Shebaa")},
+38:["Al Ghuzlaniyah"] = { latitude = 33.398953, longitude = 36.454461, display_name = _("Al Ghuzlaniyah")},
+39:["Jdaydet Alkhas"] = { latitude = 33.405680, longitude = 36.544628, display_name = _("Jdaydet Alkhas")},
+40:["Harran al'Awamid"] = { latitude = 33.447575, longitude = 36.561596, display_name = _("Harran al'Awamid")},
+41:["Otaybah"] = { latitude = 33.483517, longitude = 36.610154, display_name = _("Otaybah")},
+42:["Hayjanah"] = { latitude = 33.358906, longitude = 36.544664, display_name = _("Hayjanah")},
+43:["Al Baytariyah"] = { latitude = 33.315697, longitude = 36.543629, display_name = _("Al Baytariyah")},
+44:["Buraq"] = { latitude = 33.185661, longitude = 36.479501, display_name = _("Buraq")},
+45:["Hazm"] = { latitude = 33.132337, longitude = 36.524319, display_name = _("Hazm")},
+46:["Qura Al-Assad"] = { latitude = 33.556956, longitude = 36.135584, display_name = _("Qura Al-Assad")},
+47:["Al-Dimass"] = { latitude = 33.588011, longitude = 36.091209, display_name = _("Al-Dimass")},
+48:["Al Moadamyeh"] = { latitude = 33.463478, longitude = 36.187321, display_name = _("Al Moadamyeh")},
+49:["Darayya"] = { latitude = 33.460294, longitude = 36.235558, display_name = _("Darayya")},
+50:["Sahnaya"] = { latitude = 33.432227, longitude = 36.237736, display_name = _("Sahnaya")},
+51:["Jdaydet Artooz"] = { latitude = 33.438519, longitude = 36.159494, display_name = _("Jdaydet Artooz")},
+52:["Zakyah"] = { latitude = 33.337249, longitude = 36.165773, display_name = _("Zakyah")},
+53:["As Sanamayn"] = { latitude = 33.077101, longitude = 36.185811, display_name = _("As Sanamayn")},
+54:["Jasim"] = { latitude = 32.996681, longitude = 36.064041, display_name = _("Jasim")},
+55:["Ankhul"] = { latitude = 33.017328, longitude = 36.130427, display_name = _("Ankhul")},
+56:["Kafr Shams"] = { latitude = 33.122908, longitude = 36.115409, display_name = _("Kafr Shams")},
+57:["Aqrabac"] = { latitude = 33.111487, longitude = 36.001655, display_name = _("Aqrabac")},
+58:["Al Harah"] = { latitude = 33.057838, longitude = 36.006797, display_name = _("Al Harah")},
+59:["Maarrat Misrin"] = { latitude = 36.013735, longitude = 36.678771, display_name = _("Maarrat Misrin")},
+60:["Sarmin"] = { latitude = 35.906478, longitude = 36.725726, display_name = _("Sarmin")},
+61:["Saraqib"] = { latitude = 35.861085, longitude = 36.808029, display_name = _("Saraqib")},
+62:["Arihah"] = { latitude = 35.819453, longitude = 36.616768, display_name = _("Arihah")},
+63:["Al Rami"] = { latitude = 35.804366, longitude = 36.487599, display_name = _("Al Rami")},
+64:["Jisr Ash-Shughur"] = { latitude = 35.814383, longitude = 36.318373, display_name = _("Jisr Ash-Shughur")},
+65:["Khan Assubul"] = { latitude = 35.751556, longitude = 36.758686, display_name = _("Khan Assubul")},
+66:["Abu Ad Dhuhur"] = { latitude = 35.749513, longitude = 37.049436, display_name = _("Abu Ad Dhuhur")},
+67:["Al Ghadfah"] = { latitude = 35.677496, longitude = 36.801608, display_name = _("Al Ghadfah")},
+68:["Maarat al-Numan"] = { latitude = 35.641889, longitude = 36.675356, display_name = _("Maarat al-Numan")},
+69:["Kafr Nabi"] = { latitude = 35.614837, longitude = 36.568447, display_name = _("Kafr Nabi")},
+70:["Tell Arn"] = { latitude = 36.124066, longitude = 37.333972, display_name = _("Tell Arn")},
+71:["Al-Safirah"] = { latitude = 36.069189, longitude = 37.377062, display_name = _("Al-Safirah")},
+72:["Al Bab"] = { latitude = 36.366231, longitude = 37.512118, display_name = _("Al Bab")},
+73:["Manbij"] = { latitude = 36.525941, longitude = 37.960087, display_name = _("Manbij")},
+74:["Maskanah"] = { latitude = 35.964663, longitude = 38.042601, display_name = _("Maskanah")},
+75:["Al Tabqah"] = { latitude = 35.827092, longitude = 38.541302, display_name = _("Al Tabqah")},
+76:["Sqoubin"] = { latitude = 35.558660, longitude = 35.829224, display_name = _("Sqoubin")},
+77:["Sett Markho"] = { latitude = 35.589482, longitude = 35.851695, display_name = _("Sett Markho")},
+78:["Al Hannadi"] = { latitude = 35.480731, longitude = 35.927036, display_name = _("Al Hannadi")},
+79:["Jablah"] = { latitude = 35.363965, longitude = 35.927291, display_name = _("Jablah")},
+80:["Baniyas"] = { latitude = 35.189238, longitude = 35.953516, display_name = _("Baniyas")},
+81:["Ein Elkorum"] = { latitude = 35.368802, longitude = 36.409242, display_name = _("Ein Elkorum")},
+82:["Muhradah"] = { latitude = 35.249643, longitude = 36.572717, display_name = _("Muhradah")},
+83:["Halfaya"] = { latitude = 35.260712, longitude = 36.606798, display_name = _("Halfaya")},
+84:["Ar Rastan"] = { latitude = 34.923488, longitude = 36.732503, display_name = _("Ar Rastan")},
+85:["Hawash"] = { latitude = 34.762026, longitude = 36.322719, display_name = _("Hawash")},
+86:["Zaidal"] = { latitude = 34.718672, longitude = 36.773686, display_name = _("Zaidal")},
+87:["Fairuzah"] = { latitude = 34.702436, longitude = 36.757134, display_name = _("Fairuzah")},
+88:["Al Qusayr"] = { latitude = 34.512113, longitude = 36.587781, display_name = _("Al Qusayr")},
+89:["Khirbe"] = { latitude = 34.583839, longitude = 36.017331, display_name = _("Khirbe")},
+90:["Al Aabde"] = { latitude = 34.511339, longitude = 35.962268, display_name = _("Al Aabde")},
+91:["Chekka"] = { latitude = 34.323663, longitude = 35.731135, display_name = _("Chekka")},
+92:["Hamat"] = { latitude = 34.285622, longitude = 35.692717, display_name = _("Hamat")},
+93:["Batroun"] = { latitude = 34.252986, longitude = 35.666329, display_name = _("Batroun")},
+94:["Maqne"] = { latitude = 34.076334, longitude = 36.206335, display_name = _("Maqne")},
+95:["Baalbek"] = { latitude = 33.997755, longitude = 36.211899, display_name = _("Baalbek")},
+96:["Jounieh"] = { latitude = 33.979290, longitude = 35.633664, display_name = _("Jounieh")},
+97:["Rayak"] = { latitude = 33.853182, longitude = 36.021607, display_name = _("Rayak")},
+98:["Serghaya"] = { latitude = 33.811850, longitude = 36.161077, display_name = _("Serghaya")},
+99:["Al Zabadani"] = { latitude = 33.726458, longitude = 36.101596, display_name = _("Al Zabadani")},
+100:["Madaya"] = { latitude = 33.682698, longitude = 36.095064, display_name = _("Madaya")},
+101:["Zahle"] = { latitude = 33.842402, longitude = 35.925711, display_name = _("Zahle")},
+102:["Taalabaya"] = { latitude = 33.814138, longitude = 35.873182, display_name = _("Taalabaya")},
+103:["Bar Elias"] = { latitude = 33.774479, longitude = 35.900918, display_name = _("Bar Elias")},
+104:["Anjar"] = { latitude = 33.727388, longitude = 35.931892, display_name = _("Anjar")},
+105:["Majdel Anjar"] = { latitude = 33.707532, longitude = 35.907553, display_name = _("Majdel Anjar")},
+106:["Ghazze"] = { latitude = 33.668655, longitude = 35.831698, display_name = _("Ghazze")},
+107:["Joub Jannine"] = { latitude = 33.627189, longitude = 35.783124, display_name = _("Joub Jannine")},
+108:["Qaraoun"] = { latitude = 33.567601, longitude = 35.721222, display_name = _("Qaraoun")},
+109:["Khalde"] = { latitude = 33.777551, longitude = 35.475219, display_name = _("Khalde")},
+110:["Haret Chbib"] = { latitude = 33.740920, longitude = 35.457533, display_name = _("Haret Chbib")},
+111:["Chim"] = { latitude = 33.620974, longitude = 35.488638, display_name = _("Chim")},
+112:["Saida"] = { latitude = 33.563094, longitude = 35.377028, display_name = _("Saida")},
+113:["Nabatieh"] = { latitude = 33.381200, longitude = 35.479974, display_name = _("Nabatieh")},
+114:["Qatana"] = { latitude = 33.438131, longitude = 36.079687, display_name = _("Qatana")},
+115:["Khan Alsheh"] = { latitude = 33.373053, longitude = 36.113067, display_name = _("Khan Alsheh")},
+116:["Kanaker"] = { latitude = 33.268693, longitude = 36.094640, display_name = _("Kanaker")},
+117:["Jabah"] = { latitude = 33.164877, longitude = 35.927233, display_name = _("Jabah")},
+118:["Khan Arnabeh"] = { latitude = 33.182506, longitude = 35.890276, display_name = _("Khan Arnabeh")},
+119:["Naba Alsakher"] = { latitude = 33.088327, longitude = 35.947298, display_name = _("Naba Alsakher")},
+120:["Ghabagheb"] = { latitude = 33.182552, longitude = 36.224414, display_name = _("Ghabagheb")},
+121:["Jabab"] = { latitude = 33.113405, longitude = 36.264712, display_name = _("Jabab")},
+122:["As Sawara"] = { latitude = 33.028305, longitude = 36.578694, display_name = _("As Sawara")},
+123:["Shahba"] = { latitude = 32.858367, longitude = 36.632505, display_name = _("Shahba")},
+124:["Muadamyat Al Qalamon"] = { latitude = 33.741316, longitude = 36.640933, display_name = _("Muadamyat Al Qalamon")},
+125:["Al Kafr"] = { latitude = 32.632244, longitude = 36.648252, display_name = _("Al Kafr")},
+126:["El Karak"] = { latitude = 32.685853, longitude = 36.353277, display_name = _("El Karak")},
+127:["Eastern Garyiah"] = { latitude = 32.677965, longitude = 36.260940, display_name = _("Eastern Garyiah")},
+128:["Western Garyiah"] = { latitude = 32.687917, longitude = 36.225685, display_name = _("Western Garyiah")},
+129:["Khirbet Ghazaleh"] = { latitude = 32.737882, longitude = 36.201831, display_name = _("Khirbet Ghazaleh")},
+130:["Busra"] = { latitude = 32.517997, longitude = 36.481645, display_name = _("Busra")},
+131:["Dibin"] = { latitude = 32.439463, longitude = 36.567784, display_name = _("Dibin")},
+132:["Miarbah"] = { latitude = 32.544797, longitude = 36.428341, display_name = _("Miarbah")},
+133:["Ghasam"] = { latitude = 32.549096, longitude = 36.374564, display_name = _("Ghasam")},
+134:["Al Jeezah"] = { latitude = 32.565680, longitude = 36.316322, display_name = _("Al Jeezah")},
+135:["El Taebah"] = { latitude = 32.564137, longitude = 36.246336, display_name = _("El Taebah")},
+136:["Ramtha"] = { latitude = 32.565921, longitude = 36.008365, display_name = _("Ramtha")},
+137:["Et Turra"] = { latitude = 32.641456, longitude = 35.990626, display_name = _("Et Turra")},
+138:["Irbid"] = { latitude = 32.557292, longitude = 35.856121, display_name = _("Irbid")},
+139:["Tiberias"] = { latitude = 32.790725, longitude = 35.526414, display_name = _("Tiberias")},
+140:["Nazareth"] = { latitude = 32.704739, longitude = 35.306182, display_name = _("Nazareth")},
+141:["Daliyat al-Karmel"] = { latitude = 32.692722, longitude = 35.050793, display_name = _("Daliyat al-Karmel")},
+142:["Umm al-Fahm"] = { latitude = 32.522954, longitude = 35.151370, display_name = _("Umm al-Fahm")},
+143:["Afula"] = { latitude = 32.610048, longitude = 35.289515, display_name = _("Afula")},
+144:["Ein Harod"] = { latitude = 32.556165, longitude = 35.394209, display_name = _("Ein Harod")},
+145:["Beit Shean"] = { latitude = 32.492844, longitude = 35.501891, display_name = _("Beit Shean")},
+146:["Iksal"] = { latitude = 32.684349, longitude = 35.325562, display_name = _("Iksal")},
+147:["Hatzor HaGlilit"] = { latitude = 32.980146, longitude = 35.545722, display_name = _("Hatzor HaGlilit")},
+148:["Migdal HaEmek"] = { latitude = 32.678191, longitude = 35.241797, display_name = _("Migdal HaEmek")},
+149:["Nahalal"] = { latitude = 32.690694, longitude = 35.198958, display_name = _("Nahalal")},
+150:["Ramat Yishai"] = { latitude = 32.705166, longitude = 35.166819, display_name = _("Ramat Yishai")},
+151:["Kfar Yehoshua"] = { latitude = 32.681006, longitude = 35.153116, display_name = _("Kfar Yehoshua")},
+152:["Kiryat Tivon"] = { latitude = 32.717158, longitude = 35.126145, display_name = _("Kiryat Tivon")},
+153:["Yokneam Illit"] = { latitude = 32.653497, longitude = 35.102342, display_name = _("Yokneam Illit")},
+154:["Kafr Qara"] = { latitude = 32.504314, longitude = 35.064774, display_name = _("Kafr Qara")},
+155:["Pardes Hanna-Karkur"] = { latitude = 32.473446, longitude = 34.969511, display_name = _("Pardes Hanna-Karkur")},
+156:["Hadera"] = { latitude = 32.428035, longitude = 34.919863, display_name = _("Hadera")},
+157:["Isfiya"] = { latitude = 32.719767, longitude = 35.062365, display_name = _("Isfiya")},
+158:["Ein Hod"] = { latitude = 32.698984, longitude = 34.987603, display_name = _("Ein Hod")},
+159:["Atlit"] = { latitude = 32.688863, longitude = 34.943009, display_name = _("Atlit")},
+160:["Kiryat Motzkin"] = { latitude = 32.834316, longitude = 35.084219, display_name = _("Kiryat Motzkin")},
+161:["Kiryat Yam"] = { latitude = 32.842731, longitude = 35.069248, display_name = _("Kiryat Yam")},
+162:["Kiryat Ata"] = { latitude = 32.809126, longitude = 35.115174, display_name = _("Kiryat Ata")},
+163:["Shefar-Amr"] = { latitude = 32.804129, longitude = 35.172103, display_name = _("Shefar-Amr")},
+164:["Ibilin"] = { latitude = 32.822190, longitude = 35.192066, display_name = _("Ibilin")},
+165:["Kafr Manda"] = { latitude = 32.812136, longitude = 35.262557, display_name = _("Kafr Manda")},
+166:["Kabul"] = { latitude = 32.869646, longitude = 35.213104, display_name = _("Kabul")},
+167:["Tamra"] = { latitude = 32.854794, longitude = 35.194876, display_name = _("Tamra")},
+168:["Karmiel"] = { latitude = 32.907124, longitude = 35.286717, display_name = _("Karmiel")},
+169:["Deir al-Asad"] = { latitude = 32.929701, longitude = 35.275590, display_name = _("Deir al-Asad")},
+170:["Jadeidi Makr"] = { latitude = 32.927754, longitude = 35.148612, display_name = _("Jadeidi Makr")},
+171:["Yarka"] = { latitude = 32.955283, longitude = 35.211219, display_name = _("Yarka")},
+172:["Kafr Yasif"] = { latitude = 32.957481, longitude = 35.166921, display_name = _("Kafr Yasif")},
+173:["Acre"] = { latitude = 32.929521, longitude = 35.078140, display_name = _("Acre")},
+174:["Nahariyya"] = { latitude = 33.008845, longitude = 35.100274, display_name = _("Nahariyya")},
+175:["Bent Jbail"] = { latitude = 33.125874, longitude = 35.440673, display_name = _("Bent Jbail")},
+176:["Qiryat Shemona"] = { latitude = 33.209375, longitude = 35.570715, display_name = _("Qiryat Shemona")},
+177:["Tyre"] = { latitude = 33.275537, longitude = 35.215861, display_name = _("Tyre")},
+178:["Houle"] = { latitude = 33.210746, longitude = 35.517176, display_name = _("Houle")},
+179:["Adaisse"] = { latitude = 33.256673, longitude = 35.536415, display_name = _("Adaisse")},
+180:["Ghajar"] = { latitude = 33.271816, longitude = 35.624125, display_name = _("Ghajar")},
+181:["Marjayoun"] = { latitude = 33.365911, longitude = 35.593865, display_name = _("Marjayoun")},
+182:["Hasbaya"] = { latitude = 33.397627, longitude = 35.685607, display_name = _("Hasbaya")},
+183:["Afrin"] = { latitude = 36.508418, longitude = 36.867495, display_name = _("Afrin")},
+184:["Tel Aviv"] = { latitude = 32.097989, longitude = 34.846363, display_name = _("Tel Aviv")},
+185:["Amman"] = { latitude = 31.941718, longitude = 35.921985, display_name = _("Amman")},
+186:["Jerusalem"] = { latitude = 31.814225, longitude = 35.228012, display_name = _("Jerusalem")},
+187:["Gaza"] = { latitude = 31.512967, longitude = 34.458627, display_name = _("Gaza")},
+188:["Dimona"] = { latitude = 31.068838, longitude = 35.036878, display_name = _("Dimona")},
+189:["Al-Karak"] = { latitude = 31.175175, longitude = 35.710114, display_name = _("Al-Karak")},
+190:["Kahramanmaras"] = { latitude = 37.581853, longitude = 36.910948, display_name = _("Kahramanmaras")},
+191:["Adiyaman"] = { latitude = 37.767544, longitude = 38.273825, display_name = _("Adiyaman")},
+192:["Khan Yunus"] = { latitude = 31.343213, longitude = 34.318337, display_name = _("Khan Yunus")},
+193:["Limassol"] = { latitude = 34.685290, longitude = 33.033266, display_name = _("Limassol")},
+194:["Ayia Napa"] = { latitude = 34.989322, longitude = 33.996204, display_name = _("Ayia Napa")},
+195:["Famagusta"] = { latitude = 35.122964, longitude = 33.934763, display_name = _("Famagusta")},
+196:["Nicosia"] = { latitude = 35.172754, longitude = 33.347521, display_name = _("Nicosia")},
+197:["Larnaca"] = { latitude = 34.923609, longitude = 33.623618, display_name = _("Larnaca")},
+198:["Pafos"] = { latitude = 34.774399, longitude = 32.423159, display_name = _("Pafos")},
+199:["Frenaros"] = { latitude = 35.042196, longitude = 33.922345, display_name = _("Frenaros")},
+200:["Avgorou"] = { latitude = 35.035629, longitude = 33.840146, display_name = _("Avgorou")},
+201:["Xylofagou"] = { latitude = 34.977233, longitude = 33.849197, display_name = _("Xylofagou")},
+202:["Liopetri"] = { latitude = 35.006349, longitude = 33.892496, display_name = _("Liopetri")},
+203:["Vrysoulles"] = { latitude = 35.072454, longitude = 33.882568, display_name = _("Vrysoulles")},
+204:["Protaras"] = { latitude = 35.009259, longitude = 34.058308, display_name = _("Protaras")},
+205:["Paralimni"] = { latitude = 35.039134, longitude = 33.982792, display_name = _("Paralimni")},
+206:["Sotira"] = { latitude = 35.026689, longitude = 33.950197, display_name = _("Sotira")},
+207:["Dasaki Achnas"] = { latitude = 35.029712, longitude = 33.770819, display_name = _("Dasaki Achnas")},
+208:["Tremetousia"] = { latitude = 35.084553, longitude = 33.608585, display_name = _("Tremetousia")},
+209:["Tavros"] = { latitude = 35.397795, longitude = 34.076555, display_name = _("Tavros")},
+210:["Bafra"] = { latitude = 35.379518, longitude = 34.071254, display_name = _("Bafra")},
+211:["Leonarisso"] = { latitude = 35.468513, longitude = 34.138289, display_name = _("Leonarisso")},
+212:["Agios Andronikos"] = { latitude = 35.505036, longitude = 34.162471, display_name = _("Agios Andronikos")},
+213:["Asha"] = { latitude = 35.157788, longitude = 33.608634, display_name = _("Asha")},
+214:["Afania"] = { latitude = 35.158185, longitude = 33.586684, display_name = _("Afania")},
+215:["Kalyvakia"] = { latitude = 35.257759, longitude = 33.548666, display_name = _("Kalyvakia")},
+216:["Vatili"] = { latitude = 35.133793, longitude = 33.655731, display_name = _("Vatili")},
+217:["Lysi"] = { latitude = 35.105865, longitude = 33.682267, display_name = _("Lysi")},
+218:["Sinta"] = { latitude = 35.157610, longitude = 33.700548, display_name = _("Sinta")},
+219:["Strongylos"] = { latitude = 35.166652, longitude = 33.639099, display_name = _("Strongylos")},
+220:["Angastina"] = { latitude = 35.204358, longitude = 33.589232, display_name = _("Angastina")},
+221:["Marathovounos"] = { latitude = 35.222767, longitude = 33.616837, display_name = _("Marathovounos")},
+222:["Mora"] = { latitude = 35.175973, longitude = 33.552892, display_name = _("Mora")},
+223:["Klepini"] = { latitude = 35.306699, longitude = 33.433474, display_name = _("Klepini")},
+224:["Tatlisu"] = { latitude = 35.373241, longitude = 33.753563, display_name = _("Tatlisu")},
+225:["Ormideia"] = { latitude = 34.992619, longitude = 33.776457, display_name = _("Ormideia")},
+226:["Dipkarpaz"] = { latitude = 35.597107, longitude = 34.380133, display_name = _("Dipkarpaz")},
+227:["Trikomo"] = { latitude = 35.286368, longitude = 33.891919, display_name = _("Trikomo")},
+228:["Lefkoniko"] = { latitude = 35.260533, longitude = 33.732199, display_name = _("Lefkoniko")},
+229:["Gernagra"] = { latitude = 35.218012, longitude = 33.698500, display_name = _("Gernagra")},
+230:["Vitsada"] = { latitude = 35.244260, longitude = 33.646537, display_name = _("Vitsada")},
+231:["Knodara"] = { latitude = 35.264077, longitude = 33.661483, display_name = _("Knodara")},
+232:["Kiados"] = { latitude = 35.255921, longitude = 33.601667, display_name = _("Kiados")},
+233:["Milia"] = { latitude = 35.239504, longitude = 33.780851, display_name = _("Milia")},
+234:["Mallidag"] = { latitude = 35.332739, longitude = 33.689058, display_name = _("Mallidag")},
+235:["Trypimeni"] = { latitude = 35.310068, longitude = 33.634115, display_name = _("Trypimeni")},
+236:["Kornokipos"] = { latitude = 35.282707, longitude = 33.573077, display_name = _("Kornokipos")},
+237:["Prastio"] = { latitude = 35.175578, longitude = 33.756855, display_name = _("Prastio")},
+238:["Acheritou"] = { latitude = 35.100507, longitude = 33.860308, display_name = _("Acheritou")},
+239:["Kalopsida"] = { latitude = 35.095984, longitude = 33.794515, display_name = _("Kalopsida")},
+240:["Agios Sergios"] = { latitude = 35.196624, longitude = 33.874025, display_name = _("Agios Sergios")},
+241:["Deryneia"] = { latitude = 35.064867, longitude = 33.960913, display_name = _("Deryneia")},
+242:["Kapparis"] = { latitude = 35.052898, longitude = 34.008009, display_name = _("Kapparis")},
+243:["Melouseia"] = { latitude = 35.077310, longitude = 33.584090, display_name = _("Melouseia")},
+244:["Agia"] = { latitude = 35.110869, longitude = 33.566215, display_name = _("Agia")},
+245:["Sutluce"] = { latitude = 35.253814, longitude = 33.686959, display_name = _("Sutluce")},
+246:["Ayia Thekla"] = { latitude = 34.980493, longitude = 33.927541, display_name = _("Ayia Thekla")},
+247:["Astromeritis"] = { latitude = 35.139988, longitude = 33.037487, display_name = _("Astromeritis")},
+248:["Peristerona"] = { latitude = 35.129875, longitude = 33.079999, display_name = _("Peristerona")},
+249:["Deneia"] = { latitude = 35.166404, longitude = 33.146445, display_name = _("Deneia")},
+250:["Bellapais"] = { latitude = 35.306505, longitude = 33.353218, display_name = _("Bellapais")},
+251:["Karakoumi"] = { latitude = 35.332686, longitude = 33.342067, display_name = _("Karakoumi")},
+252:["Kampyli"] = { latitude = 35.301416, longitude = 33.107860, display_name = _("Kampyli")},
+253:["Asomatos"] = { latitude = 35.275328, longitude = 33.107723, display_name = _("Asomatos")},
+254:["Kontemenos"] = { latitude = 35.268873, longitude = 33.125908, display_name = _("Kontemenos")},
+255:["Vasilia"] = { latitude = 35.351996, longitude = 33.120077, display_name = _("Vasilia")},
+256:["Agios Ermolaos"] = { latitude = 35.278452, longitude = 33.172702, display_name = _("Agios Ermolaos")},
+257:["Fotta"] = { latitude = 35.264565, longitude = 33.222091, display_name = _("Fotta")},
+258:["Pileri"] = { latitude = 35.289681, longitude = 33.216143, display_name = _("Pileri")},
+259:["Kazivera"] = { latitude = 35.172484, longitude = 32.916449, display_name = _("Kazivera")},
+260:["Syrianochori"] = { latitude = 35.225105, longitude = 32.940156, display_name = _("Syrianochori")},
+261:["Karavas"] = { latitude = 35.343171, longitude = 33.195612, display_name = _("Karavas")},
+262:["Arediou"] = { latitude = 35.047838, longitude = 33.194954, display_name = _("Arediou")},
+263:["Kyra"] = { latitude = 35.203250, longitude = 33.060546, display_name = _("Kyra")},
+264:["Argaki"] = { latitude = 35.179960, longitude = 33.035324, display_name = _("Argaki")},
+265:["Vyzakia"] = { latitude = 35.076357, longitude = 33.013747, display_name = _("Vyzakia")},
+266:["Nikitari"] = { latitude = 35.074412, longitude = 32.994035, display_name = _("Nikitari")},
+267:["Katokopia"] = { latitude = 35.174702, longitude = 33.051777, display_name = _("Katokopia")},
+268:["Masari"] = { latitude = 35.186833, longitude = 33.076005, display_name = _("Masari")},
+269:["Korakou"] = { latitude = 35.040145, longitude = 32.887412, display_name = _("Korakou")},
+270:["Lapithos"] = { latitude = 35.342051, longitude = 33.167295, display_name = _("Lapithos")},
+271:["Krini"] = { latitude = 35.287148, longitude = 33.237457, display_name = _("Krini")},
+272:["Orga"] = { latitude = 35.360685, longitude = 33.042131, display_name = _("Orga")},
+273:["Panagra"] = { latitude = 35.336326, longitude = 33.068166, display_name = _("Panagra")},
+274:["Myrtou"] = { latitude = 35.307206, longitude = 33.075147, display_name = _("Myrtou")},
+275:["Kapouti"] = { latitude = 35.245008, longitude = 33.039549, display_name = _("Kapouti")},
+276:["Kato Zodia"] = { latitude = 35.168557, longitude = 33.006620, display_name = _("Kato Zodia")},
+277:["Pano Zodia"] = { latitude = 35.162132, longitude = 33.015938, display_name = _("Pano Zodia")},
+278:["Elia"] = { latitude = 35.133123, longitude = 32.913372, display_name = _("Elia")},
+279:["Peristeronari"] = { latitude = 35.132526, longitude = 32.864638, display_name = _("Peristeronari")},
+280:["Koutsoventis"] = { latitude = 35.265850, longitude = 33.420857, display_name = _("Koutsoventis")},
+281:["Agia Eirini"] = { latitude = 35.298681, longitude = 32.963554, display_name = _("Agia Eirini")},
+282:["Agios Epiktitos"] = { latitude = 35.321345, longitude = 33.390658, display_name = _("Agios Epiktitos")},
+283:["Lefka"] = { latitude = 35.113200, longitude = 32.849994, display_name = _("Lefka")},
+284:["Motides"] = { latitude = 35.338091, longitude = 33.207692, display_name = _("Motides")},
+285:["Trimithi"] = { latitude = 35.332540, longitude = 33.262067, display_name = _("Trimithi")},
+286:["Sichari"] = { latitude = 35.273444, longitude = 33.386313, display_name = _("Sichari")},
+287:["Livera"] = { latitude = 35.383253, longitude = 32.952996, display_name = _("Livera")},
+288:["Larnakas tis  Lapithiou"] = { latitude = 35.310705, longitude = 33.140665, display_name = _("Larnakas tis  Lapithiou")},
+289:["Nikitas"] = { latitude = 35.176535, longitude = 32.956714, display_name = _("Nikitas")},
+290:["Angolemi"] = { latitude = 35.118146, longitude = 32.948238, display_name = _("Angolemi")},
+291:["Thermeia"] = { latitude = 35.321323, longitude = 33.331778, display_name = _("Thermeia")},
+292:["Evrychou"] = { latitude = 35.039240, longitude = 32.900035, display_name = _("Evrychou")},
+293:["Agios Theodoros Soleas"] = { latitude = 35.042093, longitude = 32.927442, display_name = _("Agios Theodoros Soleas")},
+294:["Flasou"] = { latitude = 35.065118, longitude = 32.888541, display_name = _("Flasou")},
+295:["Kyrenia"] = { latitude = 35.334440, longitude = 33.311163, display_name = _("Kyrenia")},
+296:["Skylloura"] = { latitude = 35.230480, longitude = 33.165247, display_name = _("Skylloura")},
+297:["Agios Vasilios"] = { latitude = 35.219057, longitude = 33.184430, display_name = _("Agios Vasilios")},
+298:["Avlona"] = { latitude = 35.161698, longitude = 33.106021, display_name = _("Avlona")},
+299:["Kato Moni"] = { latitude = 35.060715, longitude = 33.092081, display_name = _("Kato Moni")},
+300:["Diorios"] = { latitude = 35.306173, longitude = 33.053890, display_name = _("Diorios")},
+301:["Karavostasi"] = { latitude = 35.138837, longitude = 32.834612, display_name = _("Karavostasi")},
+302:["Potamos"] = { latitude = 35.146207, longitude = 32.803648, display_name = _("Potamos")},
+303:["Pentageia"] = { latitude = 35.153115, longitude = 32.884403, display_name = _("Pentageia")},
+304:["Agirda"] = { latitude = 35.297065, longitude = 33.266677, display_name = _("Agirda")},
+305:["Potami"] = { latitude = 35.104428, longitude = 33.029883, display_name = _("Potami")},
+306:["Kormakitis"] = { latitude = 35.342845, longitude = 33.009710, display_name = _("Kormakitis")},
+307:["Agioi Trimithias"] = { latitude = 35.114564, longitude = 33.210728, display_name = _("Agioi Trimithias")},
+308:["Paliometocho"] = { latitude = 35.124703, longitude = 33.191649, display_name = _("Paliometocho")},
+309:["Akaki"] = { latitude = 35.134529, longitude = 33.129655, display_name = _("Akaki")},
+310:["Mammari"] = { latitude = 35.175594, longitude = 33.205065, display_name = _("Mammari")},
+311:["Kokkinotrimithia"] = { latitude = 35.154271, longitude = 33.198654, display_name = _("Kokkinotrimithia")},
+312:["Pano Dikomo"] = { latitude = 35.277494, longitude = 33.315093, display_name = _("Pano Dikomo")},
+313:["Katydata"] = { latitude = 35.083202, longitude = 32.888147, display_name = _("Katydata")},
+314:["Ayia Marina"] = { latitude = 35.049164, longitude = 33.057631, display_name = _("Ayia Marina")},
+315:["Kato Koutrafas"] = { latitude = 35.103145, longitude = 32.977614, display_name = _("Kato Koutrafas")},
+316:["Orounta"] = { latitude = 35.101424, longitude = 33.093839, display_name = _("Orounta")},
+317:["Meniko"] = { latitude = 35.110851, longitude = 33.145559, display_name = _("Meniko")},
+318:["Morfou"] = { latitude = 35.198552, longitude = 32.993499, display_name = _("Morfou")},
+319:["Ayios Ioannis"] = { latitude = 35.065989, longitude = 33.183611, display_name = _("Ayios Ioannis")},
+320:["Zygi"] = { latitude = 34.728997, longitude = 33.338022, display_name = _("Zygi")},
+321:["Kiti"] = { latitude = 34.845623, longitude = 33.572605, display_name = _("Kiti")},
+322:["Dromolaxia"] = { latitude = 34.870834, longitude = 33.588094, display_name = _("Dromolaxia")},
+323:["Pergamos"] = { latitude = 35.043163, longitude = 33.708323, display_name = _("Pergamos")},
+324:["Kolossi"] = { latitude = 34.676059, longitude = 32.938111, display_name = _("Kolossi")},
+325:["Akrotiri"] = { latitude = 34.600749, longitude = 32.956124, display_name = _("Akrotiri")},
+326:["Pyrgos"] = { latitude = 34.738000, longitude = 33.185028, display_name = _("Pyrgos")},
+327:["Dierona"] = { latitude = 34.830596, longitude = 33.111073, display_name = _("Dierona")},
+328:["Parekklisia"] = { latitude = 34.742872, longitude = 33.161365, display_name = _("Parekklisia")},
+329:["Aradhippou"] = { latitude = 34.949618, longitude = 33.592675, display_name = _("Aradhippou")},
+330:["Prodromos"] = { latitude = 34.949950, longitude = 32.832486, display_name = _("Prodromos")},
+331:["Mouttagiaka"] = { latitude = 34.720734, longitude = 33.100903, display_name = _("Mouttagiaka")},
+332:["Palodeia"] = { latitude = 34.748450, longitude = 33.004720, display_name = _("Palodeia")},
+333:["Eptagoneia"] = { latitude = 34.846848, longitude = 33.158371, display_name = _("Eptagoneia")},
+334:["Mathiatis"] = { latitude = 34.962425, longitude = 33.336218, display_name = _("Mathiatis")},
+335:["Ayios Amvrosios"] = { latitude = 34.781213, longitude = 32.827274, display_name = _("Ayios Amvrosios")},
+336:["Kalopanagiotis"] = { latitude = 34.992010, longitude = 32.828077, display_name = _("Kalopanagiotis")},
+337:["Agros"] = { latitude = 34.917642, longitude = 33.018409, display_name = _("Agros")},
+338:["Kyperounta"] = { latitude = 34.941192, longitude = 32.974253, display_name = _("Kyperounta")},
+339:["Vavatsinia"] = { latitude = 34.893473, longitude = 33.228932, display_name = _("Vavatsinia")},
+340:["Pera Pedi"] = { latitude = 34.860690, longitude = 32.874353, display_name = _("Pera Pedi")},
+341:["Moniatis"] = { latitude = 34.865176, longitude = 32.904931, display_name = _("Moniatis")},
+342:["Mazotos"] = { latitude = 34.804063, longitude = 33.488422, display_name = _("Mazotos")},
+343:["Kofinou"] = { latitude = 34.824591, longitude = 33.392021, display_name = _("Kofinou")},
+344:["Skarinou"] = { latitude = 34.821390, longitude = 33.357167, display_name = _("Skarinou")},
+345:["Louvaras"] = { latitude = 34.836624, longitude = 33.039209, display_name = _("Louvaras")},
+346:["Ora"] = { latitude = 34.862074, longitude = 33.195996, display_name = _("Ora")},
+347:["Kannavia"] = { latitude = 34.983561, longitude = 32.976925, display_name = _("Kannavia")},
+348:["Spilia"] = { latitude = 34.966484, longitude = 32.955302, display_name = _("Spilia")},
+349:["Zoopigi"] = { latitude = 34.862898, longitude = 33.015171, display_name = _("Zoopigi")},
+350:["Ayia Anna"] = { latitude = 34.943078, longitude = 33.473480, display_name = _("Ayia Anna")},
+351:["Monagrouli"] = { latitude = 34.748795, longitude = 33.212988, display_name = _("Monagrouli")},
+352:["Fini"] = { latitude = 34.893841, longitude = 32.838060, display_name = _("Fini")},
+353:["Meneou"] = { latitude = 34.836802, longitude = 33.605426, display_name = _("Meneou")},
+354:["Mathikoloni"] = { latitude = 34.775343, longitude = 33.047382, display_name = _("Mathikoloni")},
+355:["Ayios Konstantinos"] = { latitude = 34.867715, longitude = 33.066720, display_name = _("Ayios Konstantinos")},
+356:["Melini"] = { latitude = 34.867512, longitude = 33.157683, display_name = _("Melini")},
+357:["Agios Georgios"] = { latitude = 34.815217, longitude = 32.898745, display_name = _("Agios Georgios")},
+358:["Paramytha"] = { latitude = 34.759549, longitude = 32.993300, display_name = _("Paramytha")},
+359:["Tersefanou"] = { latitude = 34.854252, longitude = 33.546740, display_name = _("Tersefanou")},
+360:["Xylotymbou"] = { latitude = 35.013205, longitude = 33.743930, display_name = _("Xylotymbou")},
+361:["Ypsonas"] = { latitude = 34.688001, longitude = 32.961246, display_name = _("Ypsonas")},
+362:["Pano Polemidia"] = { latitude = 34.701607, longitude = 32.998671, display_name = _("Pano Polemidia")},
+363:["Kalo Chorio"] = { latitude = 34.928468, longitude = 33.537421, display_name = _("Kalo Chorio")},
+364:["Oroklini"] = { latitude = 34.982275, longitude = 33.655855, display_name = _("Oroklini")},
+365:["Athienou"] = { latitude = 35.061861, longitude = 33.540495, display_name = _("Athienou")},
+366:["Pano Platres"] = { latitude = 34.883226, longitude = 32.860383, display_name = _("Pano Platres")},
+367:["Agios Athanasios"] = { latitude = 34.710274, longitude = 33.059699, display_name = _("Agios Athanasios")},
+368:["Farmakas"] = { latitude = 34.912829, longitude = 33.136079, display_name = _("Farmakas")},
+369:["Gourri"] = { latitude = 34.957275, longitude = 33.158550, display_name = _("Gourri")},
+370:["Kellia"] = { latitude = 34.975592, longitude = 33.622728, display_name = _("Kellia")},
+371:["Troulloi"] = { latitude = 35.032983, longitude = 33.615891, display_name = _("Troulloi")},
+372:["Loutros"] = { latitude = 35.149000, longitude = 32.772348, display_name = _("Loutros")},
+373:["Pentakomo"] = { latitude = 34.739878, longitude = 33.241226, display_name = _("Pentakomo")},
+374:["Mari"] = { latitude = 34.740670, longitude = 33.298627, display_name = _("Mari")},
+375:["Lympia"] = { latitude = 34.997869, longitude = 33.462627, display_name = _("Lympia")},
+376:["Anglisides"] = { latitude = 34.853651, longitude = 33.457420, display_name = _("Anglisides")},
+377:["Klavdia"] = { latitude = 34.892715, longitude = 33.515011, display_name = _("Klavdia")},
+378:["Livadia"] = { latitude = 34.949164, longitude = 33.628193, display_name = _("Livadia")},
+379:["Pachna"] = { latitude = 34.776586, longitude = 32.792975, display_name = _("Pachna")},
+380:["Kivides"] = { latitude = 34.759421, longitude = 32.852250, display_name = _("Kivides")},
+381:["Kakopetria"] = { latitude = 34.989549, longitude = 32.903240, display_name = _("Kakopetria")},
+382:["Alethriko"] = { latitude = 34.861503, longitude = 33.494229, display_name = _("Alethriko")},
+383:["Ayios Georgios Kafkallou"] = { latitude = 35.037317, longitude = 33.013208, display_name = _("Ayios Georgios Kafkallou")},
+384:["Lythrodontas"] = { latitude = 34.951079, longitude = 33.296681, display_name = _("Lythrodontas")},
+385:["Potamia"] = { latitude = 35.042349, longitude = 33.445564, display_name = _("Potamia")},
+386:["Geri"] = { latitude = 35.106850, longitude = 33.420415, display_name = _("Geri")},
+387:["Alampra"] = { latitude = 34.995833, longitude = 33.403660, display_name = _("Alampra")},
+388:["Mandres"] = { latitude = 35.215170, longitude = 33.378666, display_name = _("Mandres")},
+389:["Trachoni"] = { latitude = 35.223382, longitude = 33.479348, display_name = _("Trachoni")},
+390:["Ayia Varvara"] = { latitude = 34.996237, longitude = 33.369224, display_name = _("Ayia Varvara")},
+391:["Mia Milia"] = { latitude = 35.206372, longitude = 33.420020, display_name = _("Mia Milia")},
+392:["Palaikythro"] = { latitude = 35.201877, longitude = 33.484779, display_name = _("Palaikythro")},
+393:["Kampia"] = { latitude = 35.007635, longitude = 33.256669, display_name = _("Kampia")},
+394:["Gerolakkos"] = { latitude = 35.180659, longitude = 33.253309, display_name = _("Gerolakkos")},
+395:["Psimolofou"] = { latitude = 35.060218, longitude = 33.259777, display_name = _("Psimolofou")},
+396:["Ergates"] = { latitude = 35.054048, longitude = 33.243019, display_name = _("Ergates")},
+397:["Pera"] = { latitude = 35.031929, longitude = 33.253596, display_name = _("Pera")},
+398:["Dali"] = { latitude = 35.022569, longitude = 33.421807, display_name = _("Dali")},
+399:["Lakatamia"] = { latitude = 35.120095, longitude = 33.307850, display_name = _("Lakatamia")},
+400:["Strovolos"] = { latitude = 35.132899, longitude = 33.345497, display_name = _("Strovolos")},
+401:["Latsia"] = { latitude = 35.099565, longitude = 33.381599, display_name = _("Latsia")},
+402:["Nisou"] = { latitude = 35.021139, longitude = 33.389249, display_name = _("Nisou")},
+403:["Tseri"] = { latitude = 35.072697, longitude = 33.324669, display_name = _("Tseri")},
+404:["Analiontas"] = { latitude = 35.007475, longitude = 33.291168, display_name = _("Analiontas")},
+405:["Epicho"] = { latitude = 35.227483, longitude = 33.513494, display_name = _("Epicho")},
+406:["Exo Metochi"] = { latitude = 35.214911, longitude = 33.526624, display_name = _("Exo Metochi")},
+407:["Gonyeli"] = { latitude = 35.214514, longitude = 33.302562, display_name = _("Gonyeli")},
+408:["Agios Konstantinos & Elenis"] = { latitude = 35.070407, longitude = 33.391708, display_name = _("Agios Konstantinos & Elenis")},
+409:["Serhatkoy"] = { latitude = 35.188275, longitude = 33.092243, display_name = _("Serhatkoy")},
+410:["Kouklia"] = { latitude = 34.710843, longitude = 32.573612, display_name = _("Kouklia")},
+411:["Tala"] = { latitude = 34.836133, longitude = 32.430976, display_name = _("Tala")},
+412:["Empa"] = { latitude = 34.808747, longitude = 32.423549, display_name = _("Empa")},
+413:["Tremithousa"] = { latitude = 34.816938, longitude = 32.447427, display_name = _("Tremithousa")},
+414:["Chloraka"] = { latitude = 34.799590, longitude = 32.407920, display_name = _("Chloraka")},
+415:["Konia"] = { latitude = 34.784944, longitude = 32.457557, display_name = _("Konia")},
+416:["Episkopi"] = { latitude = 34.795654, longitude = 32.525533, display_name = _("Episkopi")},
+417:["Polis"] = { latitude = 35.034969, longitude = 32.425935, display_name = _("Polis")},
+418:["Mandria"] = { latitude = 34.715793, longitude = 32.532270, display_name = _("Mandria")},
+419:["Timi"] = { latitude = 34.731608, longitude = 32.516070, display_name = _("Timi")},
+420:["Marathounta"] = { latitude = 34.791211, longitude = 32.487025, display_name = _("Marathounta")},
+421:["Kathikas"] = { latitude = 34.912540, longitude = 32.425781, display_name = _("Kathikas")},
+422:["Peyia"] = { latitude = 34.883505, longitude = 32.380320, display_name = _("Peyia")},
+423:["Tsada"] = { latitude = 34.839381, longitude = 32.475236, display_name = _("Tsada")},
+424:["Stroumpi"] = { latitude = 34.883859, longitude = 32.482008, display_name = _("Stroumpi")},
+425:["Agia Barbara"] = { latitude = 34.750691, longitude = 32.510470, display_name = _("Agia Barbara")},
+426:["Agios Georgios Pegeias"] = { latitude = 34.902241, longitude = 32.325863, display_name = _("Agios Georgios Pegeias")},
+427:["Mesa Chorio"] = { latitude = 34.809478, longitude = 32.461618, display_name = _("Mesa Chorio")},
+428:["Pissouri"] = { latitude = 34.668905, longitude = 32.701048, display_name = _("Pissouri")},
+429:["Choletria"] = { latitude = 34.762878, longitude = 32.599142, display_name = _("Choletria")},
+430:["Koili"] = { latitude = 34.860107, longitude = 32.455015, display_name = _("Koili")},
+431:["Choulou Village"] = { latitude = 34.871900, longitude = 32.557968, display_name = _("Choulou Village")},
+432:["Fyti"] = { latitude = 34.928563, longitude = 32.544993, display_name = _("Fyti")},
+433:["Drymou"] = { latitude = 34.925470, longitude = 32.513109, display_name = _("Drymou")},
+434:["Simou"] = { latitude = 34.941317, longitude = 32.503857, display_name = _("Simou")},
+435:["Avdimou"] = { latitude = 34.695845, longitude = 32.762085, display_name = _("Avdimou")},
+436:["Polemi"] = { latitude = 34.885627, longitude = 32.507547, display_name = _("Polemi")},
+437:["Agios Demetrianos"] = { latitude = 34.906770, longitude = 32.550754, display_name = _("Agios Demetrianos")},
+438:["Kanaviou"] = { latitude = 34.915585, longitude = 32.574702, display_name = _("Kanaviou")},
+439:["Nikoklia"] = { latitude = 34.729321, longitude = 32.576835, display_name = _("Nikoklia")},
+440:["Nata"] = { latitude = 34.778942, longitude = 32.571063, display_name = _("Nata")},
+441:["Anarita"] = { latitude = 34.741019, longitude = 32.533769, display_name = _("Anarita")},
+442:["Drousha"] = { latitude = 34.962257, longitude = 32.398645, display_name = _("Drousha")},
+443:["Pano Arodes"] = { latitude = 34.936156, longitude = 32.407228, display_name = _("Pano Arodes")},
+444:["Lemona"] = { latitude = 34.862611, longitude = 32.557950, display_name = _("Lemona")},
+445:["Yiolou"] = { latitude = 34.924640, longitude = 32.473288, display_name = _("Yiolou")},
+446:["Pano Panagia"] = { latitude = 34.920522, longitude = 32.631212, display_name = _("Pano Panagia")},
+447:["Kato Pyrgos"] = { latitude = 35.181229, longitude = 32.684581, display_name = _("Kato Pyrgos")},
+448:["Trachypedoula"] = { latitude = 34.800995, longitude = 32.678918, display_name = _("Trachypedoula")},
+449:["Neo Chorio"] = { latitude = 35.026539, longitude = 32.363440, display_name = _("Neo Chorio")},
+450:["Ayios Yeorgios"] = { latitude = 34.778531, longitude = 32.652547, display_name = _("Ayios Yeorgios")},
+451:["Pomos"] = { latitude = 35.160650, longitude = 32.546536, display_name = _("Pomos")},
+452:["Kinoussa"] = { latitude = 35.033124, longitude = 32.507161, display_name = _("Kinoussa")},
+453:["Kritou Marottou"] = { latitude = 34.926635, longitude = 32.562511, display_name = _("Kritou Marottou")},
+454:["Anadiou"] = { latitude = 34.944470, longitude = 32.566024, display_name = _("Anadiou")},
+455:["Kallepeia"] = { latitude = 34.845730, longitude = 32.500867, display_name = _("Kallepeia")},
+456:["Chrysochou"] = { latitude = 35.003688, longitude = 32.439510, display_name = _("Chrysochou")},
+457:["Goudi"] = { latitude = 34.991751, longitude = 32.441850, display_name = _("Goudi")},
+458:["Terra"] = { latitude = 34.966470, longitude = 32.424455, display_name = _("Terra")},
+459:["Kritou Terra"] = { latitude = 34.955673, longitude = 32.422224, display_name = _("Kritou Terra")},
+460:["Mallia"] = { latitude = 34.816663, longitude = 32.782711, display_name = _("Mallia")},
+461:["Plataniskia"] = { latitude = 34.712470, longitude = 32.711061, display_name = _("Plataniskia")},
+462:["Mamonia"] = { latitude = 34.769794, longitude = 32.636721, display_name = _("Mamonia")},
+463:["Pretori"] = { latitude = 34.849210, longitude = 32.746407, display_name = _("Pretori")},
+464:["Mylikouri"] = { latitude = 34.962104, longitude = 32.750769, display_name = _("Mylikouri")},
+465:["Tsakistra"] = { latitude = 35.024518, longitude = 32.723070, display_name = _("Tsakistra")},
+466:["Kampos"] = { latitude = 35.040153, longitude = 32.732495, display_name = _("Kampos")},
+467:["Salamiou"] = { latitude = 34.840032, longitude = 32.689471, display_name = _("Salamiou")},
+468:["Omodhos"] = { latitude = 34.848106, longitude = 32.809067, display_name = _("Omodhos")},
+469:["Tris Elies"] = { latitude = 34.931828, longitude = 32.793529, display_name = _("Tris Elies")},
+470:["Alectora"] = { latitude = 34.709406, longitude = 32.683189, display_name = _("Alectora")},
+471:["Arsos"] = { latitude = 34.840546, longitude = 32.768890, display_name = _("Arsos")},
+472:["Kelokedara"] = { latitude = 34.812611, longitude = 32.651651, display_name = _("Kelokedara")},
+473:["Stavrokonou"] = { latitude = 34.785345, longitude = 32.617812, display_name = _("Stavrokonou")},
+474:["Arminou"] = { latitude = 34.861572, longitude = 32.720259, display_name = _("Arminou")},
+475:["Asprogia"] = { latitude = 34.922564, longitude = 32.613785, display_name = _("Asprogia")},
+476:["Anogyra"] = { latitude = 34.739796, longitude = 32.734062, display_name = _("Anogyra")},
+477:["Kissonerga"] = { latitude = 34.822866, longitude = 32.401922, display_name = _("Kissonerga")},
+478:["Statos-Agios Photios"] = { latitude = 34.885322, longitude = 32.621495, display_name = _("Statos-Agios Photios")},
+479:["Pachyammos"] = { latitude = 35.171212, longitude = 32.585264, display_name = _("Pachyammos")},
+480:["Pigenia"] = { latitude = 35.169002, longitude = 32.657078, display_name = _("Pigenia")},
+481:["Mosfili"] = { latitude = 35.179978, longitude = 32.631516, display_name = _("Mosfili")},
+482:["Aksilou"] = { latitude = 34.806104, longitude = 32.564681, display_name = _("Aksilou")},
+483:["Amargeti"] = { latitude = 34.823625, longitude = 32.583248, display_name = _("Amargeti")},
+484:["Pentalia"] = { latitude = 34.855844, longitude = 32.620447, display_name = _("Pentalia")},
+485:["Agia Marina Kelokedaron"] = { latitude = 34.828943, longitude = 32.614453, display_name = _("Agia Marina Kelokedaron")},
+486:["Potamiou"] = { latitude = 34.824362, longitude = 32.806959, display_name = _("Potamiou")},
+487:["Geroskipou"] = { latitude = 34.761175, longitude = 32.452697, display_name = _("Geroskipou")},
+488:["Yesilirmak"] = { latitude = 35.167523, longitude = 32.739489, display_name = _("Yesilirmak")},
+489:["Ayia Marina Chrysochous"] = { latitude = 35.120305, longitude = 32.514681, display_name = _("Ayia Marina Chrysochous")},
+490:["Argaka"] = { latitude = 35.065576, longitude = 32.485881, display_name = _("Argaka")},
+491:["Pelathousa"] = { latitude = 35.028011, longitude = 32.475560, display_name = _("Pelathousa")},
+492:["Androlikou"] = { latitude = 34.998735, longitude = 32.381103, display_name = _("Androlikou")},
+493:["Vassa"] = { latitude = 34.833676, longitude = 32.791727, display_name = _("Vassa")},
+494:["Lysos"] = { latitude = 34.994907, longitude = 32.512007, display_name = _("Lysos")},
+495:["Theletra"] = { latitude = 34.912195, longitude = 32.447295, display_name = _("Theletra")},
+496:["Aphrodite Hills"] = { latitude = 34.683989, longitude = 32.613011, display_name = _("Aphrodite Hills")},
+497:["Dora"] = { latitude = 34.780641, longitude = 32.738130, display_name = _("Dora")},
+498:["Mut"] = { latitude = 36.643451, longitude = 33.438188, display_name = _("Mut")},
+499:["Ermenek"] = { latitude = 36.639313, longitude = 32.891781, display_name = _("Ermenek")},
+500:["Anamur"] = { latitude = 36.075720, longitude = 32.837883, display_name = _("Anamur")},
+501:["Basyayla"] = { latitude = 36.753599, longitude = 32.679537, display_name = _("Basyayla")},
+502:["Guney"] = { latitude = 36.154167, longitude = 32.450556, display_name = _("Guney")},
+503:["Demirtas"] = { latitude = 36.416868, longitude = 32.198377, display_name = _("Demirtas")},
+504:["Beldibi"] = { latitude = 36.450000, longitude = 32.315278, display_name = _("Beldibi")},
+505:["Karacukur"] = { latitude = 36.281629, longitude = 32.405868, display_name = _("Karacukur")},
+506:["Corus"] = { latitude = 36.332587, longitude = 32.430553, display_name = _("Corus")},
+507:["Yeniguney"] = { latitude = 36.285000, longitude = 32.467500, display_name = _("Yeniguney")},
+508:["Sugozu"] = { latitude = 36.425063, longitude = 32.447476, display_name = _("Sugozu")},
+509:["Erdemli"] = { latitude = 36.605896, longitude = 34.309941, display_name = _("Erdemli")},
+510:["Camliyayla"] = { latitude = 37.171067, longitude = 34.621793, display_name = _("Camliyayla")},
+511:["Bozyazi"] = { latitude = 36.103255, longitude = 32.974656, display_name = _("Bozyazi")},
+512:["Gulnar"] = { latitude = 36.338683, longitude = 33.401070, display_name = _("Gulnar")},
+513:["Sogucak"] = { latitude = 36.966286, longitude = 34.550467, display_name = _("Sogucak")},
+514:["Balcilar"] = { latitude = 36.892547, longitude = 32.685223, display_name = _("Balcilar")},
+515:["Sebil"] = { latitude = 37.129156, longitude = 34.561949, display_name = _("Sebil")},
+516:["Findikpinari"] = { latitude = 36.922300, longitude = 34.367386, display_name = _("Findikpinari")},
+517:["Cetmi"] = { latitude = 36.878479, longitude = 32.622590, display_name = _("Cetmi")},
+518:["Bolay"] = { latitude = 36.870377, longitude = 32.616754, display_name = _("Bolay")},
+519:["Kocahamzali"] = { latitude = 36.863732, longitude = 34.522803, display_name = _("Kocahamzali")},
+520:["Cavak"] = { latitude = 36.840183, longitude = 34.544435, display_name = _("Cavak")},
+521:["Dagpazari"] = { latitude = 36.829601, longitude = 33.468057, display_name = _("Dagpazari")},
+522:["Kavakozu"] = { latitude = 36.873481, longitude = 33.394556, display_name = _("Kavakozu")},
+523:["Gume"] = { latitude = 36.920553, longitude = 33.509615, display_name = _("Gume")},
+524:["Koprubasi"] = { latitude = 36.783476, longitude = 33.178883, display_name = _("Koprubasi")},
+525:["Inalkoy"] = { latitude = 36.135199, longitude = 32.540990, display_name = _("Inalkoy")},
+526:["Kazanc"] = { latitude = 36.502742, longitude = 32.859488, display_name = _("Kazanc")},
+527:["Kocasli"] = { latitude = 36.549780, longitude = 32.635845, display_name = _("Kocasli")},
+528:["Gokceseki"] = { latitude = 36.619481, longitude = 33.021301, display_name = _("Gokceseki")},
+529:["Gormeli"] = { latitude = 36.544789, longitude = 32.977313, display_name = _("Gormeli")},
+530:["Goktepe"] = { latitude = 36.627787, longitude = 32.627055, display_name = _("Goktepe")},
+531:["Yerbag"] = { latitude = 36.602877, longitude = 32.765024, display_name = _("Yerbag")},
+532:["Adiller"] = { latitude = 36.686945, longitude = 32.620597, display_name = _("Adiller")},
+533:["Kayaonu"] = { latitude = 37.125499, longitude = 33.832249, display_name = _("Kayaonu")},
+534:["Comelek"] = { latitude = 36.711828, longitude = 33.686224, display_name = _("Comelek")},
+535:["Derekoy"] = { latitude = 36.639501, longitude = 33.659293, display_name = _("Derekoy")},
+536:["Kumru Yaylasi"] = { latitude = 36.735004, longitude = 33.511791, display_name = _("Kumru Yaylasi")},
+537:["Gozne"] = { latitude = 36.997580, longitude = 34.573647, display_name = _("Gozne")},
+538:["Degirmendere"] = { latitude = 37.059589, longitude = 34.540509, display_name = _("Degirmendere")},
+539:["Sarikavak"] = { latitude = 37.110256, longitude = 34.684187, display_name = _("Sarikavak")},
+540:["Resul"] = { latitude = 36.881369, longitude = 34.591633, display_name = _("Resul")},
+541:["Caglarca"] = { latitude = 37.005130, longitude = 34.445285, display_name = _("Caglarca")},
+542:["Bekiralani"] = { latitude = 36.984575, longitude = 34.523157, display_name = _("Bekiralani")},
+543:["Dalakdere"] = { latitude = 36.924936, longitude = 34.568354, display_name = _("Dalakdere")},
+544:["Yavca"] = { latitude = 37.018072, longitude = 34.374299, display_name = _("Yavca")},
+545:["Camlidere"] = { latitude = 36.898954, longitude = 34.556730, display_name = _("Camlidere")},
+546:["Degnek"] = { latitude = 37.067592, longitude = 34.393852, display_name = _("Degnek")},
+547:["Aladag"] = { latitude = 36.941463, longitude = 34.497057, display_name = _("Aladag")},
+548:["Arslankoy"] = { latitude = 37.019640, longitude = 34.291595, display_name = _("Arslankoy")},
+549:["Yenikoy"] = { latitude = 36.975548, longitude = 34.497985, display_name = _("Yenikoy")},
+550:["Olukkoyagi"] = { latitude = 37.228803, longitude = 34.684591, display_name = _("Olukkoyagi")},
+551:["Akcatekir"] = { latitude = 37.346554, longitude = 34.807748, display_name = _("Akcatekir")},
+552:["Bozdogan"] = { latitude = 36.091793, longitude = 32.900727, display_name = _("Bozdogan")},
+553:["Bozon"] = { latitude = 36.804363, longitude = 34.497238, display_name = _("Bozon")},
+554:["Camili"] = { latitude = 36.890831, longitude = 34.617832, display_name = _("Camili")},
+555:["Cemilli"] = { latitude = 36.802769, longitude = 34.450855, display_name = _("Cemilli")},
+556:["Cinkoy"] = { latitude = 36.986992, longitude = 34.756832, display_name = _("Cinkoy")},
+557:["Dedeler"] = { latitude = 36.269211, longitude = 33.611233, display_name = _("Dedeler")},
+558:["Delikkaya"] = { latitude = 36.285740, longitude = 33.486439, display_name = _("Delikkaya")},
+559:["Demiroren"] = { latitude = 36.046132, longitude = 32.678841, display_name = _("Demiroren")},
+560:["Dogancay"] = { latitude = 36.853901, longitude = 34.429619, display_name = _("Dogancay")},
+561:["Doglu"] = { latitude = 36.747231, longitude = 34.425457, display_name = _("Doglu")},
+562:["Dogusandal"] = { latitude = 36.763348, longitude = 34.392998, display_name = _("Dogusandal")},
+563:["Esenli"] = { latitude = 36.940361, longitude = 34.646919, display_name = _("Esenli")},
+564:["Eski Yuruk"] = { latitude = 36.246223, longitude = 33.400188, display_name = _("Eski Yuruk")},
+565:["Gercebahsis"] = { latitude = 36.145644, longitude = 32.864237, display_name = _("Gercebahsis")},
+566:["Gozsuzce"] = { latitude = 36.153416, longitude = 33.198791, display_name = _("Gozsuzce")},
+567:["Guzelyayla"] = { latitude = 37.013122, longitude = 34.476623, display_name = _("Guzelyayla")},
+568:["Hacibahattin"] = { latitude = 36.175754, longitude = 33.350319, display_name = _("Hacibahattin")},
+569:["Kalekoy"] = { latitude = 36.767647, longitude = 34.525433, display_name = _("Kalekoy")},
+570:["Karacaoglan"] = { latitude = 36.667161, longitude = 33.732463, display_name = _("Karacaoglan")},
+571:["Karadiken"] = { latitude = 36.999853, longitude = 34.713617, display_name = _("Karadiken")},
+572:["Karakaya"] = { latitude = 36.425696, longitude = 33.785061, display_name = _("Karakaya")},
+573:["Karayakup"] = { latitude = 36.777904, longitude = 34.368607, display_name = _("Karayakup")},
+574:["Kayrak"] = { latitude = 36.349243, longitude = 33.523804, display_name = _("Kayrak")},
+575:["Korucuk"] = { latitude = 36.111542, longitude = 32.734665, display_name = _("Korucuk")},
+576:["Kizilca"] = { latitude = 36.309841, longitude = 33.072708, display_name = _("Kizilca")},
+577:["Lale"] = { latitude = 36.209045, longitude = 32.581318, display_name = _("Lale")},
+578:["Lenger"] = { latitude = 36.246613, longitude = 33.153984, display_name = _("Lenger")},
+579:["Mezitli"] = { latitude = 36.745137, longitude = 34.524236, display_name = _("Mezitli")},
+580:["Nasrettin"] = { latitude = 36.042645, longitude = 32.778973, display_name = _("Nasrettin")},
+581:["Buyukeceli"] = { latitude = 36.169905, longitude = 33.556496, display_name = _("Buyukeceli")},
+582:["Parmakkurdu"] = { latitude = 36.973209, longitude = 34.665067, display_name = _("Parmakkurdu")},
+583:["Sarilar"] = { latitude = 36.904461, longitude = 34.305846, display_name = _("Sarilar")},
+584:["Sariveli"] = { latitude = 36.949223, longitude = 34.726517, display_name = _("Sariveli")},
+585:["Takanli"] = { latitude = 36.786934, longitude = 34.415188, display_name = _("Takanli")},
+586:["Tasoluk"] = { latitude = 36.351799, longitude = 33.129936, display_name = _("Tasoluk")},
+587:["Tepe"] = { latitude = 36.920878, longitude = 34.292652, display_name = _("Tepe")},
+588:["Yagda"] = { latitude = 36.736355, longitude = 34.050095, display_name = _("Yagda")},
+589:["Yuksekoluk"] = { latitude = 36.973911, longitude = 34.421415, display_name = _("Yuksekoluk")},
+590:["Camlipinaralani"] = { latitude = 36.042679, longitude = 32.723845, display_name = _("Camlipinaralani")},
+591:["Cataloluk"] = { latitude = 36.144695, longitude = 32.789829, display_name = _("Cataloluk")},
+592:["Cevlik"] = { latitude = 36.778763, longitude = 34.457645, display_name = _("Cevlik")},
+593:["Ciftepinar"] = { latitude = 36.712413, longitude = 34.350172, display_name = _("Ciftepinar")},
+594:["Ilemin"] = { latitude = 36.732933, longitude = 34.312958, display_name = _("Ilemin")},
+595:["Insu"] = { latitude = 36.867333, longitude = 34.499275, display_name = _("Insu")},
+596:["Pinarbasi"] = { latitude = 37.102082, longitude = 33.052489, display_name = _("Pinarbasi")},
+597:["Ayvagedigi Yaylasi"] = { latitude = 37.026981, longitude = 34.565185, display_name = _("Ayvagedigi Yaylasi")},
+598:["Bozdogan"] = { latitude = 36.692844, longitude = 33.223659, display_name = _("Bozdogan")},
+599:["Esencay"] = { latitude = 36.712910, longitude = 33.458775, display_name = _("Esencay")},
+600:["Evren"] = { latitude = 36.586735, longitude = 33.297371, display_name = _("Evren")},
+601:["Gezende"] = { latitude = 36.511699, longitude = 33.156990, display_name = _("Gezende")},
+602:["Irmakli"] = { latitude = 36.571345, longitude = 33.414811, display_name = _("Irmakli")},
+603:["Kemenli"] = { latitude = 36.514950, longitude = 33.500919, display_name = _("Kemenli")},
+604:["Kumacukuru"] = { latitude = 36.665833, longitude = 33.538662, display_name = _("Kumacukuru")},
+605:["Kurtulus"] = { latitude = 36.632671, longitude = 33.552654, display_name = _("Kurtulus")},
+606:["Kuskan"] = { latitude = 36.487873, longitude = 33.269501, display_name = _("Kuskan")},
+607:["Sarikavak"] = { latitude = 36.580778, longitude = 33.643836, display_name = _("Sarikavak")},
+608:["Sucat"] = { latitude = 36.606607, longitude = 33.368756, display_name = _("Sucat")},
+609:["Yalnizcabag"] = { latitude = 36.654812, longitude = 33.157897, display_name = _("Yalnizcabag")},
+610:["Caglayangedik"] = { latitude = 36.493715, longitude = 33.579133, display_name = _("Caglayangedik")},
+611:["Ibrahimli"] = { latitude = 36.694454, longitude = 33.639885, display_name = _("Ibrahimli")},
+612:["Aybasti"] = { latitude = 37.003451, longitude = 33.107250, display_name = _("Aybasti")},
+613:["Burhan"] = { latitude = 37.079319, longitude = 33.075035, display_name = _("Burhan")},
+614:["Distas"] = { latitude = 36.796483, longitude = 33.267465, display_name = _("Distas")},
+615:["Elmadag"] = { latitude = 36.914432, longitude = 33.158306, display_name = _("Elmadag")},
+616:["Erenkavak"] = { latitude = 37.047909, longitude = 33.151283, display_name = _("Erenkavak")},
+617:["Guldere"] = { latitude = 37.024464, longitude = 33.470905, display_name = _("Guldere")},
+618:["Guzelyurt"] = { latitude = 36.831459, longitude = 33.203243, display_name = _("Guzelyurt")},
+619:["Kozlubucak"] = { latitude = 36.993269, longitude = 33.266675, display_name = _("Kozlubucak")},
+620:["Morcali"] = { latitude = 37.074318, longitude = 33.106819, display_name = _("Morcali")},
+621:["Tarlaoren"] = { latitude = 37.054871, longitude = 33.244770, display_name = _("Tarlaoren")},
+622:["Civi"] = { latitude = 36.848378, longitude = 33.557506, display_name = _("Civi")},
+623:["Cukurkoy"] = { latitude = 36.944813, longitude = 32.991434, display_name = _("Cukurkoy")},
+624:["Adakoy"] = { latitude = 36.915268, longitude = 32.897518, display_name = _("Adakoy")},
+625:["Bademli"] = { latitude = 37.023109, longitude = 32.664723, display_name = _("Bademli")},
+626:["Bozkandak"] = { latitude = 37.119320, longitude = 32.842606, display_name = _("Bozkandak")},
+627:["Guneyyurt"] = { latitude = 36.680996, longitude = 32.808348, display_name = _("Guneyyurt")},
+628:["Habiller"] = { latitude = 37.096893, longitude = 32.718903, display_name = _("Habiller")},
+629:["Pinaronu"] = { latitude = 36.566399, longitude = 32.838634, display_name = _("Pinaronu")},
+630:["Ihsaniye"] = { latitude = 36.855573, longitude = 32.935812, display_name = _("Ihsaniye")},
+631:["Sokun"] = { latitude = 36.340566, longitude = 34.009935, display_name = _("Sokun")},
+632:["Esenpinar"] = { latitude = 36.589546, longitude = 34.113293, display_name = _("Esenpinar")},
+633:["Husametli"] = { latitude = 36.664730, longitude = 34.156929, display_name = _("Husametli")},
+634:["Karaahmetli"] = { latitude = 36.548332, longitude = 34.127121, display_name = _("Karaahmetli")},
+635:["Karakesli"] = { latitude = 36.675420, longitude = 34.115603, display_name = _("Karakesli")},
+636:["Tabureli"] = { latitude = 36.653070, longitude = 34.065555, display_name = _("Tabureli")},
+637:["Yeniyurt"] = { latitude = 36.632240, longitude = 34.116905, display_name = _("Yeniyurt")},
+638:["Uctepe"] = { latitude = 36.589235, longitude = 34.236396, display_name = _("Uctepe")},
+639:["Kavakozu"] = { latitude = 37.165939, longitude = 33.744881, display_name = _("Kavakozu")},
+640:["Pinarkaya"] = { latitude = 37.113716, longitude = 33.718575, display_name = _("Pinarkaya")},
+641:["Taskale"] = { latitude = 37.142571, longitude = 33.613728, display_name = _("Taskale")},
+642:["Gokcesaray"] = { latitude = 36.260292, longitude = 32.561065, display_name = _("Gokcesaray")},
+643:["Gungoren"] = { latitude = 36.230743, longitude = 32.632561, display_name = _("Gungoren")},
+644:["Karatepe"] = { latitude = 36.407597, longitude = 32.413929, display_name = _("Karatepe")},
+645:["Komurlu"] = { latitude = 36.166385, longitude = 32.934444, display_name = _("Komurlu")},
+646:["Ikizcinar"] = { latitude = 36.484788, longitude = 32.927732, display_name = _("Ikizcinar")},
+647:["Incegiz"] = { latitude = 36.333648, longitude = 32.343650, display_name = _("Incegiz")},
+648:["Hebilli"] = { latitude = 36.923302, longitude = 34.666007, display_name = _("Hebilli")},
+649:["Kerimler"] = { latitude = 36.935673, longitude = 34.772594, display_name = _("Kerimler")},
+650:["Akova"] = { latitude = 36.389057, longitude = 33.192310, display_name = _("Akova")},
+651:["Bereket"] = { latitude = 36.349506, longitude = 33.248413, display_name = _("Bereket")},
+652:["Cukurkonak"] = { latitude = 36.391751, longitude = 33.332650, display_name = _("Cukurkonak")},
+653:["Ortulu"] = { latitude = 36.451421, longitude = 33.413284, display_name = _("Ortulu")},
+654:["Seyhomer"] = { latitude = 36.337904, longitude = 33.302251, display_name = _("Seyhomer")},
+655:["Dagli"] = { latitude = 36.709141, longitude = 34.262116, display_name = _("Dagli")},
+656:["Elbeyli"] = { latitude = 36.696751, longitude = 34.017265, display_name = _("Elbeyli")},
+657:["Guzeloluk"] = { latitude = 36.795725, longitude = 34.082877, display_name = _("Guzeloluk")},
+658:["Kosereli"] = { latitude = 36.709030, longitude = 34.170876, display_name = _("Kosereli")},
+659:["Sarikaya"] = { latitude = 36.763788, longitude = 34.114890, display_name = _("Sarikaya")},
+660:["Sorgun"] = { latitude = 36.871544, longitude = 34.137512, display_name = _("Sorgun")},
+661:["Toros"] = { latitude = 36.885424, longitude = 34.115650, display_name = _("Toros")},
+662:["Korucak"] = { latitude = 37.153023, longitude = 34.715847, display_name = _("Korucak")},
+663:["Uzumlu"] = { latitude = 36.848347, longitude = 34.340931, display_name = _("Uzumlu")},
+664:["Gurcam"] = { latitude = 36.215515, longitude = 32.486745, display_name = _("Gurcam")},
+665:["Mersin"] = { latitude = 36.824224, longitude = 34.628565, display_name = _("Mersin")},
+666:["Silifke"] = { latitude = 36.389185, longitude = 33.932160, display_name = _("Silifke")},
+667:["Gazipasa"] = { latitude = 36.268494, longitude = 32.314498, display_name = _("Gazipasa")},
+668:["Aydincik"] = { latitude = 36.145295, longitude = 33.322088, display_name = _("Aydincik")},
+669:["Adana"] = { latitude = 37.016810, longitude = 35.275819, display_name = _("Adana")},
+670:["Cotlu"] = { latitude = 36.874264, longitude = 35.487177, display_name = _("Cotlu")},
+671:["Ceyhan"] = { latitude = 37.032204, longitude = 35.820925, display_name = _("Ceyhan")},
+672:["Karsi"] = { latitude = 36.761068, longitude = 36.223837, display_name = _("Karsi")},
+673:["Sariseki"] = { latitude = 36.629934, longitude = 36.220243, display_name = _("Sariseki")},
+674:["Iskenderun"] = { latitude = 36.570207, longitude = 36.147166, display_name = _("Iskenderun")},
+675:["Kirikhan"] = { latitude = 36.501251, longitude = 36.361665, display_name = _("Kirikhan")},
+676:["Akincilar"] = { latitude = 36.388407, longitude = 36.231198, display_name = _("Akincilar")},
+677:["Kumlu"] = { latitude = 36.365700, longitude = 36.465543, display_name = _("Kumlu")},
+678:["Reyhanli"] = { latitude = 36.263975, longitude = 36.567831, display_name = _("Reyhanli")},
+679:["Antakya"] = { latitude = 36.211221, longitude = 36.157590, display_name = _("Antakya")},
+680:["Samandag"] = { latitude = 36.081880, longitude = 35.981085, display_name = _("Samandag")},
+681:["Gaziantep"] = { latitude = 37.062653, longitude = 37.383408, display_name = _("Gaziantep")},
+682:["Imamoglu"] = { latitude = 37.256528, longitude = 35.663411, display_name = _("Imamoglu")},
+683:["Saygecit"] = { latitude = 37.248791, longitude = 35.625353, display_name = _("Saygecit")},
+684:["Osmaniye"] = { latitude = 37.073671, longitude = 36.255941, display_name = _("Osmaniye")},
+685:["Karatas"] = { latitude = 36.565325, longitude = 35.381304, display_name = _("Karatas")},
+686:["Dortyol"] = { latitude = 36.837412, longitude = 36.224341, display_name = _("Dortyol")},
+687:["Erzin"] = { latitude = 36.953608, longitude = 36.202282, display_name = _("Erzin")},
+688:["Cukurkopru"] = { latitude = 37.339231, longitude = 35.917985, display_name = _("Cukurkopru")},
+689:["Buyuktuysuz"] = { latitude = 37.020790, longitude = 36.109193, display_name = _("Buyuktuysuz")},
+690:["Karabacak"] = { latitude = 37.259340, longitude = 36.037716, display_name = _("Karabacak")},
+691:["Gazikoy"] = { latitude = 37.295450, longitude = 35.852451, display_name = _("Gazikoy")},
+692:["Gokceyol"] = { latitude = 37.295048, longitude = 35.808819, display_name = _("Gokceyol")},
+693:["Doruk"] = { latitude = 36.877598, longitude = 35.760820, display_name = _("Doruk")},
+694:["Kosreli"] = { latitude = 37.161445, longitude = 35.977732, display_name = _("Kosreli")},
+695:["Sugozu"] = { latitude = 36.841458, longitude = 35.860074, display_name = _("Sugozu")},
+696:["Mercimek"] = { latitude = 37.104513, longitude = 35.794950, display_name = _("Mercimek")},
+697:["Incirli"] = { latitude = 36.893384, longitude = 35.947136, display_name = _("Incirli")},
+698:["Incirlik"] = { latitude = 36.987866, longitude = 35.440832, display_name = _("Incirlik")},
+699:["Cihadiye"] = { latitude = 37.050737, longitude = 35.561613, display_name = _("Cihadiye")},
+700:["Kurkculer"] = { latitude = 36.989556, longitude = 35.510233, display_name = _("Kurkculer")},
+701:["Aliefendioglu"] = { latitude = 36.883629, longitude = 34.910675, display_name = _("Aliefendioglu")},
+702:["Atalar"] = { latitude = 36.853973, longitude = 34.852444, display_name = _("Atalar")},
+703:["Bahsis"] = { latitude = 36.823593, longitude = 34.884811, display_name = _("Bahsis")},
+704:["Kelahmet"] = { latitude = 36.818691, longitude = 34.979096, display_name = _("Kelahmet")},
+705:["Mahmutaga"] = { latitude = 36.936993, longitude = 34.969502, display_name = _("Mahmutaga")},
+706:["Nemiroglu"] = { latitude = 36.918541, longitude = 35.012615, display_name = _("Nemiroglu")},
+707:["Yesiltepe"] = { latitude = 36.845619, longitude = 34.895405, display_name = _("Yesiltepe")},
+708:["Yunusoglu"] = { latitude = 36.953651, longitude = 34.978336, display_name = _("Yunusoglu")},
+709:["Yuksekkoy"] = { latitude = 36.934128, longitude = 35.046757, display_name = _("Yuksekkoy")},
+710:["Cicekli"] = { latitude = 36.874371, longitude = 35.087093, display_name = _("Cicekli")},
+711:["Kurttepe"] = { latitude = 37.056900, longitude = 35.273949, display_name = _("Kurttepe")},
+712:["Kuzuculu"] = { latitude = 36.883835, longitude = 36.225632, display_name = _("Kuzuculu")},
+713:["Yeniyurt"] = { latitude = 36.885415, longitude = 36.150480, display_name = _("Yeniyurt")},
+714:["Yesilkoy"] = { latitude = 36.849552, longitude = 36.196766, display_name = _("Yesilkoy")},
+715:["Yesiltepe"] = { latitude = 36.916771, longitude = 36.125946, display_name = _("Yesiltepe")},
+716:["Yoncaduzu"] = { latitude = 36.973328, longitude = 36.210064, display_name = _("Yoncaduzu")},
+717:["Karakese"] = { latitude = 36.824791, longitude = 36.245556, display_name = _("Karakese")},
+718:["Havutlu"] = { latitude = 36.933117, longitude = 35.353413, display_name = _("Havutlu")},
+719:["Kucuk Dikili"] = { latitude = 36.997665, longitude = 35.211193, display_name = _("Kucuk Dikili")},
+720:["Abdioglu"] = { latitude = 36.910213, longitude = 35.565185, display_name = _("Abdioglu")},
+721:["Akdam"] = { latitude = 36.801189, longitude = 35.445622, display_name = _("Akdam")},
+722:["Atakoy"] = { latitude = 36.752564, longitude = 35.113769, display_name = _("Atakoy")},
+723:["Bahcekoy"] = { latitude = 36.611977, longitude = 35.446663, display_name = _("Bahcekoy")},
+724:["Camili"] = { latitude = 36.933723, longitude = 35.431550, display_name = _("Camili")},
+725:["Camuzcu"] = { latitude = 36.917568, longitude = 35.272533, display_name = _("Camuzcu")},
+726:["Danisment"] = { latitude = 36.825291, longitude = 35.447452, display_name = _("Danisment")},
+727:["Demirtas"] = { latitude = 36.822380, longitude = 35.815334, display_name = _("Demirtas")},
+728:["Denizkuyusu"] = { latitude = 36.843975, longitude = 35.299892, display_name = _("Denizkuyusu")},
+729:["Karayusuflu M."] = { latitude = 36.869614, longitude = 35.243854, display_name = _("Karayusuflu M.")},
+730:["Murseloglu M."] = { latitude = 36.810181, longitude = 35.163867, display_name = _("Murseloglu M.")},
+731:["Sirkenli"] = { latitude = 36.727657, longitude = 35.400623, display_name = _("Sirkenli")},
+732:["Yahsiler"] = { latitude = 36.792603, longitude = 35.497196, display_name = _("Yahsiler")},
+733:["Yemisli"] = { latitude = 36.653832, longitude = 35.359867, display_name = _("Yemisli")},
+734:["Yenidam"] = { latitude = 36.953995, longitude = 35.246380, display_name = _("Yenidam")},
+735:["Yenikoy"] = { latitude = 36.816143, longitude = 35.774937, display_name = _("Yenikoy")},
+736:["Yesilkoy"] = { latitude = 36.675354, longitude = 35.493233, display_name = _("Yesilkoy")},
+737:["Yolgecen"] = { latitude = 36.966373, longitude = 35.192333, display_name = _("Yolgecen")},
+738:["Caputcu M."] = { latitude = 36.865171, longitude = 35.196627, display_name = _("Caputcu M.")},
+739:["Cimeli"] = { latitude = 36.698330, longitude = 35.343601, display_name = _("Cimeli")},
+740:["Sahinaga"] = { latitude = 36.802868, longitude = 35.397671, display_name = _("Sahinaga")},
+741:["Seyhmurat"] = { latitude = 36.861774, longitude = 35.431366, display_name = _("Seyhmurat")},
+742:["Akdam"] = { latitude = 37.236393, longitude = 35.861465, display_name = _("Akdam")},
+743:["Aysehoca"] = { latitude = 37.263760, longitude = 35.851606, display_name = _("Aysehoca")},
+744:["Mustafalar"] = { latitude = 37.113766, longitude = 35.510112, display_name = _("Mustafalar")},
+745:["Dumlu"] = { latitude = 37.150242, longitude = 35.707294, display_name = _("Dumlu")},
+746:["Yesilbahce"] = { latitude = 37.170589, longitude = 35.826191, display_name = _("Yesilbahce")},
+747:["Catalhuyuk"] = { latitude = 37.196430, longitude = 35.815067, display_name = _("Catalhuyuk")},
+748:["Dokuztekne"] = { latitude = 37.009956, longitude = 35.979076, display_name = _("Dokuztekne")},
+749:["Hamdilli"] = { latitude = 37.033039, longitude = 35.926212, display_name = _("Hamdilli")},
+750:["Kocyurdu"] = { latitude = 37.213474, longitude = 36.043549, display_name = _("Kocyurdu")},
+751:["Korkuyu"] = { latitude = 36.949184, longitude = 35.823029, display_name = _("Korkuyu")},
+752:["Mustafabeyli"] = { latitude = 37.078514, longitude = 36.073406, display_name = _("Mustafabeyli")},
+753:["Kumbet"] = { latitude = 37.330630, longitude = 36.053292, display_name = _("Kumbet")},
+754:["Kalemli"] = { latitude = 36.785786, longitude = 35.763584, display_name = _("Kalemli")},
+755:["Bebeli"] = { latitude = 36.640480, longitude = 35.490871, display_name = _("Bebeli")},
+756:["Kesmeburun"] = { latitude = 36.764503, longitude = 35.490646, display_name = _("Kesmeburun")},
+757:["Cukurova"] = { latitude = 37.042264, longitude = 35.307505, display_name = _("Cukurova")},
+758:["Zeytinbeli"] = { latitude = 36.811573, longitude = 35.742145, display_name = _("Zeytinbeli")},
+759:["Yuregir"] = { latitude = 36.985580, longitude = 35.366488, display_name = _("Yuregir")},
+760:["Gecitli"] = { latitude = 36.952820, longitude = 35.626236, display_name = _("Gecitli")},
+761:["Topallar"] = { latitude = 37.329432, longitude = 35.758293, display_name = _("Topallar")},
+762:["Islahiye"] = { latitude = 37.025433, longitude = 36.632707, display_name = _("Islahiye")},
+763:["Oguzeli"] = { latitude = 36.963870, longitude = 37.512537, display_name = _("Oguzeli")},
+764:["Qarah Kuz"] = { latitude = 36.735114, longitude = 37.648246, display_name = _("Qarah Kuz")},
+765:["Bak Ubasi"] = { latitude = 36.797544, longitude = 36.766200, display_name = _("Bak Ubasi")},
+766:["Samalik"] = { latitude = 36.783775, longitude = 36.697058, display_name = _("Samalik")},
+767:["Bulbul"] = { latitude = 36.771627, longitude = 36.818877, display_name = _("Bulbul")},
+768:["Qarah Baba"] = { latitude = 36.747498, longitude = 36.627846, display_name = _("Qarah Baba")},
+769:["Qudah Kuwi"] = { latitude = 36.619247, longitude = 36.644039, display_name = _("Qudah Kuwi")},
+770:["Shaykh al Hadid"] = { latitude = 36.501225, longitude = 36.600435, display_name = _("Shaykh al Hadid")},
+771:["Jaqmaq"] = { latitude = 36.715090, longitude = 36.698269, display_name = _("Jaqmaq")},
+772:["Ereba"] = { latitude = 36.575155, longitude = 36.708755, display_name = _("Ereba")},
+773:["Bibaka"] = { latitude = 36.718727, longitude = 36.822997, display_name = _("Bibaka")},
+774:["Kirsanli"] = { latitude = 36.660694, longitude = 37.536368, display_name = _("Kirsanli")},
+775:["Abudane"] = { latitude = 36.754267, longitude = 36.914150, display_name = _("Abudane")},
+776:["Haydar Basha"] = { latitude = 36.700000, longitude = 37.683333, display_name = _("Haydar Basha")},
+777:["Nabghah"] = { latitude = 36.637955, longitude = 37.670658, display_name = _("Nabghah")},
+778:["Qarah Kubri"] = { latitude = 36.635632, longitude = 37.261948, display_name = _("Qarah Kubri")},
+779:["Bab Laymun"] = { latitude = 36.701284, longitude = 37.583533, display_name = _("Bab Laymun")},
+780:["Tathimus"] = { latitude = 36.618344, longitude = 37.376703, display_name = _("Tathimus")},
+781:["Qarah Tashli"] = { latitude = 36.666667, longitude = 37.783333, display_name = _("Qarah Tashli")},
+782:["Mirza Shahid"] = { latitude = 36.630199, longitude = 37.738552, display_name = _("Mirza Shahid")},
+783:["Bawz Huyuk"] = { latitude = 36.731222, longitude = 37.777528, display_name = _("Bawz Huyuk")},
+784:["Khalfatli"] = { latitude = 36.657703, longitude = 37.324518, display_name = _("Khalfatli")},
+785:["Yazibaxe"] = { latitude = 36.654444, longitude = 37.047500, display_name = _("Yazibaxe")},
+786:["Shawah"] = { latitude = 36.608224, longitude = 37.632466, display_name = _("Shawah")},
+787:["Zawghar"] = { latitude = 36.750781, longitude = 37.806699, display_name = _("Zawghar")},
+788:["Dersiwan"] = { latitude = 36.713392, longitude = 36.997150, display_name = _("Dersiwan")},
+789:["Ziyarah"] = { latitude = 36.661574, longitude = 37.621006, display_name = _("Ziyarah")},
+790:["Duraqli"] = { latitude = 36.706618, longitude = 36.910394, display_name = _("Duraqli")},
+791:["Thaljah Sharqiyah"] = { latitude = 36.639419, longitude = 37.501258, display_name = _("Thaljah Sharqiyah")},
+792:["Al Ayubiyah"] = { latitude = 36.591243, longitude = 37.517457, display_name = _("Al Ayubiyah")},
+793:["Sandarah"] = { latitude = 36.595691, longitude = 37.332194, display_name = _("Sandarah")},
+794:["Qubbat at Turkuman"] = { latitude = 36.700000, longitude = 37.733333, display_name = _("Qubbat at Turkuman")},
+795:["As Sabuniyah"] = { latitude = 36.695042, longitude = 37.814350, display_name = _("As Sabuniyah")},
+796:["Aykadah"] = { latitude = 36.649405, longitude = 37.180835, display_name = _("Aykadah")},
+797:["Silsilah"] = { latitude = 36.688129, longitude = 37.535015, display_name = _("Silsilah")},
+798:["Sakizlar"] = { latitude = 36.612321, longitude = 37.560608, display_name = _("Sakizlar")},
+799:["Shaykh Khurus"] = { latitude = 36.732600, longitude = 36.886640, display_name = _("Shaykh Khurus")},
+800:["Hafirah"] = { latitude = 36.710752, longitude = 37.849940, display_name = _("Hafirah")},
+801:["Adabat"] = { latitude = 36.622446, longitude = 37.490600, display_name = _("Adabat")},
+802:["Zilif"] = { latitude = 36.617771, longitude = 37.603051, display_name = _("Zilif")},
+803:["Saghir Ubasi"] = { latitude = 36.703065, longitude = 36.780138, display_name = _("Saghir Ubasi")},
+804:["Qanli Quyu"] = { latitude = 36.662291, longitude = 37.679501, display_name = _("Qanli Quyu")},
+805:["Al Hadirah"] = { latitude = 36.703521, longitude = 37.891848, display_name = _("Al Hadirah")},
+806:["Kundurah"] = { latitude = 36.742913, longitude = 37.889650, display_name = _("Kundurah")},
+807:["Kaklijah"] = { latitude = 36.803299, longitude = 37.956888, display_name = _("Kaklijah")},
+808:["Marma al Hajar"] = { latitude = 36.782245, longitude = 37.992475, display_name = _("Marma al Hajar")},
+809:["Ash Shamil"] = { latitude = 36.767120, longitude = 38.011360, display_name = _("Ash Shamil")},
+810:["Jalur"] = { latitude = 36.739688, longitude = 36.708701, display_name = _("Jalur")},
+811:["Dawrish"] = { latitude = 36.674731, longitude = 36.901906, display_name = _("Dawrish")},
+812:["Khilalka"] = { latitude = 36.755368, longitude = 36.740887, display_name = _("Khilalka")},
+813:["Marsawiyah"] = { latitude = 36.762839, longitude = 36.953980, display_name = _("Marsawiyah")},
+814:["Bayadiyah"] = { latitude = 36.837164, longitude = 38.059051, display_name = _("Bayadiyah")},
+815:["Jibnah"] = { latitude = 36.843834, longitude = 38.091079, display_name = _("Jibnah")},
+816:["Az Ziyarah"] = { latitude = 36.854259, longitude = 38.034358, display_name = _("Az Ziyarah")},
+817:["Jarabulus"] = { latitude = 36.818115, longitude = 38.009831, display_name = _("Jarabulus")},
+818:["Al Qastal"] = { latitude = 36.734667, longitude = 36.858705, display_name = _("Al Qastal")},
+819:["Haj Khalil"] = { latitude = 36.677861, longitude = 36.683981, display_name = _("Haj Khalil")},
+820:["Adama"] = { latitude = 36.767841, longitude = 36.661365, display_name = _("Adama")},
+821:["Al Mudallalah"] = { latitude = 36.695300, longitude = 36.856076, display_name = _("Al Mudallalah")},
+822:["Atmana"] = { latitude = 36.656399, longitude = 36.654559, display_name = _("Atmana")},
+823:["Maskah"] = { latitude = 36.649390, longitude = 36.679211, display_name = _("Maskah")},
+824:["Uksurli"] = { latitude = 36.616287, longitude = 36.722915, display_name = _("Uksurli")},
+825:["Dunballi"] = { latitude = 36.610716, longitude = 36.679572, display_name = _("Dunballi")},
+826:["Khalil Kulku"] = { latitude = 36.578888, longitude = 36.643250, display_name = _("Khalil Kulku")},
+827:["Anqele"] = { latitude = 36.462361, longitude = 36.607504, display_name = _("Anqele")},
+828:["Nurdagi"] = { latitude = 37.178612, longitude = 36.741441, display_name = _("Nurdagi")},
+829:["Nizip"] = { latitude = 37.010886, longitude = 37.793173, display_name = _("Nizip")},
+830:["Turkoglu"] = { latitude = 37.381755, longitude = 36.850863, display_name = _("Turkoglu")},
+831:["Araban"] = { latitude = 37.425931, longitude = 37.689199, display_name = _("Araban")},
+832:["Yavuzeli"] = { latitude = 37.317633, longitude = 37.568507, display_name = _("Yavuzeli")},
+833:["Duzici"] = { latitude = 37.240127, longitude = 36.453543, display_name = _("Duzici")},
+834:["Hasanbeyli"] = { latitude = 37.130932, longitude = 36.555539, display_name = _("Hasanbeyli")},
+835:["Musabeyli"] = { latitude = 36.885432, longitude = 36.915641, display_name = _("Musabeyli")},
+836:["Polateli"] = { latitude = 36.841509, longitude = 37.143582, display_name = _("Polateli")},
+837:["Alaca"] = { latitude = 36.990576, longitude = 36.831030, display_name = _("Alaca")},
+838:["Kozlubag"] = { latitude = 36.957342, longitude = 37.004342, display_name = _("Kozlubag")},
+839:["Korahmethoyugu"] = { latitude = 36.988070, longitude = 36.959826, display_name = _("Korahmethoyugu")},
+840:["Sungutepe"] = { latitude = 36.792100, longitude = 36.949757, display_name = _("Sungutepe")},
+841:["Kurtaran"] = { latitude = 36.896869, longitude = 36.969922, display_name = _("Kurtaran")},
+842:["Fevzipasa"] = { latitude = 37.099608, longitude = 36.635078, display_name = _("Fevzipasa")},
+843:["Saraykoy"] = { latitude = 37.027937, longitude = 37.961500, display_name = _("Saraykoy")},
+844:["Yarpuz"] = { latitude = 37.048961, longitude = 36.430177, display_name = _("Yarpuz")},
+845:["Gelinbugday"] = { latitude = 37.405014, longitude = 37.580770, display_name = _("Gelinbugday")},
+846:["Kokluce"] = { latitude = 37.469769, longitude = 37.620025, display_name = _("Kokluce")},
+847:["Gulluce"] = { latitude = 37.461207, longitude = 37.578717, display_name = _("Gulluce")},
+848:["Akbudak"] = { latitude = 37.444552, longitude = 37.935580, display_name = _("Akbudak")},
+849:["Kasyolu"] = { latitude = 36.873036, longitude = 37.585093, display_name = _("Kasyolu")},
+850:["Dibecik"] = { latitude = 36.816789, longitude = 37.646859, display_name = _("Dibecik")},
+851:["Guvecli"] = { latitude = 36.853234, longitude = 37.680011, display_name = _("Guvecli")},
+852:["Ikizkuyu"] = { latitude = 36.877651, longitude = 37.499959, display_name = _("Ikizkuyu")},
+853:["Karaman"] = { latitude = 36.844384, longitude = 37.653016, display_name = _("Karaman")},
+854:["Karadibek"] = { latitude = 36.837216, longitude = 37.587918, display_name = _("Karadibek")},
+855:["Ikizkuyu"] = { latitude = 36.901325, longitude = 37.478352, display_name = _("Ikizkuyu")},
+856:["Sutluce"] = { latitude = 36.838036, longitude = 37.538020, display_name = _("Sutluce")},
+857:["Gokceli"] = { latitude = 36.879761, longitude = 37.703012, display_name = _("Gokceli")},
+858:["Kurucahuyuk"] = { latitude = 36.871071, longitude = 37.743124, display_name = _("Kurucahuyuk")},
+859:["Zeytinli"] = { latitude = 36.919494, longitude = 37.389741, display_name = _("Zeytinli")},
+860:["Duluk"] = { latitude = 37.153496, longitude = 37.362061, display_name = _("Duluk")},
+861:["Buyukkarakuyu"] = { latitude = 37.237745, longitude = 37.530321, display_name = _("Buyukkarakuyu")},
+862:["Dokuzyol"] = { latitude = 36.894205, longitude = 37.656132, display_name = _("Dokuzyol")},
+863:["Orenli"] = { latitude = 37.255240, longitude = 37.512359, display_name = _("Orenli")},
+864:["Ciflikkoy"] = { latitude = 36.827686, longitude = 37.796566, display_name = _("Ciflikkoy")},
+865:["Selmincik"] = { latitude = 36.738551, longitude = 37.495856, display_name = _("Selmincik")},
+866:["Buyuk Karacaoren"] = { latitude = 36.763786, longitude = 37.544601, display_name = _("Buyuk Karacaoren")},
+867:["Koseler"] = { latitude = 37.242718, longitude = 37.804107, display_name = _("Koseler")},
+868:["Gulbasak"] = { latitude = 37.251699, longitude = 37.772819, display_name = _("Gulbasak")},
+869:["Guder"] = { latitude = 37.170025, longitude = 37.771377, display_name = _("Guder")},
+870:["Ikizce"] = { latitude = 36.862580, longitude = 37.773733, display_name = _("Ikizce")},
+871:["Dernek"] = { latitude = 37.210419, longitude = 37.690298, display_name = _("Dernek")},
+872:["Gaziler"] = { latitude = 37.191740, longitude = 37.737264, display_name = _("Gaziler")},
+873:["Kayalar"] = { latitude = 37.224019, longitude = 37.768471, display_name = _("Kayalar")},
+874:["Turlu"] = { latitude = 37.069119, longitude = 37.758916, display_name = _("Turlu")},
+875:["Sakcagozu"] = { latitude = 37.173774, longitude = 36.926656, display_name = _("Sakcagozu")},
+876:["Zincirli"] = { latitude = 37.103918, longitude = 36.676734, display_name = _("Zincirli")},
+877:["Gulluhuyuk"] = { latitude = 37.004236, longitude = 36.686540, display_name = _("Gulluhuyuk")},
+878:["Akcakoyunlu"] = { latitude = 37.345650, longitude = 37.185194, display_name = _("Akcakoyunlu")},
+879:["Damlatas"] = { latitude = 37.450547, longitude = 37.280050, display_name = _("Damlatas")},
+880:["Egrice"] = { latitude = 37.360051, longitude = 37.331960, display_name = _("Egrice")},
+881:["Mezere"] = { latitude = 37.404636, longitude = 37.375384, display_name = _("Mezere")},
+882:["Seyrantepe"] = { latitude = 37.454829, longitude = 37.117129, display_name = _("Seyrantepe")},
+883:["Yigitler"] = { latitude = 37.326348, longitude = 37.302661, display_name = _("Yigitler")},
+884:["Igdeli"] = { latitude = 37.370328, longitude = 37.217073, display_name = _("Igdeli")},
+885:["Abbaslar"] = { latitude = 37.388269, longitude = 37.042192, display_name = _("Abbaslar")},
+886:["Akdemir"] = { latitude = 37.276663, longitude = 37.013836, display_name = _("Akdemir")},
+887:["Emiroglu"] = { latitude = 37.332144, longitude = 37.062811, display_name = _("Emiroglu")},
+888:["Evri"] = { latitude = 37.256867, longitude = 37.070380, display_name = _("Evri")},
+889:["Karacay"] = { latitude = 37.346967, longitude = 37.116762, display_name = _("Karacay")},
+890:["Cocelli"] = { latitude = 37.278790, longitude = 37.138394, display_name = _("Cocelli")},
+891:["Ordekdede"] = { latitude = 37.300379, longitude = 37.097641, display_name = _("Ordekdede")},
+892:["Doluca"] = { latitude = 37.388890, longitude = 36.695736, display_name = _("Doluca")},
+893:["Kaledibi"] = { latitude = 37.300315, longitude = 36.667388, display_name = _("Kaledibi")},
+894:["Uzunsogut"] = { latitude = 37.399617, longitude = 36.777723, display_name = _("Uzunsogut")},
+895:["Baglica"] = { latitude = 36.995418, longitude = 37.883309, display_name = _("Baglica")},
+896:["Kale"] = { latitude = 36.946903, longitude = 37.836978, display_name = _("Kale")},
+897:["Mihrap"] = { latitude = 36.933507, longitude = 37.867497, display_name = _("Mihrap")},
+898:["Dogankoy"] = { latitude = 37.402939, longitude = 37.784596, display_name = _("Dogankoy")},
+899:["Elifkoy"] = { latitude = 37.376633, longitude = 37.879514, display_name = _("Elifkoy")},
+900:["Esentepe"] = { latitude = 37.401196, longitude = 37.712227, display_name = _("Esentepe")},
+901:["Ballik"] = { latitude = 37.331287, longitude = 37.533859, display_name = _("Ballik")},
+902:["Bagtepe"] = { latitude = 37.331536, longitude = 37.643092, display_name = _("Bagtepe")},
+903:["Begendik"] = { latitude = 37.283977, longitude = 37.828846, display_name = _("Begendik")},
+904:["Gocmez"] = { latitude = 37.339577, longitude = 37.759079, display_name = _("Gocmez")},
+905:["Havuzkoy"] = { latitude = 37.352291, longitude = 37.722023, display_name = _("Havuzkoy")},
+906:["Kucuk Karakuyu"] = { latitude = 37.350483, longitude = 37.541284, display_name = _("Kucuk Karakuyu")},
+907:["Ciltoprak"] = { latitude = 37.288708, longitude = 37.740048, display_name = _("Ciltoprak")},
+908:["Cimenli"] = { latitude = 37.283737, longitude = 37.584349, display_name = _("Cimenli")},
+909:["Senlikce"] = { latitude = 37.331170, longitude = 37.698465, display_name = _("Senlikce")},
+910:["Keklik"] = { latitude = 37.081448, longitude = 37.814728, display_name = _("Keklik")},
+911:["Kocatepe"] = { latitude = 37.041597, longitude = 37.691841, display_name = _("Kocatepe")},
+912:["Meteler"] = { latitude = 37.051567, longitude = 37.915920, display_name = _("Meteler")},
+913:["Samandoken"] = { latitude = 37.043377, longitude = 37.849119, display_name = _("Samandoken")},
+914:["Sogutlu"] = { latitude = 37.003632, longitude = 37.727990, display_name = _("Sogutlu")},
+915:["Yagmuralan"] = { latitude = 36.918324, longitude = 37.750282, display_name = _("Yagmuralan")},
+916:["Catalca"] = { latitude = 36.901715, longitude = 37.693640, display_name = _("Catalca")},
+917:["Ozyurt"] = { latitude = 37.108963, longitude = 37.783169, display_name = _("Ozyurt")},
+918:["Turkyurdu"] = { latitude = 36.805096, longitude = 37.896278, display_name = _("Turkyurdu")},
+919:["Acar"] = { latitude = 36.744358, longitude = 37.193913, display_name = _("Acar")},
+920:["Cumhuriyet"] = { latitude = 36.798687, longitude = 37.558102, display_name = _("Cumhuriyet")},
+921:["Duruca"] = { latitude = 36.755982, longitude = 37.029241, display_name = _("Duruca")},
+922:["Dunbullu"] = { latitude = 36.817236, longitude = 37.027953, display_name = _("Dunbullu")},
+923:["Elbeyli"] = { latitude = 36.674955, longitude = 37.466985, display_name = _("Elbeyli")},
+924:["Fericek"] = { latitude = 36.879898, longitude = 37.033341, display_name = _("Fericek")},
+925:["Gecerli"] = { latitude = 36.715923, longitude = 37.525990, display_name = _("Gecerli")},
+926:["Gozluce"] = { latitude = 36.869453, longitude = 37.000992, display_name = _("Gozluce")},
+927:["Guvendik"] = { latitude = 36.692513, longitude = 37.373820, display_name = _("Guvendik")},
+928:["Kapdegirmeni"] = { latitude = 36.717937, longitude = 37.228786, display_name = _("Kapdegirmeni")},
+929:["Karacurun"] = { latitude = 36.730019, longitude = 37.469414, display_name = _("Karacurun")},
+930:["Karbeyaz"] = { latitude = 36.862712, longitude = 36.961181, display_name = _("Karbeyaz")},
+931:["Kupluce"] = { latitude = 36.753452, longitude = 37.243218, display_name = _("Kupluce")},
+932:["Polatbey"] = { latitude = 36.804074, longitude = 37.191159, display_name = _("Polatbey")},
+933:["Uzunlu"] = { latitude = 36.768363, longitude = 37.218396, display_name = _("Uzunlu")},
+934:["Yeniyapan"] = { latitude = 36.865064, longitude = 37.226831, display_name = _("Yeniyapan")},
+935:["Catalsu"] = { latitude = 36.865063, longitude = 37.421889, display_name = _("Catalsu")},
+936:["Cukuroba"] = { latitude = 36.764240, longitude = 37.143169, display_name = _("Cukuroba")},
+937:["Urunlu"] = { latitude = 36.841171, longitude = 37.096645, display_name = _("Urunlu")},
+938:["Uckubbe"] = { latitude = 36.720596, longitude = 37.571987, display_name = _("Uckubbe")},
+939:["Atalan"] = { latitude = 37.260441, longitude = 36.341777, display_name = _("Atalan")},
+940:["Ellek"] = { latitude = 37.215420, longitude = 36.374603, display_name = _("Ellek")},
+941:["Karatas"] = { latitude = 37.072662, longitude = 36.385815, display_name = _("Karatas")},
+942:["Karayigit"] = { latitude = 37.078213, longitude = 36.496819, display_name = _("Karayigit")},
+943:["Kaypak"] = { latitude = 37.110833, longitude = 36.462343, display_name = _("Kaypak")},
+944:["Sarayova"] = { latitude = 37.105152, longitude = 36.547282, display_name = _("Sarayova")},
+945:["Erikli"] = { latitude = 37.204222, longitude = 37.284423, display_name = _("Erikli")},
+946:["Karayusuflu"] = { latitude = 37.323496, longitude = 37.453066, display_name = _("Karayusuflu")},
+947:["Koclu"] = { latitude = 37.307465, longitude = 37.428173, display_name = _("Koclu")},
+948:["Segmenli"] = { latitude = 37.313411, longitude = 37.352048, display_name = _("Segmenli")},
+949:["Ugruca"] = { latitude = 37.272408, longitude = 37.467659, display_name = _("Ugruca")},
+950:["Cobantepe"] = { latitude = 37.363365, longitude = 36.927837, display_name = _("Cobantepe")},
+951:["Buyuksahinbey"] = { latitude = 36.949940, longitude = 37.421321, display_name = _("Buyuksahinbey")},
+952:["Bademli"] = { latitude = 37.218197, longitude = 36.743061, display_name = _("Bademli")},
+953:["Beyoglu"] = { latitude = 37.289216, longitude = 36.785339, display_name = _("Beyoglu")},
+954:["Ceceli"] = { latitude = 37.346626, longitude = 36.804924, display_name = _("Ceceli")},
+955:["Mesthuyuk"] = { latitude = 37.216805, longitude = 36.813888, display_name = _("Mesthuyuk")},
+956:["Sekeroba"] = { latitude = 37.256767, longitude = 36.774685, display_name = _("Sekeroba")},
+957:["Emirler"] = { latitude = 37.289168, longitude = 36.948717, display_name = _("Emirler")},
+958:["Karakesek"] = { latitude = 37.325050, longitude = 37.243027, display_name = _("Karakesek")},
+959:["Naimler"] = { latitude = 37.241722, longitude = 36.916809, display_name = _("Naimler")},
+960:["Nogaylar"] = { latitude = 37.229652, longitude = 36.870453, display_name = _("Nogaylar")},
+961:["Incirli"] = { latitude = 37.258228, longitude = 36.951591, display_name = _("Incirli")},
+962:["Cakmak"] = { latitude = 37.193043, longitude = 36.847496, display_name = _("Cakmak")},
+963:["Icerisu"] = { latitude = 37.165314, longitude = 36.845600, display_name = _("Icerisu")},
+964:["Burunsuzlar"] = { latitude = 36.943218, longitude = 36.863838, display_name = _("Burunsuzlar")},
+965:["Dorucak"] = { latitude = 36.853905, longitude = 36.887199, display_name = _("Dorucak")},
+966:["Durmuslar"] = { latitude = 37.105497, longitude = 36.835158, display_name = _("Durmuslar")},
+967:["Elbistanhuyugu"] = { latitude = 37.084524, longitude = 36.740655, display_name = _("Elbistanhuyugu")},
+968:["Gulbaba"] = { latitude = 36.831773, longitude = 36.794439, display_name = _("Gulbaba")},
+969:["Gunesli"] = { latitude = 36.802671, longitude = 36.874370, display_name = _("Gunesli")},
+970:["Gungoren"] = { latitude = 36.931271, longitude = 36.798229, display_name = _("Gungoren")},
+971:["Hamidiye"] = { latitude = 37.108392, longitude = 36.876015, display_name = _("Hamidiye")},
+972:["Hisarkoy"] = { latitude = 36.826561, longitude = 36.766155, display_name = _("Hisarkoy")},
+973:["Huseyinoglu"] = { latitude = 36.928833, longitude = 36.929436, display_name = _("Huseyinoglu")},
+974:["Kuzoluk"] = { latitude = 37.070030, longitude = 36.904369, display_name = _("Kuzoluk")},
+975:["Topallar"] = { latitude = 36.902973, longitude = 36.789997, display_name = _("Topallar")},
+976:["Toplamalar"] = { latitude = 37.082967, longitude = 36.781609, display_name = _("Toplamalar")},
+977:["Yedigoz"] = { latitude = 36.864841, longitude = 36.844902, display_name = _("Yedigoz")},
+978:["Yelliburun"] = { latitude = 37.023132, longitude = 36.719299, display_name = _("Yelliburun")},
+979:["Yeniceli"] = { latitude = 36.979469, longitude = 36.921654, display_name = _("Yeniceli")},
+980:["Calkaya"] = { latitude = 36.797222, longitude = 36.834675, display_name = _("Calkaya")},
+981:["Ortulu"] = { latitude = 37.055980, longitude = 36.718410, display_name = _("Ortulu")},
+982:["Incegedik"] = { latitude = 37.060494, longitude = 36.764996, display_name = _("Incegedik")},
+983:["Atalar"] = { latitude = 37.174988, longitude = 37.021694, display_name = _("Atalar")},
+984:["Gozluhuyuk"] = { latitude = 37.139744, longitude = 36.781845, display_name = _("Gozluhuyuk")},
+985:["Hisarkoy"] = { latitude = 37.150306, longitude = 36.905444, display_name = _("Hisarkoy")},
+986:["Karakaya"] = { latitude = 36.963680, longitude = 36.779167, display_name = _("Karakaya")},
+987:["Kartal"] = { latitude = 37.106300, longitude = 36.980080, display_name = _("Kartal")},
+988:["Komurler"] = { latitude = 37.163970, longitude = 36.809811, display_name = _("Komurler")},
+989:["Ortaklar"] = { latitude = 37.052678, longitude = 37.020822, display_name = _("Ortaklar")},
+990:["Terken"] = { latitude = 37.123642, longitude = 37.006538, display_name = _("Terken")},
+991:["Yamacoba"] = { latitude = 37.172424, longitude = 37.088490, display_name = _("Yamacoba")},
+992:["Yesilova"] = { latitude = 36.998413, longitude = 36.748756, display_name = _("Yesilova")},
+993:["Cevreli"] = { latitude = 37.035790, longitude = 37.076737, display_name = _("Cevreli")},
+994:["Cubuk"] = { latitude = 36.995316, longitude = 36.785980, display_name = _("Cubuk")},
+995:["Cubukdiken"] = { latitude = 37.031017, longitude = 37.042729, display_name = _("Cubukdiken")},
+996:["Idilli"] = { latitude = 36.983574, longitude = 36.562073, display_name = _("Idilli")},
+997:["Ikizkuyu"] = { latitude = 37.139858, longitude = 36.975552, display_name = _("Ikizkuyu")},
+998:["Sahmaran"] = { latitude = 36.968229, longitude = 36.723932, display_name = _("Sahmaran")},
+999:["Belenozu"] = { latitude = 36.878162, longitude = 37.073924, display_name = _("Belenozu")},
+1000:["Beskuyu"] = { latitude = 37.106009, longitude = 37.151234, display_name = _("Beskuyu")},
+1001:["Burc"] = { latitude = 37.017872, longitude = 37.193914, display_name = _("Burc")},
+1002:["Gumussuyu"] = { latitude = 36.810836, longitude = 37.291564, display_name = _("Gumussuyu")},
+1003:["Karamelik"] = { latitude = 36.790436, longitude = 37.252199, display_name = _("Karamelik")},
+1004:["Kavsak"] = { latitude = 37.010789, longitude = 37.140553, display_name = _("Kavsak")},
+1005:["Killik"] = { latitude = 36.836252, longitude = 37.393863, display_name = _("Killik")},
+1006:["Kurum"] = { latitude = 36.947131, longitude = 37.163154, display_name = _("Kurum")},
+1007:["Toreli"] = { latitude = 36.852596, longitude = 37.327544, display_name = _("Toreli")},
+1008:["Ugurtepe"] = { latitude = 36.952965, longitude = 37.094978, display_name = _("Ugurtepe")},
+1009:["Omeroglu"] = { latitude = 36.875170, longitude = 37.191569, display_name = _("Omeroglu")},
+1010:["Sahinbey"] = { latitude = 36.906744, longitude = 37.203776, display_name = _("Sahinbey")},
+1011:["Yeniyurt"] = { latitude = 37.378770, longitude = 37.465119, display_name = _("Yeniyurt")},
+1012:["Yoreli"] = { latitude = 37.334347, longitude = 37.595512, display_name = _("Yoreli")},
+1013:["Karacaoren"] = { latitude = 37.477552, longitude = 37.682149, display_name = _("Karacaoren")},
+1014:["Kucuklu"] = { latitude = 37.431027, longitude = 37.824547, display_name = _("Kucuklu")},
+1015:["Acar"] = { latitude = 36.927262, longitude = 37.624244, display_name = _("Acar")},
+1016:["Battal"] = { latitude = 37.103736, longitude = 37.651620, display_name = _("Battal")},
+1017:["Besdeli"] = { latitude = 36.878170, longitude = 37.462532, display_name = _("Besdeli")},
+1018:["Direkli"] = { latitude = 36.962502, longitude = 37.604194, display_name = _("Direkli")},
+1019:["Dutluca"] = { latitude = 36.893303, longitude = 37.612892, display_name = _("Dutluca")},
+1020:["Gunbulur"] = { latitude = 37.025790, longitude = 37.629534, display_name = _("Gunbulur")},
+1021:["Kavunluk"] = { latitude = 36.926754, longitude = 37.566585, display_name = _("Kavunluk")},
+1022:["Kecikuyusu"] = { latitude = 36.993656, longitude = 37.609859, display_name = _("Kecikuyusu")},
+1023:["Kullu"] = { latitude = 37.071801, longitude = 37.577859, display_name = _("Kullu")},
+1024:["Sinankoy"] = { latitude = 37.029533, longitude = 37.579833, display_name = _("Sinankoy")},
+1025:["Ibrahimsehir"] = { latitude = 37.068382, longitude = 37.633602, display_name = _("Ibrahimsehir")},
+1026:["Geneyik"] = { latitude = 36.943970, longitude = 37.309136, display_name = _("Geneyik")},
+1027:["Akcakoy"] = { latitude = 36.831429, longitude = 37.869789, display_name = _("Akcakoy")},
+1028:["Balaban"] = { latitude = 36.811863, longitude = 37.768974, display_name = _("Balaban")},
+1029:["Hatunlu"] = { latitude = 36.782309, longitude = 37.645971, display_name = _("Hatunlu")},
+1030:["Ugurlar"] = { latitude = 36.769222, longitude = 37.491592, display_name = _("Ugurlar")},
+1031:["Yeserti"] = { latitude = 36.851906, longitude = 37.846840, display_name = _("Yeserti")},
+1032:["Bilek"] = { latitude = 37.129237, longitude = 37.541495, display_name = _("Bilek")},
+1033:["Boyluca"] = { latitude = 37.186996, longitude = 37.632012, display_name = _("Boyluca")},
+1034:["Demirkonak"] = { latitude = 36.750146, longitude = 37.599487, display_name = _("Demirkonak")},
+1035:["Durukoy"] = { latitude = 36.838182, longitude = 37.506533, display_name = _("Durukoy")},
+1036:["Eceler"] = { latitude = 36.916460, longitude = 37.924688, display_name = _("Eceler")},
+1037:["Erikliyayla"] = { latitude = 36.723852, longitude = 37.384788, display_name = _("Erikliyayla")},
+1038:["Eski Konak"] = { latitude = 36.915589, longitude = 37.801940, display_name = _("Eski Konak")},
+1039:["Gevence"] = { latitude = 36.912609, longitude = 37.844199, display_name = _("Gevence")},
+1040:["Goksuncuk"] = { latitude = 37.200920, longitude = 37.364616, display_name = _("Goksuncuk")},
+1041:["Gunece"] = { latitude = 36.738989, longitude = 37.442610, display_name = _("Gunece")},
+1042:["Gungurge"] = { latitude = 37.215573, longitude = 37.469180, display_name = _("Gungurge")},
+1043:["Karacaburc"] = { latitude = 37.225086, longitude = 37.344504, display_name = _("Karacaburc")},
+1044:["Karacurun"] = { latitude = 36.871498, longitude = 37.904994, display_name = _("Karacurun")},
+1045:["Karanfilkoy"] = { latitude = 36.830124, longitude = 37.973151, display_name = _("Karanfilkoy")},
+1046:["Kelekli"] = { latitude = 36.915291, longitude = 37.990440, display_name = _("Kelekli")},
+1047:["Sammezraasi"] = { latitude = 37.137895, longitude = 37.288445, display_name = _("Sammezraasi")},
+1048:["Saraymagara"] = { latitude = 37.258883, longitude = 37.606442, display_name = _("Saraymagara")},
+1049:["Sevindi"] = { latitude = 36.794808, longitude = 37.520126, display_name = _("Sevindi")},
+1050:["Soylu"] = { latitude = 36.836327, longitude = 37.909152, display_name = _("Soylu")},
+1051:["Tokdemir"] = { latitude = 37.187372, longitude = 37.581373, display_name = _("Tokdemir")},
+1052:["Tuglu"] = { latitude = 37.185010, longitude = 37.530467, display_name = _("Tuglu")},
+1053:["Yalankoz"] = { latitude = 37.220356, longitude = 37.408180, display_name = _("Yalankoz")},
+1054:["Yasarkoy"] = { latitude = 36.869736, longitude = 37.941901, display_name = _("Yasarkoy")},
+1055:["Yeni Degirmen"] = { latitude = 36.769208, longitude = 37.422717, display_name = _("Yeni Degirmen")},
+1056:["Yeni Yapan"] = { latitude = 36.891629, longitude = 37.785980, display_name = _("Yeni Yapan")},
+1057:["Zuhrecik"] = { latitude = 36.891331, longitude = 37.890701, display_name = _("Zuhrecik")},
+1058:["Caykuyu"] = { latitude = 37.245266, longitude = 37.459827, display_name = _("Caykuyu")},
+1059:["Corten"] = { latitude = 36.773980, longitude = 37.296283, display_name = _("Corten")},
+1060:["Onculer"] = { latitude = 36.779978, longitude = 37.850091, display_name = _("Onculer")},
+1061:["Ucgol"] = { latitude = 37.246078, longitude = 37.687544, display_name = _("Ucgol")},
+1062:["Inceyol"] = { latitude = 36.805349, longitude = 37.462838, display_name = _("Inceyol")},
+1063:["Akcagoze"] = { latitude = 37.260349, longitude = 37.302360, display_name = _("Akcagoze")},
+1064:["Boyno"] = { latitude = 37.185921, longitude = 37.240212, display_name = _("Boyno")},
+1065:["Cerityeniyapan"] = { latitude = 37.178158, longitude = 37.154751, display_name = _("Cerityeniyapan")},
+1066:["Eski Sarkaya"] = { latitude = 37.218452, longitude = 37.129997, display_name = _("Eski Sarkaya")},
+1067:["Koksalan"] = { latitude = 37.278297, longitude = 37.239052, display_name = _("Koksalan")},
+1068:["Serintepe"] = { latitude = 37.258805, longitude = 37.201185, display_name = _("Serintepe")},
+1069:["Ulkerli"] = { latitude = 37.221104, longitude = 37.240066, display_name = _("Ulkerli")},
+1070:["Ucgoze"] = { latitude = 37.205897, longitude = 37.204607, display_name = _("Ucgoze")},
+1071:["Kaxire"] = { latitude = 36.514930, longitude = 36.704075, display_name = _("Kaxire")},
+1072:["Catalcam"] = { latitude = 36.783039, longitude = 37.702713, display_name = _("Catalcam")},
+1073:["Hisarkoy"] = { latitude = 37.386158, longitude = 37.917848, display_name = _("Hisarkoy")},
+1074:["Incirlidere"] = { latitude = 36.882467, longitude = 38.056445, display_name = _("Incirlidere")},
+1075:["Qestele Xidiriya"] = { latitude = 36.753734, longitude = 36.782822, display_name = _("Qestele Xidiriya")},
+1076:["Be'er Sheva"] = { latitude = 31.265082, longitude = 34.794776, display_name = _("Be'er Sheva")},
+1077:["An Nabk"] = { latitude = 31.342993, longitude = 37.316547, display_name = _("An Nabk")},
+1078:["Madaba"] = { latitude = 31.723613, longitude = 35.800724, display_name = _("Madaba")},
+1079:["El Khalil (Hebron)"] = { latitude = 31.552176, longitude = 35.114792, display_name = _("El Khalil (Hebron)")},
+1080:["Ashdod"] = { latitude = 31.809189, longitude = 34.653578, display_name = _("Ashdod")},
+1081:["Tower 22"] = { latitude = 33.309249, longitude = 38.697987, display_name = _("Tower 22")},
+1082:["Ermenek Dam"] = { latitude = 36.566693, longitude = 32.956468, display_name = _("Ermenek Dam")},
+1083:["Aksifat Dam"] = { latitude = 36.827512, longitude = 33.885884, display_name = _("Aksifat Dam")},
+1084:["Berdan Dam"] = { latitude = 36.964493, longitude = 34.882153, display_name = _("Berdan Dam")},
+1085:["Habima Theatre"] = { latitude = 32.075000, longitude = 34.780384, display_name = _("Habima Theatre")},
+1086:["Herbert Samuel Opera"] = { latitude = 32.076545, longitude = 34.763308, display_name = _("Herbert Samuel Opera")},
+1087:["InterContinental David"] = { latitude = 32.062828, longitude = 34.762186, display_name = _("InterContinental David")},
+1088:["Church of the Holy Sepulchre"] = { latitude = 31.780919, longitude = 35.230250, display_name = _("Church of the Holy Sepulchre")},
+1089:["Dome of the Rock"] = { latitude = 31.780281, longitude = 35.238327, display_name = _("Dome of the Rock")},
+1090:["Al-Aqsa Mosque"] = { latitude = 31.774830, longitude = 35.235355, display_name = _("Al-Aqsa Mosque")},
+1091:["Tower of David"] = { latitude = 31.775650, longitude = 35.227691, display_name = _("Tower of David")},
+1092:["Great Synagogue"] = { latitude = 31.773588, longitude = 35.213866, display_name = _("Great Synagogue")},
+1093:["Leonardo Plaza Hotel"] = { latitude = 31.778177, longitude = 35.217767, display_name = _("Leonardo Plaza Hotel")},
+1094:["Migdal Halr"] = { latitude = 31.782637, longitude = 35.213605, display_name = _("Migdal Halr")},
+1095:["HaYovel Tower"] = { latitude = 32.070468, longitude = 34.791450, display_name = _("HaYovel Tower")},
+1096:["Sourasky Medical Center"] = { latitude = 32.082518, longitude = 34.793214, display_name = _("Sourasky Medical Center")},
+1097:["Mersin Hazrat Mikdad Mosque"] = { latitude = 36.784120, longitude = 34.601226, display_name = _("Mersin Hazrat Mikdad Mosque")},
+1098:["01burda"] = { latitude = 36.995316, longitude = 35.308933, display_name = _("01burda")},
+1099:["Park Adana"] = { latitude = 36.997536, longitude = 35.301085, display_name = _("Park Adana")},
+1100:["Adana HiltonSA"] = { latitude = 36.985252, longitude = 35.335523, display_name = _("Adana HiltonSA")},
+1101:["Adana Optimum"] = { latitude = 36.989070, longitude = 35.342753, display_name = _("Adana Optimum")},
+1102:["Sheraton Grand Adana"] = { latitude = 36.996832, longitude = 35.341257, display_name = _("Sheraton Grand Adana")},
+1103:["Sabanci Merkez Mosque"] = { latitude = 36.993257, longitude = 35.331654, display_name = _("Sabanci Merkez Mosque")},
+1104:["Adana Galleria"] = { latitude = 37.005156, longitude = 35.333314, display_name = _("Adana Galleria")},
+1105:["Yuregir Hospital"] = { latitude = 37.008674, longitude = 35.358075, display_name = _("Yuregir Hospital")},
+1106:["City Training and Research Hospital"] = { latitude = 37.027060, longitude = 35.345891, display_name = _("City Training and Research Hospital")},
+1107:["Et-Tabka Dam"] = { latitude = 35.878035, longitude = 38.554539, display_name = _("Et-Tabka Dam")},
+1108:["Ataturk Dam"] = { latitude = 37.489151, longitude = 38.326501, display_name = _("Ataturk Dam")},
+1109:["Karatay City Park"] = { latitude = 37.875133, longitude = 32.555411, display_name = _("Karatay City Park")},
+1110:["Temple of Jupiter"] = { latitude = 34.007602, longitude = 36.204283, display_name = _("Temple of Jupiter")},
+1111:["Basilica of St. Paul"] = { latitude = 33.978804, longitude = 35.650348, display_name = _("Basilica of St. Paul")},
+1112:["Basilica of Our Lady of Lebanon"] = { latitude = 33.983536, longitude = 35.653944, display_name = _("Basilica of Our Lady of Lebanon")},
+1113:["Platinum Tower"] = { latitude = 33.902475, longitude = 35.495663, display_name = _("Platinum Tower")},
+1114:["Sky Gate Beirut"] = { latitude = 33.889188, longitude = 35.519098, display_name = _("Sky Gate Beirut")},
+1115:["Sama Beirut"] = { latitude = 33.888244, longitude = 35.508536, display_name = _("Sama Beirut")},
+1116:["Mohammad Al-Amin Mosque"] = { latitude = 33.896589, longitude = 35.502576, display_name = _("Mohammad Al-Amin Mosque")},
+1117:["Kings Avenue Mall"] = { latitude = 34.767441, longitude = 32.413772, display_name = _("Kings Avenue Mall")},
+1118:["Amathus Beach Hotel"] = { latitude = 34.747825, longitude = 32.425493, display_name = _("Amathus Beach Hotel")},
+1119:["Paphos General Hospital"] = { latitude = 34.787247, longitude = 32.444390, display_name = _("Paphos General Hospital")},
+1120:["My Mall"] = { latitude = 34.654901, longitude = 32.996942, display_name = _("My Mall")},
+1121:["Port of Limassol"] = { latitude = 34.656783, longitude = 33.022966, display_name = _("Port of Limassol")},
+1122:["Limassol General Hospital "] = { latitude = 34.704910, longitude = 32.982627, display_name = _("Limassol General Hospital ")},
+1123:["KEAN Factory"] = { latitude = 34.694807, longitude = 33.073931, display_name = _("KEAN Factory")},
+1124:["Olympic Residence"] = { latitude = 34.685848, longitude = 33.064137, display_name = _("Olympic Residence")},
+1125:["Larnaca General Hospital"] = { latitude = 34.920698, longitude = 33.605023, display_name = _("Larnaca General Hospital")},
+1126:["Radisson Blu Hotel Larnaca"] = { latitude = 34.932992, longitude = 33.636716, display_name = _("Radisson Blu Hotel Larnaca")},
+1127:["Kyrenia Castle"] = { latitude = 35.343319, longitude = 33.322147, display_name = _("Kyrenia Castle")},
+1128:["Merit Park Hotel Casino & SPA"] = { latitude = 35.351048, longitude = 33.256455, display_name = _("Merit Park Hotel Casino & SPA")},
+1129:["Nicosia General Hospital"] = { latitude = 35.125380, longitude = 33.376821, display_name = _("Nicosia General Hospital")},
+1130:["Mall of Cyprus"] = { latitude = 35.131057, longitude = 33.371148, display_name = _("Mall of Cyprus")},
+1131:["CYTA"] = { latitude = 35.148824, longitude = 33.370362, display_name = _("CYTA")},
+1132:["Kykkos Monastery"] = { latitude = 35.160533, longitude = 33.339254, display_name = _("Kykkos Monastery")},
+1133:["St. Sophia Church"] = { latitude = 35.146790, longitude = 33.334231, display_name = _("St. Sophia Church")},
+1134:["Selimiye Mosque"] = { latitude = 35.177614, longitude = 33.364809, display_name = _("Selimiye Mosque")},
+1135:["Ministry of Finance"] = { latitude = 35.168682, longitude = 33.353756, display_name = _("Ministry of Finance")},
+1136:["Aleppo Citadel Building"] = { latitude = 36.200998, longitude = 37.163936, display_name = _("Aleppo Citadel Building")},
+1137:["Papiri pumping station"] = { latitude = 36.099713, longitude = 38.012783, display_name = _("Papiri pumping station")},
+1138:["Aleppo City Hall"] = { latitude = 36.203937, longitude = 37.146673, display_name = _("Aleppo City Hall")},
+1139:["People's Palace"] = { latitude = 33.514810, longitude = 36.248643, display_name = _("People's Palace")},
+1140:["Mariamite Cathedral"] = { latitude = 33.509446, longitude = 36.314067, display_name = _("Mariamite Cathedral")},
+1141:["Umayyad Mosque"] = { latitude = 33.510527, longitude = 36.305226, display_name = _("Umayyad Mosque")},
+1142:["Ministry of Expatriates"] = { latitude = 33.501204, longitude = 36.268777, display_name = _("Ministry of Expatriates")},
+1143:["Central Bank of Syria"] = { latitude = 33.522760, longitude = 36.297163, display_name = _("Central Bank of Syria")},
+1144:["Damascus Tower"] = { latitude = 33.513033, longitude = 36.296703, display_name = _("Damascus Tower")},
+1145:["Four Seasons Hotel"] = { latitude = 33.515177, longitude = 36.290071, display_name = _("Four Seasons Hotel")},
+1146:["Akko Old Town"] = { latitude = 32.921558, longitude = 35.069468, display_name = _("Akko Old Town")},
+1147:["University of Haifa"] = { latitude = 32.760610, longitude = 35.019732, display_name = _("University of Haifa")},
+1148:["Sammy Ofer Stadium"] = { latitude = 32.780962, longitude = 34.962645, display_name = _("Sammy Ofer Stadium")},
+1149:["Bahai World Centre"] = { latitude = 32.815351, longitude = 34.985867, display_name = _("Bahai World Centre")},
+1150:["Panorama Towers"] = { latitude = 32.804419, longitude = 34.988495, display_name = _("Panorama Towers")},
+1151:["Sail Tower"] = { latitude = 32.817042, longitude = 35.003150, display_name = _("Sail Tower")},
+1152:["Carmel Hospital "] = { latitude = 32.784093, longitude = 34.979872, display_name = _("Carmel Hospital ")},
+1153:["Dagon Elevator"] = { latitude = 32.824593, longitude = 34.996369, display_name = _("Dagon Elevator")},
+1154:["Krak des Chevaliers"] = { latitude = 34.758087, longitude = 36.294083, display_name = _("Krak des Chevaliers")},
+1155:["Palmyra Castle"] = { latitude = 34.563791, longitude = 38.256857, display_name = _("Palmyra Castle")},
+1156:["SAA 312th Brigade%"] = { latitude = 34.588207, longitude = 36.942638, display_name = _("SAA 312th Brigade%")},
+1157:["SAA 171th Brigade%"] = { latitude = 34.699599, longitude = 36.969931, display_name = _("SAA 171th Brigade%")},
+1158:["Netafim military base"] = { latitude = 32.810372, longitude = 35.420586, display_name = _("Netafim military base")},
+1159:["SyADF 24th Brigade"] = { latitude = 33.336071, longitude = 36.418180, display_name = _("SyADF 24th Brigade")},
+1160:["SAA 158th Brigade"] = { latitude = 33.401255, longitude = 36.272973, display_name = _("SAA 158th Brigade")},
+1161:["SAA 100th Regiment"] = { latitude = 33.380777, longitude = 36.213524, display_name = _("SAA 100th Regiment")},
+1162:["SAA 65th Brigade"] = { latitude = 33.766740, longitude = 36.547502, display_name = _("SAA 65th Brigade")},
+1163:["SAA 550th Brigade"] = { latitude = 34.614960, longitude = 38.254372, display_name = _("SAA 550th Brigade")},
+1164:["Chemical Weapons Storage Area"] = { latitude = 34.627713, longitude = 38.249290, display_name = _("Chemical Weapons Storage Area")},
+1165:["SAA 165th Brigade"] = { latitude = 33.283835, longitude = 36.255758, display_name = _("SAA 165th Brigade")},
+1166:["Army Vehicle Training Ground"] = { latitude = 33.365284, longitude = 36.322571, display_name = _("Army Vehicle Training Ground")},
+1167:["SAA 1st Armoured Division"] = { latitude = 33.352760, longitude = 36.296204, display_name = _("SAA 1st Armoured Division")},
+1168:["SyADF 150th Regiment"] = { latitude = 33.251611, longitude = 36.269702, display_name = _("SyADF 150th Regiment")},
+1169:["SAA 121th Brigade"] = { latitude = 33.278919, longitude = 36.082934, display_name = _("SAA 121th Brigade")},
+1170:["Army Vehicle Training Ground"] = { latitude = 33.433665, longitude = 36.124922, display_name = _("Army Vehicle Training Ground")},
+1171:["Artillery Base"] = { latitude = 33.457854, longitude = 36.128248, display_name = _("Artillery Base")},
+1172:["SAA 155th Artillery Regiment"] = { latitude = 33.702711, longitude = 36.526507, display_name = _("SAA 155th Artillery Regiment")},
+1173:["SAA 128th Brigade"] = { latitude = 33.971493, longitude = 36.898243, display_name = _("SAA 128th Brigade")},
+1174:["Al Safira Military Base"] = { latitude = 36.046375, longitude = 37.334725, display_name = _("Al Safira Military Base")},
+1175:["Military Research Base"] = { latitude = 35.983058, longitude = 37.403046, display_name = _("Military Research Base")},
+1176:["Durayhim Military Base"] = { latitude = 35.790074, longitude = 37.728073, display_name = _("Durayhim Military Base")},
+1177:["SAA 156th Brigade"] = { latitude = 33.667855, longitude = 36.735378, display_name = _("SAA 156th Brigade")},
+1178:["Air Defence Academy"] = { latitude = 34.612370, longitude = 36.750060, display_name = _("Air Defence Academy")},
+1179:["SAA 4th Armoured Division"] = { latitude = 33.506039, longitude = 36.201757, display_name = _("SAA 4th Armoured Division")},
+1180:["Army Vehicle Training Ground"] = { latitude = 33.737184, longitude = 36.809278, display_name = _("Army Vehicle Training Ground")},
+1181:["SAA 20th Brigade"] = { latitude = 33.773650, longitude = 36.718297, display_name = _("SAA 20th Brigade")},
+1182:["Army Vehicle Training Ground"] = { latitude = 33.710700, longitude = 36.665598, display_name = _("Army Vehicle Training Ground")},
+1183:["SyADF 159th Regiment"] = { latitude = 33.177072, longitude = 36.577899, display_name = _("SyADF 159th Regiment")},
+1184:["SAA 89th Brigade"] = { latitude = 33.146138, longitude = 36.284818, display_name = _("SAA 89th Brigade")},
+1185:["SAA 7th Division"] = { latitude = 33.456229, longitude = 36.083628, display_name = _("SAA 7th Division")},
+1186:["Army Training Ground"] = { latitude = 33.405091, longitude = 36.319119, display_name = _("Army Training Ground")},
+
+--- MissionGenerator/nodes.lua ---
+(exists, 93 lines)
+-- grep for projection/coordinate keywords --
+(no matches)
+
+--- MissionGenerator/nodesMap.lua ---
+(exists, 1 lines)
+-- grep for projection/coordinate keywords --
+(no matches)
+
+--- misc/metacache/base.lua ---
+(exists, 167 lines)
+-- grep for projection/coordinate keywords --
+(no matches)
+
+=== Full content of entry.lua (primary suspect for projection/origin config) ===
+if not USE_TERRAIN4 then
+	return
+end
+
+theatre =
+{
+	['developerName'] = "Ugra-Media";
+	['state'] = "installed";
+	['type'] = "terrain";
+	['version'] = "";
+	['update_id'] = "SYRIA_terrain";
+
+	['Skins'] = 
+	{
+		{
+			name = _("Syria"),
+			dir  = "Theme",
+		};
+	};
+
+	['image'] = 'map.png';
+	['description'] = _("The Syria map is 1000 km north to south and 980 km east to west, giving a total map area of 980,000 sq km. The map includes the island of Cyprus, Lebanon, Syria, parts of Israel, Turkey, Jordan and Iraq. The map is divided between the coastal areas of the eastern Mediterranean, coastal mountain ranges and the interior of the desert. The map of Syria is a diverse map that provides many historical scenarios and \"what if\" scenarios. The map shows more than 76 airfields and heliports.");
+	['id'] = "Syria";
+
+	['localizedName'] = "Syria";
+	['creditsFile'] = "credits.txt";
+	['nodesMapFile'] = "MissionGenerator/nodesMap.png";
+	['nodesFile'] = "MissionGenerator/nodes.lua";
+} -- end of theatre
+
+dofile(current_mod_path .. '/' .. 'MissionGenerator/nodesMap.lua')
+
+local self_ID = "Syria";
+declare_plugin(self_ID, theatre);
+plugin_done()
+
+=== Full content of beacons.lua (nav beacon positions, for cross-checking) ===
+dofile('Scripts/Database/wsTypes.lua')
+dofile('Scripts/World/Radio/BeaconTypes.lua')
+dofile('Scripts/World/Radio/BeaconSites.lua')
+
+local disableNauticalBeacons = true
+
+local gettext = require("i_18n")
+local       _ = gettext.translate
+
+--WORLD BEACONS
+
+beaconsTableFormat = 2
+beacons = {
+	{
+		display_name = _('BANIAS');
+		beaconId = 'world_0';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'BAN';
+		frequency = 304000.000000;
+		position = { 22735.679688, 7.987951, 5935.380859 };
+		direction = 0.000000;
+		positionGeo = { latitude = 35.228286, longitude = 35.957919 };
+		sceneObjects = {'t:138619822'};
+	};
+	{
+		display_name = _('KAHRAMANMARAS');
+		beaconId = 'world_1';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'KHM';
+		frequency = 374000.000000;
+		position = { 276904.968750, 478.396719, 101895.742188 };
+		direction = 0.000000;
+		positionGeo = { latitude = 37.540196, longitude = 36.952346 };
+		sceneObjects = {'t:209496146'};
+	};
+	{
+		display_name = _('KLEYATE');
+		beaconId = 'world_2';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'RA';
+		frequency = 450000.000000;
+		position = { -48636.152344, 4.410843, 7884.588867 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.586111, longitude = 36.002778 };
+		sceneObjects = {'t:124144025'};
+	};
+	{
+		display_name = _('KARIATAIN');
+		beaconId = 'world_3';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'KTN';
+		frequency = 372500.000000;
+		position = { -91109.367188, 752.408956, 120109.953125 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.227181, longitude = 37.233667 };
+		sceneObjects = {'t:116402321'};
+	};
+	{
+		display_name = _('TURAIF');
+		beaconId = 'world_4';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'TRF';
+		frequency = 116100000.000000;
+		position = { -373082.937500, 846.806633, 257743.343750 };
+		direction = 0.000000;
+		positionGeo = { latitude = 31.696111, longitude = 38.735583 };
+		sceneObjects = {'t:21504000'};
+	};
+	{
+		display_name = _('BAYSUR');
+		beaconId = 'world_5';
+		type = BEACON_TYPE_VOR;
+		callsign = 'BAR';
+		frequency = 113900000.000000;
+		position = { -137939.109375, 837.341536, -36216.691406 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.769444, longitude = 35.555556 };
+		sceneObjects = {'t:30180566'};
+	};
+	{
+		display_name = _('MARKA');
+		beaconId = 'world_6';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'AMN';
+		frequency = 116300000.000000;
+		position = { -335215.781250, 662.712455, 5626.460938 };
+		direction = 0.000000;
+		positionGeo = { latitude = 32.004072, longitude = 36.065986 };
+		sceneObjects = {'t:23295688'};
+	};
+	{
+		display_name = _('TANF');
+		beaconId = 'world_7';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'TAN';
+		frequency = 114000000.000000;
+		position = { -175046.437500, 703.699556, 250662.015625 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.482383, longitude = 38.654064 };
+		sceneObjects = {'t:28794977'};
+	};
+	{
+		display_name = _('NATANIA');
+		beaconId = 'world_8';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'NAT';
+		frequency = 112400000.000000;
+		position = { -295272.531250, 21.452834, -96707.609375 };
+		direction = 0.000000;
+		positionGeo = { latitude = 32.333889, longitude = 34.968889 };
+		sceneObjects = {'t:24257114'};
+	};
+	{
+		display_name = _('KAHRAMANMARAS');
+		beaconId = 'world_9';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'KHM';
+		frequency = 113900000.000000;
+		position = { 276922.218750, 478.601675, 101996.453125 };
+		direction = 0.000000;
+		positionGeo = { latitude = 37.540371, longitude = 36.953481 };
+		sceneObjects = {'t:54334344'};
+	};
+	{
+		display_name = _('KARIATAIN');
+		beaconId = 'world_10';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'KTN';
+		frequency = 117700000.000000;
+		position = { -92699.039063, 748.330887, 122897.039063 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.213283, longitude = 37.264208 };
+		sceneObjects = {'t:31719424'};
+	};
+	{
+		display_name = _('MUT');
+		beaconId = 'world_11';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'MUT';
+		frequency = 112300000.000000;
+		position = { 215007.406250, 1739.611481, -226320.593750 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.862579, longitude = 33.290921 };
+		sceneObjects = {'t:48562292'};
+	};
+	{
+		display_name = _('DHEKELIA');
+		beaconId = 'world_12';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'DKA';
+		frequency = 343000.000000;
+		position = { 5039.548340, 46.457436, -196596.843750 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.993187, longitude = 33.749388 };
+		sceneObjects = {'t:134468931'};
+	};
+	{
+		display_name = _('GHI');
+		beaconId = 'world_13';
+		type = BEACON_TYPE_VORTAC;
+		callsign = 'GHI';
+		frequency = 113800000.000000;
+		channel = 85;
+		position = { -355603.781250, 498.786998, 72566.945313 };
+		direction = 0.000000;
+		positionGeo = { latitude = 31.834683, longitude = 36.778475 };
+		sceneObjects = {'t:22099401'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield2_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IADA';
+		frequency = 108700000.000000;
+		position = { 220391.796875, 17.000017, -46974.203125 };
+		direction = -124.199000;
+		positionGeo = { latitude = 36.990667, longitude = 35.294835 };
+		sceneObjects = {'t:187150265'};
+		chartOffsetX = 3030.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield2_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IADA';
+		frequency = 108700000.000000;
+		position = { 218806.687500, 17.000017, -49094.089844 };
+		direction = -125.000001;
+		positionGeo = { latitude = 36.975663, longitude = 35.271760 };
+		sceneObjects = {'t:487213258'};
+	};
+	{
+		display_name = _('ADANA');
+		beaconId = 'airfield2_2';
+		type = BEACON_TYPE_AIRPORT_HOMER_WITH_MARKER;
+		callsign = 'ADN';
+		frequency = 395000.000000;
+		position = { 218312.296875, 11.821711, -50018.769531 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.970889, longitude = 35.261611 };
+		sceneObjects = {'t:187050001'};
+	};
+	{
+		display_name = _('ADANA');
+		beaconId = 'airfield2_3';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'ADA';
+		frequency = 112700000.000000;
+		position = { 215128.828125, 6.788537, -54714.742188 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.940583, longitude = 35.210389 };
+		sceneObjects = {'t:48764962'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield219_0';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'KHD';
+		frequency = 113600000.000000;
+		position = { 295551.562500, 654.415205, 234938.328125 };
+		direction = -130.230807;
+		positionGeo = { latitude = 37.724773, longitude = 38.456876 };
+		sceneObjects = {'t:554754787'};
+		chartOffsetX = 2678.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield219_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'KHD';
+		frequency = 113600000.000000;
+		position = { 297197.843750, 643.432711, 237099.843750 };
+		direction = -130.369775;
+		positionGeo = { latitude = 37.739722, longitude = 38.481300 };
+		sceneObjects = {'t:216433353'};
+		chartOffsetX = 2678.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield44_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IAK';
+		frequency = 109700000.000000;
+		position = { -35143.730469, 20.984022, -270549.812500 };
+		direction = 111.071989;
+		positionGeo = { latitude = 34.595184, longitude = 32.969540 };
+		sceneObjects = {'t:126290339'};
+		chartOffsetX = 3211.500000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield44_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IAK';
+		frequency = 109700000.000000;
+		position = { -36049.847656, 25.257578, -267864.875000 };
+		direction = 110.000033;
+		positionGeo = { latitude = 34.588499, longitude = 32.999245 };
+		sceneObjects = {'t:343196760'};
+	};
+	{
+		display_name = _('Akrotiri');
+		beaconId = 'airfield44_2';
+		type = BEACON_TYPE_TACAN;
+		callsign = 'AKR';
+		frequency = 116000000.000000;
+		channel = 107;
+		position = { -36624.153826, 20.984020, -266665.539958 };
+		direction = -17.825354;
+		positionGeo = { latitude = 34.583989, longitude = 33.012622 };
+		sceneObjects = {'t:126299555'};
+	};
+	{
+		display_name = _('AKROTIRI');
+		beaconId = 'airfield44_3';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'AK';
+		frequency = 365000.000000;
+		position = { -36624.347164, 20.984020, -266658.306707 };
+		direction = -70.452586;
+		positionGeo = { latitude = 34.583991, longitude = 33.012701 };
+		sceneObjects = {'t:126299556'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield67_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IAMN';
+		frequency = 109500000.000000;
+		position = { -339321.562500, 758.709987, -3324.462891 };
+		direction = 65.799993;
+		positionGeo = { latitude = 31.964856, longitude = 35.972564 };
+		sceneObjects = {'t:2144894977'};
+		chartOffsetX = 3762.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield67_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IAMN';
+		frequency = 109500000.000000;
+		position = { -338058.625000, 751.314472, -238.776428 };
+		direction = 65.799993;
+		positionGeo = { latitude = 31.977009, longitude = 36.004805 };
+		sceneObjects = {'t:2144894976'};
+	};
+	{
+		display_name = _('KALDE');
+		beaconId = 'airfield6_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'KAD';
+		frequency = 112600000.000000;
+		position = { -133511.000000, 12.000012, -42518.968750 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.807390, longitude = 35.485991 };
+		sceneObjects = {'t:30155984'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield6_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IBB';
+		frequency = 110100000.000000;
+		position = { -130320.203125, 12.000012, -42839.488281 };
+		direction = -11.107002;
+		positionGeo = { latitude = 33.836015, longitude = 35.481357 };
+		sceneObjects = {'t:320340078'};
+		chartOffsetX = 3722.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield6_2';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IKK';
+		frequency = 110700000.000000;
+		position = { -131222.921875, 12.000013, -40739.011719 };
+		direction = -145.184003;
+		positionGeo = { latitude = 33.828534, longitude = 35.504347 };
+		sceneObjects = {'t:110379053'};
+		chartOffsetX = 4140.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield6_3';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'BIL';
+		frequency = 109500000.000000;
+		position = { -133542.953125, 12.000011, -42243.164063 };
+		direction = -1.121999;
+		positionGeo = { latitude = 33.807187, longitude = 35.488977 };
+		sceneObjects = {'t:110357422'};
+		chartOffsetX = 3510.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield6_4';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IBB';
+		frequency = 110100000.000000;
+		position = { -133400.578125, 12.000012, -42358.453125 };
+		direction = -11.107002;
+		positionGeo = { latitude = 33.808433, longitude = 35.487681 };
+		sceneObjects = {'t:110357423'};
+		chartOffsetX = 3722.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield6_5';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'BIL';
+		frequency = 109500000.000000;
+		position = { -130440.914063, 12.000011, -42160.257813 };
+		direction = -1.121999;
+		positionGeo = { latitude = 33.835138, longitude = 35.488728 };
+		sceneObjects = {'t:320341825'};
+		chartOffsetX = 3510.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield6_6';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IKK';
+		frequency = 110700000.000000;
+		position = { -133752.968750, 12.000012, -42644.976563 };
+		direction = -146.677196;
+		positionGeo = { latitude = 33.805173, longitude = 35.484721 };
+		sceneObjects = {'t:319625595'};
+		chartOffsetX = 4140.000000;
+	};
+	{
+		display_name = _('BEIRUT');
+		beaconId = 'airfield6_7';
+		type = BEACON_TYPE_AIRPORT_HOMER_WITH_MARKER;
+		callsign = 'BOD';
+		frequency = 351000.000000;
+		position = { -122843.140625, 3.000003, -42540.902344 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.903416, longitude = 35.481814 };
+		sceneObjects = {'t:112410782'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'BG';
+		frequency = 110300000.000000;
+		position = { -332231.781250, 33.877864, -104915.296875 };
+		direction = -56.203443;
+		positionGeo = { latitude = 31.998505, longitude = 34.896858 };
+		sceneObjects = {'t:78086585'};
+		chartOffsetX = 3645.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'GP';
+		frequency = 110900000.000000;
+		position = { -330565.312500, 25.852733, -107937.046875 };
+		direction = -96.541637;
+		positionGeo = { latitude = 32.012463, longitude = 34.864276 };
+		sceneObjects = {'t:262843033'};
+	};
+	{
+		display_name = _('BenGurion');
+		beaconId = 'airfield221_2';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'BGN';
+		frequency = 113500000.000000;
+		position = { -330530.218750, 27.562535, -106879.281250 };
+		direction = 43.233596;
+		positionGeo = { latitude = 32.013143, longitude = 34.875433 };
+		sceneObjects = {'t:23128749'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_3';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'BD';
+		frequency = 111900000.000000;
+		position = { -331790.125000, 30.797894, -105358.093750 };
+		direction = 125.847574;
+		positionGeo = { latitude = 32.002328, longitude = 34.892005 };
+		sceneObjects = {'t:262092530'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_4';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'GP';
+		frequency = 108700000.000000;
+		position = { -330026.937500, 33.242205, -105559.414063 };
+		direction = 81.145106;
+		positionGeo = { latitude = 32.018125, longitude = 34.889169 };
+		sceneObjects = {'t:262849067'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_5';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'BA';
+		frequency = 110900000.000000;
+		position = { -329966.593750, 37.791618, -104394.031250 };
+		direction = -97.951866;
+		positionGeo = { latitude = 32.019067, longitude = 34.901454 };
+		sceneObjects = {'t:79332281'};
+		chartOffsetX = 4600.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_6';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'BN';
+		frequency = 109700000.000000;
+		position = { -332691.500000, 30.425392, -106088.875000 };
+		direction = 30.940212;
+		positionGeo = { latitude = 31.993966, longitude = 34.884651 };
+		sceneObjects = {'t:78078961'};
+		chartOffsetX = 3366.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_7';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'GP';
+		frequency = 110300000.000000;
+		position = { -330657.906250, 26.298896, -107483.937500 };
+		direction = -54.152496;
+		positionGeo = { latitude = 32.011786, longitude = 34.869098 };
+		sceneObjects = {'t:262843034'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_8';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'GP';
+		frequency = 109700000.000000;
+		position = { -330261.750000, 35.505323, -104773.367188 };
+		direction = 34.106947;
+		positionGeo = { latitude = 32.016281, longitude = 34.897566 };
+		sceneObjects = {'t:262849068'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_9';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'BA';
+		frequency = 108700000.000000;
+		position = { -330605.656250, 24.885405, -108970.898438 };
+		direction = 82.045598;
+		positionGeo = { latitude = 32.011743, longitude = 34.853374 };
+		sceneObjects = {'t:79299855'};
+		chartOffsetX = 4452.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield221_10';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'BD';
+		frequency = 111900000.000000;
+		position = { -330206.906250, 25.774962, -107943.945313 };
+		direction = 124.030008;
+		positionGeo = { latitude = 32.015685, longitude = 34.864058 };
+		sceneObjects = {'t:79307562'};
+		chartOffsetX = 3640.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield90_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'ICKR';
+		frequency = 333950000.000000;
+		position = { 208553.562500, 3.000003, -68438.546875 };
+		direction = 34.096409;
+		positionGeo = { latitude = 36.876437, longitude = 35.059671 };
+		sceneObjects = {'t:182396098'};
+		chartOffsetX = 3815.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield90_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'ICKU';
+		frequency = 329750000.000000;
+		position = { 211312.109375, 3.000003, -66449.406250 };
+		direction = 38.578347;
+		positionGeo = { latitude = 36.901983, longitude = 35.080668 };
+		sceneObjects = {'t:481452124'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield90_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'ICKR';
+		frequency = 333950000.000000;
+		position = { 208950.359375, 3.000003, -68025.148438 };
+		direction = -144.086106;
+		positionGeo = { latitude = 36.880159, longitude = 35.064115 };
+		sceneObjects = {'t:479510569'};
+	};
+	{
+		display_name = _('Cukurova');
+		beaconId = 'airfield90_3';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'CKR';
+		frequency = 113700000.000000;
+		position = { 209368.921875, 3.000003, -67645.867188 };
+		direction = 43.233601;
+		positionGeo = { latitude = 36.884064, longitude = 35.068168 };
+		sceneObjects = {'t:47957135'};
+	};
+	{
+		display_name = _('Cukurova');
+		beaconId = 'airfield90_4';
+		type = BEACON_TYPE_HOMER;
+		callsign = 'CKR';
+		frequency = 320000000.000000;
+		position = { 209285.921875, 3.000003, -67702.554688 };
+		direction = 35.594155;
+		positionGeo = { latitude = 36.883297, longitude = 35.067572 };
+		sceneObjects = {'t:479510570'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield90_5';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'ICKU';
+		frequency = 329750000.000000;
+		position = { 211879.578125, 3.000003, -66209.078125 };
+		direction = -146.137062;
+		positionGeo = { latitude = 36.907176, longitude = 35.083098 };
+		sceneObjects = {'t:183869747'};
+		chartOffsetX = 3825.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield7_0';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IDA';
+		frequency = 109900000.000000;
+		position = { -177673.234375, 612.000612, 53046.078125 };
+		direction = 52.625842;
+		positionGeo = { latitude = 33.434538, longitude = 36.528631 };
+		sceneObjects = {'t:309363104'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield7_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IDA';
+		frequency = 109900000.000000;
+		position = { -180064.953125, 612.000612, 50398.371094 };
+		direction = 49.999989;
+		positionGeo = { latitude = 33.412415, longitude = 36.500792 };
+		sceneObjects = {'t:102608993'};
+		chartOffsetX = 4063.000000;
+	};
+	{
+		display_name = _('Damascus');
+		beaconId = 'airfield7_2';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'DAM';
+		frequency = 116000000.000000;
+		position = { -185235.656250, 609.969726, 47226.804688 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.365131, longitude = 36.468066 };
+		sceneObjects = {'t:28378351'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield7_3';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'DAML';
+		frequency = 111100000.000000;
+		position = { -180656.640625, 612.000673, 52815.601563 };
+		direction = -130.000016;
+		positionGeo = { latitude = 33.407604, longitude = 36.526916 };
+		sceneObjects = {'t:101876616'};
+		chartOffsetX = 3926.000000;
+	};
+	{
+		display_name = _('DAMASCUS');
+		beaconId = 'airfield7_4';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'DAL';
+		frequency = 342000.000000;
+		position = { -171986.156250, 592.215680, 60026.417969 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.487262, longitude = 36.602245 };
+		sceneObjects = {'t:10018861'};
+	};
+	{
+		display_name = _('ABYAD');
+		beaconId = 'airfield7_5';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'ABD';
+		frequency = 264000.000000;
+		position = { -188453.578125, 627.339495, 43443.796875 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.335299, longitude = 36.428295 };
+		sceneObjects = {'t:9625834'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield7_6';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'DAML';
+		frequency = 111100000.000000;
+		position = { -183014.953125, 612.000673, 50184.816406 };
+		direction = -130.000001;
+		positionGeo = { latitude = 33.385786, longitude = 36.499259 };
+		sceneObjects = {'t:307520466'};
+	};
+	{
+		display_name = _('DEIR_EZ-ZOR');
+		beaconId = 'airfield42_0';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'DRZ';
+		frequency = 295000.000000;
+		position = { 25885.554688, 208.432749, 390774.875000 };
+		direction = 0.000000;
+		positionGeo = { latitude = 35.289111, longitude = 40.187417 };
+		sceneObjects = {'t:140070254'};
+	};
+	{
+		display_name = _('DEIR_EZ-ZOR');
+		beaconId = 'airfield42_1';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'DRZ';
+		frequency = 117000000.000000;
+		position = { 26163.650391, 215.067857, 387712.218750 };
+		direction = 0.000000;
+		positionGeo = { latitude = 35.291944, longitude = 40.153778 };
+		sceneObjects = {'t:37613337'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield217_0';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IDD';
+		frequency = 109400000.000000;
+		position = { 316409.625000, 673.807681, 387771.937500 };
+		direction = -17.301781;
+		positionGeo = { latitude = 37.907964, longitude = 40.194093 };
+		sceneObjects = {'t:568691301'};
+		chartOffsetX = 3858.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield217_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IDI';
+		frequency = 109200000.000000;
+		position = { 313423.531250, 673.807681, 388744.156250 };
+		direction = 162.698221;
+		positionGeo = { latitude = 37.880943, longitude = 40.204711 };
+		sceneObjects = {'t:567534749'};
+		chartOffsetX = 3965.000000;
+	};
+	{
+		display_name = _('Diyarbakir');
+		beaconId = 'airfield217_2';
+		type = BEACON_TYPE_TACAN;
+		callsign = 'DIY';
+		frequency = 110000000.000000;
+		channel = 37;
+		position = { 315875.906250, 681.274058, 387583.125000 };
+		direction = 0.000000;
+		positionGeo = { latitude = 37.903176, longitude = 40.191868 };
+		sceneObjects = {'t:221635018'};
+	};
+	{
+		display_name = _('Diyarbakir');
+		beaconId = 'airfield217_3';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IDD';
+		frequency = 109400000.000000;
+		position = { 312889.718750, 673.807742, 389045.156250 };
+		direction = -18.160159;
+		positionGeo = { latitude = 37.876098, longitude = 40.208055 };
+		sceneObjects = {'t:220775315'};
+		chartOffsetX = 3858.000000;
+	};
+	{
+		display_name = _('Diyarbakir');
+		beaconId = 'airfield217_4';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IDI';
+		frequency = 109200000.000000;
+		position = { 316931.218750, 673.807681, 387719.687500 };
+		direction = 161.823274;
+		positionGeo = { latitude = 37.912670, longitude = 40.193575 };
+		sceneObjects = {'t:221635039'};
+		chartOffsetX = 3965.000000;
+	};
+	{
+		display_name = _('Diyarbakir');
+		beaconId = 'airfield217_5';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'DYB';
+		frequency = 330000.000000;
+		position = { 312629.812500, 672.085145, 389064.000000 };
+		direction = -103.524221;
+		positionGeo = { latitude = 37.873754, longitude = 40.208231 };
+		sceneObjects = {'t:57699645'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield49_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IECR';
+		frequency = 108300000.000000;
+		position = { 24929.355469, 116.000116, -219696.593750 };
+		direction = 114.991276;
+		positionGeo = { latitude = 35.160518, longitude = 33.485367 };
+		sceneObjects = {'t:139560961'};
+		chartOffsetX = 3027.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield49_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IECR';
+		frequency = 108300000.000000;
+		position = { 23924.181641, 116.000116, -217243.453125 };
+		direction = 115.512938;
+		positionGeo = { latitude = 35.152717, longitude = 33.512786 };
+		sceneObjects = {'t:370346353'};
+	};
+	{
+		display_name = _('ERCAN');
+		beaconId = 'airfield49_2';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'ECN';
+		frequency = 117000000.000000;
+		position = { 24471.242188, 116.000116, -219165.546875 };
+		direction = -29.411821;
+		positionGeo = { latitude = 35.156671, longitude = 33.491449 };
+		sceneObjects = {'t:138504657'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield11_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IGNP';
+		frequency = 109100000.000000;
+		position = { 210811.390625, 702.613435, 145646.171875 };
+		direction = 105.990001;
+		positionGeo = { latitude = 36.952192, longitude = 37.459536 };
+		sceneObjects = {'t:184313265'};
+		chartOffsetX = 3230.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield11_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IGNP';
+		frequency = 109100000.000000;
+		position = { 209897.875000, 670.317138, 148451.203125 };
+		direction = 106.808504;
+		positionGeo = { latitude = 36.944364, longitude = 37.491193 };
+		sceneObjects = {'t:480092846'};
+		chartOffsetX = 3230.000000;
+	};
+	{
+		display_name = _('GAZIANTEP');
+		beaconId = 'airfield11_2';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'GAZ';
+		frequency = 432000.000000;
+		position = { 210917.500000, 693.557517, 146450.375000 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.953265, longitude = 37.468546 };
+		sceneObjects = {'t:184313263'};
+	};
+	{
+		display_name = _('GAZIANTEP');
+		beaconId = 'airfield11_3';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'GAZ';
+		frequency = 116700000.000000;
+		position = { 210721.703125, 688.106035, 146838.281250 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.951556, longitude = 37.472937 };
+		sceneObjects = {'t:48161692'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield41_0';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IGZP';
+		frequency = 108500000.000000;
+		position = { 158150.518881, 12.769524, -320235.136140 };
+		direction = -91.944233;
+		positionGeo = { latitude = 36.298449, longitude = 32.288303 };
+		sceneObjects = {'t:439159036'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield41_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IGZP';
+		frequency = 108500000.000000;
+		position = { 158246.250000, 41.552360, -318055.781250 };
+		direction = -94.354002;
+		positionGeo = { latitude = 36.300663, longitude = 32.312336 };
+		sceneObjects = {'t:166054899'};
+		chartOffsetX = 2585.500000;
+	};
+	{
+		display_name = _('ALANYA/GAZIPASA');
+		beaconId = 'airfield41_2';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'GZP';
+		frequency = 114200000.000000;
+		channel = 89;
+		position = { 158055.437500, 26.650974, -319161.812500 };
+		direction = 30.136678;
+		positionGeo = { latitude = 36.298267, longitude = 32.300249 };
+		sceneObjects = {'t:43772219'};
+	};
+	{
+		display_name = _('GAZIPASA/ALANYA');
+		beaconId = 'airfield41_3';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'GZP';
+		frequency = 316000.000000;
+		position = { 158235.265625, 26.971258, -319169.343750 };
+		direction = -63.025353;
+		positionGeo = { latitude = 36.299872, longitude = 32.300027 };
+		sceneObjects = {'t:166054897'};
+	};
+	{
+		display_name = _('FAMAGUSTA_GECITKALE');
+		beaconId = 'airfield50_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'GKE';
+		frequency = 114300000.000000;
+		position = { 31834.130250, 45.000041, -197182.508265 };
+		direction = -85.625353;
+		positionGeo = { latitude = 35.233502, longitude = 33.727478 };
+		sceneObjects = {'t:37324785'};
+	};
+	{
+		display_name = _('GECITKALE');
+		beaconId = 'airfield50_1';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'GKE';
+		frequency = 435000.000000;
+		position = { 31577.271484, 45.000045, -195761.718750 };
+		direction = -111.535787;
+		positionGeo = { latitude = 35.231874, longitude = 33.743176 };
+		sceneObjects = {'t:140529152'};
+	};
+	{
+		display_name = _('HATAY');
+		beaconId = 'airfield15_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'HTY';
+		frequency = 112050000.000000;
+		position = { 147753.046875, 69.475785, 39662.273438 };
+		direction = -45.690008;
+		positionGeo = { latitude = 36.362972, longitude = 36.290113 };
+		sceneObjects = {'t:43420096'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield15_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IHAT';
+		frequency = 108900000.000000;
+		position = { 149019.375000, 69.475785, 40718.835938 };
+		direction = -135.689998;
+		positionGeo = { latitude = 36.374642, longitude = 36.301483 };
+		sceneObjects = {'t:164193476'};
+		chartOffsetX = 3421.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield15_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IHAT';
+		frequency = 108900000.000000;
+		position = { 146921.406250, 69.475785, 38518.476563 };
+		direction = -136.812009;
+		positionGeo = { latitude = 36.355193, longitude = 36.277639 };
+		sceneObjects = {'t:430515400'};
+	};
+	{
+		display_name = _('HATAY');
+		beaconId = 'airfield15_3';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'HTY';
+		frequency = 336000.000000;
+		position = { 147771.703125, 69.475785, 39693.753906 };
+		direction = -45.690008;
+		positionGeo = { latitude = 36.363148, longitude = 36.290458 };
+		sceneObjects = {'t:164193474'};
+	};
+	{
+		display_name = _('Hatzerim');
+		beaconId = 'airfield81_0';
+		type = BEACON_TYPE_VORTAC;
+		callsign = 'BRA';
+		frequency = 114900000.000000;
+		channel = 96;
+		position = { -416259.343750, 215.818636, -128712.781250 };
+		direction = 0.000000;
+		positionGeo = { latitude = 31.234168, longitude = 34.680733 };
+		sceneObjects = {'t:19736131'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield222_0';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'HZR';
+		frequency = 108500000.000000;
+		channel = 0;
+		position = { -358500.312500, 33.500034, -123045.218750 };
+		direction = -124.889683;
+		positionGeo = { latitude = 31.755831, longitude = 34.716411 };
+		sceneObjects = {'t:252002630'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield222_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'HZR';
+		frequency = 108500000.000000;
+		position = { -357218.125000, 33.500034, -120951.023438 };
+		direction = -123.217133;
+		positionGeo = { latitude = 31.768108, longitude = 34.737933 };
+		sceneObjects = {'t:71966960'};
+		chartOffsetX = 2715.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield222_2';
+		type = BEACON_TYPE_VORTAC;
+		callsign = 'HZR';
+		frequency = 115900000.000000;
+		channel = 106;
+		position = { -357863.531250, 33.500034, -122331.710938 };
+		direction = 173.152098;
+		positionGeo = { latitude = 31.761813, longitude = 34.723660 };
+		sceneObjects = {'t:21848372'};
+	};
+	{
+		display_name = _('INCIRLIC');
+		beaconId = 'airfield16_0';
+		type = BEACON_TYPE_TACAN;
+		callsign = 'DAN';
+		channel = 21;
+		position = { 222639.437500, 73.699804, -33216.257813 };
+		direction = 0.000000;
+		positionGeo = { latitude = 37.015611, longitude = 35.448194 };
+		sceneObjects = {'t:189305212'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield16_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IDAN';
+		frequency = 109300000.000000;
+		position = { 222315.812500, 73.638211, -33655.464844 };
+		direction = -125.002995;
+		positionGeo = { latitude = 37.012552, longitude = 35.443402 };
+		sceneObjects = {'t:189304578'};
+		chartOffsetX = 3617.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield16_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IDAN';
+		frequency = 109300000.000000;
+		position = { 220377.484375, 48.478762, -36217.171875 };
+		direction = -125.000001;
+		positionGeo = { latitude = 36.994247, longitude = 35.415483 };
+		sceneObjects = {'t:489072839'};
+		chartOffsetX = 3617.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield16_3';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IDNA';
+		frequency = 111700000.000000;
+		position = { 222001.125000, 63.883437, -34347.218750 };
+		direction = 55.000018;
+		positionGeo = { latitude = 37.009487, longitude = 35.435774 };
+		sceneObjects = {'t:490989793'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield16_4';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IDNA';
+		frequency = 111700000.000000;
+		position = { 220088.968750, 47.390978, -36832.261719 };
+		direction = 54.996984;
+		positionGeo = { latitude = 36.991443, longitude = 35.408706 };
+		sceneObjects = {'t:187482129'};
+		chartOffsetX = 3639.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield65_0';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = '';
+		frequency = 109100000.000000;
+		position = { -335847.750000, 700.000700, 21146.527344 };
+		direction = 131.944421;
+		positionGeo = { latitude = 32.002069, longitude = 36.230275 };
+		sceneObjects = {'t:261726984'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield65_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = '';
+		frequency = 109100000.000000;
+		position = { -334522.218750, 700.000700, 19490.818359 };
+		direction = 131.755428;
+		positionGeo = { latitude = 32.013630, longitude = 36.212404 };
+		sceneObjects = {'t:78865692'};
+		chartOffsetX = 2572.000000;
+	};
+	{
+		display_name = _('Konya');
+		beaconId = 'airfield218_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'KNY';
+		frequency = 111200000.000000;
+		channel = 49;
+		position = { 345196.531250, 1038.561097, -282509.656250 };
+		direction = -49.038536;
+		positionGeo = { latitude = 37.996909, longitude = 32.564747 };
+		sceneObjects = {'t:58938177'};
+	};
+	{
+		display_name = _('Konya');
+		beaconId = 'airfield218_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IKNY';
+		frequency = 108900000.000000;
+		position = { 345285.625000, 1038.561097, -282339.375000 };
+		direction = -159.286965;
+		positionGeo = { latitude = 37.997812, longitude = 32.566604 };
+		sceneObjects = {'t:226076014'};
+		chartOffsetX = 3833.000000;
+	};
+	{
+		display_name = _('Konya');
+		beaconId = 'airfield218_2';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'KNY';
+		frequency = 390000.000000;
+		position = { 345109.625000, 1038.561097, -283155.281250 };
+		direction = -49.038536;
+		positionGeo = { latitude = 37.995729, longitude = 32.557509 };
+		sceneObjects = {'t:18538592'};
+	};
+	{
+		display_name = _('Konya');
+		beaconId = 'airfield218_3';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IKNY';
+		frequency = 108900000.000000;
+		position = { 342095.093750, 1038.494447, -283659.218750 };
+		direction = -158.519348;
+		positionGeo = { latitude = 37.968417, longitude = 32.554178 };
+		sceneObjects = {'t:579815605'};
+		chartOffsetX = 3833.000000;
+	};
+	{
+		display_name = _('Konya');
+		beaconId = 'airfield218_4';
+		type = BEACON_TYPE_DME;
+		callsign = 'IKNY';
+		frequency = 108900000.000000;
+		channel = 26;
+		position = { 342027.218750, 1035.012265, -283456.156250 };
+		direction = -158.519348;
+		positionGeo = { latitude = 37.967936, longitude = 32.556528 };
+		sceneObjects = {'t:579815606'};
+		chartOffsetX = 3833.000000;
+	};
+	{
+		display_name = _('Konya');
+		beaconId = 'airfield218_5';
+		type = BEACON_TYPE_TACAN;
+		callsign = 'KON';
+		frequency = 114100000.000000;
+		channel = 88;
+		position = { 345432.437500, 1038.561097, -282485.281250 };
+		direction = 108.649773;
+		positionGeo = { latitude = 37.999037, longitude = 32.564838 };
+		sceneObjects = {'t:226076013'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield47_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'ILC';
+		frequency = 110300000.000000;
+		position = { -8990.810547, 5.000005, -210314.343750 };
+		direction = 48.171958;
+		positionGeo = { latitude = 34.860647, longitude = 33.608001 };
+		sceneObjects = {'t:131574404'};
+		chartOffsetX = 3620.000000;
+	};
+	{
+		display_name = _('Larnaca');
+		beaconId = 'airfield47_1';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'LCA';
+		frequency = 112800000.000000;
+		position = { -7711.266602, 5.000005, -208672.828125 };
+		direction = 47.364518;
+		positionGeo = { latitude = 34.872928, longitude = 33.625131 };
+		sceneObjects = {'t:35931201'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield47_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'ILC';
+		frequency = 110300000.000000;
+		position = { -6842.452099, 5.000005, -208095.043820 };
+		direction = 49.274376;
+		positionGeo = { latitude = 34.881007, longitude = 33.630916 };
+		sceneObjects = {'t:355305159'};
+	};
+	{
+		display_name = _('Larnaca');
+		beaconId = 'airfield47_3';
+		type = BEACON_TYPE_HOMER;
+		callsign = 'LCA';
+		frequency = 432000.000000;
+		position = { -12868.368164, 6.492096, -214644.968750 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.823731, longitude = 33.563132 };
+		sceneObjects = {'t:35523484'};
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_0';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IBA';
+		frequency = 109100000.000000;
+		position = { 43058.035156, 28.401319, 5704.970703 };
+		direction = -1.444000;
+		positionGeo = { latitude = 35.411208, longitude = 35.948517 };
+		sceneObjects = {'t:380250018'};
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IBA';
+		frequency = 109100000.000000;
+		position = { 40423.035156, 25.705146, 5690.542969 };
+		direction = -1.456000;
+		positionGeo = { latitude = 35.387479, longitude = 35.949253 };
+		sceneObjects = {'t:142020950'};
+		chartOffsetX = 3027.000000;
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_2';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'LTK';
+		frequency = 114800000.000000;
+		position = { 41480.648438, 28.008296, 5966.445313 };
+		direction = 0.000000;
+		positionGeo = { latitude = 35.397078, longitude = 35.951928 };
+		sceneObjects = {'t:38187886'};
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_3';
+		type = BEACON_TYPE_HOMER;
+		callsign = 'LTK';
+		frequency = 414000.000000;
+		position = { 50737.488281, 121.697601, 5622.082031 };
+		direction = -1.444000;
+		positionGeo = { latitude = 35.480331, longitude = 35.944991 };
+		sceneObjects = {'t:12948489'};
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_4';
+		type = BEACON_TYPE_RSBN;
+		callsign = 'LTK';
+		channel = 7;
+		position = { 41451.058594, 27.958459, 5953.934082 };
+		direction = 0.000000;
+		positionGeo = { latitude = 35.396808, longitude = 35.951801 };
+		sceneObjects = {'t:2144928065'};
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_5';
+		type = BEACON_TYPE_DME;
+		callsign = 'IBA';
+		frequency = 109100000.000000;
+		position = { 43057.664063, 28.401666, 5717.976074 };
+		direction = 178.907120;
+		positionGeo = { latitude = 35.411209, longitude = 35.948660 };
+		sceneObjects = {'t:816144813'};
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_6';
+		type = BEACON_TYPE_PRMG_LOCALIZER;
+		callsign = 'LTK';
+		channel = 9;
+		position = { 43417.753906, 28.010303, 5806.485352 };
+		direction = 178.552524;
+		positionGeo = { latitude = 35.414475, longitude = 35.949512 };
+		sceneObjects = {'t:142789829'};
+		chartOffsetX = 2930.000000;
+	};
+	{
+		display_name = _('LATAKIA');
+		beaconId = 'airfield21_7';
+		type = BEACON_TYPE_PRMG_GLIDESLOPE;
+		callsign = 'LTK';
+		channel = 9;
+		position = { 41140.093750, 27.429463, 5768.382324 };
+		direction = 178.556007;
+		positionGeo = { latitude = 35.393957, longitude = 35.949866 };
+		sceneObjects = {'t:379400000'};
+	};
+	{
+		display_name = _('MEZZEH');
+		beaconId = 'airfield25_0';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'MEZ';
+		frequency = 358000.000000;
+		position = { -171265.828125, 727.811031, 25122.662109 };
+		direction = 0.000000;
+		positionGeo = { latitude = 33.485917, longitude = 36.226722 };
+		sceneObjects = {'t:104095904'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield68_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IGHI';
+		frequency = 108900000.000000;
+		position = { -354515.062500, 498.786998, 71677.593750 };
+		direction = 132.158067;
+		positionGeo = { latitude = 31.844333, longitude = 36.768847 };
+		sceneObjects = {'t:73434956'};
+		chartOffsetX = 3677.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield68_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IGHS';
+		frequency = 109700000.000000;
+		position = { -357739.031250, 498.786998, 70990.304688 };
+		direction = 81.151936;
+		positionGeo = { latitude = 31.815141, longitude = 36.762290 };
+		sceneObjects = {'t:72540717'};
+		chartOffsetX = 3392.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield68_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IGHI';
+		frequency = 108900000.000000;
+		position = { -356610.437500, 498.787028, 73861.421875 };
+		direction = 131.944421;
+		positionGeo = { latitude = 31.825845, longitude = 36.792361 };
+		sceneObjects = {'t:253370588'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield68_3';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IGHS';
+		frequency = 109700000.000000;
+		position = { -357437.906250, 498.787028, 73745.195313 };
+		direction = 80.853211;
+		positionGeo = { latitude = 31.818364, longitude = 36.791312 };
+		sceneObjects = {'t:253370589'};
+	};
+	{
+		display_name = _('ALEPPO');
+		beaconId = 'airfield27_0';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'ALE';
+		frequency = 396000.000000;
+		position = { 126175.296875, 382.191026, 123040.015625 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.185997, longitude = 37.223297 };
+		sceneObjects = {'t:156696612'};
+	};
+	{
+		display_name = _('ALEPPO');
+		beaconId = 'airfield27_1';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'MER';
+		frequency = 365000.000000;
+		position = { 124610.679688, 372.975593, 130592.070313 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.173114, longitude = 37.307553 };
+		sceneObjects = {'t:156723941'};
+	};
+	{
+		display_name = _('ALEPPO');
+		beaconId = 'airfield27_2';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'ALE';
+		frequency = 114500000.000000;
+		position = { 125497.867188, 382.191026, 121775.375000 };
+		direction = 0.000000;
+		positionGeo = { latitude = 36.179683, longitude = 37.209378 };
+		sceneObjects = {'t:41826602'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield62_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'NGV';
+		frequency = 111500000.000000;
+		position = { -421912.218750, 420.000420, -94751.156250 };
+		direction = 77.905158;
+		positionGeo = { latitude = 31.194762, longitude = 35.038565 };
+		sceneObjects = {'t:19419171'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield62_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'GR';
+		frequency = 108300000.000000;
+		position = { -419723.625000, 420.000451, -96052.562500 };
+		direction = -101.256400;
+		positionGeo = { latitude = 31.214041, longitude = 35.024113 };
+		sceneObjects = {'t:62506404'};
+		chartOffsetX = 3050.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield62_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'NGV';
+		frequency = 111500000.000000;
+		position = { -421911.281250, 420.000420, -94717.609375 };
+		direction = 77.905158;
+		positionGeo = { latitude = 31.194781, longitude = 35.038916 };
+		sceneObjects = {'t:231792878'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield62_3';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'GR';
+		frequency = 111500000.000000;
+		position = { -421906.531250, 420.000420, -94179.265625 };
+		direction = -101.256400;
+		positionGeo = { latitude = 31.194998, longitude = 35.044551 };
+		sceneObjects = {'t:61990413'};
+		chartOffsetX = 4250.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield62_4';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'NEV';
+		frequency = 108300000.000000;
+		position = { -419720.687500, 420.000420, -96594.421875 };
+		direction = 77.905158;
+		positionGeo = { latitude = 31.213892, longitude = 35.018437 };
+		sceneObjects = {'t:232866477'};
+	};
+	{
+		display_name = _('Nevatim');
+		beaconId = 'airfield62_5';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'BSA';
+		frequency = 114300000.000000;
+		position = { -420584.500000, 420.000420, -96888.898438 };
+		direction = 75.825167;
+		positionGeo = { latitude = 31.206021, longitude = 35.015679 };
+		sceneObjects = {'t:19419172'};
+	};
+	{
+		display_name = _('PALMYRA');
+		beaconId = 'airfield28_0';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'PLR';
+		frequency = 363000.000000;
+		position = { -55843.890625, 413.873095, 215545.687500 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.555739, longitude = 38.266916 };
+		sceneObjects = {'t:122888582'};
+	};
+	{
+		display_name = _('PALMYRA');
+		beaconId = 'airfield28_1';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'PAL';
+		frequency = 337000.000000;
+		position = { -56185.023438, 388.136313, 218419.765625 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.552847, longitude = 38.298267 };
+		sceneObjects = {'t:122931323'};
+	};
+	{
+		display_name = _('Pafos');
+		beaconId = 'airfield46_0';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'PHA';
+		frequency = 328000.000000;
+		position = { -18611.082031, 25.818074, -314997.281250 };
+		direction = 23.966996;
+		positionGeo = { latitude = 34.718456, longitude = 32.476168 };
+		sceneObjects = {'t:129479241'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield46_1';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'IPA';
+		frequency = 108900000.000000;
+		position = { -19225.234375, 25.202300, -313313.031250 };
+		direction = 113.967035;
+		positionGeo = { latitude = 34.713934, longitude = 32.494877 };
+		sceneObjects = {'t:349390706'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield46_2';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'IPA';
+		frequency = 108900000.000000;
+		position = { -18026.191406, 26.717262, -315715.781250 };
+		direction = 113.966978;
+		positionGeo = { latitude = 34.723276, longitude = 32.467959 };
+		sceneObjects = {'t:129467622'};
+		chartOffsetX = 3055.000000;
+	};
+	{
+		display_name = _('Pafos');
+		beaconId = 'airfield46_3';
+		type = BEACON_TYPE_DME;
+		callsign = 'IPA';
+		frequency = 108900000.000000;
+		position = { -19244.414063, 25.214266, -313349.875000 };
+		direction = 23.966996;
+		positionGeo = { latitude = 34.713741, longitude = 32.494490 };
+		sceneObjects = {'t:129479242'};
+	};
+	{
+		display_name = _('Pafos');
+		beaconId = 'airfield46_4';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'PHA';
+		frequency = 117900000.000000;
+		position = { -19535.277344, 25.111800, -312322.156250 };
+		direction = 23.966996;
+		positionGeo = { latitude = 34.711733, longitude = 32.505846 };
+		sceneObjects = {'t:35021186'};
+	};
+	{
+		display_name = _('Pafos');
+		beaconId = 'airfield46_5';
+		type = BEACON_TYPE_TACAN;
+		callsign = 'PHA';
+		channel = 79;
+		position = { -18853.347656, 26.002872, -314408.500000 };
+		direction = 23.966996;
+		positionGeo = { latitude = 34.716628, longitude = 32.482728 };
+		sceneObjects = {'t:129479243'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield64_0';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'ABC';
+		frequency = 111700000.000000;
+		position = { -318862.125000, 660.000660, 106895.179688 };
+		direction = 131.813647;
+		positionGeo = { latitude = 32.171799, longitude = 37.134339 };
+		sceneObjects = {'t:82463613'};
+		chartOffsetX = 3710.000000;
+	};
+	{
+		display_name = _('PrinceHussein');
+		beaconId = 'airfield64_1';
+		type = BEACON_TYPE_VORTAC;
+		callsign = 'ABC';
+		frequency = 115900000.000000;
+		channel = 106;
+		position = { -320240.468750, 660.000660, 108184.500000 };
+		direction = 0.000000;
+		positionGeo = { latitude = 32.159572, longitude = 37.148259 };
+		sceneObjects = {'t:81830297'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield64_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'ABC';
+		frequency = 111700000.000000;
+		position = { -321007.437500, 660.000660, 109130.851563 };
+		direction = 132.926205;
+		positionGeo = { latitude = 32.152803, longitude = 37.158429 };
+		sceneObjects = {'t:267338684'};
+	};
+	{
+		display_name = _('RAMATDAVID');
+		beaconId = 'airfield30_0';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'RMD';
+		frequency = 368000.000000;
+		position = { -259542.296875, 41.203761, -74613.953125 };
+		direction = 0.000000;
+		positionGeo = { latitude = 32.662780, longitude = 35.189551 };
+		sceneObjects = {'t:25601770'};
+	};
+	{
+		display_name = _('RAMATDAVID');
+		beaconId = 'airfield30_1';
+		type = BEACON_TYPE_VORTAC;
+		callsign = 'RMD';
+		frequency = 113700000.000000;
+		channel = 84;
+		position = { -259304.093750, 40.906039, -74774.546875 };
+		direction = 15.278860;
+		positionGeo = { latitude = 32.664872, longitude = 35.187751 };
+		sceneObjects = {'t:90099240'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield30_2';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'RMD';
+		frequency = 111100000.000000;
+		position = { -257897.281250, 40.982127, -75918.515625 };
+		direction = 146.477722;
+		positionGeo = { latitude = 32.677163, longitude = 35.175038 };
+		sceneObjects = {'t:90762519'};
+		chartOffsetX = 2803.900000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield30_3';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'RMD';
+		frequency = 111100000.000000;
+		position = { -259881.140625, 41.308349, -74464.289063 };
+		direction = 146.477996;
+		positionGeo = { latitude = 32.659779, longitude = 35.191273 };
+		sceneObjects = {'t:286845191'};
+	};
+	{
+		display_name = _('ROSH-PINA');
+		beaconId = 'airfield34_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'ROP';
+		frequency = 115300000.000000;
+		position = { -225298.109375, 261.558306, -37500.589844 };
+		direction = 0.000000;
+		positionGeo = { latitude = 32.982520, longitude = 35.572743 };
+		sceneObjects = {'t:26923091'};
+	};
+	{
+		display_name = _('Sanliurfa');
+		beaconId = 'airfield58_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'GAP';
+		frequency = 113200000.000000;
+		channel = 79;
+		position = { 265824.093750, 823.947418, 274371.968750 };
+		direction = 0.000000;
+		positionGeo = { latitude = 37.458037, longitude = 38.904692 };
+		sceneObjects = {'t:53790024'};
+	};
+	{
+		display_name = _('Sanliurfa');
+		beaconId = 'airfield58_1';
+		type = BEACON_TYPE_AIRPORT_HOMER;
+		callsign = 'GAP';
+		frequency = 391000.000000;
+		position = { 265880.125000, 823.947418, 274385.500000 };
+		direction = 0.000000;
+		positionGeo = { latitude = 37.458542, longitude = 38.904844 };
+		sceneObjects = {'t:205767761'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield58_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'ISUR';
+		frequency = 111900000.000000;
+		position = { 263522.041725, 823.947418, 272587.820796 };
+		direction = -137.908405;
+		positionGeo = { latitude = 37.437269, longitude = 38.884550 };
+		sceneObjects = {'t:528795444'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield58_3';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'ISUR';
+		frequency = 111900000.000000;
+		position = { 266417.843750, 823.947357, 275349.468750 };
+		direction = -137.908391;
+		positionGeo = { latitude = 37.463397, longitude = 38.915738 };
+		sceneObjects = {'t:207110450'};
+		chartOffsetX = 4348.000000;
+	};
+	{
+		display_name = _('TEL_NOF');
+		beaconId = 'airfield220_0';
+		type = BEACON_TYPE_TACAN;
+		callsign = 'AKR';
+		channel = 87;
+		position = { -349931.500000, 55.000055, -113174.578125 };
+		direction = -32.679810;
+		positionGeo = { latitude = 31.836392, longitude = 34.816875 };
+		sceneObjects = {'t:73605978'};
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield220_1';
+		type = BEACON_TYPE_ILS_LOCALIZER;
+		callsign = 'AKR';
+		frequency = 109100000.000000;
+		position = { -348557.156250, 55.000051, -112962.046875 };
+		direction = -175.175433;
+		positionGeo = { latitude = 31.848832, longitude = 34.818557 };
+		sceneObjects = {'t:73623880'};
+		chartOffsetX = 2618.000000;
+	};
+	{
+		display_name = _('');
+		beaconId = 'airfield220_2';
+		type = BEACON_TYPE_ILS_GLIDESLOPE;
+		callsign = 'AKR';
+		frequency = 109100000.000000;
+		position = { -351167.156250, 55.000055, -113112.414063 };
+		direction = -175.976436;
+		positionGeo = { latitude = 31.825295, longitude = 34.818033 };
+		sceneObjects = {'t:255042465'};
+	};
+	{
+		display_name = _('Teyman');
+		beaconId = 'airfield91_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'BSA';
+		frequency = 114300000.000000;
+		position = { -410642.375000, 176.932169, -124597.828125 };
+		direction = 149.048265;
+		positionGeo = { latitude = 31.286150, longitude = 34.721537 };
+		sceneObjects = {'t:19736132'};
+	};
+	{
+		display_name = _('Cheka');
+		beaconId = 'airfield40_0';
+		type = BEACON_TYPE_VOR_DME;
+		callsign = 'CAK';
+		frequency = 116200000.000000;
+		position = { -79459.062500, 196.905226, -20936.335938 };
+		direction = 0.000000;
+		positionGeo = { latitude = 34.300489, longitude = 35.699946 };
+		sceneObjects = {'t:32337208'};
+	};
+}
+
+=== map/towns.lua: first 10 and last 10 lines (table declaration + closing; entries already captured in full by the grep pass above) ===
+-- head --
+local gettext = require("i_18n")
+local       _ = gettext.translate
+
+towns = {
+["Racetrack for Camel Racing"] = { latitude = 34.403706, longitude = 38.198771, display_name = _("Racetrack for Camel Racing")},
+["Marbat El-Hassan Reservoir"] = { latitude = 34.667083, longitude = 38.224691, display_name = _("Marbat El-Hassan Reservoir")},
+["Sharqiyah Mine"] = { latitude = 34.199641, longitude = 38.014742, display_name = _("Sharqiyah Mine")},
+["Solonchak Sabhat al-Jabbul"] = { latitude = 36.044571, longitude = 37.521323, display_name = _("Solonchak Sabhat al-Jabbul")},
+["Aleppo"] = { latitude = 36.219471, longitude = 37.142091, display_name = _("Aleppo")},
+["Raqqa"] = { latitude = 35.960290, longitude = 39.015335, display_name = _("Raqqa")},
+-- tail --
+["Air Defence Academy"] = { latitude = 34.612370, longitude = 36.750060, display_name = _("Air Defence Academy")},
+["SAA 4th Armoured Division"] = { latitude = 33.506039, longitude = 36.201757, display_name = _("SAA 4th Armoured Division")},
+["Army Vehicle Training Ground"] = { latitude = 33.737184, longitude = 36.809278, display_name = _("Army Vehicle Training Ground")},
+["SAA 20th Brigade"] = { latitude = 33.773650, longitude = 36.718297, display_name = _("SAA 20th Brigade")},
+["Army Vehicle Training Ground"] = { latitude = 33.710700, longitude = 36.665598, display_name = _("Army Vehicle Training Ground")},
+["SyADF 159th Regiment"] = { latitude = 33.177072, longitude = 36.577899, display_name = _("SyADF 159th Regiment")},
+["SAA 89th Brigade"] = { latitude = 33.146138, longitude = 36.284818, display_name = _("SAA 89th Brigade")},
+["SAA 7th Division"] = { latitude = 33.456229, longitude = 36.083628, display_name = _("SAA 7th Division")},
+["Army Training Ground"] = { latitude = 33.405091, longitude = 36.319119, display_name = _("Army Training Ground")},
+}
+
+=== Full content of MissionGenerator/nodes.lua (small file, possible road/waypoint topology source) ===
+missionNodes = 
+{
+	[1] = 
+	{
+		redTemplates = 	{"Red Offensive - Large 1",	"Red Defensive - Large 1",	"Red Offensive - Large 2",	"Red Defensive - Large 2",	"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{210000.91269734,	-35470.825059534},
+		id	=	1,
+		Tasks = 	{},
+		redPos = 	{206941.08437705,	-53661.389705541},
+		name	=	"Adana",
+		blueTemplates = 	{"Blue Defensive - Large 1",	"Blue Offensive - Large 1",	"Blue Offensive - Large 2",	"Blue Defensive -Large 2",	"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [1]
+	[2] = 
+	{
+		redTemplates = 	{"Red Defensive - Large 1",	"Red Offensive - Large 1",	"Red Offensive - Large 2",	"Red Defensive - Large 2",	"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{144934.44482392,	61314.21863869},
+		id	=	2,
+		Tasks = 	{},
+		redPos = 	{138788.83152826,	45257.480841749},
+		name	=	"Hatai",
+		blueTemplates = 	{"Blue Defensive - Large 1",	"Blue Offensive - Large 1",	"Blue Offensive - Large 2",	"Blue Defensive -Large 2",	"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [2]
+	[3] = 
+	{
+		redTemplates = 	{"Red Offensive - Large 1",	"Red Defensive - Large 1",	"Red Offensive - Large 2",	"Red Defensive - Large 2",	"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{-183562.27152806,	43707.734530233},
+		Tasks = 	{},
+		id	=	3,
+		redPos = 	{-182075.05141166,	66016.036276254},
+		name	=	"Damascus",
+		blueTemplates = 	{"Blue Defensive - Large 1",	"Blue Offensive - Large 1",	"Blue Offensive - Large 2",	"Blue Defensive -Large 2",	"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [3]
+	[4] = 
+	{
+		redTemplates = 	{"Red Offensive - Large 1",	"Red Defensive - Large 1",	"Red Offensive - Large 2",	"Red Defensive - Large 2",	"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{125490.69633797,	132125.42707422},
+		id	=	4,
+		Tasks = 	{},
+		redPos = 	{125609.3102919,	114985.7107312},
+		name	=	"Aleppo",
+		blueTemplates = 	{"Blue Defensive - Large 1",	"Blue Offensive - Large 1",	"Blue Offensive - Large 2",	"Blue Defensive -Large 2",	"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [4]
+	[5] = 
+	{
+		redTemplates = 	{"Red Offensive - Large 1",	"Red Defensive - Large 1",	"Red Offensive - Large 2",	"Red Defensive - Large 2",	"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{-56529.862595179,	224474.74257066},
+		id	=	5,
+		Tasks = 	{},
+		redPos = 	{-57356.03928147,	215937.583479},
+		name	=	"Palmyra",
+		blueTemplates = 	{"Blue Defensive - Large 1",	"Blue Offensive - Large 1",	"Blue Offensive - Large 2",	"Blue Defensive -Large 2",	"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [5]
+	[6] = 
+	{
+		redTemplates = 	{"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{-131539.56296348,	-34428.381088201},
+		id	=	6,
+		Tasks = 	{},
+		redPos = 	{-136101.05276901,	-36604.863366841},
+		name	=	"Beirut",
+		blueTemplates = 	{"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [6]
+	[7] = 
+	{
+		redTemplates = 	{"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{-26942.347791652,	-269250.55808494},
+		id	=	7,
+		Tasks = 	{},
+		redPos = 	{33966.963035054,	-193732.43769825},
+		name	=	"Cyprus",
+		blueTemplates = 	{"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [7]
+	[8] = 
+	{
+		redTemplates = 	{"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{-176051.36495466,	246580.2583962},
+		id	=	8,
+		Tasks = 	{},
+		redPos = 	{-218539.2958158,	341022.34305645},
+		name	=	"H3",
+		blueTemplates = 	{"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [8]
+	[9] = 
+	{
+		redTemplates = 	{"Red Offensive - Small 1",	"Red Defensive - Small 1",	"Red Offensive - Medium 1",	"Red Defensive - Medium 1",	"Red Offensive - Very Small 1",	"Red Defensive - Very Small 1"},
+		bluePos = 	{168818.14915749,	247303.46740076},
+		id	=	9,
+		Tasks = 	{},
+		redPos = 	{77508.926428621,	244841.19622605},
+		name	=	"Efrat",
+		blueTemplates = 	{"Blue Offensive - Small 1",	"Blue Defensive - Small 1",	"Blue Offensive - Medium 1",	"Blue Defensive - Medium 1",	"Blue Offensive - Very Small 1",	"Blue Defensive - Very Small 1"},
+	}, -- end of [9]
+} -- end of missionNodes
+
+=== MissionGenerator/nodesMap.lua: size + bounded preview (reported as 1 line -- avoid dumping an arbitrarily huge single line in full) ===
+byte size: 118
+line count: 1
+-- first 4000 characters --
+theatre.nodesMapBorders = { -257003.953125, -419498.875000, 248852.046875, 368981.125000 }  --minX, minZ, maxX, maxZ
+
+-- last 2000 characters --
+theatre.nodesMapBorders = { -257003.953125, -419498.875000, 248852.046875, 368981.125000 }  --minX, minZ, maxX, maxZ
+
