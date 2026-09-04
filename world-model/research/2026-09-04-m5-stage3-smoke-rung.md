@@ -184,3 +184,58 @@ tile(s) -- the region may straddle a tile boundary, unconfirmed) and re-running
 `build_world_model.py --srtm-tile ...` is a cheap follow-up once the user has it locally; the
 `ingest_probe`/`ElevationGrid.stats` code path is already implemented and tested (see
 `test_ingest_probe.py`'s SRTM tests against a synthetic tile).
+
+---
+
+## Real Latakia store rebuild — 2026-09-04
+
+`tools/build_world_model.py latakia-20km --probe-output data/raw/dcs/2026-09-04/terrain_probe_output_full.jsonl`
+(no `--srtm-tile`, per the gap above). Final feature/grid counts:
+
+```
+airfield: 1, named_place: 108, navaid: 8, road: 3267 (3136 OSM + 131 DCS), runway: 2,
+settlement: 338, water: 117
+probe stats: points_expected=1681, points_received=1681,
+  surface_type_counts={WATER: 412, LAND: 1236, ROAD: 29, RUNWAY: 4}
+```
+
+**Grid coverage: 1,681/1,681 cells populated for both `elevation` and `surface_type`** (verified
+directly against `grid_sample` row counts, not just the ingest report) -- full coverage, no gaps,
+since the full rung supplied every cell the smoke/500 rungs left `None`.
+`elevation.stats["srtm"]` is `null` (no covering DEM tile -- see above).
+
+**`describe_position` spot-checks against the real rebuilt store:**
+
+- **OSLK ARP** (`--latlon 35.40109 35.94868`): `elevation.dcs_m=28.48m` (plausible for a coastal
+  airfield), `surface_type.value="LAND"`. `nearest_road` (DCS) 256.0m at 184.65 deg;
+  `nearest_road_osm` 136.2m, disagreeing on the nearest road entirely -- rule 2 (disagreement
+  reported, not hidden) visibly holds.
+- **Coastal grid vertex** `(34934.892, -4314.924)` (`r0c0`, exactly on a grid point): `elevation.
+  dcs_m=0.0`, `surface_type.value="WATER"` -- exact agreement with the raw probe capture (as
+  expected at an exact grid vertex, where `sample_grid`'s bilinear/nearest-cell lookup collapses
+  to that one cell).
+- **Runway grid vertex** `(40934.892, 5685.076)` (`r12c20`): `elevation.dcs_m=27.02m`,
+  `surface_type.value="RUNWAY"`, `nearest_road` (DCS) 204.6m, `nearest_airfield`
+  (`derived_from_dcs_beacons`) 805.7m away, `derivation="runway_axis_midpoint"` -- consistent
+  with the smoke-rung research note's own cross-subsystem observation, now confirmed through the
+  full query stack rather than a raw-file distance calculation.
+- **Far outside the region** `(0, 0)`: `elevation.dcs_m=null`, `surface_type.value=null`,
+  `nearest_settlement=null` -- explicit absence, not a plausible-looking wrong answer (rule 3).
+
+## Summary across all three rungs
+
+| rung | points | nulls | enum surprises | determinism vs. earlier rungs |
+|---|---|---|---|---|
+| smoke | 121 | 0 | none (all in 1-5) | n/a (first rung) |
+| 500 | 441 | 0 | none | 121/121 rung-1 points bit-identical |
+| full | 1,681 | 0 | none | 121+441 points bit-identical; exact expected name-set match |
+
+`land.getSurfaceType` is now a confirmed-working, DCS-authoritative source for this install,
+matching the caution the plan asked for (never trusted at scale before this session's live
+verification). `SHALLOW_WATER` (enum value 2) was never observed at any rung -- a real absence in
+this grid's coverage, not evidence the value never occurs.
+
+**Outstanding, not this session's job:** an SRTM tile covering the Latakia envelope
+(`N35E035.hgt` or whichever tile(s) actually cover ~35.0-35.5N/35.85-35.95E), and Stage 4's
+formal cross-subsystem check (`getSurfaceType` ROAD/RUNWAY cells vs. nearest `.routes`
+centerline distance) and control-point/tolerance-band test.

@@ -637,3 +637,102 @@ Latakia `.sqlite` be rebuilt with `--probe-output`/`--srtm-tile`, and the
   (if sparse) queryable grid rather than throwaway data replaced wholesale by later rungs — this
   wasn't explicitly required by the checklist but falls out naturally from the grid-index naming
   choice and seemed worth doing since it costs nothing.
+
+---
+
+### Implementation Summary — Stage 3 completion (live DCS round-trip finished)
+
+The live round-trip flagged as outstanding above is now complete. All three rungs
+(smoke/121, ~500/441, full/1,681) ran on the Windows DCS machine, were synced back via
+`win-mac-sync/`, ingested, and sanity-checked in turn; the real Latakia `.sqlite` was rebuilt with
+the full probe grid wired in. Full detail, per-rung enum distributions, determinism cross-checks,
+and `describe_position` spot-checks are in `world-model/research/2026-09-04-m5-stage3-smoke-rung.md`
+(one running note covering all three rungs plus the final rebuild, despite its filename naming
+only rung 1 -- kept as a single note rather than three, since each rung's findings build directly
+on the last).
+
+### Files Changed (this completion pass)
+- `world-model/tests/test_terrain_probe.py` — synthetic fixture replaced with a real 7-line
+  subset of the actual smoke-rung capture (per `CONVENTIONS.md`'s real-data-fixture rule), plus a
+  new test pinning that all observed `surface_type` values fall inside the documented `1..5`
+  enum.
+- `world-model/tests/test_ingest_probe.py` — docstring updated to stop claiming "no real probe
+  output exists yet" (stale after the live rungs landed); still uses a synthetic grid
+  deliberately, since it's a wiring test, not a DCS-terrain claim.
+- `world-model/research/2026-09-04-m5-stage3-smoke-rung.md` — grew across three sessions/rungs
+  into the complete record: rung 1 (smoke), rung 2 (500), rung 3 (full), the SRTM-tile-gap
+  finding, and the final real-store rebuild + spot-checks.
+- No `src/` changes were needed in this completion pass — `ingest_probe`/`parse_terrain_probe_output`
+  handled all three real files correctly against the code already written and tested with
+  synthetic fixtures in the prior pass.
+
+### Real data results
+
+**Per-rung sanity (all three point counts exactly as requested, 0 nulls, 0 duplicate names):**
+
+| rung | points | LAND | SHALLOW_WATER | WATER | ROAD | RUNWAY |
+|---|---|---|---|---|---|---|
+| smoke | 121 | 85 (70.2%) | 0 | 34 (28.1%) | 1 (0.8%) | 1 (0.8%) |
+| 500 | 441 | 324 (73.5%) | 0 | 112 (25.4%) | 4 (0.9%) | 1 (0.2%) |
+| full | 1,681 | 1,236 (73.5%) | 0 | 412 (24.5%) | 29 (1.7%) | 4 (0.2%) |
+
+**`getSurfaceType` surprises:** none in the sense of invalid/out-of-enum values (all three rungs,
+100% of points, land inside the documented `1..5` range) or nondeterminism (three-way
+cross-check: every point re-sampled across rungs returned bit-identical `height_m`/
+`surface_type`). One real, spatially-explained oddity worth flagging: several `WATER` cells carry
+non-zero elevation (up to ~180m, inland, away from the coast) rather than sea-level-only —
+plausible as river/reservoir features (the plan's Finding B independently notes the Nahr
+al-Kabir river crosses this region) rather than a bug, not independently confirmed against a
+water-body reference this session. `SHALLOW_WATER` (enum 2) was never observed at any rung's
+sampling density — a real absence in this grid's coverage at 500m spacing, not evidence the DCS
+terrain never produces it.
+
+**Final store elevation/surface_type coverage:** both grids are **100% populated — 1,681/1,681
+cells** (verified directly against `grid_sample` row counts, not just the ingest report), since
+the full rung supplied every point the earlier partial rungs would have left `None`.
+
+**SRTM delta stats: not computed this session.** `data/raw/dem/` holds only the Gemerek/M4 tile
+(`N39E036.hgt`); the Latakia envelope needs a different tile (`N35E035.hgt` or whichever
+tile(s) actually cover ~35.0-35.5N/35.85-35.95E), which isn't present. An automated fetch attempt
+was blocked by sandbox network policy, consistent with M4's own precedent of the user manually
+fetching the DEM tile. `elevation.stats["srtm"]` is `null` in the real store — an honest absence,
+not a fabricated number. The `ingest_probe`/`ElevationGrid.stats` SRTM code path is implemented
+and tested against a synthetic tile (`test_ingest_probe.py`); rerunning
+`build_world_model.py --srtm-tile <path>` once a covering tile is available is a cheap follow-up,
+no code changes needed.
+
+**`describe_position` spot-checks against the real rebuilt store:**
+- OSLK ARP: `elevation.dcs_m=28.48m`, `surface_type.value="LAND"`; `nearest_road` (DCS) 256.0m,
+  `nearest_road_osm` 136.2m — disagreeing on which road is nearest, visibly reported per rule 2.
+- Coastal grid vertex (`r0c0`): `elevation.dcs_m=0.0`, `surface_type.value="WATER"` — exact match
+  to the raw probe capture at this exact grid point.
+- Runway grid vertex (`r12c20`): `elevation.dcs_m=27.02m`, `surface_type.value="RUNWAY"`,
+  `nearest_airfield` 805.7m away (`derivation="runway_axis_midpoint"`) — consistent with the
+  cross-subsystem observation first noted at the smoke rung, now confirmed through the full query
+  stack.
+- Far outside the region (`x=0, z=0`): `elevation.dcs_m=null`, `surface_type.value=null`,
+  `nearest_settlement=null` — explicit absence, not a plausible-looking wrong answer.
+
+### Checks (this completion pass)
+- `ruff format --check world-model/src world-model/tests`: pass
+- `ruff check world-model/src world-model/tests`: pass, 0 findings
+- `mypy --strict world-model/src world-model/tests`: pass (55 source files)
+- `pytest world-model/tests -q`: pass (137 passed, up from 136 after the code-only pass)
+
+### Notable Discoveries (this completion pass)
+- **The incremental ladder's determinism cross-check turned out to be a real, useful side
+  effect, not just a formality.** Because every rung samples a subset of the same fixed grid
+  coordinates, each later rung re-queries every earlier rung's points — three independent live
+  DCS mission invocations returned bit-identical `land.getHeight`/`land.getSurfaceType` results
+  for every overlapping point. This wasn't a planned test, but it's a genuine reproducibility
+  finding worth having for a function (`getSurfaceType`) that had never been exercised before this
+  session.
+- **`getSurfaceType`'s `ROAD`/`RUNWAY` cell counts scale roughly linearly with grid density**
+  (1/4/29 and 1/1/4 don't look linear at a glance, but the road/runway *strips* are narrow enough
+  relative to 500m spacing that hitting more of them as density increases is expected aliasing,
+  not a sign of anything wrong — consistent with the plan's own Finding C caveat that this
+  function is "a good water mask and a poor road geometry source" at this spacing).
+- **No DEM tile for Latakia is a real, not-yet-closed gap** distinct from anything M1-M4
+  established — M4's Gemerek tile doesn't help here, and this is the first M5 stage to actually
+  need one. Left for the user to fetch (same manual viewfinderpanoramas.org process M4 used)
+  rather than attempted via an unverified automated download this session.
