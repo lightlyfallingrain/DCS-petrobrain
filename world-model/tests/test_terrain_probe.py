@@ -1,16 +1,29 @@
 """Tests for `elevation.dcs_grid.parse_terrain_probe_output`.
 
-**No real probe output exists yet** -- `land.getSurfaceType` has never been
-called against this install (M5 Stage 3's whole point), so unlike
-`test_dcs_grid.py`'s M4 fixture (a literal, real live-mission run), this
-fixture is a synthetic literal that only pins the JSON-lines *format
-contract* the plan already decided (`tools/dcs-mission-probe/
-terrain_probe_*.lua`'s emitted shape: `name`/`x`/`z`/`height_m`/
-`surface_type`, enum `LAND=1 .. RUNWAY=5` per plan.md Finding C) -- it does
-not assert any claim about DCS's actual terrain. Once a live rung's real
-output lands, replace/extend this with a hardcoded real fixture the same
-way `test_dcs_grid.py` does, per `world-model/docs/CONVENTIONS.md`'s "verify
-claims against the installed DCS version" rule.
+The fixture below is a literal, hand-copied subset of `terrain_probe_smoke.lua`'s
+real rung-1 output (121 points, collected from a live DCS mission via
+`tools/wsl/collect_terrain_probe_log.sh`) -- `land.getHeight` and
+`land.getSurfaceType` against the installed Syria terrain, the first live
+call of `getSurfaceType` against this install. Mirrors `test_dcs_grid.py`'s
+pattern of hardcoding a small real-data subset directly in the test module
+rather than reading the gitignored raw file, so tests stay reproducible
+without a live probe having run.
+
+Provenance: `world-model/data/raw/dcs/2026-09-04/terrain_probe_output_smoke.jsonl`.
+See `world-model/research/2026-09-04-m5-stage3-smoke-rung.md` for the full
+121-point enum distribution and sanity checks this subset was drawn from.
+
+The 7 lines below deliberately span all three enum values the real run
+produced (`LAND=1`, `WATER=3`, `ROAD=4`, `RUNWAY=5`; `SHALLOW_WATER=2` was
+not observed in this rung -- absence noted, not asserted as impossible) plus
+one real oddity worth pinning in a test rather than only a research note:
+`r0c32` is `WATER` at `height_m=79.8625`, i.e. not sea level -- surrounded by
+`LAND` neighbours at similar elevations, plausibly a small inland body in
+the Jabal Ansariyah foothills rather than a parser bug (see the research
+note's discussion). `r12c20` (`RUNWAY`) sits 805.7m from the Stage 1
+derived LATAKIA airfield point (41740.54, 5697.76) -- an independent,
+unplanned cross-subsystem sanity check the plan reserves formally for Stage
+4, cheap to note here.
 """
 
 from pathlib import Path
@@ -20,9 +33,13 @@ import pytest
 from elevation.dcs_grid import DcsTerrainSample, parse_terrain_probe_output
 
 _FIXTURE_LINES = [
-    '{"name": "r0c0", "x": 34934.8920, "z": -4314.9240, "height_m": 12.3400, "surface_type": 1}',
-    '{"name": "r0c1", "x": 34934.8920, "z": -3814.9240, "height_m": -0.5000, "surface_type": 3}',
-    '{"name": "r1c0", "x": 35434.8920, "z": -4314.9240, "height_m": 5.1000, "surface_type": 4}',
+    '{"name": "r0c0", "x": 34934.8920, "z": -4314.9240, "height_m": 0.0000, "surface_type": 3}',
+    '{"name": "r0c4", "x": 34934.8920, "z": -2314.9240, "height_m": 0.0000, "surface_type": 3}',
+    '{"name": "r0c16", "x": 34934.8920, "z": 3685.0760, "height_m": 9.1380, "surface_type": 1}',
+    '{"name": "r0c32", "x": 34934.8920, "z": 11685.0760, "height_m": 79.8625, "surface_type": 3}',
+    '{"name": "r12c20", "x": 40934.8920, "z": 5685.0760, "height_m": 27.0237, "surface_type": 5}',
+    '{"name": "r32c20", "x": 50934.8920, "z": 5685.0760, "height_m": 126.6403, "surface_type": 4}',
+    '{"name": "r40c40", "x": 54934.8920, "z": 15685.0760, "height_m": 283.9335, "surface_type": 1}',
 ]
 
 
@@ -37,8 +54,16 @@ def test_parse_terrain_probe_output_returns_all_points(tmp_path: Path) -> None:
 
     samples = parse_terrain_probe_output(fixture_path)
 
-    assert len(samples) == 3
-    assert [s.name for s in samples] == ["r0c0", "r0c1", "r1c0"]
+    assert len(samples) == 7
+    assert [s.name for s in samples] == [
+        "r0c0",
+        "r0c4",
+        "r0c16",
+        "r0c32",
+        "r12c20",
+        "r32c20",
+        "r40c40",
+    ]
 
 
 def test_parse_terrain_probe_output_parses_fields_exactly(tmp_path: Path) -> None:
@@ -47,10 +72,29 @@ def test_parse_terrain_probe_output_parses_fields_exactly(tmp_path: Path) -> Non
     samples = parse_terrain_probe_output(fixture_path)
 
     assert samples[0] == DcsTerrainSample(
-        name="r0c0", x=34934.892, z=-4314.924, height_m=12.34, surface_type=1
+        name="r0c0", x=34934.892, z=-4314.924, height_m=0.0, surface_type=3
     )
-    assert samples[1].surface_type == 3
-    assert samples[2].surface_type == 4
+    assert samples[4] == DcsTerrainSample(
+        name="r12c20", x=40934.892, z=5685.076, height_m=27.0237, surface_type=5
+    )
+    assert samples[5] == DcsTerrainSample(
+        name="r32c20", x=50934.892, z=5685.076, height_m=126.6403, surface_type=4
+    )
+
+
+def test_parse_terrain_probe_output_surface_type_values_are_within_documented_enum(
+    tmp_path: Path,
+) -> None:
+    """`land.getSurfaceType` had never been called against this install
+    before this probe (see the plan's Finding C) -- the whole point of the
+    smoke test was to confirm it returns plausible enum values rather than
+    garbage. Every value observed in the real 121-point rung falls inside
+    the documented `1..5` range."""
+    fixture_path = _write_fixture(tmp_path)
+
+    samples = parse_terrain_probe_output(fixture_path)
+
+    assert all(1 <= s.surface_type <= 5 for s in samples)
 
 
 def test_parse_terrain_probe_output_raises_on_null_height(tmp_path: Path) -> None:

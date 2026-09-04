@@ -1,8 +1,10 @@
 """Tests for `build.ingest_probe.ingest_probe`.
 
-Uses a small synthetic 2x2 grid (not the real 41x41 Latakia grid -- no live
-probe output exists yet, see `test_terrain_probe.py`'s docstring) and a
-tiny, uniform-value synthetic `SrtmTile` (all samples the same value, so the
+Uses a small synthetic 2x2 grid (not the real 41x41 Latakia grid -- this is
+a wiring test for `ingest_probe`'s row/col placement and stats logic, not a
+claim about real DCS terrain; contrast `test_terrain_probe.py`, which as of
+the Stage 3 smoke rung uses a real hardcoded fixture) and a tiny,
+uniform-value synthetic `SrtmTile` (all samples the same value, so the
 expected SRTM delta for every point is exactly `height_m - tile_value`,
 independent of bilinear interpolation position -- this keeps the expected
 numbers hand-verifiable without needing a real `.hgt` tile). The tile's
