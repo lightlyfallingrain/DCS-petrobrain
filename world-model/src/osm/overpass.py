@@ -35,6 +35,15 @@ class BBox:
 
 
 def _build_query(bbox: BBox) -> str:
+    """M5's widened query (see
+    `plans/m5-first-persistent-model/plan.md` "Affected Modules / Files" ->
+    `osm/overpass.py`): M3's `highway`/`building`/`place` node/`waterway`
+    set, plus `landuse`, `natural=water`, and `place` way/relation --
+    settlement and water features need *extent* (a polygon), not just a
+    labelled point, and M3's original query had neither. Validated by M5
+    Stage 0's census fetch
+    (`world-model/research/2026-09-04-m5-stage0-census.md`) before becoming
+    the default here."""
     coords = f"{bbox.south},{bbox.west},{bbox.north},{bbox.east}"
     return (
         "[out:json][timeout:25];\n"
@@ -42,7 +51,12 @@ def _build_query(bbox: BBox) -> str:
         f'  way["highway"]({coords});\n'
         f'  way["building"]({coords});\n'
         f'  node["place"]({coords});\n'
+        f'  way["place"]({coords});\n'
+        f'  relation["place"]({coords});\n'
         f'  way["waterway"]({coords});\n'
+        f'  way["natural"="water"]({coords});\n'
+        f'  relation["natural"="water"]({coords});\n'
+        f'  way["landuse"]({coords});\n'
         ");\n"
         "out geom;\n"
     )
