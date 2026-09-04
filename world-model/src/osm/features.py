@@ -38,10 +38,21 @@ class OsmWay:
 
 @dataclass(frozen=True)
 class OsmFeatureSet:
-    """All features parsed from one Overpass response."""
+    """All features parsed from one Overpass response.
+
+    `relations_skipped` counts `"relation"` elements in the response --
+    multipolygon relations (e.g. some large water bodies and settlement
+    extents) are not parsed into geometry (real work: outer/inner ring
+    assembly), but per
+    `plans/m5-first-persistent-model/plan.md`'s "Multipolygon relations"
+    risk entry, an unsupported relation must be an explicitly counted skip,
+    never a silent drop -- `build/ingest_osm.py` surfaces this count in the
+    research note.
+    """
 
     nodes: list[OsmNode] = field(default_factory=list)
     ways: list[OsmWay] = field(default_factory=list)
+    relations_skipped: int = 0
 
 
 def _parse_node(element: dict[str, Any]) -> OsmNode:
@@ -72,13 +83,16 @@ def load_features(cache_path: Path) -> OsmFeatureSet:
 
     nodes: list[OsmNode] = []
     ways: list[OsmWay] = []
+    relations_skipped = 0
     for element in data["elements"]:
         element_type = element["type"]
         if element_type == "node":
             nodes.append(_parse_node(element))
         elif element_type == "way":
             ways.append(_parse_way(element))
-        # "relation" elements are not requested by the plan's query and are
-        # ignored if present.
+        elif element_type == "relation":
+            relations_skipped += 1
+        # Any other element type is unrecognized and dropped without a count
+        # -- Overpass's `out geom;` only ever emits node/way/relation.
 
-    return OsmFeatureSet(nodes=nodes, ways=ways)
+    return OsmFeatureSet(nodes=nodes, ways=ways, relations_skipped=relations_skipped)
