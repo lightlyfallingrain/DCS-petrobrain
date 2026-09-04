@@ -876,6 +876,21 @@ test; no `src/` pipeline code changed.
   the fix is either tightening `find_next_point_block`'s validation or adding a
   plausibility/subnormal-value filter to `ingest_roadnet`. Scope: 1 of 131 DCS road features
   (0.76%).
+  **Correction (2026-09-04, later same-day session, Debugger role): fixed.** Root cause was
+  `roadnet/container.py::_triple_plausible` never rejecting denormalized/subnormal float64 values
+  (finite, near-zero, so they trivially passed the wide envelope bounds) — the same filter the
+  exploratory recon script already used (`2026-09-04-m5-roadnet-byte-decode.md` Session 2) but
+  which never made it into the production validator. Fixed by rejecting any coordinate component
+  that is nonzero but has magnitude `< 1e-6`. Full re-walk/rebuild: whole-file routes 14,861 →
+  **14,833** (-28), in-region routes 131 → **130** (-1, the corrupted one), `sync_loss_events`
+  302 → **220**. `describe_position(0,0)`'s `nearest_road` is no longer the bogus `0.0 m` — it now
+  resolves to a real, legitimate long route (`id=3716`) at `3689.37 m`, not `null` (that route
+  genuinely passes near the origin; see the correction section for why `null` was the wrong
+  expectation, not the fix). The 28-route whole-file delta is evidence the resync-false-positive
+  risk was not a one-off — flagged as worth a future systematic per-route audit, not fully closed
+  by this fix beyond the denormalized-magnitude failure mode. Full detail, before/after table, and
+  regression tests: `world-model/research/2026-09-04-m5-stage4-validation.md`'s "Correction"
+  section.
 - **DCS-vs-OSM road displacement is ~2 orders of magnitude tighter than the plan predicted** (median
   5.3 m / p90 47.0 m computed, vs. an expected ~1.0-1.3 km carried forward from M1's *point-object*
   placement-error figure). Investigated rather than reported at face value: an initial unfiltered

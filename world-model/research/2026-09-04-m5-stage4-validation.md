@@ -255,12 +255,105 @@ look like a pass against the original number.
 
 ---
 
+## Correction (2026-09-04, later same-day session) — Finding 1 fixed, numbers superseded
+
+Finding 1 above was disposed as "open, not fixed this session." It has since been fixed (Debugger
+role, same day). **This section corrects the affected numbers rather than editing them away in
+place**, per the project's decision-history convention — everything above this point is left as
+originally written.
+
+**Root cause, precisely identified.** `roadnet/container.py`'s `_triple_plausible` (the resync
+scan's per-point envelope check) validated `math.isfinite(x/y/z)` plus wide magnitude bounds
+(`|x|,|z| < 1e6`, `-2000 < y < 6000`), but never rejected denormalized/subnormal float64 values —
+numbers like `1.36211130863e-312` are finite and trivially satisfy those bounds (they're
+near-zero), so they read as "plausible" even though they are never a genuine DCS coordinate. This
+exact filter (`reject any value that is nonzero but has magnitude < 1e-6`) was already known and
+used in the exploratory recon script documented in
+`2026-09-04-m5-roadnet-byte-decode.md` Session 2 ("without this filter the scan returns thousands
+of false positives with y/z values like 1e-312") — it simply never made it from the recon script
+into the production `_triple_plausible` validator. Feature `id=3711`'s actual stored geometry,
+confirmed directly against the pre-fix store: 64 points, of which the first 3 are denormalized
+garbage (`[-5.607157514132566e-195, 1.36211130863e-312]`, `[46368.0, 1.371949926365e-312]`,
+`[3.541463e-318, 0.0]` — one more garbage point than this note's original "two garbage leading
+points" estimate) followed by 61 points of exact `(0.0, 0.0)` padding.
+
+**Fix.** `roadnet/container.py::_triple_plausible` now rejects any coordinate component that is
+nonzero but has magnitude below `1e-6` (`_is_denormalized_garbage`), matching the already-proven
+recon-script filter. Exact `0.0` is still accepted (a genuine coordinate, e.g. sea-level
+elevation, can legitimately be zero) — only nonzero-but-implausibly-tiny values are rejected. This
+is a container-layer fix (shared by both `.routes` and `.rn4`), not a special case for this one
+feature id. Two regression tests pin the exact literal garbage values from this feature:
+`test_roadnet_container.py::test_find_next_point_block_rejects_denormalized_garbage_false_positive`
+and `test_roadnet_routes.py::test_iter_routes_skips_denormalized_garbage_false_positive_route`.
+
+**Verification — full `.routes` walk and store rebuild re-run**, real Latakia store, same raw
+inputs as the original Stage 2/3/4 build:
+
+| stat | before (this note, original) | after (fix) | delta |
+|---|---|---|---|
+| `routes_found_whole_file` | 14,861 | **14,833** | -28 |
+| `routes_in_region` (Latakia gate) | 131 | **130** | -1 (the corrupted route) |
+| `sync_loss_events` | 302 | **220** | -82 |
+| `road` feature count in store | 3,267 (3,136 OSM + 131 DCS) | **3,266** (3,136 OSM + 130 DCS) | -1 |
+| feature `id=3711` / `route:3311@464953201` present? | yes (corrupted) | **absent** | removed |
+| `describe_position(conn, "Syria", 0.0, 0.0)`'s `nearest_road` (DCS) | **0.0 m** (bogus, sourced from garbage) | **3689.37 m** (real, sourced from feature `id=3716`, `route:6244@717667470`) | no longer a plausible-wrong answer |
+
+Confirmed directly against the rebuilt store: zero road features contain any denormalized-garbage
+coordinate (`abs(v) < 1e-6` and nonzero) anywhere in their geometry.
+
+**`describe_position(0,0)` does *not* degrade to `null` — and that is correct, not a miss.** The
+task expectation going in was that `(0,0)` would turn out to be genuinely outside all real DCS
+road coverage once the corrupted feature was removed. That expectation was wrong: `(0,0)` sits
+close to a real, legitimate, long clipped route (`id=3716`, `route:6244@717667470`, spanning
+`x=-13305.06` to `x=194333.03` — the same "any point inside bbox keeps the whole route" pattern
+this note's item 3 already validated as correct behavior for a sibling route, `id=3717`/
+`route:6243@717667470`, at the "outside coverage, far east" spot-check point). Its geometry is
+smooth, envelope-compliant, and contains no denormalized values — genuine DCS road data, not
+resync noise. The real bug was never "`(0,0)` should be outside coverage"; it was "the *specific*
+0.0 m answer was sourced from garbage." Post-fix, `(0,0)`'s `nearest_road` is a different,
+legitimate feature at a plausible distance — the honest answer, whether or not it happens to be
+`null`.
+
+**Does this raise doubt about the other ~14,860 routes' integrity?** Yes, and it should be flagged
+rather than assumed away. The whole-file route count dropping by 28 (not just the 1 inside the
+Latakia region) is direct, measured evidence that the resync-false-positive risk Stage 2 flagged
+as open was not a one-off: 28 total false-positive matches existed across the full 2.25 GB file
+under the pre-fix validator, of which only 1 happened to land inside the Latakia region's bbox.
+The fix removes exactly the class of false positive this note's Finding 1 identified
+(denormalized-magnitude garbage), and the post-fix walk shows zero remaining denormalized-garbage
+points anywhere in the store's road geometry — so *this specific* failure mode is closed, not
+just patched for one id. It does **not** prove every one of the remaining 14,833 whole-file routes
+(130 in-region) is geometrically sound in every other possible way (e.g. a false-positive match
+that happened to decode into small-but-*normal*-magnitude, envelope-compliant values would still
+slip through, since the fix only targets the denormalized-magnitude signature actually observed).
+Recommend a future milestone (not M5-scoped) add a systematic per-route smoothness/plausibility
+audit (e.g. flag routes with abnormally large point-to-point jumps, or excessive exact-duplicate
+points) over the full whole-theatre walk, rather than relying on spot-checking as Stage 4 did here.
+
+**Numbers *not* affected.** Item 7's cross-subsystem check (median 129.05 m) and item 8's
+DCS-vs-OSM displacement check (median 5.30 m) already excluded the corrupted feature via the
+analysis script's own `_is_subnormal_point` filter (documented in this note's original Finding 1
+disposition) — those numbers used the same clean data before and after this fix and do not need
+correction.
+
+**Checks (fix + regression tests):**
+- `ruff format --check world-model/src world-model/tests`: pass
+- `ruff check world-model/src world-model/tests`: pass, 0 findings
+- `mypy --strict world-model/src world-model/tests`: pass
+- `pytest world-model/tests -q`: pass (142 passed, up from 139)
+
+---
+
 ## Files
 
 - `world-model/tools/analyze_m5_stage4_validation.py` — the analysis script behind every number in
   this note (read-only against the real store, no pipeline code, not part of `src/`).
 - `world-model/tests/test_describe_position.py` — added
   `test_describe_position_control_point_latakia_arp` (the one CI-pinnable Stage 4 check).
+- `world-model/src/roadnet/container.py` — Correction section's fix: `_triple_plausible` now
+  rejects denormalized/near-zero-but-nonzero garbage coordinates.
+- `world-model/tests/test_roadnet_container.py`,
+  `world-model/tests/test_roadnet_routes.py` — Correction section's regression tests.
 
 ## Checks
 
