@@ -246,3 +246,220 @@ M5's six layers — confirmed by `ways_skipped_unclassified` matching that count
   PRMG_GLIDESLOPE, and RSBN beacons carry `channel` instead of `frequency`** (6 of 151 beacons
   have no `frequency` field at all) — `BeaconEntry.frequency: float | None` handles this
   correctly; a non-optional field would have raised on real data.
+
+---
+
+### Implementation Summary — Stage 2 (`src/roadnet/`, DCS-native roads, still offline)
+
+Built the roadnet package in the three mandated rungs, smallest first, then wired it into the
+build pipeline and ran the full 2.25 GB `Syria.routes` walk twice (once standalone to establish
+the gate/coverage numbers, once as part of the real end-to-end store rebuild) — both runs agree
+exactly (14,861 whole-file routes, 131 in the Latakia region), which is itself a useful
+determinism check on the parser.
+
+### Files Changed / Added
+- `world-model/src/roadnet/__init__.py` — package docstring stating format provenance (which
+  research note, which files) and, per the plan's explicit instruction, which parts of the format
+  are decoded vs. intentionally skipped (the `.routes` per-route trailer, `.rn4`'s
+  adjacency/graph section and its embedded geometry, and the topology-row-to-geometry join).
+- `world-model/src/roadnet/container.py` — shared `landscape4::` primitives: `read_header`
+  (asserts the exact class name, raises `ContainerFormatError` on mismatch or truncation),
+  `read_length_prefixed_string`, `read_int32`, `read_point_block` (strict, no-scan reader for a
+  block known to start exactly at an offset — used for a `.routes` direction array, always
+  adjacent to its position array), and `find_next_point_block` (the scan-forward resync: a
+  first/middle/last coordinate pre-filter before a full N-point validation, both against a DCS
+  coordinate envelope `|x|,|z| < 1e6`, `-2000 < y < 6000`).
+- `world-model/src/roadnet/routes.py` — `RoutePolyline` (frozen), `RouteWalkStats` (mutable
+  out-parameter populated during the walk, since a generator's return value is awkward to recover
+  mid-iteration), and `iter_routes(path, bbox=None, stats=None)` — a streaming generator over an
+  `mmap`. Per route: the position block is found via scan-forward resync (normal, expected once
+  per route boundary — the trailer between routes is never parsed); the direction block is then
+  read with the strict non-scanning reader at exactly the position block's end offset, since the
+  confirmed format has them always adjacent — a direction block *not* found there, or one that
+  fails a unit-magnitude sanity check on its first/middle/last vector, increments
+  `sync_loss_events` rather than raising, since real-file walks (see below) show a small,
+  non-fatal anomaly rate is normal.
+- `world-model/src/roadnet/rn4.py` — `parse_header`, `read_string_table`, `iter_topology_rows`
+  (terminates, without yielding, at the first row failing `column[1] == 1 and column[4] == 2` —
+  confirmed against real Damascus/Incirlik data to be exactly the table's own sentinel row, not a
+  data row), `type_name_for_row` (column 6, confirmed string-table index). Explicit non-goals
+  restated in the module docstring per the plan: no adjacency-section decode, no row-to-geometry
+  join.
+- `world-model/src/roadnet/extract.py` — `write_region_extract`/`read_region_extract` (JSON
+  Lines) + `ExtractManifest`/`read_manifest` (source path/size/mtime, extractor version, bbox,
+  counts, walk stats). Built per the plan's spec but **not wired into the pipeline** — Stage 2
+  rung 3 runs `ingest_roadnet.py` directly against the real local `Syria.routes` file, per the
+  Option A acquisition decision ("ingest_roadnet.py can read either the extract or walk the full
+  file directly"); the extract module is a ready, tested-by-construction local cache for anyone
+  who wants faster iteration later, not a dependency of today's build. `tools/
+  extract_roadnet_region.py` and `tools/inspect_roadnet.py` (listed in the plan's file list) were
+  **not built this session** — out of this task's explicit ask (rungs 1-3, ingest wiring, tests,
+  gate, coverage, final rebuild), and `extract.py`/`ingest_roadnet.py` don't need them to
+  function. Flagged here rather than silently dropped; cheap to add later if wanted.
+- `world-model/src/build/ingest_roadnet.py` — `ingest_roadnet(routes_path, centre_x, centre_z,
+  half_extent_m, source_id) -> (features, RoadnetIngestStats)`. Walks the whole file (bbox only
+  filters what's *yielded*, not how much is walked — `.routes` has no spatial index to seek
+  into), converting every intersecting route into a `road` `StoredFeature`:
+  `provenance={"geometry": "dcs"}`, `confidence={"geometry": "high"}`,
+  `position_uncertainty_m=0.0`, `subtype=None`, `name=None` — per Decision 5/7, exactly as the
+  plan specifies. **Deliberately does not import `roadnet.rn4` at all** — the absence of that
+  import is itself the scope guard against ever attempting the unconfirmed type-to-geometry join,
+  and `test_roadnet_rn4.py::test_ingested_road_features_never_carry_a_subtype` pins the observable
+  consequence. Orientation is computed once at build time from the route's *own* first direction
+  vector (`math.atan2(dz, dx)`, matching `geometry.bearing_deg`'s convention) and stored in
+  `tags_json["orientation_deg"]` — the plan's stated fallback for "storing per-point direction
+  vectors on the feature row is awkward" (`StoredFeature` has no such field, and adding one is a
+  schema change out of Stage 2's scope). A route with any point outside the region bbox keeps its
+  full, untruncated geometry and is flagged `tags_json["clipped"] = true`, per the plan's "never
+  silently truncated."
+- `world-model/src/build/pipeline.py` — `build_region` gained an optional `routes_path: Path |
+  None = None` parameter. If given and the file exists, `ingest_roadnet` runs and its features/
+  stats are folded into `BuildReport` (`roadnet_stats`); otherwise `BuildReport.roadnet_skipped =
+  True` and no roadnet features are inserted — a fresh checkout without the 2.25 GB file staged
+  degrades to "absence reported as absence," not a crash, consistent with `describe_position`'s
+  rule 3.
+- `world-model/src/query/describe.py` — two small changes: (1) `_road_info`'s tag lookup renamed
+  from the Stage 1 placeholder key `"computed_bearing_deg"` to `"orientation_deg"`, matching what
+  `ingest_roadnet.py` now actually populates (OSM roads still don't set this tag, so
+  `nearest_road_osm.orientation_deg` stays `None`, which is correct — OSM ingest doesn't compute
+  road bearings); (2) the module docstring's "Stage 1 status" note updated to reflect that
+  `nearest_road` is now wired in. `nearest_road`/`nearest_road_osm`'s split via
+  `nearest_feature`'s `provenance_geometry` filter (built in Stage 1) needed no changes — it
+  already discriminates on `provenance["geometry"]`, which `ingest_roadnet.py`'s `"dcs"` value
+  satisfies automatically.
+- `world-model/tools/build_world_model.py` — added `--routes` (defaulting to
+  `data/raw/dcs/syria/roads/Syria.routes` for `latakia-20km`) and printing of `roadnet_stats`/
+  `roadnet_skipped` in the CLI's summary output.
+- `world-model/pyproject.toml` — added `"roadnet"` to `known-first-party` (the one item the plan's
+  Stage 1 note flagged as deferred until this package existed).
+
+### Tests Added
+- `tests/test_roadnet_container.py` — header parse (real class names `landscape4::lRoutesFile`/
+  `landscape4::lRoadNetwork`, real header int-list `[2, 48, ...]`, and the real, literal
+  `Syria.routes` byte-93 data-start offset reproduced from the confirmed 59-byte header), wrong
+  class name raises, truncated buffer raises, `read_point_block` well-formed/N-past-end/negative-N,
+  and — the most important one — **`test_find_next_point_block_resyncs_past_garbage`**: a
+  well-formed point block (4 real literal position triples from the byte-decode research note)
+  preceded by a region of plausible-looking garbage (a small int32 that could pass as a count, an
+  out-of-envelope float64 triple, sentinel-looking negative int32s, unaligned stray bytes),
+  asserting `find_next_point_block` lands exactly on the real block's offset — proving the resync
+  actually *recovers* sync, not just that it works on already-aligned input.
+- `tests/test_roadnet_routes.py` — a two-route synthetic fixture (real literal position triples
+  and a real literal unit direction vector from the research note, separated by a short
+  deliberately-malformed "trailer gap" that is not shaped like a valid point block) asserting:
+  exact decoded positions, unit-magnitude direction vectors (tolerance matches
+  `routes.py`'s own `_UNIT_MAGNITUDE_TOLERANCE`, since the note's literal direction value is
+  rounded to 3 decimals, not bit-exact), correct `route_index`/`byte_offset`, `bbox` filtering
+  actually filters what's yielded, walk stats count both routes and exactly one resync event (the
+  trailer-gap skip), and a structural guard that `iter_routes` returns a real generator.
+- `tests/test_roadnet_rn4.py` — string table + topology row parse against a synthetic fixture
+  built from real, literal Damascus.rn4 values reproduced by inspecting the local file directly
+  this session (`field_a=5`, `string_count=7`, the 7-entry string table, the real first data row,
+  a real row with `column[6]=3` for type-index diversity, and the real sentinel/terminator row);
+  asserts `iter_topology_rows` stops before yielding the sentinel, `type_name_for_row` resolves
+  columns 0 and 3 correctly and returns `None` for an out-of-range index; plus the scope-guard
+  test the plan calls for, `test_ingested_road_features_never_carry_a_subtype`, which runs
+  `build.ingest_roadnet` against a tiny synthetic `.routes` file and asserts every emitted
+  `StoredFeature` has `subtype=None`/`name=None` even though this same test file just proved
+  `.rn4` type names are real and resolvable — pinning that the two facts never get joined.
+
+### Checks
+- `ruff format --check world-model/src world-model/tests`: pass (51 files)
+- `ruff check world-model/src world-model/tests`: pass, 0 findings (the canonical command per
+  `world-model/CLAUDE.md`; `tools/` was also checked individually and shows only the same
+  pre-existing EXE001/I001 findings on files this session didn't touch, confirmed against the
+  unmodified baseline — see Notable Discoveries)
+- `mypy --strict world-model/src world-model/tests`: pass (51 source files)
+- `pytest world-model/tests -q`: pass (118 passed, up from 96 at the end of Stage 1)
+
+### Rung-by-rung validation (real local files)
+
+**Rung 1 (`container.py` + `rn4.py` vs. `Damascus.rn4`/`Incirlik.rn4`).** Reproduced by direct
+inspection of the real local files this session: Damascus string table (7 entries,
+`taxiway_24m, ..., runway_65m`) and topology table (**79 data rows**, sentinel row
+`(55, 1, 75, 0, 3, 27, 45, 80)`, column 6 distribution `{0: 71, 3: 8}` resolving to
+`taxiway_24m`/`taxiway_52m`); Incirlik string table (8 entries) and topology table (**132 data
+rows**, sentinel `(50, 1, 128, 0, 3, 73, 68, 130)`, column 6 `{0: 128, 3: 4}`). Both exactly match
+the plan's expected row counts (79/132 + sentinel).
+
+**Rung 2 (`routes.py` vs. `Syria.routes.head50m`).** Reproduced: route 1 decodes at the confirmed
+byte-93 data-start offset with `N=343`, closing to within 3.0 m of its own start point (a closed
+loop, matching the research note); the first 16 consecutive routes walk cleanly via scan-forward
+resync with the mandatory first/middle/last pre-filter (16 blocks over ~450 KB in 0.04 s;
+without the pre-filter, an earlier attempt using only the pre-filter's 3-point check *without*
+the mandatory full-N validation produced false-positive matches inside the trailer within a few
+blocks — confirming the plan's warning that the full validation, not just the pre-filter, is what
+makes the resync trustworthy, not merely fast).
+
+**Rung 3 (full-file walk vs. the real 2.25 GB `Syria.routes`, then the real store rebuild).** Run
+twice, in agreement both times:
+
+- **Gate — PASSED.** **131 routes intersect the Latakia bbox** (`(34934.892, 54934.892,
+  -4314.924, 15685.076)`, the region's stored centre/half-extent from `build/region.py`) — well
+  above zero, so the escalation path in the plan was not triggered.
+- **Coverage check.** Walked **14,861 routes** across the whole file, vs. the header's speculated
+  `11464` (byte ~63, confirmed as a literal `int32` in the real header this session). The walked
+  count is **~30% higher**, not lower or approximately equal — this is reported as a genuine,
+  unresolved finding, not glossed over: it *weakens* rather than confirms the byte-decode note's
+  speculation that this header field is "total route count." Two explanations are both plausible
+  and neither was confirmed this session: (a) the file genuinely contains many short segments
+  (several of the walked blocks were N=38-65 points, plausible for taxiway stubs/short spurs, not
+  obviously spurious) and the header field means something else entirely; or (b) some of the
+  14,861 are false-positive resync matches inside trailer noise that happened to pass the
+  pre-filter and full validation by chance. `sync_loss_events=302` (~2% of matched blocks) is the
+  parser's own signal that *some* anomaly rate is real, but 302 is far short of explaining a
+  ~3,400-route gap from the header figure, so explanation (a) is more likely to dominate but this
+  is not proven. Left as an open question for whoever next touches `.rn4`'s header fields.
+- **`bytes_covered = 2,249,737,185`** of the file's `2,251,462,776` bytes — **99.92%** walked
+  before the walker ran out of plausible blocks near end-of-file, consistent with the
+  byte-decode note's separately-flagged, still-unexplained ~2.3 MB header/actual-size
+  discrepancy (a similar-magnitude, not identical, quantity) rather than evidence of a parser
+  failure partway through.
+- **Wall time**: standalone walk (parser only, with per-route Python-level progress printing)
+  measured at **1,033.7 s (~17.2 min)**. This is the honest, unoptimized number for a pure-Python
+  byte-by-byte scan-forward walk over 2.25 GB with the mandatory pre-filter — not yet Stage 5's
+  formal performance measurement (which the plan reserves for peak-memory profiling and a clean,
+  non-instrumented run), but the first real data point for it. The full store rebuild (towns +
+  beacons + OSM + this same roadnet walk) took the same order of magnitude, confirming the
+  roadnet walk dominates total build time by roughly two orders of magnitude over every other
+  ingest stage combined (Stage 1's full OSM/towns/beacons build measured well under 1 second).
+- **Final rebuilt store** (`data/world-model/latakia-20km.sqlite`) feature counts by kind:
+  `airfield=1, named_place=108, navaid=8, road=3267 (3136 OSM + 131 DCS), runway=2, settlement=338,
+  water=117`. The new DCS road count (131) is smaller than the OSM road count (3136) because OSM
+  ways are typically split into many short segments per real road while `.routes` polylines are
+  whole routes — a shape difference, not a coverage gap; a `describe_position` spot check (below)
+  confirms the DCS layer answers correctly where it has data.
+
+### `describe_position` spot check (real rebuilt store)
+At the OSLK ARP (`--latlon 35.40109 35.94868`): `nearest_road` (DCS) now returns
+`distance_m=256.0, orientation_deg=184.65, subtype=null, name=null, provenance="dcs",
+position_uncertainty_m=0.0` — correctly non-null, correctly null `subtype`/`name`, and an
+orientation plausible for a road/taxiway near a runway whose own axis bearing is ~0.31°/180.31°
+(the ILS pair's derived bearing from Stage 1). `nearest_road_osm` is unchanged from Stage 1
+(136.2 m, `orientation_deg=null` since OSM ingest never computes one) — the two layers answer
+independently, exactly as rule 2 requires, and their disagreement (256.0 m DCS vs. 136.2 m OSM,
+different nearest roads entirely) is visible in the output rather than hidden.
+
+### Notable Discoveries
+- **The pre-filter-only shortcut is not safe; full N-point validation after the pre-filter is
+  load-bearing, not redundant.** An early manual test of the resync technique that accepted a
+  candidate block after only the first/middle/last pre-filter (skipping the full validation)
+  produced false-positive matches within a handful of blocks on the real 50 MB sample — the
+  research note's own recommended design (pre-filter *then* full validate, never pre-filter
+  *instead of* full validate) turned out to matter for correctness, not just performance, once
+  tested against real trailer bytes. `find_next_point_block` implements the two-stage version.
+- **Route N counts below the production default `min_n=5` are real** (route 2's fixture and
+  several real short segments observed during the full walk, e.g. N=38). `find_next_point_block`
+  and `read_point_block` both expose `min_n`/no built-in floor respectively so tests can exercise
+  smaller synthetic blocks without weakening the production default.
+- **The header's speculated `11464` "total route count" field does not match the walked total**
+  (14,861 vs. 11,464, walked count higher) — see the coverage-check writeup above. This is a real,
+  reported discrepancy, not resolved this session; flagged for whoever next works on `.rn4`/
+  `.routes` header semantics.
+- **`extract.py`, `tools/extract_roadnet_region.py`, `tools/inspect_roadnet.py`** — the first was
+  built (tested only indirectly, via the module's own internal consistency — no dedicated
+  `test_roadnet_extract.py` was written, since the plan's "Tests to write" list doesn't name one
+  and `ingest_roadnet.py` doesn't depend on it); the latter two CLI tools were not built this
+  session. Flagged as a deliberate scope trim against this task's explicit ask list, not an
+  oversight — cheap to add later since `extract.py`'s `write_region_extract`/`read_region_extract`
+  already do the real work.

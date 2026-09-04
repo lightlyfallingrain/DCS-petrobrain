@@ -9,10 +9,13 @@ Not part of the pipeline's importable API; a thin CLI wrapper. Run from
         --towns <towns.lua> --beacons <beacons.lua> --osm-cache <cache.json> \\
         [--out <out.sqlite>]
 
-Defaults for `latakia-20km` point at the raw paths M5 Stage 1 already
+Defaults for `latakia-20km` point at the raw paths M5 Stage 1/2 already
 populated (`data/raw/dcs/syria/map/*.lua`,
-`data/raw/osm/2026-09-04/latakia_20km_widened.json`) so the common case
-needs only the region name.
+`data/raw/osm/2026-09-04/latakia_20km_widened.json`,
+`data/raw/dcs/syria/roads/Syria.routes`) so the common case needs only the
+region name. `--routes` is optional -- if the file isn't present (e.g. a
+fresh checkout without the 2.25 GB `Syria.routes` staged), the roadnet
+layer is skipped and reported as absent, not an error.
 """
 
 import argparse
@@ -31,6 +34,7 @@ _DEFAULT_RAW_PATHS: dict[str, dict[str, Path]] = {
         "beacons": _WORLD_MODEL_ROOT / "data/raw/dcs/syria/map/beacons.lua",
         "osm_cache": _WORLD_MODEL_ROOT
         / "data/raw/osm/2026-09-04/latakia_20km_widened.json",
+        "routes": _WORLD_MODEL_ROOT / "data/raw/dcs/syria/roads/Syria.routes",
     },
 }
 
@@ -41,6 +45,7 @@ def main() -> None:
     parser.add_argument("--towns", type=Path, default=None)
     parser.add_argument("--beacons", type=Path, default=None)
     parser.add_argument("--osm-cache", type=Path, default=None)
+    parser.add_argument("--routes", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -50,6 +55,7 @@ def main() -> None:
     towns_path = args.towns or defaults.get("towns")
     beacons_path = args.beacons or defaults.get("beacons")
     osm_cache_path = args.osm_cache or defaults.get("osm_cache")
+    routes_path = args.routes or defaults.get("routes")
     if towns_path is None or beacons_path is None or osm_cache_path is None:
         parser.error(
             f"No default raw paths registered for region {args.region!r} -- "
@@ -60,7 +66,9 @@ def main() -> None:
         _WORLD_MODEL_ROOT / "data/world-model" / f"{args.region}.sqlite"
     )
 
-    report = build_region(region, towns_path, beacons_path, osm_cache_path, out_path)
+    report = build_region(
+        region, towns_path, beacons_path, osm_cache_path, out_path, routes_path
+    )
 
     print(f"Built {out_path}")
     for kind, count in sorted(report.feature_counts.items()):
@@ -69,6 +77,10 @@ def main() -> None:
         print(f"  beacon stats: {report.beacon_stats}")
     if report.osm_stats is not None:
         print(f"  osm stats: {report.osm_stats}")
+    if report.roadnet_stats is not None:
+        print(f"  roadnet stats: {report.roadnet_stats}")
+    elif report.roadnet_skipped:
+        print("  roadnet: skipped (routes_path not given or not found)")
 
 
 if __name__ == "__main__":
