@@ -1,30 +1,31 @@
 ---
 name: m5-stage3-handoff
-description: M5 Stage 3 (elevation+surface_type probe) code landed, live DCS round-trip still pending user action
+description: M5 Stage 3 (elevation+surface_type probe) complete — all three live rungs ran, real store rebuilt; only the SRTM DEM tile is outstanding
 metadata:
   type: project
 ---
 
-M5 Stage 3 (`plans/m5-first-persistent-model/`) implemented the full code path for the
-elevation/surface-type probe grid on `feature/m5-first-persistent-model` (2026-09-04): parser
-(`elevation.dcs_grid.parse_terrain_probe_output`), ingest (`build.ingest_probe`), pipeline wiring
-(`build.pipeline.probe_grid_for_region` + `build_region`'s new `probe_output_path`/`srtm_tile_path`
-params), CLI wiring, and three Lua probe rungs (`tools/dcs-mission-probe/terrain_probe_
-{smoke,500,full}.lua`, 121/441/1681 points on the same `r{row}c{col}` grid coordinate system) plus
-a WSL collector script. All tests pass against synthetic fixtures (mypy --strict, ruff, pytest all
-green, 136 tests).
+M5 Stage 3 (`plans/m5-first-persistent-model/`) is **complete** on `feature/m5-first-persistent-model`
+(2026-09-04). All three incremental-ladder rungs (smoke/121, ~500/441, full/1,681 points) ran live
+against DCS via the `win-mac-sync/` round trip, were ingested and sanity-checked in turn
+(commits `b534939`, `f363615`, `3834e85`, `ad85006`), and the real `latakia-20km.sqlite` was
+rebuilt with the full probe grid wired in: **100% coverage, 1,681/1,681 cells for both `elevation`
+and `surface_type`**. `land.getSurfaceType` is now a confirmed-working, DCS-authoritative source
+for this install — three independent live runs returned bit-identical results for every
+overlapping grid point (a real determinism finding, not just a repeat pass).
 
-**What's NOT done**: no live DCS round-trip happened — `land.getSurfaceType` has never been called
-against this install. The smoke-test rung + collector script are staged in
-`win-mac-sync/run-wsl/` waiting for the user to run them on the Windows machine. `describe_position`
-already reads real grid data once it exists (Stage 1 designed `store.reader.sample_grid` to return
-`None` on an empty grid, so Stage 3 needed zero query-layer code changes) — but the real Latakia
-`.sqlite` has not been rebuilt with probe data yet.
+Full per-rung numbers, enum distributions, and `describe_position` spot-checks:
+`world-model/research/2026-09-04-m5-stage3-smoke-rung.md` (one running note covering all three
+rungs plus the final rebuild).
 
-**Why**: this agent (Mac-side, no DCS access) cannot trigger a live mission. See
-`plans/m5-first-persistent-model/implementation.md`'s Stage 3 "Handoff" section for exact next
-steps once the user runs the smoke test and syncs results back.
+**What's still outstanding**: SRTM delta stats are `null` in the real store — `data/raw/dem/`
+only has the Gemerek/M4 tile (`N39E036.hgt`), not one covering Latakia's envelope
+(~35.0-35.5N, 35.85-35.95E, needs roughly `N35E035.hgt`). An automated fetch attempt was blocked
+by sandbox network policy; per M4's own precedent this needs the *user* to manually fetch the
+tile (viewfinderpanoramas.org, no-login). Once fetched, `build_world_model.py --srtm-tile <path>`
+is a cheap rerun — the `ingest_probe`/`ElevationGrid.stats` SRTM code path is already implemented
+and tested against a synthetic tile, no code changes needed.
 
-**How to apply**: if resuming this work, check `win-mac-sync/wsl-output/` for
-`terrain_probe_output_*.jsonl` before redoing any of this — the code is ready to ingest it
-immediately via `build.ingest_probe`.
+**How to apply**: if the user later provides a Latakia-covering `.hgt` tile, just rerun the build
+CLI with `--srtm-tile`; don't attempt another automated DEM fetch without checking whether network
+policy has changed.
