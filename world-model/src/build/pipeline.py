@@ -2,10 +2,17 @@
 
 Idempotent -- `open_for_build` deletes and recreates the target `.sqlite` on
 every call, per the concept doc's "keep raw separate from derived so the
-database can be rebuilt". M5 Stage 1 wires in towns, beacons and OSM;
-roadnet (Stage 2) and the elevation/surface-type probe grid (Stage 3) are
-deliberately not called here yet -- `describe_position` answers `null` for
-those fields until then, exactly as the plan specifies.
+database can be rebuilt". M5 Stage 1 wired in towns, beacons and OSM; Stage
+2 adds the DCS-native roadnet layer (`.routes` walk -> `road` features,
+`provenance["geometry"] == "dcs"`). The elevation/surface-type probe grid
+(Stage 3) is still deliberately not called here -- `describe_position`
+answers `null` for `elevation`/`surface_type` until then.
+
+`routes_path` is optional: a fresh checkout or CI environment will not have
+the real 2.25 GB `Syria.routes` staged, and the roadnet layer degrading to
+absent (with a logged skip in `BuildReport`) is the correct "absence
+reported as absence" behaviour, not an error -- see `describe_position`'s
+rule 3.
 """
 
 import datetime
@@ -16,6 +23,7 @@ from pathlib import Path
 
 from build.ingest_beacons import BeaconIngestStats, ingest_beacons
 from build.ingest_osm import OsmIngestStats, ingest_osm
+from build.ingest_roadnet import RoadnetIngestStats, ingest_roadnet
 from build.ingest_towns import ingest_towns
 from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
@@ -34,6 +42,8 @@ class BuildReport:
     feature_counts: Counter[str] = field(default_factory=Counter)
     beacon_stats: BeaconIngestStats | None = None
     osm_stats: OsmIngestStats | None = None
+    roadnet_stats: RoadnetIngestStats | None = None
+    roadnet_skipped: bool = False
 
 
 def build_region(
@@ -42,10 +52,12 @@ def build_region(
     beacons_lua_path: Path,
     osm_cache_path: Path,
     out_path: Path,
+    routes_path: Path | None = None,
 ) -> BuildReport:
     """Build `out_path` from scratch for `region`, ingesting towns.lua,
-    beacons.lua and the cached Overpass response at the given raw paths.
-    Returns a `BuildReport` with per-kind feature counts."""
+    beacons.lua, the cached Overpass response and (if `routes_path` is given
+    and exists) the DCS-native `.routes` roadnet layer. Returns a
+    `BuildReport` with per-kind feature counts."""
     conn = open_for_build(out_path)
     try:
         built_at = datetime.datetime.now(datetime.UTC).isoformat()
@@ -132,6 +144,33 @@ def build_region(
         for f in osm_features:
             report.feature_counts[f.kind] += 1
         report.osm_stats = osm_stats
+
+        if routes_path is not None and routes_path.exists():
+            roadnet_source_id = insert_source(
+                conn,
+                Source(
+                    name="Syria.routes",
+                    fetched_at=built_at,
+                    raw_path=str(routes_path),
+                    attribution="DCS terrain module (Eagle Dynamics)",
+                    notes="Whole-theatre road centerline geometry; see "
+                    "roadnet package docstring and "
+                    "research/2026-09-04-m5-roadnet-byte-decode.md.",
+                ),
+            )
+            road_features, roadnet_stats = ingest_roadnet(
+                routes_path,
+                region.centre_x,
+                region.centre_z,
+                region.half_extent_m,
+                roadnet_source_id,
+            )
+            insert_features(conn, road_features)
+            for f in road_features:
+                report.feature_counts[f.kind] += 1
+            report.roadnet_stats = roadnet_stats
+        else:
+            report.roadnet_skipped = True
 
         return report
     finally:

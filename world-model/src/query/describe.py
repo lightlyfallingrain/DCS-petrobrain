@@ -13,11 +13,13 @@ Four rules define what "position understanding" means at this stage (see
 Input is always DCS-native `(x, z)`; lat/lon callers go through
 `coordinates.wgs84_to_dcs` before calling this function.
 
-**M5 Stage 1 status**: `elevation`, `surface_type` and `nearest_road` (the
-DCS-sourced roadnet layer) are always `None`/absent at this stage -- Stages
-2 (roadnet) and 3 (elevation/surface probe) have not landed yet. This is
-the honest, contract-compliant answer, not a placeholder to special-case
-away: rule 3 says absence is reported as absence.
+**M5 Stage 2 status**: `nearest_road` (the DCS-sourced roadnet layer) is
+wired in as of Stage 2 -- it answers from `.routes`-derived `road` features
+(`provenance["geometry"] == "dcs"`) when a build supplied `routes_path`, and
+is otherwise absent, same as any other feature-not-in-store case. `elevation`
+and `surface_type` remain always `None`/absent until Stage 3 (the
+elevation/surface probe) lands -- rule 3 says absence is reported as
+absence, not a placeholder to special-case away.
 """
 
 import sqlite3
@@ -178,7 +180,7 @@ def _road_info(match: tuple[StoredFeature, float] | None) -> RoadInfo | None:
     feature, distance = match
     return RoadInfo(
         distance_m=distance,
-        orientation_deg=feature.tags.get("computed_bearing_deg"),
+        orientation_deg=feature.tags.get("orientation_deg"),
         subtype=feature.subtype,
         name=feature.name,
         provenance=_provenance_str(feature),

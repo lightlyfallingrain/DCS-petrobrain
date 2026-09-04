@@ -40,4 +40,5 @@ known-first-party = [
     "store",
     "build",
     "query",
+    "roadnet",
 ]
