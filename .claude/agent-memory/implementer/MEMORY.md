@@ -22,3 +22,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M5 Stage 4 findings](project_m5_stage4_findings.md) — real corrupted DCS road feature (id=3711) in live store; DCS-vs-OSM road displacement is ~5-50m not M1's ~1-1.3km point-error figure.
 - [Verify rebuild row counts](feedback_verify_rebuild_row_counts.md) — build_world_model.py optional flags with no default silently drop data on rebuild; verify row counts/query output directly.
 - [macOS mmap RSS metric](reference_macos_mmap_rss_metric.md) — for mmap-based readers on Darwin, use "peak memory footprint" not "maximum resident set size" to judge real memory use.
+- [Agent memory path](feedback_agent_memory_path.md) — always write to top-level `.claude/agent-memory/implementer/`, never a `world-model/`-nested copy; mistake recurred twice before this.
