@@ -133,3 +133,54 @@ file correctly with zero changes.
 
 **Next:** rung 3 (full 1,681, `terrain_probe_full.lua`) staged for the user; see
 `plans/m5-first-persistent-model/implementation.md` for the exact run instructions.
+
+---
+
+## Rung 3/3 update (full grid, 1,681 points) — 2026-09-04
+
+The full 41x41 grid, same live-mission mechanism. Output:
+`data/raw/dcs/2026-09-04/terrain_probe_output_full.jsonl` (gitignored).
+
+**Point-count sanity:** 1,681 requested, 1,681 lines returned, 0 nulls on either field, 0
+duplicate names. **Exact match against the expected `{r{row}c{col} : row,col in 0..40}` name set**
+-- no missing points, no unexpected extra names. This is the strongest completeness check
+available: the grid is not just "1,681 lines" but provably the *specific* 1,681 cells the plan
+calls for.
+
+**Enum distribution:**
+
+| value | label | count | % |
+|---|---|---|---|
+| 1 | LAND | 1,236 | 73.5% |
+| 2 | SHALLOW_WATER | 0 | 0.0% |
+| 3 | WATER | 412 | 24.5% |
+| 4 | ROAD | 29 | 1.7% |
+| 5 | RUNWAY | 4 | 0.2% |
+
+Proportions essentially unchanged from rungs 1/2 (LAND/WATER split stable at ~73.5%/~24.5% across
+all three sample densities -- consistent with a real, spatially coherent coastal/inland split
+rather than sampling noise). `ROAD`/`RUNWAY` counts scale up with finer sampling as expected (more
+grid cells now land on the (still narrow, still aliased at 500m spacing per Finding C's stated
+limitation) road/runway strips). `SHALLOW_WATER` remains unobserved at any rung -- noted as a real
+absence in this grid's sampling, not evidence the value doesn't exist in the enum.
+
+**Determinism cross-check (three-way).** All 121 rung-1 points and all 441 rung-2 points recur in
+the full grid with **zero mismatches** on `height_m` or `surface_type` -- three independent live
+mission runs, fully consistent.
+
+**No code changes needed.** `ingest_probe` handled the real 1,681-point file with zero changes.
+
+## SRTM tile availability -- gap, not resolved this session
+
+`data/raw/dem/` holds only `N39E036.hgt` (the Gemerek/M4 tile). The Latakia region's lat/lon
+envelope (~35.0-35.5N, ~35.85-35.95E) needs a **different** tile (`N35E035.hgt`), which is not
+present. An attempted automated fetch this session (viewfinderpanoramas.org / USGS mirrors) was
+blocked by the sandbox's network policy, consistent with M4's own precedent of the *user*
+manually fetching the DEM tile via viewfinderpanoramas.org's interactive map (not an automated
+pipeline step). **The real Latakia rebuild therefore proceeds without `--srtm-tile`** --
+`elevation.stats["srtm"]` is `null` for the real store, an honest absence rather than a fabricated
+or borrowed-from-the-wrong-region number. Fetching `N35E035.hgt` (or the region's actual covering
+tile(s) -- the region may straddle a tile boundary, unconfirmed) and re-running
+`build_world_model.py --srtm-tile ...` is a cheap follow-up once the user has it locally; the
+`ingest_probe`/`ElevationGrid.stats` code path is already implemented and tested (see
+`test_ingest_probe.py`'s SRTM tests against a synthetic tile).
