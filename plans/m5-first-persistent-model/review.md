@@ -212,3 +212,96 @@ into the M6 backlog rather than reopening Stage 2/4 now.
 
 APPROVED. No required fixes. One optional refinement (test fixture literal fidelity) left for a
 future touch of `roadnet`.
+
+### Review Summary — Stage 5 (light perf)
+
+Reviewed commits `1c0f923`..`63760b1` on `feature/m5-first-persistent-model`: the perf
+measurement script + research note, the `implementation.md` decision-log entry, and three
+agent-memory commits (including a relocation fix for a path mistake). Scope check: `git diff
+c3b099a..63760b1 -- world-model/src world-model/tests` is empty — no production code touched,
+exactly matching the checklist's "measurement-only" framing for this stage. The only new file
+under `world-model/` proper is the throwaway script `tools/measure_m5_stage5_perf.py`, which
+follows the established `tools/` convention (four independent subcommands, docstring explaining
+why `routes-walk` is isolated from `rebuild`, explicit note about the Darwin-only byte-vs-KB
+`ru_maxrss` assumption). No test additions — correct, since nothing in `src/` changed.
+
+**Numbers independently re-verified, not just trusted from the write-up.** Queried the actual
+`data/world-model/latakia-20km.sqlite` directly: `grid`=2, `grid_sample`=3362, file size=8,982,528
+bytes — all three match the research note and `implementation.md` exactly. The
+`describe_position` latency table, rebuild wall time, and routes-walk wall time/memory numbers in
+`implementation.md`'s Stage 5 section are consistent word-for-word with the research note's
+Summary table — no drift between the two documents.
+
+**The probe-output regression is documented honestly, not smoothed over.** Both
+`implementation.md` and the research note state plainly: the first `rebuild` run omitted
+`--probe-output` (no registered default for `latakia-20km`, unlike towns/beacons/osm-cache/
+routes), silently produced a "probe: skipped" build, and overwrote the real Stage 3/4 store's
+1,681-point grid down to 0/0 rows. Both documents state the fix (pass `--probe-output` explicitly)
+and the two-step re-verification (row-count check + a `describe_position` sanity check showing
+non-null `elevation.dcs_m`/`surface_type.value` on a real point) before asserting "all four
+measurements below are from the corrected rebuild." This is exactly the project's
+correct-rather-than-silently-edit convention. The CLI-defaults gap itself is correctly *not*
+fixed this session (out of Stage 5's scope) but is flagged forward for Stage 6/whoever next
+touches `build_world_model.py`, with a concrete suggested fix (registered default, or a
+loud size-regression warning) rather than just a vague "watch out."
+
+**The RSS-vs-peak-footprint reasoning is sound, not hand-waved.** The research note explains the
+actual mechanism (mmap brings clean, file-backed, reclaimable pages into RSS as a sequential scan
+touches them — this is what mmap is for, not heap growth) rather than just asserting "trust the
+smaller number." It reports both numbers with the mechanism, explicitly calling out that reporting
+only RSS would look like a false-alarm blowup and reporting only footprint without the explanation
+would look like cherry-picking. The conclusion — peak footprint (~22.5 MB) stays flat regardless of
+the 2.25 GB input, confirming Stage 2's "never loads `.routes` into memory" claim — follows from
+the numbers actually presented, and matches `routes_found`/`bytes_covered`/`resync_events`
+agreeing exactly with the in-pipeline walk and Stage 4's post-fix figures (a real determinism
+cross-check, not just asserted).
+
+**Standard checks reconfirmed independently** (not just taking the implementer's self-report):
+`ruff format --check world-model/src world-model/tests` — 55 files, clean. `ruff check
+world-model/src world-model/tests` — clean. `mypy --strict world-model/src world-model/tests` —
+clean, 55 source files. `pytest world-model/tests -q` — 142 passed, unchanged from Stage 4, as
+expected since no `src/` changes. `mypy --strict` run directly against
+`tools/measure_m5_stage5_perf.py` in isolation fails with `import-not-found` for its `sys.path`-
+injected `src` imports — but this is **not specific to this script**: the same failure occurs for
+every existing file in `tools/` (`describe_position.py`, `export_geojson.py`,
+`inspect_elevation.py`, etc.) when mypy is pointed at `tools/` directly, because `world-model/`'s
+canonical mypy command (`mypy world-model/src`, per `world-model/CLAUDE.md`) never includes
+`tools/` in the first place. Not a Stage-5-introduced gap — consistent with the project's existing
+convention that `tools/` scripts are exploratory and outside the strict-typing gate.
+
+**Git status.** After all five Stage 5 commits, `world-model/` and the plan/research files are
+fully clean. One unrelated file is modified-but-unstaged at the repo root:
+`.claude/agent-memory/skill-candidates.md` — this is orchestrator-session meta-bookkeeping (agent
+skill-candidate notes), not part of any Stage 5 commit and not touched by the implementer; flagged
+here for completeness but not a Stage 5 blocker.
+
+**On the recurring agent-memory path mistake** (`world-model/.claude/agent-memory/implementer/`
+instead of the repo's actual top-level `.claude/agent-memory/implementer/`, this now being at
+least the second occurrence after `f7a7ec1`): the orchestrator's own fix (`ac6768c`/`63760b1`)
+was clean — confirmed no stray `world-model/.claude/` directory remains, and the relocated files
+are well-formed with correct frontmatter. This is worth flagging back to the implementer role
+more forcefully than a one-off fix each time, since two occurrences is a pattern, not a fluke: the
+implementer role's own memory (or `AGENTS.md`/`CLAUDE.md`'s agent-memory instructions) should
+state the exact top-level path explicitly rather than relying on the agent inferring it correctly
+inside a subproject working directory each session. Recommend the orchestrator add an explicit
+reminder line to the implementer role definition or seed an implementer-memory entry naming the
+correct path outright, since after-the-fact relocation works but a stated-path guard would prevent
+the mistake recurring a third time.
+
+### Required Fixes — Stage 5
+None.
+
+### Optional Refinements — Stage 5
+- Add a registered `--probe-output` default (or a loud row-count-regression warning) to
+  `build_world_model.py` for `latakia-20km`, per the CLI-defaults gap this stage caught and
+  correctly deferred to Stage 6/future work (optional, already flagged forward by the implementer).
+- Stage a written, path-explicit guard against the implementer role recompiling the
+  `world-model/.claude/agent-memory/...` mistake a third time — either an instruction-file line or
+  a standing implementer-memory entry naming `.claude/agent-memory/<role>/` (top-level, not
+  `world-model/`-relative) outright (optional, process hygiene not code).
+
+### Verdict — Stage 5
+
+APPROVED
+
+---
