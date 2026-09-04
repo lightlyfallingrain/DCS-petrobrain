@@ -10,6 +10,7 @@ World Model Builder — Milestone 0/1. See `world-model/ROADMAP.md` for full mil
 - [x] M2 — Raster understanding. `src/raster/` (Pillow DDS loader + empirical registration), `tools/inspect_raster.py` diagnostic, control-point + held-out-point tests pass. See `world-model/ROADMAP.md` M2 entry and `plans/m2-raster-understanding/`.
 - [x] M3 — OSM overlay. `src/osm/` (Overpass API fetch + in-memory parse), `tools/inspect_osm_overlay.py` diagnostic overlay, tests pass, held-out Gemerek validation. Attribution rendered onto output PNG. Spatial-storage choice deferred to M5. See `world-model/research/2026-09-03-m3-osm-overlay.md` and `plans/m3-osm-overlay/`.
 - [x] M4 — DCS elevation. `src/elevation/` (`land.getHeight` live-mission probe via io/lfs, SRTM3 `.hgt` parsing), `tools/inspect_elevation.py` diagnostic, control-point + real-fixture tests pass. 100-point Gemerek grid vs SRTM3: mean delta +13.89m, west-edge outlier traced to real terrain-mesh-resolution mismatch, not a bug. `MissionScripting.lua` io/lfs edit intentionally left in place (more probes expected M5+). See `world-model/research/2026-09-03-m4-dcs-elevation.md` and `plans/m4-dcs-elevation/`.
+- [x] M5 — First persistent model. `src/store/` (stdlib `sqlite3` + R*Tree, JSON geometry), `src/roadnet/` (DCS-native `.routes` binary parser), `src/dcs_data/` (towns/beacons Lua parsers), `src/query/describe_position`. Region: Latakia (`latakia-20km`). Real store: 3,266 roads, 338 settlements, 117 water, 108 named places, 1,681-point elevation/surface_type probe grid at 100% coverage, 8.57 MB `.sqlite`. Two real defects found+fixed: `pyproj.Transformer` per-call rebuild (perf), roadnet resync denormalized-float validation gap (correctness). `.rn4` graph decoding, airfield taxiways/structures, Latakia SRTM tile, full-theatre resync audit deferred to M6+. See `world-model/research/2026-09-04-m5-first-persistent-model.md` and `plans/m5-first-persistent-model/`.
 
 ## Milestones
 
@@ -17,4 +18,4 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M7). Do not start Mi
 
 ## Deferred
 
-- Spatial storage/library choice (GeoPackage vs SpatiaLite vs PostGIS) — deferred to M5; M3 confirmed no DB is needed yet (no point-in-polygon/nearest-neighbor/multi-feature-type join workload exists before `describe_position(...)`), see `world-model/research/2026-09-03-m3-osm-overlay.md`.
+- Spatial storage/library choice — resolved by M5: stdlib `sqlite3` + R*Tree, JSON geometry (not GeoPackage/SpatiaLite/PostGIS). See `world-model/research/2026-09-04-m5-first-persistent-model.md`.
