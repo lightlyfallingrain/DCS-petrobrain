@@ -44,6 +44,21 @@ _COORD_XZ_MAX = 1_000_000.0
 _COORD_Y_MIN = -2_000.0
 _COORD_Y_MAX = 6_000.0
 
+# A nonzero float64 with magnitude below this is denormalized-float garbage
+# from a misaligned/false-positive resync match, never a genuine DCS
+# coordinate -- confirmed empirically in
+# `world-model/research/2026-09-04-m5-roadnet-byte-decode.md` Session 2
+# ("rejecting any value that is nonzero but has magnitude < 1e-6 ... without
+# this filter the scan returns thousands of false positives with y/z values
+# like 1e-312"). That filter was applied in the exploratory recon script but
+# never carried into this production validator -- exactly how DCS road
+# feature id=3711 (source_ref "route:3311@464953201") slipped through as a
+# false-positive resync match in the real Latakia store (see
+# `world-model/research/2026-09-04-m5-stage4-validation.md` Finding 1 and
+# this fix's dated correction note). Exact zero is still permitted -- a
+# genuine DCS coordinate can legitimately be 0.0 (e.g. sea-level y).
+_MIN_NONZERO_MAGNITUDE = 1e-6
+
 # Plausible point-block count range for the resync scan -- per byte-decode
 # research note's validated technique.
 _MIN_PLAUSIBLE_N = 5
@@ -150,12 +165,22 @@ def read_point_block(
     return points, end
 
 
+def _is_denormalized_garbage(value: float) -> bool:
+    """True for a nonzero value whose magnitude is implausibly small for a
+    genuine DCS coordinate -- the signature of a misaligned/false-positive
+    resync match reinterpreting non-float bytes as a float64. Exact 0.0 is
+    not garbage (a real coordinate component can legitimately be zero)."""
+    return value != 0.0 and abs(value) < _MIN_NONZERO_MAGNITUDE
+
+
 def _triple_plausible(buf: Buffer, offset: int) -> bool:
     try:
         x, y, z = _TRIPLE.unpack_from(buf, offset)
     except struct.error:
         return False
     if not (math.isfinite(x) and math.isfinite(y) and math.isfinite(z)):
+        return False
+    if any(_is_denormalized_garbage(v) for v in (x, y, z)):
         return False
     if abs(x) >= _COORD_XZ_MAX or abs(z) >= _COORD_XZ_MAX:
         return False

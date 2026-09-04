@@ -150,6 +150,40 @@ def test_iter_routes_stats_count_both_routes_and_the_resync(tmp_path: Path) -> N
     assert stats.bytes_covered > 0
 
 
+def test_iter_routes_skips_denormalized_garbage_false_positive_route(
+    tmp_path: Path,
+) -> None:
+    """Regression test for the real defect found in Stage 4 validation
+    (`world-model/research/2026-09-04-m5-stage4-validation.md` Finding 1):
+    DCS road feature id=3711 decoded as a false-positive scan-forward resync
+    match -- two denormalized-float garbage leading points followed by
+    exact-zero padding, which the old envelope check accepted as plausible.
+    A garbage pseudo-"route" using those literal values, injected between
+    two real routes, must be skipped entirely -- `iter_routes` must yield
+    only the two real routes, never a spurious third one sourced from
+    garbage geometry."""
+    garbage_points: list[tuple[float, float, float]] = [
+        (-5.607157514132566e-195, 1.36211130863e-312, 0.0),
+        (46368.0, 0.0, 1.371949926365e-312),
+    ] + [(0.0, 0.0, 0.0)] * 61
+    buf = (
+        _pack_header(_ROUTES_CLASS_NAME)
+        + _pack_route(_ROUTE_1_POINTS)
+        + _undecoded_trailer_gap()
+        + _pack_route(garbage_points)
+        + _undecoded_trailer_gap()
+        + _pack_route(_ROUTE_2_POINTS)
+    )
+    path = tmp_path / "synthetic_with_garbage.routes"
+    path.write_bytes(buf)
+    stats = RouteWalkStats()
+
+    routes = list(iter_routes(path, stats=stats))
+
+    assert [r.points for r in routes] == [_ROUTE_1_POINTS, _ROUTE_2_POINTS]
+    assert len(routes) == 2
+
+
 def test_iter_routes_never_loads_whole_file_into_a_python_list_of_bytes(
     tmp_path: Path,
 ) -> None:

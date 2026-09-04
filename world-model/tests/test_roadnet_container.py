@@ -157,3 +157,54 @@ def test_find_next_point_block_returns_none_when_nothing_plausible() -> None:
     buf = b"\x00" * 200
 
     assert find_next_point_block(buf, 0) is None
+
+
+def test_find_next_point_block_rejects_denormalized_garbage_false_positive() -> None:
+    """Regression test for the real defect found in Stage 4 validation
+    (`world-model/research/2026-09-04-m5-stage4-validation.md` Finding 1,
+    root-caused in `.../2026-09-04-m5-roadnet-corrupted-route-fix.md`): a
+    scan-forward candidate whose leading triples are denormalized-float
+    garbage (`-5.607157514132566e-195`, `1.36211130863e-312`, etc. -- the
+    literal values decoded from the real corrupted DCS road feature id=3711)
+    followed by exact-zero padding used to numerically satisfy the old
+    envelope check (`|x|,|z| < 1e6`, `-2000 < y < 6000` -- all trivially true
+    near zero). Before the denormalized-magnitude filter, this was accepted
+    as a plausible block; it must now be rejected, and the scan must recover
+    sync at the real block that follows."""
+    garbage_points: list[tuple[float, float, float]] = [
+        (-5.607157514132566e-195, 1.36211130863e-312, 0.0),
+        (46368.0, 0.0, 1.371949926365e-312),
+    ] + [(0.0, 0.0, 0.0)] * 3
+    garbage_block = _pack_point_block(garbage_points)
+    real_points = [
+        (214985.70, 18.74, -45079.89),
+        (214985.65, 18.74, -45079.88),
+        (214982.84, 18.69, -45078.98),
+        (214958.38, 18.07, -45069.10),
+    ]
+    valid_block = _pack_point_block(real_points)
+    buf = garbage_block + valid_block
+
+    result = find_next_point_block(buf, 0, min_n=4)
+
+    assert result is not None
+    match_offset, decoded, end = result
+    # Must not land on the garbage block's own offset (0) -- it has to be
+    # rejected and the scan must recover sync past it.
+    assert match_offset == len(garbage_block)
+    assert decoded == real_points
+    assert end == len(buf)
+
+
+def test_find_next_point_block_accepts_exact_zero_coordinates() -> None:
+    """Exact 0.0 is a legitimate coordinate component (e.g. sea-level
+    elevation) and must not be rejected by the denormalized-garbage filter
+    -- only genuinely tiny *nonzero* magnitudes are garbage."""
+    points = [(0.0, 0.0, 0.0), (100.0, 0.0, -50.0)]
+    buf = _pack_point_block(points)
+
+    result = find_next_point_block(buf, 0, min_n=2)
+
+    assert result is not None
+    _, decoded, _ = result
+    assert decoded == points
