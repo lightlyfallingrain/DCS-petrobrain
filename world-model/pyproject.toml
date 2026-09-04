@@ -29,4 +29,15 @@ pythonpath = ["src"]
 # world-model/research/2026-09-03-m2-rastercharts-recon.md session 12 and
 # plans/m2-raster-understanding/implementation.md). Declaring these
 # explicitly makes the classification invocation-cwd-independent.
-known-first-party = ["coordinates", "raster", "control_points", "elevation"]
+known-first-party = [
+    "coordinates",
+    "raster",
+    "control_points",
+    "elevation",
+    "osm",
+    "geometry",
+    "dcs_data",
+    "store",
+    "build",
+    "query",
+]
