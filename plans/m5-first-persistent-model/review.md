@@ -305,3 +305,107 @@ None.
 APPROVED
 
 ---
+
+## Stage 6 (close out) — final milestone review
+
+Reviewed commits `5ba08e2`, `98530e2`, `a733ca6`, `96d2481`, `de967cc` on
+`feature/m5-first-persistent-model` — the milestone-summary research note, three new
+`world-model/CLAUDE.md` tech-stack entries, ROADMAP.md/todo.md completion flip, the
+`implementation.md` Stage 6 decision-log entry, and an implementer-memory fix recording the
+correct top-level agent-memory path. Documentation-only stage, no `src/`/`tests/` changes —
+confirmed by diff.
+
+**Milestone-summary research note
+(`world-model/research/2026-09-04-m5-first-persistent-model.md`).** Genuine synthesis, not a
+copy-paste of per-stage notes: it states final architecture, links every per-stage note instead
+of repeating them, and its "what stayed out of scope" and "two real defects found and fixed"
+sections read as actual synthesis judgment (grouping the `pyproj.Transformer` perf fix and the
+roadnet resync validation gap under one "numbers that look done aren't sufficient evidence"
+lesson) rather than a mechanical roll-up. Numbers spot-checked directly against the live store
+rather than trusted from prose:
+
+- Feature counts (`airfield=1, named_place=108, navaid=8, road=3266, runway=2, settlement=338,
+  water=117`) — queried `latakia-20km.sqlite` directly (`SELECT kind, COUNT(*) FROM feature GROUP
+  BY kind`): exact match.
+- Road source split (3136 OSM + 130 DCS) — queried `feature` grouped by `provenance_json` for
+  `kind='road'`: `{"geometry": "dcs"}` → 130, `{"geometry": "osm", "name": "osm"}` → 3136. Exact
+  match, and confirms Stage 2's DCS-road-count (130, non-zero) satisfies the checklist's Stage 2
+  gate — DCS roads did land inside the Latakia bbox, not an empty layer.
+- Grid coverage (2 grids, 3362 samples = 1,681 points × 2 kinds) — queried `grid`/`grid_sample`
+  directly: exact match.
+- `.sqlite` file size (8,982,528 bytes / 8.57 MB) — `ls -la`: exact match.
+- Remaining figures (roadnet walk stats, `describe_position` latency, rebuild wall time, peak
+  memory) are carried forward verbatim from Stage 5's already-independently-verified perf note
+  (see Stage 5 verdict above) — re-checking them a third time here would be redundant, so this
+  review relied on the prior stage's verification rather than re-deriving them.
+
+**`world-model/CLAUDE.md` tech-stack entries.** All three (persistent storage, DCS-native roads,
+towns/beacons) follow the exact existing M1-M4 style: bold decision name, one-line rationale,
+source module path, research-note link. Checked every linked research note exists on disk
+(`2026-09-04-m5-first-persistent-model.md`, `2026-09-04-m5-roadnet-byte-decode.md`,
+`2026-09-03-m5-nodes-lua-probe.txt`, plus the per-stage notes) — all present, none broken links.
+
+**ROADMAP.md / todo.md.** M5's checkbox flip in both files follows the exact "Done: ... /
+feature-counts / research-note-link" pattern used for M1-M4, not a new format. The stale
+`todo.md` "Deferred" bullet ("Spatial storage/library choice ... deferred to M5") is correctly
+resolved in place (not deleted, per the project's "do not delete tasks" convention) to state
+M5's actual decision (`sqlite3` + R\*Tree) with a link to the milestone summary. Searched both
+files for any other stale M5-referencing line (`grep -n "M5"` across `ROADMAP.md`/`todo.md`) —
+none found beyond the two updated in this stage.
+
+**Full verification, re-run independently (not trusted from the implementer's self-report):**
+- `ruff format --check world-model/src world-model/tests` — 55 files, all already formatted.
+- `ruff check world-model/src world-model/tests` — all checks passed.
+- `mypy src` (strict, run from within `world-model/` per that subproject's cwd/mypy_path
+  requirement) — success, no issues found in 34 source files.
+- `pytest world-model/tests -q` — **142 passed**, matching the claimed count exactly, unchanged
+  from Stage 4/5 as expected for a documentation-only stage.
+
+**`git status`.** Clean aside from the pre-existing, unrelated `.claude/agent-memory/
+skill-candidates.md` orchestrator-meta file (already flagged as out-of-scope in the Stage 5
+verdict above) — no stage-6-introduced untracked or unstaged files.
+
+**Whole-arc sanity check (not just this stage's diff), against the checklist's locked gates:**
+- Stage 0's gate ("region must contain water + settlement polygons + named places") — satisfied:
+  live store has `water=117, settlement=338, named_place=108`, all non-zero.
+- Stage 2's gate ("zero routes intersecting Latakia bbox = stop and escalate") — satisfied: 130
+  DCS routes landed in-region (confirmed above), never triggered.
+- Stage 2's coverage check (walked count vs. header's speculated 11,464) — the actual walk found
+  14,833 whole-file routes, a real deviation from that speculative header figure, but this was
+  already surfaced and accepted in earlier stage notes (the header figure was always flagged as
+  "speculated," not authoritative) rather than silently reconciled here — no new concern.
+- Stage 4's control-point/spot-check/airfield/cross-subsystem validation gates — all previously
+  reviewed and approved (see Stage 4 verdict above); nothing in Stage 6 reopens or contradicts
+  them.
+- Road type/subtype `null`-in-M5 decision (checklist item 5) — confirmed still true in the live
+  store's schema/data as read above; the milestone summary correctly states this as an M5
+  scope boundary, not silently dropped or quietly filled in.
+- No milestone-wide gate was found to have been silently skipped across the whole Stage 0-6 arc.
+
+### Required Fixes — Stage 6
+None.
+
+### Optional Refinements — Stage 6
+None beyond what earlier stages already carried forward as optional (Stage 5's `--probe-output`
+CLI-defaults gap and the roadnet fixture literal-fidelity note) — both are correctly captured in
+this note's "what stayed out of scope" / M6+ backlog framing rather than needing anything further
+from Stage 6 itself.
+
+### Verdict — Stage 6
+
+APPROVED
+
+---
+
+## Overall M5 Milestone Verdict
+
+All six stages (0 through 6) are reviewer-approved, with only optional refinements outstanding —
+no unresolved required fixes anywhere in the arc. Verification was independently re-run at Stage
+6 and passes cleanly (ruff format/check, mypy --strict, 142 tests). The live store's numbers were
+spot-checked directly against `latakia-20km.sqlite` and match the milestone summary exactly.
+`git status` is clean apart from the pre-existing, unrelated orchestrator-meta file noted above.
+Every checklist-mandated gate (Stage 0 water/settlement/named-place, Stage 2 non-empty-DCS-roads,
+Stage 4 correctness validation) was genuinely exercised, not silently skipped.
+
+**Ready for the Definition of Done gate — no blockers.** This milestone is ready for user-approved
+merge to `main`. (Merge itself is out of scope for this review, per instruction.)
