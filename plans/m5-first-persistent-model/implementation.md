@@ -909,3 +909,86 @@ test; no `src/` pipeline code changed.
   the real data, not just against the plan's own worked example (which was itself derived from the
   same real data, so this isn't fully independent, but the near-exact match to a hand-computed
   figure from a different session is still a meaningful cross-check of no regression since Stage 1).
+
+---
+
+### Implementation Summary — Stage 5 (light perf)
+
+Measurement-only stage, per the checklist. No production code under `src/` changed. Added one
+throwaway script (`tools/measure_m5_stage5_perf.py`, following `fetch_m5_stage0_census.py`'s
+pattern) with four independent subcommands (`latency`, `routes-walk`, `rebuild`, `sqlite-size`)
+so the 2.25 GB `Syria.routes` walk could be measured standalone, isolated from the full rebuild,
+per the checklist's explicit requirement. Full numbers and the memory-metric interpretation are
+in the dated research note, `world-model/research/2026-09-04-m5-stage5-perf.md` — not repeated
+in full here.
+
+### Files Changed
+- `world-model/tools/measure_m5_stage5_perf.py` — new throwaway measurement script (four
+  subcommands as above). `_sample_points` reuses Stage 4's spot-check philosophy (mix of
+  in-region and near/outside-boundary points) but samples 100 points with a fixed seed rather
+  than hand-picking a handful, since this is a latency distribution measurement, not a
+  correctness check.
+- `world-model/research/2026-09-04-m5-stage5-perf.md` — the four measurements, the regression
+  found and fixed mid-session (below), and the peak-memory metric explanation.
+
+### A regression this stage caught (not a Stage 5 code change, but load-bearing for the numbers)
+The first `rebuild` run omitted `--probe-output` (no default registered for `latakia-20km` in
+`build_world_model.py`'s `_DEFAULT_RAW_PATHS`, unlike `--towns`/`--beacons`/`--osm-cache`/
+`--routes`), which silently produced a "probe: skipped" build and **overwrote the real Stage 3/4
+store, dropping its 1,681-point elevation/surface_type grid** (`grid`/`grid_sample` row counts
+went to 0/0). Caught by inspecting the rebuilt store's row counts directly rather than trusting
+the CLI's own summary output. Fixed by passing `--probe-output` explicitly (pointed at the
+already-staged Stage 3 full-rung output,
+`data/raw/dcs/2026-09-04/terrain_probe_output_full.jsonl`) in the measurement script's `rebuild`
+subcommand, then re-running and re-verifying via both a direct row-count check
+(`grid`=2, `grid_sample`=3,362, matching Stage 3/4 exactly) and a `describe_position` sanity
+check on a real point (`elevation.dcs_m=37.1263`, `surface_type.value="LAND"`, both correctly
+non-null). All four measurements reported in the research note are from this corrected,
+probe-inclusive rebuild. `--srtm-tile` was left unset (no local SRTM tile for Latakia is staged
+— `data/raw/dem/` only has Gemerek's M4 tile); per `build.pipeline.build_region`'s contract this
+degrades to an absent SRTM-delta stat, not an error, and is an already-accepted M5 deferral, not
+a gap introduced this stage.
+
+### Measurements (full detail in the research note)
+- Full rebuild wall time (region+towns+beacons+OSM+roadnet+probe grid, probe-inclusive):
+  **430.9 s (~7.2 min)**.
+- `.sqlite` file size: **8,982,528 bytes (8.57 MB)**.
+- `describe_position` latency, 100 sampled points: **mean 89.0 ms, median 71.3 ms, p95 223.7 ms,
+  p99 275.0 ms**.
+- Full `.routes` walk, standalone (isolated from the rebuild): **wall time 446.3 s (~7.4 min)**;
+  peak memory — **two numbers reported, not one, because they measure different things**: macOS
+  "maximum resident set size" (~2.18 GB, essentially the whole file — this counts `mmap`-ed
+  clean/reclaimable file-backed pages, not heap) vs. "peak memory footprint" (~22.5 MB, the
+  actual-heap/dirty-memory metric) obtained via `/usr/bin/time -l` wrapping the script's own
+  `resource.getrusage`-based self-report. **The streaming claim from Stage 2 holds**: peak
+  footprint stays flat and low regardless of the 2.25 GB input — no accidental full-buffer
+  materialization exists in `roadnet.routes.iter_routes`.
+
+### Checks
+- `ruff format --check world-model/src world-model/tests`: pass (55 files)
+- `ruff check world-model/src world-model/tests`: pass, 0 findings
+- `mypy --strict world-model/src world-model/tests`: pass (55 source files)
+- `pytest world-model/tests -q`: pass (142 passed — unchanged from before this stage, no test
+  additions expected or made since no production code changed)
+- `tools/measure_m5_stage5_perf.py` individually: `ruff format`/`ruff check` clean (only the
+  pre-existing, baseline `EXE001` "shebang present but file not executable" finding shared by
+  every other script in `tools/`), `mypy --strict` clean.
+
+### Notable Discoveries
+- **A CLI default gap (`--probe-output` has no registered default for `latakia-20km`) is a real
+  footgun for anyone re-running `build_world_model.py latakia-20km` without all optional flags**
+  — it doesn't error, it silently degrades to a smaller build and can overwrite a store that had
+  more data than the new build produces. Not fixed this session (out of Stage 5's "measurement,
+  not optimization/code changes" scope, and the checklist's own gate for new work — "unless a
+  measurement reveals something genuinely broken" — is about the *streaming claim*, not this CLI
+  ergonomics gap). Flagged here for whoever next touches `build_world_model.py` or writes Stage 6's
+  close-out: consider either a registered `probe_output` default (mirroring `routes`'s pattern)
+  or a loud warning when a rebuild would produce fewer grid/feature rows than the store it's
+  about to overwrite already has.
+- **macOS's `ru_maxrss`/`/usr/bin/time -l` "maximum resident set size" is the wrong metric to
+  read for "did this program's own memory use scale with input size" when the program uses
+  `mmap`** — it will look identical to a genuine memory blowup for any large `mmap`+sequential-
+  scan workload regardless of actual heap use. "Peak memory footprint" (also from `/usr/bin/time
+  -l` on Darwin) is the metric that actually answers that question. Worth remembering for any
+  future milestone (M6 ridge/valley extraction, M7 full-theatre) that profiles another `mmap`-
+  based reader.
