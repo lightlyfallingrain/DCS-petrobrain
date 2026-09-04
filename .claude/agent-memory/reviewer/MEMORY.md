@@ -13,3 +13,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Check agent-memory files are staged](feedback_check_agent_memory_staged.md) — run full `git status`, not just feature diff; other agents' memory writes can be left uncommitted, breaking DoD.
 - [Attribution on artifact, not just logs](feedback_attribution_on_artifact_not_just_logs.md) — M3: OSM attribution must be burned into the saved image, not just printed/logged in docs.
 - [M4 elevation review outcome](m4-elevation-review-outcome.md) — approved w/ minor fixes; code/tests/checks clean, third recurrence of unstaged agent-memory files as the only blocker.
+- [M5 Stage 0+1 review outcome](m5-stage1-offline-sources-approved.md) — approved clean; both named traps + airfield-derivation overclaim risk all pinned by tests; conservative ambiguity resolution; mypy tests cwd-quirk noted.
