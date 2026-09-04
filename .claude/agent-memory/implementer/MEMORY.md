@@ -20,3 +20,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M5 Stage 3 handoff](project_m5_stage3_handoff.md) — complete: all 3 rungs ran live, real store rebuilt at 100% grid coverage; only a Latakia SRTM tile is outstanding.
 - [Verify mission-probe pattern claims](feedback_verify_mission_probe_pattern_claims.md) — re-read the actual prior script before claiming a new one "mirrors its proven pattern"; a plan's prose isn't proof the code does it.
 - [M5 Stage 4 findings](project_m5_stage4_findings.md) — real corrupted DCS road feature (id=3711) in live store; DCS-vs-OSM road displacement is ~5-50m not M1's ~1-1.3km point-error figure.
+- [Verify rebuild row counts](feedback_verify_rebuild_row_counts.md) — build_world_model.py optional flags with no default silently drop data on rebuild; verify row counts/query output directly.
+- [macOS mmap RSS metric](reference_macos_mmap_rss_metric.md) — for mmap-based readers on Darwin, use "peak memory footprint" not "maximum resident set size" to judge real memory use.
