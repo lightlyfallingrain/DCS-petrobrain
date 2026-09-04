@@ -18,3 +18,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M5 Stage 1 layout](project_m5_stage1_layout.md) — geometry/dcs_data/store/build/query packages landed; nearest_road(DCS)/elevation/surface_type null until Stage 2-3 wire in.
 - [M5 Stage 2 roadnet results](project_m5_roadnet_stage2.md) — gate PASSED (131 routes in Latakia bbox), header route-count field doesn't match walked total, resync pre-filter-only is unsafe.
 - [M5 Stage 3 handoff](project_m5_stage3_handoff.md) — complete: all 3 rungs ran live, real store rebuilt at 100% grid coverage; only a Latakia SRTM tile is outstanding.
+- [Verify mission-probe pattern claims](feedback_verify_mission_probe_pattern_claims.md) — re-read the actual prior script before claiming a new one "mirrors its proven pattern"; a plan's prose isn't proof the code does it.

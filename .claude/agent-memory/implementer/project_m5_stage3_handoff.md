@@ -29,3 +29,9 @@ and tested against a synthetic tile, no code changes needed.
 **How to apply**: if the user later provides a Latakia-covering `.hgt` tile, just rerun the build
 CLI with `--srtm-tile`; don't attempt another automated DEM fetch without checking whether network
 policy has changed.
+
+**Review fix (2026-09-04, commit `05316e2`)**: the three probe scripts originally used a single
+blocking loop instead of the checklist-mandated `timer.scheduleFunction` chunking; rewritten to
+chunk (`CHUNK_SIZE=20`/tick, true append-mode `io.write`). See
+[[feedback_verify_mission_probe_pattern_claims]] for the root cause (an inaccurate "mirrors M4's
+proven pattern" claim that wasn't actually checked against M4's current file content).
