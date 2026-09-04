@@ -992,3 +992,52 @@ a gap introduced this stage.
   -l` on Darwin) is the metric that actually answers that question. Worth remembering for any
   future milestone (M6 ridge/valley extraction, M7 full-theatre) that profiles another `mmap`-
   based reader.
+
+---
+
+### Implementation Summary — Stage 6 (close-out)
+
+Documentation-only close-out stage, per the checklist. No `src/` changes — Stages 0-5 were
+already reviewer-approved and no new defect was found during close-out.
+
+### Files Changed
+- `world-model/research/2026-09-04-m5-first-persistent-model.md` — new milestone-summary
+  research note. Covers what M5 built, final live-store numbers (pulled from the real
+  `latakia-20km.sqlite` build and Stage 5's perf note), what stayed out of scope (`.rn4` graph
+  decoding, airfield taxiways/structures, Latakia SRTM tile, full-theatre resync audit,
+  `--probe-output` CLI default gap — all flagged for M6+), and a "what we learned" section on the
+  two real defects found and fixed this milestone (the `pyproj.Transformer` per-call perf bug and
+  the roadnet resync denormalized-float validation gap). Links to every per-stage note and to
+  this file rather than repeating their content.
+- `world-model/CLAUDE.md` — added three "Tech stack" entries following the exact style of the
+  existing M1-M4 entries (bold decision name, one-line rationale, source module path, research
+  note link): persistent storage (`sqlite3` + R\*Tree, JSON geometry), roads (DCS-native
+  `.routes`/`.rn4` parsing), towns/beacons (regex Lua parsers).
+- `world-model/ROADMAP.md` — flipped M5's checkbox to `[x]`, following the exact "Done: ..." /
+  feature-count / research-note-link pattern of the M1-M4 entries directly above it.
+- `todo/todo.md` — added an M5 entry to "Current Focus" following the M1-M4 entries' pattern, and
+  resolved the now-stale "Deferred" bullet about the spatial-storage choice (it was M5's own
+  decision, so it's no longer an open deferral — updated in place rather than deleted, per the
+  project's "do not delete tasks" backlog convention, to keep the resolution visible).
+
+### Tests Added
+None — documentation-only stage, no production code changed.
+
+### Checks
+- `ruff format --check world-model/src world-model/tests`: pass (55 files, unchanged)
+- `ruff check world-model/src world-model/tests`: pass, 0 findings
+- `mypy --strict world-model/src` (run from within `world-model/`, per this subproject's
+  cwd/mypy_path requirement): pass (34 source files)
+- `pytest world-model/tests -q`: pass (142 passed — unchanged from Stage 4's post-fix count,
+  as expected for a documentation-only stage)
+
+### Notable Discoveries
+- No new defects found during close-out review of the live store or the per-stage notes —
+  Stages 0-5's reviewer-approved state held. The milestone-summary note's "what we learned"
+  section is a synthesis of already-recorded findings (Stage 4's Correction section, the
+  `pyproj` perf fix), not a new discovery from this stage.
+- The checklist's stated filename (`2026-09-03-m5-first-persistent-model.md`) does not match this
+  session's actual dating convention — every other M5-dated note from this session uses
+  `2026-09-04-` (today's real date; M5 work happened 2026-09-04, the checklist's prefix appears
+  to be a placeholder carried over from the plan's earlier drafting date). Used
+  `2026-09-04-m5-first-persistent-model.md` instead, consistent with every sibling M5 note.
