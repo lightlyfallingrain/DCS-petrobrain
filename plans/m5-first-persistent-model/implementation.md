@@ -463,3 +463,177 @@ different nearest roads entirely) is visible in the output rather than hidden.
   session. Flagged as a deliberate scope trim against this task's explicit ask list, not an
   oversight — cheap to add later since `extract.py`'s `write_region_extract`/`read_region_extract`
   already do the real work.
+
+---
+
+### Implementation Summary — Stage 3 (DCS probe: elevation + surface_type only)
+
+Built the full code path for the elevation/surface-type probe grid (parser, ingest, pipeline
+wiring, CLI wiring, SRTM-delta-as-metadata-stats), and staged the live-probe artifacts
+(`terrain_probe_{smoke,500,full}.lua`, a WSL collector script). **This stage could not be
+finished this session** — `land.getSurfaceType` has never been called against this install, and
+running any of the three probe rungs requires a live DCS mission on the Windows machine, which
+this agent has no way to trigger. The smoke-test rung (121 points) and its collector script are
+staged in `win-mac-sync/run-wsl/`, ready for the user to run; see "Handoff — what needs to happen
+next" below. No `.sqlite` rebuild with real elevation/surface_type data happened this session;
+`describe_position`'s `elevation`/`surface_type` fields remain `null` against the real Latakia
+store until the user runs a rung and the result is ingested.
+
+### Files Changed / Added
+- `world-model/src/elevation/dcs_grid.py` — added `DcsTerrainSample` (`name`, `x`, `z`,
+  `height_m`, `surface_type`) and `parse_terrain_probe_output`, parsing the combined
+  `terrain_probe_*.lua` JSON-lines format (`height_m` + `surface_type` per point, both raising
+  `ValueError` on `null` rather than silently dropping a failed point). M4's `DcsElevationSample`/
+  `parse_probe_output` are untouched — this is an addition, not a replacement, since M4's own
+  fixture/tests still reference the original single-field format.
+- `world-model/src/build/ingest_probe.py` — new module, `ingest_probe(probe_output_path, theatre,
+  origin_x, origin_z, spacing_m, n_rows, n_cols, source_id, srtm_tile=None) -> (ElevationGrid,
+  SurfaceGrid, ProbeIngestStats)`. Parses point names as `r{row}c{col}` (`_parse_row_col`, raises
+  on a name that doesn't match or decodes outside the grid) so **any rung's output — smoke, 500,
+  or full — places its points into the correct cell of the same grid coordinate system**; a
+  missing cell stays `None` (`store.writer.insert_grid` already skips `None` cells, so a
+  smoke-test-only run yields a real, if sparse, queryable grid, not a placeholder or an error).
+  SRTM delta is computed only as `ElevationGrid.stats["srtm"]` (mean/median/stddev/min/max delta,
+  points compared vs. skipped) via `elevation.dem.SrtmTile.height_at` + `coordinates.dcs_to_wgs84`
+  — per the checklist's explicit "SRTM delta as metadata stats only (not stored samples)", no
+  SRTM-sourced `grid`/`grid_sample` rows are ever created. `stats["srtm"]` is `None` if no
+  `srtm_tile` is supplied. `SurfaceGrid.stats["counts"]` holds a label->count census
+  (`LAND`/`SHALLOW_WATER`/`WATER`/`ROAD`/`RUNWAY`, or `UNKNOWN_<n>` for an enum value outside the
+  documented range — never silently coerced into a known label).
+- `world-model/src/build/pipeline.py` — added `probe_grid_for_region(region, spacing_m=500.0) ->
+  (origin_x, origin_z, spacing_m, n_rows, n_cols)`, deriving the grid from a `RegionDefinition`
+  (south-west-corner origin, `n = round(2*half_extent/spacing) + 1` — 41 for Latakia's 10,000m
+  half-extent at 500m spacing, matching the checklist's locked 41x41/1,681 decision exactly).
+  `build_region` gained optional `probe_output_path`/`srtm_tile_path` parameters; if
+  `probe_output_path` is given and exists, `ingest_probe` runs and both grids are inserted via
+  `store.writer.insert_grid`, with results folded into `BuildReport.probe_stats`; otherwise
+  `BuildReport.probe_skipped = True` and no grid is inserted — same "absence reported as absence"
+  pattern Stage 2 established for `routes_path`.
+- `world-model/src/query/describe.py` — **no logic change**, docstring only. `elevation`/
+  `surface_type` already read live through `store.reader.sample_grid` (bilinear for elevation,
+  nearest-cell for the categorical surface grid) since Stage 1 — they were `null` at Stage 1/2
+  purely because no `grid`/`grid_sample` rows existed yet, not because of a special case in this
+  module. Updated the module docstring to state this explicitly (previously implied Stage 3 would
+  need code changes here; it does not) and to note `elevation.external_m`/`delta_m` stay always
+  `None` — the SRTM comparison lives in grid metadata (`ingest_probe`), never as a per-point
+  lookup this function performs.
+- `world-model/tools/build_world_model.py` — added `--probe-output`/`--srtm-tile` CLI args
+  (both optional, both passed through to `build_region`), and printing of `probe_stats`/
+  `probe_skipped` in the summary output, mirroring the existing `--routes` pattern.
+- `world-model/tools/dcs-mission-probe/terrain_probe_{smoke,500,full}.lua` — new Lua mission
+  probes, one per incremental-ladder rung (121 / 441 / 1,681 points), each a subset of the same
+  41x41 grid (`probe_grid_for_region`'s coordinate system, computed offline — no coordinate
+  transform needed since the grid is already DCS-native x/z). Every point name is `r{row}c{col}`
+  into that shared grid, so `ingest_probe` can place any rung's real output correctly regardless
+  of which rung produced it. Mirrors `elevation_probe.lua`'s (M4) proven structure exactly:
+  `pcall`-wrapped calls, append-mode `io.write`, one JSON object per line — extended with a second
+  `pcall(land.getSurfaceType, ...)` per point, since that function has never been called against
+  this install (documented-only, Hoggit enum `LAND=1, SHALLOW_WATER=2, WATER=3, ROAD=4,
+  RUNWAY=5`, per plan.md Finding C — the exact status `getHeight` held before M4 Stage 1).
+- `world-model/tools/wsl/collect_terrain_probe_log.sh` — new WSL collector script, mirrors
+  `collect_elevation_log.sh` exactly (same `DCS_SAVED_GAMES_PATH` env-var contract, same
+  timestamped copy into `win-mac-sync/wsl-output/`), pointed at `terrain_probe_output.jsonl`.
+  Every rung's `.lua` script writes to the same output filename, so this must be run once per
+  rung (collect before running the next one).
+- `world-model/tools/dcs-mission-probe/README.md` — documented the three new scripts, the
+  incremental-ladder requirement, and the `getSurfaceType`-never-called-before caveat.
+- Test additions (see below): `tests/test_terrain_probe.py`, `tests/test_ingest_probe.py`,
+  `tests/test_pipeline_probe_grid.py`; `tests/test_describe_position.py` extended with two new
+  tests plus a new grid-bearing fixture helper (existing tests untouched).
+
+### Tests Added
+- `tests/test_terrain_probe.py` — `parse_terrain_probe_output` against a **synthetic** JSON-lines
+  fixture (explicitly documented as synthetic, not a real probe capture — no real
+  `terrain_probe_*.lua` output exists yet, since `land.getSurfaceType` has never run against this
+  install). Pins the format contract only (5-field shape, `height_m`/`surface_type` null ->
+  `ValueError`, blank-line skipping) — not a claim about real DCS terrain, per the module
+  docstring's explicit distinction from `test_dcs_grid.py`'s M4 real-data fixture.
+- `tests/test_ingest_probe.py` — `ingest_probe` against a small synthetic 2x2/3x3 grid and a
+  tiny uniform-value synthetic `SrtmTile` (every sample the same value, so the expected delta for
+  every point is exactly `height_m - tile_value`, independent of bilinear-interpolation position
+  — keeps the numbers hand-verifiable without a real `.hgt` tile; only the tile's *sample values*
+  are synthetic, its `sw_lat`/`sw_lon`/`span_deg` cover the real lat/lon of the test's DCS points
+  via a real `coordinates.dcs_to_wgs84` call). Covers: row/col placement, missing cells stay
+  `None` (partial-grid case), surface-type label counts, bad/out-of-range point names raise,
+  `srtm_tile=None` yields `stats["srtm"] is None`, SRTM delta stats computed correctly, and a
+  point outside the tile's coverage is counted as skipped rather than dropped or crashing.
+- `tests/test_pipeline_probe_grid.py` — `probe_grid_for_region` against the real
+  `latakia-20km` `RegionDefinition`: pins the exact 41x41/500m/1,681-point outcome the checklist
+  locks, confirms the origin is the region's south-west corner (round-trips to the north-east
+  corner via `origin + (n-1)*spacing`), and checks a custom `spacing_m` still derives correctly.
+- `tests/test_describe_position.py` — added `_fixture_conn_with_grid` (the existing ARP fixture
+  plus a small synthetic 3x3 elevation/surface_type grid centred exactly on the ARP point, so
+  `sample_grid`'s bilinear/nearest-cell lookup resolves to one known cell rather than an
+  interpolated blend) and two new tests:
+  `test_describe_position_reads_elevation_and_surface_type_from_a_built_grid` (confirms the
+  store->`sample_grid`->`describe_position` wiring actually works end to end, and that
+  `elevation.external_m`/`delta_m` stay `None`) and
+  `test_describe_position_grid_absent_still_reports_null` (confirms a store with no grid rows —
+  the Stage 1/2 state — still degrades to explicit `None`, i.e. Stage 3 changed nothing for that
+  case). Existing tests in this file were not modified.
+
+### Checks
+- `ruff format --check world-model/src world-model/tests`: pass (after `ruff format` fixed 3
+  files' formatting — long import line in `pipeline.py`, two single-item lists in
+  `test_ingest_probe.py`)
+- `ruff check world-model/src world-model/tests`: pass, 0 findings in touched/new files.
+  `world-model/tools/build_world_model.py` individually checked — clean except the same
+  pre-existing repo-wide EXE001 non-executable-shebang convention every other `tools/*.py` script
+  already carries (confirmed against the unmodified baseline, per M5's recurring
+  Notable-Discoveries note on this).
+- `mypy --strict world-model/src world-model/tests`: pass (55 source files)
+- `pytest world-model/tests -q`: pass (136 passed, up from 118 at the end of Stage 2)
+
+### Handoff — what needs to happen next (this stage is not complete)
+
+This session cannot run DCS — there is no way to trigger a live mission on the Windows machine
+from here. The code side of Stage 3 is finished and tested against synthetic fixtures, but the
+actual elevation/surface_type data, the `getSurfaceType`-never-called-before verification, and
+the incremental-ladder timing/cost checks all require the user to run something in DCS.
+
+**Staged and ready, rung 1 of 3 (smoke test):**
+- `win-mac-sync/run-wsl/terrain_probe_smoke.lua` — the 121-point smoke-test probe script,
+  synced via Dropbox.
+- `win-mac-sync/run-wsl/collect_terrain_probe_log.sh` — the WSL collector script for its output.
+
+**What the user needs to do:**
+1. On the Windows DCS machine: uncomment the `io`/`lfs` `sanitizeModule` lines in
+   `Scripts/MissionScripting.lua` (same probe-only, user-authorized edit M4 used — redo it if it
+   was reverted after M4).
+2. Copy `win-mac-sync/run-wsl/terrain_probe_smoke.lua` to a location DCS can read (e.g. alongside
+   a test mission), build a throwaway Syria-terrain mission with a `TIME MORE 5` -> `DO SCRIPT
+   FILE` trigger pointing at it, run the mission ~10-20 seconds, then exit. Watch for any hang or
+   unresponsiveness — 121 `land.getSurfaceType` calls have never been tried on this install, and
+   an actual ceiling (Finding E's open question) would be new, useful evidence either way.
+3. In WSL bash on the Windows machine, with `DCS_SAVED_GAMES_PATH` set, run
+   `win-mac-sync/run-wsl/collect_terrain_probe_log.sh` to copy `terrain_probe_output.jsonl` into
+   `win-mac-sync/wsl-output/`.
+4. Let it sync back to the Mac (Dropbox), then tell me to resume.
+
+**Once rung 1's real output lands**, this session (or a resumed one) should: move the output file
+into `world-model/data/raw/dcs/<date>/`, verify point count (121) and no nulls, run
+`build.ingest_probe` against it standalone to sanity-check `land.getSurfaceType`'s actual return
+values are within the documented `1-5` enum (the checklist's explicit caution — treat this
+function with the same skepticism M4 gave `land.getHeight` before its own Stage 1), replace this
+test file's synthetic fixture with a real one per `CONVENTIONS.md`, then proceed to rung 2 (~500,
+`terrain_probe_500.lua`) and rung 3 (full 1,681, `terrain_probe_full.lua`) the same way — each
+rung's real output sanity-checked before scaling up, per the checklist's "stop and reassess if any
+rung shows non-linear cost." Only after the full 1,681-point rung succeeds should the real
+Latakia `.sqlite` be rebuilt with `--probe-output`/`--srtm-tile`, and the
+`describe_position`/SRTM-delta/coverage numbers this task asked for (smoke/500/full point counts,
+`getSurfaceType` surprises, final grid coverage, SRTM delta stats, real spot-checks) be reported.
+
+### Notable Discoveries
+- **`query/describe.py` needed zero logic changes for Stage 3.** Stage 1 already wired
+  `elevation`/`surface_type` through `store.reader.sample_grid`, which was designed from the start
+  to return `None` when no grid exists — Stage 3's entire "wire it in" scope collapsed to "make a
+  `grid`/`grid_sample` row-producing ingest module exist," confirming the Stage 1 store design
+  anticipated this correctly. Worth remembering for any future milestone: check whether the query
+  layer already supports a not-yet-populated data source before assuming query-side work is
+  needed.
+- **The incremental ladder's real value, in this design, is partial-grid safety, not just
+  cost control.** Because every rung's point names are `r{row}c{col}` into one shared grid
+  coordinate system, `ingest_probe` was written so a smoke-test-only run already produces a real
+  (if sparse) queryable grid rather than throwaway data replaced wholesale by later rungs — this
+  wasn't explicitly required by the checklist but falls out naturally from the grid-index naming
+  choice and seemed worth doing since it costs nothing.

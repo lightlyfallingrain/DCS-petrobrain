@@ -13,9 +13,12 @@ Defaults for `latakia-20km` point at the raw paths M5 Stage 1/2 already
 populated (`data/raw/dcs/syria/map/*.lua`,
 `data/raw/osm/2026-09-04/latakia_20km_widened.json`,
 `data/raw/dcs/syria/roads/Syria.routes`) so the common case needs only the
-region name. `--routes` is optional -- if the file isn't present (e.g. a
-fresh checkout without the 2.25 GB `Syria.routes` staged), the roadnet
-layer is skipped and reported as absent, not an error.
+region name. `--routes` and `--probe-output` are both optional -- if a file
+isn't present (e.g. a fresh checkout without the 2.25 GB `Syria.routes` or a
+live probe's output staged), that layer is skipped and reported as absent,
+not an error. `--srtm-tile` is optional and only affects the elevation
+grid's stored `stats` (a metadata-only SRTM delta summary, never stored
+samples -- see `build.ingest_probe`).
 """
 
 import argparse
@@ -46,6 +49,8 @@ def main() -> None:
     parser.add_argument("--beacons", type=Path, default=None)
     parser.add_argument("--osm-cache", type=Path, default=None)
     parser.add_argument("--routes", type=Path, default=None)
+    parser.add_argument("--probe-output", type=Path, default=None)
+    parser.add_argument("--srtm-tile", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -56,6 +61,8 @@ def main() -> None:
     beacons_path = args.beacons or defaults.get("beacons")
     osm_cache_path = args.osm_cache or defaults.get("osm_cache")
     routes_path = args.routes or defaults.get("routes")
+    probe_output_path = args.probe_output or defaults.get("probe_output")
+    srtm_tile_path = args.srtm_tile or defaults.get("srtm_tile")
     if towns_path is None or beacons_path is None or osm_cache_path is None:
         parser.error(
             f"No default raw paths registered for region {args.region!r} -- "
@@ -67,7 +74,14 @@ def main() -> None:
     )
 
     report = build_region(
-        region, towns_path, beacons_path, osm_cache_path, out_path, routes_path
+        region,
+        towns_path,
+        beacons_path,
+        osm_cache_path,
+        out_path,
+        routes_path,
+        probe_output_path,
+        srtm_tile_path,
     )
 
     print(f"Built {out_path}")
@@ -81,6 +95,10 @@ def main() -> None:
         print(f"  roadnet stats: {report.roadnet_stats}")
     elif report.roadnet_skipped:
         print("  roadnet: skipped (routes_path not given or not found)")
+    if report.probe_stats is not None:
+        print(f"  probe stats: {report.probe_stats}")
+    elif report.probe_skipped:
+        print("  probe: skipped (probe_output_path not given or not found)")
 
 
 if __name__ == "__main__":

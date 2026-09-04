@@ -6,17 +6,26 @@ This is Stage 1's "does it answer without crashing, with the four honesty
 rules visibly respected" check. The full control-point tolerance-band test
 against the real Latakia data (per
 `plans/m5-first-persistent-model/plan.md`'s test spec) is Stage 4's job,
-once the elevation/surface-type probe and roadnet layers exist to compare
-against -- this test intentionally does not assert on those None-valued
-fields as bugs.
+once the roadnet layer (already wired since Stage 2) and the elevation/
+surface-type probe grid have real data to compare against -- Stage 4 is
+also where a *real* fixture (hardcoded literals from a live probe run, not
+synthetic) belongs, per `world-model/docs/CONVENTIONS.md`.
+
+Stage 3 adds `test_describe_position_reads_elevation_and_surface_type_from_
+a_built_grid`, confirming the wiring (`store.reader.sample_grid` ->
+`elevation.dcs_m` / `surface_type.value`) actually works end to end against
+a small **synthetic** grid built directly via `store.writer.insert_grid` --
+this is a wiring test, not a claim about real DCS terrain, so a synthetic
+grid is appropriate here (contrast `test_ingest_probe.py`'s docstring on why
+`elevation.dcs_grid` itself still needs a real fixture once one exists).
 """
 
 import sqlite3
 from pathlib import Path
 
 from query import describe_position
-from store.models import Region, StoredFeature
-from store.writer import insert_features, insert_region, open_for_build
+from store.models import ElevationGrid, Region, StoredFeature, SurfaceGrid
+from store.writer import insert_features, insert_grid, insert_region, open_for_build
 
 
 def _fixture_conn(tmp_path: Path) -> sqlite3.Connection:
@@ -134,3 +143,94 @@ def test_describe_position_every_present_field_carries_provenance(
         assert result.nearest_water.provenance
     for place in result.named_places_within_radius:
         assert place.provenance
+
+
+_ARP_X = 41934.892
+_ARP_Z = 5685.076
+_GRID_SPACING_M = 500.0
+_GRID_ORIGIN_X = _ARP_X - _GRID_SPACING_M
+_GRID_ORIGIN_Z = _ARP_Z - _GRID_SPACING_M
+
+
+def _fixture_conn_with_grid(tmp_path: Path) -> sqlite3.Connection:
+    """`_fixture_conn`'s store plus a small 3x3 elevation/surface_type grid
+    centred exactly on the ARP fixture point (row=1, col=1), so
+    `sample_grid`'s bilinear/nearest-cell lookup at the ARP resolves to a
+    single known cell rather than an interpolated blend -- see the module
+    docstring."""
+    conn = _fixture_conn(tmp_path)
+    elevation_samples: list[list[float | None]] = [
+        [10.0, 20.0, 30.0],
+        [40.0, 123.4, 60.0],
+        [70.0, 80.0, 90.0],
+    ]
+    surface_samples: list[list[int | None]] = [
+        [1, 1, 1],
+        [1, 4, 1],
+        [1, 1, 3],
+    ]
+    insert_grid(
+        conn,
+        ElevationGrid(
+            origin_x=_GRID_ORIGIN_X,
+            origin_z=_GRID_ORIGIN_Z,
+            spacing_m=_GRID_SPACING_M,
+            n_rows=3,
+            n_cols=3,
+            source_id=None,
+            stats={"points_expected": 9, "points_received": 9, "srtm": None},
+            samples=elevation_samples,
+        ),
+    )
+    insert_grid(
+        conn,
+        SurfaceGrid(
+            origin_x=_GRID_ORIGIN_X,
+            origin_z=_GRID_ORIGIN_Z,
+            spacing_m=_GRID_SPACING_M,
+            n_rows=3,
+            n_cols=3,
+            source_id=None,
+            stats={"points_expected": 9, "points_received": 9, "counts": {"ROAD": 1}},
+            samples=surface_samples,
+        ),
+    )
+    return conn
+
+
+def test_describe_position_reads_elevation_and_surface_type_from_a_built_grid(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn_with_grid(tmp_path)
+    try:
+        result = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert result.elevation.dcs_m == 123.4
+    assert result.elevation.source == "dcs"
+    assert result.elevation.confidence == "high"
+    # SRTM comparison is metadata-only (grid stats), never a per-point
+    # lookup this function performs -- see the query.describe module
+    # docstring and build.ingest_probe's.
+    assert result.elevation.external_m is None
+    assert result.elevation.delta_m is None
+
+    assert result.surface_type.value == "ROAD"
+    assert result.surface_type.provenance == "dcs"
+    assert result.surface_type.sampled_at_m == _GRID_SPACING_M
+
+
+def test_describe_position_grid_absent_still_reports_null(tmp_path: Path) -> None:
+    """Without `_fixture_conn_with_grid`'s grid rows, elevation/surface_type
+    stay the explicit-absence `None` that Stage 1/2 already established --
+    confirming the wiring didn't change behavior for a store with no probe
+    data, only added it for a store that has some."""
+    conn = _fixture_conn(tmp_path)
+    try:
+        result = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert result.elevation.dcs_m is None
+    assert result.surface_type.value is None

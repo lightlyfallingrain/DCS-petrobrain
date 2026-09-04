@@ -13,13 +13,20 @@ Four rules define what "position understanding" means at this stage (see
 Input is always DCS-native `(x, z)`; lat/lon callers go through
 `coordinates.wgs84_to_dcs` before calling this function.
 
-**M5 Stage 2 status**: `nearest_road` (the DCS-sourced roadnet layer) is
-wired in as of Stage 2 -- it answers from `.routes`-derived `road` features
-(`provenance["geometry"] == "dcs"`) when a build supplied `routes_path`, and
-is otherwise absent, same as any other feature-not-in-store case. `elevation`
-and `surface_type` remain always `None`/absent until Stage 3 (the
-elevation/surface probe) lands -- rule 3 says absence is reported as
-absence, not a placeholder to special-case away.
+**M5 Stage 3 status**: `nearest_road` (the DCS-sourced roadnet layer) has
+been wired in since Stage 2 -- it answers from `.routes`-derived `road`
+features (`provenance["geometry"] == "dcs"`) when a build supplied
+`routes_path`, and is otherwise absent, same as any other
+feature-not-in-store case. `elevation` and `surface_type` needed no code
+change here to go live: both already read through `store.reader.sample_grid`
+(bilinear for `"elevation"`, nearest-cell for `"surface_type"`), which
+returns `None` whenever no `grid`/`grid_sample` rows exist -- so they were
+`None` at Stage 1/2 purely because `build.ingest_probe` had never run, not
+because of a special case here. Once a build supplies `probe_output_path`
+(Stage 3), the same code path answers real values. `elevation.external_m`/
+`delta_m` stay `None` always -- the SRTM comparison is metadata-only grid
+stats (`grid.stats_json`), not a per-point lookup this function performs;
+see `build.ingest_probe`'s module docstring.
 """
 
 import sqlite3
