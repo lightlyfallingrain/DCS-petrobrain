@@ -87,3 +87,49 @@ Per the checklist's incremental ladder: proceed to rung 2 (~500 points, `terrain
 then rung 3 (full 1,681, `terrain_probe_full.lua`), each collected and sanity-checked the same way
 before scaling up further. Only after rung 3 lands does the real Latakia `.sqlite` get rebuilt
 with `--probe-output`/`--srtm-tile` and the SRTM delta / final coverage numbers get computed.
+
+---
+
+## Rung 2/3 update (500 points) — 2026-09-04
+
+441 points (every 2nd row/col of the 41x41 grid), same mechanism, same live-mission workflow.
+Output: `data/raw/dcs/2026-09-04/terrain_probe_output_500.jsonl` (gitignored).
+
+**Point-count sanity:** 441 requested, 441 lines returned, 0 nulls on either field, 0 duplicate
+names.
+
+**Enum distribution:**
+
+| value | label | count | % |
+|---|---|---|---|
+| 1 | LAND | 324 | 73.5% |
+| 2 | SHALLOW_WATER | 0 | 0.0% |
+| 3 | WATER | 112 | 25.4% |
+| 4 | ROAD | 4 | 0.9% |
+| 5 | RUNWAY | 1 | 0.2% |
+
+Consistent with rung 1's proportions (70.2%/0%/28.1%/0.8%/0.8%); no new out-of-enum value.
+`SHALLOW_WATER` still unobserved. Height range unchanged (0.0-556.3m).
+
+**Determinism cross-check (new this rung).** All 121 of rung 1's grid points are also present in
+rung 2's 441 (rung 2 is a superset at finer stride, same grid coordinate system) -- every
+overlapping point's `height_m` and `surface_type` are **bit-identical** between the two live
+mission runs. This is a real, if informal, reproducibility check: `land.getHeight`/
+`land.getSurfaceType` return the same value for the same `(x, z)` across two separate live-mission
+invocations, not noisy or session-dependent.
+
+**Spatial plausibility, updated:**
+- The same `r12c20` RUNWAY point recurs (805.7m from the derived airfield point, identical
+  height) -- expected, since it's the same grid cell re-sampled.
+- 4 ROAD points now visible (`r6c16`, `r10c30`, `r32c18`, `r32c20`), scattered 4.3-9.3km from the
+  airfield point -- plausible for roads elsewhere in the region; not cross-checked against the
+  `.routes` layer this session (Stage 4's job).
+- 6 non-zero-elevation WATER points now visible (up from 4 at rung 1's coarser stride, all rung 1
+  points recur plus 2 new ones: `r6c38` 161.1m, `r18c40` 179.8m) -- same inland-water-feature
+  interpretation as rung 1, strengthened by more samples rather than contradicted.
+
+**No code changes needed.** `ingest_probe`/`parse_terrain_probe_output` handled the real 441-point
+file correctly with zero changes.
+
+**Next:** rung 3 (full 1,681, `terrain_probe_full.lua`) staged for the user; see
+`plans/m5-first-persistent-model/implementation.md` for the exact run instructions.
