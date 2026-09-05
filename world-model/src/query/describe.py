@@ -27,6 +27,12 @@ because of a special case here. Once a build supplies `probe_output_path`
 `delta_m` stay `None` always -- the SRTM comparison is metadata-only grid
 stats (`grid.stats_json`), not a per-point lookup this function performs;
 see `build.ingest_probe`'s module docstring.
+
+**M6 status**: `nearby_ridges`/`nearby_valleys` answer from the same
+`nearest_feature` machinery as `nearest_road`/`nearest_water`, restricted to
+`kind="ridge"`/`"valley"` rows -- present only once a build's probe grid has
+run `build.ingest_terrain` (see `build/pipeline.py`), `None` otherwise, same
+absence-as-absence rule as every other field here.
 """
 
 import sqlite3
@@ -145,6 +151,22 @@ class NavaidInfo:
 
 
 @dataclass(frozen=True)
+class TerrainLineInfo:
+    """A nearest ridge/valley line's structured facts (M6). `orientation_deg`
+    and `elevation_range_m` come straight from the feature's `tags_json`
+    (`terrain.features.to_stored_features`); `elevation_range_m` is `None`
+    only if an older/foreign store row lacks the tag, never a fabricated
+    default."""
+
+    distance_m: float
+    orientation_deg: float | None
+    elevation_range_m: list[float] | None
+    provenance: str
+    confidence: str
+    position_uncertainty_m: float
+
+
+@dataclass(frozen=True)
 class RegionInfo:
     name: str
     built_at: str
@@ -164,6 +186,8 @@ class PositionDescription:
     nearest_settlement: SettlementInfo | None
     inside_settlement: SettlementInfo | None
     nearest_water: WaterInfo | None
+    nearby_ridges: TerrainLineInfo | None
+    nearby_valleys: TerrainLineInfo | None
     named_places_within_radius: list[NamedPlaceInfo]
     named_places_radius_m: float
     nearest_airfield: AirfieldInfo | None
@@ -227,6 +251,22 @@ def _airfield_info(match: tuple[StoredFeature, float] | None) -> AirfieldInfo | 
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
         derivation=feature.tags.get("derivation"),
+    )
+
+
+def _terrain_line_info(
+    match: tuple[StoredFeature, float] | None,
+) -> TerrainLineInfo | None:
+    if match is None:
+        return None
+    feature, distance = match
+    return TerrainLineInfo(
+        distance_m=distance,
+        orientation_deg=feature.tags.get("orientation_deg"),
+        elevation_range_m=feature.tags.get("elevation_range_m"),
+        provenance=_provenance_str(feature),
+        confidence=_confidence_str(feature),
+        position_uncertainty_m=feature.position_uncertainty_m or 0.0,
     )
 
 
@@ -300,6 +340,9 @@ def describe_position(
     nearest_water = (
         _water_info(water_match[0], water_match[1]) if water_match is not None else None
     )
+
+    nearby_ridges = _terrain_line_info(nearest_feature(conn, ["ridge"], x, z))
+    nearby_valleys = _terrain_line_info(nearest_feature(conn, ["valley"], x, z))
 
     named_place_candidates = features_in_bbox(
         conn,
@@ -375,6 +418,8 @@ def describe_position(
         nearest_settlement=nearest_settlement,
         inside_settlement=inside_settlement,
         nearest_water=nearest_water,
+        nearby_ridges=nearby_ridges,
+        nearby_valleys=nearby_valleys,
         named_places_within_radius=named_places_within_radius,
         named_places_radius_m=named_places_radius_m,
         nearest_airfield=nearest_airfield,

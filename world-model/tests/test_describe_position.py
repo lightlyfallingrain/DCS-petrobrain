@@ -251,6 +251,86 @@ def test_describe_position_grid_absent_still_reports_null(tmp_path: Path) -> Non
     assert result.surface_type.value is None
 
 
+def test_describe_position_nearby_ridge_and_valley_absent_without_terrain_features(
+    tmp_path: Path,
+) -> None:
+    """Stage 1/2's rule (elevation/surface_type stayed `None` before
+    `build.ingest_probe` ran) applies identically to M6's ridge/valley
+    fields: absence is reported as absence, not a guess, when no
+    `kind="ridge"`/`"valley"` rows exist in the store."""
+    conn = _fixture_conn(tmp_path)
+    try:
+        result = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert result.nearby_ridges is None
+    assert result.nearby_valleys is None
+
+
+def test_describe_position_finds_nearby_ridge_and_valley_features(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn(tmp_path)
+    try:
+        insert_features(
+            conn,
+            [
+                StoredFeature(
+                    kind="ridge",
+                    geom_type="LineString",
+                    geometry=[(_ARP_X - 200.0, _ARP_Z), (_ARP_X + 200.0, _ARP_Z)],
+                    name=None,
+                    subtype=None,
+                    tags={
+                        "elevation_range_m": [150.0, 200.0],
+                        "orientation_deg": 90.0,
+                        "cell_count": 5,
+                    },
+                    source_id=None,
+                    source_ref="ridge_0",
+                    provenance={"geometry": "dcs_derived"},
+                    confidence={"geometry": "low"},
+                    position_uncertainty_m=500.0,
+                ),
+                StoredFeature(
+                    kind="valley",
+                    geom_type="LineString",
+                    geometry=[
+                        (_ARP_X, _ARP_Z - 200.0),
+                        (_ARP_X, _ARP_Z + 200.0),
+                    ],
+                    name=None,
+                    subtype=None,
+                    tags={
+                        "elevation_range_m": [10.0, 30.0],
+                        "orientation_deg": 0.0,
+                        "cell_count": 5,
+                    },
+                    source_id=None,
+                    source_ref="valley_0",
+                    provenance={"geometry": "dcs_derived"},
+                    confidence={"geometry": "low"},
+                    position_uncertainty_m=500.0,
+                ),
+            ],
+        )
+
+        result = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert result.nearby_ridges is not None
+    assert result.nearby_ridges.provenance == "dcs_derived"
+    assert result.nearby_ridges.confidence == "low"
+    assert result.nearby_ridges.orientation_deg == 90.0
+    assert result.nearby_ridges.elevation_range_m == [150.0, 200.0]
+
+    assert result.nearby_valleys is not None
+    assert result.nearby_valleys.provenance == "dcs_derived"
+    assert result.nearby_valleys.elevation_range_m == [10.0, 30.0]
+
+
 def test_describe_position_control_point_latakia_arp(tmp_path: Path) -> None:
     """Control-point test, non-circular per `plans/m5-first-persistent-
     model/plan.md`'s repeated emphasis (never validate DCS-derived data

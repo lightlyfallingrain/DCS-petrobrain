@@ -41,4 +41,5 @@ known-first-party = [
     "build",
     "query",
     "roadnet",
+    "terrain",
 ]

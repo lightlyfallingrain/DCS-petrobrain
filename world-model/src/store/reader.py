@@ -23,7 +23,7 @@ from geometry import (
     point_in_polygon,
 )
 
-from .models import Region, StoredFeature
+from .models import ElevationGrid, Region, StoredFeature
 
 _EXPANDING_RADII_M = (500.0, 2000.0, 8000.0, 30000.0)
 
@@ -246,6 +246,8 @@ class _GridMeta:
     spacing_m: float
     n_rows: int
     n_cols: int
+    source_id: int | None
+    stats_json: str
 
 
 def grid_spacing_m(conn: sqlite3.Connection, grid_kind: str) -> float | None:
@@ -259,8 +261,8 @@ def grid_spacing_m(conn: sqlite3.Connection, grid_kind: str) -> float | None:
 
 def _load_grid_meta(conn: sqlite3.Connection, grid_kind: str) -> _GridMeta | None:
     row = conn.execute(
-        "SELECT id, origin_x, origin_z, spacing_m, n_rows, n_cols FROM grid "
-        "WHERE kind = ? ORDER BY id DESC LIMIT 1",
+        "SELECT id, origin_x, origin_z, spacing_m, n_rows, n_cols, source_id, "
+        "stats_json FROM grid WHERE kind = ? ORDER BY id DESC LIMIT 1",
         (grid_kind,),
     ).fetchone()
     if row is None:
@@ -272,6 +274,45 @@ def _load_grid_meta(conn: sqlite3.Connection, grid_kind: str) -> _GridMeta | Non
         spacing_m=row[3],
         n_rows=row[4],
         n_cols=row[5],
+        source_id=row[6],
+        stats_json=row[7],
+    )
+
+
+def load_full_grid(conn: sqlite3.Connection, grid_kind: str) -> ElevationGrid | None:
+    """Return the full `samples[row][col]` matrix for the most recent grid
+    of `grid_kind`, or `None` if no such grid has been built yet.
+
+    Unlike `sample_grid` (single interpolated point lookup), this reads
+    every stored `grid_sample` row for the grid in one query -- for
+    whole-grid analysis (`terrain.curvature`'s discrete-Laplacian
+    classification, M6) rather than per-point queries. Missing cells stay
+    `None`, matching `ElevationGrid.samples`' documented shape for a
+    partial/sparse grid.
+    """
+    meta = _load_grid_meta(conn, grid_kind)
+    if meta is None:
+        return None
+
+    samples: list[list[float | None]] = [
+        [None] * meta.n_cols for _ in range(meta.n_rows)
+    ]
+    for row, col, value in conn.execute(
+        "SELECT row, col, value FROM grid_sample WHERE grid_id = ?",
+        (meta.grid_id,),
+    ):
+        samples[row][col] = float(value)
+
+    return ElevationGrid(
+        origin_x=meta.origin_x,
+        origin_z=meta.origin_z,
+        spacing_m=meta.spacing_m,
+        n_rows=meta.n_rows,
+        n_cols=meta.n_cols,
+        source_id=meta.source_id,
+        stats=json.loads(meta.stats_json),
+        samples=samples,
+        id=meta.grid_id,
     )
 
 
