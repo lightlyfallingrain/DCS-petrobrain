@@ -10,13 +10,19 @@ user's own build ever produces.
 """
 
 import sqlite3
+from array import array
 from pathlib import Path
+
+import pytest
 
 from build.validate import (
     SpotCheckPoint,
     check_road_count,
+    compare_probe_to_srtm,
     spot_check_positions,
 )
+from elevation.dcs_grid import DcsElevationSample
+from elevation.dem import SrtmTile
 from store.models import Region, StoredFeature
 from store.writer import insert_features, insert_region, open_for_build
 
@@ -122,3 +128,75 @@ def test_check_road_count_within_tolerance() -> None:
 def test_check_road_count_outside_tolerance() -> None:
     check = check_road_count(actual_road_count=1_000, expected=14_833)
     assert check.within_tolerance is False
+
+
+def _uniform_tile(
+    sw_lat: float, sw_lon: float, span_deg: float, value: float
+) -> SrtmTile:
+    """Mirrors `test_ingest_probe.py`'s/`test_ingest_srtm.py`'s uniform-
+    value tile fixture: every sample is `value`, so any point inside the
+    tile's coverage returns exactly `value` regardless of bilinear
+    interpolation position -- keeps expected deltas hand-verifiable."""
+    size = 3
+    samples = array("h", [int(value)] * (size * size))
+    return SrtmTile(
+        sw_lat=sw_lat, sw_lon=sw_lon, size=size, samples=samples, span_deg=span_deg
+    )
+
+
+# Real lat/lon envelope of DCS point (41934.892, 5685.076) under Syria's
+# projection is ~35.40N, ~35.95E (the Latakia ARP -- see
+# tests/control_points.py). A generously-sized tile around it covers every
+# point used below.
+_TILE = _uniform_tile(sw_lat=35.3, sw_lon=35.85, span_deg=0.3, value=100.0)
+
+
+def test_compare_probe_to_srtm_computes_delta_per_point() -> None:
+    """Generalizes M4's single-region Gemerek delta check to a scattered
+    point set: `delta_m` is `dcs_probe_m - srtm_m`, hand-verifiable here
+    since every SRTM sample is the same uniform value (100.0)."""
+    samples = [
+        DcsElevationSample(name="p1", x=41934.892, z=5685.076, height_m=112.0),
+        DcsElevationSample(name="p2", x=42934.892, z=6685.076, height_m=88.0),
+    ]
+
+    report = compare_probe_to_srtm(samples, [_TILE], "Syria")
+
+    assert len(report.points) == 2
+    assert report.points_skipped == 0
+    by_name = {p.name: p for p in report.points}
+    assert by_name["p1"].delta_m == pytest.approx(12.0)
+    assert by_name["p2"].delta_m == pytest.approx(-12.0)
+    assert report.mean_delta_m == pytest.approx(0.0)
+    assert report.min_delta_m == pytest.approx(-12.0)
+    assert report.max_delta_m == pytest.approx(12.0)
+
+
+def test_compare_probe_to_srtm_skips_points_outside_tile_coverage() -> None:
+    """A point far outside every given tile's coverage is counted as
+    skipped, not silently dropped or allowed to crash the whole report --
+    mirrors `build.ingest_probe`'s existing `srtm_points_skipped` handling,
+    generalized to a scattered multi-tile point set."""
+    samples = [
+        DcsElevationSample(name="in_range", x=41934.892, z=5685.076, height_m=112.0),
+        DcsElevationSample(name="far_away", x=5_000_000.0, z=5_000_000.0, height_m=1.0),
+    ]
+
+    report = compare_probe_to_srtm(samples, [_TILE], "Syria")
+
+    assert len(report.points) == 1
+    assert report.points_skipped == 1
+    assert report.points[0].name == "in_range"
+
+
+def test_compare_probe_to_srtm_empty_result_has_null_stats() -> None:
+    samples = [
+        DcsElevationSample(name="far_away", x=5_000_000.0, z=5_000_000.0, height_m=1.0)
+    ]
+
+    report = compare_probe_to_srtm(samples, [_TILE], "Syria")
+
+    assert report.points == []
+    assert report.points_skipped == 1
+    assert report.mean_delta_m is None
+    assert report.stddev_delta_m is None

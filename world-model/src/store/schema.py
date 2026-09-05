@@ -5,11 +5,19 @@ incompatible way. Because the database is always rebuilt from `data/raw/`
 (never hand-edited), a version mismatch is not a migration problem -- it is
 a signal that the `.sqlite` file on disk predates the code reading it and
 must be rebuilt.
+
+Version 3 (M7 Stage 2): `grid.provenance` records which source a grid's
+cells came from (`"srtm"` vs `"dcs_probe"`) -- SRTM becomes the primary
+full-theatre elevation source in M7 Stage 2, alongside the pre-existing
+DCS-live-probe grid path, so a `grid` row's own `kind` ("elevation" /
+"surface_type") is no longer enough to say which of the two produced it.
+See `store/models.py`'s `ElevationGrid`/`SurfaceGrid` docstrings and
+`build/ingest_srtm.py`/`build/ingest_probe.py`.
 """
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DDL = """
 CREATE TABLE meta (
@@ -66,6 +74,7 @@ CREATE TABLE grid (
     n_rows INT,
     n_cols INT,
     source_id INTEGER REFERENCES source(id),
+    provenance TEXT,
     stats_json TEXT
 );
 

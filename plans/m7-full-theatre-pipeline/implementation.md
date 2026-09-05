@@ -237,3 +237,173 @@ fixtures and the existing `latakia-20km`-scale test store, never the real 2.25 G
   published lat/lon), just sourced from a static Lua file already on disk rather than a fresh
   live-mission run. Worth noting for any future control-point additions: `beacons.lua`'s
   `position` field is a legitimate, already-decoded source for this, not just `positionGeo`.
+
+## Stage 2 — Elevation/surface-type grid at full theatre, SRTM-primary (2026-09-05)
+
+Made SRTM the store's primary `elevation` grid source (`provenance="srtm"`), repurposed the
+existing DCS live-probe path (`elevation_probe.lua`, `elevation.dcs_grid.parse_probe_output`)
+to a scattered spot-check validation report rather than a full-grid ingest, and closed the
+provenance gap `query.describe.describe_position` had been carrying since M5 (`elevation.source`/
+`surface_type.provenance` were hardcoded `"dcs"` regardless of what actually produced the grid).
+Per the plan's "Execution boundary": no real SRTM tile set was run against the real `syria-full`
+bbox, and no real DCS live-mission probe was run -- everything below is verified against small/
+synthetic fixtures, mirroring Stage 0/1's pattern. **`src/terrain/` was not touched** and M6's
+ridge/valley classifier was not rerun anywhere in this stage, per the plan's lockout.
+
+### Files Changed
+
+- `world-model/src/store/schema.py` -- added a `grid.provenance TEXT` column; `SCHEMA_VERSION`
+  bumped 2 -> 3 (an incompatible DDL change, per the module's own convention -- no live-data
+  migration concern, every `.sqlite` is always rebuilt from `data/raw/`).
+- `world-model/src/store/models.py` -- `ElevationGrid`/`SurfaceGrid` gain a required (no
+  default) `provenance: str` field, positioned before `stats` so every existing positional-safe
+  ordering stays valid. Required, not defaulted, so a caller cannot silently skip tagging a
+  grid's source -- mirrors `StoredFeature.provenance`'s existing "never a bare collapsed value"
+  contract, just for grids instead of features.
+- `world-model/src/store/writer.py` (`insert_grid`), `reader.py` (`_GridMeta`,
+  `_load_grid_meta`, `load_full_grid`) -- read/write the new column; `reader.py` gains a new
+  public `grid_provenance(conn, grid_kind) -> str | None` accessor, mirroring the existing
+  `grid_spacing_m` shape, so callers don't need to load the whole grid matrix just to learn its
+  source.
+- `world-model/src/elevation/dem.py` -- new `select_tile(tiles, lat, lon) -> SrtmTile | None`:
+  linear-scan lookup for whichever of a list of tiles covers a given point. A full theatre needs
+  many `.hgt` tiles (each a fixed 1x1 degree by format), so any full-theatre grid or
+  multi-location report needs per-point tile selection, not one shared tile/origin -- this is
+  the shared primitive both new modules below build on. Exported from `elevation/__init__.py`.
+- `world-model/src/build/ingest_srtm.py` (new) -- `ingest_srtm_grid`: resamples one or more
+  `SrtmTile`s onto the regular DCS-metre grid `build.pipeline.probe_grid_for_region` already
+  defines for the (now-repurposed) probe grid, producing the primary `ElevationGrid`
+  (`provenance="srtm"`, constant `GRID_PROVENANCE_SRTM`). A cell with no covering tile or a void
+  sample is left `None` and counted in `SrtmIngestStats.points_void_or_uncovered` -- absence
+  reported as absence, never guessed, matching every other ingest module's contract. Runs to
+  completion rather than raising on a single bad cell, since a full-theatre grid should tolerate
+  imperfect SRTM coverage at some cells.
+- `world-model/src/build/ingest_probe.py` -- added `GRID_PROVENANCE_DCS_PROBE = "dcs_probe"`
+  and passed it into both `ElevationGrid`/`SurfaceGrid` constructions -- the module's own
+  behavior is otherwise unchanged (still parses `terrain_probe_*.lua` output into a full grid;
+  still valid for `latakia-20km`-scale builds), it just now tags what it always implicitly was.
+- `world-model/src/build/validate.py` -- added `ElevationAlignmentPoint`/
+  `ElevationAlignmentReport`/`compare_probe_to_srtm`: generalizes M4's single-region Gemerek
+  delta check (mean +13.89m, stddev 28.02m) to a scattered, multi-tile point set. Takes
+  `elevation.dcs_grid.parse_probe_output`'s output (`elevation_probe.lua`'s existing,
+  unmodified spot-check format -- plain named points, not the grid-indexed `r{row}c{col}`
+  format `parse_terrain_probe_output` needs) plus a list of `SrtmTile`s, and reports per-point
+  deltas plus mean/median/stddev/min/max. Deliberately independent of `sqlite3`/the built
+  store -- answers "does DCS agree with SRTM here", not "what's in the store".
+- `world-model/src/build/pipeline.py` -- `build_region` gains `srtm_tile_paths: list[Path] |
+  None` and `srtm_grid_spacing_m: float = DEFAULT_SRTM_GRID_SPACING_M` (1000m default,
+  independent of the pre-existing single-tile `srtm_tile_path` delta-stats parameter, which is
+  untouched). The new SRTM-ingest stage runs *before* the existing probe/terrain-semantics
+  block in execution order (though logged as stage "5" vs. probe's "6"/terrain's "7" -- stage
+  numbers reflect the module's own count, not strict chronological log order, see the
+  `_stage(name, index)` calls), specifically so that if a build ever supplies both
+  `srtm_tile_paths` and `probe_output_path`, the probe-inserted `dcs_probe` elevation grid is
+  always the more-recently-inserted one `load_full_grid(conn, "elevation")` sees inside the
+  terrain-semantics block -- keeping M6's classifier locked to DCS-probe-sourced grids only,
+  never accidentally fed an SRTM grid. In practice a real `syria-full` build supplies only
+  `srtm_tile_paths` (Stage 2 repurposes the probe to spot-check, not a stored grid), so this
+  ordering concern doesn't arise for M7's own builds -- documented so it doesn't surprise a
+  future combination.
+- `world-model/tools/build_world_model.py` -- CLI gains `--srtm-dir` (a directory of `.hgt`
+  tiles, non-recursive glob of `*.hgt`/`*.HGT`, ingested as the primary grid) and
+  `--srtm-grid-spacing-m` (default from `build.pipeline.DEFAULT_SRTM_GRID_SPACING_M`, exported
+  as a public name specifically so the CLI can import it without a private-member import).
+  Distinct from the pre-existing `--srtm-tile` (singular, delta-stats-only). Prints
+  `srtm stats: ...` / `srtm: skipped` alongside the existing per-layer summary lines.
+- `world-model/tools/validate_m7_stage2_elevation.py` (new) -- CLI wrapper around
+  `compare_probe_to_srtm`, mirroring `validate_m7_stage1.py`'s pattern (a throwaway analysis
+  script, not part of the pipeline). Unlike Stage 1's validator, needs no built `.sqlite` at
+  all -- reads the probe output file and `.hgt` tiles directly, since the spot-check comparison
+  is independent of what's been ingested into the store. Made executable (`chmod +x`) to match
+  `validate_m7_stage1.py`'s convention (`build_world_model.py`'s own missing +x bit predates
+  this stage and was left alone).
+- `world-model/src/query/describe.py` -- `describe_position`'s `elevation.source`/
+  `surface_type.provenance` now read `store.reader.grid_provenance` instead of a hardcoded
+  `"dcs"` literal (present since M5 Stage 3) -- this is the actual fix for the provenance gap
+  the plan calls out: before this change, a store built entirely from SRTM would have reported
+  its elevation as `"dcs"`, which is simply false. Falls back to `"unavailable"` when no grid of
+  that kind exists yet, same absence-as-absence convention as every other field. The `dcs_m`
+  field name itself is unchanged (still holds whatever numeric value the grid has, regardless of
+  source) -- renaming it was out of scope for this stage and would ripple into
+  `tools/analyze_m5_stage4_validation.py`, which reads it directly; not done here.
+- `world-model/docs/M7_RUN_INSTRUCTIONS.md` -- added a full "Stage 2" section: staging `.hgt`
+  tiles (with the row-count-sizing tradeoff spelled out numerically), running the build with
+  `--srtm-dir`, running the live-probe spot-check mission via `wsl-probe-sync` (the one step in
+  all of M7 that cannot be done from already-staged files -- it needs the actual DCS install),
+  running `validate_m7_stage2_elevation.py`, and recording the result.
+- Test fixtures updated for the now-required `provenance` field:
+  `tests/test_terrain_curvature.py` (2 sites, `"dcs_probe"`), `tests/test_terrain_features.py`,
+  `tests/test_ingest_terrain.py` (1 site each, `"dcs_probe"`) -- these are M6 fixtures
+  representing probe-origin grids conceptually, so `"dcs_probe"` is the correct tag even though
+  M6 itself doesn't care about the field. `tests/test_store_reader.py` (4 sites: 3
+  `"dcs_probe"`, 1 `"srtm"` -- the `"srtm"` one doubles as a provenance-round-trip assertion on
+  `load_full_grid`). `tests/test_describe_position.py`'s `_fixture_conn_with_grid` (both grids
+  now `"dcs_probe"`, and the two assertions that previously read `"dcs"` now read `"dcs_probe"`
+  -- a required mechanical update to keep the test asserting the truth after the hardcoded-value
+  bug fix above, not a weakening of the test's intent).
+
+### Tests Added
+
+- `world-model/tests/test_ingest_srtm.py` (new) -- `ingest_srtm_grid` samples every cell from a
+  single covering tile; selects the *correct* tile per cell from a multi-tile list (deliberately
+  puts the covering tile second, to catch a "always use tiles[0]" bug); leaves
+  uncovered/void cells `None` rather than guessing.
+- `world-model/tests/test_build_validate.py` -- `compare_probe_to_srtm` computes a hand-
+  verifiable per-point delta and summary stats against a uniform-value tile; skips (not drops)
+  a point outside every tile's coverage; returns null summary stats (not zeros or a crash) when
+  every point is skipped.
+- `world-model/tests/test_pipeline_build_region.py` -- `test_build_region_srtm_tile_paths_
+  becomes_the_primary_elevation_grid`: a real (from-disk, `SrtmTile.from_file`-parseable, just
+  minimal 2x2) synthetic `.hgt` tile builds a store whose `elevation` grid reads back
+  `provenance == "srtm"` via both `grid_provenance` and `load_full_grid`, and confirms
+  `terrain_skipped` stays `True` (M6 not triggered by an SRTM-only build).
+  `test_build_region_srtm_tile_paths_given_but_missing_is_skipped_not_an_error`: a stale
+  `--srtm-dir` path degrades the same way every other optional path already does.
+- `world-model/tests/test_store_reader.py` -- `test_grid_provenance_distinguishes_srtm_from_
+  dcs_probe`: an `elevation` grid tagged `"srtm"` and a `surface_type` grid tagged `"dcs_probe"`
+  in the same store report their own distinct provenance, and are asserted `!=` each other --
+  the store-layer half of the provenance-separation proof.
+  `test_grid_provenance_returns_none_when_absent`.
+- `world-model/tests/test_describe_position.py` -- `test_describe_position_elevation_source_
+  reports_srtm_not_dcs` and `test_describe_position_elevation_source_reports_dcs_probe_not_srtm`:
+  the end-to-end half of the proof, through `describe_position` itself rather than the reader
+  layer -- an SRTM-sourced grid answers `elevation.source == "srtm"` (and asserts `!=
+  "dcs_probe"`), a DCS-probe-sourced grid answers the reverse, using two independently-built
+  fixture stores so this isn't just a hardcoded-string coincidence.
+
+### Checks
+
+- `ruff format --check world-model/src world-model/tests`: pass (68 files)
+- `ruff check world-model/src world-model/tests`: pass
+- `mypy world-model/src` (`--strict` per `pyproject.toml`): pass, 40 source files
+- `mypy --strict` on the two new/touched `tools/` files individually (not part of the mandated
+  command, but checked per project convention): pass
+- `pytest world-model/tests -q`: pass, 186 passed (was 173 after Stage 1; +13 new tests: 4 in
+  `test_ingest_srtm.py`, 3 in `test_build_validate.py`, 2 in `test_pipeline_build_region.py`, 2
+  in `test_store_reader.py`, 2 in `test_describe_position.py`)
+
+### Notable Discoveries
+
+- **The plan's own "Affected Modules" list named `src/build/ingest_terrain.py` for SRTM-related
+  adjustment, which would have meant touching M6's ridge/valley ingest module** -- but that
+  directly conflicts with this same plan's later-added Locked Decision 5 ("M6's ridge/valley
+  classifier is explicitly NOT rerun here ... locked out of M7 entirely"), which the plan's own
+  revision note says was finalized *after* the Affected Modules section was drafted. Treated the
+  explicit lockout (and this task's own explicit instruction) as authoritative and did not touch
+  `src/terrain/` or `build/ingest_terrain.py` at all -- flagging the stale cross-reference in the
+  plan for whoever revisits it, since a literal reading of "Affected Modules" alone would have
+  led to reintroducing exactly what the lockout forbids.
+- **Grid "most recent wins" ordering needed explicit attention once two elevation-grid producers
+  could coexist in one store.** `store.reader`'s `_load_grid_meta` has always picked
+  `ORDER BY id DESC LIMIT 1` for a given `grid.kind` -- fine when only one producer (the probe)
+  ever wrote `"elevation"` rows. Adding SRTM as a second potential producer of the same `kind`
+  meant insertion order in `build_region` now has real behavioral consequences (which grid a
+  later `describe_position`/M6 terrain-ingest call actually reads) that didn't exist before this
+  stage -- resolved by ordering the SRTM stage before the probe stage (see Files Changed above),
+  but this is a real, not hypothetical, consideration for any future third `"elevation"`
+  producer.
+- **`store.models.ElevationGrid`/`SurfaceGrid.provenance` being a required (non-default) field
+  meant every existing test fixture constructing either dataclass directly needed a mechanical
+  update** -- 9 call sites across 5 test files, none of which changed test *intent* (see Stage
+  0's implementation.md entry for the same "many direct readers of one field" pattern recurring
+  here for a different field).

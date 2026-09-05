@@ -6,9 +6,11 @@ that boundary — the implementer/reviewer/DoD verify the pipeline code against 
 only (see `tests/test_pipeline_build_region.py`, `tests/test_build_validate.py`); the real
 build, its real feature counts, wall time, and file size are the user's own result.
 
-This doc covers **Stage 1 only** (DCS-native vector layers: roads, towns, beacons — no OSM,
-no elevation). Stage 2's SRTM/elevation-probe run instructions are a separate follow-up once
-Stage 2 lands.
+This doc covers **Stage 1** (DCS-native vector layers: roads, towns, beacons — no OSM, no
+elevation) and **Stage 2** (SRTM-primary elevation/`surface_type`, plus a DCS live-probe
+spot-check validation). Run Stage 1 first; Stage 2 can be run against the same
+`syria-full.sqlite` afterward, or built together in one `build_world_model.py` invocation (see
+Stage 2 step 2 below).
 
 ## 1. Check the raw files are staged
 
@@ -91,4 +93,91 @@ wall time, file size, validation output) — either directly in a new dated
 `world-model/research/` note (mirroring M5/M7 Stage 0's convention) or by reporting them back
 so they can be written up. This is the actual Definition-of-Done evidence for M7 Stage 1 — an
 agent-produced or agent-reported full-theatre store/count does not satisfy it, per the plan's
+"Execution boundary".
+
+## Stage 2 — SRTM-primary elevation, DCS-probe spot-check validation
+
+Per the plan's locked Stage 2 decision: **SRTM is the primary full-theatre elevation/
+`surface_type` source**, not the live DCS mission probe. The probe is repurposed to a small,
+scattered spot-check control-point set that validates SRTM alignment accuracy — it is *not* run
+as a full grid and its output is *not* stored as a `grid` row for `syria-full` (see
+`build.pipeline`'s module docstring on why ordering keeps this unambiguous if you ever do pass
+both). Two separate real actions are involved, in either order:
+
+### 2a. Stage the SRTM `.hgt` tiles
+
+Syria's padded bbox (31.19–38.01°N, 32.29–40.21°E, per
+`world-model/research/2026-09-05-m7-syria-theatre-extent.md`) spans roughly 7 degrees of
+latitude and 8 of longitude, so covering it needs on the order of several dozen 1x1-degree
+`.hgt` tiles — every tile whose 1-degree cell overlaps that lat/lon envelope. M4 Stage 2 already
+sourced one tile (`N39E036.hgt`) from the viewfinderpanoramas.org no-login mirror (SRTM3, ~90m);
+fetch the remaining tiles from the same source (or SRTM1 if you want ~30m instead — `SrtmTile`
+handles either, deriving resolution from file size) and put them all in one directory, e.g.
+`data/raw/dem/syria-full/`.
+
+**Row-count sizing is a real decision you should make before running this for real** (see
+`build.ingest_srtm`'s module docstring and `build.pipeline`'s `DEFAULT_SRTM_GRID_SPACING_M`):
+at the default 1000m storage spacing, `syria-full`'s ~827x771 km bbox is roughly 828 x 772 ≈
+639,000 grid cells; at 500m (matching the older probe-grid convention) it's ~2.5 million. SQLite
+handles millions of rows fine per M5's own findings, but this is the first full-theatre-scale
+grid this pipeline has ever built for real — consider timing a smaller test run first, or pass
+`--srtm-grid-spacing-m` explicitly if you want a different tradeoff than the default.
+
+### 2b. Run the build with `--srtm-dir`
+
+From `world-model/`, with the venv active — this can be combined with Stage 1's build (same
+command, one more flag) or run again against an existing `syria-full.sqlite` (the build is
+idempotent; it deletes and recreates the file each time, so re-run the full command, not just
+this flag):
+
+```sh
+.venv/bin/python tools/build_world_model.py syria-full \
+    --towns data/raw/dcs/syria/map/towns.lua \
+    --beacons data/raw/dcs/syria/map/beacons.lua \
+    --routes data/raw/dcs/syria/roads/Syria.routes \
+    --srtm-dir data/raw/dem/syria-full/
+```
+
+The build prints `srtm stats: SrtmIngestStats(...)` on success (`points_sampled`,
+`points_void_or_uncovered`, `tiles_used`) or `srtm: skipped` if `--srtm-dir` was omitted or had
+no `.hgt` files. `probe: skipped` and `terrain: skipped` are still expected here too — Stage 2
+does not run a full-grid DCS probe or M6's ridge/valley classifier (locked out of M7 entirely).
+
+### 2c. Run the DCS live-probe spot-check mission
+
+Unlike Stage 1's vector layers, this step needs the actual installed DCS copy on the Windows
+machine — it is the one part of M7 that cannot be done from already-staged files. Run
+`tools/dcs-mission-probe/elevation_probe.lua` (unchanged from M4/M5 — see the plan's Stage 2:
+"no chunking/resumability redesign needed") against a **small, scattered point set spread
+across the theatre** — one or two points per major region/airbase cluster (e.g. near Damascus,
+Aleppo, Latakia, Beirut, and a few inland/mountain points), not a dense grid. Follow the
+`wsl-probe-sync` workflow (`world-model/WORKFLOW.md`) to run the mission and sync the resulting
+JSON-lines output file back to the Mac, e.g. into
+`data/raw/dcs/syria/probes/syria-full-spot-check.jsonl`.
+
+### 2d. Validate SRTM alignment against the spot-check
+
+From `world-model/`, with the venv active — this does **not** need `syria-full.sqlite` to exist
+yet; it only reads the probe output file and the `.hgt` tiles directly:
+
+```sh
+.venv/bin/python tools/validate_m7_stage2_elevation.py \
+    --probe-output data/raw/dcs/syria/probes/syria-full-spot-check.jsonl \
+    --srtm-dir data/raw/dem/syria-full/
+```
+
+This prints a JSON report: per-point `dcs_probe_m`/`srtm_m`/`delta_m`, plus `mean_delta_m`/
+`median_delta_m`/`stddev_delta_m`/`min_delta_m`/`max_delta_m` across every point the probe and
+SRTM both cover (`points_skipped` counts any spot-check point outside the staged tiles'
+coverage). Compare the summary against M4's single-region Gemerek baseline (mean +13.89m,
+stddev 28.02m) — the open question this step answers (per the plan's Risks section) is whether
+alignment quality is roughly uniform across the theatre or degrades with distance from
+Gemerek/the tmerc central meridian. Report it plainly either way; there is no automatic pass/
+fail threshold here, the same as Stage 1's validator.
+
+### 2e. Record the result
+
+Note the real SRTM ingest stats, the spot-check delta report, and (if it changed) the rebuilt
+`syria-full.sqlite`'s file size/wall time — same convention as Stage 1's step 4. This is the
+actual Definition-of-Done evidence for M7 Stage 2; an agent cannot produce it per the plan's
 "Execution boundary".

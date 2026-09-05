@@ -33,6 +33,15 @@ see `build.ingest_probe`'s module docstring.
 `kind="ridge"`/`"valley"` rows -- present only once a build's probe grid has
 run `build.ingest_terrain` (see `build/pipeline.py`), `None` otherwise, same
 absence-as-absence rule as every other field here.
+
+**M7 Stage 2 status**: `elevation.source`/`surface_type.provenance` read the
+store's actual `grid.provenance` (`store.reader.grid_provenance`) instead of
+a hardcoded `"dcs"` -- a build's `elevation` grid can now come from either
+`"srtm"` (M7's primary full-theatre source, `build.ingest_srtm`) or
+`"dcs_probe"` (the live-mission probe, `build.ingest_probe`), and this field
+is exactly what keeps that distinction from silently collapsing into one
+undifferentiated label. `"unavailable"` when no grid of that kind has been
+built at all, same absence-as-absence rule as every other field.
 """
 
 import sqlite3
@@ -44,6 +53,7 @@ from store.models import StoredFeature
 from store.reader import (
     containing_polygons,
     features_in_bbox,
+    grid_provenance,
     grid_spacing_m,
     load_only_region,
     nearest_feature,
@@ -299,9 +309,12 @@ def describe_position(
     lat, lon = dcs_to_wgs84(theatre, x, z)
 
     dcs_elevation_m = sample_grid(conn, "elevation", x, z)
+    elevation_provenance = grid_provenance(conn, "elevation")
     elevation = ElevationInfo(
         dcs_m=dcs_elevation_m,
-        source="dcs",
+        source=elevation_provenance
+        if elevation_provenance is not None
+        else "unavailable",
         confidence="high" if dcs_elevation_m is not None else "unavailable",
         external_m=None,
         delta_m=None,
@@ -309,11 +322,14 @@ def describe_position(
 
     surface_code = sample_grid(conn, "surface_type", x, z)
     surface_spacing = grid_spacing_m(conn, "surface_type") or _DEFAULT_SURFACE_SPACING_M
+    surface_provenance = grid_provenance(conn, "surface_type")
     surface_type = SurfaceTypeInfo(
         value=_SURFACE_TYPE_LABELS.get(int(surface_code))
         if surface_code is not None
         else None,
-        provenance="dcs",
+        provenance=surface_provenance
+        if surface_provenance is not None
+        else "unavailable",
         sampled_at_m=surface_spacing,
     )
 

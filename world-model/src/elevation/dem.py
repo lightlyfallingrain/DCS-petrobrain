@@ -139,5 +139,26 @@ class SrtmTile:
         return top * (1 - frac_row) + bottom * frac_row
 
 
+def select_tile(tiles: list[SrtmTile], lat: float, lon: float) -> SrtmTile | None:
+    """Return whichever of `tiles` covers `(lat, lon)`, or `None` if none
+    does.
+
+    A full theatre needs many `.hgt` tiles (each a fixed 1x1 degree by
+    format), so any full-theatre elevation grid or multi-location
+    validation report (M7 Stage 2) must pick the right tile per point
+    rather than assume one shared tile/origin -- SRTM's native 1-degree
+    tile registration doesn't line up with a DCS-metre grid's regular
+    spacing. Linear scan is fine here: real tile lists are at most a few
+    dozen entries (a whole theatre spans on the order of 10 degrees per
+    side), nowhere near where an index would matter.
+    """
+    for tile in tiles:
+        north_lat = tile.sw_lat + tile.span_deg
+        east_lon = tile.sw_lon + tile.span_deg
+        if tile.sw_lat <= lat <= north_lat and tile.sw_lon <= lon <= east_lon:
+            return tile
+    return None
+
+
 def _is_little_endian() -> bool:
     return array("h", [1]).tobytes()[0] == 1

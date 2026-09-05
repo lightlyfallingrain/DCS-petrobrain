@@ -1,6 +1,8 @@
-"""M7 Stage 1 validation: sanity checks for a full-theatre build, run
-against an already-built `.sqlite` (via `spot_check_positions`) or against
-a `BuildReport`'s road count (via `check_road_count`).
+"""M7 validation: sanity checks for a full-theatre build.
+
+**Stage 1** (sanity checks against an already-built `.sqlite`): run against
+an already-built `.sqlite` (via `spot_check_positions`) or against a
+`BuildReport`'s road count (via `check_road_count`).
 
 Per `plans/m7-full-theatre-pipeline/plan.md` Stage 1 ("Validate: row counts
 sane relative to Stage 0's census; `describe_position` returns correct
@@ -19,11 +21,25 @@ needs a DCS-native `(x, z)` and a label, not a published real-world lat/lon
 (that coordinate-tolerance check is `tests/control_points.py`'s job, wired
 through `query.describe_position`'s `lat`/`lon` fields directly, not
 through this module).
+
+**Stage 2** (`compare_probe_to_srtm`): generalizes M4's single-region
+Gemerek DCS-vs-SRTM delta check (mean +13.89m, stddev 28.02m) to a
+scattered, theatre-spread control-point set. Takes DCS live-probe elevation
+samples (`elevation.dcs_grid.parse_probe_output`'s output --
+`elevation_probe.lua`'s spot-check mission run, per the plan's Stage 2
+"reused as-is" decision) and one or more `elevation.dem.SrtmTile`s, and
+reports the alignment delta at each shared point plus mean/median/stddev/
+min/max summary stats -- independent of `store`/`sqlite3`, since this
+answers "does DCS agree with SRTM here", not "what's in the built store".
 """
 
 import sqlite3
-from dataclasses import dataclass
+import statistics
+from dataclasses import dataclass, field
 
+from coordinates import dcs_to_wgs84
+from elevation.dcs_grid import DcsElevationSample
+from elevation.dem import SrtmTile, select_tile
 from query import describe_position
 
 # Real full-theatre `.routes` walk result, `syria-full` region -- see
@@ -128,4 +144,85 @@ def check_road_count(
         actual=actual_road_count,
         tolerance_fraction=tolerance_fraction,
         within_tolerance=lower <= actual_road_count <= upper,
+    )
+
+
+@dataclass(frozen=True)
+class ElevationAlignmentPoint:
+    """One spot-check point's DCS-probe vs SRTM elevation comparison.
+    `delta_m` is `dcs_probe_m - srtm_m`, matching
+    `build.ingest_probe`'s existing delta-sign convention."""
+
+    name: str
+    dcs_probe_m: float
+    srtm_m: float
+    delta_m: float
+
+
+@dataclass(frozen=True)
+class ElevationAlignmentReport:
+    """Theatre-spread generalization of M4's single-region Gemerek delta
+    check (mean +13.89m, stddev 28.02m) -- summary stats plus the individual
+    per-point deltas, so a caller can see whether alignment quality is
+    uniform across the theatre or clusters/degrades with distance from a
+    reference point, per the plan's Stage 2 Risk note."""
+
+    points: list[ElevationAlignmentPoint] = field(default_factory=list)
+    points_skipped: int = 0
+    mean_delta_m: float | None = None
+    median_delta_m: float | None = None
+    stddev_delta_m: float | None = None
+    min_delta_m: float | None = None
+    max_delta_m: float | None = None
+
+
+def compare_probe_to_srtm(
+    probe_samples: list[DcsElevationSample],
+    tiles: list[SrtmTile],
+    theatre: str,
+) -> ElevationAlignmentReport:
+    """Compare each of `probe_samples` (DCS live-probe spot-check points,
+    DCS-native x/z + `land.getHeight`) against SRTM at the same point, via
+    whichever of `tiles` covers it (`elevation.dem.select_tile`).
+
+    A sample with no covering tile, or landing on a SRTM data void, is
+    counted in `points_skipped`, not silently dropped or allowed to skew the
+    summary stats -- mirrors `build.ingest_probe`'s existing
+    `srtm_points_skipped` handling for the single-region case, generalized
+    here to a scattered multi-tile point set instead of one shared tile.
+    """
+    points: list[ElevationAlignmentPoint] = []
+    skipped = 0
+    for sample in probe_samples:
+        lat, lon = dcs_to_wgs84(theatre, sample.x, sample.z)
+        tile = select_tile(tiles, lat, lon)
+        if tile is None:
+            skipped += 1
+            continue
+        try:
+            srtm_m = tile.height_at(lat, lon)
+        except ValueError:
+            skipped += 1
+            continue
+        points.append(
+            ElevationAlignmentPoint(
+                name=sample.name,
+                dcs_probe_m=sample.height_m,
+                srtm_m=srtm_m,
+                delta_m=sample.height_m - srtm_m,
+            )
+        )
+
+    if not points:
+        return ElevationAlignmentReport(points=points, points_skipped=skipped)
+
+    deltas = [p.delta_m for p in points]
+    return ElevationAlignmentReport(
+        points=points,
+        points_skipped=skipped,
+        mean_delta_m=statistics.mean(deltas),
+        median_delta_m=statistics.median(deltas),
+        stddev_delta_m=statistics.stdev(deltas) if len(deltas) > 1 else 0.0,
+        min_delta_m=min(deltas),
+        max_delta_m=max(deltas),
     )

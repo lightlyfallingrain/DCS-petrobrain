@@ -122,8 +122,9 @@ def insert_grid(conn: sqlite3.Connection, grid: ElevationGrid | SurfaceGrid) -> 
     kind = "elevation" if isinstance(grid, ElevationGrid) else "surface_type"
     cursor = conn.execute(
         "INSERT INTO grid "
-        "(kind, origin_x, origin_z, spacing_m, n_rows, n_cols, source_id, stats_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(kind, origin_x, origin_z, spacing_m, n_rows, n_cols, source_id, "
+        " provenance, stats_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             kind,
             grid.origin_x,
@@ -132,6 +133,7 @@ def insert_grid(conn: sqlite3.Connection, grid: ElevationGrid | SurfaceGrid) -> 
             grid.n_rows,
             grid.n_cols,
             grid.source_id,
+            grid.provenance,
             json.dumps(grid.stats),
         ),
     )

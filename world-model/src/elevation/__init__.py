@@ -14,10 +14,11 @@ from a live-mission probe run, not from pipeline-computed values.
 """
 
 from .dcs_grid import DcsElevationSample, parse_probe_output
-from .dem import SrtmTile
+from .dem import SrtmTile, select_tile
 
 __all__ = [
     "DcsElevationSample",
     "SrtmTile",
     "parse_probe_output",
+    "select_tile",
 ]

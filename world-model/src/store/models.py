@@ -69,7 +69,15 @@ class ElevationGrid:
     """A regular elevation sample grid: `samples[row][col]` in metres,
     `None` where the probe had no value for that cell. `origin_x`/`origin_z`
     is the grid's (row 0, col 0) corner; cell (row, col) sits at
-    `origin_x + row * spacing_m`, `origin_z + col * spacing_m`."""
+    `origin_x + row * spacing_m`, `origin_z + col * spacing_m`.
+
+    `provenance` records which source produced every cell in this grid --
+    `"srtm"` (M7 Stage 2's primary full-theatre source, see
+    `build.ingest_srtm`) or `"dcs_probe"` (the live-mission `land.getHeight`
+    probe, see `build.ingest_probe`). Required, not defaulted: per this
+    project's provenance invariant, a grid's source must never be left
+    implicit -- see `store/schema.py`'s version-3 note.
+    """
 
     origin_x: float
     origin_z: float
@@ -77,6 +85,7 @@ class ElevationGrid:
     n_rows: int
     n_cols: int
     source_id: int | None
+    provenance: str
     stats: dict[str, Any]
     samples: list[list[float | None]] = field(default_factory=list)
     id: int | None = None
@@ -87,7 +96,14 @@ class SurfaceGrid:
     """A regular surface-type sample grid: `samples[row][col]` holds a
     `land.getSurfaceType` enum value (int), `None` where unsampled. Reads
     use nearest-cell lookup, never interpolation -- the value is categorical,
-    and interpolating an enum is a category error."""
+    and interpolating an enum is a category error.
+
+    `provenance` is always `"dcs_probe"` in practice as of M7 -- SRTM has no
+    surface-classification data, so `surface_type` grids have exactly one
+    real source -- but the field is still required (not hardcoded) so a
+    future second source can't silently collapse into this one without a
+    code change here. See `ElevationGrid.provenance`.
+    """
 
     origin_x: float
     origin_z: float
@@ -95,6 +111,7 @@ class SurfaceGrid:
     n_rows: int
     n_cols: int
     source_id: int | None
+    provenance: str
     stats: dict[str, Any]
     samples: list[list[int | None]] = field(default_factory=list)
     id: int | None = None

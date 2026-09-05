@@ -19,6 +19,19 @@ no Overpass cache at all -- OSM is dropped from M7 scope entirely (see
 absent from a fresh checkout the way `routes_path`/`probe_output_path` can
 be. A missing/absent OSM cache degrades the same way: skipped, reported in
 `BuildReport.osm_skipped`, never an error.
+
+`srtm_tile_paths` is M7 Stage 2's addition: SRTM as the region's *primary*
+`elevation` grid (`build.ingest_srtm`, `provenance="srtm"`), run before the
+pre-existing live-probe grid stage (`probe_output_path`,
+`provenance="dcs_probe"`) so that a build supplying both still lets the
+probe grid win as "most recent" for M6's ridge/valley classifier -- which
+this pipeline does **not** run over an SRTM-sourced grid (M6 is locked out
+of M7 entirely; see the plan's "Deferred / Out of Scope"). In practice a
+real `syria-full` build supplies only `srtm_tile_paths`, since M7 repurposes
+the live probe to a small spot-check validation set
+(`build.validate.compare_probe_to_srtm`) rather than a stored full grid, so
+this ordering concern does not arise for M7's own builds -- it exists only
+so the two paths compose safely if ever used together.
 """
 
 import datetime
@@ -35,6 +48,7 @@ from build.ingest_beacons import BeaconIngestStats, ingest_beacons
 from build.ingest_osm import OsmIngestStats, ingest_osm
 from build.ingest_probe import ProbeIngestStats, ingest_probe
 from build.ingest_roadnet import RoadnetIngestStats, ingest_roadnet
+from build.ingest_srtm import SrtmIngestStats, ingest_srtm_grid
 from build.ingest_terrain import TerrainIngestStats, ingest_terrain
 from build.ingest_towns import ingest_towns
 from build.region import RegionDefinition
@@ -53,7 +67,18 @@ from store.writer import (
 )
 
 _PROBE_GRID_SPACING_M = 500.0
-_TOTAL_STAGES = 6
+# Default storage spacing for the M7 Stage 2 SRTM-primary full-theatre
+# elevation grid -- deliberately coarser than `_PROBE_GRID_SPACING_M`
+# (SRTM's own native ~30-90m sampling density is unaffected; this only
+# controls how many of those samples get stored as grid cells). At 500m,
+# `syria-full`'s ~827x771 km padded bbox would be ~1,650 x 1,540 = ~2.5M
+# grid cells; SQLite handles millions of rows fine per M5, but this is the
+# first full-theatre-scale grid this pipeline has built, so the CLI exposes
+# this as an override rather than hardcoding either number -- see
+# `build.ingest_srtm`'s module docstring and
+# `world-model/docs/M7_RUN_INSTRUCTIONS.md`'s Stage 2 section.
+DEFAULT_SRTM_GRID_SPACING_M = 1000.0
+_TOTAL_STAGES = 7
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +131,8 @@ class BuildReport:
     probe_skipped: bool = False
     terrain_stats: TerrainIngestStats | None = None
     terrain_skipped: bool = False
+    srtm_stats: SrtmIngestStats | None = None
+    srtm_skipped: bool = False
 
 
 def build_region(
@@ -117,16 +144,32 @@ def build_region(
     routes_path: Path | None = None,
     probe_output_path: Path | None = None,
     srtm_tile_path: Path | None = None,
+    srtm_tile_paths: list[Path] | None = None,
+    srtm_grid_spacing_m: float = DEFAULT_SRTM_GRID_SPACING_M,
 ) -> BuildReport:
     """Build `out_path` from scratch for `region`, ingesting towns.lua,
     beacons.lua, (if `osm_cache_path` is given and exists) the cached
     Overpass response, (if `routes_path` is given and exists) the
     DCS-native `.routes` roadnet layer, and (if `probe_output_path` is
     given and exists) the elevation/surface-type probe grid.
-    `srtm_tile_path`, if given, adds an SRTM delta summary to the elevation
-    grid's metadata (see `ingest_probe`'s module docstring -- stats only,
-    never stored samples). Returns a `BuildReport` with per-kind feature
-    counts."""
+    `srtm_tile_path`, if given, adds an SRTM delta summary to the
+    `probe_output_path` elevation grid's metadata (see `ingest_probe`'s
+    module docstring -- stats only, never stored samples).
+
+    `srtm_tile_paths` (M7 Stage 2), if given and non-empty, ingests SRTM as
+    the region's **primary** `elevation` grid (`provenance="srtm"`,
+    `build.ingest_srtm`), independent of `probe_output_path`/
+    `srtm_tile_path` above -- this is the full-theatre path, not the
+    single-tile delta-stats path. Stored at `srtm_grid_spacing_m` spacing
+    over the same regular grid `probe_grid_for_region` derives for the
+    probe grid. If both `srtm_tile_paths` and `probe_output_path` are given
+    in the same build, both `elevation` grid rows get inserted; readers
+    always see the most recently inserted one (`store.reader`'s
+    `ORDER BY id DESC LIMIT 1`) -- for a real `syria-full` build only
+    `srtm_tile_paths` is used (see the plan's Stage 2, which repurposes the
+    live probe to spot-check validation rather than a stored grid), so this
+    ambiguity does not arise in practice for M7's own builds. Returns a
+    `BuildReport` with per-kind feature counts."""
     conn = open_for_build(out_path)
     try:
         built_at = datetime.datetime.now(datetime.UTC).isoformat()
@@ -253,6 +296,43 @@ def build_region(
         else:
             report.roadnet_skipped = True
 
+        if srtm_tile_paths:
+            existing_tile_paths = [p for p in srtm_tile_paths if p.exists()]
+            if existing_tile_paths:
+                srtm_source_id = insert_source(
+                    conn,
+                    Source(
+                        name="SRTM .hgt tiles",
+                        fetched_at=built_at,
+                        raw_path=",".join(str(p) for p in existing_tile_paths),
+                        attribution="SRTM (processed via viewfinderpanoramas.org "
+                        "no-login mirror)",
+                        notes="Primary full-theatre elevation source (M7 Stage 2); "
+                        "see build.ingest_srtm module docstring.",
+                    ),
+                )
+                tiles = [SrtmTile.from_file(p) for p in existing_tile_paths]
+                srtm_origin_x, srtm_origin_z, _, srtm_n_rows, srtm_n_cols = (
+                    probe_grid_for_region(region, spacing_m=srtm_grid_spacing_m)
+                )
+                with _stage(f"SRTM elevation grid ({len(tiles)} tile(s))", 5):
+                    srtm_grid, srtm_stats = ingest_srtm_grid(
+                        tiles,
+                        region.theatre,
+                        srtm_origin_x,
+                        srtm_origin_z,
+                        srtm_grid_spacing_m,
+                        srtm_n_rows,
+                        srtm_n_cols,
+                        srtm_source_id,
+                    )
+                    insert_grid(conn, srtm_grid)
+                    report.srtm_stats = srtm_stats
+            else:
+                report.srtm_skipped = True
+        else:
+            report.srtm_skipped = True
+
         if probe_output_path is not None and probe_output_path.exists():
             probe_source_id = insert_source(
                 conn,
@@ -274,7 +354,7 @@ def build_region(
             origin_x, origin_z, spacing_m, n_rows, n_cols = probe_grid_for_region(
                 region
             )
-            with _stage("elevation/surface probe grid", 5):
+            with _stage("elevation/surface probe grid", 6):
                 elevation_grid, surface_grid, probe_stats = ingest_probe(
                     probe_output_path,
                     region.theatre,
@@ -290,7 +370,7 @@ def build_region(
                 insert_grid(conn, surface_grid)
                 report.probe_stats = probe_stats
 
-            with _stage("terrain semantics (ridge/valley)", 6):
+            with _stage("terrain semantics (ridge/valley)", 7):
                 terrain_grid = load_full_grid(conn, "elevation")
                 if terrain_grid is not None:
                     terrain_features, terrain_stats = ingest_terrain(

@@ -14,6 +14,8 @@ parsers, which already have their own fixture-based tests
 (`test_towns_lua.py`, `test_beacons_lua.py`).
 """
 
+import sqlite3
+from array import array
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,7 @@ import pytest
 from build.pipeline import build_region
 from build.region import RegionDefinition
 from dcs_data.towns import TownEntry
+from store.reader import grid_provenance, load_full_grid
 
 # A real towns.lua entry (world-model/research/2026-09-03-m5-recon.md
 # Finding 17) whose DCS-projected position is known to fall well inside a
@@ -72,6 +75,7 @@ def test_build_region_rectangular_region_without_osm_cache(tmp_path: Path) -> No
     assert report.roadnet_skipped is True
     assert report.probe_skipped is True
     assert report.terrain_skipped is True
+    assert report.srtm_skipped is True
 
 
 def test_build_region_osm_cache_path_given_but_missing_is_skipped_not_an_error(
@@ -91,3 +95,76 @@ def test_build_region_osm_cache_path_given_but_missing_is_skipped_not_an_error(
 
     assert report.osm_skipped is True
     assert "road" not in report.feature_counts
+
+
+def _write_fake_hgt_tile(path: Path, value: int) -> None:
+    """A minimal (2x2, span exactly 1 degree by `SrtmTile.from_file`'s
+    assumption) synthetic tile -- real SRTM tiles are much larger, but
+    `SrtmTile.from_file` only requires the byte count to match a square
+    16-bit grid, so this is a real, from_file-parseable tile, not a
+    fabricated in-memory shortcut. Filename encodes sw_lat=36, sw_lon=37,
+    covering 36-37N/37-38E -- squarely inside `_TEST_REGION`'s Aleppo-area
+    footprint (see `_ALEPPO_TOWN`)."""
+    samples = array("h", [value] * 4)
+    if array("h", [1]).tobytes()[0] == 1:  # little-endian host
+        samples.byteswap()  # .hgt samples are big-endian
+    path.write_bytes(samples.tobytes())
+
+
+def test_build_region_srtm_tile_paths_becomes_the_primary_elevation_grid(
+    tmp_path: Path,
+) -> None:
+    """M7 Stage 2's wiring: `srtm_tile_paths` ingests SRTM as the region's
+    primary `elevation` grid, provenance-tagged `"srtm"` -- independent of
+    `probe_output_path` (absent here, so the DCS-probe path stays skipped,
+    same as before this parameter existed)."""
+    tile_path = tmp_path / "N36E037.hgt"
+    _write_fake_hgt_tile(tile_path, value=250)
+    out_path = tmp_path / "test-rectangular-region-srtm.sqlite"
+
+    report = build_region(
+        _TEST_REGION,
+        towns_lua_path=Path("unused-towns.lua"),
+        beacons_lua_path=Path("unused-beacons.lua"),
+        osm_cache_path=None,
+        out_path=out_path,
+        srtm_tile_paths=[tile_path],
+        srtm_grid_spacing_m=2000.0,
+    )
+
+    assert report.srtm_skipped is False
+    assert report.srtm_stats is not None
+    assert report.srtm_stats.points_sampled > 0
+    # SRTM never runs M6's ridge/valley classifier -- locked out of M7.
+    assert report.terrain_skipped is True
+
+    conn = sqlite3.connect(f"file:{out_path}?mode=ro", uri=True)
+    try:
+        assert grid_provenance(conn, "elevation") == "srtm"
+        grid = load_full_grid(conn, "elevation")
+        assert grid is not None
+        assert grid.provenance == "srtm"
+        assert any(
+            value == pytest.approx(250.0)
+            for row in grid.samples
+            for value in row
+            if value is not None
+        )
+    finally:
+        conn.close()
+
+
+def test_build_region_srtm_tile_paths_given_but_missing_is_skipped_not_an_error(
+    tmp_path: Path,
+) -> None:
+    report = build_region(
+        _TEST_REGION,
+        towns_lua_path=Path("unused-towns.lua"),
+        beacons_lua_path=Path("unused-beacons.lua"),
+        osm_cache_path=None,
+        out_path=tmp_path / "test-rectangular-region-srtm-missing.sqlite",
+        srtm_tile_paths=[tmp_path / "does-not-exist.hgt"],
+    )
+
+    assert report.srtm_skipped is True
+    assert report.srtm_stats is None

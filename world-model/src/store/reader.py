@@ -249,6 +249,7 @@ class _GridMeta:
     n_rows: int
     n_cols: int
     source_id: int | None
+    provenance: str | None
     stats_json: str
 
 
@@ -261,10 +262,24 @@ def grid_spacing_m(conn: sqlite3.Connection, grid_kind: str) -> float | None:
     return None if meta is None else meta.spacing_m
 
 
+def grid_provenance(conn: sqlite3.Connection, grid_kind: str) -> str | None:
+    """Return the stored grid's `provenance` (`"srtm"` or `"dcs_probe"`) for
+    `grid_kind`, or `None` if no such grid has been built yet.
+    `query/describe.py`'s `elevation.source`/`surface_type.provenance` use
+    this instead of a hardcoded label, so a store built from SRTM never gets
+    silently reported as DCS-probed or vice versa -- see `store/schema.py`'s
+    version-3 note and `store/models.py`'s `ElevationGrid.provenance`.
+    `None` for a grid row written before this field existed (schema version
+    2 or earlier), which `check_schema_version` already refuses to open, so
+    in practice this is only `None` when no grid of `grid_kind` exists."""
+    meta = _load_grid_meta(conn, grid_kind)
+    return None if meta is None else meta.provenance
+
+
 def _load_grid_meta(conn: sqlite3.Connection, grid_kind: str) -> _GridMeta | None:
     row = conn.execute(
         "SELECT id, origin_x, origin_z, spacing_m, n_rows, n_cols, source_id, "
-        "stats_json FROM grid WHERE kind = ? ORDER BY id DESC LIMIT 1",
+        "provenance, stats_json FROM grid WHERE kind = ? ORDER BY id DESC LIMIT 1",
         (grid_kind,),
     ).fetchone()
     if row is None:
@@ -277,7 +292,8 @@ def _load_grid_meta(conn: sqlite3.Connection, grid_kind: str) -> _GridMeta | Non
         n_rows=row[4],
         n_cols=row[5],
         source_id=row[6],
-        stats_json=row[7],
+        provenance=row[7],
+        stats_json=row[8],
     )
 
 
@@ -312,6 +328,7 @@ def load_full_grid(conn: sqlite3.Connection, grid_kind: str) -> ElevationGrid | 
         n_rows=meta.n_rows,
         n_cols=meta.n_cols,
         source_id=meta.source_id,
+        provenance=meta.provenance or "",
         stats=json.loads(meta.stats_json),
         samples=samples,
         id=meta.grid_id,

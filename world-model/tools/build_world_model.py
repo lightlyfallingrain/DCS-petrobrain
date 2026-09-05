@@ -17,8 +17,17 @@ region name. `--osm-cache`, `--routes` and `--probe-output` are all
 optional -- if a file isn't present (e.g. a fresh checkout without the
 2.25 GB `Syria.routes` or a live probe's output staged), that layer is
 skipped and reported as absent, not an error. `--srtm-tile` is optional and
-only affects the elevation grid's stored `stats` (a metadata-only SRTM
-delta summary, never stored samples -- see `build.ingest_probe`).
+only affects the `--probe-output` elevation grid's stored `stats` (a
+metadata-only SRTM delta summary, never stored samples -- see
+`build.ingest_probe`).
+
+`--srtm-dir` (M7 Stage 2) is a directory of `.hgt` tiles ingested as the
+region's *primary* `elevation` grid (`provenance="srtm"`, see
+`build.ingest_srtm`) -- distinct from `--srtm-tile` above. Every `*.hgt`/
+`*.HGT` file directly inside the directory is loaded (not recursive).
+`--srtm-grid-spacing-m` controls the storage grid's cell spacing (default
+1000m); see `build.pipeline`'s `DEFAULT_SRTM_GRID_SPACING_M` for the row-count
+sizing tradeoff this default is a judgment call about.
 
 `syria-full` (M7 Stage 1) has no registered defaults and no OSM cache at
 all -- OSM is out of scope for M7 (see
@@ -28,7 +37,7 @@ invoked with explicit `--towns`, `--beacons` and `--routes` and no
 
     .venv/bin/python tools/build_world_model.py syria-full \\
         --towns <path/to/towns.lua> --beacons <path/to/beacons.lua> \\
-        --routes <path/to/Syria.routes>
+        --routes <path/to/Syria.routes> --srtm-dir <path/to/hgt_tiles/>
 
 See `world-model/docs/M7_RUN_INSTRUCTIONS.md` for the full step-by-step
 procedure -- this is the actual full-theatre build, which per the plan's
@@ -43,7 +52,7 @@ from pathlib import Path
 _WORLD_MODEL_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_WORLD_MODEL_ROOT / "src"))
 
-from build.pipeline import build_region
+from build.pipeline import DEFAULT_SRTM_GRID_SPACING_M, build_region
 from build.region import REGIONS
 
 _DEFAULT_RAW_PATHS: dict[str, dict[str, Path]] = {
@@ -67,6 +76,10 @@ def main() -> None:
     parser.add_argument("--routes", type=Path, default=None)
     parser.add_argument("--probe-output", type=Path, default=None)
     parser.add_argument("--srtm-tile", type=Path, default=None)
+    parser.add_argument("--srtm-dir", type=Path, default=None)
+    parser.add_argument(
+        "--srtm-grid-spacing-m", type=float, default=DEFAULT_SRTM_GRID_SPACING_M
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -85,6 +98,14 @@ def main() -> None:
             "pass --towns/--beacons explicitly"
         )
 
+    srtm_tile_paths: list[Path] | None = None
+    if args.srtm_dir is not None:
+        srtm_tile_paths = sorted(
+            {*args.srtm_dir.glob("*.hgt"), *args.srtm_dir.glob("*.HGT")}
+        )
+        if not srtm_tile_paths:
+            parser.error(f"--srtm-dir {args.srtm_dir} contains no .hgt files")
+
     out_path = args.out or (
         _WORLD_MODEL_ROOT / "data/world-model" / f"{args.region}.sqlite"
     )
@@ -98,6 +119,8 @@ def main() -> None:
         routes_path,
         probe_output_path,
         srtm_tile_path,
+        srtm_tile_paths,
+        args.srtm_grid_spacing_m,
     )
 
     print(f"Built {out_path}")
@@ -117,6 +140,10 @@ def main() -> None:
         print(f"  probe stats: {report.probe_stats}")
     elif report.probe_skipped:
         print("  probe: skipped (probe_output_path not given or not found)")
+    if report.srtm_stats is not None:
+        print(f"  srtm stats: {report.srtm_stats}")
+    elif report.srtm_skipped:
+        print("  srtm: skipped (--srtm-dir not given or no .hgt files found)")
 
 
 if __name__ == "__main__":
