@@ -41,11 +41,16 @@ class OsmIngestStats:
 
 
 def _within_region(
-    x: float, z: float, centre_x: float, centre_z: float, half_extent_m: float
+    x: float,
+    z: float,
+    centre_x: float,
+    centre_z: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
 ) -> bool:
     return (
-        centre_x - half_extent_m <= x <= centre_x + half_extent_m
-        and centre_z - half_extent_m <= z <= centre_z + half_extent_m
+        centre_x - half_extent_x_m <= x <= centre_x + half_extent_x_m
+        and centre_z - half_extent_z_m <= z <= centre_z + half_extent_z_m
     )
 
 
@@ -70,14 +75,15 @@ def _ingest_node(
     theatre: str,
     centre_x: float,
     centre_z: float,
-    half_extent_m: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
     source_id: int | None,
     stats: OsmIngestStats,
 ) -> StoredFeature | None:
     if "place" not in node.tags or "name" not in node.tags:
         return None
     x, z = wgs84_to_dcs(theatre, node.lat, node.lon)
-    if not _within_region(x, z, centre_x, centre_z, half_extent_m):
+    if not _within_region(x, z, centre_x, centre_z, half_extent_x_m, half_extent_z_m):
         return None
     stats.named_places += 1
     return StoredFeature(
@@ -100,7 +106,8 @@ def _ingest_way(
     theatre: str,
     centre_x: float,
     centre_z: float,
-    half_extent_m: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
     source_id: int | None,
     stats: OsmIngestStats,
 ) -> StoredFeature | None:
@@ -115,7 +122,8 @@ def _ingest_way(
         stats.ways_skipped_degenerate += 1
         return None
     if not any(
-        _within_region(x, z, centre_x, centre_z, half_extent_m) for x, z in points
+        _within_region(x, z, centre_x, centre_z, half_extent_x_m, half_extent_z_m)
+        for x, z in points
     ):
         return None
 
@@ -151,25 +159,40 @@ def ingest_osm(
     theatre: str,
     centre_x: float,
     centre_z: float,
-    half_extent_m: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
     source_id: int | None,
 ) -> tuple[list[StoredFeature], OsmIngestStats]:
     """Convert a parsed Overpass response into `road`/`settlement`/`water`/
-    `named_place` features clipped to the square region `(centre_x,
-    centre_z) +/- half_extent_m`."""
+    `named_place` features clipped to the rectangular region `(centre_x,
+    centre_z) +/- (half_extent_x_m, half_extent_z_m)`."""
     stats = OsmIngestStats(relations_skipped=feature_set.relations_skipped)
     features: list[StoredFeature] = []
 
     for node in feature_set.nodes:
         feature = _ingest_node(
-            node, theatre, centre_x, centre_z, half_extent_m, source_id, stats
+            node,
+            theatre,
+            centre_x,
+            centre_z,
+            half_extent_x_m,
+            half_extent_z_m,
+            source_id,
+            stats,
         )
         if feature is not None:
             features.append(feature)
 
     for way in feature_set.ways:
         feature = _ingest_way(
-            way, theatre, centre_x, centre_z, half_extent_m, source_id, stats
+            way,
+            theatre,
+            centre_x,
+            centre_z,
+            half_extent_x_m,
+            half_extent_z_m,
+            source_id,
+            stats,
         )
         if feature is not None:
             features.append(feature)

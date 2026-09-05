@@ -68,14 +68,19 @@ def probe_grid_for_region(
     region: RegionDefinition, spacing_m: float = _PROBE_GRID_SPACING_M
 ) -> tuple[float, float, float, int, int]:
     """Derive `(origin_x, origin_z, spacing_m, n_rows, n_cols)` for the
-    Stage 3 probe grid: a regular grid covering the whole region square at
-    `spacing_m` spacing, `origin` at the region's south-west corner (row 0 /
-    col 0). For M5's 10,000 m half-extent / 500 m spacing this is 41x41 =
-    1,681 points, matching the checklist's locked grid decision."""
-    n = round(2 * region.half_extent_m / spacing_m) + 1
-    origin_x = region.centre_x - region.half_extent_m
-    origin_z = region.centre_z - region.half_extent_m
-    return origin_x, origin_z, spacing_m, n, n
+    Stage 3 probe grid: a regular grid covering the whole region rectangle
+    at `spacing_m` spacing, `origin` at the region's south-west corner (row
+    0 / col 0). `n_rows` spans the x half-extent and `n_cols` spans the z
+    half-extent, matching `ElevationGrid`'s `(row, col)` -> `(origin_x + row
+    * spacing_m, origin_z + col * spacing_m)` convention. For M5's square
+    10,000 m half-extent / 500 m spacing this is 41x41 = 1,681 points,
+    matching the checklist's locked grid decision; for a rectangular region
+    `n_rows != n_cols` in general."""
+    n_rows = round(2 * region.half_extent_x_m / spacing_m) + 1
+    n_cols = round(2 * region.half_extent_z_m / spacing_m) + 1
+    origin_x = region.centre_x - region.half_extent_x_m
+    origin_z = region.centre_z - region.half_extent_z_m
+    return origin_x, origin_z, spacing_m, n_rows, n_cols
 
 
 @dataclass
@@ -123,7 +128,8 @@ def build_region(
                 theatre=region.theatre,
                 centre_x=region.centre_x,
                 centre_z=region.centre_z,
-                half_extent_m=region.half_extent_m,
+                half_extent_x_m=region.half_extent_x_m,
+                half_extent_z_m=region.half_extent_z_m,
                 built_at=built_at,
             ),
         )
@@ -147,7 +153,8 @@ def build_region(
                 region.theatre,
                 region.centre_x,
                 region.centre_z,
-                region.half_extent_m,
+                region.half_extent_x_m,
+                region.half_extent_z_m,
                 towns_source_id,
             )
             insert_features(conn, town_features)
@@ -170,7 +177,8 @@ def build_region(
                 beacons,
                 region.centre_x,
                 region.centre_z,
-                region.half_extent_m,
+                region.half_extent_x_m,
+                region.half_extent_z_m,
                 beacons_source_id,
             )
             insert_features(conn, beacon_features)
@@ -195,7 +203,8 @@ def build_region(
                 region.theatre,
                 region.centre_x,
                 region.centre_z,
-                region.half_extent_m,
+                region.half_extent_x_m,
+                region.half_extent_z_m,
                 osm_source_id,
             )
             insert_features(conn, osm_features)
@@ -221,7 +230,8 @@ def build_region(
                     routes_path,
                     region.centre_x,
                     region.centre_z,
-                    region.half_extent_m,
+                    region.half_extent_x_m,
+                    region.half_extent_z_m,
                     roadnet_source_id,
                 )
                 insert_features(conn, road_features)

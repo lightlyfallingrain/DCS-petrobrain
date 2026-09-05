@@ -62,22 +62,24 @@ def ingest_roadnet(
     routes_path: Path,
     centre_x: float,
     centre_z: float,
-    half_extent_m: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
     source_id: int | None,
 ) -> tuple[list[StoredFeature], RoadnetIngestStats]:
     """Walk `routes_path` (the real `Syria.routes` file, or any file in the
-    same format), converting every route intersecting the square region
-    `(centre_x, centre_z) +/- half_extent_m` into a `road` feature.
+    same format), converting every route intersecting the rectangular
+    region `(centre_x, centre_z) +/- (half_extent_x_m, half_extent_z_m)`
+    into a `road` feature.
 
     Walks the *whole* file regardless of region size -- `.routes` has no
     spatial index to seek into, so a bbox only filters what gets yielded,
     not how much of the file is read (see `roadnet.routes.iter_routes`).
     """
     bbox = (
-        centre_x - half_extent_m,
-        centre_x + half_extent_m,
-        centre_z - half_extent_m,
-        centre_z + half_extent_m,
+        centre_x - half_extent_x_m,
+        centre_x + half_extent_x_m,
+        centre_z - half_extent_z_m,
+        centre_z + half_extent_z_m,
     )
     min_x, max_x, min_z, max_z = bbox
 

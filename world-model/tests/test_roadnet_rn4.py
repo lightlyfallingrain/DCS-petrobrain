@@ -181,7 +181,8 @@ def test_ingested_road_features_never_carry_a_subtype(tmp_path: Path) -> None:
         routes_path,
         centre_x=214985.0,
         centre_z=-45079.0,
-        half_extent_m=1000.0,
+        half_extent_x_m=1000.0,
+        half_extent_z_m=1000.0,
         source_id=None,
     )
 

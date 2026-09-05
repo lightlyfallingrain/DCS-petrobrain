@@ -62,11 +62,16 @@ class BeaconIngestStats:
 
 
 def _within_region(
-    x: float, z: float, centre_x: float, centre_z: float, half_extent_m: float
+    x: float,
+    z: float,
+    centre_x: float,
+    centre_z: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
 ) -> bool:
     return (
-        centre_x - half_extent_m <= x <= centre_x + half_extent_m
-        and centre_z - half_extent_m <= z <= centre_z + half_extent_m
+        centre_x - half_extent_x_m <= x <= centre_x + half_extent_x_m
+        and centre_z - half_extent_z_m <= z <= centre_z + half_extent_z_m
     )
 
 
@@ -153,18 +158,22 @@ def ingest_beacons(
     entries: list[BeaconEntry],
     centre_x: float,
     centre_z: float,
-    half_extent_m: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
     source_id: int | None,
 ) -> tuple[list[StoredFeature], BeaconIngestStats]:
     """Convert `beacons.lua` entries into `navaid`, `runway` and `airfield`
-    features clipped to the square region `(centre_x, centre_z) +/-
-    half_extent_m`. Clipping is applied per-beacon before grouping, so a
-    group straddling the region boundary derives its runway/airfield point
-    only from the beacons actually inside the region."""
+    features clipped to the rectangular region `(centre_x, centre_z) +/-
+    (half_extent_x_m, half_extent_z_m)`. Clipping is applied per-beacon
+    before grouping, so a group straddling the region boundary derives its
+    runway/airfield point only from the beacons actually inside the
+    region."""
     in_region = [
         e
         for e in entries
-        if _within_region(e.x, e.z, centre_x, centre_z, half_extent_m)
+        if _within_region(
+            e.x, e.z, centre_x, centre_z, half_extent_x_m, half_extent_z_m
+        )
     ]
 
     features: list[StoredFeature] = [_navaid_feature(e, source_id) for e in in_region]

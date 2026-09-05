@@ -94,6 +94,7 @@ def _ingest_latakia() -> tuple[list[StoredFeature], BeaconIngestStats]:
         _LATAKIA_CENTRE_X,
         _LATAKIA_CENTRE_Z,
         _LATAKIA_HALF_EXTENT_M,
+        _LATAKIA_HALF_EXTENT_M,
         source_id=1,
     )
 
@@ -146,7 +147,9 @@ def test_unpaired_localizer_emits_no_runway_and_increments_skip_count() -> None:
             display_name="LONELY",
         )
     ]
-    features, stats = ingest_beacons(lone_localizer, 0.0, 0.0, 100.0, source_id=1)
+    features, stats = ingest_beacons(
+        lone_localizer, 0.0, 0.0, 100.0, 100.0, source_id=1
+    )
 
     runway_features = [f for f in features if f.kind == "runway"]
     assert runway_features == []

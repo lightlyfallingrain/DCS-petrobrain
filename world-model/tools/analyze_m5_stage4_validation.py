@@ -293,8 +293,8 @@ def _osm_displacement_check(
     unfiltered run of this check landing far outside M1's established
     1.0-1.3km range (mean 4.7km, p90 13.6km, max 55.4km) before this filter
     was added."""
-    cx, cz, half_extent_m = conn.execute(
-        "SELECT centre_x, centre_z, half_extent_m FROM region LIMIT 1"
+    cx, cz, half_extent_x_m, half_extent_z_m = conn.execute(
+        "SELECT centre_x, centre_z, half_extent_x_m, half_extent_z_m FROM region LIMIT 1"
     ).fetchone()
 
     dcs_polylines = _clean_dcs_road_polylines(conn)
@@ -310,8 +310,8 @@ def _osm_displacement_check(
         for x, z in poly:
             dcs_points_all.append((x, z))
             if (
-                cx - half_extent_m <= x <= cx + half_extent_m
-                and cz - half_extent_m <= z <= cz + half_extent_m
+                cx - half_extent_x_m <= x <= cx + half_extent_x_m
+                and cz - half_extent_z_m <= z <= cz + half_extent_z_m
             ):
                 dcs_points_in_bbox.append((x, z))
 

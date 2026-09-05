@@ -57,14 +57,15 @@ def insert_region(conn: sqlite3.Connection, region: Region) -> None:
     """Insert (or replace) a `Region` row."""
     conn.execute(
         "INSERT OR REPLACE INTO region "
-        "(name, theatre, centre_x, centre_z, half_extent_m, built_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "(name, theatre, centre_x, centre_z, half_extent_x_m, half_extent_z_m, built_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
             region.name,
             region.theatre,
             region.centre_x,
             region.centre_z,
-            region.half_extent_m,
+            region.half_extent_x_m,
+            region.half_extent_z_m,
             region.built_at,
         ),
     )

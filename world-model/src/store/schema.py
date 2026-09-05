@@ -9,7 +9,7 @@ must be rebuilt.
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DDL = """
 CREATE TABLE meta (
@@ -31,7 +31,8 @@ CREATE TABLE region (
     theatre TEXT,
     centre_x REAL,
     centre_z REAL,
-    half_extent_m REAL,
+    half_extent_x_m REAL,
+    half_extent_z_m REAL,
     built_at TEXT
 );
 

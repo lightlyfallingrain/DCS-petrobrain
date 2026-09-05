@@ -33,11 +33,16 @@ _POSITION_UNCERTAINTY_M = 1300.0
 
 
 def _within_region(
-    x: float, z: float, centre_x: float, centre_z: float, half_extent_m: float
+    x: float,
+    z: float,
+    centre_x: float,
+    centre_z: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
 ) -> bool:
     return (
-        centre_x - half_extent_m <= x <= centre_x + half_extent_m
-        and centre_z - half_extent_m <= z <= centre_z + half_extent_m
+        centre_x - half_extent_x_m <= x <= centre_x + half_extent_x_m
+        and centre_z - half_extent_z_m <= z <= centre_z + half_extent_z_m
     )
 
 
@@ -46,11 +51,13 @@ def ingest_towns(
     theatre: str,
     centre_x: float,
     centre_z: float,
-    half_extent_m: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
     source_id: int | None,
 ) -> list[StoredFeature]:
     """Convert `towns.lua` entries into `named_place` features clipped to
-    the square region `(centre_x, centre_z) +/- half_extent_m`.
+    the rectangular region `(centre_x, centre_z) +/- (half_extent_x_m,
+    half_extent_z_m)`.
 
     Every `TownEntry` becomes its own feature regardless of duplicate
     names -- `towns.lua` has 31 real places sharing a name with another
@@ -60,7 +67,9 @@ def ingest_towns(
     features: list[StoredFeature] = []
     for entry in entries:
         x, z = wgs84_to_dcs(theatre, entry.lat, entry.lon)
-        if not _within_region(x, z, centre_x, centre_z, half_extent_m):
+        if not _within_region(
+            x, z, centre_x, centre_z, half_extent_x_m, half_extent_z_m
+        ):
             continue
         features.append(
             StoredFeature(

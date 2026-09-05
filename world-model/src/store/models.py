@@ -32,7 +32,8 @@ class Region:
     theatre: str
     centre_x: float
     centre_z: float
-    half_extent_m: float
+    half_extent_x_m: float
+    half_extent_z_m: float
     built_at: str
 
 

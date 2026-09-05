@@ -20,7 +20,8 @@ def _region() -> Region:
         theatre="Syria",
         centre_x=44934.892,
         centre_z=5685.076,
-        half_extent_m=10000.0,
+        half_extent_x_m=10000.0,
+        half_extent_z_m=10000.0,
         built_at="2026-09-04T00:00:00+00:00",
     )
 

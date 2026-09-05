@@ -31,8 +31,8 @@ _EXPANDING_RADII_M = (500.0, 2000.0, 8000.0, 30000.0)
 def load_region(conn: sqlite3.Connection, name: str) -> Region | None:
     """Return the built `Region` row named `name`, or `None` if absent."""
     row = conn.execute(
-        "SELECT name, theatre, centre_x, centre_z, half_extent_m, built_at "
-        "FROM region WHERE name = ?",
+        "SELECT name, theatre, centre_x, centre_z, half_extent_x_m, half_extent_z_m, "
+        "built_at FROM region WHERE name = ?",
         (name,),
     ).fetchone()
     if row is None:
@@ -42,8 +42,9 @@ def load_region(conn: sqlite3.Connection, name: str) -> Region | None:
         theatre=row[1],
         centre_x=row[2],
         centre_z=row[3],
-        half_extent_m=row[4],
-        built_at=row[5],
+        half_extent_x_m=row[4],
+        half_extent_z_m=row[5],
+        built_at=row[6],
     )
 
 
@@ -54,8 +55,8 @@ def load_only_region(conn: sqlite3.Connection) -> Region | None:
     decision), so `query/describe.py` does not need a region name to answer
     the contract's `region` field."""
     row = conn.execute(
-        "SELECT name, theatre, centre_x, centre_z, half_extent_m, built_at "
-        "FROM region LIMIT 1"
+        "SELECT name, theatre, centre_x, centre_z, half_extent_x_m, half_extent_z_m, "
+        "built_at FROM region LIMIT 1"
     ).fetchone()
     if row is None:
         return None
@@ -64,8 +65,9 @@ def load_only_region(conn: sqlite3.Connection) -> Region | None:
         theatre=row[1],
         centre_x=row[2],
         centre_z=row[3],
-        half_extent_m=row[4],
-        built_at=row[5],
+        half_extent_x_m=row[4],
+        half_extent_z_m=row[5],
+        built_at=row[6],
     )
 
 
