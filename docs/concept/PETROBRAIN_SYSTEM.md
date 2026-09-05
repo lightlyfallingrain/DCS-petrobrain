@@ -480,3 +480,5 @@ Do not begin by implementing conversational Petrovich behavior.
 First establish whether a useful persistent semantic geographic representation of a DCS theatre can actually be constructed, queried and aligned with DCS coordinates.
 
 See `WORLD_MODEL_BUILDER.md`.
+
+See also `division-or-responsibility.md` (draft) for compute-topology constraints (local LAN split between Mac/Ollama and Windows/DCS) and a brain/body/aircraft/memory microservice decomposition of layer 3.

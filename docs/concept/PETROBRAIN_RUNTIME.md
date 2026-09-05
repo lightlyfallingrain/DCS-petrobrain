@@ -11,6 +11,8 @@
 > 3. what Petrovich perception/state can actually be extracted from DCS.
 >
 > Do not treat the interfaces or structures below as final. Revise this document as the preceding layers mature.
+>
+> See also `division-or-responsibility.md` for a microservice-style decomposition of this layer into brain/body/aircraft/memory sublayers with concrete I/O examples — also draft/provisional, not yet reconciled in detail with this document.
 
 ## Purpose
 
