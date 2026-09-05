@@ -83,4 +83,26 @@ CONTROL_POINTS: list[ControlPoint] = [
         ),
         expected_max_residual_m=1500.0,
     ),
+    ControlPoint(
+        theatre="Syria",
+        name="Aleppo International (OSAP)",
+        # DCS-authoritative x/z from beacons.lua's `airfield27_0` (ALEPPO
+        # NDB) `position` field -- world-model/research/2026-09-03-m5-nodes-
+        # lua-probe.txt line 2773 -- not a fresh live coord.LOtoLL probe
+        # (no DCS access from this session), but the same kind of
+        # DCS-authoritative x/z M1 already cross-validated. This stays
+        # non-circular per M1 Finding 2: `real_lat`/`real_lon` below come
+        # from SkyVector, an independent source, never from this same
+        # beacon's own `positionGeo` field.
+        dcs_x=126175.296875,
+        dcs_z=123040.015625,
+        real_lat=36.1805,
+        real_lon=37.226833,
+        source=(
+            "Published ARP N36°10.83' / E37°13.61' "
+            "(36°10'50\"N 37°13'27\"E), "
+            "https://skyvector.com/airport/OSAP/Aleppo-Airport"
+        ),
+        expected_max_residual_m=1500.0,
+    ),
 ]

@@ -13,12 +13,26 @@ Defaults for `latakia-20km` point at the raw paths M5 Stage 1/2 already
 populated (`data/raw/dcs/syria/map/*.lua`,
 `data/raw/osm/2026-09-04/latakia_20km_widened.json`,
 `data/raw/dcs/syria/roads/Syria.routes`) so the common case needs only the
-region name. `--routes` and `--probe-output` are both optional -- if a file
-isn't present (e.g. a fresh checkout without the 2.25 GB `Syria.routes` or a
-live probe's output staged), that layer is skipped and reported as absent,
-not an error. `--srtm-tile` is optional and only affects the elevation
-grid's stored `stats` (a metadata-only SRTM delta summary, never stored
-samples -- see `build.ingest_probe`).
+region name. `--osm-cache`, `--routes` and `--probe-output` are all
+optional -- if a file isn't present (e.g. a fresh checkout without the
+2.25 GB `Syria.routes` or a live probe's output staged), that layer is
+skipped and reported as absent, not an error. `--srtm-tile` is optional and
+only affects the elevation grid's stored `stats` (a metadata-only SRTM
+delta summary, never stored samples -- see `build.ingest_probe`).
+
+`syria-full` (M7 Stage 1) has no registered defaults and no OSM cache at
+all -- OSM is out of scope for M7 (see
+`plans/m7-full-theatre-pipeline/plan.md` clarification 2) -- so it must be
+invoked with explicit `--towns`, `--beacons` and `--routes` and no
+`--osm-cache`:
+
+    .venv/bin/python tools/build_world_model.py syria-full \\
+        --towns <path/to/towns.lua> --beacons <path/to/beacons.lua> \\
+        --routes <path/to/Syria.routes>
+
+See `world-model/docs/M7_RUN_INSTRUCTIONS.md` for the full step-by-step
+procedure -- this is the actual full-theatre build, which per the plan's
+"Execution boundary" only the user runs, on their Windows DCS machine.
 """
 
 import argparse
@@ -65,10 +79,10 @@ def main() -> None:
     routes_path = args.routes or defaults.get("routes")
     probe_output_path = args.probe_output or defaults.get("probe_output")
     srtm_tile_path = args.srtm_tile or defaults.get("srtm_tile")
-    if towns_path is None or beacons_path is None or osm_cache_path is None:
+    if towns_path is None or beacons_path is None:
         parser.error(
             f"No default raw paths registered for region {args.region!r} -- "
-            "pass --towns/--beacons/--osm-cache explicitly"
+            "pass --towns/--beacons explicitly"
         )
 
     out_path = args.out or (
@@ -93,6 +107,8 @@ def main() -> None:
         print(f"  beacon stats: {report.beacon_stats}")
     if report.osm_stats is not None:
         print(f"  osm stats: {report.osm_stats}")
+    elif report.osm_skipped:
+        print("  osm: skipped (osm_cache_path not given or not found)")
     if report.roadnet_stats is not None:
         print(f"  roadnet stats: {report.roadnet_stats}")
     elif report.roadnet_skipped:

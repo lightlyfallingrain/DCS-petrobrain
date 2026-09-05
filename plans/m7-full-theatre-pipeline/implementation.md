@@ -112,3 +112,128 @@ boundary.
   plan itself, both investigator research notes, the Kola distortion probe tool, investigator
   agent-memory updates), and a second with this Stage 0 implementation -- kept separate since
   neither this implementer session nor its commit authored the first set.
+
+## Stage 1 — DCS-native vector layers, no elevation (2026-09-05)
+
+Wired `build.pipeline.build_region` and `tools/build_world_model.py` to support building
+`syria-full` (or any region) without an OSM cache, added a small full-theatre validation
+module (`build.validate`) and its CLI (`tools/validate_m7_stage1.py`), extended
+`tests/control_points.py` with a fourth scattered point (Aleppo), and wrote the required
+"Execution boundary" run-instructions deliverable. Per the plan's Execution boundary, **no real
+`syria-full.sqlite` was built** -- everything below was verified against small/synthetic
+fixtures and the existing `latakia-20km`-scale test store, never the real 2.25 GB
+`Syria.routes` or the real `towns.lua`/`beacons.lua`.
+
+### Files Changed
+
+- `world-model/src/build/pipeline.py` -- `build_region`'s `osm_cache_path` parameter changed
+  from required (`Path`) to optional (`Path | None`), mirroring the existing `routes_path`/
+  `probe_output_path` "absent is skipped, not an error" pattern: the OSM-insert/ingest block is
+  now guarded by `if osm_cache_path is not None and osm_cache_path.exists()`, with a new
+  `BuildReport.osm_skipped: bool` field set in the `else` branch. This was necessary because M7
+  drops OSM from scope entirely (plan clarification 2) and `syria-full` has no Overpass cache
+  at all -- unlike `routes_path`/`probe_output_path`, which are optional only because a fresh
+  checkout might not have them staged yet, `osm_cache_path` for `syria-full` will never exist,
+  by design, not by omission.
+- `world-model/tools/build_world_model.py` -- the CLI's required-args check no longer demands
+  `--osm-cache`; only `--towns`/`--beacons` are required (with defaults for `latakia-20km`).
+  Added a "skipped" print line for OSM alongside the existing routes/probe skip lines, and a
+  module-docstring block giving the exact `syria-full` invocation (explicit `--towns`,
+  `--beacons`, `--routes`, no `--osm-cache`) plus a pointer to the new run-instructions doc.
+- `world-model/src/build/validate.py` (new) -- Stage 1's validation logic: `check_road_count`
+  (a real build's `road`-feature count within a tolerance band of Stage 0's real full-theatre
+  census, `SYRIA_FULL_EXPECTED_ROAD_COUNT = 14_833`, from
+  `world-model/research/2026-09-05-m7-stage0-roadnet-census.md`) and `spot_check_positions`
+  (runs `query.describe_position` at a list of `SpotCheckPoint`s and summarizes whether a
+  nearest road/settlement was found). Deliberately does not import `tests/control_points.py`'s
+  `ControlPoint` -- `src/` must not depend on `tests/` fixtures; `SpotCheckPoint` is its own
+  minimal type carrying only what a store-content sanity check needs (name, DCS x/z), not a
+  published real-world lat/lon (that's the separate coordinate-tolerance check `describe_position`
+  control-point tests already cover).
+- `world-model/tools/validate_m7_stage1.py` (new) -- the CLI the run-instructions doc tells the
+  user to run against their real `syria-full.sqlite`: reads real `feature` counts by `kind`
+  directly via SQL, runs `check_road_count` against the real road count, runs
+  `spot_check_positions` at all four `tests/control_points.py` points, and separately re-checks
+  each point's `describe_position` lat/lon against its published real-world ARP (reusing
+  `haversine_distance_m`). Prints one JSON report to stdout. Does not build or mutate anything
+  -- read-only against an already-built store, matching `tools/analyze_m5_stage4_validation.py`'s
+  established pattern.
+- `world-model/tests/control_points.py` -- added a fourth control point, Aleppo International
+  (OSAP), completing the plan's named Stage 1 spread ("Damascus, Aleppo, Beirut, Latakia").
+  Its DCS `(x, z)` comes from `beacons.lua`'s real `airfield27_0` (ALEPPO NDB) `position` field
+  (`world-model/research/2026-09-03-m5-nodes-lua-probe.txt` line 2773) rather than a fresh live
+  `coord.LOtoLL` probe (no DCS access this session) -- still non-circular per M1 Finding 2,
+  since the independently-published SkyVector ARP (N36°10.83'/E37°13.61') is used as the
+  real-world reference, never the same beacon's own `positionGeo` field. Verified via
+  `tools/report_control_point_errors.py` before committing: residual 688.7 m, comfortably
+  inside the 1,500 m tolerance and consistent with the other three points' 960-1,315 m band.
+- `world-model/tests/test_describe_position.py` -- added
+  `test_describe_position_control_points_spread_across_theatre` (new test function; the
+  existing `test_describe_position_control_point_latakia_arp` was not modified), looping the
+  same non-circular tolerance-band check over all four `CONTROL_POINTS` instead of Latakia
+  alone -- the "correctness checked at more than one location" coverage the plan's Stage 1
+  calls for.
+- `world-model/docs/M7_RUN_INSTRUCTIONS.md` (new) -- the plan's required "Execution boundary"
+  deliverable for Stage 1: step-by-step instructions to stage the raw files (which, notably,
+  turn out to already be locally staged on this machine -- see Notable Discoveries), run
+  `build_world_model.py syria-full` with explicit paths and no `--osm-cache`, run
+  `validate_m7_stage1.py`, and record the real result. Framed throughout around "this is your
+  action, not something already done for you," per the plan's explicit DoD framing.
+
+### Tests Added
+
+- `world-model/tests/test_build_validate.py` (new) -- `spot_check_positions` finds a nearby
+  road/settlement in a small synthetic store and correctly reports absence far outside
+  coverage; `check_road_count` correctly buckets counts into/out of a tolerance band.
+- `world-model/tests/test_pipeline_build_region.py` (new) --
+  `test_build_region_rectangular_region_without_osm_cache`: a synthetic **rectangular**
+  (non-square) region builds successfully with `osm_cache_path=None`, correctly clips an
+  out-of-region town while keeping an in-region one, and reports every optional layer
+  (`osm_skipped`, `roadnet_skipped`, `probe_skipped`, `terrain_skipped`) as skipped rather than
+  erroring -- this is the exact shape of an M7 `syria-full`-style Stage 1 build.
+  `test_build_region_osm_cache_path_given_but_missing_is_skipped_not_an_error`: a stale/wrong
+  `--osm-cache` path degrades the same way a missing `--routes`/`--probe-output` already does.
+  `parse_towns_lua`/`parse_beacons_lua` are monkeypatched (both raise `ValueError` unless given
+  *exactly* 1,182/151 entries -- a real hand-written fixture file can't go through them), so
+  this tests `build_region`'s wiring, not those parsers (already covered elsewhere).
+- `test_describe_position_control_points_spread_across_theatre` (in
+  `test_describe_position.py`) -- see Files Changed above.
+
+### Checks
+
+- `ruff format --check world-model/src world-model/tests`: pass (66 files)
+- `ruff check world-model/src world-model/tests`: pass
+- `mypy --strict world-model/src`: pass, 39 source files
+- `mypy --strict` on the two touched/new `tools/` files individually (not part of the mandated
+  command, but checked per project convention for new tool files): pass
+- `pytest world-model/tests -q`: pass, 173 passed (was 165 after Stage 0; +8 new tests: 4 in
+  `test_build_validate.py`, 2 in `test_pipeline_build_region.py`, 1 new control point pulling in
+  no new test count by itself, 1 new `describe_position` test)
+
+### Notable Discoveries
+
+- **The raw files Stage 1 needs are already locally staged on this Mac** -- `world-model/data/
+  raw/dcs/syria/map/towns.lua`, `.../beacons.lua`, and `.../roads/Syria.routes` (2,251,462,776
+  bytes) all already exist from M5/Stage 0's work, confirmed by direct `ls` before writing the
+  run-instructions doc (read-only check, no content read, no build run). Since these are
+  already whole-theatre files (not region-clipped -- M5's finding, reconfirmed by Stage 0's
+  census), **Stage 1's real build may not need any new Windows/WSL round-trip at all**, unlike
+  what a from-scratch reading of the plan's "Windows DCS machine" framing might suggest. The
+  run-instructions doc says this explicitly rather than assuming a fresh extraction is needed.
+- **`build_region`'s OSM-required-ness was a real, previously-invisible blocker for M7.** Before
+  this stage, `osm_cache_path: Path` was a required positional parameter with no absence
+  handling, unlike `routes_path`/`probe_output_path` (already optional since M5). Since M7
+  explicitly drops OSM (clarification 2) and `syria-full` has no cache file to point at, the
+  CLI as it stood before this change would have hard-required a nonexistent/inapplicable file
+  for the exact build the plan calls for. This wasn't mentioned explicitly in the plan's
+  "Affected Modules" list (which focuses on SRTM/elevation wiring for Stage 2) -- flagging it
+  as a real gap this stage had to close, not scope creep.
+- **No live-DCS-probe path existed this session for a fresh Aleppo `coord.LOtoLL` control
+  point** (matching the plan's own Risks note that Kola's projection params are similarly
+  unverified live). Used `beacons.lua`'s already-decoded, already-DCS-authoritative
+  `airfield27_0` position instead, cross-checked via `WebSearch`/`WebFetch` against SkyVector
+  for the independent real-world ARP -- functionally equivalent to the existing control points
+  in every way that matters for non-circularity (DCS-native x/z paired with an independently
+  published lat/lon), just sourced from a static Lua file already on disk rather than a fresh
+  live-mission run. Worth noting for any future control-point additions: `beacons.lua`'s
+  `position` field is a legitimate, already-decoded source for this, not just `positionGeo`.

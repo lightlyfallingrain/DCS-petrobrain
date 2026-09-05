@@ -354,3 +354,31 @@ def test_describe_position_control_point_latakia_arp(tmp_path: Path) -> None:
         assert residual_m <= oslk.expected_max_residual_m
     finally:
         conn.close()
+
+
+def test_describe_position_control_points_spread_across_theatre(
+    tmp_path: Path,
+) -> None:
+    """M7 Stage 1: the same non-circular tolerance-band check as
+    `test_describe_position_control_point_latakia_arp`, but over every
+    control point in `tests/control_points.py` -- Damascus, Latakia,
+    Beirut, Aleppo -- rather than Latakia alone. This is the "correctness
+    checked at more than one location once the store covers the whole
+    theatre" coverage `plans/m7-full-theatre-pipeline/plan.md` Stage 1
+    calls for. Store content is irrelevant here too (see the module
+    docstring and the Latakia-only test above) -- `lat`/`lon` come purely
+    from `coordinates.dcs_to_wgs84`, so an empty-but-valid store answers
+    for any point regardless of theatre location."""
+    conn = open_for_build(tmp_path / "control_points_fixture.sqlite")
+    try:
+        for point in CONTROL_POINTS:
+            result = describe_position(conn, point.theatre, point.dcs_x, point.dcs_z)
+            residual_m = haversine_distance_m(
+                result.lat, result.lon, point.real_lat, point.real_lon
+            )
+            assert residual_m <= point.expected_max_residual_m, (
+                f"{point.name}: residual {residual_m:.1f}m exceeds "
+                f"{point.expected_max_residual_m:.1f}m"
+            )
+    finally:
+        conn.close()

@@ -12,6 +12,13 @@ CI environment will not have the real 2.25 GB `Syria.routes` or a live
 probe's output staged, and each layer degrading to absent (with a logged
 skip in `BuildReport`) is the correct "absence reported as absence"
 behaviour, not an error -- see `describe_position`'s rule 3.
+
+`osm_cache_path` is optional too (M7 Stage 1): M7's `syria-full` build has
+no Overpass cache at all -- OSM is dropped from M7 scope entirely (see
+`plans/m7-full-theatre-pipeline/plan.md` clarification 2), not merely
+absent from a fresh checkout the way `routes_path`/`probe_output_path` can
+be. A missing/absent OSM cache degrades the same way: skipped, reported in
+`BuildReport.osm_skipped`, never an error.
 """
 
 import datetime
@@ -94,6 +101,7 @@ class BuildReport:
     osm_stats: OsmIngestStats | None = None
     roadnet_stats: RoadnetIngestStats | None = None
     roadnet_skipped: bool = False
+    osm_skipped: bool = False
     probe_stats: ProbeIngestStats | None = None
     probe_skipped: bool = False
     terrain_stats: TerrainIngestStats | None = None
@@ -104,20 +112,21 @@ def build_region(
     region: RegionDefinition,
     towns_lua_path: Path,
     beacons_lua_path: Path,
-    osm_cache_path: Path,
+    osm_cache_path: Path | None,
     out_path: Path,
     routes_path: Path | None = None,
     probe_output_path: Path | None = None,
     srtm_tile_path: Path | None = None,
 ) -> BuildReport:
     """Build `out_path` from scratch for `region`, ingesting towns.lua,
-    beacons.lua, the cached Overpass response, (if `routes_path` is given
-    and exists) the DCS-native `.routes` roadnet layer, and (if
-    `probe_output_path` is given and exists) the elevation/surface-type
-    probe grid. `srtm_tile_path`, if given, adds an SRTM delta summary to
-    the elevation grid's metadata (see `ingest_probe`'s module docstring --
-    stats only, never stored samples). Returns a `BuildReport` with per-kind
-    feature counts."""
+    beacons.lua, (if `osm_cache_path` is given and exists) the cached
+    Overpass response, (if `routes_path` is given and exists) the
+    DCS-native `.routes` roadnet layer, and (if `probe_output_path` is
+    given and exists) the elevation/surface-type probe grid.
+    `srtm_tile_path`, if given, adds an SRTM delta summary to the elevation
+    grid's metadata (see `ingest_probe`'s module docstring -- stats only,
+    never stored samples). Returns a `BuildReport` with per-kind feature
+    counts."""
     conn = open_for_build(out_path)
     try:
         built_at = datetime.datetime.now(datetime.UTC).isoformat()
@@ -186,31 +195,34 @@ def build_region(
                 report.feature_counts[f.kind] += 1
             report.beacon_stats = beacon_stats
 
-        osm_source_id = insert_source(
-            conn,
-            Source(
-                name="OpenStreetMap (Overpass)",
-                fetched_at=built_at,
-                raw_path=str(osm_cache_path),
-                attribution="(c) OpenStreetMap contributors, ODbL",
-                notes="Cached single Overpass fetch; see osm.overpass module docstring.",
-            ),
-        )
-        with _stage("OSM overlay", 3):
-            feature_set = load_features(osm_cache_path)
-            osm_features, osm_stats = ingest_osm(
-                feature_set,
-                region.theatre,
-                region.centre_x,
-                region.centre_z,
-                region.half_extent_x_m,
-                region.half_extent_z_m,
-                osm_source_id,
+        if osm_cache_path is not None and osm_cache_path.exists():
+            osm_source_id = insert_source(
+                conn,
+                Source(
+                    name="OpenStreetMap (Overpass)",
+                    fetched_at=built_at,
+                    raw_path=str(osm_cache_path),
+                    attribution="(c) OpenStreetMap contributors, ODbL",
+                    notes="Cached single Overpass fetch; see osm.overpass module docstring.",
+                ),
             )
-            insert_features(conn, osm_features)
-            for f in osm_features:
-                report.feature_counts[f.kind] += 1
-            report.osm_stats = osm_stats
+            with _stage("OSM overlay", 3):
+                feature_set = load_features(osm_cache_path)
+                osm_features, osm_stats = ingest_osm(
+                    feature_set,
+                    region.theatre,
+                    region.centre_x,
+                    region.centre_z,
+                    region.half_extent_x_m,
+                    region.half_extent_z_m,
+                    osm_source_id,
+                )
+                insert_features(conn, osm_features)
+                for f in osm_features:
+                    report.feature_counts[f.kind] += 1
+                report.osm_stats = osm_stats
+        else:
+            report.osm_skipped = True
 
         if routes_path is not None and routes_path.exists():
             roadnet_source_id = insert_source(
