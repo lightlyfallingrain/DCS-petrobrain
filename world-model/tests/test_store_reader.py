@@ -11,7 +11,12 @@ from pathlib import Path
 
 from geometry import distance_point_point, distance_point_polyline, point_in_polygon
 from store.models import ElevationGrid, StoredFeature
-from store.reader import containing_polygons, nearest_feature, sample_grid
+from store.reader import (
+    containing_polygons,
+    load_full_grid,
+    nearest_feature,
+    sample_grid,
+)
 from store.writer import insert_features, insert_grid, open_for_build
 
 
@@ -271,5 +276,66 @@ def test_sample_grid_surface_type_nearest_cell_not_interpolated(tmp_path: Path) 
         # value.
         near_land = sample_grid(conn, "surface_type", 10.0, 10.0)
         assert near_land == 1.0
+    finally:
+        conn.close()
+
+
+def test_load_full_grid_returns_whole_matrix(tmp_path: Path) -> None:
+    db_path = tmp_path / "grid.sqlite"
+    conn = open_for_build(db_path)
+    try:
+        grid = ElevationGrid(
+            origin_x=0.0,
+            origin_z=0.0,
+            spacing_m=100.0,
+            n_rows=2,
+            n_cols=2,
+            source_id=None,
+            stats={"points_expected": 4, "points_received": 4},
+            samples=[[0.0, 100.0], [200.0, 300.0]],
+        )
+        insert_grid(conn, grid)
+
+        loaded = load_full_grid(conn, "elevation")
+
+        assert loaded is not None
+        assert loaded.n_rows == 2
+        assert loaded.n_cols == 2
+        assert loaded.spacing_m == 100.0
+        assert loaded.samples == [[0.0, 100.0], [200.0, 300.0]]
+        assert loaded.stats == {"points_expected": 4, "points_received": 4}
+    finally:
+        conn.close()
+
+
+def test_load_full_grid_leaves_missing_cells_none(tmp_path: Path) -> None:
+    db_path = tmp_path / "grid.sqlite"
+    conn = open_for_build(db_path)
+    try:
+        grid = ElevationGrid(
+            origin_x=0.0,
+            origin_z=0.0,
+            spacing_m=100.0,
+            n_rows=2,
+            n_cols=2,
+            source_id=None,
+            stats={},
+            samples=[[0.0, None], [200.0, 300.0]],
+        )
+        insert_grid(conn, grid)
+
+        loaded = load_full_grid(conn, "elevation")
+
+        assert loaded is not None
+        assert loaded.samples == [[0.0, None], [200.0, 300.0]]
+    finally:
+        conn.close()
+
+
+def test_load_full_grid_returns_none_when_absent(tmp_path: Path) -> None:
+    db_path = tmp_path / "grid.sqlite"
+    conn = open_for_build(db_path)
+    try:
+        assert load_full_grid(conn, "elevation") is None
     finally:
         conn.close()

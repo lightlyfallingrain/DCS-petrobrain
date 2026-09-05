@@ -13,7 +13,9 @@ find_next_point_block`'s scan-forward resync to reach the next route.
 `.routes` into memory, which matters at `Syria.routes`' real size (2.25 GB).
 """
 
+import logging
 import mmap
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +29,9 @@ from .container import (
 )
 
 _CLASS_NAME = "landscape4::lRoutesFile"
+_PROGRESS_LOG_INTERVAL_S = 5.0
+
+logger = logging.getLogger(__name__)
 
 Point3 = tuple[float, float, float]
 Bbox = tuple[float, float, float, float]  # (min_x, max_x, min_z, max_z)
@@ -121,6 +126,8 @@ def _walk(
     header = read_header(buf, _CLASS_NAME)
     offset = header.data_offset
     route_index = 0
+    total_bytes = len(buf) - header.data_offset
+    last_logged_at = time.monotonic()
 
     while True:
         found = find_next_point_block(buf, offset)
@@ -129,6 +136,19 @@ def _walk(
         pos_offset, points, pos_end = found
         if pos_offset != offset:
             stats.resync_events += 1
+
+        now = time.monotonic()
+        if now - last_logged_at >= _PROGRESS_LOG_INTERVAL_S:
+            last_logged_at = now
+            covered = pos_offset - header.data_offset
+            pct = 100.0 * covered / total_bytes if total_bytes > 0 else 100.0
+            logger.info(
+                "parsing .routes: route %d, byte %d/%d (%.1f%%)",
+                route_index,
+                covered,
+                total_bytes,
+                pct,
+            )
 
         try:
             directions, dir_end = read_point_block(buf, pos_end)

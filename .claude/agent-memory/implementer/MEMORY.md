@@ -23,3 +23,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Verify rebuild row counts](feedback_verify_rebuild_row_counts.md) — build_world_model.py optional flags with no default silently drop data on rebuild; verify row counts/query output directly.
 - [macOS mmap RSS metric](reference_macos_mmap_rss_metric.md) — for mmap-based readers on Darwin, use "peak memory footprint" not "maximum resident set size" to judge real memory use.
 - [Agent memory path](feedback_agent_memory_path.md) — always write to top-level `.claude/agent-memory/implementer/`, never a `world-model/`-nested copy; mistake recurred twice before this.
+- [M6 terrain semantics](project_m6_terrain_semantics.md) — tuned defaults (threshold=20/min_cell=6), real ridge=12/valley=12, checkerboard-noise finding is a resolution ceiling not a bug.
+- [Decouple test fixtures from tuned defaults](feedback_decouple_fixtures_from_tuned_defaults.md) — pass an explicit test threshold, never rely on a module default a later stage will re-tune.

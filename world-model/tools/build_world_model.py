@@ -22,6 +22,7 @@ samples -- see `build.ingest_probe`).
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -43,6 +44,7 @@ _DEFAULT_RAW_PATHS: dict[str, dict[str, Path]] = {
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("region", choices=sorted(REGIONS.keys()))
     parser.add_argument("--towns", type=Path, default=None)

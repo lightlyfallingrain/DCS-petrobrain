@@ -15,8 +15,12 @@ behaviour, not an error -- see `describe_position`'s rule 3.
 """
 
 import datetime
+import logging
 import sqlite3
+import time
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,6 +28,7 @@ from build.ingest_beacons import BeaconIngestStats, ingest_beacons
 from build.ingest_osm import OsmIngestStats, ingest_osm
 from build.ingest_probe import ProbeIngestStats, ingest_probe
 from build.ingest_roadnet import RoadnetIngestStats, ingest_roadnet
+from build.ingest_terrain import TerrainIngestStats, ingest_terrain
 from build.ingest_towns import ingest_towns
 from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
@@ -31,6 +36,7 @@ from dcs_data.towns import parse_towns_lua
 from elevation.dem import SrtmTile
 from osm.features import load_features
 from store.models import Region, Source
+from store.reader import load_full_grid
 from store.writer import (
     insert_features,
     insert_grid,
@@ -40,6 +46,22 @@ from store.writer import (
 )
 
 _PROBE_GRID_SPACING_M = 500.0
+_TOTAL_STAGES = 6
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _stage(name: str, index: int) -> Iterator[None]:
+    """Log start/end of one build stage with a coarse `n/N stages`
+    completion estimate -- each stage is one raw-data source ingested, not
+    weighted by how long it actually takes (roadnet dwarfs everything else),
+    so this is "which stage" visibility, not a time-remaining estimate."""
+    logger.info("[%d/%d] %s: starting", index, _TOTAL_STAGES, name)
+    started_at = time.monotonic()
+    yield
+    elapsed_s = time.monotonic() - started_at
+    logger.info("[%d/%d] %s: done (%.1fs)", index, _TOTAL_STAGES, name, elapsed_s)
 
 
 def probe_grid_for_region(
@@ -69,6 +91,8 @@ class BuildReport:
     roadnet_skipped: bool = False
     probe_stats: ProbeIngestStats | None = None
     probe_skipped: bool = False
+    terrain_stats: TerrainIngestStats | None = None
+    terrain_skipped: bool = False
 
 
 def build_region(
@@ -116,18 +140,19 @@ def build_region(
                 notes="Named-place gazetteer; see dcs_data.towns module docstring.",
             ),
         )
-        towns = parse_towns_lua(towns_lua_path)
-        town_features = ingest_towns(
-            towns,
-            region.theatre,
-            region.centre_x,
-            region.centre_z,
-            region.half_extent_m,
-            towns_source_id,
-        )
-        insert_features(conn, town_features)
-        for f in town_features:
-            report.feature_counts[f.kind] += 1
+        with _stage("towns.lua", 1):
+            towns = parse_towns_lua(towns_lua_path)
+            town_features = ingest_towns(
+                towns,
+                region.theatre,
+                region.centre_x,
+                region.centre_z,
+                region.half_extent_m,
+                towns_source_id,
+            )
+            insert_features(conn, town_features)
+            for f in town_features:
+                report.feature_counts[f.kind] += 1
 
         beacons_source_id = insert_source(
             conn,
@@ -139,18 +164,19 @@ def build_region(
                 notes="Navaid/airfield-beacon gazetteer; see dcs_data.beacons module docstring.",
             ),
         )
-        beacons = parse_beacons_lua(beacons_lua_path)
-        beacon_features, beacon_stats = ingest_beacons(
-            beacons,
-            region.centre_x,
-            region.centre_z,
-            region.half_extent_m,
-            beacons_source_id,
-        )
-        insert_features(conn, beacon_features)
-        for f in beacon_features:
-            report.feature_counts[f.kind] += 1
-        report.beacon_stats = beacon_stats
+        with _stage("beacons.lua", 2):
+            beacons = parse_beacons_lua(beacons_lua_path)
+            beacon_features, beacon_stats = ingest_beacons(
+                beacons,
+                region.centre_x,
+                region.centre_z,
+                region.half_extent_m,
+                beacons_source_id,
+            )
+            insert_features(conn, beacon_features)
+            for f in beacon_features:
+                report.feature_counts[f.kind] += 1
+            report.beacon_stats = beacon_stats
 
         osm_source_id = insert_source(
             conn,
@@ -162,19 +188,20 @@ def build_region(
                 notes="Cached single Overpass fetch; see osm.overpass module docstring.",
             ),
         )
-        feature_set = load_features(osm_cache_path)
-        osm_features, osm_stats = ingest_osm(
-            feature_set,
-            region.theatre,
-            region.centre_x,
-            region.centre_z,
-            region.half_extent_m,
-            osm_source_id,
-        )
-        insert_features(conn, osm_features)
-        for f in osm_features:
-            report.feature_counts[f.kind] += 1
-        report.osm_stats = osm_stats
+        with _stage("OSM overlay", 3):
+            feature_set = load_features(osm_cache_path)
+            osm_features, osm_stats = ingest_osm(
+                feature_set,
+                region.theatre,
+                region.centre_x,
+                region.centre_z,
+                region.half_extent_m,
+                osm_source_id,
+            )
+            insert_features(conn, osm_features)
+            for f in osm_features:
+                report.feature_counts[f.kind] += 1
+            report.osm_stats = osm_stats
 
         if routes_path is not None and routes_path.exists():
             roadnet_source_id = insert_source(
@@ -189,17 +216,18 @@ def build_region(
                     "research/2026-09-04-m5-roadnet-byte-decode.md.",
                 ),
             )
-            road_features, roadnet_stats = ingest_roadnet(
-                routes_path,
-                region.centre_x,
-                region.centre_z,
-                region.half_extent_m,
-                roadnet_source_id,
-            )
-            insert_features(conn, road_features)
-            for f in road_features:
-                report.feature_counts[f.kind] += 1
-            report.roadnet_stats = roadnet_stats
+            with _stage(f"Syria.routes ({routes_path.stat().st_size} bytes)", 4):
+                road_features, roadnet_stats = ingest_roadnet(
+                    routes_path,
+                    region.centre_x,
+                    region.centre_z,
+                    region.half_extent_m,
+                    roadnet_source_id,
+                )
+                insert_features(conn, road_features)
+                for f in road_features:
+                    report.feature_counts[f.kind] += 1
+                report.roadnet_stats = roadnet_stats
         else:
             report.roadnet_skipped = True
 
@@ -224,22 +252,37 @@ def build_region(
             origin_x, origin_z, spacing_m, n_rows, n_cols = probe_grid_for_region(
                 region
             )
-            elevation_grid, surface_grid, probe_stats = ingest_probe(
-                probe_output_path,
-                region.theatre,
-                origin_x,
-                origin_z,
-                spacing_m,
-                n_rows,
-                n_cols,
-                probe_source_id,
-                srtm_tile=srtm_tile,
-            )
-            insert_grid(conn, elevation_grid)
-            insert_grid(conn, surface_grid)
-            report.probe_stats = probe_stats
+            with _stage("elevation/surface probe grid", 5):
+                elevation_grid, surface_grid, probe_stats = ingest_probe(
+                    probe_output_path,
+                    region.theatre,
+                    origin_x,
+                    origin_z,
+                    spacing_m,
+                    n_rows,
+                    n_cols,
+                    probe_source_id,
+                    srtm_tile=srtm_tile,
+                )
+                insert_grid(conn, elevation_grid)
+                insert_grid(conn, surface_grid)
+                report.probe_stats = probe_stats
+
+            with _stage("terrain semantics (ridge/valley)", 6):
+                terrain_grid = load_full_grid(conn, "elevation")
+                if terrain_grid is not None:
+                    terrain_features, terrain_stats = ingest_terrain(
+                        terrain_grid, probe_source_id
+                    )
+                    insert_features(conn, terrain_features)
+                    for f in terrain_features:
+                        report.feature_counts[f.kind] += 1
+                    report.terrain_stats = terrain_stats
+                else:
+                    report.terrain_skipped = True
         else:
             report.probe_skipped = True
+            report.terrain_skipped = True
 
         return report
     finally:
