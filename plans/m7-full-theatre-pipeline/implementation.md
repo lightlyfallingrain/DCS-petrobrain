@@ -529,3 +529,136 @@ touched, per the plan's explicit Stage 3 exclusion.
   that "has a beacon in `beacons.lua`" and "has an independently-verifiable real-world
   reference" are two different requirements, and the second one should be checked before
   investing in coordinate extraction.
+
+## Stage 4 — Perf (2026-09-05)
+
+Added `tools/measure_m7_stage4_perf.py`, mirroring `tools/measure_m5_stage5_perf.py`'s
+three-subcommand shape (`latency`, `sqlite-size`, `rebuild`) but generalized for a
+full-theatre-scale store: sample points are no longer confined to one 20 km box. Per the
+plan's "Execution boundary": no real `syria-full.sqlite` was built or measured here --
+everything below is verified against a small synthetic fixture store, same posture as every
+prior M7 stage. **`src/terrain/` was not touched.**
+
+### Files Changed
+
+- `world-model/tools/measure_m7_stage4_perf.py` (new) -- three subcommands:
+  - `sqlite-size --region syria-full [--db-path ...]`: reports the real store's file size.
+  - `rebuild <region> <build_args...>`: times `tools/build_world_model.py <region>
+    <build_args...>` end to end as a subprocess, forwarding every flag after the region name
+    verbatim via `argparse.REMAINDER` -- generalizes M5's `cmd_rebuild` (which hardcoded
+    `latakia-20km`'s known raw paths) since `syria-full` has no registered default raw paths at
+    all (see `build_world_model.py`'s module docstring) and needs `--towns`/`--beacons`/
+    `--routes`/`--srtm-dir` passed explicitly every time. Verified the REMAINDER forwarding
+    works correctly for flags after a positional region argument by exercising the parser
+    directly (a known argparse trap when combined with subparsers).
+  - `latency --region syria-full [--n-random 300] [--n-boundary 40] [--seed ...] [--db-path
+    ...]`: the actual Stage 4 change from M5 Stage 5's format -- `sample_points_for_region`
+    draws from **the whole region bbox**, not one small sub-box: every registered
+    `tests/control_points.py` control point for the region's theatre (already spread across
+    coastal/urban/desert/mountainous terrain per Stage 3), plus `n_random` points uniform
+    across the entire bbox, plus `n_boundary` points extended to 1.05x the half-extents (scaled
+    down from M5's 1.5x since a full-theatre region's edges are far more remote than a 20 km
+    box's). `measure_describe_position_latency` times each `describe_position` call
+    individually and reports the same mean/median/p95/p99/min/max shape as M5's report, via a
+    `LatencyStats` dataclass (M5's version used a bare dict; a dataclass here since this
+    module's tests need to assert on individual fields, not just re-parse printed JSON).
+  - Made executable (`chmod +x`) per this project's convention for `tools/validate_m7_*.py`
+    scripts. Checked individually with `ruff format`/`ruff check`/`mypy --strict` since `tools/`
+    isn't part of the mandated check-command paths (per this project's own convention, see
+    memory `verify_full_suite_not_just_new_files` / prior M7 stage notes).
+- `world-model/docs/M7_RUN_INSTRUCTIONS.md` -- added the final "Stage 4" section: running each
+  of the three subcommands against a real `syria-full.sqlite`, and what to compare the results
+  against -- M5's own Latakia baselines (8.57 MB / 430.9 s / p99 275.0 ms), spelled out
+  explicitly so the user has a concrete sanity-check reference rather than an unanchored
+  number. Also notes that this is the actual Definition-of-Done evidence for M7 as a whole, and
+  that sign-off in `ROADMAP.md`/`todo/todo.md` is the user's decision after reviewing it, not
+  the implementer's.
+
+### Tests Added
+
+- `world-model/tests/test_measure_m7_stage4_perf.py` (new) -- imports `tools/
+  measure_m7_stage4_perf.py` directly (`tools/` isn't on `pytest`'s configured `pythonpath`,
+  only `src` is, so the test file inserts `tools/` onto `sys.path` itself, mirroring how
+  `tools/validate_m7_stage3.py` inserts `tests/` to import `control_points`). Uses a
+  deliberately rectangular (non-square) synthetic region and control-point set (all tagged
+  `theatre="Syria"` so `describe_position` can resolve a real registered projection -- an
+  earlier draft used a fake `"Testland"` theatre for the region/control-point fixtures, which
+  is fine for `sample_points_for_region`'s pure string/arithmetic logic but fails inside
+  `describe_position`, which looks up `coordinates.THEATRE_PROJECTIONS[theatre]` and raises
+  `KeyError` for an unregistered theatre name -- a different, unrelated `"Kola"` theatre tag is
+  used for the one control point that must be *excluded* from the sample, since that path never
+  reaches `describe_position`):
+  - `test_sample_points_for_region_includes_every_matching_control_point` /
+    `test_sample_points_for_region_excludes_other_theatres_control_points` -- the theatre filter
+    is exercised both ways, not just asserted present.
+  - `test_sample_points_for_region_total_count_and_bbox` -- exact point-count arithmetic (2
+    control points + N random + M boundary), random points strictly within the region's own
+    rectangular half-extents, and at least one boundary point strictly outside them (proving the
+    boundary sample is actually wider, not coincidentally the same range).
+  - `test_sample_points_for_region_is_reproducible_for_a_fixed_seed` -- same seed produces an
+    identical point list, needed since the real tool's `--seed` default is meant to make repeat
+    runs comparable.
+  - `test_measure_describe_position_latency_reports_one_stat_per_batch` /
+    `..._handles_a_single_point` -- `LatencyStats` field ordering invariants
+    (min <= median <= max, median <= p95 <= p99 <= max) against a small `store.writer`-built
+    fixture store (same direct-construction pattern as `test_build_validate.py`'s fixture),
+    including the single-point degenerate case where every percentile collapses to the same
+    value.
+
+### Checks
+
+- `ruff format --check world-model/src world-model/tests`: pass (70 files)
+- `ruff check world-model/src world-model/tests`: pass
+- `ruff format`/`ruff check`/`mypy --strict` on `tools/measure_m7_stage4_perf.py` individually
+  (not part of the mandated command, but checked per project convention for new tool files):
+  pass
+- `mypy world-model/src` (`--strict` per `pyproject.toml`): pass, 40 source files
+- `pytest world-model/tests -q`: pass, 200 passed (was 194 after Stage 3; +6 new tests, all in
+  `test_measure_m7_stage4_perf.py`)
+
+### Notable Discoveries
+
+- **`describe_position` requires a registered theatre projection, not just a theatre string
+  match** -- `sample_points_for_region`'s theatre filter is pure string comparison and works
+  fine with any placeholder theatre name, but `measure_describe_position_latency` (and by
+  extension the fixture tests that call it) must use a real registered theatre
+  (`coordinates.THEATRE_PROJECTIONS`, currently just `"Syria"`) or `describe_position` raises
+  `KeyError`. Caught while writing the fixture tests, not by the real tool (which only ever
+  runs against a real, already-registered `syria-full` region) -- worth remembering for any
+  future test fixture that constructs a region/control-point with a throwaway theatre name and
+  then calls anything in the `query`/`coordinates` chain, not just `store`/`build` layer
+  functions.
+- **`argparse.REMAINDER` after a `choices`-constrained positional works as expected for
+  forwarding arbitrary downstream-CLI flags** -- verified directly (not just by reading argparse
+  docs) since this is a known trap area when combined with subparsers; `rebuild syria-full
+  --towns x --beacons y` correctly parses `region="syria-full"` and
+  `build_args=["--towns", "x", "--beacons", "y"]` with no special separator needed.
+
+### M7 sign-off readiness assessment
+
+All four implementation stages (0-3, now including Stage 4's measurement tooling) are code-
+complete and tested against small fixtures, per the plan's "Execution boundary": nobody but the
+user runs the real full-theatre build. Concretely, in place and verified:
+
+- `RegionDefinition` generalized to rectangular half-extents; `syria-full` registered
+  (Stage 0).
+- Vector-layer ingest (roads/towns/beacons) wired for the unclipped full-theatre case; no OSM
+  (Stage 1).
+- SRTM-primary elevation/`surface_type` ingest with explicit `"srtm"`/`"dcs_probe"` provenance
+  tagging, closing a pre-existing hardcoded-provenance bug in `query/describe.py` along the way
+  (Stage 2).
+- An eight-point, geographically-spread control-point set plus a provenance-at-scale check
+  (Stage 3).
+- A perf-measurement tool for file size / rebuild time / full-theatre-scale `describe_position`
+  latency, with M5's own numbers as an explicit comparison baseline (Stage 4, this entry).
+
+What remains is exactly what the plan's Execution boundary reserves for the user: staging the
+real SRTM tile set and raw DCS files, running the real live-DCS spot-check probe mission (the
+one step that needs the actual installed DCS copy), running `build_world_model.py syria-full`
+for real, and running `validate_m7_stage1.py` / `validate_m7_stage2_elevation.py` /
+`validate_m7_stage3.py` / `measure_m7_stage4_perf.py` against the resulting real store. No
+further pipeline code is indicated by anything found in this stage -- the perf-measurement
+tooling itself is now the last piece `docs/M7_RUN_INSTRUCTIONS.md` needed to be complete
+end to end. Marking M7 complete in `world-model/ROADMAP.md`/`todo/todo.md` remains the user's
+decision, made after reviewing the real numbers this tooling produces, per the plan's own text
+-- not something this session does on the code's behalf.

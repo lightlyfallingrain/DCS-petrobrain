@@ -241,3 +241,86 @@ report and use judgement, the same as Stages 1 and 2.
 Note the real coordinate-residual and provenance numbers — same convention as Stages 1 and 2's
 "record the result" steps. This is the actual Definition-of-Done evidence for M7 Stage 3; an
 agent cannot produce it per the plan's "Execution boundary".
+
+## Stage 4 — perf: file size, rebuild time, `describe_position` latency at full-theatre scale
+
+Per the plan's Stage 4: `.sqlite` file size, full rebuild wall time, and `describe_position`
+latency, measured over a sample spread across the *whole* theatre rather than confined to one
+20 km box — mirroring M5 Stage 5's measurement format
+(`world-model/research/2026-09-04-m5-stage5-perf.md`), scaled up. This is a measurement stage,
+not an optimization stage: SQLite+R\*Tree is not expected to be row-count-sensitive at
+full-theatre scale per M5's own numbers (a 3,266-road, 20×20 km store already answered
+`describe_position` in tens-to-low-hundreds of milliseconds) — Stage 4 exists to catch it if
+that assumption is wrong, not because a problem is expected.
+
+Run this once `syria-full.sqlite` has Stage 1's vector layers and Stage 2's SRTM elevation grid
+built (i.e. after Stages 1–3 above).
+
+### 4a. `.sqlite` file size
+
+From `world-model/`, with the venv active:
+
+```sh
+.venv/bin/python tools/measure_m7_stage4_perf.py sqlite-size --region syria-full
+```
+
+Prints the real file's size in bytes/MB. Compare against M5's Latakia baseline — 8,982,528
+bytes (8.57 MB) for one 20×20 km region — to sanity-check the scale-up is roughly proportionate
+to the much larger theatre and its SRTM grid, not wildly disproportionate (which would suggest
+something is being duplicated or not clipped as expected).
+
+### 4b. Full rebuild wall time
+
+From `world-model/`, with the venv active — this re-runs the actual build as a subprocess and
+times it end to end, forwarding every flag after `syria-full` straight to
+`tools/build_world_model.py` (so pass exactly the same flags you used in Stage 1/2's build
+steps):
+
+```sh
+.venv/bin/python tools/measure_m7_stage4_perf.py rebuild syria-full \
+    --towns data/raw/dcs/syria/map/towns.lua \
+    --beacons data/raw/dcs/syria/map/beacons.lua \
+    --routes data/raw/dcs/syria/roads/Syria.routes \
+    --srtm-dir data/raw/dem/syria-full/
+```
+
+Compare against M5's Latakia baseline — 430.9 s (~7.2 min) for a 20×20 km region including a
+full `.routes` walk (the walk itself dominates build time regardless of region size, per M5
+Stage 5's finding — `.routes` is walked in full either way). The full-theatre number should be
+close to that same `.routes`-walk-dominated figure plus whatever the (much larger) SRTM ingest
+adds — if it's dramatically higher, the SRTM ingest stage is the first place to look, not the
+roadnet walk.
+
+### 4c. `describe_position` latency, full-theatre-scale sample
+
+From `world-model/`, with the venv active:
+
+```sh
+.venv/bin/python tools/measure_m7_stage4_perf.py latency --region syria-full
+```
+
+Unlike M5 Stage 5's 100 points confined to one 20 km box, this samples every registered control
+point for the theatre (`tests/control_points.py`'s full eight-point set, already spread across
+coastal/urban/desert/mountainous terrain) plus 300 points drawn uniformly across the *entire*
+`syria-full` bbox plus 40 points extended slightly past its edges (`--n-random`/`--n-boundary`
+override the counts if you want a bigger or smaller sample). Prints the same
+mean/median/p95/p99/min/max shape as M5's report.
+
+Compare against M5's Latakia baseline: mean 89.0 ms, median 71.3 ms, p95 223.7 ms, p99
+275.0 ms. A full-theatre store has vastly more rows for the R\*Tree index to search, but per
+M5's own conclusion an R\*Tree's query cost scales with how many candidate features fall near a
+given point, not with the total table size — so latency in the same rough range (tens to a few
+hundred ms) is the expected, unremarkable result. If p99 comes back an order of magnitude
+higher (multi-second queries), that is the one finding this stage exists to catch — worth a
+follow-up investigation into whether an index is missing or a query is doing an unindexed table
+scan, not something to wave off as "full theatre is just slower."
+
+### 4d. Record the result
+
+Note the real file size, rebuild wall time, and latency numbers — same convention as every
+earlier stage's "record the result" step, e.g. in a new dated `world-model/research/` note
+mirroring M5 Stage 5's and this plan's own Stage 0 census note. This is the actual
+Definition-of-Done evidence for M7 Stage 4, and for M7 as a whole — an agent cannot produce it
+per the plan's "Execution boundary". Once this is recorded and reviewed, M7 is ready for
+sign-off in `world-model/ROADMAP.md`/`todo/todo.md` (a decision for after you've seen these
+real numbers, not one made by the implementer).
