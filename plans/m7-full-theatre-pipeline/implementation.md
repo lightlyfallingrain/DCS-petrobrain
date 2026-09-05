@@ -407,3 +407,125 @@ ridge/valley classifier was not rerun anywhere in this stage, per the plan's loc
   update** -- 9 call sites across 5 test files, none of which changed test *intent* (see Stage
   0's implementation.md entry for the same "many direct readers of one field" pattern recurring
   here for a different field).
+
+## Stage 3 — Validation (2026-09-05)
+
+Extended `tests/control_points.py` with four new geographically-spread control points (coastal,
+urban, desert, mountainous), added `build.validate.check_elevation_provenance` (provenance-at-
+scale check, generalizing Stage 2's two-fixture proof to a scattered point set), and wrote
+`tools/validate_m7_stage3.py` for the user to run against their real `syria-full.sqlite`.
+Per the plan's "Execution boundary": no real full-theatre store exists or was built here --
+everything below is verified against small/synthetic fixtures, same posture as every prior
+stage. **`src/terrain/` was not touched** and the M5 roadnet resync audit was not run or
+touched, per the plan's explicit Stage 3 exclusion.
+
+### Files Changed
+
+- `world-model/tests/control_points.py` -- added four new `ControlPoint`s to the existing
+  `CONTROL_POINTS` list (via `.extend(...)`, so every existing consumer of `CONTROL_POINTS` --
+  `tools/validate_m7_stage1.py`, `tests/test_describe_position.py`'s spread test, `tools/
+  report_control_point_errors.py` -- automatically picks up the wider set with no code change
+  of its own):
+  - **Coastal**: Rene Mouawad AB / Klieat (OLKA), Akkar, northern Lebanon.
+  - **Urban**: Mezzeh Air Base (OS67), inside Damascus city.
+  - **Desert**: Deir ez-Zor Airport (OSDZ), Euphrates valley, far eastern theatre edge.
+  - **Mountainous**: Kahramanmaras Airport (LTCN), foot of the Taurus range, far northern
+    theatre edge.
+
+  Each pairs a DCS-authoritative `(x, z)` read directly from the real, already-staged
+  `world-model/data/raw/dcs/syria/map/beacons.lua` (grepped for `display_name`/`position`
+  fields -- e.g. `airfield25_0` for MEZZEH) with an independently-published real-world ARP
+  (Wikipedia infobox coordinates, cross-checked against SkyVector for Palmyra during candidate
+  selection even though Palmyra itself wasn't used) -- never that same beacon's own
+  `positionGeo` field, per M1 Finding 2's non-circularity rule, same posture as the existing
+  Aleppo point. Verified via `tools/report_control_point_errors.py` before committing: all four
+  residuals (871m, 958m, 1135m, 169m) land comfortably inside the existing 1,500m tolerance and
+  the same 169-1315m band the original four points span -- no outlier, no sign of a
+  transform/theatre mismatch.
+- `world-model/src/build/validate.py` -- added `check_elevation_provenance` (plus
+  `ProvenanceSpotCheck`/`ProvenanceCheckReport`): runs `describe_position` at a list of
+  `SpotCheckPoint`s and confirms `elevation.source`/`surface_type.provenance` are each
+  unambiguously `"srtm"` or `"dcs_probe"` (`_VALID_GRID_PROVENANCE`) -- `"unavailable"` (no grid
+  built) and any other/stale string (e.g. the pre-Stage-2 hardcoded `"dcs"` literal) both count
+  as not-ok. Reuses Stage 1's `SpotCheckPoint`/`describe_position` plumbing rather than adding a
+  second store-reading path; does not touch `store/`, `query/`, or `terrain/`.
+- `world-model/tools/validate_m7_stage3.py` (new) -- the CLI the run instructions tell the user
+  to run against their real `syria-full.sqlite`: road-count check, coordinate-residual check,
+  and spot-checks over the full (now eight-point) `CONTROL_POINTS` set (identical logic to
+  `validate_m7_stage1.py` for those three), plus the new `provenance_checks` section from
+  `check_elevation_provenance`. Deliberately duplicates Stage 1's road/coordinate/spot-check
+  logic rather than refactoring `validate_m7_stage1.py` into a shared helper -- matches this
+  project's established one-throwaway-script-per-stage convention (`validate_m7_stage1.py`,
+  `validate_m7_stage2_elevation.py`), and the two scripts' equivalence on those three checks is
+  itself a natural consequence of `CONTROL_POINTS` now being a single shared list rather than a
+  per-stage split.
+- `world-model/docs/M7_RUN_INSTRUCTIONS.md` -- added a "Stage 3" section (run
+  `validate_m7_stage3.py`, read `provenance_checks.all_ok`, what a real SRTM-primary build
+  should report for every point). Also corrected Stage 1's doc text, which had hardcoded "four
+  scattered points" -- now stale since `CONTROL_POINTS` is a single list Stage 3 extended in
+  place, so re-running `validate_m7_stage1.py` today already checks all eight points, not just
+  the original four.
+
+### Tests Added
+
+- `world-model/tests/test_build_validate.py` --
+  `test_check_elevation_provenance_all_ok_for_real_srtm_and_dcs_probe_values`: a store with a
+  real `"srtm"` elevation grid and `"dcs_probe"` surface_type grid reports both as ok with the
+  exact source strings.
+  `test_check_elevation_provenance_flags_a_stale_ambiguous_value`: **the deliberately-bad
+  fixture proving the check actually catches a problem** -- an elevation grid tagged with the
+  pre-M7-Stage-2 hardcoded `"dcs"` literal (the exact bug `query/describe.py`'s provenance fix
+  replaced) is flagged `elevation_provenance_ok=False`/`all_ok=False`, while the unrelated,
+  correctly-tagged surface_type grid in the same store stays `ok=True` (each grid kind checked
+  independently, one bad value doesn't false-flag the other).
+  `test_check_elevation_provenance_flags_a_missing_grid_as_not_ok`: no grid built at all reports
+  `"unavailable"`, which the check also treats as not-ok (missing, not just ambiguous, still
+  fails).
+  `test_check_elevation_provenance_covers_every_point_given`: a two-point scattered set (one
+  inside the fixture grid's sampled coverage, one outside) both report the same store-wide,
+  correct provenance -- proving the loop covers every point given, not just the first, and that
+  provenance (store-wide) is independent of a point's own grid-coverage/`dcs_m` availability.
+
+### Checks
+
+- `ruff format --check world-model/src world-model/tests`: pass (69 files)
+- `ruff check world-model/src world-model/tests`: pass
+- `mypy --strict world-model/src`: pass, 40 source files
+- `mypy --strict` on the new `tools/validate_m7_stage3.py` individually (not part of the
+  mandated command, but checked per project convention for new tool files): pass
+- `pytest world-model/tests -q`: pass, 194 passed (was 186 after Stage 2; +8: 4 new functions in
+  `test_build_validate.py`'s provenance section, plus 4 more automatically from
+  `tests/test_coordinates.py::test_control_point_within_expected_residual`, which is
+  parametrized directly over `CONTROL_POINTS` -- the four new control points added themselves
+  to that existing parametrized test with no code change needed there)
+
+### Notable Discoveries
+
+- **`CONTROL_POINTS` being a single flat list (not split per stage) meant Stage 3's four new
+  points automatically strengthened Stage 1's existing coverage with zero code change to Stage
+  1's own test/tool** -- `test_describe_position_control_points_spread_across_theatre` and
+  `validate_m7_stage1.py` both iterate `CONTROL_POINTS` directly, so today they check eight
+  points, not four. This is the intended effect of "extend `control_points.py`" (not a
+  side-effect to work around), but it did make Stage 1's already-written run-instructions text
+  stale (hardcoded "four scattered points") -- corrected in this stage's doc edit, flagged here
+  since a future stage adding yet more control points should expect the same automatic
+  propagation and check for other now-stale hardcoded counts in prose.
+- **Grid provenance is store-wide, not per-point** (`store.reader`'s "most recent `grid.kind`
+  row wins" convention, unchanged since Stage 2) -- there is exactly one active `elevation`
+  provenance and one active `surface_type` provenance per store at any time, never a mix in the
+  same store. This shaped `check_elevation_provenance`'s design (and ruled out a "some points
+  ambiguous, others not, in the same real build" test scenario as physically impossible given
+  the current store model) -- worth remembering if a future milestone ever wants per-tile/
+  per-region provenance within one store (e.g. SRTM in most of the theatre, DCS-probe validated
+  data overriding a few cells), since that would need a real schema change, not just a new
+  check function.
+- **Coastal-airport candidate selection needed one pivot mid-task**: the DCS `beacons.lua`
+  'BANIAS' homer (`world_0`) was the first coastal candidate considered, but Baniyas has no
+  published airport ICAO/ARP to cross-check against independently (only the city's own
+  coordinates turned up), which would have made that point circular/unverifiable in the same
+  way M1 Finding 2 warns against for beacon-only sources. Switched to Rene Mouawad AB / Klieat
+  (OLKA, a real ICAO-coded airport just across the Lebanese border) instead, which has a
+  proper independent Wikipedia-published ARP. Not a defect in the beacon data, just a reminder
+  that "has a beacon in `beacons.lua`" and "has an independently-verifiable real-world
+  reference" are two different requirements, and the second one should be checked before
+  investing in coordinate extraction.

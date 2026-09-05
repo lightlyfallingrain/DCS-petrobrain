@@ -17,14 +17,15 @@ import pytest
 
 from build.validate import (
     SpotCheckPoint,
+    check_elevation_provenance,
     check_road_count,
     compare_probe_to_srtm,
     spot_check_positions,
 )
 from elevation.dcs_grid import DcsElevationSample
 from elevation.dem import SrtmTile
-from store.models import Region, StoredFeature
-from store.writer import insert_features, insert_region, open_for_build
+from store.models import ElevationGrid, Region, StoredFeature, SurfaceGrid
+from store.writer import insert_features, insert_grid, insert_region, open_for_build
 
 _ROAD_X, _ROAD_Z = 1000.0, 0.0
 _SETTLEMENT_X, _SETTLEMENT_Z = 0.0, 1000.0
@@ -200,3 +201,162 @@ def test_compare_probe_to_srtm_empty_result_has_null_stats() -> None:
     assert report.points_skipped == 1
     assert report.mean_delta_m is None
     assert report.stddev_delta_m is None
+
+
+def _fixture_conn_with_region(tmp_path: Path) -> sqlite3.Connection:
+    """A store with a region but deliberately no grid at all -- the
+    "missing" half of Stage 3's provenance check."""
+    conn = open_for_build(tmp_path / "fixture-provenance.sqlite")
+    insert_region(
+        conn,
+        Region(
+            name="test-region",
+            theatre="Syria",
+            centre_x=0.0,
+            centre_z=0.0,
+            half_extent_x_m=5000.0,
+            half_extent_z_m=5000.0,
+            built_at="2026-09-05T00:00:00+00:00",
+        ),
+    )
+    return conn
+
+
+def _small_elevation_grid(provenance: str) -> ElevationGrid:
+    return ElevationGrid(
+        origin_x=0.0,
+        origin_z=0.0,
+        spacing_m=100.0,
+        n_rows=2,
+        n_cols=2,
+        source_id=None,
+        provenance=provenance,
+        stats={},
+        samples=[[0.0, 100.0], [200.0, 300.0]],
+    )
+
+
+def _small_surface_grid(provenance: str) -> SurfaceGrid:
+    return SurfaceGrid(
+        origin_x=0.0,
+        origin_z=0.0,
+        spacing_m=100.0,
+        n_rows=2,
+        n_cols=2,
+        source_id=None,
+        provenance=provenance,
+        stats={},
+        samples=[[1, 1], [1, 1]],
+    )
+
+
+def test_check_elevation_provenance_all_ok_for_real_srtm_and_dcs_probe_values(
+    tmp_path: Path,
+) -> None:
+    """A store whose `elevation` grid came from SRTM and whose
+    `surface_type` grid came from the DCS live probe (M7 Stage 2's real
+    shape for a `syria-full` build) reports both provenances as ok, and
+    with the exact source strings a caller would want to display."""
+    conn = _fixture_conn_with_region(tmp_path)
+    try:
+        insert_grid(conn, _small_elevation_grid("srtm"))
+        insert_grid(conn, _small_surface_grid("dcs_probe"))
+
+        report = check_elevation_provenance(
+            conn, "Syria", [SpotCheckPoint(name="centre", x=50.0, z=50.0)]
+        )
+    finally:
+        conn.close()
+
+    assert report.all_ok is True
+    assert len(report.checks) == 1
+    check = report.checks[0]
+    assert check.elevation_source == "srtm"
+    assert check.elevation_provenance_ok is True
+    assert check.surface_type_provenance == "dcs_probe"
+    assert check.surface_type_provenance_ok is True
+
+
+def test_check_elevation_provenance_flags_a_stale_ambiguous_value(
+    tmp_path: Path,
+) -> None:
+    """Deliberately-bad fixture: an `elevation` grid tagged with the
+    pre-M7-Stage-2 hardcoded `"dcs"` literal (the exact bug
+    `query/describe.py`'s provenance fix replaced -- see its module
+    docstring) is neither `"srtm"` nor `"dcs_probe"`, and the check must
+    flag it rather than passing silently. Proves the check actually catches
+    an ambiguous provenance value, not just that it passes on good data."""
+    conn = _fixture_conn_with_region(tmp_path)
+    try:
+        insert_grid(conn, _small_elevation_grid("dcs"))
+        insert_grid(conn, _small_surface_grid("dcs_probe"))
+
+        report = check_elevation_provenance(
+            conn, "Syria", [SpotCheckPoint(name="centre", x=50.0, z=50.0)]
+        )
+    finally:
+        conn.close()
+
+    assert report.all_ok is False
+    check = report.checks[0]
+    assert check.elevation_source == "dcs"
+    assert check.elevation_provenance_ok is False
+    # The unrelated, correctly-tagged surface_type grid is not dragged down
+    # by the elevation grid's bad value -- each is checked independently.
+    assert check.surface_type_provenance_ok is True
+
+
+def test_check_elevation_provenance_flags_a_missing_grid_as_not_ok(
+    tmp_path: Path,
+) -> None:
+    """No grid built at all reports `"unavailable"` (absence-as-absence,
+    per `query/describe.py`), which the provenance check must also treat
+    as not-ok -- Stage 3 cares that provenance is never ambiguous *or*
+    silently missing where a real build should have populated it."""
+    conn = _fixture_conn_with_region(tmp_path)
+    try:
+        report = check_elevation_provenance(
+            conn, "Syria", [SpotCheckPoint(name="centre", x=50.0, z=50.0)]
+        )
+    finally:
+        conn.close()
+
+    assert report.all_ok is False
+    check = report.checks[0]
+    assert check.elevation_source == "unavailable"
+    assert check.elevation_provenance_ok is False
+    assert check.surface_type_provenance == "unavailable"
+    assert check.surface_type_provenance_ok is False
+
+
+def test_check_elevation_provenance_covers_every_point_given(
+    tmp_path: Path,
+) -> None:
+    """A scattered multi-point set (Stage 3's "wider, geographically-spread
+    control-point set") produces one `ProvenanceSpotCheck` per point, all
+    reporting the store's real, unambiguous grid provenance -- not just the
+    first point checked. Grid provenance is store-wide (one "most recent"
+    grid per kind, per `store.reader`'s convention), so being outside the
+    grid's own sampled coverage changes `elevation.dcs_m`, not the
+    provenance label itself; `all_ok` aggregating across every point (not
+    just the first) is proven together with the ambiguous/missing cases
+    above, which fail on a single point."""
+    conn = _fixture_conn_with_region(tmp_path)
+    try:
+        insert_grid(conn, _small_elevation_grid("srtm"))
+        insert_grid(conn, _small_surface_grid("dcs_probe"))
+
+        report = check_elevation_provenance(
+            conn,
+            "Syria",
+            [
+                SpotCheckPoint(name="inside_grid", x=50.0, z=50.0),
+                SpotCheckPoint(name="outside_grid", x=4000.0, z=4000.0),
+            ],
+        )
+    finally:
+        conn.close()
+
+    assert report.all_ok is True
+    assert len(report.checks) == 2
+    assert {check.name for check in report.checks} == {"inside_grid", "outside_grid"}

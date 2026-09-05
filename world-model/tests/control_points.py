@@ -106,3 +106,75 @@ CONTROL_POINTS: list[ControlPoint] = [
         expected_max_residual_m=1500.0,
     ),
 ]
+
+# Stage 3 (M7) adds a geographically-spread set covering terrain types Stage 1's
+# four points did not: coastal, urban, desert, mountainous. Each pairs a
+# DCS-authoritative x/z from `beacons.lua` (not a fresh live `coord.LOtoLL`
+# probe -- no DCS access this session, same posture as the Aleppo point above)
+# with an independently-published real-world ARP, never that beacon's own
+# `positionGeo` field, per M1 Finding 2's non-circularity rule.
+CONTROL_POINTS.extend(
+    [
+        ControlPoint(
+            theatre="Syria",
+            name="Rene Mouawad AB / Klieat (OLKA)",
+            # Coastal (Akkar, northern Lebanon, ~6 km from the Mediterranean).
+            # beacons.lua `world_2` ('KLEYATE', BEACON_TYPE_AIRPORT_HOMER).
+            dcs_x=-48636.152344,
+            dcs_z=7884.588867,
+            real_lat=34.58944,
+            real_lon=36.01139,
+            source=(
+                "Published coordinates 34°35'22\"N 36°00'41\"E, "
+                "https://en.wikipedia.org/wiki/Rene_Mouawad_Air_Base"
+            ),
+            expected_max_residual_m=1500.0,
+        ),
+        ControlPoint(
+            theatre="Syria",
+            name="Mezzeh Air Base (OS67)",
+            # Urban (inside Damascus city, south-west of the old centre).
+            # beacons.lua `airfield25_0` ('MEZZEH', BEACON_TYPE_AIRPORT_HOMER).
+            dcs_x=-171265.828125,
+            dcs_z=25122.662109,
+            real_lat=33.47778,
+            real_lon=36.22333,
+            source=(
+                "Published coordinates 33°28'40\"N 36°13'24\"E, "
+                "https://en.wikipedia.org/wiki/Mezzeh_Air_Base"
+            ),
+            expected_max_residual_m=1500.0,
+        ),
+        ControlPoint(
+            theatre="Syria",
+            name="Deir ez-Zor Airport (OSDZ)",
+            # Desert (Euphrates valley, far eastern edge of the theatre).
+            # beacons.lua `airfield42_0` ('DEIR_EZ-ZOR', BEACON_TYPE_AIRPORT_HOMER).
+            dcs_x=25885.554688,
+            dcs_z=390774.875000,
+            real_lat=35.28528,
+            real_lon=40.17583,
+            source=(
+                "Published ARP 35°17'07\"N 040°10'33\"E, "
+                "https://en.wikipedia.org/wiki/Deir_ez-Zor_Airport"
+            ),
+            expected_max_residual_m=1500.0,
+        ),
+        ControlPoint(
+            theatre="Syria",
+            name="Kahramanmaras Airport (LTCN)",
+            # Mountainous (Turkish city at the foot of the Taurus range's
+            # Ahir Dagi, far northern edge of the theatre).
+            # beacons.lua `world_1` ('KAHRAMANMARAS', BEACON_TYPE_AIRPORT_HOMER).
+            dcs_x=276904.968750,
+            dcs_z=101895.742188,
+            real_lat=37.53889,
+            real_lon=36.95333,
+            source=(
+                "Published coordinates 37°32'20\"N 036°57'12\"E, "
+                "https://en.wikipedia.org/wiki/Kahramanmara%C5%9F_Airport"
+            ),
+            expected_max_residual_m=1500.0,
+        ),
+    ]
+)

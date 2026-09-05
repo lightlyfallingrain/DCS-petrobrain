@@ -7,10 +7,11 @@ only (see `tests/test_pipeline_build_region.py`, `tests/test_build_validate.py`)
 build, its real feature counts, wall time, and file size are the user's own result.
 
 This doc covers **Stage 1** (DCS-native vector layers: roads, towns, beacons — no OSM, no
-elevation) and **Stage 2** (SRTM-primary elevation/`surface_type`, plus a DCS live-probe
-spot-check validation). Run Stage 1 first; Stage 2 can be run against the same
+elevation), **Stage 2** (SRTM-primary elevation/`surface_type`, plus a DCS live-probe
+spot-check validation), and **Stage 3** (a wider geographically-spread control-point pass plus
+provenance-at-scale validation). Run Stage 1 first; Stage 2 can be run against the same
 `syria-full.sqlite` afterward, or built together in one `build_world_model.py` invocation (see
-Stage 2 step 2 below).
+Stage 2 step 2 below); Stage 3 runs last, once both are in place.
 
 ## 1. Check the raw files are staged
 
@@ -70,12 +71,14 @@ This checks the freshly-built `data/world-model/syria-full.sqlite` against:
   `world-model/research/2026-09-05-m7-stage0-roadnet-census.md`). A count far outside that band
   means something changed between Stage 0's measurement-only walk and Stage 1's real build (a
   bug, not an expected variance) and is worth investigating before moving on.
-- **Coordinate control points**: `tests/control_points.py`'s four scattered points (Damascus,
-  Latakia, Beirut, Aleppo) transform to within their published real-world ARP's expected
-  residual — this doesn't depend on the store's contents (see
-  `tests/test_describe_position.py`'s control-point tests, which already pin this in CI), but
-  re-running it here confirms the same theatre/projection is in play for the real build.
-- **Spot checks**: `describe_position` at each of those same four points reports whether a
+- **Coordinate control points**: every point in `tests/control_points.py`'s `CONTROL_POINTS`
+  (Stage 1's original four scattered points — Damascus, Latakia, Beirut, Aleppo — plus Stage 3's
+  four additional terrain-type points, once that stage has extended the list) transforms to
+  within its published real-world ARP's expected residual — this doesn't depend on the store's
+  contents (see `tests/test_describe_position.py`'s control-point tests, which already pin this
+  in CI), but re-running it here confirms the same theatre/projection is in play for the real
+  build.
+- **Spot checks**: `describe_position` at each of those same points reports whether a
   nearest road/settlement was found and at what distance — a human-scannable sanity check, not
   an exact-value assertion (Stage 1 has no independent ground truth for "the nearest road to
   this specific point"). If every point comes back with no nearest road at all, something is
@@ -181,3 +184,60 @@ Note the real SRTM ingest stats, the spot-check delta report, and (if it changed
 `syria-full.sqlite`'s file size/wall time — same convention as Stage 1's step 4. This is the
 actual Definition-of-Done evidence for M7 Stage 2; an agent cannot produce it per the plan's
 "Execution boundary".
+
+## Stage 3 — validation: wider control-point set + provenance at scale
+
+Per the plan's Stage 3: a full `describe_position` correctness pass over a wider,
+geographically-spread control-point set (coastal, mountainous, urban, desert — broader than
+Stage 1's four Damascus/Aleppo/Beirut/Latakia points), plus confirming `elevation`/
+`surface_type` provenance is never ambiguous about `"srtm"` vs `"dcs_probe"` at scale. This
+stage does **not** include the M5 roadnet resync audit — that's a separate follow-up task,
+tracked in the plan's "Deferred / Out of Scope", not part of M7.
+
+Run this once `syria-full.sqlite` has both its Stage 1 vector layers and Stage 2 SRTM elevation
+grid built (the earlier steps in this doc).
+
+### 3a. Run the Stage 3 validator
+
+From `world-model/`, with the venv active:
+
+```sh
+.venv/bin/python tools/validate_m7_stage3.py
+```
+
+This reads `tests/control_points.py`'s full set — Stage 1's original four points plus four new
+Stage 3 additions spread across terrain types the first four didn't cover:
+
+- **Coastal** — Rene Mouawad AB / Klieat (OLKA), Akkar, northern Lebanon.
+- **Urban** — Mezzeh Air Base (OS67), inside Damascus city.
+- **Desert** — Deir ez-Zor Airport (OSDZ), Euphrates valley, far eastern edge of the theatre.
+- **Mountainous** — Kahramanmaras Airport (LTCN), at the foot of the Taurus range, far northern
+  edge of the theatre.
+
+Each pairs a DCS-authoritative `(x, z)` from `beacons.lua` with an independently-published
+real-world ARP (Wikipedia/SkyVector — never that same beacon's own `positionGeo` field, per M1
+Finding 2's non-circularity rule) — see `tests/control_points.py`'s docstrings for the exact
+sources.
+
+The script's JSON report has three parts:
+
+- **`road_count_check`** / **`coordinate_control_point_checks`** / **`spot_checks`** — the same
+  checks `validate_m7_stage1.py` runs, just now over all eight points instead of four.
+- **`provenance_checks`** — for each point, `describe_position`'s `elevation.source` and
+  `surface_type.provenance`, and whether each is unambiguously `"srtm"` or `"dcs_probe"` (never
+  `"unavailable"`, and never a stale/other value — see `build.validate.check_elevation_
+  provenance`'s docstring). For a real `syria-full` build (SRTM-primary, no stored DCS-probe
+  grid — Stage 2 repurposes the probe to a spot-check report only), every point should report
+  `elevation_source == "srtm"`. If `provenance_checks.all_ok` is `False`, or any point reports
+  `"unavailable"`, that means a layer didn't build as expected — investigate before treating the
+  store as done, since per this project's provenance invariant a `.sqlite` with ambiguous or
+  missing grid provenance is not a valid deliverable.
+
+There is no automatic pass/fail exit code beyond the "store doesn't exist yet" case — read the
+report and use judgement, the same as Stages 1 and 2.
+
+### 3b. Record the result
+
+Note the real coordinate-residual and provenance numbers — same convention as Stages 1 and 2's
+"record the result" steps. This is the actual Definition-of-Done evidence for M7 Stage 3; an
+agent cannot produce it per the plan's "Execution boundary".

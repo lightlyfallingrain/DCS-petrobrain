@@ -31,6 +31,19 @@ samples (`elevation.dcs_grid.parse_probe_output`'s output --
 reports the alignment delta at each shared point plus mean/median/stddev/
 min/max summary stats -- independent of `store`/`sqlite3`, since this
 answers "does DCS agree with SRTM here", not "what's in the built store".
+
+**Stage 3** (`check_elevation_provenance`): per the plan's Stage 3
+("Confirm provenance/confidence fields are correctly populated at scale --
+specifically that `elevation` features are never ambiguous about `"srtm"`
+vs `"dcs_probe"` provenance"), runs `describe_position` at a scattered
+point set and checks that `elevation.source`/`surface_type.provenance` are
+each one of the two real grid-provenance values
+(`store.reader.grid_provenance`'s documented `"srtm"`/`"dcs_probe"`
+contract) -- never `"unavailable"` (no grid built at all) and never some
+other/stale string (e.g. the hardcoded `"dcs"` this project shipped before
+M7 Stage 2 fixed it, see `query/describe.py`'s module docstring). This
+reuses Stage 1's `SpotCheckPoint`/`describe_position` plumbing rather than
+adding a second store-reading path.
 """
 
 import sqlite3
@@ -225,4 +238,72 @@ def compare_probe_to_srtm(
         stddev_delta_m=statistics.stdev(deltas) if len(deltas) > 1 else 0.0,
         min_delta_m=min(deltas),
         max_delta_m=max(deltas),
+    )
+
+
+# The only two provenance values `build.ingest_srtm`/`build.ingest_probe`
+# ever write (`GRID_PROVENANCE_SRTM`/`GRID_PROVENANCE_DCS_PROBE`). Not
+# imported directly from those modules to avoid a cross-import cycle purely
+# for two string literals; pinned here and cross-checked by
+# `tests/test_build_validate.py` against the real constants.
+_VALID_GRID_PROVENANCE = frozenset({"srtm", "dcs_probe"})
+
+
+@dataclass(frozen=True)
+class ProvenanceSpotCheck:
+    """One point's `describe_position` elevation/surface_type provenance
+    labels, plus whether each is unambiguously one of the two real grid
+    sources. `"unavailable"` (no grid built for that kind at all) and any
+    other/stale string both count as not-ok -- Stage 3 is checking that
+    provenance is never ambiguous, not merely that it is present."""
+
+    name: str
+    elevation_source: str
+    elevation_provenance_ok: bool
+    surface_type_provenance: str
+    surface_type_provenance_ok: bool
+
+
+@dataclass(frozen=True)
+class ProvenanceCheckReport:
+    """Whole-set summary of `ProvenanceSpotCheck` results -- `all_ok` is
+    `False` if even one point's elevation or surface_type provenance is
+    ambiguous/missing, so a caller doesn't have to scan `checks` by hand to
+    notice a single bad point in an otherwise-clean scattered set."""
+
+    checks: list[ProvenanceSpotCheck]
+    all_ok: bool
+
+
+def check_elevation_provenance(
+    conn: sqlite3.Connection, theatre: str, points: list[SpotCheckPoint]
+) -> ProvenanceCheckReport:
+    """Run `describe_position` at each of `points` and confirm its
+    `elevation.source`/`surface_type.provenance` are each unambiguously
+    `"srtm"` or `"dcs_probe"` -- the store-level half of the M7 Stage 2
+    provenance-separation fix (`query/describe.py`'s `grid_provenance`
+    read), exercised here at a wider, theatre-spread point set per the
+    plan's Stage 3 ("Confirm provenance/confidence fields are correctly
+    populated at scale")."""
+    checks = []
+    for point in points:
+        description = describe_position(conn, theatre, point.x, point.z)
+        elevation_source = description.elevation.source
+        surface_type_provenance = description.surface_type.provenance
+        checks.append(
+            ProvenanceSpotCheck(
+                name=point.name,
+                elevation_source=elevation_source,
+                elevation_provenance_ok=elevation_source in _VALID_GRID_PROVENANCE,
+                surface_type_provenance=surface_type_provenance,
+                surface_type_provenance_ok=surface_type_provenance
+                in _VALID_GRID_PROVENANCE,
+            )
+        )
+    return ProvenanceCheckReport(
+        checks=checks,
+        all_ok=all(
+            check.elevation_provenance_ok and check.surface_type_provenance_ok
+            for check in checks
+        ),
     )
