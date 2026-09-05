@@ -44,6 +44,7 @@ def _grid(sign: float) -> ElevationGrid:
         n_rows=_N,
         n_cols=_N,
         source_id=None,
+        provenance="dcs_probe",
         stats={},
         samples=samples,
     )
@@ -99,6 +100,7 @@ def test_classify_curvature_skips_cells_with_unsampled_neighbours() -> None:
         n_rows=grid.n_rows,
         n_cols=grid.n_cols,
         source_id=None,
+        provenance="dcs_probe",
         stats={},
         samples=samples,
     )

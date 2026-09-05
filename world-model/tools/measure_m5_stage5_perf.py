@@ -62,22 +62,22 @@ def _sample_points(
     points: list[tuple[float, float]] = []
     for _ in range(n_in_region):
         x = rng.uniform(
-            region.centre_x - region.half_extent_m,
-            region.centre_x + region.half_extent_m,
+            region.centre_x - region.half_extent_x_m,
+            region.centre_x + region.half_extent_x_m,
         )
         z = rng.uniform(
-            region.centre_z - region.half_extent_m,
-            region.centre_z + region.half_extent_m,
+            region.centre_z - region.half_extent_z_m,
+            region.centre_z + region.half_extent_z_m,
         )
         points.append((x, z))
     for _ in range(n_boundary):
         x = rng.uniform(
-            region.centre_x - 1.5 * region.half_extent_m,
-            region.centre_x + 1.5 * region.half_extent_m,
+            region.centre_x - 1.5 * region.half_extent_x_m,
+            region.centre_x + 1.5 * region.half_extent_x_m,
         )
         z = rng.uniform(
-            region.centre_z - 1.5 * region.half_extent_m,
-            region.centre_z + 1.5 * region.half_extent_m,
+            region.centre_z - 1.5 * region.half_extent_z_m,
+            region.centre_z + 1.5 * region.half_extent_z_m,
         )
         points.append((x, z))
     return points

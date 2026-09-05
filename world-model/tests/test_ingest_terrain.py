@@ -32,6 +32,7 @@ def _ridge_grid() -> ElevationGrid:
         n_rows=_N,
         n_cols=_N,
         source_id=None,
+        provenance="dcs_probe",
         stats={},
         samples=samples,
     )

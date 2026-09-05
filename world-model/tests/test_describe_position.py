@@ -52,7 +52,8 @@ def _fixture_conn(tmp_path: Path) -> sqlite3.Connection:
             theatre="Syria",
             centre_x=44934.892,
             centre_z=5685.076,
-            half_extent_m=10000.0,
+            half_extent_x_m=10000.0,
+            half_extent_z_m=10000.0,
             built_at="2026-09-04T00:00:00+00:00",
         ),
     )
@@ -193,6 +194,7 @@ def _fixture_conn_with_grid(tmp_path: Path) -> sqlite3.Connection:
             n_rows=3,
             n_cols=3,
             source_id=None,
+            provenance="dcs_probe",
             stats={"points_expected": 9, "points_received": 9, "srtm": None},
             samples=elevation_samples,
         ),
@@ -206,6 +208,7 @@ def _fixture_conn_with_grid(tmp_path: Path) -> sqlite3.Connection:
             n_rows=3,
             n_cols=3,
             source_id=None,
+            provenance="dcs_probe",
             stats={"points_expected": 9, "points_received": 9, "counts": {"ROAD": 1}},
             samples=surface_samples,
         ),
@@ -223,7 +226,7 @@ def test_describe_position_reads_elevation_and_surface_type_from_a_built_grid(
         conn.close()
 
     assert result.elevation.dcs_m == 123.4
-    assert result.elevation.source == "dcs"
+    assert result.elevation.source == "dcs_probe"
     assert result.elevation.confidence == "high"
     # SRTM comparison is metadata-only (grid stats), never a per-point
     # lookup this function performs -- see the query.describe module
@@ -232,7 +235,7 @@ def test_describe_position_reads_elevation_and_surface_type_from_a_built_grid(
     assert result.elevation.delta_m is None
 
     assert result.surface_type.value == "ROAD"
-    assert result.surface_type.provenance == "dcs"
+    assert result.surface_type.provenance == "dcs_probe"
     assert result.surface_type.sampled_at_m == _GRID_SPACING_M
 
 
@@ -353,3 +356,89 @@ def test_describe_position_control_point_latakia_arp(tmp_path: Path) -> None:
         assert residual_m <= oslk.expected_max_residual_m
     finally:
         conn.close()
+
+
+def test_describe_position_control_points_spread_across_theatre(
+    tmp_path: Path,
+) -> None:
+    """M7 Stage 1: the same non-circular tolerance-band check as
+    `test_describe_position_control_point_latakia_arp`, but over every
+    control point in `tests/control_points.py` -- Damascus, Latakia,
+    Beirut, Aleppo -- rather than Latakia alone. This is the "correctness
+    checked at more than one location once the store covers the whole
+    theatre" coverage `plans/m7-full-theatre-pipeline/plan.md` Stage 1
+    calls for. Store content is irrelevant here too (see the module
+    docstring and the Latakia-only test above) -- `lat`/`lon` come purely
+    from `coordinates.dcs_to_wgs84`, so an empty-but-valid store answers
+    for any point regardless of theatre location."""
+    conn = open_for_build(tmp_path / "control_points_fixture.sqlite")
+    try:
+        for point in CONTROL_POINTS:
+            result = describe_position(conn, point.theatre, point.dcs_x, point.dcs_z)
+            residual_m = haversine_distance_m(
+                result.lat, result.lon, point.real_lat, point.real_lon
+            )
+            assert residual_m <= point.expected_max_residual_m, (
+                f"{point.name}: residual {residual_m:.1f}m exceeds "
+                f"{point.expected_max_residual_m:.1f}m"
+            )
+    finally:
+        conn.close()
+
+
+def test_describe_position_elevation_source_reports_srtm_not_dcs(
+    tmp_path: Path,
+) -> None:
+    """M7 Stage 2's core provenance invariant, proven end to end through
+    `describe_position` rather than just at the store-reader layer (see
+    `tests/test_store_reader.py::test_grid_provenance_distinguishes_srtm_
+    from_dcs_probe`): a store whose `elevation` grid was built from SRTM
+    must report `elevation.source == "srtm"`, never the `"dcs_probe"` label
+    a DCS-live-probe-built grid would carry (see the next test) -- the two
+    sources must never collapse into one undifferentiated answer."""
+    conn = _fixture_conn(tmp_path)
+    try:
+        insert_grid(
+            conn,
+            ElevationGrid(
+                origin_x=_GRID_ORIGIN_X,
+                origin_z=_GRID_ORIGIN_Z,
+                spacing_m=_GRID_SPACING_M,
+                n_rows=3,
+                n_cols=3,
+                source_id=None,
+                provenance="srtm",
+                stats={"points_expected": 9, "points_sampled": 9},
+                samples=[
+                    [10.0, 20.0, 30.0],
+                    [40.0, 111.0, 60.0],
+                    [70.0, 80.0, 90.0],
+                ],
+            ),
+        )
+        result = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert result.elevation.dcs_m == 111.0
+    assert result.elevation.source == "srtm"
+    assert result.elevation.source != "dcs_probe"
+
+
+def test_describe_position_elevation_source_reports_dcs_probe_not_srtm(
+    tmp_path: Path,
+) -> None:
+    """The other half of the invariant above: a store whose `elevation`
+    grid was built from the DCS live probe must report `"dcs_probe"`, never
+    `"srtm"` -- confirms this isn't a hardcoded flip to a new constant but
+    an actual read of the grid's own recorded source (uses
+    `_fixture_conn_with_grid`, which already builds a `"dcs_probe"`-tagged
+    grid, per the Stage 1/2 fixture above)."""
+    conn = _fixture_conn_with_grid(tmp_path)
+    try:
+        result = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert result.elevation.source == "dcs_probe"
+    assert result.elevation.source != "srtm"

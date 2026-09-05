@@ -17,8 +17,8 @@ def test_probe_grid_for_latakia_is_41x41_at_500m_spacing() -> None:
     assert spacing_m == 500.0
     assert n_rows == 41
     assert n_cols == 41
-    assert origin_x == region.centre_x - region.half_extent_m
-    assert origin_z == region.centre_z - region.half_extent_m
+    assert origin_x == region.centre_x - region.half_extent_x_m
+    assert origin_z == region.centre_z - region.half_extent_z_m
 
 
 def test_probe_grid_origin_is_south_west_corner_of_the_square() -> None:
@@ -28,8 +28,8 @@ def test_probe_grid_origin_is_south_west_corner_of_the_square() -> None:
 
     max_x = origin_x + (n_rows - 1) * spacing_m
     max_z = origin_z + (n_cols - 1) * spacing_m
-    assert max_x == region.centre_x + region.half_extent_m
-    assert max_z == region.centre_z + region.half_extent_m
+    assert max_x == region.centre_x + region.half_extent_x_m
+    assert max_z == region.centre_z + region.half_extent_z_m
 
 
 def test_probe_grid_respects_custom_spacing() -> None:

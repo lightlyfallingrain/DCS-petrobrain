@@ -41,6 +41,13 @@ from store.models import ElevationGrid, SurfaceGrid
 
 _NAME_RE = re.compile(r"^r(\d+)c(\d+)$")
 
+# `store.models.ElevationGrid`/`SurfaceGrid.provenance` tag for grids built
+# from this module's live-mission `land.getHeight`/`land.getSurfaceType`
+# probe -- distinct from `build.ingest_srtm.GRID_PROVENANCE_SRTM` (M7 Stage
+# 2's primary full-theatre elevation source). See `store/schema.py`'s
+# version-3 note.
+GRID_PROVENANCE_DCS_PROBE = "dcs_probe"
+
 _SURFACE_TYPE_LABELS: dict[int, str] = {
     1: "LAND",
     2: "SHALLOW_WATER",
@@ -178,6 +185,7 @@ def ingest_probe(
         n_rows=n_rows,
         n_cols=n_cols,
         source_id=source_id,
+        provenance=GRID_PROVENANCE_DCS_PROBE,
         stats={
             "points_expected": points_expected,
             "points_received": len(samples),
@@ -192,6 +200,7 @@ def ingest_probe(
         n_rows=n_rows,
         n_cols=n_cols,
         source_id=source_id,
+        provenance=GRID_PROVENANCE_DCS_PROBE,
         stats={
             "points_expected": points_expected,
             "points_received": len(samples),

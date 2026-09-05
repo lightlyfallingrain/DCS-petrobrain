@@ -10,9 +10,10 @@ import sqlite3
 from pathlib import Path
 
 from geometry import distance_point_point, distance_point_polyline, point_in_polygon
-from store.models import ElevationGrid, StoredFeature
+from store.models import ElevationGrid, StoredFeature, SurfaceGrid
 from store.reader import (
     containing_polygons,
+    grid_provenance,
     load_full_grid,
     nearest_feature,
     sample_grid,
@@ -235,6 +236,7 @@ def test_sample_grid_elevation_bilinear_interpolation(tmp_path: Path) -> None:
             n_rows=2,
             n_cols=2,
             source_id=None,
+            provenance="dcs_probe",
             stats={},
             samples=[[0.0, 100.0], [200.0, 300.0]],
         )
@@ -257,8 +259,6 @@ def test_sample_grid_surface_type_nearest_cell_not_interpolated(tmp_path: Path) 
     db_path = tmp_path / "grid.sqlite"
     conn = open_for_build(db_path)
     try:
-        from store.models import SurfaceGrid
-
         grid = SurfaceGrid(
             origin_x=0.0,
             origin_z=0.0,
@@ -266,6 +266,7 @@ def test_sample_grid_surface_type_nearest_cell_not_interpolated(tmp_path: Path) 
             n_rows=2,
             n_cols=2,
             source_id=None,
+            provenance="dcs_probe",
             stats={},
             samples=[[1, 3], [4, 5]],  # LAND, WATER / ROAD, RUNWAY
         )
@@ -291,6 +292,7 @@ def test_load_full_grid_returns_whole_matrix(tmp_path: Path) -> None:
             n_rows=2,
             n_cols=2,
             source_id=None,
+            provenance="srtm",
             stats={"points_expected": 4, "points_received": 4},
             samples=[[0.0, 100.0], [200.0, 300.0]],
         )
@@ -304,6 +306,9 @@ def test_load_full_grid_returns_whole_matrix(tmp_path: Path) -> None:
         assert loaded.spacing_m == 100.0
         assert loaded.samples == [[0.0, 100.0], [200.0, 300.0]]
         assert loaded.stats == {"points_expected": 4, "points_received": 4}
+        # Provenance must round-trip byte-for-byte, not just spacing/samples
+        # -- see store/schema.py's version-3 note.
+        assert loaded.provenance == "srtm"
     finally:
         conn.close()
 
@@ -319,6 +324,7 @@ def test_load_full_grid_leaves_missing_cells_none(tmp_path: Path) -> None:
             n_rows=2,
             n_cols=2,
             source_id=None,
+            provenance="dcs_probe",
             stats={},
             samples=[[0.0, None], [200.0, 300.0]],
         )
@@ -337,5 +343,64 @@ def test_load_full_grid_returns_none_when_absent(tmp_path: Path) -> None:
     conn = open_for_build(db_path)
     try:
         assert load_full_grid(conn, "elevation") is None
+    finally:
+        conn.close()
+
+
+def test_grid_provenance_distinguishes_srtm_from_dcs_probe(tmp_path: Path) -> None:
+    """The provenance invariant this module exists to enforce (M7 Stage 2,
+    per `store/schema.py`'s version-3 note): an `elevation` grid built from
+    SRTM and a `surface_type` grid built from the DCS live probe must each
+    report their own real source, never a shared/hardcoded label -- this is
+    what `query.describe.describe_position`'s `elevation.source`/
+    `surface_type.provenance` fields read to answer that honestly."""
+    db_path = tmp_path / "grid.sqlite"
+    conn = open_for_build(db_path)
+    try:
+        insert_grid(
+            conn,
+            ElevationGrid(
+                origin_x=0.0,
+                origin_z=0.0,
+                spacing_m=1000.0,
+                n_rows=1,
+                n_cols=1,
+                source_id=None,
+                provenance="srtm",
+                stats={},
+                samples=[[500.0]],
+            ),
+        )
+        insert_grid(
+            conn,
+            SurfaceGrid(
+                origin_x=0.0,
+                origin_z=0.0,
+                spacing_m=500.0,
+                n_rows=1,
+                n_cols=1,
+                source_id=None,
+                provenance="dcs_probe",
+                stats={},
+                samples=[[1]],
+            ),
+        )
+
+        assert grid_provenance(conn, "elevation") == "srtm"
+        assert grid_provenance(conn, "surface_type") == "dcs_probe"
+        # The two grid kinds' provenance must never be conflated into one
+        # value, even though both live in the same `grid` table.
+        assert grid_provenance(conn, "elevation") != grid_provenance(
+            conn, "surface_type"
+        )
+    finally:
+        conn.close()
+
+
+def test_grid_provenance_returns_none_when_absent(tmp_path: Path) -> None:
+    db_path = tmp_path / "grid.sqlite"
+    conn = open_for_build(db_path)
+    try:
+        assert grid_provenance(conn, "elevation") is None
     finally:
         conn.close()

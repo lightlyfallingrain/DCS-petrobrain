@@ -57,14 +57,15 @@ def insert_region(conn: sqlite3.Connection, region: Region) -> None:
     """Insert (or replace) a `Region` row."""
     conn.execute(
         "INSERT OR REPLACE INTO region "
-        "(name, theatre, centre_x, centre_z, half_extent_m, built_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "(name, theatre, centre_x, centre_z, half_extent_x_m, half_extent_z_m, built_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
             region.name,
             region.theatre,
             region.centre_x,
             region.centre_z,
-            region.half_extent_m,
+            region.half_extent_x_m,
+            region.half_extent_z_m,
             region.built_at,
         ),
     )
@@ -121,8 +122,9 @@ def insert_grid(conn: sqlite3.Connection, grid: ElevationGrid | SurfaceGrid) -> 
     kind = "elevation" if isinstance(grid, ElevationGrid) else "surface_type"
     cursor = conn.execute(
         "INSERT INTO grid "
-        "(kind, origin_x, origin_z, spacing_m, n_rows, n_cols, source_id, stats_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(kind, origin_x, origin_z, spacing_m, n_rows, n_cols, source_id, "
+        " provenance, stats_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             kind,
             grid.origin_x,
@@ -131,6 +133,7 @@ def insert_grid(conn: sqlite3.Connection, grid: ElevationGrid | SurfaceGrid) -> 
             grid.n_rows,
             grid.n_cols,
             grid.source_id,
+            grid.provenance,
             json.dumps(grid.stats),
         ),
     )
