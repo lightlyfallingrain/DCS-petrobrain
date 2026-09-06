@@ -5,13 +5,23 @@ from manually-downloaded offline geofabrik.de per-country extracts instead of M3
 Overpass API queries — filling the `nearest_settlement` / `nearest_water` /
 `inside_settlement` fields that M7's full-theatre build leaves `null` theatre-wide.
 
-> **Status: not yet scheduled.** Split out of the original combined M8 plan on 2026-09-06 at
-> the user's direction; M8 is now incremental-store work only
-> (`plans/m8-incremental-store/plan.md`). This plan is carried over as written and has **not**
-> been re-validated since the split — in particular its central open dependency question is
-> still unresolved, and the reconnaissance behind it carries an explicit unverified caveat
-> (below). Re-run an Architect pass before starting work; do not implement from this file
-> as-is.
+> **Status: deferred (value reassessed 2026-09-06), not scheduled.** Split out of the
+> original combined M8 plan on 2026-09-06 at the user's direction; M8 is now
+> incremental-store work only (`plans/m8-incremental-store/plan.md`). Its central open
+> dependency question is still unresolved, and the reconnaissance behind it carries an
+> explicit unverified caveat (below) — nothing in that respect has changed.
+>
+> Additionally, on 2026-09-06 the user asked whether OSM still brings value given what
+> DCS-native extraction plus M8's future live-probe incremental store already cover.
+> Conclusion: OSM's original role split ("DCS = where, OSM = what") is now partly absorbed —
+> DCS-native gives exact roads/named places/elevation, and live probing can fill point-level
+> `surface_type`/water ground-truth with zero new dependency. Remaining unique OSM value is
+> narrow: settlement **boundary polygons** (DCS only gives town-center points) and semantic
+> **tags** (road class/ref, land-use, POI type). Not worth the new-dependency/`.osm.pbf`
+> cost while no downstream consumer (Mission Interpreter/Runtime — neither built yet) needs
+> settlement-extent reasoning or richer naming. **Deferred indefinitely; revisit only when
+> the user decides to come back to it**, not on a fixed schedule. Re-run an Architect pass
+> before starting work if that happens; do not implement from this file as-is.
 
 Reconnaissance: `world-model/research/2026-09-06-m8-geofabrik-osm-recon.md`. **Read its
 caveat first** — `download.geofabrik.de` was unreachable during that pass (5/5 fetch

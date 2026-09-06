@@ -19,7 +19,7 @@ World Model Builder — M0-M8 all complete. `world-model/ROADMAP.md`'s milestone
 
 Full sequence lives in `world-model/ROADMAP.md` (M0 through M9). Do not start Mission Interpreter or Petrobrain Runtime work — see root `CLAUDE.md` "Current priority".
 
-- [ ] M9 — OSM augmentation (geofabrik). **Not yet scheduled**, deferred entirely for now. Offline geofabrik.de per-country extracts instead of live Overpass, filling M7's theatre-wide `null` settlement/water fields. Gated on an unresolved new-dependency decision (`.osm.pbf` parsing) and an unverified claim about geofabrik's available formats; needs a fresh Architect pass before work starts. See `plans/m9-osm-geofabrik/plan.md`.
+(none currently scheduled — M9 moved to Deferred below, 2026-09-06)
 
 ## Backlog
 
@@ -28,3 +28,4 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9). Do not start Mi
 ## Deferred
 
 - Spatial storage/library choice — resolved by M5: stdlib `sqlite3` + R*Tree, JSON geometry (not GeoPackage/SpatiaLite/PostGIS). See `world-model/research/2026-09-04-m5-first-persistent-model.md`.
+- M9 — OSM augmentation (geofabrik). **Deferred, value reassessed 2026-09-06.** OSM's original role split ("DCS = where, OSM = what") is now partly absorbed: DCS-native gives exact roads/named places/elevation, and M8's live-probe path can fill point-level `surface_type`/water ground-truth incrementally with zero new dependency. Remaining unique OSM value is narrow — settlement **boundary polygons** (DCS only gives town-center points) and semantic **tags** (road class/ref, land-use, POI type) that neither DCS nor probing produce. Not worth the new-dependency/`.osm.pbf`-parsing cost (see `plans/m9-osm-geofabrik/plan.md` open dependency decision) while no downstream consumer (Mission Interpreter/Runtime, both not yet built) needs settlement-extent reasoning or richer naming. Revisit only when such a consumer's requirements actually call for it — user decides when.
