@@ -120,3 +120,39 @@ the plan — base-store isolation, two-store write separation, locked parameters
 tri-state, `UNIQUE(kind)` + extensibility, R\*Tree parity, write-path drift detection, the
 probe-then-base control-point test, fixture-only testing, and scope boundaries — is genuinely
 and correctly implemented, with real tests behind each claim rather than assertions in prose.
+
+### Follow-up (commit `9a0d0d8`) — Required Fix #1 verified closed
+
+The implementer added `probe_store.schema.check_probe_paired_with_base` (compares the attached
+probe store's `theatre`/`chunk_size_m`/`probe_spacing_m` meta against what's being queried, plus
+its recorded `base_schema_version` against the live base store's actual schema version), called
+from `describe_position` right after `check_probe_schema_version`, with the same
+detach-and-fall-back-to-base-only handling on either check's `ValueError`.
+
+Verified directly, not taken on report:
+
+- **Re-ran my original Kola/Syria repro script** against this commit: a probe store built for
+  `theatre="Kola"` (matching schema version) attached while querying a `theatre="Syria"` base
+  store now correctly falls back to base-only — `elevation.source == "dcs_probe"` (not
+  `"probe"`), `elevation.dcs_m` is the base grid's own value (not the Kola store's `999.0`),
+  `coverage == "no_probe_store"`. Gap closed.
+- **The 3 new tests in `tests/test_describe_position.py` genuinely exercise it**, each with a
+  real mismatched probe store and a real assertion on the fallback outcome, not a mocked check:
+  `test_describe_position_probe_store_wrong_theatre_falls_back_to_base` (theatre mismatch, the
+  exact reviewer repro), `test_describe_position_probe_store_wrong_chunk_lattice_falls_back_to_base`
+  (`chunk_size_m` mismatch), `test_describe_position_probe_store_stale_base_schema_version_falls_back_to_base`
+  (`base_schema_version=999` vs. the live base store's real version). All three assert
+  `dcs_m != 999.0` and `coverage == "no_probe_store"` — a real forcing test, not an assertion in
+  prose.
+- Re-ran the full verification suite on this commit: `ruff format --check src tests` (79 files,
+  clean), `ruff check src tests` (clean), `mypy --strict src` (47 files, clean), `pytest tests -q`
+  — **244 passed** (241 + 3 new), as expected.
+- `d459acb` ("agent-memory bookkeeping") is confirmed to be exactly my own prior memory-write
+  commit (`.claude/agent-memory/reviewer/MEMORY.md` + one new memory file) — no `src`/`tests`
+  changes, correctly ignorable.
+- `git status` clean.
+
+### Updated Verdict
+
+**APPROVED.** The required fix is closed, verified independently (reproduction script + reading
+the new tests + full command re-run), and no new issues were introduced. Ready for DoD.

@@ -21,6 +21,14 @@ probe store created with `theatre="Kola"` (matching schema version) via `probe_d
 `describe_position(conn, "Syria", ...)` silently returned the Kola probe store's value labeled
 `source="probe"`, `coverage="queried_with_data"` — no error, no signal.
 
+**Closed in commit `9a0d0d8`**: implementer added `probe_store.schema.
+check_probe_paired_with_base` (compares theatre/chunk_size_m/probe_spacing_m/
+base_schema_version against the live base store), called from `describe_position` alongside
+`check_probe_schema_version`, same detach-and-fall-back-to-base-only handling. Verified by
+re-running the exact repro (now falls back correctly) plus reading the 3 new tests (wrong
+theatre / wrong chunk_size_m / stale base_schema_version), all genuine forcing tests. Full
+suite re-run clean, 244 passed. Final verdict: APPROVED.
+
 `docs/M8_PROBE_STORE.md`'s "Drift protection" section states the check runs on "every
 subsequent `open_probe_store` call" — true, but `describe_position` never calls
 `open_probe_store` at all (it ATTACHes directly), so the doc overclaims read-path coverage.
