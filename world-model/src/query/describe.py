@@ -42,13 +42,51 @@ a hardcoded `"dcs"` -- a build's `elevation` grid can now come from either
 is exactly what keeps that distinction from silently collapsing into one
 undifferentiated label. `"unavailable"` when no grid of that kind has been
 built at all, same absence-as-absence rule as every other field.
+
+**M8 status**: `describe_position` accepts an optional `probe_db_path` --
+the region's `-probe.sqlite` sibling (`probe_store.paths.probe_store_path`).
+When given and present, the probe store is `ATTACH`ed on `conn` under the
+alias `"probe"` for the duration of this call (never the base store's own
+connection object mutated permanently -- it is `DETACH`ed again before
+returning), and `elevation`/`surface_type` try the probe store's
+nearest-cell `probe_store.reader.sample_probe_grid` *before* falling back to
+the base store's `sample_grid`. `elevation.source`/`surface_type.provenance`
+report `"probe"` when the probe store answered, so a caller can always tell
+which of the two stores produced a value -- this is the "report which store
+answered" requirement from `plans/m8-incremental-store/plan.md`. The new
+`coverage` field on both carries that chunk's tri-state
+`probe_store.models.ChunkStatus` value, or `"no_probe_store"` when
+`probe_db_path` is omitted or absent -- distinguishing "nobody has probed
+this chunk yet" from "this build has no probe store at all". Every other
+field is untouched, and behaviour is byte-for-byte identical to before M8
+whenever `probe_db_path` is `None` -- the plan's "degrades to today's exact
+behaviour when the probe store is absent" requirement.
+
+Before trusting anything read from the `ATTACH`ed connection, this function
+runs both `probe_store.schema.check_probe_schema_version` *and*
+`check_probe_paired_with_base` -- the latter compares the probe store's own
+recorded `theatre`/`chunk_size_m`/`probe_spacing_m`/`base_schema_version`
+meta against `theatre` and the live base store's actual schema version.
+Without this second check, a probe store built for a *different* theatre
+(or a stale chunk lattice) would silently answer as if it were the correct
+one -- exactly the "opening a mismatched pair must fail loudly" risk the
+plan's "Risks & Unknowns" calls out as the main new risk the two-store
+split introduces. Either check failing is treated identically: `DETACH`
+and fall back to base-only, never propagate the error up to
+`describe_position`'s own caller.
 """
 
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from coordinates import dcs_to_wgs84
 from geometry import distance_point_point
+from probe_store.reader import chunk_status as probe_chunk_status
+from probe_store.reader import grid_spacing_m as probe_grid_spacing_m
+from probe_store.reader import sample_probe_grid
+from probe_store.schema import check_probe_paired_with_base, check_probe_schema_version
+from store.chunks import chunk_index_for
 from store.models import StoredFeature
 from store.reader import (
     containing_polygons,
@@ -59,6 +97,8 @@ from store.reader import (
     nearest_feature,
     sample_grid,
 )
+
+_NO_PROBE_STORE = "no_probe_store"
 
 _DEFAULT_NAMED_PLACES_RADIUS_M = 5000.0
 _DEFAULT_NAVAIDS_RADIUS_M = 15000.0
@@ -82,6 +122,7 @@ class ElevationInfo:
     confidence: str
     external_m: float | None
     delta_m: float | None
+    coverage: str
 
 
 @dataclass(frozen=True)
@@ -89,6 +130,7 @@ class SurfaceTypeInfo:
     value: str | None
     provenance: str
     sampled_at_m: float
+    coverage: str
 
 
 @dataclass(frozen=True)
@@ -302,36 +344,99 @@ def describe_position(
     z: float,
     named_places_radius_m: float = _DEFAULT_NAMED_PLACES_RADIUS_M,
     navaids_radius_m: float = _DEFAULT_NAVAIDS_RADIUS_M,
+    probe_db_path: Path | None = None,
 ) -> PositionDescription:
     """Answer structured position understanding for DCS-native `(x, z)` in
     `theatre`, from whatever the store at `conn` has built. See the module
-    docstring for the four honesty rules and Stage 1's known-absent fields."""
+    docstring for the four honesty rules and Stage 1's known-absent fields,
+    and the M8 status note for `probe_db_path`'s probe-then-base fallback."""
     lat, lon = dcs_to_wgs84(theatre, x, z)
 
-    dcs_elevation_m = sample_grid(conn, "elevation", x, z)
-    elevation_provenance = grid_provenance(conn, "elevation")
-    elevation = ElevationInfo(
-        dcs_m=dcs_elevation_m,
-        source=elevation_provenance
-        if elevation_provenance is not None
-        else "unavailable",
-        confidence="high" if dcs_elevation_m is not None else "unavailable",
-        external_m=None,
-        delta_m=None,
-    )
+    probe_attached = False
+    if probe_db_path is not None and probe_db_path.exists():
+        conn.execute("ATTACH DATABASE ? AS probe", (str(probe_db_path),))
+        try:
+            check_probe_schema_version(conn, schema="probe")
+            check_probe_paired_with_base(
+                conn, theatre, base_schema="main", probe_schema="probe"
+            )
+            probe_attached = True
+        except ValueError:
+            conn.execute("DETACH DATABASE probe")
 
-    surface_code = sample_grid(conn, "surface_type", x, z)
-    surface_spacing = grid_spacing_m(conn, "surface_type") or _DEFAULT_SURFACE_SPACING_M
-    surface_provenance = grid_provenance(conn, "surface_type")
-    surface_type = SurfaceTypeInfo(
-        value=_SURFACE_TYPE_LABELS.get(int(surface_code))
-        if surface_code is not None
-        else None,
-        provenance=surface_provenance
-        if surface_provenance is not None
-        else "unavailable",
-        sampled_at_m=surface_spacing,
-    )
+    try:
+        chunk_ix, chunk_iz = chunk_index_for(x, z)
+
+        elevation_coverage = _NO_PROBE_STORE
+        probe_elevation_m: float | None = None
+        if probe_attached:
+            probe_elevation_m = sample_probe_grid(
+                conn, "elevation", x, z, schema="probe"
+            )
+            elevation_coverage = probe_chunk_status(
+                conn, "elevation", chunk_ix, chunk_iz, schema="probe"
+            ).value
+
+        if probe_elevation_m is not None:
+            elevation = ElevationInfo(
+                dcs_m=probe_elevation_m,
+                source="probe",
+                confidence="high",
+                external_m=None,
+                delta_m=None,
+                coverage=elevation_coverage,
+            )
+        else:
+            dcs_elevation_m = sample_grid(conn, "elevation", x, z)
+            elevation_provenance = grid_provenance(conn, "elevation")
+            elevation = ElevationInfo(
+                dcs_m=dcs_elevation_m,
+                source=elevation_provenance
+                if elevation_provenance is not None
+                else "unavailable",
+                confidence="high" if dcs_elevation_m is not None else "unavailable",
+                external_m=None,
+                delta_m=None,
+                coverage=elevation_coverage,
+            )
+
+        surface_coverage = _NO_PROBE_STORE
+        probe_surface_code: float | None = None
+        if probe_attached:
+            probe_surface_code = sample_probe_grid(
+                conn, "surface_type", x, z, schema="probe"
+            )
+            surface_coverage = probe_chunk_status(
+                conn, "surface_type", chunk_ix, chunk_iz, schema="probe"
+            ).value
+
+        if probe_surface_code is not None:
+            surface_type = SurfaceTypeInfo(
+                value=_SURFACE_TYPE_LABELS.get(int(probe_surface_code)),
+                provenance="probe",
+                sampled_at_m=probe_grid_spacing_m(conn, "surface_type", schema="probe")
+                or _DEFAULT_SURFACE_SPACING_M,
+                coverage=surface_coverage,
+            )
+        else:
+            surface_code = sample_grid(conn, "surface_type", x, z)
+            surface_spacing = (
+                grid_spacing_m(conn, "surface_type") or _DEFAULT_SURFACE_SPACING_M
+            )
+            surface_provenance = grid_provenance(conn, "surface_type")
+            surface_type = SurfaceTypeInfo(
+                value=_SURFACE_TYPE_LABELS.get(int(surface_code))
+                if surface_code is not None
+                else None,
+                provenance=surface_provenance
+                if surface_provenance is not None
+                else "unavailable",
+                sampled_at_m=surface_spacing,
+                coverage=surface_coverage,
+            )
+    finally:
+        if probe_attached:
+            conn.execute("DETACH DATABASE probe")
 
     nearest_road = _road_info(
         nearest_feature(conn, ["road"], x, z, provenance_geometry="dcs")

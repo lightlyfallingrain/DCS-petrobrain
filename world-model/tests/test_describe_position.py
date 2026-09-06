@@ -32,13 +32,26 @@ of Stage 4 that *is* pinnable in CI: it needs only `tests/control_points.py`
 -- an independent, non-DCS-derived source (published real-world ARPs) -- and
 `describe_position`'s pure `coordinates.dcs_to_wgs84` call, not any store
 content.
+
+M8 adds the probe-then-base fallback control-point test
+(`test_describe_position_probe_store_answers_inside_probed_cell_falls_back_
+outside`) plus the "absent probe store behaves exactly as before" and
+"no probe store at all reports coverage honestly" checks -- see
+`plans/m8-incremental-store/plan.md`'s Implementation Plan step 3.
 """
 
 import sqlite3
 from pathlib import Path
 
 from control_points import CONTROL_POINTS, haversine_distance_m
+from probe_store.models import ChunkStatus
+from probe_store.writer import (
+    open_probe_store,
+    upsert_chunk_coverage,
+    upsert_grid_samples,
+)
 from query import describe_position
+from store.chunks import chunk_index_for
 from store.models import ElevationGrid, Region, StoredFeature, SurfaceGrid
 from store.writer import insert_features, insert_grid, insert_region, open_for_build
 
@@ -442,3 +455,196 @@ def test_describe_position_elevation_source_reports_dcs_probe_not_srtm(
 
     assert result.elevation.source == "dcs_probe"
     assert result.elevation.source != "srtm"
+
+
+def test_describe_position_probe_store_answers_inside_probed_cell_falls_back_outside(
+    tmp_path: Path,
+) -> None:
+    """M8 control-point test: a base store with a `dcs_probe` elevation
+    grid, plus a probe store with exactly one written cell, must return the
+    probe value at that cell and the base grid's (interpolated) value
+    everywhere else in the same chunk -- each labelled by `elevation.
+    source`, never silently blended."""
+    conn = _fixture_conn_with_grid(tmp_path)
+    probe_path = tmp_path / "probe.sqlite"
+    chunk_ix, chunk_iz = chunk_index_for(_ARP_X, _ARP_Z)
+    probe_conn = open_probe_store(probe_path, "Syria", 3)
+    try:
+        upsert_grid_samples(
+            probe_conn,
+            "elevation",
+            100.0,
+            {(round(_ARP_X / 100.0), round(_ARP_Z / 100.0)): 999.0},
+            None,
+            "dcs_probe",
+        )
+        upsert_chunk_coverage(
+            probe_conn, "elevation", chunk_ix, chunk_iz, ChunkStatus.QUERIED_WITH_DATA
+        )
+    finally:
+        probe_conn.close()
+
+    try:
+        result_inside = describe_position(
+            conn, "Syria", _ARP_X, _ARP_Z, probe_db_path=probe_path
+        )
+        result_outside = describe_position(
+            conn, "Syria", _ARP_X + 250.0, _ARP_Z, probe_db_path=probe_path
+        )
+    finally:
+        conn.close()
+
+    assert result_inside.elevation.dcs_m == 999.0
+    assert result_inside.elevation.source == "probe"
+    assert result_inside.elevation.coverage == "queried_with_data"
+
+    assert result_outside.elevation.dcs_m != 999.0
+    assert result_outside.elevation.source == "dcs_probe"
+    assert result_outside.elevation.coverage == "queried_with_data"
+
+
+def test_describe_position_probe_store_wrong_theatre_falls_back_to_base(
+    tmp_path: Path,
+) -> None:
+    """Reviewer-reproduced gap (`plans/m8-incremental-store/review.md`
+    Required Fix #1): a probe store built for a *different* theatre, but
+    with a matching `PROBE_SCHEMA_VERSION`, must not be silently trusted --
+    `check_probe_schema_version` alone would let this through.
+    `describe_position` must fall back to base-only, exactly as if
+    `probe_db_path` had been absent, never answer with the wrong store's
+    data labelled `source="probe"`."""
+    conn = _fixture_conn_with_grid(tmp_path)
+    probe_path = tmp_path / "probe.sqlite"
+    chunk_ix, chunk_iz = chunk_index_for(_ARP_X, _ARP_Z)
+    # Same schema version (3), same chunk lattice, but built for "Kola" --
+    # exactly the reviewer's reproduction.
+    probe_conn = open_probe_store(probe_path, "Kola", 3)
+    try:
+        upsert_grid_samples(
+            probe_conn,
+            "elevation",
+            100.0,
+            {(round(_ARP_X / 100.0), round(_ARP_Z / 100.0)): 999.0},
+            None,
+            "dcs_probe",
+        )
+        upsert_chunk_coverage(
+            probe_conn, "elevation", chunk_ix, chunk_iz, ChunkStatus.QUERIED_WITH_DATA
+        )
+    finally:
+        probe_conn.close()
+
+    try:
+        result = describe_position(
+            conn, "Syria", _ARP_X, _ARP_Z, probe_db_path=probe_path
+        )
+    finally:
+        conn.close()
+
+    assert result.elevation.dcs_m != 999.0
+    assert result.elevation.source == "dcs_probe"
+    assert result.elevation.coverage == "no_probe_store"
+
+
+def test_describe_position_probe_store_wrong_chunk_lattice_falls_back_to_base(
+    tmp_path: Path,
+) -> None:
+    """Same gap, different mismatched field: a probe store built at a
+    different `chunk_size_m` must also be refused, not just a different
+    theatre."""
+    conn = _fixture_conn_with_grid(tmp_path)
+    probe_path = tmp_path / "probe.sqlite"
+    probe_conn = open_probe_store(probe_path, "Syria", 3, chunk_size_m=1000.0)
+    try:
+        upsert_grid_samples(
+            probe_conn,
+            "elevation",
+            100.0,
+            {(round(_ARP_X / 100.0), round(_ARP_Z / 100.0)): 999.0},
+            None,
+            "dcs_probe",
+        )
+    finally:
+        probe_conn.close()
+
+    try:
+        result = describe_position(
+            conn, "Syria", _ARP_X, _ARP_Z, probe_db_path=probe_path
+        )
+    finally:
+        conn.close()
+
+    assert result.elevation.dcs_m != 999.0
+    assert result.elevation.coverage == "no_probe_store"
+
+
+def test_describe_position_probe_store_stale_base_schema_version_falls_back_to_base(
+    tmp_path: Path,
+) -> None:
+    """A probe store recorded against a base `SCHEMA_VERSION` that no
+    longer matches the base store actually being queried (e.g. the base
+    store was rebuilt after a schema bump) must also be refused."""
+    conn = _fixture_conn_with_grid(tmp_path)
+    probe_path = tmp_path / "probe.sqlite"
+    # base_schema_version=999 will never match the live base store's real
+    # `store.schema.SCHEMA_VERSION`.
+    probe_conn = open_probe_store(probe_path, "Syria", 999)
+    try:
+        upsert_grid_samples(
+            probe_conn,
+            "elevation",
+            100.0,
+            {(round(_ARP_X / 100.0), round(_ARP_Z / 100.0)): 999.0},
+            None,
+            "dcs_probe",
+        )
+    finally:
+        probe_conn.close()
+
+    try:
+        result = describe_position(
+            conn, "Syria", _ARP_X, _ARP_Z, probe_db_path=probe_path
+        )
+    finally:
+        conn.close()
+
+    assert result.elevation.dcs_m != 999.0
+    assert result.elevation.coverage == "no_probe_store"
+
+
+def test_describe_position_absent_probe_store_behaves_exactly_as_before(
+    tmp_path: Path,
+) -> None:
+    """A `probe_db_path` that does not exist on disk must degrade to
+    exactly today's (pre-M8) behaviour for every field but `coverage`."""
+    conn = _fixture_conn_with_grid(tmp_path)
+    missing_probe_path = tmp_path / "does-not-exist-probe.sqlite"
+    try:
+        with_probe_arg = describe_position(
+            conn, "Syria", _ARP_X, _ARP_Z, probe_db_path=missing_probe_path
+        )
+        without_probe_arg = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert with_probe_arg.elevation.dcs_m == without_probe_arg.elevation.dcs_m == 123.4
+    assert (
+        with_probe_arg.elevation.source
+        == without_probe_arg.elevation.source
+        == "dcs_probe"
+    )
+    assert with_probe_arg.elevation.coverage == "no_probe_store"
+    assert without_probe_arg.elevation.coverage == "no_probe_store"
+
+
+def test_describe_position_no_probe_store_reports_coverage_honestly(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn(tmp_path)
+    try:
+        result = describe_position(conn, "Syria", _ARP_X, _ARP_Z)
+    finally:
+        conn.close()
+
+    assert result.elevation.coverage == "no_probe_store"
+    assert result.surface_type.coverage == "no_probe_store"

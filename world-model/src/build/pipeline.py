@@ -46,18 +46,41 @@ from pathlib import Path
 
 from build.ingest_beacons import BeaconIngestStats, ingest_beacons
 from build.ingest_osm import OsmIngestStats, ingest_osm
-from build.ingest_probe import ProbeIngestStats, ingest_probe
+from build.ingest_probe import (
+    ChunkProbeIngestStats,
+    ProbeIngestStats,
+    ingest_probe,
+    ingest_probe_chunk,
+)
 from build.ingest_roadnet import RoadnetIngestStats, ingest_roadnet
 from build.ingest_srtm import SrtmIngestStats, ingest_srtm_grid
-from build.ingest_terrain import TerrainIngestStats, ingest_terrain
+from build.ingest_terrain import (
+    TerrainIngestStats,
+    ingest_terrain,
+    ingest_terrain_chunk,
+)
 from build.ingest_towns import ingest_towns
 from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
 from dcs_data.towns import parse_towns_lua
 from elevation.dem import SrtmTile
 from osm.features import load_features
+from probe_store.models import ChunkStatus
+from probe_store.paths import probe_store_path
+from probe_store.reader import load_chunk_elevation_window
+from probe_store.schema import PROBE_SPACING_M
+from probe_store.writer import insert_source as insert_probe_source
+from probe_store.writer import (
+    open_probe_store,
+    replace_chunk_features,
+    upsert_chunk_coverage,
+    upsert_grid_samples,
+)
+from store.chunks import CHUNK_SIZE_M
 from store.models import Region, Source
-from store.reader import load_full_grid
+from store.reader import load_full_grid, load_only_region
+from store.schema import SCHEMA_VERSION as BASE_SCHEMA_VERSION
+from store.schema import check_schema_version
 from store.writer import (
     insert_features,
     insert_grid,
@@ -65,6 +88,8 @@ from store.writer import (
     insert_source,
     open_for_build,
 )
+from terrain.curvature import DEFAULT_CURVATURE_THRESHOLD_M
+from terrain.features import DEFAULT_MIN_CELL_COUNT
 
 _PROBE_GRID_SPACING_M = 500.0
 # Default storage spacing for the M7 Stage 2 SRTM-primary full-theatre
@@ -394,3 +419,178 @@ def build_region(
 def open_region_db(db_path: Path) -> sqlite3.Connection:
     """Open an already-built `.sqlite` read-only for querying."""
     return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+
+@dataclass
+class ProbeChunkReport:
+    """Summary of one `add_probe_chunk` call -- the M8 sibling of
+    `BuildReport`, scoped to a single chunk rather than a whole region."""
+
+    chunk_ix: int
+    chunk_iz: int
+    probe_stats: ChunkProbeIngestStats
+    terrain_stats: TerrainIngestStats | None
+    terrain_skipped: bool
+
+
+def add_probe_chunk(
+    base_db_path: Path,
+    probe_output_path: Path,
+    chunk_ix: int,
+    chunk_iz: int,
+    chunk_size_m: float = CHUNK_SIZE_M,
+    probe_spacing_m: float = PROBE_SPACING_M,
+    curvature_threshold_m: float = DEFAULT_CURVATURE_THRESHOLD_M,
+    min_cell_count: int = DEFAULT_MIN_CELL_COUNT,
+) -> ProbeChunkReport:
+    """Ingest one chunk-scoped probe output file into `base_db_path`'s
+    probe-tier sibling store (`probe_store.paths.probe_store_path`).
+
+    Writes **only** to the probe store -- `base_db_path` is opened
+    read-only, purely to read the region's `theatre` and confirm its own
+    `SCHEMA_VERSION` is what this code expects (`store.schema.
+    check_schema_version`), so the probe store's identity meta can be
+    checked against it (`probe_store.writer.open_probe_store`'s
+    drift-detection contract). `build_region`/the base `.sqlite` are never
+    opened for write here -- see the plan's "Storage architecture: two
+    stores" and its point-2 argument for why this split matters.
+
+    Order of operations for chunk `(chunk_ix, chunk_iz)`:
+    1. Parse `probe_output_path` into `(row, col) -> value` maps
+       (`build.ingest_probe.ingest_probe_chunk`).
+    2. If the chunk yielded no points at all, mark `elevation` and
+       `surface_type` coverage `QUERIED_VOID` for this chunk and return --
+       a real, meaningful outcome (see `probe_store.models.ChunkStatus`),
+       not an error.
+    3. Otherwise, upsert both grids' cells and mark both `QUERIED_WITH_DATA`.
+    4. Load a local elevation window (chunk + 1-cell border,
+       `probe_store.reader.load_chunk_elevation_window`) and run M6's
+       ridge/valley classifier over it unchanged
+       (`build.ingest_terrain.ingest_terrain_chunk`), replacing this
+       chunk's `"ridge"`/`"valley"` features (and their own coverage)
+       independently per kind.
+    """
+    base_conn = open_region_db(base_db_path)
+    try:
+        check_schema_version(base_conn)
+        region = load_only_region(base_conn)
+        if region is None:
+            raise ValueError(f"{base_db_path} has no built region row")
+        theatre = region.theatre
+    finally:
+        base_conn.close()
+
+    probe_path = probe_store_path(base_db_path)
+    probe_conn = open_probe_store(
+        probe_path,
+        theatre,
+        BASE_SCHEMA_VERSION,
+        chunk_size_m=chunk_size_m,
+        probe_spacing_m=probe_spacing_m,
+    )
+    try:
+        built_at = datetime.datetime.now(datetime.UTC).isoformat()
+        probe_source_id = insert_probe_source(
+            probe_conn,
+            Source(
+                name="terrain_probe chunk (land.getHeight + land.getSurfaceType)",
+                fetched_at=built_at,
+                raw_path=str(probe_output_path),
+                attribution="DCS live mission-scripting probe (Eagle Dynamics)",
+                notes=f"Chunk (ix={chunk_ix}, iz={chunk_iz}); see "
+                "build.ingest_probe.ingest_probe_chunk module docstring.",
+            ),
+        )
+
+        elevation_samples, surface_samples, probe_stats = ingest_probe_chunk(
+            probe_output_path, chunk_ix, chunk_iz, chunk_size_m, probe_spacing_m
+        )
+
+        if not elevation_samples:
+            upsert_chunk_coverage(
+                probe_conn, "elevation", chunk_ix, chunk_iz, ChunkStatus.QUERIED_VOID
+            )
+            upsert_chunk_coverage(
+                probe_conn, "surface_type", chunk_ix, chunk_iz, ChunkStatus.QUERIED_VOID
+            )
+            return ProbeChunkReport(
+                chunk_ix=chunk_ix,
+                chunk_iz=chunk_iz,
+                probe_stats=probe_stats,
+                terrain_stats=None,
+                terrain_skipped=True,
+            )
+
+        upsert_grid_samples(
+            probe_conn,
+            "elevation",
+            probe_spacing_m,
+            elevation_samples,
+            probe_source_id,
+            "dcs_probe",
+        )
+        upsert_grid_samples(
+            probe_conn,
+            "surface_type",
+            probe_spacing_m,
+            surface_samples,
+            probe_source_id,
+            "dcs_probe",
+        )
+        upsert_chunk_coverage(
+            probe_conn, "elevation", chunk_ix, chunk_iz, ChunkStatus.QUERIED_WITH_DATA
+        )
+        upsert_chunk_coverage(
+            probe_conn,
+            "surface_type",
+            chunk_ix,
+            chunk_iz,
+            ChunkStatus.QUERIED_WITH_DATA,
+        )
+
+        window = load_chunk_elevation_window(
+            probe_conn, chunk_ix, chunk_iz, chunk_size_m, probe_spacing_m
+        )
+        terrain_stats: TerrainIngestStats | None = None
+        terrain_skipped = True
+        if window is not None:
+            features, terrain_stats = ingest_terrain_chunk(
+                window, probe_source_id, curvature_threshold_m, min_cell_count
+            )
+            terrain_skipped = False
+            ridge_features = [f for f in features if f.kind == "ridge"]
+            valley_features = [f for f in features if f.kind == "valley"]
+            replace_chunk_features(
+                probe_conn, "ridge", chunk_ix, chunk_iz, ridge_features
+            )
+            replace_chunk_features(
+                probe_conn, "valley", chunk_ix, chunk_iz, valley_features
+            )
+            upsert_chunk_coverage(
+                probe_conn,
+                "ridge",
+                chunk_ix,
+                chunk_iz,
+                ChunkStatus.QUERIED_WITH_DATA
+                if ridge_features
+                else ChunkStatus.QUERIED_VOID,
+            )
+            upsert_chunk_coverage(
+                probe_conn,
+                "valley",
+                chunk_ix,
+                chunk_iz,
+                ChunkStatus.QUERIED_WITH_DATA
+                if valley_features
+                else ChunkStatus.QUERIED_VOID,
+            )
+
+        return ProbeChunkReport(
+            chunk_ix=chunk_ix,
+            chunk_iz=chunk_iz,
+            probe_stats=probe_stats,
+            terrain_stats=terrain_stats,
+            terrain_skipped=terrain_skipped,
+        )
+    finally:
+        probe_conn.close()

@@ -37,6 +37,8 @@ from typing import Any
 from coordinates import dcs_to_wgs84
 from elevation.dcs_grid import DcsTerrainSample, parse_terrain_probe_output
 from elevation.dem import SrtmTile
+from probe_store.schema import PROBE_SPACING_M
+from store.chunks import CHUNK_SIZE_M, chunk_bounds
 from store.models import ElevationGrid, SurfaceGrid
 
 _NAME_RE = re.compile(r"^r(\d+)c(\d+)$")
@@ -209,3 +211,74 @@ def ingest_probe(
         samples=surface_samples,
     )
     return elevation_grid, surface_grid, stats
+
+
+@dataclass
+class ChunkProbeIngestStats:
+    """Census of one `ingest_probe_chunk` run -- the M8 chunk-scoped sibling
+    of `ProbeIngestStats`, for `build.pipeline.add_probe_chunk`'s report."""
+
+    chunk_ix: int
+    chunk_iz: int
+    points_received: int
+    surface_type_counts: dict[str, int] = field(default_factory=dict)
+
+
+def ingest_probe_chunk(
+    probe_output_path: Path,
+    chunk_ix: int,
+    chunk_iz: int,
+    chunk_size_m: float = CHUNK_SIZE_M,
+    probe_spacing_m: float = PROBE_SPACING_M,
+) -> tuple[
+    dict[tuple[int, int], float], dict[tuple[int, int], int], ChunkProbeIngestStats
+]:
+    """Parse one chunk-scoped `terrain_probe_*.lua`-shaped JSON-lines output
+    file into sparse `(row, col) -> value` maps for the probe store's
+    theatre-anchored `"elevation"`/`"surface_type"` grids.
+
+    Unlike `ingest_probe`, points are **not** named `r{row}c{col}` relative
+    to a caller-supplied grid shape -- the probe store's grid is a single
+    theatre-wide sparse grid per kind (see `probe_store.writer._ensure_grid`),
+    so `(row, col)` is instead derived directly from each point's absolute
+    DCS `(x, z)`: `row = round(x / probe_spacing_m)`, `col = round(z /
+    probe_spacing_m)` -- global grid indices, not chunk-local, so cells from
+    different chunks land in the same sparse grid with no per-chunk origin
+    bookkeeping (see `store.chunks`'s module docstring on the theatre-
+    anchored lattice this mirrors).
+
+    Raises `ValueError` if any point's `(x, z)` falls outside chunk
+    `(chunk_ix, chunk_iz)`'s own bounds -- a probe output file that doesn't
+    match the caller's claimed chunk is a caller bug, not something to
+    silently accept into the wrong chunk's coverage record.
+    """
+    samples = parse_terrain_probe_output(probe_output_path)
+    min_x, max_x, min_z, max_z = chunk_bounds(chunk_ix, chunk_iz, chunk_size_m)
+
+    elevation_samples: dict[tuple[int, int], float] = {}
+    surface_samples: dict[tuple[int, int], int] = {}
+    surface_counts: dict[str, int] = {}
+
+    for sample in samples:
+        if not (min_x <= sample.x <= max_x and min_z <= sample.z <= max_z):
+            raise ValueError(
+                f"Probe point {sample.name!r} at (x={sample.x}, z={sample.z}) "
+                f"falls outside chunk (ix={chunk_ix}, iz={chunk_iz})'s bounds "
+                f"({min_x}, {max_x}, {min_z}, {max_z})"
+            )
+        row = round(sample.x / probe_spacing_m)
+        col = round(sample.z / probe_spacing_m)
+        elevation_samples[(row, col)] = sample.height_m
+        surface_samples[(row, col)] = sample.surface_type
+        label = _SURFACE_TYPE_LABELS.get(
+            sample.surface_type, f"UNKNOWN_{sample.surface_type}"
+        )
+        surface_counts[label] = surface_counts.get(label, 0) + 1
+
+    stats = ChunkProbeIngestStats(
+        chunk_ix=chunk_ix,
+        chunk_iz=chunk_iz,
+        points_received=len(samples),
+        surface_type_counts=surface_counts,
+    )
+    return elevation_samples, surface_samples, stats

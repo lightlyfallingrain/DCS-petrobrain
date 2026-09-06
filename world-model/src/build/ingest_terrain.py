@@ -69,3 +69,30 @@ def ingest_terrain(
         valley_feature_count=sum(1 for f in features if f.kind == "valley"),
     )
     return features, stats
+
+
+def ingest_terrain_chunk(
+    elevation_window: ElevationGrid,
+    source_id: int | None,
+    curvature_threshold_m: float = DEFAULT_CURVATURE_THRESHOLD_M,
+    min_cell_count: int = DEFAULT_MIN_CELL_COUNT,
+) -> tuple[list[StoredFeature], TerrainIngestStats]:
+    """M8's chunk-scoped variant: identical classify + extract pipeline to
+    `ingest_terrain`, run over `elevation_window` -- a small local grid
+    covering one chunk plus a 1-cell border (see `probe_store.reader.
+    load_chunk_elevation_window`) rather than a whole-region grid.
+
+    No behavioural difference from `ingest_terrain` is needed here: the
+    curvature classifier already excludes a grid's outermost ring (no full
+    4-neighbour window), which is exactly the 1-cell border `
+    load_chunk_elevation_window` adds -- so every feature this call can
+    possibly produce is built entirely from the chunk's own interior cells,
+    never a border cell, and the result is safe to hand straight to
+    `probe_store.writer.replace_chunk_features` per kind. `build.pipeline.
+    add_probe_chunk` is the caller; the separate name exists so a reader of
+    that pipeline can see immediately that this call is chunk-scoped,
+    without inspecting the grid it was passed.
+    """
+    return ingest_terrain(
+        elevation_window, source_id, curvature_threshold_m, min_cell_count
+    )
