@@ -16,11 +16,14 @@ World Model Builder — M0-M7 all complete. `world-model/ROADMAP.md`'s milestone
 
 ## Milestones
 
-Full sequence lives in `world-model/ROADMAP.md` (M0 through M7). Do not start Mission Interpreter or Petrobrain Runtime work — see root `CLAUDE.md` "Current priority".
+Full sequence lives in `world-model/ROADMAP.md` (M0 through M9). Do not start Mission Interpreter or Petrobrain Runtime work — see root `CLAUDE.md` "Current priority".
+
+- [ ] M8 — Incremental probe store. **Plan final, ready to implement.** Accumulate probe-tier data (fine elevation, `surface_type`, ridge/valley) chunk-by-chunk into a second `.sqlite` per theatre (`<region>-probe.sqlite`), separate from M7's base store: theatre-anchored 5 km chunk lattice at 100 m probe spacing, tri-state coverage, ATTACH-based probe-then-base resolution. Two stores rather than a `grid.tier` column — probe data is not rebuildable from `data/raw/` and must survive base rebuilds. `build_region` untouched. Builder-side only — no Runtime, no live-probe channel, no base-store per-layer append (Backlog item below stays open, deliberately not folded in). See `plans/m8-incremental-store/plan.md`.
+- [ ] M9 — OSM augmentation (geofabrik). **Not yet scheduled**, deferred entirely for now. Offline geofabrik.de per-country extracts instead of live Overpass, filling M7's theatre-wide `null` settlement/water fields. Gated on an unresolved new-dependency decision (`.osm.pbf` parsing) and an unverified claim about geofabrik's available formats; needs a fresh Architect pass before work starts. See `plans/m9-osm-geofabrik/plan.md`.
 
 ## Backlog
 
-- [ ] **Incremental per-layer pipeline builds** — `build_region` currently deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. User-requested capability: run individual pipeline sections (e.g., roads only, elevation only, validation only) and *add* that data into an existing store, allowing staged builds and partial re-runs when debugging a single layer. Deferred post-M7 (raised during M7 DoD acceptance testing, explicitly not blocking). See `plans/m7-full-theatre-pipeline/` for context and `world-model/src/build/pipeline.py`'s `build_region` implementation.
+- [ ] **Incremental per-layer pipeline builds** — `build_region` currently deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. User-requested capability: run individual pipeline sections (e.g., roads only, elevation only, validation only) and *add* that data into an existing store, allowing staged builds and partial re-runs when debugging a single layer. Deferred post-M7 (raised during M7 DoD acceptance testing, explicitly not blocking). Considered for M8 and **explicitly dropped** from it (2026-09-06) to keep that milestone scoped to the probe store — this remains open and unscheduled for a later milestone. M9 (OSM) would benefit from it; see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` for context and `world-model/src/build/pipeline.py`'s `build_region` implementation.
 
 ## Deferred
 
