@@ -225,14 +225,14 @@ def cmd_rebuild(args: argparse.Namespace) -> None:
         *args.build_args,
     ]
     start = time.perf_counter()
-    result = subprocess.run(
-        cmd, cwd=_WORLD_MODEL_ROOT, capture_output=True, text=True, check=False
-    )
+    # Inherit stdout/stderr (no capture_output) so build_world_model.py's own
+    # per-stage `logging` progress lines stream to the terminal live, the
+    # same as running it directly -- a multi-minute full-theatre rebuild
+    # otherwise looks hung until the whole subprocess exits.
+    result = subprocess.run(cmd, cwd=_WORLD_MODEL_ROOT, check=False)
     elapsed_s = time.perf_counter() - start
 
     if result.returncode != 0:
-        print(result.stdout)
-        print(result.stderr, file=sys.stderr)
         sys.exit(result.returncode)
 
     print(
@@ -240,7 +240,6 @@ def cmd_rebuild(args: argparse.Namespace) -> None:
             {
                 "region": args.region,
                 "rebuild_wall_time_s": elapsed_s,
-                "build_stdout": result.stdout,
             },
             indent=2,
         )
