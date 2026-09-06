@@ -57,12 +57,31 @@ output files, same as the rest of this pipeline's build-time code.
 ## Drift protection
 
 A probe store records its own identity in `meta` at creation: `theatre`, `chunk_size_m`,
-`probe_spacing_m`, and the base store's `SCHEMA_VERSION` at the time it was created. Every
-subsequent `open_probe_store` call re-checks all four against what's being requested and raises
-`ValueError` on any mismatch — pairing a probe store with a base store rebuilt at a different
-schema version, or a different chunk lattice, fails loudly rather than silently mis-placing
-chunks. See `probe_store.writer.open_probe_store`'s docstring and
-`tests/test_probe_store.py`'s drift tests.
+`probe_spacing_m`, and the base store's `SCHEMA_VERSION` at the time it was created. This is
+checked on **both** paths that open a probe store, not just one:
+
+- **Write path**: every subsequent `probe_store.writer.open_probe_store` call (i.e. every
+  `build.pipeline.add_probe_chunk`) re-checks all four against what's being requested and raises
+  `ValueError` on any mismatch. See that function's docstring and
+  `tests/test_probe_store.py`'s `test_open_probe_store_raises_on_*` tests.
+- **Read path**: `query.describe.describe_position`'s `ATTACH` never goes through
+  `open_probe_store` — it attaches the file directly — so it has its own check,
+  `probe_store.schema.check_probe_paired_with_base`, called right after `ATTACH` alongside
+  `check_probe_schema_version`. It compares the attached probe store's identity meta against the
+  `theatre` being queried and the live base connection's own `schema_version`. A mismatch on
+  either check is treated identically: `DETACH` and fall back to base-only, the same
+  degrade-to-absent behaviour as a missing probe store file — never a crash, and never a silent
+  cross-theatre or stale-lattice answer. See `tests/test_describe_position.py`'s
+  `test_describe_position_probe_store_wrong_theatre_falls_back_to_base` and its two siblings
+  (chunk-lattice mismatch, stale base schema version).
+
+Both checks exist because they close different halves of the same risk: writing with the wrong
+identity would corrupt the probe store's own meta, while reading with an unchecked identity
+would silently answer from the wrong store entirely — a base store for one theatre queried
+against a probe store built for another, matching `PROBE_SCHEMA_VERSION` and all, with no error
+and no visible signal. This was found in review and is exactly the "opening a mismatched pair
+must fail loudly" risk the plan's "Risks & Unknowns" names as the main new risk the two-store
+split introduces.
 
 ## Performance
 

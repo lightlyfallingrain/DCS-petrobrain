@@ -136,3 +136,47 @@ are byte-for-byte unmodified — only additive imports and one new function were
 - **No deviations from the plan.** All five Implementation Plan steps, the required test list,
   the drift-detection test, and the R*Tree row-count-parity test were all implemented as
   specified; `store/writer.py`/`store/schema.py`/`store/reader.py`/`build_region` are untouched.
+
+### Post-review fix (Required Fix #1, `plans/m8-incremental-store/review.md`)
+
+Reviewer found and reproduced a real gap: `describe_position`'s `ATTACH` block only ran
+`check_probe_schema_version` on the probe store, never comparing `theatre`/`chunk_size_m`/
+`probe_spacing_m`/base schema version against the base store actually being queried. A probe
+store built for a different theatre (or a stale chunk lattice), with a matching
+`PROBE_SCHEMA_VERSION`, was silently accepted and answered as if correct — exactly the "opening
+a mismatched pair must fail loudly" risk the plan's "Risks & Unknowns" names as the main new
+risk of the two-store split, and the write path (`open_probe_store`) already had this check
+while the read path didn't.
+
+Fix:
+- `probe_store/schema.py` — added `check_probe_paired_with_base(conn, theatre, chunk_size_m,
+  probe_spacing_m, base_schema, probe_schema)`, the read-path counterpart to
+  `open_probe_store`'s drift check. Compares the attached probe store's identity meta against
+  `theatre`/the locked chunk-lattice defaults, and its recorded `base_schema_version` against
+  `base_schema`'s own live `schema_version` (read directly off the base connection, so it
+  reflects the actual store being queried, not a hardcoded constant). Raises `ValueError` on any
+  mismatch, mirroring `open_probe_store`'s error shape. Extracted `IDENTITY_META_KEYS` as a
+  shared tuple so `writer.open_probe_store` and this new function can't drift apart on which
+  keys "identity" means (`writer.py`'s previously-private `_META_KEYS` now imports this).
+- `query/describe.py` — `describe_position`'s `ATTACH` block now calls
+  `check_probe_paired_with_base` immediately after `check_probe_schema_version`, inside the same
+  `try`/`except ValueError` that already existed for the schema-version check — a mismatch on
+  either detaches and falls back to base-only, exactly like a missing probe store file. No
+  change to the happy path or to any existing test's expected output.
+- `tests/test_describe_position.py` — added three tests reproducing the reviewer's exact
+  scenario and two siblings: wrong theatre (`"Kola"` probe attached while querying a `"Syria"`
+  base store, matching schema version), wrong `chunk_size_m`, and a stale recorded
+  `base_schema_version`. Each asserts the probe value is never returned and `coverage` reports
+  `"no_probe_store"`, i.e. degrade-to-absent, not a crash and not a fabricated answer.
+- `docs/M8_PROBE_STORE.md` — "Drift protection" section rewritten to describe both the write
+  path and the read path explicitly (it previously only described the write path, which is what
+  the reviewer flagged as an overstatement of actual coverage).
+
+Did not implement the two review-flagged **optional** refinements (`insert_source` duplication,
+`add_probe_chunk`'s coverage-marking repetition) — reviewer explicitly marked both non-blocking
+and "not worth doing now" / "isn't required," and the coordinator's instruction was to fix them
+"only if trivial, not required." Left as-is to keep this fix commit scoped to the required item.
+
+Re-ran the full check suite after the fix: `ruff format --check`, `ruff check`, `mypy --strict
+world-model/src` (47 files), `pytest world-model/tests -q` — **244 passed** (up from 241; the
+three new drift tests), all green.

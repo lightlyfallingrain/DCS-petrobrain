@@ -61,6 +61,19 @@ this chunk yet" from "this build has no probe store at all". Every other
 field is untouched, and behaviour is byte-for-byte identical to before M8
 whenever `probe_db_path` is `None` -- the plan's "degrades to today's exact
 behaviour when the probe store is absent" requirement.
+
+Before trusting anything read from the `ATTACH`ed connection, this function
+runs both `probe_store.schema.check_probe_schema_version` *and*
+`check_probe_paired_with_base` -- the latter compares the probe store's own
+recorded `theatre`/`chunk_size_m`/`probe_spacing_m`/`base_schema_version`
+meta against `theatre` and the live base store's actual schema version.
+Without this second check, a probe store built for a *different* theatre
+(or a stale chunk lattice) would silently answer as if it were the correct
+one -- exactly the "opening a mismatched pair must fail loudly" risk the
+plan's "Risks & Unknowns" calls out as the main new risk the two-store
+split introduces. Either check failing is treated identically: `DETACH`
+and fall back to base-only, never propagate the error up to
+`describe_position`'s own caller.
 """
 
 import sqlite3
@@ -72,7 +85,7 @@ from geometry import distance_point_point
 from probe_store.reader import chunk_status as probe_chunk_status
 from probe_store.reader import grid_spacing_m as probe_grid_spacing_m
 from probe_store.reader import sample_probe_grid
-from probe_store.schema import check_probe_schema_version
+from probe_store.schema import check_probe_paired_with_base, check_probe_schema_version
 from store.chunks import chunk_index_for
 from store.models import StoredFeature
 from store.reader import (
@@ -344,6 +357,9 @@ def describe_position(
         conn.execute("ATTACH DATABASE ? AS probe", (str(probe_db_path),))
         try:
             check_probe_schema_version(conn, schema="probe")
+            check_probe_paired_with_base(
+                conn, theatre, base_schema="main", probe_schema="probe"
+            )
             probe_attached = True
         except ValueError:
             conn.execute("DETACH DATABASE probe")

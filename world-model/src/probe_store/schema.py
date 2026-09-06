@@ -37,6 +37,18 @@ assert CHUNK_SIZE_M % PROBE_SPACING_M == 0, (
     "cell boundaries"
 )
 
+# The identity meta rows every probe store records at creation
+# (`writer.open_probe_store`) and that both the write path (reopening the
+# same store) and the read path (`check_probe_paired_with_base`, below)
+# validate against. Shared here so the two call sites can't drift apart on
+# which keys "identity" actually means.
+IDENTITY_META_KEYS = (
+    "theatre",
+    "chunk_size_m",
+    "probe_spacing_m",
+    "base_schema_version",
+)
+
 _DDL = """
 CREATE TABLE meta (
     key TEXT PRIMARY KEY,
@@ -144,4 +156,79 @@ def check_probe_schema_version(conn: sqlite3.Connection, schema: str = "main") -
             f"code's PROBE_SCHEMA_VERSION {PROBE_SCHEMA_VERSION} -- rebuild "
             "is not possible (the probe store is not rebuildable from raw "
             "data); this is a hard incompatibility"
+        )
+
+
+def check_probe_paired_with_base(
+    conn: sqlite3.Connection,
+    theatre: str,
+    chunk_size_m: float = CHUNK_SIZE_M,
+    probe_spacing_m: float = PROBE_SPACING_M,
+    base_schema: str = "main",
+    probe_schema: str = "probe",
+) -> None:
+    """Raise `ValueError` if the probe store attached as `probe_schema` was
+    not created for `theatre`/`chunk_size_m`/`probe_spacing_m`, or if its
+    recorded `base_schema_version` disagrees with `base_schema`'s own live
+    `schema_version`.
+
+    This is the **read-path** counterpart to `writer.open_probe_store`'s
+    drift-detection contract -- the plan's "Risks & Unknowns" names
+    "opening a mismatched pair" as the main new risk the two-store split
+    introduces and requires it to "fail loudly", but `open_probe_store`'s
+    check only runs when a probe store is opened directly (i.e. the write
+    path, `build.pipeline.add_probe_chunk`). `query.describe.
+    describe_position`'s `ATTACH` never goes through `open_probe_store`, so
+    without this separate check a probe store built for a *different*
+    theatre (or a stale chunk lattice) would silently answer as if it were
+    the correct one, labelled `source="probe"` with no signal anything was
+    wrong -- exactly the failure this function exists to close.
+
+    Callers (currently only `describe_position`) treat a raised
+    `ValueError` the same way a bad `PROBE_SCHEMA_VERSION` is already
+    treated: `DETACH` and fall back to base-only, never propagate the
+    error to the caller of `describe_position` itself -- a mismatched
+    probe store degrades to "no probe store", not a crash.
+    """
+    requested = {
+        "theatre": theatre,
+        "chunk_size_m": repr(chunk_size_m),
+        "probe_spacing_m": repr(probe_spacing_m),
+    }
+    stored: dict[str, str] = {}
+    for key in IDENTITY_META_KEYS:
+        row = conn.execute(
+            f"SELECT value FROM {probe_schema}.meta WHERE key = ?", (key,)
+        ).fetchone()
+        if row is not None:
+            stored[key] = str(row[0])
+
+    mismatches = {
+        key: (stored.get(key), value)
+        for key, value in requested.items()
+        if stored.get(key) != value
+    }
+
+    base_version_row = conn.execute(
+        f"SELECT value FROM {base_schema}.meta WHERE key = 'schema_version'"
+    ).fetchone()
+    live_base_schema_version = (
+        None if base_version_row is None else str(base_version_row[0])
+    )
+    if (
+        live_base_schema_version is not None
+        and stored.get("base_schema_version") != live_base_schema_version
+    ):
+        mismatches["base_schema_version"] = (
+            stored.get("base_schema_version"),
+            live_base_schema_version,
+        )
+
+    if mismatches:
+        raise ValueError(
+            f"Probe store (schema={probe_schema!r}) is not paired with the "
+            f"queried base store (schema={base_schema!r}): {mismatches!r} "
+            "(stored vs expected) -- refusing to answer from a probe store "
+            "built for a different theatre, chunk lattice, or base schema "
+            "version"
         )

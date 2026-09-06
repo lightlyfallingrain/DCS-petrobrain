@@ -19,9 +19,12 @@ from store.chunks import CHUNK_SIZE_M
 from store.models import Source, StoredFeature
 
 from .models import ChunkStatus
-from .schema import PROBE_SPACING_M, check_probe_schema_version, create_probe_schema
-
-_META_KEYS = ("theatre", "chunk_size_m", "probe_spacing_m", "base_schema_version")
+from .schema import (
+    IDENTITY_META_KEYS,
+    PROBE_SPACING_M,
+    check_probe_schema_version,
+    create_probe_schema,
+)
 
 
 def open_probe_store(
@@ -69,13 +72,13 @@ def open_probe_store(
 
     check_probe_schema_version(conn)
     stored: dict[str, str] = {}
-    for key in _META_KEYS:
+    for key in IDENTITY_META_KEYS:
         row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         if row is not None:
             stored[key] = str(row[0])
     mismatches = {
         key: (stored.get(key), requested[key])
-        for key in _META_KEYS
+        for key in IDENTITY_META_KEYS
         if stored.get(key) != requested[key]
     }
     if mismatches:
