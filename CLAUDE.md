@@ -20,7 +20,7 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 
 ## Current priority
 
-**World Model Builder only** (`world-model/`). Do not implement Mission Interpreter or Petrobrain runtime behavior yet — those depend on what the World Model proves possible. See `world-model/ROADMAP.md` for milestone status.
+World Model Builder (`world-model/`) reached good-enough state 2026-09-06 (M0-M8 done, M9 deferred) — gate lifted. Priority now: build out the rest of the chain (aircraft layer first — DCS I/O — per `docs/concept/division-or-responsibility.md`) so the whole pipeline can be tested and iterated end-to-end. See `world-model/ROADMAP.md` for World Model milestone status.
 
 ## Subprojects
 
