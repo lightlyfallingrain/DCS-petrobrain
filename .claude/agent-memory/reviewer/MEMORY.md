@@ -20,3 +20,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Agent-memory path mistake recurs](feedback_agent_memory_path_recurrence.md) — implementer wrote under `world-model/.claude/agent-memory/` twice (f7a7ec1, M5 Stage 5); check the actual prefix on any agent-memory diff.
 - [M6 terrain semantics review outcome](m6-terrain-semantics-review.md) — approved w/ minor fixes; real control-point tests, honest negative usefulness finding; fourth recurrence of unstaged agent-memory files.
 - [M7 full-theatre review outcome](m7-full-theatre-review-approved.md) — APPROVED, zero required fixes; execution-boundary and provenance invariants independently verified via diff/grep, not trusted from prose.
+- [M8 probe store read-path drift gap](m8-probe-store-read-path-drift-gap.md) — NEEDS REVISION; write-path drift check (open_probe_store) solid+tested, but describe_position's ATTACH only checks schema_version, reproduced silent cross-theatre answer.
