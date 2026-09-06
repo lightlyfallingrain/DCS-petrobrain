@@ -16,7 +16,7 @@ Responsibilities:
 
 Priorities: 1. Preserve invariants from `CLAUDE.md` 2. Keep module responsibilities clear 3. Avoid premature abstraction 4. Keep the design incrementally implementable
 
-Should produce: short implementation plan, affected modules/files, key risks/unknowns, decisions requiring user input.
+Should produce: short implementation plan, affected modules/files, key risks/unknowns, decisions requiring user input, and at least one second-order effect this feature has on later milestones (if any — state "none identified" if truly isolated).
 
 Must not: write large amounts of code before the plan is accepted; introduce new abstractions without clear need; expand scope silently.
 

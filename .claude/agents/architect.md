@@ -47,7 +47,8 @@ When asked to plan a feature or resolve a design question:
 4. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
 5. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
 6. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
-7. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
+7. **State a second-order effect** — one sentence on how this feature affects later milestones (unblocks/narrows/complicates a future one), or "none identified" if genuinely isolated. First-order correctness isn't enough; value chains further than the immediate change.
+8. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
 
 ---
 

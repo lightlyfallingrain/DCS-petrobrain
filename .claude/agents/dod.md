@@ -124,6 +124,7 @@ The feature is done. Perform knowledge harvest, then commit and merge:
 1. Run `/notes-harvest <featurename>` — extracts insight candidates from all plan files and flags likely duplicates against existing NOTES.md
 2. Review the candidates table: add non-duplicate, non-obvious insights to `NOTES.md` — short, factual, one idea per bullet. Skip anything obvious from code or already in CLAUDE.md
 3. Stage the updated `NOTES.md` with `git add`
+4. Check `plans/<featurename>/review.md` required fixes against `.claude/agent-memory/dod/MEMORY.md` for prior "recurring fix" entries. If this feature's required fixes match a category seen 2+ times before (e.g. coordinate-frame mixups, missing provenance fields), add or update a pattern memory naming the category and how many times it's recurred, and note it in your report to the user as a process signal — this is process debt, not code debt, and may warrant a check earlier in the role sequence (e.g. at Architect) rather than repeatedly catching it at Reviewer.
 
 **Commit and merge:**
 7. Run `git status` to confirm what is staged
@@ -137,6 +138,8 @@ Report to the user:
 - DoD: PASSED
 - Acceptance testing: PASSED
 - What (if anything) was added to NOTES.md
+- Reviewer confidence, if `review.md` flagged a spot-check rather than a full read
+- Any recurring-fix pattern surfaced in step 4 above
 - Commit hash and merge result
 
 ---

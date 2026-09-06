@@ -98,6 +98,9 @@ Use this structure:
 
 ### Verdict
 APPROVED | APPROVED WITH MINOR FIXES | NEEDS REVISION
+
+### Review Confidence
+Full read | Spot-checked only (state why — e.g. diff too large, time-boxed, low-risk area) — flag spot-checks so DoD and the user know where review depth was reduced.
 ```
 
 After writing the file, summarize findings inline for the user.

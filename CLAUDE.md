@@ -41,6 +41,10 @@ Each major component under this repo may carry its own `<subproject>/CLAUDE.md` 
 3. Show that milestone and its subitems to the user
 4. Ask what they want to work on
 
+## Milestone Completion
+
+Before marking a milestone done in `world-model/ROADMAP.md`, answer one question in the DoD report or todo.md update: does this milestone's completion change what the next milestone should be, or invalidate an assumption downstream milestones rely on? One line is enough — this is the project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than a calendar.
+
 ## Verification
 
 Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see `world-model/CLAUDE.md` "Commands" for the current list (ruff format/check, mypy --strict, pytest). This is the same sequence the pre-commit hook enforces mechanically — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
