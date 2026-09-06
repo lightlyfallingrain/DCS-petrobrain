@@ -29,3 +29,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M7 Stage 1 vector layers](project_m7_stage1_vector_layers.md) — osm_cache_path was a hidden required-param blocker for syria-full; raw files already staged locally; parse_towns/beacons_lua reject non-exact counts so monkeypatch for pipeline tests.
 - [M7 Stage 2 SRTM provenance](project_m7_stage2_srtm_provenance.md) — grid.provenance schema bump v2->v3, required field on ElevationGrid/SurfaceGrid, "most recent grid wins" ordering now matters, plan's file list vs its own locked decisions can conflict.
 - [M8 probe store](project_m8_probe_store.md) — nearest-cell-only sparse-grid sampling, chunk classifier reuse needed zero new logic, ~23ms/chunk perf, base store fully untouched.
+- [aircraft-layer stage 1-2](project_aircraft_layer_stage1_2.md) — new independent subproject, schema bool-as-int gotcha, LoGetSelfData shape unverified (defensive pcall in Export.lua), stage 3/4 deferred.

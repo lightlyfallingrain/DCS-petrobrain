@@ -87,6 +87,12 @@ class CollectorServer:
             logger.info("Export.lua connected from %s", addr)
             try:
                 self._handle_connection(conn)
+            except OSError:
+                logger.warning(
+                    "Export.lua connection from %s dropped abruptly",
+                    addr,
+                    exc_info=True,
+                )
             finally:
                 conn.close()
                 logger.info("Export.lua connection from %s closed", addr)
