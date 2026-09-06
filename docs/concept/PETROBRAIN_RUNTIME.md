@@ -160,6 +160,55 @@ Petrobrain should operate on **belief state**, not omniscient DCS truth.
 
 Where possible, perception should come from Petrovich's actual DCS targeting/detection information.
 
+## World model acquisition: incremental, on-demand probing
+
+> **Status: proposed, not implemented.** Raised 2026-09-06, right after the World Model
+> Builder's M7 (full-theatre pipeline) completed. This section depends on an open technical
+> unknown (below) that should be resolved, likely by the Investigator agent, before any of this
+> gets designed further — do not start implementing against this section yet. See
+> `WORLD_MODEL_BUILDER.md`'s matching "Incremental, on-demand probe-tier data" section for the
+> storage/schema side of the same idea.
+
+Full-theatre live-mission probing (the thing M7 deliberately avoided for elevation by using SRTM
+instead) is expensive, and mostly wasted effort: a player — especially flying a helicopter — is
+very unlikely to need probe-tier terrain resolution (fine elevation, `surface_type`, ridge/
+valley) across a whole theatre. Real sorties are geographically contained.
+
+**Idea**: treat the player's position as an expanding "known-area bubble" instead of pre-building
+theatre-wide coverage.
+
+- The World Model's base tier (roads, settlements, airfields, beacons, navaids — see
+  `WORLD_MODEL_BUILDER.md`) stays exactly as M7 built it: cheap, whole-theatre, one offline pass,
+  no reason to change.
+- The **probe tier** (elevation detail beyond SRTM, `surface_type`, ridge/valley) is instead
+  filled incrementally, chunk by chunk, only for terrain the player has actually flown near.
+- When Petrobrain (or an underlying perception/terrain-awareness check) queries a chunk the store
+  marks `unqueried`, and the aircraft is near or approaching it, trigger a **throttled** live DCS
+  probe for that chunk — and plausibly a look-ahead ring of chunks in the direction of travel, so
+  the bubble grows ahead of the aircraft rather than always one step behind it. Write the result
+  back into the persistent store; the known-coverage bubble grows outward as the player explores.
+- "Throttled" matters for the same reason M5/M7's terrain probes already use
+  `timer.scheduleFunction` chunking instead of one blocking loop (see
+  `tools/dcs-mission-probe/README.md`'s note on `terrain_probe_*.lua`'s incremental-ladder
+  pattern) — a burst of live `land.getHeight`/`land.getSurfaceType` calls mid-mission must not
+  visibly impact game performance. Rate-limit probe calls per tick, same discipline, just
+  triggered by player movement instead of a pre-planned grid walk.
+- Ridge/valley classification (M6's local Laplacian-curvature method) runs naturally per-chunk
+  once that chunk's elevation is available — no separate design needed, it already operates on a
+  local grid neighborhood.
+
+**The one open blocker this whole idea hinges on**: there is currently no live data path from a
+running DCS mission back into the persistent world-model store. Every extraction to date
+(`world-model/WORKFLOW.md`) is a manual, offline, batch round-trip — a mission runs, writes to
+`Saved Games/DCS/Logs/`, a human syncs the file back to the Mac hours later via Dropbox, then it
+gets parsed into the store. "Fly into unmapped terrain and have Petrobrain answer a question
+about it within the same flight" needs something meaningfully faster than that — a live socket
+export, a Windows-side watcher process shipping newly-written probe output over the existing
+Mac/Windows LAN split (see the project's compute-topology notes) in near-real time, or something
+else entirely. Resolve this — likely via an Investigator pass into DCS's live export options
+(`Export.lua`, DCS-gRPC, UDP telemetry, etc.) — before designing the chunk-grid/throttling
+mechanics in more detail.
+
 ## Perception adapter
 
 The first major technical unknown is:
@@ -802,6 +851,8 @@ Do not hard-code final assumptions about:
 - DCS perception format;
 - coordinate uncertainty;
 - runtime model context;
+- live probe-to-store data channel (see "World model acquisition: incremental, on-demand
+  probing" above — currently unsolved);
 
 until practical experiments establish what is really possible.
 
