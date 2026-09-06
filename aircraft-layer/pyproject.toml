@@ -1,0 +1,27 @@
+[project]
+name = "dcs-aircraft-layer"
+version = "0.1.0"
+description = "Live DCS aircraft telemetry pipeline: Export.lua -> local collector -> LAN API"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src:tests"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff.lint.isort]
+# See world-model/pyproject.toml for why this is declared explicitly rather
+# than left to ruff's cwd-relative auto-detection: invoking `ruff check
+# aircraft-layer/src aircraft-layer/tests` from the repo root vs. cwd
+# aircraft-layer/ changes whether these local packages are classified as
+# first-party or third-party, flipping I001 findings depending on invocation
+# cwd. Declaring them explicitly makes the classification invocation-cwd-independent.
+known-first-party = [
+    "schema",
+    "collector",
+]
