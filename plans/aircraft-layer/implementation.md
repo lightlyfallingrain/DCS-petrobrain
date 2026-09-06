@@ -33,3 +33,24 @@ No global `ruff`/`mypy`/`pytest` install exists on this machine; ran all three v
 - `Export.lua`'s exact `LoGetSelfData()` sub-field structure (`Position.p.x/.y/.z` vs. a flat `Position.x/.y/.z`; whether `Heading` is top-level) is documented on the Hoggit wiki per the investigator's research doc but was not independently verified against the installed DCS version this session (no Windows-box access from this agent). The script is written defensively — `pcall`-guarded field access, tries the nested `Position.p.*` shape first and falls back to a flat `Position.*` — and simply skips sending a sample if the shape doesn't match rather than erroring. This is exactly what plan stage 3 (live DCS mission test) exists to confirm or correct; flagging so the reviewer/DoD doesn't mistake the pcall guards for defensive-programming overkill — they're covering a genuinely unverified assumption.
 - The plan's stage 2 bullet "verify end-to-end via a local script on the Windows box reading the collector's in-memory state (or a debug stdout dump)" was interpreted as calling for the debug-dump tooling to be built now (it's infrastructure, not the live-mission test itself) even though actually running it against DCS is stage 3's job. `aircraft-layer/src/collector/__main__.py` is that tooling, unexercised against a real Export.lua in this session.
 - No `aircraft-layer/CLAUDE.md` or `WORKFLOW.md` written yet (stage 6, explicitly out of scope for this pass) — anyone reading `aircraft-layer/` cold before that stage lands should look to `plans/aircraft-layer/plan.md` and this file for the stack/design rationale in the meantime.
+
+---
+
+### Implementation Summary (review fix follow-up)
+
+Addressed the one required fix from `plans/aircraft-layer/review.md` for the stage 1-2 review: `CollectorServer.serve_forever` did not catch `OSError` around per-connection handling, so an abrupt Export.lua disconnect (e.g. `ConnectionResetError` on Windows when DCS force-quits/crashes) propagated out of `_handle_connection` and crashed the whole long-running collector process instead of looping back to `accept()` — contradicting the module's own docstring claim that the loop re-accepts after each disconnect.
+
+### Files Changed
+- `aircraft-layer/src/collector/server.py` — wrapped the `self._handle_connection(conn)` call in `serve_forever` with `except OSError:` that logs a warning (`exc_info=True`) and falls through to the existing `finally: conn.close()`, then loops back to `accept()`. No other logic changed.
+
+### Tests Added
+- None. The reviewer's own note characterized this as a live-connection failure-mode fix best exercised by the stage 3 live DCS mission test (per the module's existing test philosophy: `_handle_connection`/`serve_forever` correctness depends on a real socket peer, not unit tests — only `TelemetryCache` and `TelemetrySample` are unit-tested). Left the optional unbounded-`buffered`-string guard out of scope for this pass per the reviewer's own framing (low risk on trusted loopback; worth revisiting before stage 4 exposes this code on the LAN).
+
+### Checks
+- ruff format --check aircraft-layer/src aircraft-layer/tests: pass
+- ruff check aircraft-layer/src aircraft-layer/tests: pass
+- mypy --strict aircraft-layer/src aircraft-layer/tests (run from inside `aircraft-layer/`): pass
+- pytest aircraft-layer/tests -q: pass (20 passed, unchanged from stage 1-2 — no new tests added)
+
+### Notable Discoveries
+- None beyond what stage 1-2's entry already flagged. Committed as its own small commit (`Catch OSError per-connection in collector serve_forever`) separate from the reviewer's own review artifacts, which were committed separately to keep review-record commits distinct from code-fix commits.
