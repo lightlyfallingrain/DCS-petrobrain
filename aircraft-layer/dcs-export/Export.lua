@@ -38,7 +38,13 @@ sample (logged nowhere, since there's no console here) rather than erroring
 out of the export callback permanently.
 --]]
 
-local socket = require("socket")
+-- require("socket") fails in DCS's Export environment: lua-socket.dll only
+-- exports luaopen_socket_core, not the plain luaopen_socket entry point Lua
+-- looks up for module name "socket" (confirmed via dcs.log ALERT: "error
+-- loading module 'socket' ... The specified procedure could not be found").
+-- socket.core exposes the same tcp()/settimeout/connect/send/close methods
+-- we use here, so no other change is needed.
+local socket = require("socket.core")
 
 local HOST = "127.0.0.1"
 local PORT = 7790

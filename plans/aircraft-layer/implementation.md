@@ -54,3 +54,29 @@ Addressed the one required fix from `plans/aircraft-layer/review.md` for the sta
 
 ### Notable Discoveries
 - None beyond what stage 1-2's entry already flagged. Committed as its own small commit (`Catch OSError per-connection in collector serve_forever`) separate from the reviewer's own review artifacts, which were committed separately to keep review-record commits distinct from code-fix commits.
+
+---
+
+### Implementation Summary (stage 3 live-test bug fix)
+
+Stage 3 live DCS mission test blocked immediately: collector confirmed listening, Export.lua never connected. User's `Saved Games\DCS\Logs\dcs.log` pinned it exactly:
+
+```
+ALERT   EDCORE (Main): Can't execute Lua file C:\Users\simon\Saved Games\DCS\Scripts\Export.lua - error loading module 'socket' from file 'F:\Games\DCS World\bin-mt\lua-socket.dll':
+	The specified procedure could not be found.
+```
+
+Root cause: `require("socket")` at the top of `Export.lua` was unguarded, and it fails in this DCS install's Export environment because `lua-socket.dll` only exports `luaopen_socket_core`, not the plain `luaopen_socket` entry point Lua's `require` looks up for module name `"socket"`. Since the failure happens at module load time (top level, not inside any `LuaExportStart`/`LuaExportActivityNextEvent` callback), the entire script aborted before any callback function was even defined — so DCS never called anything in it, and nothing ever attempted to connect. This matches the investigator's research doc claim that LuaSocket "ships with" the Export environment (true — the DLL is present and loadable) but that claim didn't extend to *which* require name works, which stage 3 was specifically meant to verify and did.
+
+### Files Changed
+- `aircraft-layer/dcs-export/Export.lua` — changed `local socket = require("socket")` to `local socket = require("socket.core")`, with a comment recording why. No other change needed: every method this script calls (`socket.tcp()`, `:settimeout`, `:connect`, `:send`, `:close`) is a `socket.core` primitive: `socket.core` is the primitive tcp/udp core, `socket.lua` (the layer `require("socket")` normally loads) only adds convenience wrappers (`socket.connect`, `socket.bind`, `socket.select` helpers) this script never used.
+- Canonical fix copied to `win-mac-sync/to-windows/aircraft-layer/Export.lua` for redeploy (per this project's copy-out-never-edit-in-place cross-machine convention).
+
+### Tests Added
+- None — this is Export.lua, which per the module's own stated test philosophy is validated by the live DCS mission test, not unit tests.
+
+### Checks
+- Not re-run (no `.py` changes this pass).
+
+### Notable Discoveries
+- An unguarded top-level `require()` failure in Export.lua is silent from the collector's point of view: no connection attempt, no error visible anywhere except `dcs.log`. Worth remembering for any future Export.lua dependency: DCS logs load failures only to `dcs.log`, never to the collector or any process this pipeline controls. Next step once connectivity is confirmed: continue stage 3 (cross-check telemetry values against cockpit instruments, confirm/correct the `LoGetSelfData()` field-shape assumption noted in stage 1-2's entry).
