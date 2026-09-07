@@ -71,6 +71,41 @@ Think microservice architechture. That tould naturally balance load on multiple 
             -> observe DCS data to verify desired result, issue correcting commands if needed
 - body must observe DCS data and use an inspect and adapt loop to measure if the desired outcome is achieved and issue corrective commands to reach it. This must be adaptive and allow time for DCS aircaft/world state to evolve, some things take time. (defer flight control until possible later stage, do this for sensors and detection)
 
+## Speech / audio (SRS ICS)
+
+- transport is SRS (SimpleRadio Standalone). Petrovich sits on the ICS (intercom) channel
+    - player transmits on ICS -> Petrovich hears it
+    - Petrovich transmits on ICS -> player hears it
+    - same channel both directions, no separate mechanism for in/out
+- an **SRS adapter** owns the audio boundary. Proposed as its own thin component, sibling to the aircraft layer, not part of it
+    - justification: aircraft layer's contract is "DCS I/O". SRS is a separate application with its own client/protocol, not DCS. Folding it into the aircraft layer would put two unrelated external processes behind one API
+    - but it follows the same rule as the aircraft layer: **sanitized data out over a sensible API**, raw audio never leaves it
+    - runs on the Windows box (where SRS and DCS are). Emits transcripts over LAN, accepts text to speak
+- incoming audio path
+    - PTT-down on ICS -> capture
+    - **debounce**: ignore transmissions shorter than a sanity-check interval (accidental transmit-key clicks)
+    - **silence/noise gate**: drop transmissions that are silence or noise rather than running STT on garbage
+    - STT -> transcript text -> body layer
+    - signal-level debounce and gating (duration, energy) live in the SRS adapter, not body. Raw audio never crosses into body, and body should never see a transmission that was not real speech
+    - any later *context-dependent* suppression — e.g. a tighter tolerance mid-engagement — is body's, acting on already-transcribed text. Not needed initially
+- incoming routing gate (transcript -> action), decided by body
+    - deterministic parse succeeds ("scan 2 o'clock", "watch that", "say again") -> body acts directly, no brain call
+    - deterministic parse fails or is ambiguous, or the player asked a genuine question or wants judgement -> pass to brain, with whatever body already extracted from the transcript
+    - brain either decides the action or asks the player for clarification
+- outgoing routing gate (what Petrovich says), same split
+    - **deterministic / templated**, body writes the text itself
+        - command readbacks — "scanning 2 o'clock"
+        - contact reports — "enemy, 2 o'clock, 3 km, group of 3 tanks, 2 IFVs and infantry, crossroad east of <village>"
+        - urgent reactive calls — "missile launch, 9 o'clock, break right"
+    - **brain-level**, body supplies facts, brain writes the text
+        - judgement and advice — "commander, SAM threat in the target area, suggest terrain cover east of target"
+        - anything conversational, or anything answering a question the templates do not cover
+- outgoing audio path
+    - chosen text -> TTS -> injected into SRS on ICS
+    - TTS lives in the SRS adapter, same as STT. Body and brain deal in text only
+- latency note: the deterministic paths exist largely so common interactions do not wait on an LLM. A readback should be near-instant; an advisory may take a beat
+- the text-only version of all of this (typed input standing in for STT, printed text standing in for TTS) is the thing to build first. The routing, parsing, templating and readback logic is not audio work and should not wait for audio
+
 ## Memory layer
 - active mission memory
     - mission briefing
