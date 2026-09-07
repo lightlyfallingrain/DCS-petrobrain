@@ -14,3 +14,8 @@ entries are removed once created or rejected by the user.
 - **Pattern**: Copy (never edit in-place) source files from canonical repo path (e.g., `aircraft-layer/src/...`, `aircraft-layer/dcs-export/Export.lua`) to gitignored scratch path (`win-mac-sync/aircraft-layer/...`) via `cp`, verify gitignore match, document sync convention
 - **Count**: 6 files copied this session; pattern applied once but would repeat for every build/test cycle involving native-Windows deployment
 - **Benefit**: Formalizes native-Windows deployment workflow (currently by analogy from wsl-probe-sync); ensures canonical truth stays in repo; establishes cross-platform sync SOP beyond WSL-specific tooling
+
+## 2026-09-07 iterative-web-recon-to-dated-report
+- **Pattern**: Run many narrow WebSearch queries (community wiki/forum/mod terms) plus WebFetch on the most promising hits to triangulate whether an undocumented API/state is exposed, then synthesize into a dated findings file under `world-model/research/` and produce a short verdict summary
+- **Count**: 19 WebSearch + 5 WebFetch calls this session (investigator subagent researching Petrovich/Mi-24P detection-state extractability)
+- **Benefit**: A dedicated research-recon skill could standardize query fan-out strategy (terminology variants, source prioritization: official docs > wiki > forum > mod source), dedupe overlapping searches, and enforce the dated-report/verdict-summary output format directly — cutting redundant searches and speeding future PB-0-style feasibility investigations

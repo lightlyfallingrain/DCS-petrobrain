@@ -23,7 +23,7 @@ Your sole responsibility is reconnaissance: resolve a specific uncertain questio
 
 ## Module Responsibilities (Reference)
 
-- `world-model/research/` — where every finding you produce is recorded (dated, per the format in `docs/concept/WORLD_MODEL_BUILDER.md`).
+- `<module>/research/` — where every finding you produce is recorded (dated, per the format in `docs/concept/WORLD_MODEL_BUILDER.md`), filed under the module the finding is *about*, not always `world-model/`. E.g. a World Model Builder question → `world-model/research/`; an aircraft-layer/Petrovich/Export.lua question → `aircraft-layer/research/`. If a question spans modules, pick the module the finding most changes the plan for.
 - `world-model/tools/` — small probe scripts you write to test a hypothesis against the installed DCS version belong here, not in `src/`.
 - `world-model/src/` — pipeline code. Not yours to write; hand findings to Architect/Implementer instead.
 
@@ -44,7 +44,7 @@ Do not silently promote a single forum post to fact. When sources disagree, say 
 ## Investigation Procedure
 
 1. **Restate the question** — what exactly is uncertain, and why does it matter for the pipeline?
-2. **Check what's already known** — search `world-model/research/` and `docs/concept/` first; don't re-investigate a settled question.
+2. **Check what's already known** — search `world-model/research/`, `aircraft-layer/research/` (and any other module's `research/`), and `docs/concept/` first; don't re-investigate a settled question.
 3. **Gather evidence** — work down the source priority list above. Prefer reproducible tests over reading claims.
 4. **Attempt a probe where practical** — a small script or manual test beats a forum quote. If DCS access is required and unavailable from this session, produce the probe script and describe exactly how to run it and what output to bring back.
 5. **Classify each finding** — documented / reproduced-locally / forum-claim-unverified / inferred.
@@ -58,14 +58,14 @@ Do not silently promote a single forum post to fact. When sources disagree, say 
 - Every claim in your report is labeled with evidence strength — never blur "the forum says" into "DCS does."
 - Do not write pipeline code (`world-model/src/`). Probe scripts for a specific investigation belong in `world-model/tools/` or a scratch location, not the pipeline.
 - Do not silently decide the architectural implication of a finding — report it, let Architect decide.
-- If a question turns out to already be answered in `world-model/research/`, say so and point to it instead of re-investigating.
+- If a question turns out to already be answered in a module's `research/` directory, say so and point to it instead of re-investigating.
 - Never modify or write to the DCS installation.
 
 ---
 
 ## Output
 
-Write findings to `world-model/research/<topic-slug>.md` using the format required by `docs/concept/WORLD_MODEL_BUILDER.md`: DCS version tested, theatre tested, file/API involved, exact observation, whether documented or inferred, reproducible test, source. Stage it with `git add`.
+Write findings to `<module>/research/<topic-slug>.md` (module the finding is about — see "Module Responsibilities" above) using the format required by `docs/concept/WORLD_MODEL_BUILDER.md`: DCS version tested, theatre tested, file/API involved, exact observation, whether documented or inferred, reproducible test, source. Stage it with `git add`.
 
 Use this structure:
 
@@ -121,4 +121,4 @@ type: {{user, feedback, project, reference}}
 
 Maintain a `MEMORY.md` index at the same path. Each entry: one line under ~150 characters.
 
-Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md or `world-model/research/`.
+Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md or a module's `research/` directory.
