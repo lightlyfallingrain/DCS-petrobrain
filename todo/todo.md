@@ -2,7 +2,9 @@
 
 ## Current Focus
 
-World Model Builder good-enough, gate lifted 2026-09-06 (user decision: move to rest of chain to test/improve end-to-end). Next: **aircraft layer** (DCS I/O + API, per `docs/concept/division-or-responsibility.md`) — needs heavy investigation before implementation (DCS runtime data availability, scripting-API command surface). Architect pass starting now, will pull in `investigator` for unverified DCS-internals claims. World Model's own backlog (M9 OSM, incremental per-layer builds) stays deferred/unscheduled — see `world-model/ROADMAP.md`.
+World Model Builder good-enough, gate lifted 2026-09-06 (user decision: move to rest of chain to test/improve end-to-end). Next: **aircraft layer** (DCS I/O + API, per `docs/concept/division-or-responsibility.md`) — needs heavy investigation before implementation (DCS runtime data availability, scripting-API command surface). World Model's own backlog (M9 OSM, incremental per-layer builds) stays deferred/unscheduled — see `world-model/ROADMAP.md`.
+
+**Aircraft layer status (2026-09-07, paused mid stage-3, user diverting to other topics):** branch `feature/aircraft-layer-telemetry`, stages 1-2 implemented+reviewed+committed. Stage 3 (live DCS mission test) in progress: two bugs found+fixed (`require("socket")` load failure; then a standing debug-logging facility added to Export.lua since samples still weren't arriving). Blocked on user running the updated `Export.lua` + debug flag on the Windows box and reporting back the `aircraft_layer_debug.log` contents. Full resume instructions in `plans/aircraft-layer/implementation.md`'s "STATUS AS OF 2026-09-07" entry — read that first when picking this back up.
 
 - [x] M0 — record installed DCS version + confirm Syria terrain present, in `world-model/research/`.
 - [x] M1 (recon) — prove DCS x/z ↔ lat/lon transform for Syria against a known real-world control point; measure error. pydcs tmerc params confirmed against live install; real-world residual ~1.0-1.3km (terrain-placement error, not projection defect). See `world-model/research/2026-09-03-m1-coordinate-transform-verification.md`.

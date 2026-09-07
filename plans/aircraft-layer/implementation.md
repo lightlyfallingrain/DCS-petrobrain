@@ -105,3 +105,23 @@ Replaced the earlier one-shot temporary dump hack with a permanent facility in `
 
 ### Notable Discoveries
 - This facility is intended to stay in `Export.lua` permanently (unlike the one-shot dump it replaces) — future DCS-interfacing changes to this file should extend it (add `debug_log` calls at new failure points) rather than hand-rolling another temporary dump.
+
+---
+
+### STATUS AS OF 2026-09-07 — paused mid stage-3 live test, resume here
+
+Branch: `feature/aircraft-layer-telemetry`, HEAD = `67da687` ("Add standing flag-gated debug logging to Export.lua"). Working tree clean on this branch as of this entry.
+
+**Where things stand:** stage 3 (live DCS mission test) is in progress and blocked twice so far, both bugs fixed:
+1. `require("socket")` aborted Export.lua's entire load (fixed in `b51fc94`: switched to `require("socket.core")`).
+2. Connection now succeeds, but collector still receives zero samples — every frame is silently skipped, most likely because the `LoGetSelfData()` field-shape guess (`Position.p.x/.y/.z` vs. flat `Position.x/.y/.z`, top-level `Heading`) doesn't match this DCS install's actual return shape. Not yet confirmed — this is what the just-added debug facility (`67da687`) exists to answer.
+
+**Not yet done (the actual next step):** user needs to, on the Windows box:
+1. Copy `win-mac-sync/to-windows/aircraft-layer/Export.lua` (already up to date with both fixes) to `Saved Games\DCS\Scripts\Export.lua`.
+2. Create an empty file `Saved Games\DCS\Scripts\aircraft_layer_debug.flag` (any content, even empty) to turn on debug logging.
+3. Run the collector, start a mission, fly briefly.
+4. Copy `Saved Games\DCS\Logs\aircraft_layer_debug.log` into `win-mac-sync/from-windows/` and report back.
+
+**Once that log is in hand:** read it for the `LoGetSelfData()` shape dump (logged once via `debug_dump`) and the skip-reason lines (which field(s) are `nil`), fix the field access in `Export.lua` to match the real shape, re-copy to `win-mac-sync/to-windows/aircraft-layer/Export.lua`, re-test. Once samples flow, finish stage 3 proper (cross-check telemetry values against cockpit instruments), then proceed to stage 4 (Mac-facing HTTP API) per `plans/aircraft-layer/plan.md`.
+
+No other work is in flight on this branch. Safe to switch topics and resume by reading this entry.
