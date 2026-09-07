@@ -172,3 +172,16 @@ Implemented plan stage 4: `GET /telemetry/latest` and `GET /telemetry/since/<tim
 ### Notable Discoveries
 - `ThreadingHTTPServer.shutdown()` is the intended cross-thread stop mechanism (unlike `CollectorServer.close()`, which just closes the listening socket out from under a blocking `accept()`) — `TelemetryAPIServer.close()` uses it directly rather than replicating the collector's socket-close pattern, since `http.server` already provides the safer primitive.
 - Stage 4 plan text says "confirm reachability from the Mac over LAN with a plain `curl`" and "measure DCS frame-time impact" (stage 5) — neither done this pass; this was a same-machine (offline, no DCS) implementation pass only. Both remain open alongside stage 3's cockpit cross-check.
+
+---
+
+### Live LAN reachability confirmed (stage 4 plan requirement closed)
+
+Synced current `aircraft-layer/src/` (incl. new `api/`) + `pyproject.toml` to `win-mac-sync/to-windows/aircraft-layer/` (previous copy there was stale, predated stage 4). User opened the `netsh advfirewall` rule for port 7791, ran `python -m collector --debug` on the Windows box (`192.168.0.85`) against a live Mi-24P mission, then curled from the Mac side of the LAN:
+
+- `GET http://192.168.0.85:7791/telemetry/latest` -> 200, single current sample.
+- `GET http://192.168.0.85:7791/telemetry/since/0` -> 200, ~100-sample array (full ring buffer, `DEFAULT_BUFFER_SIZE`), chronological, `dcs_model_time_s` spanning ~0.84s of flight at the expected ~5ms-per-sample (200 Hz-ish receipt cadence at whatever the current export rate actually is — worth reconciling against the plan's nominal "5 Hz" once stage 5 measures the real rate, since consecutive `dcs_model_time_s` deltas in the sample look closer to ~8-10ms than 200ms).
+
+This closes stage 4's "confirm reachability from the Mac over LAN with a plain curl" requirement. `altitude_radar_m` still `None` in every sample (known gap, stage 3 leftover, not investigated this pass).
+
+**Remaining open items, unchanged in kind:** stage 3's cockpit-instrument cross-check, `altitude_radar_m` investigation, stage 5 frame-time measurement (now also: reconcile actual observed export rate against the plan's nominal 5 Hz).
