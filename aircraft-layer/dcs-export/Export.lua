@@ -25,9 +25,12 @@ LuaSocket and an unsanitized `io`/`lfs` environment by default):
   - LoGetIndicatedAirSpeed()     -- m/s IAS
   - LoGetTrueAirSpeed()          -- m/s TAS
   - LoGetModelTime()             -- DCS simulation clock, seconds
-  - LuaExportActivityNextEvent(t) -- documented throttle mechanism: DCS calls
-    this every frame with the current model time and fires
-    LuaExportAfterNextFrame at whatever time this function returns next.
+  - LuaExportActivityNextEvent(t) -- required export callback, but NOT a
+    throttle on LuaExportAfterNextFrame despite reading that way in some
+    documentation: stage 5 confirmed live that DCS calls this correctly on
+    the requested schedule, yet still calls LuaExportAfterNextFrame every
+    frame regardless of what this returns. The actual 5 Hz throttle is
+    `last_export_t`, enforced manually inside LuaExportAfterNextFrame.
 
 NOTE: exact LoGetSelfData() sub-field names (Position.p.x/.y/.z vs. a flat
 Position.x/.y/.z, and whether Heading is top-level) are documented but not
@@ -126,6 +129,13 @@ end
 local client = nil
 local next_reconnect_attempt_t = 0
 
+-- Stage 5 finding: LuaExportActivityNextEvent's returned "next" time does
+-- NOT gate LuaExportAfterNextFrame calls -- DCS calls the latter every
+-- frame regardless (confirmed live: ActivityNextEvent fired exactly on the
+-- requested 0.2s schedule while AfterNextFrame fired every ~8ms, i.e. every
+-- frame). The throttle has to be enforced manually here instead.
+local last_export_t = -1
+
 local function try_connect()
     local sock = socket.tcp()
     sock:settimeout(0.2) -- don't stall the sim frame on a slow/refused connect
@@ -190,11 +200,33 @@ function LuaExportStop()
     end
 end
 
--- Documented throttle mechanism (research finding 1): DCS calls this every
--- frame with the current model time and schedules the next
--- LuaExportAfterNextFrame at whatever time this returns.
+-- NOT actually a throttle on LuaExportAfterNextFrame -- research finding 1's
+-- documentation reads that way, but stage 5 confirmed live that DCS calls
+-- this on its own schedule (correctly, exactly every EXPORT_INTERVAL_S) yet
+-- still calls LuaExportAfterNextFrame every frame regardless of what this
+-- returns. Kept only because it's a required export callback; the real
+-- throttle is `last_export_t` inside LuaExportAfterNextFrame below.
+--
+-- Bounded diagnostic logging (stage 5): live samples showed
+-- received_wall_clock_s deltas of ~8ms between consecutive samples, not the
+-- expected ~200ms (EXPORT_INTERVAL_S=0.2, 5 Hz) -- this logs the requested
+-- vs. actual call cadence to confirm whether the throttle is being honored
+-- at all, capped at ACTIVITY_LOG_LIMIT calls so the log doesn't grow
+-- unbounded over a long mission.
+local activity_call_count = 0
+local send_count = 0
+local ACTIVITY_LOG_LIMIT = 40
+
 function LuaExportActivityNextEvent(t)
-    return t + EXPORT_INTERVAL_S
+    activity_call_count = activity_call_count + 1
+    local next_t = t + EXPORT_INTERVAL_S
+    if activity_call_count <= ACTIVITY_LOG_LIMIT then
+        debug_log(
+            "ActivityNextEvent #" .. activity_call_count
+            .. ": t=" .. tostring(t) .. " -> requested next=" .. tostring(next_t)
+        )
+    end
+    return next_t
 end
 
 function LuaExportAfterNextFrame()
@@ -202,6 +234,11 @@ function LuaExportAfterNextFrame()
     if t == nil then
         return
     end
+
+    if t - last_export_t < EXPORT_INTERVAL_S then
+        return -- called every frame; enforce the 5 Hz export rate ourselves
+    end
+    last_export_t = t
 
     if client == nil then
         if t < next_reconnect_attempt_t then
@@ -254,6 +291,11 @@ function LuaExportAfterNextFrame()
             .. " ias=" .. tostring(ias) .. " tas=" .. tostring(tas)
         )
         return -- incomplete sample, skip rather than send a partial line
+    end
+
+    send_count = send_count + 1
+    if send_count <= ACTIVITY_LOG_LIMIT then
+        debug_log("AfterNextFrame send #" .. send_count .. ": t=" .. tostring(t))
     end
 
     local line = encode_json_line({

@@ -228,3 +228,29 @@ altitude_agl_m: 91.699523925781
 `altitude_radar_m` is still `null` in this same sample, now isolated as a standalone issue — no longer explainable by the shoreline coincidence, since this position has genuine AGL (~92m) where a radar altimeter should read valid.
 
 **User decision: not investigating further.** `altitude_agl_m` measures the same physical quantity radar alt would (height above the terrain directly below), and it's confirmed working correctly (previous entry). Consumers should use `altitude_agl_m` as the AGL/radar-alt-equivalent value; `altitude_radar_m`/`LoGetRadarAltimeter()`'s always-null behavior is deprioritized, not scheduled for further debugging. No code change — the field stays in the schema (harmless if it starts working later; downstream code should not depend on it being non-null).
+
+---
+
+### Stage 5, part 1: export-rate bug found and fixed (real, not the shoreline kind)
+
+Before the frame-time A/B test, chased the export-rate discrepancy flagged since the first live LAN test (`8f818ba`'s log entry): consecutive samples' `received_wall_clock_s` deltas looked like ~8ms, not the coded 200ms (`EXPORT_INTERVAL_S`, 5 Hz).
+
+Instrumented both export callbacks in `Export.lua` with bounded (`ACTIVITY_LOG_LIMIT=40`) debug logging: `LuaExportActivityNextEvent` (logs requested `t` -> `next`) and the point in `LuaExportAfterNextFrame` where a sample is actually about to be sent. Two live runs on the Windows box, `aircraft_layer_debug.log` synced back each time:
+
+- **Before the fix:** `ActivityNextEvent` fired exactly on the requested 0.2s schedule (`t=0, 0.2, 0.4, 0.6...`) — the documented mechanism itself works. But `AfterNextFrame` fired on *every DCS frame* regardless (`t=0, 0.023, 0.032, 0.039...`, ~8ms apart) — its return value doesn't gate `AfterNextFrame` at all, despite research finding 1 and this file's own comments describing it that way. Root cause: a wrong assumption about DCS's Export API, not a code typo.
+- **Fix:** `Export.lua` — added `local last_export_t = -1`; `LuaExportAfterNextFrame` now returns immediately if `t - last_export_t < EXPORT_INTERVAL_S`, before any of the `LoGetSelfData`/altitude/speed reads or socket work, and sets `last_export_t = t` when it proceeds. This is the actual 5 Hz throttle; `LuaExportActivityNextEvent` is kept only because DCS requires the callback to exist, not because it does any gating.
+- **After the fix (re-tested live):** `AfterNextFrame send #N` lines land at `t=0, 0.202, 0.403, 0.609, 0.813, 1.02, 1.228...` — ~200ms apart, matching `EXPORT_INTERVAL_S` exactly. Confirmed fixed.
+- Updated both the top-of-file docstring and the `LuaExportActivityNextEvent` comment to record this — a future reader relying on "documented throttle mechanism" would reintroduce the same wrong assumption.
+- Practical implication: every frame between stage 2 and this fix was doing the full self-data/altitude/speed/JSON-encode/socket-send workload, not once per 200ms as designed — meaning all earlier live tests (stage 3, stage 4, both cross-checks) ran at unthrottled per-frame rate, not 5 Hz. Doesn't invalidate their findings (correctness of field values/API shape doesn't depend on call rate), but the frame-time measurement stage 5 exists to do would have been measuring the wrong thing had it run before this fix.
+
+### Files Changed
+- `aircraft-layer/dcs-export/Export.lua` — `last_export_t` throttle in `LuaExportAfterNextFrame`; bounded diagnostic logging in both export callbacks (kept in, capped at 40 calls, harmless going forward); corrected the two comments that mischaracterized `LuaExportActivityNextEvent` as a throttle.
+- Canonical fix copied to `win-mac-sync/to-windows/aircraft-layer/Export.lua`.
+
+### Tests Added
+- None — Export.lua only, validated live per the module's existing test philosophy.
+
+### Checks
+- ruff format --check / ruff check / mypy --strict / pytest aircraft-layer/{src,tests}: all pass (26 tests, unchanged — no `.py` logic touched).
+
+**Next:** stage 5 part 2 — now that the export rate is actually 5 Hz, measure DCS frame-time impact (Export.lua active vs. inactive) and confirm the delta-since-last-query behavior across consecutive polls including "nothing changed."
