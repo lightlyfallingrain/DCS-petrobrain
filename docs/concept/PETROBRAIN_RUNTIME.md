@@ -428,6 +428,8 @@ attention_area:
 
 Whether Petrobrain can physically influence Petrovich's scan behavior depends on DCS control interfaces and is a separate research question.
 
+> Later, `threat-levels.md`'s `urgent` tier ("must receive automatic 'tracking' status until threat level decreases") and `ignore` tier ("friendly unit in deep friendly terrain... drop noise") map onto this attention-state machine directly. Deferred, but worth keeping `TRACK`/`IGNORE` semantics free to be driven by a threat-priority lookup later instead of only manual player commands.
+
 ## Event model
 
 Prefer event-driven runtime behavior where possible.
@@ -490,6 +492,8 @@ Runtime relevance may depend on:
 - recency.
 
 Initially prefer deterministic relevance rules over LLM judgment.
+
+> **Deferred, later goal**: `threat-levels.md` sketches a concrete priority table (urgent/high/medium/low/ignore) plus what makes a contact "dangerous to self/flight" (engagement envelope, tracking/LOS, intercept course). It is not scheduled work — no milestone depends on it yet — but relevance/attention rules built here should stay compatible with a later threat-priority pass rather than needing a rewrite: keep relevance scoring as data (contact type, threat capability, tracking state, relation to friendlies) that a priority table can consume, not baked into ad hoc thresholds.
 
 ## Runtime mission state
 
