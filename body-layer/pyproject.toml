@@ -1,0 +1,44 @@
+[project]
+name = "dcs-body-layer"
+version = "0.1.0"
+description = "Body layer: Petrovich's belief state, perception ingestion, and the brain-facing API"
+requires-python = ">=3.11"
+dependencies = [
+    # Transitive only: body-layer never calls pyproj directly, but its
+    # in-process import of world-model's `query`/`coordinates` packages
+    # (the body <-> world-model seam, see plans/body-layer/plan.md section 1
+    # "Seams") pulls it in. Kept explicit here rather than relying on
+    # world-model's own pyproject, since body-layer has its own venv
+    # (mirrors aircraft-layer's independent-subproject pattern).
+    "pyproj>=3.6",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src:tests:../world-model/src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "../world-model/src"]
+
+[tool.ruff.lint.isort]
+# See world-model/pyproject.toml and aircraft-layer/pyproject.toml for why
+# this is declared explicitly rather than left to ruff's cwd-relative
+# auto-detection: invoking `ruff check body-layer/src body-layer/tests` from
+# the repo root vs. cwd body-layer/ changes whether these local packages are
+# classified as first-party or third-party, flipping I001 findings depending
+# on invocation cwd. Declaring them explicitly makes the classification
+# invocation-cwd-independent. Includes world-model's own first-party
+# packages that body-layer imports in-process across the seam.
+known-first-party = [
+    "perception",
+    "aircraft_client",
+    "replay",
+    "logger",
+    "coordinates",
+    "geometry",
+    "query",
+    "store",
+    "probe_store",
+]
