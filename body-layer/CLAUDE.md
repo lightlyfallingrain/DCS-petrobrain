@@ -49,6 +49,13 @@ mypy body-layer/src                            # type check (strict)
 pytest body-layer/tests -q                     # test
 ```
 
+**mypy config discovery is CWD-only, and `--config-file` alone does not fix it**:
+`mypy_path` in `pyproject.toml` is itself resolved relative to the working directory the
+`mypy` process is run from, not relative to the config file's location. Running
+`mypy body-layer/src` (or even `mypy --config-file body-layer/pyproject.toml body-layer/src`)
+from the repo root fails with `import-not-found` on the `world-model` seam import even
+though the code is correct. The only correct invocation is `cd body-layer && mypy src`.
+
 Run a single test: `pytest body-layer/tests/test_file.py::test_name -q`.
 
 ## Testing

@@ -23,3 +23,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M8 probe store read-path drift gap](m8-probe-store-read-path-drift-gap.md) — closed in 9a0d0d8 (check_probe_paired_with_base), verified via repro + 3 new tests; final verdict APPROVED.
 - [Body-layer plan review](body-layer-plan-review.md) — plan violated its own provenance rule in worked examples; open question asserted as settled in concept docs; BL-5 froze tools later milestones build.
 - [Aircraft-layer stage 1-2 review](aircraft-layer-stage1-2-review.md) — approved w/ minor fix: collector accept loop not resilient to abrupt disconnect (OSError uncaught); 5th unstaged-agent-memory recurrence.
+- [PB-1 stage 2-3 review](pb1-stage2-3-review.md) — approved w/ minor fix: body-layer's cross-subproject mypy_path turns repo-root canonical command into a hard failure (not silent-pass like world-model's); unstaged-agent-memory issue did not recur this time.
