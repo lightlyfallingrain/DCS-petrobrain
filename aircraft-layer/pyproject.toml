@@ -24,4 +24,5 @@ pythonpath = ["src"]
 known-first-party = [
     "schema",
     "collector",
+    "api",
 ]

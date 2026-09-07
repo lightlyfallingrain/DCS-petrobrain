@@ -1,12 +1,14 @@
-"""Run the collector standalone and dump the latest sample to stdout.
+"""Run the collector process: Export.lua listener + Mac-facing LAN API.
 
-This is the debug-dump path plan stage 2 calls for: before the Mac-facing
-API exists (stage 4), the way to verify the Export.lua -> collector hop
-works end-to-end is to run this on the Windows box and watch it print
-telemetry while a Mi-24P mission is running (plan stage 3, live DCS test --
-not exercised by this session's work).
+Both `CollectorServer` (loopback push from Export.lua) and `TelemetryAPIServer`
+(LAN-reachable poll API, plan stage 4) run in this one process, sharing a
+single `TelemetryCache` instance. Before stage 4, this only dumped the latest
+sample to stdout for manual verification (plan stage 2); that dump is kept
+(`--dump-interval`) since it's still useful for watching the pipeline without
+a separate HTTP client.
 
-Usage: python -m collector [--host HOST] [--port PORT] [--interval SECONDS] [--debug]
+Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
+       [--api-port PORT] [--dump-interval SECONDS] [--debug]
 """
 
 from __future__ import annotations
@@ -16,16 +18,29 @@ import logging
 import threading
 import time
 
+from api.server import DEFAULT_HOST as API_DEFAULT_HOST
+from api.server import DEFAULT_PORT as API_DEFAULT_PORT
+from api.server import TelemetryAPIServer
 from collector.cache import DEFAULT_BUFFER_SIZE, TelemetryCache
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument(
-        "--interval",
+        "--host", default=DEFAULT_HOST, help="Export.lua listener host (loopback)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=DEFAULT_PORT, help="Export.lua listener port"
+    )
+    parser.add_argument(
+        "--api-host", default=API_DEFAULT_HOST, help="Mac-facing LAN API host"
+    )
+    parser.add_argument(
+        "--api-port", type=int, default=API_DEFAULT_PORT, help="Mac-facing LAN API port"
+    )
+    parser.add_argument(
+        "--dump-interval",
         type=float,
         default=1.0,
         help="seconds between stdout dumps of the latest sample",
@@ -43,20 +58,27 @@ def main() -> None:
     )
 
     cache = TelemetryCache(buffer_size=DEFAULT_BUFFER_SIZE)
-    server = CollectorServer(cache, host=args.host, port=args.port)
-    server.open()
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
+
+    collector = CollectorServer(cache, host=args.host, port=args.port)
+    collector.open()
+    collector_thread = threading.Thread(target=collector.serve_forever, daemon=True)
+    collector_thread.start()
+
+    api = TelemetryAPIServer(cache, host=args.api_host, port=args.api_port)
+    api.open()
+    api_thread = threading.Thread(target=api.serve_forever, daemon=True)
+    api_thread.start()
 
     try:
         while True:
-            time.sleep(args.interval)
+            time.sleep(args.dump_interval)
             sample = cache.latest()
             print(sample if sample is not None else "(no sample received yet)")
     except KeyboardInterrupt:
         pass
     finally:
-        server.close()
+        api.close()
+        collector.close()
 
 
 if __name__ == "__main__":

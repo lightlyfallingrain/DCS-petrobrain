@@ -147,6 +147,27 @@ class TelemetrySample:
             data, received_wall_clock_s=received_wall_clock_s
         )
 
+    def to_dict(self) -> dict[str, float | None]:
+        """Serialize for the LAN API — field names match the dataclass, not
+        Export.lua's short wire names (this is the collector->Mac hop, not
+        the loopback push hop, so verbose/self-describing names are fine)."""
+        return {
+            "dcs_model_time_s": self.dcs_model_time_s,
+            "received_wall_clock_s": self.received_wall_clock_s,
+            "position_x_m": self.position_x_m,
+            "position_y_m": self.position_y_m,
+            "position_z_m": self.position_z_m,
+            "pitch_rad": self.pitch_rad,
+            "bank_rad": self.bank_rad,
+            "yaw_rad": self.yaw_rad,
+            "heading_true_rad": self.heading_true_rad,
+            "ias_mps": self.ias_mps,
+            "tas_mps": self.tas_mps,
+            "altitude_msl_m": self.altitude_msl_m,
+            "altitude_agl_m": self.altitude_agl_m,
+            "altitude_radar_m": self.altitude_radar_m,
+        }
+
 
 def _require_number(data: dict[str, Any], field: str) -> float:
     raw = data[field]

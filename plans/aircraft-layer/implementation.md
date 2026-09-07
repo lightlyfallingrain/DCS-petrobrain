@@ -145,3 +145,30 @@ Branch: `feature/aircraft-layer-telemetry`, HEAD = `eeb7afd` ("Fix Export.lua sa
 3. Stage 4 — Mac-facing HTTP API — per `plans/aircraft-layer/plan.md`.
 
 No other work is in flight on this branch.
+
+---
+
+### Implementation Summary (stage 4 — Mac-facing HTTP API)
+
+Implemented plan stage 4: `GET /telemetry/latest` and `GET /telemetry/since/<timestamp>`, stdlib `http.server`-only, LAN-facing (`0.0.0.0`, unlike the collector's loopback-only Export.lua listener). Not yet exercised against a live DCS mission or across an actual LAN hop — that's stage 3's remaining piece plus a first real Mac->Windows `curl` check, both still open.
+
+### Files Changed
+- `aircraft-layer/src/api/__init__.py` (new), `aircraft-layer/src/api/server.py` (new) — `TelemetryAPIServer` (mirrors `CollectorServer`'s open/close/context-manager shape) wrapping `http.server.ThreadingHTTPServer`; route handlers `_handle_latest`/`_handle_since` are plain functions returning JSON-able values, separated from the `BaseHTTPRequestHandler` glue so they're testable without spinning up a real socket if ever needed (tests currently exercise the real server anyway, see below). Default `0.0.0.0:7791`.
+- `aircraft-layer/src/schema/__init__.py` — added `TelemetrySample.to_dict()`, the API's serialization boundary; kept next to `from_dict`/`from_json_line` since the module's docstring already claims to be "the single place the wire format is defined."
+- `aircraft-layer/src/collector/__main__.py` — now starts both `CollectorServer` and `TelemetryAPIServer` in one process on separate threads, sharing one `TelemetryCache`. Added `--api-host`/`--api-port`; kept `--host`/`--port` (now documented as specifically the Export.lua listener) and renamed the old `--interval` to `--dump-interval` for clarity now that there are two servers to disambiguate from.
+- `aircraft-layer/pyproject.toml` — added `api` to the ruff-isort `known-first-party` list (same cwd-classification reason as `schema`/`collector`).
+- `aircraft-layer/WORKFLOW.md` (new) — deploy steps, collector invocation, Windows Firewall `netsh` rule for the API port (7791; the Export.lua port needs none, loopback-only), and example `curl` queries. Written now (a stage-4 plan requirement) rather than deferred to stage 6's `CLAUDE.md` pass.
+- `aircraft-layer/tests/test_api.py` (new) — spins up a real `TelemetryAPIServer` on an OS-assigned port (`port=0`) in a background thread per test, queries it with `urllib.request` (stdlib only, consistent with the rest of this subproject's no-dependency policy).
+
+### Tests Added
+- `test_api.py`: `/telemetry/latest` returns JSON `null` on an empty cache and the most recent sample after pushes; `/telemetry/since/<t>` returns only later samples in chronological order, an empty list when nothing changed, and 400 on a non-numeric timestamp; unknown paths return 404.
+
+### Checks
+- ruff format --check aircraft-layer/src aircraft-layer/tests: pass
+- ruff check aircraft-layer/src aircraft-layer/tests: pass
+- mypy --strict aircraft-layer/src aircraft-layer/tests (from `aircraft-layer/`): pass
+- pytest aircraft-layer/tests -q: pass (26 passed, up from 20)
+
+### Notable Discoveries
+- `ThreadingHTTPServer.shutdown()` is the intended cross-thread stop mechanism (unlike `CollectorServer.close()`, which just closes the listening socket out from under a blocking `accept()`) — `TelemetryAPIServer.close()` uses it directly rather than replicating the collector's socket-close pattern, since `http.server` already provides the safer primitive.
+- Stage 4 plan text says "confirm reachability from the Mac over LAN with a plain `curl`" and "measure DCS frame-time impact" (stage 5) — neither done this pass; this was a same-machine (offline, no DCS) implementation pass only. Both remain open alongside stage 3's cockpit cross-check.
