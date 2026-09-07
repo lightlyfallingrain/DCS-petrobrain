@@ -108,20 +108,40 @@ Replaced the earlier one-shot temporary dump hack with a permanent facility in `
 
 ---
 
-### STATUS AS OF 2026-09-07 — paused mid stage-3 live test, resume here
+### Implementation Summary (stage 3 sample-skip bug fix — safe_call dropped yaw)
 
-Branch: `feature/aircraft-layer-telemetry`, HEAD = `67da687` ("Add standing flag-gated debug logging to Export.lua"). Working tree clean on this branch as of this entry.
+Debug log from the flag-gated facility (`67da687`) showed connection succeeding and `LoGetSelfData()`'s shape matching the existing nested-`Position.p.*` guess — not a shape-mismatch bug as suspected. Actual cause: `safe_call(fn)` used `local ok, a, b = pcall(fn)`, forwarding only 2 of `pcall`'s return values. `LoGetADIPitchBankYaw()` returns 3 (pitch, bank, yaw); the 3rd (yaw) was silently truncated every call, so `yaw` was always `nil` and every sample failed the completeness check and got skipped forever.
 
-**Where things stand:** stage 3 (live DCS mission test) is in progress and blocked twice so far, both bugs fixed:
-1. `require("socket")` aborted Export.lua's entire load (fixed in `b51fc94`: switched to `require("socket.core")`).
-2. Connection now succeeds, but collector still receives zero samples — every frame is silently skipped, most likely because the `LoGetSelfData()` field-shape guess (`Position.p.x/.y/.z` vs. flat `Position.x/.y/.z`, top-level `Heading`) doesn't match this DCS install's actual return shape. Not yet confirmed — this is what the just-added debug facility (`67da687`) exists to answer.
+### Files Changed
+- `aircraft-layer/dcs-export/Export.lua` — `safe_call` now captures/forwards 3 pcall return values (`local ok, a, b, c = pcall(fn)` / `return a, b, c`).
+- `aircraft-layer/src/collector/__main__.py`, `aircraft-layer/src/collector/server.py` — added `--debug` CLI flag (DEBUG-level logging) and debug-level logging of every received/parsed line, used to isolate this from a connection-level issue.
+- Canonical fix copied to `win-mac-sync/to-windows/aircraft-layer/Export.lua`.
 
-**Not yet done (the actual next step):** user needs to, on the Windows box:
-1. Copy `win-mac-sync/to-windows/aircraft-layer/Export.lua` (already up to date with both fixes) to `Saved Games\DCS\Scripts\Export.lua`.
-2. Create an empty file `Saved Games\DCS\Scripts\aircraft_layer_debug.flag` (any content, even empty) to turn on debug logging.
-3. Run the collector, start a mission, fly briefly.
-4. Copy `Saved Games\DCS\Logs\aircraft_layer_debug.log` into `win-mac-sync/from-windows/` and report back.
+### Tests Added
+- None — Export.lua only; collector debug logging is diagnostic tooling, not exercised by unit tests.
 
-**Once that log is in hand:** read it for the `LoGetSelfData()` shape dump (logged once via `debug_dump`) and the skip-reason lines (which field(s) are `nil`), fix the field access in `Export.lua` to match the real shape, re-copy to `win-mac-sync/to-windows/aircraft-layer/Export.lua`, re-test. Once samples flow, finish stage 3 proper (cross-check telemetry values against cockpit instruments), then proceed to stage 4 (Mac-facing HTTP API) per `plans/aircraft-layer/plan.md`.
+### Checks
+- Not re-run (no `.py` logic changed, only logging).
 
-No other work is in flight on this branch. Safe to switch topics and resume by reading this entry.
+### Result
+Live DCS test now streams samples end-to-end (`eeb7afd`). User re-ran on the Windows box: `win-mac-sync/from-windows/collector.log` shows continuous `TelemetrySample` output — position/altitude/speed/pitch/bank/yaw all changing plausibly across ~15s of flight (altitude descending 73→58m, IAS ~51-55 m/s, pitch/bank/yaw tracking a turn). `aircraft_layer_debug.log` (323KB) confirms no more skip events. One known gap: `altitude_radar_m` is `None` in every sample — the radar-altimeter field is never populated; not yet investigated, flag for stage 3 completion or later.
+
+### Notable Discoveries
+- The debug facility's value was immediate and exactly as intended: pinned the true cause (return-arity truncation, not a field-shape mismatch) on the first log, instead of another guess-fix-redeploy cycle.
+
+---
+
+### STATUS AS OF 2026-09-07 — stage 3 sample flow confirmed, cross-check + stage 4 remain
+
+Branch: `feature/aircraft-layer-telemetry`, HEAD = `eeb7afd` ("Fix Export.lua safe_call dropping yaw, add collector --debug flag"). Working tree clean.
+
+**Where things stand:** stage 3 (live DCS mission test) — connectivity and end-to-end sample flow are both confirmed working. Two bugs found and fixed along the way:
+1. `require("socket")` aborted Export.lua's entire load (fixed in `b51fc94`).
+2. `safe_call`'s pcall-forwarding truncated yaw to `nil`, causing every sample to fail the completeness check (fixed in `eeb7afd`, confirmed via live collector output).
+
+**Not yet done:**
+1. Stage 3's remaining piece — cross-check streamed telemetry values against cockpit instruments in a live mission (only log-level plausibility checked so far, not instrument-verified).
+2. Investigate why `altitude_radar_m` is always `None`.
+3. Stage 4 — Mac-facing HTTP API — per `plans/aircraft-layer/plan.md`.
+
+No other work is in flight on this branch.
