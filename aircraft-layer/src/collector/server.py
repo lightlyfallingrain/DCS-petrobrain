@@ -111,6 +111,7 @@ class CollectorServer:
     def _handle_line(self, line: str) -> None:
         if not line.strip():
             return
+        logger.debug("received line: %r", line)
         try:
             sample = TelemetrySample.from_json_line(
                 line, received_wall_clock_s=time.time()
@@ -118,4 +119,5 @@ class CollectorServer:
         except TelemetryParseError:
             logger.warning("dropping malformed telemetry line: %r", line)
             return
+        logger.debug("parsed sample: %r", sample)
         self._cache.push(sample)

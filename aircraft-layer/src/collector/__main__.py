@@ -6,7 +6,7 @@ works end-to-end is to run this on the Windows box and watch it print
 telemetry while a Mi-24P mission is running (plan stage 3, live DCS test --
 not exercised by this session's work).
 
-Usage: python -m collector [--host HOST] [--port PORT] [--interval SECONDS]
+Usage: python -m collector [--host HOST] [--port PORT] [--interval SECONDS] [--debug]
 """
 
 from __future__ import annotations
@@ -30,10 +30,16 @@ def main() -> None:
         default=1.0,
         help="seconds between stdout dumps of the latest sample",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="log every received line and parse result (DEBUG level)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
     )
 
     cache = TelemetryCache(buffer_size=DEFAULT_BUFFER_SIZE)

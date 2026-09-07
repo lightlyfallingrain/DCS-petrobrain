@@ -172,11 +172,11 @@ local FIELD_ORDER = {
 }
 
 local function safe_call(fn)
-    local ok, a, b = pcall(fn)
+    local ok, a, b, c = pcall(fn)
     if not ok then
-        return nil, nil
+        return nil, nil, nil
     end
-    return a, b
+    return a, b, c
 end
 
 function LuaExportStart()
