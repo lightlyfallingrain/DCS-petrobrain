@@ -133,6 +133,7 @@ The feature is done. Perform knowledge harvest, then commit and merge:
 10. Switch to main: `git checkout main`
 11. Merge the feature branch: `git merge --no-ff <featurebranch> -m "Merge <featurebranch>: <one-line feature summary>"`
 12. Verify the merge succeeded with `git log --oneline -5`
+13. Update `todo/todo.md`: mark the merged feature's task(s) `[x]`, update any stale in-progress status text describing it, and reassess whether a new milestone/next-step should be surfaced. Stage and commit this update (separate commit from the merge, or amend into the merge-summary commit — either is fine).
 
 Report to the user:
 - DoD: PASSED
