@@ -31,3 +31,24 @@ device ID (needed for `list_indication(n)`), whether controllers are individuall
 blob, list-row string content format, target-ID persistence — all need a live in-mission probe.
 
 Full findings (now much stronger, primary-source-based): `aircraft-layer/research/2026-09-07-petrovich-perception-export.md`.
+
+**Session 2 (same day, PoC attempt) — no live DCS access this session either; desk research only, but stronger.**
+Found real, actively-used community code (`asherao/DCS-ExportScripts`, LGPL-3.0, fork of `s-d-a/DCS-ExportScripts`,
+106 stars) whose `ExportsModules/Mi-24P.lua` calls `list_indication(8)` directly from Export.lua for THIS aircraft
+(kneeboard chaff/flare counters, not HelperAI) — **falsifies PravusJSB's "needs a Hook" claim, at least generally**;
+Export.lua-callability of `list_indication` for Mi-24P is now confirmed-via-real-code, not inferred. Its
+`lib/Tools.lua` `getListIndicatorValue()` shows the exact wire format: `list_indication(n)` returns one raw STRING
+(not a table) with repeating blocks `-----...-----\n<Key>\n<Value>\n`, one block per currently-populated named
+controller — resolves "blob vs individually-addressable" as "both": one string call, but controller names appear
+as parseable keys inside it. Still open: HelperAI's own device ID (needs `device_init.lua` from Windows box,
+filename/path itself unconfirmed), whether absent-controller-when-no-target holds, target-ID persistence.
+`LoGetWorldObjects` coalition/visibility scope now CONFIRMED (user pasted the 403'd forum thread's opening
+post): global/unfiltered in multiplayer by default (returns all connected aircraft/objects, no own-aircraft
+filter built in) — matches the Session 1 fallback-design assumption, primary-source-confirmed not inferred.
+Same post flags an edge case: export sometimes fails on public multiplayer servers, works locally (low risk
+for this project — own DCS instance). `LoGetWorldObjects` field list
+(ID/Name/Country/Coalition/LatLongAlt/Heading, no Pitch/Bank/Yaw; Country/Coalition still search-summary-only)
+is otherwise search-summary-sourced, not a primary Hoggit page read (couldn't find correct URL slug, 404'd 3x).
+Licensing note for Architect: DCS-ExportScripts is
+LGPL-3.0, reusable, but recommended reimplementing its ~15-line list_indication-parsing pattern directly rather
+than adopting the whole framework, consistent with this project's stdlib-only/"deliberately dumb" Export.lua policy.
