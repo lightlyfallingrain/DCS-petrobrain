@@ -254,3 +254,13 @@ Instrumented both export callbacks in `Export.lua` with bounded (`ACTIVITY_LOG_L
 - ruff format --check / ruff check / mypy --strict / pytest aircraft-layer/{src,tests}: all pass (26 tests, unchanged — no `.py` logic touched).
 
 **Next:** stage 5 part 2 — now that the export rate is actually 5 Hz, measure DCS frame-time impact (Export.lua active vs. inactive) and confirm the delta-since-last-query behavior across consecutive polls including "nothing changed."
+
+---
+
+### Stage 5, part 2: frame-time + delta-query validation complete
+
+**Frame-time impact:** user measured with the Nvidia FPS overlay, Export.lua present vs. removed from `Saved Games\DCS\Scripts\`. FPS jumped 110-140 in both configurations, no visible difference attributable to Export.lua (variance tracked scene complexity). Per the plan's own guidance ("if negligible at 5 Hz, don't raise the rate speculatively"), staying at `EXPORT_INTERVAL_S = 0.2`.
+
+**Delta-since-last-query, live:** two `/telemetry/since/<t>` polls a few seconds apart during sustained flight (`since.log`, `since2.log`), each returning the full 100-sample ring buffer. `received_wall_clock_s` deltas between consecutive returned samples are consistently ~200-207ms across the whole ~20s window in both polls — confirms the stage-5-part-1 fix holds under sustained real flight, not just the short debug burst. Both polls' entries are correctly ordered and their overlapping tail/head region is consistent with a shared ring buffer sampled at two different moments. The specific back-to-back-same-cursor "nothing changed" empty-array case wasn't re-demonstrated live (the two polls used different-enough cursors that both returned data) — not re-tested live since it's already covered by `test_since_nothing_changed_returns_empty_list` in `tests/test_api.py`.
+
+### Stage 5: DONE. Only stage 6 remains on the plan (aircraft-layer/CLAUDE.md, root CLAUDE.md Module Responsibilities bullet).
