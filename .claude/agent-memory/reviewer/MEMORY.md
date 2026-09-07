@@ -21,3 +21,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M6 terrain semantics review outcome](m6-terrain-semantics-review.md) — approved w/ minor fixes; real control-point tests, honest negative usefulness finding; fourth recurrence of unstaged agent-memory files.
 - [M7 full-theatre review outcome](m7-full-theatre-review-approved.md) — APPROVED, zero required fixes; execution-boundary and provenance invariants independently verified via diff/grep, not trusted from prose.
 - [M8 probe store read-path drift gap](m8-probe-store-read-path-drift-gap.md) — closed in 9a0d0d8 (check_probe_paired_with_base), verified via repro + 3 new tests; final verdict APPROVED.
+- [Body-layer plan review](body-layer-plan-review.md) — plan violated its own provenance rule in worked examples; open question asserted as settled in concept docs; BL-5 froze tools later milestones build.
+- [Aircraft-layer stage 1-2 review](aircraft-layer-stage1-2-review.md) — approved w/ minor fix: collector accept loop not resilient to abrupt disconnect (OSError uncaught); 5th unstaged-agent-memory recurrence.

@@ -20,11 +20,13 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 
 ## Current priority
 
-**World Model Builder only** (`world-model/`). Do not implement Mission Interpreter or Petrobrain runtime behavior yet — those depend on what the World Model proves possible. See `world-model/ROADMAP.md` for milestone status.
+World Model Builder (`world-model/`) reached good-enough state 2026-09-06 (M0-M8 done, M9 deferred) — gate lifted. Priority now: build out the rest of the chain (aircraft layer first — DCS I/O — per `docs/concept/division-or-responsibility.md`) so the whole pipeline can be tested and iterated end-to-end. See `world-model/ROADMAP.md` for World Model milestone status.
 
 ## Subprojects
 
-Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory. Currently: `world-model/CLAUDE.md` (see also `world-model/docs/CONVENTIONS.md` for its working rules: DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access).
+Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory. Currently:
+- `world-model/CLAUDE.md` (see also `world-model/docs/CONVENTIONS.md` for its working rules: DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access).
+- `aircraft-layer/CLAUDE.md` — live DCS I/O pipeline (Export.lua → Windows collector → LAN API). See also `aircraft-layer/WORKFLOW.md` for the cross-machine deploy/run workflow.
 
 ## Agents
 

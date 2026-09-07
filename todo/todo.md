@@ -2,7 +2,9 @@
 
 ## Current Focus
 
-World Model Builder — M0-M8 all complete. `world-model/ROADMAP.md`'s milestone list is now exhausted through M8; next milestone (OSM reintroduction via geofabrik.de per-country extracts, `surface_type`/settlement-polygon gaps) not yet planned — needs an Architect pass before work starts. See `world-model/ROADMAP.md` for full milestone list and status.
+World Model Builder good-enough, gate lifted 2026-09-06 (user decision: move to rest of chain to test/improve end-to-end). Next: **aircraft layer** (DCS I/O + API, per `docs/concept/division-or-responsibility.md`) — needs heavy investigation before implementation (DCS runtime data availability, scripting-API command surface). World Model's own backlog (M9 OSM, incremental per-layer builds) stays deferred/unscheduled — see `world-model/ROADMAP.md`.
+
+**Aircraft layer status (2026-09-07):** branch `feature/aircraft-layer-telemetry`, HEAD `eeb7afd`, stages 1-2 implemented+reviewed+committed. Stage 3 (live DCS mission test): connectivity + end-to-end sample flow now confirmed working. Two bugs found+fixed: `require("socket")` load failure, then `safe_call` truncating `pcall`'s 3rd return value (yaw), which failed every sample's completeness check. Debug-logging facility in Export.lua paid off immediately — pinned the real cause on first log. Remaining before stage 3 is done: cross-check telemetry against cockpit instruments live (only log-level plausibility checked so far), and investigate `altitude_radar_m` always `None`. Then stage 4 (Mac-facing HTTP API). See `plans/aircraft-layer/implementation.md`'s latest "STATUS AS OF 2026-09-07" entry.
 
 - [x] M0 — record installed DCS version + confirm Syria terrain present, in `world-model/research/`.
 - [x] M1 (recon) — prove DCS x/z ↔ lat/lon transform for Syria against a known real-world control point; measure error. pydcs tmerc params confirmed against live install; real-world residual ~1.0-1.3km (terrain-placement error, not projection defect). See `world-model/research/2026-09-03-m1-coordinate-transform-verification.md`.
@@ -17,7 +19,7 @@ World Model Builder — M0-M8 all complete. `world-model/ROADMAP.md`'s milestone
 
 ## Milestones
 
-Full sequence lives in `world-model/ROADMAP.md` (M0 through M9). Do not start Mission Interpreter or Petrobrain Runtime work — see root `CLAUDE.md` "Current priority".
+Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side). Aircraft layer / Mission Interpreter / Runtime work now in scope — see root `CLAUDE.md` "Current priority" (gate lifted 2026-09-06).
 
 (none currently scheduled — M9 moved to Deferred below, 2026-09-06)
 

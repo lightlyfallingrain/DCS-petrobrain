@@ -229,8 +229,13 @@ It consumes:
 - prepared Mission Understanding;
 - current aircraft state;
 - Petrovich's actual detections/perception where extractable;
-- player commands/questions;
+- player commands/questions, spoken over the SRS intercom (ICS) channel and transcribed, or typed
+  into the debug console;
 - its own episodic and working memory.
+
+It replies on the same ICS channel. Many interactions — command readbacks, contact reports,
+urgent break calls — are templated by deterministic code and never reach the model at all; see
+`PETROBRAIN_RUNTIME.md`'s "Speech input/output — SRS intercom".
 
 It should use a small, fast local model where practical.
 
