@@ -80,3 +80,28 @@ Root cause: `require("socket")` at the top of `Export.lua` was unguarded, and it
 
 ### Notable Discoveries
 - An unguarded top-level `require()` failure in Export.lua is silent from the collector's point of view: no connection attempt, no error visible anywhere except `dcs.log`. Worth remembering for any future Export.lua dependency: DCS logs load failures only to `dcs.log`, never to the collector or any process this pipeline controls. Next step once connectivity is confirmed: continue stage 3 (cross-check telemetry values against cockpit instruments, confirm/correct the `LoGetSelfData()` field-shape assumption noted in stage 1-2's entry).
+
+---
+
+### Implementation Summary (standing debug-logging facility)
+
+After the socket-require fix, stage 3 progressed: Export.lua connected but the collector still received zero samples (silent per-frame skip — no way to see why). User generalized the lesson from two consecutive silent-failure incidents (unguarded `require` aborting the whole script; now a `LoGetSelfData()` shape mismatch dropping every sample) into a standing rule: DCS-interfacing code must ship with flag-gated debug logging from the start, not bolted on reactively. Recorded as `[[feedback_dcs_debug_logging_preemptive]]`.
+
+Replaced the earlier one-shot temporary dump hack with a permanent facility in `Export.lua`:
+- `DEBUG` flag checked once at load time via presence of `Saved Games\DCS\Scripts\aircraft_layer_debug.flag` (any content, even empty).
+- `debug_log(msg)` — appends timestamped lines to `Saved Games\DCS\Logs\aircraft_layer_debug.log`, no-op when `DEBUG` is false (checked first, so the branch is cheap when off).
+- `debug_dump(label, value)` — recursive table-shape dumper (keys, types, values, depth-limited to 3), used once per mission to dump `LoGetSelfData()`'s actual raw shape.
+- Logging added at every currently-silent failure point: `try_connect` success/failure (with the underlying socket error), incomplete-sample skip (with every field's resolved value so a shape mismatch is immediately visible), and `client:send` failure (with the underlying error).
+
+### Files Changed
+- `aircraft-layer/dcs-export/Export.lua` — added the `DEBUG`/`debug_log`/`debug_dump` facility; instrumented `try_connect`, the incomplete-sample skip branch, and the send-failure branch; replaced the earlier temporary one-shot dump with a call to `debug_dump`. Updated the module docstring to document the flag file and log path as a standing feature, not a one-off.
+- Canonical fix copied to `win-mac-sync/to-windows/aircraft-layer/Export.lua`.
+
+### Tests Added
+- None — Export.lua only, validated live per the module's existing test philosophy.
+
+### Checks
+- Not re-run (no `.py` changes this pass).
+
+### Notable Discoveries
+- This facility is intended to stay in `Export.lua` permanently (unlike the one-shot dump it replaces) — future DCS-interfacing changes to this file should extend it (add `debug_log` calls at new failure points) rather than hand-rolling another temporary dump.
