@@ -68,3 +68,14 @@ and the consumer side doesn't need gap-free history anyway.
 
 See `aircraft-layer/src/schema/__init__.py` for the full field list/units in
 each sample.
+
+```
+curl http://<windows-box-lan-ip>:7791/world_objects/latest
+```
+
+Returns the most recent `LoGetWorldObjects` ground-truth snapshot (raw
+position/type/coalition/heading only, no detection filtering — that's
+body-layer's job) as a JSON object, or JSON `null` on the same "not an
+error" basis as `/telemetry/latest`. Added by
+`plans/pb1-perception-logger/plan.md` stage 3. See
+`aircraft-layer/src/schema/world_objects.py` for the field list/units.

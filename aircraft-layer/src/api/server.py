@@ -1,4 +1,5 @@
-"""Mac-facing LAN API for querying the collector's cached telemetry state.
+"""Mac-facing LAN API for querying the collector's cached telemetry +
+world-objects state.
 
 Plan stage 4. Unlike `collector.server.CollectorServer` (loopback-only, the
 Export.lua push hop), this server is LAN-reachable by design — it's the hop
@@ -8,17 +9,22 @@ the body/brain process, on either Windows or Mac (compute topology note in
 - `GET /telemetry/latest` -> the most recent sample as JSON, or JSON `null`
   if the cache is still empty (not an error — Export.lua may not have
   connected/sent anything yet).
+- `GET /world_objects/latest` -> the most recent `LoGetWorldObjects` snapshot
+  as JSON, or JSON `null` on the same "not an error" basis. Added by
+  `plans/pb1-perception-logger/plan.md` stage 3 as body-layer's Tier 3
+  fallback data source; same shape/lifecycle as `/telemetry/latest`.
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
 content, so during a paused mission it returned every motionless sample as
 "new" -- not a useful "changed" signal, and the body/brain consumer's
 polling model doesn't need gap-free history anyway (it can just poll
-`/latest` as often as it needs). See `plans/aircraft-layer/plan.md`.
+`/latest` as often as it needs). See `plans/aircraft-layer/plan.md`. The
+same reasoning applies to `/world_objects/latest` -- no delta variant either.
 
 Runs `http.server.ThreadingHTTPServer` (stdlib only, per plan decision 4) in
-the same process as `CollectorServer`, sharing one `TelemetryCache` instance
-— see `collector.__main__`.
+the same process as `CollectorServer`, sharing one `TelemetryCache` and one
+`WorldObjectsCache` instance — see `collector.__main__`.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ from types import TracebackType
 from typing import Any, Self
 from urllib.parse import urlparse
 
-from collector.cache import TelemetryCache
+from collector.cache import TelemetryCache, WorldObjectsCache
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +44,35 @@ logger = logging.getLogger(__name__)
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7791
 
-_LATEST_PATH = "/telemetry/latest"
+_TELEMETRY_LATEST_PATH = "/telemetry/latest"
+_WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 
 
-def _handle_latest(cache: TelemetryCache) -> dict[str, Any] | None:
+def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
     sample = cache.latest()
     return None if sample is None else sample.to_dict()
 
 
-def _make_handler(cache: TelemetryCache) -> type[BaseHTTPRequestHandler]:
+def _handle_world_objects_latest(
+    cache: WorldObjectsCache,
+) -> dict[str, Any] | None:
+    snapshot = cache.latest()
+    return None if snapshot is None else snapshot.to_dict()
+
+
+def _make_handler(
+    cache: TelemetryCache, world_objects_cache: WorldObjectsCache
+) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
-            if path == _LATEST_PATH:
-                self._respond_json(200, _handle_latest(cache))
+            if path == _TELEMETRY_LATEST_PATH:
+                self._respond_json(200, _handle_telemetry_latest(cache))
+                return
+            if path == _WORLD_OBJECTS_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_world_objects_latest(world_objects_cache)
+                )
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -75,10 +96,21 @@ class TelemetryAPIServer:
     def __init__(
         self,
         cache: TelemetryCache,
+        world_objects_cache: WorldObjectsCache | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
+        # `world_objects_cache` defaults to a fresh, never-populated cache
+        # rather than being required -- keeps every existing
+        # `TelemetryAPIServer(cache, host=..., port=...)` call site (tests
+        # included) working unchanged; `/world_objects/latest` on such a
+        # server just always answers `null`, same as an empty cache would.
         self._cache = cache
+        self._world_objects_cache = (
+            world_objects_cache
+            if world_objects_cache is not None
+            else WorldObjectsCache()
+        )
         self._host = host
         self._port = port
         self._httpd: ThreadingHTTPServer | None = None
@@ -105,7 +137,8 @@ class TelemetryAPIServer:
     def open(self) -> None:
         """Bind and start listening. Does not block."""
         self._httpd = ThreadingHTTPServer(
-            (self._host, self._port), _make_handler(self._cache)
+            (self._host, self._port),
+            _make_handler(self._cache, self._world_objects_cache),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)
 

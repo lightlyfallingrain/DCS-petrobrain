@@ -19,6 +19,7 @@ This is a **live-process/networked service, not an offline batch pipeline** — 
 - **Export throttle lives in `Export.lua`, not the collector.** `LuaExportAfterNextFrame` fires every DCS frame regardless of the `LuaExportActivityNextEvent` return value (contrary to the DCS-documented mechanism — see `plans/aircraft-layer/implementation.md` stage 5 part 1); the actual 5 Hz gate is a `last_export_t` check at the top of `LuaExportAfterNextFrame` itself. Do not rely on `LuaExportActivityNextEvent`'s return value to throttle anything.
 - **Every sample carries both `dcs_model_time_s` (DCS's own sim clock, stops/resets across pause/restart) and `received_wall_clock_s`** (collector's wall-clock at parse time) — required by the project's provenance/timestamp invariant. DCS's model clock keeps advancing while the mission is paused; Export.lua keeps exporting throughout pause too (confirmed live, see implementation.md).
 - **No delta/since-query endpoint** — `GET /telemetry/since/<t>` was implemented then dropped post-stage-5: its receipt-time cursor returned every motionless sample as "new" during a live pause test, and the body/brain consumer can just poll `/latest` on its own schedule. Only `GET /telemetry/latest` exists. Don't reintroduce a ring buffer/delta endpoint without a concrete consumer need for gap-free history (episodic memory might eventually be that need — not yet).
+- **`GET /world_objects/latest`** (`plans/pb1-perception-logger/plan.md` stage 3) is `LoGetWorldObjects`'s raw, global, unfiltered ground truth — no coalition/own-aircraft filter, no detection/interpretation logic. It exists so body-layer's Tier 3 proxy `PerceptionSource` has something to derive a detectability-gated approximation from; this layer does not do that filtering itself. Position is lat/lon/altitude (not DCS x/y/z, unlike `/telemetry/latest`) since that's what `LoGetWorldObjects` itself returns — DCS x/z conversion happens on the consumer side (world-model's `coordinates` module), not here.
 
 ## Commands
 
@@ -41,8 +42,8 @@ Run a single test: `pytest aircraft-layer/tests/test_file.py::test_name -q`.
 ## Structure
 
 - `dcs-export/Export.lua` — canonical, version-controlled Windows Export.lua script. Deployed by copying to `Saved Games\DCS\Scripts\Export.lua` on the Windows box; never edit the deployed copy in place. A synced copy lives at `win-mac-sync/to-windows/aircraft-layer/Export.lua` for machines using that sync folder instead of a direct repo checkout.
-- `src/schema/` — the telemetry wire format and typed record (`TelemetrySample`), including parsing/validation. Single source of truth for field names/units.
+- `src/schema/` — the telemetry wire format and typed record (`TelemetrySample`), including parsing/validation. Single source of truth for field names/units. `world_objects.py` is the `LoGetWorldObjects` sibling schema (`WorldObjectSample`/`WorldObjectsSnapshot`), re-exported from `schema/__init__.py`.
 - `src/collector/` — loopback TCP listener receiving the Export.lua feed (`server.py`), most-recent-sample cache (`cache.py`), process entrypoint wiring both servers together (`__main__.py`).
-- `src/api/` — the LAN-facing telemetry API (`GET /telemetry/latest` only).
+- `src/api/` — the LAN-facing API: `GET /telemetry/latest` and `GET /world_objects/latest`.
 - `tests/` — automated tests per "Testing" above.
 - `WORKFLOW.md` — deploy/run/firewall/query steps for the live cross-machine path.

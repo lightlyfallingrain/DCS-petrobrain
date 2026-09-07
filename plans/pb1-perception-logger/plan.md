@@ -237,25 +237,25 @@ design is ever pointed at a third-party server.
   (`division-or-responsibility.md`) but every tier's `bearing_deg` is meaningless without
   picking one — this plan cannot defer it further (see Decisions below).
 
-### Decisions Requiring User Input
+### Decisions (resolved 2026-09-07)
 
-1. **Create `body-layer/` as a real sibling subproject now**, per `plans/body-layer/plan.md`
-   §10 decision 1 ("assumed yes" there but never confirmed) — also the point at which CLAUDE.md's
-   "Mission Interpreter and Petrobrain Runtime modules do not exist yet" note goes stale.
-2. **Bearing reference: true or magnetic heading**, for `bearing_deg` throughout the
-   `Observation`/`contact` schema. Deferred in `division-or-responsibility.md`; needs an answer
-   for stage 2/4, and should be recorded once in `plans/body-layer/plan.md` §5.
-3. **Where body-layer runs** (Mac vs. Windows) — `plans/body-layer/plan.md` §10 decision 2,
-   still open, affects stage 2's World Model query path and the new `world_objects` endpoint's
-   network topology. Decide before stage 2's scaffolding.
-4. **Fixture provenance/gitignore boundary** for `body-layer/tests/fixtures/` — confirm before
-   stage 2 creates the directory.
-5. **DCS-ExportScripts reuse: reimplement the small wire-format-parsing pattern (recommended,
-   consistent with `aircraft-layer/CLAUDE.md`'s existing stdlib-only/"deliberately dumb"
-   Export.lua policy) vs. adopt the full LGPL-3.0 framework** (permitted, but a `dofile()`-
-   linking-boundary nuance the investigator flagged as a legal question, not a technical one).
-   Recommend the former; flagging because the alternative is legally available if a future need
-   (e.g. the framework's 1000+ device-arg tables) makes it worth revisiting.
-6. **Who runs stage 1's live spike, and when** — it is a prerequisite for stage 4's branch but
-   not for stage 2/3, so work can proceed on the tier-independent scaffolding immediately while
-   this is scheduled.
+1. **`body-layer/` created now** as a real sibling subproject to `aircraft-layer`/`world-model`.
+2. **Bearing reference: true heading**, for `bearing_deg` throughout the `Observation`/`contact`
+   schema — record this once in `plans/body-layer/plan.md` §5.
+3. **Where body-layer runs: any LAN box, OS-agnostic, not necessarily the DCS box** — it always
+   talks to the aircraft-layer's `GET /telemetry/latest`/`GET /world_objects/latest` over the LAN
+   HTTP API (never in-process). **World Model stays in-process with body-layer** (this is
+   unchanged from `plans/body-layer/plan.md`'s existing seam decision, not a network service): the
+   *runtime query instance* of world-model runs on whichever box body-layer runs on. If that box
+   differs from the one world-model was **built** on, the user is responsible for copying the
+   built `.sqlite` file(s) over manually before running body-layer — this is a manual step, not a
+   new sync mechanism to build.
+4. **Fixtures: commit small fixtures** in `body-layer/tests/fixtures/` (no gitignore boundary,
+   unlike `world-model/data/`) — keep them small/trivial as already planned.
+5. **Licensing: reimplement the small wire-format-parsing pattern now** (not the full LGPL-3.0
+   framework); revisit adopting the framework later only if a concrete need (e.g. its 1000+
+   device-arg tables) makes it worth it. Can change from reimplement to adopt later without
+   redesign — the `PerceptionSource` interface boundary already isolates this choice.
+6. **Live spike (stage 1) runs in parallel with BL-0/BL-3 scaffolding (stages 2-3), not
+   blocking them.** User runs it on the Windows box whenever convenient; stage 4's tier branch
+   waits on its result, stages 2-3 do not.

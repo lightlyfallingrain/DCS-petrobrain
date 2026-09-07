@@ -23,6 +23,10 @@ Units, matching what the underlying DCS export functions return:
 Heading is explicitly true heading. Magnetic heading is not exported here —
 deferred per `docs/concept/division-or-responsibility.md`'s own "need to use
 either true or magnetic consistently, defer decision" note.
+
+See `world_objects.py` for the sibling `LoGetWorldObjects` wire format
+(`WorldObjectSample`/`WorldObjectsSnapshot`), re-exported from this package
+for symmetry with `TelemetrySample`.
 """
 
 from __future__ import annotations
@@ -30,6 +34,20 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any, Final
+
+from .world_objects import (
+    WorldObjectParseError,
+    WorldObjectSample,
+    WorldObjectsSnapshot,
+)
+
+__all__ = [
+    "TelemetryParseError",
+    "TelemetrySample",
+    "WorldObjectParseError",
+    "WorldObjectSample",
+    "WorldObjectsSnapshot",
+]
 
 # Field names as they appear in the JSON line Export.lua sends. Kept short
 # because Export.lua hand-rolls its own JSON encoder (no library available in
