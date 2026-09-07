@@ -211,3 +211,18 @@ Closes stage 3's "cross-check streamed telemetry values against cockpit instrume
 2. `altitude_radar_m` is still always `None` — same undetermined status, and likely related to #1 (radar altimeter and AGL should agree; both are off from the ~190m cockpit radar reading in the same direction).
 
 ### Stage 3 status: DONE (both original plan bullets — connectivity/sample-flow, cockpit cross-check — confirmed). Stage 4: DONE (API implemented + live LAN reachability confirmed). Remaining for the plan: stage 5 (frame-time measurement, reconcile actual export rate vs. nominal 5 Hz), stage 6 (CLAUDE.md, root Module Responsibilities bullet), plus the two altitude gaps above as follow-up investigation (not blocking, not scoped to a specific stage yet).
+
+---
+
+### Altitude gap #1 resolved (shoreline artifact confirmed, not a bug)
+
+User's hypothesis from the prior cross-check — that MSL==AGL was specific to that sortie's near-sea-level shoreline location, not a pipeline bug — confirmed by flying over elevated coastal terrain and re-querying:
+
+```
+altitude_msl_m: 440.59271240234
+altitude_agl_m: 91.699523925781
+```
+
+`alt_agl` now correctly diverges from `alt_msl` (~349m difference, consistent with terrain elevation under this position), matching the cockpit screenshot's terrain (forested hills, altitude gauges reading well above ground level). **Gap #1 closed: `LoGetAltitudeAboveSeaLevel`/`LoGetAltitudeAboveGroundLevel` both behave as documented; the earlier identical values were a real feature of that flight's shoreline location, not a bug.**
+
+`altitude_radar_m` is still `null` in this same sample, now isolated as a standalone issue — no longer explainable by the shoreline coincidence, since this position has genuine AGL (~92m) where a radar altimeter should read valid. Next step if picked up: inspect `LoGetRadarAltimeter()`'s returned `radar_valid` flag directly (`Export.lua:237-241`) via the debug-dump facility, the same way the `LoGetSelfData()` shape was pinned down in stage 3.
