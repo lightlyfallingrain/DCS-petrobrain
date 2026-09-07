@@ -185,3 +185,29 @@ Synced current `aircraft-layer/src/` (incl. new `api/`) + `pyproject.toml` to `w
 This closes stage 4's "confirm reachability from the Mac over LAN with a plain curl" requirement. `altitude_radar_m` still `None` in every sample (known gap, stage 3 leftover, not investigated this pass).
 
 **Remaining open items, unchanged in kind:** stage 3's cockpit-instrument cross-check, `altitude_radar_m` investigation, stage 5 frame-time measurement (now also: reconcile actual observed export rate against the plan's nominal 5 Hz).
+
+---
+
+### Stage 3 cockpit cross-check complete
+
+User read two live samples against cockpit instruments.
+
+First pass (mission running, not paused) showed a bank mismatch (pipeline -3.8°, cockpit ~+15° right) that looked like a real bug — sign flipped and 4x off. Flagged it but declined to guess a fix given the two readings weren't from the same instant.
+
+Second pass: user paused the mission (so telemetry and cockpit reading are effectively simultaneous) and re-queried `/telemetry/latest`:
+
+| Field | Pipeline | Cockpit | Verdict |
+|---|---|---|---|
+| bank | `bank_rad=0.28762784600258` = **+16.5° right** | +15° right | match |
+| IAS | `ias_mps=42.729324993147` = **153.8 km/h** | ~150 km/h | match |
+| heading | `heading_true_rad=0.24266052246094` = **13.9°** | ~020° | close, acceptable |
+| alt MSL | `altitude_msl_m=176.39450073242` = **176.4 m** | ~170 m baro | close |
+| alt AGL | `altitude_agl_m=176.39450073242` (== MSL exactly) | radar ~190 m | 14 m off, unresolved |
+
+The first pass's bank mismatch was confirmed to be a **timing artifact** (comparing two different instants during active maneuvering, not a pipeline bug) — resolved by the paused re-test, no code change needed.
+
+Closes stage 3's "cross-check streamed telemetry values against cockpit instruments" requirement. Two known gaps remain, deliberately *not* investigated this pass (root cause unclear, need more data to isolate):
+1. `altitude_agl_m` is bit-identical to `altitude_msl_m` in every sample seen so far (this test and the earlier live-flow test), regardless of aircraft position. Plausible innocent explanation (terrain elevation ~0m under this flight path, so AGL≈MSL by definition) vs. `LoGetAltitudeAboveGroundLevel()` not behaving as documented — undetermined without an independent ground-elevation reading at that DCS position (e.g. a World Model Builder terrain query) or a flight over known non-flat terrain.
+2. `altitude_radar_m` is still always `None` — same undetermined status, and likely related to #1 (radar altimeter and AGL should agree; both are off from the ~190m cockpit radar reading in the same direction).
+
+### Stage 3 status: DONE (both original plan bullets — connectivity/sample-flow, cockpit cross-check — confirmed). Stage 4: DONE (API implemented + live LAN reachability confirmed). Remaining for the plan: stage 5 (frame-time measurement, reconcile actual export rate vs. nominal 5 Hz), stage 6 (CLAUDE.md, root Module Responsibilities bullet), plus the two altitude gaps above as follow-up investigation (not blocking, not scoped to a specific stage yet).
