@@ -6,7 +6,7 @@ Build the first working slice of the Aircraft Layer — a live, LAN-reachable, r
 
 ### Prior Investigation
 
-`world-model/research/2026-09-06-aircraft-layer-live-runtime-io.md` (investigator, 2026-09-06) established the feasible architecture. Key resolved facts this plan relies on:
+`aircraft-layer/research/2026-09-06-aircraft-layer-live-runtime-io.md` (investigator, 2026-09-06) established the feasible architecture. Key resolved facts this plan relies on:
 
 - `Saved Games\DCS\Scripts\Export.lua` is a separate, unsanitized, per-install (not per-mission) Lua environment that ships with LuaSocket and unrestricted `io`/`lfs` by default — **no `MissionScripting.lua` edit needed**, unlike the World Model Builder's elevation probes.
 - `LoGetSelfData`/`LoGetADIPitchBankYaw`/altitude/airspeed functions give ownship kinematic state, **not gated by anti-cheat/labels settings**, callable every sim frame or throttled via `LuaExportActivityNextEvent`.
@@ -39,7 +39,7 @@ Unresolved items from that investigation that don't block this plan (Mi-24P DCS-
   - `aircraft-layer/WORKFLOW.md` — new cross-machine doc: how to deploy Export.lua, run the collector on the Windows box, what port/firewall rule is needed, how the Mac reaches it. Explicitly *not* the same as `world-model/WORKFLOW.md`'s Dropbox-symlink manual-copy flow — that workflow is for asynchronous offline file transfer and is confirmed unsuitable for live telemetry (investigator finding #7 / "Process boundary").
   - `aircraft-layer/CLAUDE.md` — subproject conventions (stack, commands, testing shape), written once Stage 1 proves the pipeline out, mirroring `world-model/CLAUDE.md`'s role.
 - `CLAUDE.md` (root) — "Module Responsibilities" reference section needs a new `aircraft-layer/` bullet once this lands; not edited by this plan, flagged for the Implementer/DoD step.
-- `world-model/research/2026-09-06-aircraft-layer-live-runtime-io.md` — already written by investigator, no change needed, referenced above.
+- `aircraft-layer/research/2026-09-06-aircraft-layer-live-runtime-io.md` — already written by investigator, no change needed, referenced above.
 
 ### Invariant Check
 

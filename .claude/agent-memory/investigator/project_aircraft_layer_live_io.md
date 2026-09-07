@@ -1,11 +1,11 @@
 ---
 name: project_aircraft_layer_live_io
-description: Live-mission DCS I/O findings for the aircraft layer (Export.lua, DCS-BIOS, sensor contacts, LAN transport) — see world-model/research/2026-09-06-aircraft-layer-live-runtime-io.md
+description: Live-mission DCS I/O findings for the aircraft layer (Export.lua, DCS-BIOS, sensor contacts, LAN transport) — see aircraft-layer/research/2026-09-06-aircraft-layer-live-runtime-io.md
 metadata:
   type: project
 ---
 
-Investigated 2026-09-06 for Architect planning the aircraft layer (post-World-Model-Builder). Full findings + evidence labels in `world-model/research/2026-09-06-aircraft-layer-live-runtime-io.md` — read that file before re-investigating any of this.
+Investigated 2026-09-06 for Architect planning the aircraft layer (post-World-Model-Builder). Full findings + evidence labels in `aircraft-layer/research/2026-09-06-aircraft-layer-live-runtime-io.md` — read that file before re-investigating any of this.
 
 Key verdicts (all desk research, no live probe run yet on Windows box):
 - **Export.lua is a separate, unsanitized sandbox from Mission Scripting.** It ships with LuaSocket, `io`, `lfs` all enabled by default — no `MissionScripting.lua` edit needed (that edit, already made for M4, is irrelevant here). Lives at `Saved Games\DCS\Scripts\Export.lua`, runs per-install not per-mission.
