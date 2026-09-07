@@ -3,16 +3,18 @@
 Plan stage 4. Unlike `collector.server.CollectorServer` (loopback-only, the
 Export.lua push hop), this server is LAN-reachable by design — it's the hop
 the body/brain process, on either Windows or Mac (compute topology note in
-`plans/aircraft-layer/plan.md`), polls over the network. Read-only: two GET
-endpoints, no way to push data in through this server.
+`plans/aircraft-layer/plan.md`), polls over the network. Read-only.
 
 - `GET /telemetry/latest` -> the most recent sample as JSON, or JSON `null`
   if the cache is still empty (not an error — Export.lua may not have
   connected/sent anything yet).
-- `GET /telemetry/since/<wall_clock_timestamp>` -> a JSON array of samples
-  received strictly after that wall-clock timestamp, oldest first. An empty
-  array is the normal "nothing changed" result, per
-  `collector.cache.TelemetryCache.since`.
+
+A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
+and then dropped (stage 5): its cursor filtered on receipt time, not
+content, so during a paused mission it returned every motionless sample as
+"new" -- not a useful "changed" signal, and the body/brain consumer's
+polling model doesn't need gap-free history anyway (it can just poll
+`/latest` as often as it needs). See `plans/aircraft-layer/plan.md`.
 
 Runs `http.server.ThreadingHTTPServer` (stdlib only, per plan decision 4) in
 the same process as `CollectorServer`, sharing one `TelemetryCache` instance
@@ -37,18 +39,11 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7791
 
 _LATEST_PATH = "/telemetry/latest"
-_SINCE_PREFIX = "/telemetry/since/"
 
 
 def _handle_latest(cache: TelemetryCache) -> dict[str, Any] | None:
     sample = cache.latest()
     return None if sample is None else sample.to_dict()
-
-
-def _handle_since(
-    cache: TelemetryCache, cursor_wall_clock_s: float
-) -> list[dict[str, Any]]:
-    return [s.to_dict() for s in cache.since(cursor_wall_clock_s)]
 
 
 def _make_handler(cache: TelemetryCache) -> type[BaseHTTPRequestHandler]:
@@ -57,17 +52,6 @@ def _make_handler(cache: TelemetryCache) -> type[BaseHTTPRequestHandler]:
             path = urlparse(self.path).path
             if path == _LATEST_PATH:
                 self._respond_json(200, _handle_latest(cache))
-                return
-            if path.startswith(_SINCE_PREFIX):
-                raw_cursor = path[len(_SINCE_PREFIX) :]
-                try:
-                    cursor = float(raw_cursor)
-                except ValueError:
-                    self._respond_json(
-                        400, {"error": f"invalid timestamp: {raw_cursor!r}"}
-                    )
-                    return
-                self._respond_json(200, _handle_since(cache, cursor))
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 

@@ -78,39 +78,6 @@ def test_latest_returns_most_recent_sample(
     assert body["altitude_radar_m"] is None
 
 
-def test_since_returns_only_later_samples_in_order(
-    running_server: tuple[TelemetryAPIServer, TelemetryCache],
-) -> None:
-    server, cache = running_server
-    cache.push(_sample(t=1.0, wall=100.0))
-    cache.push(_sample(t=2.0, wall=101.0))
-    cache.push(_sample(t=3.0, wall=102.0))
-    status, body = _get(server, "/telemetry/since/100.0")
-    assert status == 200
-    assert isinstance(body, list)
-    assert [s["dcs_model_time_s"] for s in body] == [2.0, 3.0]
-
-
-def test_since_nothing_changed_returns_empty_list(
-    running_server: tuple[TelemetryAPIServer, TelemetryCache],
-) -> None:
-    server, cache = running_server
-    cache.push(_sample(t=1.0, wall=100.0))
-    status, body = _get(server, "/telemetry/since/100.0")
-    assert status == 200
-    assert body == []
-
-
-def test_since_invalid_timestamp_returns_400(
-    running_server: tuple[TelemetryAPIServer, TelemetryCache],
-) -> None:
-    server, _cache = running_server
-    status, body = _get(server, "/telemetry/since/not-a-number")
-    assert status == 400
-    assert isinstance(body, dict)
-    assert "error" in body
-
-
 def test_unknown_path_returns_404(
     running_server: tuple[TelemetryAPIServer, TelemetryCache],
 ) -> None:

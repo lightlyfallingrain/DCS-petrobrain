@@ -56,18 +56,15 @@ receives connections from off-box.
 
 ```
 curl http://<windows-box-lan-ip>:7791/telemetry/latest
-curl http://<windows-box-lan-ip>:7791/telemetry/since/<wall_clock_timestamp>
 ```
 
-- `latest` returns the most recent sample as a JSON object, or JSON `null`
-  if nothing has been received yet (not an error — Export.lua may not have
-  connected, or DCS may not be running a mission).
-- `since/<timestamp>` returns a JSON array of samples received strictly
-  after that wall-clock (`received_wall_clock_s`) timestamp, oldest first.
-  An empty array is the normal "nothing changed since your last poll"
-  result. A timestamp older than the retained ring buffer (default 100
-  samples, ~20s at the 5 Hz export rate) silently misses evicted samples —
-  poll more often than that window if you need every sample.
+Returns the most recent sample as a JSON object, or JSON `null` if nothing
+has been received yet (not an error — Export.lua may not have connected, or
+DCS may not be running a mission). Poll as often as your consumer needs;
+there's no separate delta/since endpoint — one was implemented and then
+dropped (stage 5) once live pause testing showed its receipt-time cursor
+returned every motionless sample as "new," which wasn't a useful signal,
+and the consumer side doesn't need gap-free history anyway.
 
 See `aircraft-layer/src/schema/__init__.py` for the full field list/units in
 each sample.

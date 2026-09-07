@@ -21,7 +21,7 @@ import time
 from api.server import DEFAULT_HOST as API_DEFAULT_HOST
 from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
-from collector.cache import DEFAULT_BUFFER_SIZE, TelemetryCache
+from collector.cache import TelemetryCache
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 
 
@@ -57,7 +57,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    cache = TelemetryCache(buffer_size=DEFAULT_BUFFER_SIZE)
+    cache = TelemetryCache()
 
     collector = CollectorServer(cache, host=args.host, port=args.port)
     collector.open()

@@ -264,3 +264,29 @@ Instrumented both export callbacks in `Export.lua` with bounded (`ACTIVITY_LOG_L
 **Delta-since-last-query, live:** two `/telemetry/since/<t>` polls a few seconds apart during sustained flight (`since.log`, `since2.log`), each returning the full 100-sample ring buffer. `received_wall_clock_s` deltas between consecutive returned samples are consistently ~200-207ms across the whole ~20s window in both polls — confirms the stage-5-part-1 fix holds under sustained real flight, not just the short debug burst. Both polls' entries are correctly ordered and their overlapping tail/head region is consistent with a shared ring buffer sampled at two different moments. The specific back-to-back-same-cursor "nothing changed" empty-array case wasn't re-demonstrated live (the two polls used different-enough cursors that both returned data) — not re-tested live since it's already covered by `test_since_nothing_changed_returns_empty_list` in `tests/test_api.py`.
 
 ### Stage 5: DONE. Only stage 6 remains on the plan (aircraft-layer/CLAUDE.md, root CLAUDE.md Module Responsibilities bullet).
+
+---
+
+### Delta-since-last-query API dropped (scope decision, post stage 5)
+
+User did an additional live pause test (`game-paused-latest.log`, `game-paused-since.log`): with the aircraft stationary and the mission paused, `/telemetry/since/<t>` returned ~90 entries, every field byte-identical across all of them (only `dcs_model_time_s`/`received_wall_clock_s` differed) — surprising volume for "nothing changed." Root cause, not a bug: `TelemetryCache.since()` filters on `received_wall_clock_s` (receipt time), not sample content, so every 200ms push counts as "new" regardless of whether the telemetry actually differs. Also newly confirmed: DCS's model clock (`LoGetModelTime()`) keeps advancing during a pause (~44s of model time elapsed while paused) — Export.lua keeps exporting throughout, a previously-unverified-behavior risk from the original plan, now resolved.
+
+Discussed whether receipt-based delta semantics were worth keeping at all. The endpoint's only real value is gap-free trajectory history for a consumer that can't just poll `/latest` on its own schedule (e.g. episodic memory needing every intermediate sample, not snapshots). User judged that unlikely for this project's body/brain consumer — it can poll `/latest` as often as it needs — and decided to **drop `/telemetry/since` entirely** rather than add content-based dedup or pause-detection to keep it useful.
+
+### Files Changed
+- `aircraft-layer/src/collector/cache.py` — `TelemetryCache` simplified to hold only the latest sample (`_latest: TelemetrySample | None`); removed the ring buffer (`deque`, `buffer_size`, `DEFAULT_BUFFER_SIZE`, `__len__`) and `since()`, which existed only to support the now-dropped endpoint.
+- `aircraft-layer/src/api/server.py` — removed the `/telemetry/since/<t>` route, `_handle_since`, `_SINCE_PREFIX`. Only `GET /telemetry/latest` remains.
+- `aircraft-layer/src/collector/__main__.py` — `TelemetryCache()` construction no longer takes `buffer_size`/`DEFAULT_BUFFER_SIZE`.
+- `aircraft-layer/tests/test_cache.py` — dropped all `since()`/ring-buffer/`buffer_size` tests, kept the two `latest()` tests.
+- `aircraft-layer/tests/test_api.py` — dropped the three `/telemetry/since` tests.
+- `aircraft-layer/WORKFLOW.md` — removed the `since` curl example and its explanation; documents polling `/latest` as needed instead.
+- Canonical `src/` (incl. dropped `since` code) re-synced to `win-mac-sync/to-windows/aircraft-layer/src/`.
+
+### Tests Added
+- None (removal only). 17 passed (down from 26 — the 9 removed tests covered the dropped functionality, not regressions).
+
+### Checks
+- ruff format --check / ruff check / mypy --strict / pytest aircraft-layer/{src,tests}: all pass.
+
+### Notable Discoveries
+- This is the second time a "delta-since" design got invalidated by live-pause testing catching an edge case unit tests couldn't (the first was the export-rate bug in stage 5 part 1). Pause/paused-state testing has now twice surfaced real issues invisible to in-flight-only testing — worth keeping in mind for any future DCS-interfacing feature: always include a paused-state check, not just a moving-aircraft check.
