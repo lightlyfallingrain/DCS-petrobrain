@@ -136,3 +136,142 @@ stage 4 is gated on stage 1's result, which the user runs on the Windows box, no
   `port` positionally would need updating. Same for `CollectorServer` (`world_objects_cache`
   inserted as the second required positional parameter) — its one call site
   (`collector/__main__.py`) was updated.
+
+---
+
+### Stages 4-9 (2026-09-08)
+
+Built the remaining stages against the plan's redesigned hybrid architecture (Session 4's live
+spike falsified the original two-tier framing — see plan's Session 4 and "Association design"
+sections). `petrovich_feed.py`/`proxy.py` were **not** created, per the plan's explicit
+supersession note; there is one concrete `PerceptionSource`
+(`perception.hybrid_source.HybridPerceptionSource`).
+
+### Files Changed
+
+**Aircraft-layer (stage 4 — permanent HelperAI feed)**
+- `aircraft-layer/dcs-export/Export.lua` — added `HELPERAI_DEVICE_ID = 6` and a permanent
+  `list_indication(HELPERAI_DEVICE_ID)` push, same throttle/socket/pcall-guard/one-shot-debug-dump
+  mechanism as the existing `LoGetWorldObjects` push, sent right after it in
+  `LuaExportAfterNextFrame`. New `encode_petrovich_indication_line`/`get_helperai_indication`
+  helpers; reuses the existing `encode_scalar`/`json_escape_string` string-escaping path.
+- `aircraft-layer/src/schema/petrovich_indication.py` (new) — `PetrovichIndicationSample` +
+  `parse_indication_text`, a from-scratch recursive-descent parser over the confirmed
+  `-----...-----\n<name>\n<value-if-any>\nchildren are {...}` tree format, flattening it into a
+  `{leaf_name: text}` record. Degrades gracefully (skips/treats-as-childless) on malformed tree
+  content rather than raising — only structurally-invalid JSON at the outer line level raises
+  `PetrovichIndicationParseError`. Re-exported from `schema/__init__.py`.
+- `aircraft-layer/src/collector/cache.py` — added `PetrovichIndicationCache`, same shape as
+  `WorldObjectsCache`.
+- `aircraft-layer/src/collector/server.py` — `CollectorServer` now takes a third cache;
+  `_handle_line` routes on `"indication"` key presence, same pattern as the `"objects"` branch.
+- `aircraft-layer/src/api/server.py` — added `GET /petrovich_indication/latest`;
+  `TelemetryAPIServer`'s new `petrovich_indication_cache` parameter defaults to a fresh cache
+  (same backward-compatibility pattern as `world_objects_cache`).
+- `aircraft-layer/src/collector/__main__.py` — wires the new cache into both servers.
+- `aircraft-layer/tests/test_petrovich_indication_{schema,cache,api}.py` (new) — parser unit
+  tests (nested children, empty-string, garbage-input graceful degradation, all the
+  `WorldObjectsSnapshot`-style malformed-JSON rejections), cache tests, API endpoint tests
+  including the default-cache-when-omitted path. No existing test file modified.
+
+**Body-layer (stages 5-8)**
+- `body-layer/src/perception/association.py` (new) — `WorldObjectCandidate` (DCS-native x/z,
+  built via `from_dict`'s `wgs84_to_dcs` conversion), `AssociationResult`, `associate()`
+  implementing the plan's algorithm exactly: no coalition/IFF filtering, `RANGE_CAP_M=5000`/
+  `FORWARD_HEMISPHERE_HALF_WIDTH_DEG=90`/`TYPE_MATCH_TIE_MARGIN=0` as named constants,
+  keyword-overlap type scoring, confident/ambiguous/drop decision (ambiguous emits from the
+  nearest tied candidate at `confidence=0.25`). Pure — no network I/O, no world-model queries
+  beyond `geometry.py`'s bearing/range math.
+- `body-layer/src/perception/hybrid_source.py` (new) — `HybridPerceptionSource`. Gates on
+  `middle_list_text`, debounces on text change (resets when the field goes empty, so a detection
+  reappearing with identical text still re-emits after a real gap), calls `association.py` then
+  builds an `Observation` with `source="petrovich_detection_associated"` and a provenance string
+  distinguishing confident vs. ambiguous association. Logs drops as a count/rate signal
+  (`_dropped_count`), not per-instance noise.
+- `body-layer/src/aircraft_client.py` — added `get_petrovich_indication_latest()`, mirroring
+  `get_world_objects_latest()` exactly.
+- `body-layer/src/logger.py` — added `main()` (argparse CLI: `--aircraft-layer-url`, `--theatre`,
+  `--poll-interval-s`), the one place that plugs in `HybridPerceptionSource` and drives
+  `PerceptionLogger`'s poll loop. `PerceptionLogger` itself was **not** modified — it already only
+  depended on the `PerceptionSource` protocol.
+- `body-layer/tests/test_association.py` (new) — hand-authored fixtures (noted as such in the
+  module docstring): single-candidate confident match, zero-candidate drop, range-cap and
+  forward-hemisphere filtering, ambiguous same-type multi-candidate scene (nearest-tied-candidate
+  selection), type-match tie-breaking, heading-relative-not-compass-relative bearing window, and
+  `WorldObjectCandidate.from_dict`'s coordinate-conversion call (monkeypatched `wgs84_to_dcs`).
+- `body-layer/tests/test_hybrid_source.py` (new) — no-indication/no-classification/no-world-objects/
+  no-plausible-candidate all return `[]`; confident and ambiguous emission paths (provenance,
+  confidence); debounce (repeated identical text emits once, world-objects fetched only once);
+  classification-change re-emits; detection-clears-then-reappears-with-same-text re-emits.
+- `body-layer/tests/test_aircraft_client.py` — added
+  `test_get_petrovich_indication_latest_returns_parsed_dict`; existing tests untouched.
+- `test_logger.py` (stage 8) — confirmed to pass **unmodified**: the fake-`PerceptionSource`
+  interface-conformance evidence the plan asked for, no new file needed.
+
+**Docs (stage 9)**
+- `docs/concept/PETROBRAIN_RUNTIME.md` — replaced the "Perception adapter" section's open-question
+  framing with the shipped design and why (Session 4's four-dead-channels/one-alive-channel
+  result), including the realized `source: petrovich_detection_associated` observation shape.
+- `aircraft-layer/CLAUDE.md`, `body-layer/CLAUDE.md` — updated endpoint lists and `Structure`
+  sections for the new `petrovich_indication` feed, `association.py`, and `hybrid_source.py`.
+
+### Tests Added
+
+**aircraft-layer** (18 new tests, 52 total passing)
+- `test_petrovich_indication_schema.py` — flattening of populated leaves, childless/valueless
+  nodes ignored, nested children, empty-string input, graceful degradation on non-conforming
+  text, all the standard JSON-line-level malformed-input rejections, `to_dict` round-trip.
+- `test_petrovich_indication_cache.py`, `test_petrovich_indication_api.py` — mirror the
+  `world_objects` cache/API test shape exactly, including the default-cache-when-omitted
+  backward-compatibility case.
+
+**body-layer** (19 new tests, 47 total passing)
+- `test_association.py` (9 tests) — see Files Changed above.
+- `test_hybrid_source.py` (9 tests) — see Files Changed above.
+- `test_aircraft_client.py` (1 new test) — `get_petrovich_indication_latest`.
+
+### Checks
+
+- `ruff format --check aircraft-layer/src aircraft-layer/tests`: pass (after auto-formatting 3
+  files, then fixing 2 FLY002 f-string-preference findings by hand)
+- `ruff check aircraft-layer/src aircraft-layer/tests`: pass
+- `mypy aircraft-layer/src` (strict): pass, 9 source files
+- `pytest aircraft-layer/tests -q`: pass, 52 passed
+- `ruff format --check body-layer/src body-layer/tests`: pass (after auto-formatting 2 files)
+- `ruff check body-layer/src body-layer/tests`: pass
+- `mypy body-layer/src` (strict, run via `cd body-layer && mypy src` per this subproject's
+  CWD-only config-discovery note): pass, 8 source files
+- `pytest body-layer/tests -q`: pass, 47 passed
+
+### Notable Discoveries
+
+- **`association.py`'s decision needed one interpretation call the plan text left slightly
+  underspecified**: "one is unambiguously top-scored (score margin above a threshold over the
+  next candidate)" could mean either "top score minus second score exceeds a positive margin" or
+  "any strict inequality counts, margin=0 only catches exact ties." Implemented the latter
+  (`TYPE_MATCH_TIE_MARGIN=0`, a named/tunable constant) — simpler, and "one is unambiguously
+  top-scored" reads most naturally as "no other candidate matched the score," not "beat it by a
+  specific amount." Flagged here in case Reviewer/user wants a nonzero starting margin instead.
+- **`range_m` includes the altitude component** (confirmed already documented in
+  `geometry.py`, but easy to trip over writing new fixtures) — `test_association.py`'s helper
+  candidates default to ownship's own altitude so tests can assert exact ground-distance values
+  without hand-computing slant range; caught by a first failing test run before the fix.
+- **`WorldObjectCandidate.from_dict`'s coordinate conversion is intentionally excluded from
+  `associate()`'s own tests** — `test_association.py` builds candidates directly with DCS-native
+  x/z, and `test_hybrid_source.py` monkeypatches `association.wgs84_to_dcs` to an identity-ish
+  mapping, so neither pure-logic test suite depends on real per-theatre projection math (already
+  covered by world-model's own coordinate-subsystem tests and by
+  `test_world_object_candidate_from_dict_converts_lat_lon_via_coordinates`'s own monkeypatched
+  call-shape check).
+- **`logger.py`'s `main()` is intentionally untested** — a live/replay poll-loop driver with no
+  automated coverage, same posture this repo already accepts for
+  `aircraft-layer/src/collector/__main__.py`'s own `main()`. `PerceptionLogger` and
+  `HybridPerceptionSource`, the logic it wires together, are both fully tested.
+- **Debounce reset-on-empty was a design choice beyond the plan's literal text**: the plan left
+  "exact debounce window ... an implementation detail, not architectural" open. Implemented as
+  "emit on any change from the last-emitted text, and treat a momentary empty/no-detection poll
+  as clearing that memory" — chosen so a detection that disappears and later reappears with
+  *identical* text (e.g. Petrovich re-acquires the same truck after briefly losing it) still
+  re-emits, rather than silently staying suppressed indefinitely. Noted in the module docstring;
+  flagged here as a judgment call, not a plan requirement, in case live testing shows it needs
+  retuning (e.g. a minimum re-emit interval even without a gap).
