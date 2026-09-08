@@ -28,6 +28,11 @@ Full per-role responsibilities, priorities, checklists, and output-style detail:
 
 ## Recommended Role Sequences
 
+Full sequences below include Security and Performance Reviewer. **Check the project's
+`CLAUDE.md` "Agents" section first — it may currently exempt one or both roles for this
+project phase; that exemption overrides the sequences shown here rather than being restated
+per-sequence.**
+
 - **New feature**: Architect → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Performance-sensitive feature**: Architect → Security (plan review) → Implementer → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Bug fix**: Debugger → Reviewer → Security (deep analysis) → **Definition of Done**

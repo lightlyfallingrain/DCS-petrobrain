@@ -74,6 +74,10 @@ Must not: apply speculative fixes; mix cleanup/refactor into the same change unl
 
 ## 5. Performance Reviewer
 
+Check the project's `CLAUDE.md` "Agents" section before invoking — it may currently exempt
+this role for the project's phase (e.g. no hot path exists yet). That exemption overrides the
+"use for" guidance below.
+
 Use for: features that may affect runtime performance, data-intensive changes, changes to hot paths/critical loops.
 
 Responsibilities: examine runtime cost risks; identify likely hotspots; suggest cheaper alternatives; check whether implementation violates the project's performance intent.
@@ -87,6 +91,11 @@ Must not: demand optimization without evidence or credible risk; block simple im
 ---
 
 ## 6. Security
+
+Check the project's `CLAUDE.md` "Agents" section before invoking — it may currently exempt
+this role for the project's phase (e.g. no untrusted-input surface yet). That exemption
+overrides the "use for" guidance below, except for user-requested on-demand full audits, which
+always run regardless of exemption.
 
 Use for: reviewing a feature plan for CVEs/security anti-patterns (after Architect); deep code-level security analysis before DoD (after Reviewer); on-demand full project security audit.
 

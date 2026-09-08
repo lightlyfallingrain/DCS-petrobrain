@@ -14,15 +14,16 @@ of.
 
 The deterministic process that owns Petrovich's belief state — contacts, attention, mission
 phase, events, spatial semantics — sitting between the brain (LLM, not built yet) and the
-aircraft layer (DCS I/O). Currently at BL-0/BL-1: the tier-independent perception scaffolding
+aircraft layer (DCS I/O). BL-0/BL-1 built the tier-independent perception scaffolding
 (`PerceptionSource` interface, bearing/range/LOS geometry, a replay harness, an aircraft-layer
 HTTP client, a text-only logger) plus its one concrete `PerceptionSource`,
 `HybridPerceptionSource` — a live-DCS spike (`plans/pb1-perception-logger/plan.md` stage 1,
 `aircraft-layer/research/2026-09-08-pb1-live-spike-results.md`) found every native geometry
 channel dead and one real detection-existence channel (HelperAI's `list_indication`) alive, so
 this is a hybrid design (real detection gate + `LoGetWorldObjects`-derived geometry via
-`perception.association`), not a choice between two originally-anticipated tiers. None of
-BL-2+'s contact/attention/brain-API machinery has been built yet.
+`perception.association`), not a choice between two originally-anticipated tiers.
+**Current BL-x milestone status: see `todo/todo.md` "Current Focus"**, not this file — status
+changes faster than this doc gets touched.
 
 ## Tech stack
 

@@ -20,14 +20,19 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 
 ## Current priority
 
-World Model Builder (`world-model/`) reached good-enough state 2026-09-06 (M0-M8 done, M9 deferred) — gate lifted. Priority now: build out the rest of the chain (aircraft layer first — DCS I/O — per `docs/concept/division-or-responsibility.md`) so the whole pipeline can be tested and iterated end-to-end. See `world-model/ROADMAP.md` for World Model milestone status.
+`todo/todo.md`'s "Current Focus" is the single source of truth for what's done and what's
+next — read it, don't infer status from this file. (Deliberately not restated here: two copies
+of the same fact drift out of sync as milestones complete. Per-subproject backlogs, e.g.
+World Model's own M9/incremental-build backlog, live in that subproject's own ROADMAP.md.)
 
 ## Subprojects
 
 Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory. Currently:
+
+**Module independence**: each subproject should be able to run on its own, with its own venv/dependencies. **body-layer ↔ world-model is the sole exception** — body-layer imports world-model's `query`/`coordinates` packages in-process (not over HTTP), a deliberate coupling because the two are treated as a pair, at least for now (see `plans/body-layer/plan.md` "Seams" and `body-layer/CLAUDE.md` "Tech stack"). Do not introduce a similar in-process cross-subproject import elsewhere without the same explicit justification — the default is HTTP/JSON across a subproject boundary (as aircraft-layer ↔ body-layer already does), not a shared import.
 - `world-model/CLAUDE.md` (see also `world-model/docs/CONVENTIONS.md` for its working rules: DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access).
 - `aircraft-layer/CLAUDE.md` — live DCS I/O pipeline (Export.lua → Windows collector → LAN API). See also `aircraft-layer/WORKFLOW.md` for the cross-machine deploy/run workflow.
-- `body-layer/CLAUDE.md` — Petrovich's belief-state process (contacts, attention, perception ingestion, the brain-facing API). Currently at BL-0/BL-1 tier-independent perception scaffolding only — see `plans/body-layer/plan.md` and `plans/pb1-perception-logger/plan.md`.
+- `body-layer/CLAUDE.md` — Petrovich's belief-state process (contacts, attention, perception ingestion, the brain-facing API). BL-x milestone status: see `todo/todo.md` "Current Focus", not this line — `plans/body-layer/plan.md` has the full milestone series.
 
 ## Agents
 

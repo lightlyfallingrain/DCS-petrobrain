@@ -26,9 +26,9 @@
           {
             "type": "command",
             "if": "jq -e '.command | startswith(\"git commit\")'",
-            "command": "cd /Users/sg/Code/DCS-petrobrain && ruff format --check world-model/src world-model/tests && ruff check world-model/src world-model/tests && mypy world-model/src && pytest world-model/tests -q",
+            "command": "/Users/sg/Code/DCS-petrobrain/.claude/scripts/commit-quality-gate.sh",
             "timeout": 180,
-            "statusMessage": "Quality gate: ruff format / ruff check / mypy / pytest..."
+            "statusMessage": "Quality gate: per-subproject ruff format / ruff check / mypy / pytest..."
           }
         ]
       }
@@ -44,7 +44,7 @@
           },
           {
             "type": "command",
-            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:\"AGENTS.md role sequences — apply automatically, no user input needed. New feature or refactor: Architect → Implementer → Reviewer → Definition of Done. Performance-sensitive feature: Architect → Implementer → Performance Reviewer → Reviewer → Definition of Done. Bug fix: Debugger → Reviewer → Definition of Done. Performance issue: Debugger → Performance Reviewer → Reviewer → Definition of Done. For small features one role may cover the whole task. Escalate only per AGENTS.md escalation rules.\"}}'",
+            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:\"AGENTS.md role sequences — apply automatically, no user input needed. Full sequences (see AGENTS.md) include Security/Performance Reviewer steps, but CLAUDE.md Agents section may currently exempt one or both for this project phase — that exemption wins. New feature or refactor: Architect → Implementer → Reviewer → Definition of Done. Performance-sensitive feature: Architect → Implementer → Performance Reviewer → Reviewer → Definition of Done. Bug fix: Debugger → Reviewer → Definition of Done. Performance issue: Debugger → Performance Reviewer → Reviewer → Definition of Done. For small features one role may cover the whole task. Escalate only per AGENTS.md escalation rules.\"}}'",
             "statusMessage": "Loading agent context..."
           }
         ]

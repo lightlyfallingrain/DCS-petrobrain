@@ -4,12 +4,17 @@ description: Run the project build command with filtered output (errors and warn
 type: user-invocable
 ---
 
-Run in `/Users/sg/Code/DCS-petrobrain`:
+Usage: `/compile [world-model|aircraft-layer|body-layer]`
+
+Run in `/Users/sg/Code/DCS-petrobrain`. If a subproject arg is given, lint only that one.
+Otherwise auto-detect from `git status --porcelain` which of `world-model/`, `aircraft-layer/`,
+`body-layer/` have modified/untracked files and lint each detected one; if none are touched,
+default to `world-model` (preserves prior single-subproject behavior).
 
 ```
-ruff check world-model/src world-model/tests 2>&1
+ruff check <subproject>/src <subproject>/tests 2>&1
 ```
 
-Report:
+Report per subproject checked:
 - **PASS** if exit 0
 - **FAIL** with full filtered output if exit non-zero

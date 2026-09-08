@@ -4,11 +4,11 @@ description: Run all mechanical Definition of Done checks and output a structure
 type: user-invocable
 ---
 
-Usage: `/dod-check <feature-name>`
+Usage: `/dod-check <feature-name> [world-model|aircraft-layer|body-layer]`
 
-Example: `/dod-check star-rendering`
+Example: `/dod-check star-rendering` or `/dod-check pb2-contact-memory body-layer`
 
-Runs every mechanical DoD check — quality gates, code violation scans, file size limits, staging status, security sign-off — and outputs a structured markdown report. The DoD agent reads the report and decides agent responsibility; it does not run these checks itself.
+Runs every mechanical DoD check — quality gates, code violation scans, file size limits, staging status, security sign-off — for the given subproject and outputs a structured markdown report. If no subproject arg is given, auto-detect from `git status --porcelain` which of `world-model/`, `aircraft-layer/`, `body-layer/` have modified/untracked files; if exactly one is touched, use it; if none or multiple are touched, default to `world-model` and note the ambiguity in the report header. The DoD agent reads the report and decides agent responsibility; it does not run these checks itself.
 
 ```bash
 #!/usr/bin/env bash
@@ -16,9 +16,24 @@ set -euo pipefail
 cd /Users/sg/Code/DCS-petrobrain
 
 FEATURE="${1:-}"
+SUBPROJECT="${2:-}"
 PASS="✓ PASS"
 FAIL="✗ FAIL"
 OVERALL=0
+
+if [ -z "$SUBPROJECT" ]; then
+  TOUCHED=$(git status --porcelain | awk '{print $2}' | grep -oE '^(world-model|aircraft-layer|body-layer)/' | sort -u | tr -d '/')
+  COUNT=$(echo "$TOUCHED" | grep -c . || true)
+  if [ "$COUNT" = "1" ]; then
+    SUBPROJECT="$TOUCHED"
+  else
+    SUBPROJECT="world-model"
+    AMBIGUOUS_NOTE=" (auto-detect found $COUNT subproject(s) touched — defaulted to world-model, pass a subproject arg explicitly if wrong)"
+  fi
+fi
+
+SRC="$SUBPROJECT/src"
+TESTS="$SUBPROJECT/tests"
 
 result() {
   local label="$1" status="$2" detail="$3"
@@ -30,7 +45,7 @@ result() {
   fi
 }
 
-echo "# DoD Check: ${FEATURE:-<no feature name given>}"
+echo "# DoD Check: ${FEATURE:-<no feature name given>} (${SUBPROJECT}${AMBIGUOUS_NOTE:-})"
 echo "Timestamp: $(date '+%Y-%m-%d %H:%M')"
 echo ""
 
@@ -41,24 +56,29 @@ echo "| Check | Status | Notes |"
 echo "|-------|--------|-------|"
 
 # Format check
-FMT_OUT=$(ruff format --check world-model/src world-model/tests 2>&1 || true)
+FMT_OUT=$(ruff format --check "$SRC" "$TESTS" 2>&1 || true)
 if echo "$FMT_OUT" | grep -q "would be reformatted\|would reformat"; then
-  result "Format" "FAIL" "Run \`ruff format world-model/src world-model/tests\` to fix"
+  result "Format" "FAIL" "Run \`ruff format $SRC $TESTS\` to fix"
 else
   result "Format" "PASS" "No formatting changes needed"
 fi
 
 # Lint check
-LINT_OUT=$(ruff check world-model/src world-model/tests 2>&1 || true)
+LINT_OUT=$(ruff check "$SRC" "$TESTS" 2>&1 || true)
 if echo "$LINT_OUT" | grep -q "^All checks passed"; then
   result "Lint" "PASS" "0 errors/warnings"
 else
-  COUNT=$(echo "$LINT_OUT" | grep -cE "^world-model/" || echo "?")
+  COUNT=$(echo "$LINT_OUT" | grep -cE "^${SUBPROJECT}/" || echo "?")
   result "Lint" "FAIL" "$COUNT error(s): $(echo "$LINT_OUT" | head -1)"
 fi
 
-# Type check
-MYPY_OUT=$(mypy world-model/src 2>&1 || true)
+# Type check — body-layer's mypy config discovery is CWD-only (see body-layer/CLAUDE.md);
+# `mypy --config-file` alone does not fix it, so it must be invoked from within the subproject.
+if [ "$SUBPROJECT" = "body-layer" ]; then
+  MYPY_OUT=$(cd body-layer && mypy src 2>&1 || true)
+else
+  MYPY_OUT=$(mypy "$SRC" 2>&1 || true)
+fi
 if echo "$MYPY_OUT" | grep -q "^Success: no issues found"; then
   result "Types (mypy --strict)" "PASS" "no issues found"
 else
@@ -66,7 +86,7 @@ else
 fi
 
 # Test suite
-TEST_OUT=$(pytest world-model/tests -q 2>&1 || true)
+TEST_OUT=$(pytest "$TESTS" -q 2>&1 || true)
 if echo "$TEST_OUT" | grep -qE "^[0-9]+ passed"; then
   SUMMARY=$(echo "$TEST_OUT" | grep -E "^[0-9]+ (passed|failed)" | tail -1 || echo "passed")
   result "Tests" "PASS" "$SUMMARY"
@@ -83,7 +103,6 @@ echo ""
 echo "| Check | Status | Findings |"
 echo "|-------|--------|---------|"
 
-SRC="world-model/src"
 EXT="py"
 
 # Debug output left in code
@@ -154,6 +173,25 @@ fi
 
 echo ""
 
+# ── Agent-memory path check ───────────────────────────────────────────────────
+# Recurring mistake: agent memory written under a subproject-relative path instead of
+# repo-root .claude/agent-memory/ — see feedback_agent_memory_path_recurrence.md.
+echo "## Agent-Memory Path"
+echo ""
+STRAY_MEMORY=$(git status --porcelain | awk '{print $2}' | grep -E '^[^/]+/\.claude/agent-memory/' || true)
+if [ -z "$STRAY_MEMORY" ]; then
+  echo "| $PASS | No subproject-relative agent-memory writes |"
+  echo "|--------|----------------------------------------------|"
+else
+  echo "| Status | Stray agent-memory path found |"
+  echo "|--------|--------------------------------|"
+  echo "| $FAIL | Must live at repo-root .claude/agent-memory/<role>/: |"
+  echo "$STRAY_MEMORY" | while read -r f; do echo "| | \`$f\` |"; done
+  OVERALL=1
+fi
+
+echo ""
+
 # ── Security Sign-off ─────────────────────────────────────────────────────────
 if [ -n "$FEATURE" ]; then
   echo "## Security Sign-off"
@@ -203,3 +241,7 @@ else
   echo "## Verdict: **FAIL** — see failures above"
 fi
 ```
+
+Note: `CLAUDE.md`'s "Skip `performance-reviewer` and `security` for now" exception (see its
+"Agents" section) may make the Security Sign-off section not applicable — check there before
+treating a missing `security-review.md`/`security-plan-review.md` as a real FAIL.

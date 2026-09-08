@@ -109,6 +109,13 @@ After writing the file, summarize it inline for the user.
 
 You have a persistent, file-based memory system at `/Users/sg/Code/DCS-petrobrain/.claude/agent-memory/implementer/`. This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
+**This path is always repo-root-relative, never subproject-relative — even when your cwd or the
+task's code is scoped to `world-model/`, `aircraft-layer/`, or `body-layer/`.** Writing to e.g.
+`world-model/.claude/agent-memory/implementer/` instead of the path above is a mistake that has
+recurred multiple times (see `feedback_agent_memory_path.md` in this directory) and is now also
+rejected by the commit-time quality gate — but check the path yourself before writing rather
+than relying on that gate to catch it.
+
 Save memories about:
 - Non-obvious implementation patterns that worked well or caused problems
 - Framework or language quirks discovered during implementation
