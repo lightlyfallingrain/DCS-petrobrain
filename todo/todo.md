@@ -1,5 +1,11 @@
 # Todo
 
+## User priority tasks
+Prioritize any open task here over any other task in this file or roadmap files.
+
+- [ ] Create integrity audit skill, see instructions @todo/integrity-audit-skill.md
+
+
 ## Current Focus
 
 World Model Builder good-enough, gate lifted 2026-09-06 (user decision: move to rest of chain to test/improve end-to-end). Aircraft layer (DCS I/O + API, per `docs/concept/division-or-responsibility.md`) — **done, merged to main 2026-09-07** (`51654ec`). World Model's own backlog (M9 OSM, incremental per-layer builds) stays deferred/unscheduled — see `world-model/ROADMAP.md`. **User decision 2026-09-07: defer Mission Interpreter until the DCS→LLM-brain pipeline exists — Petrobrain Runtime is next.** Per `docs/concept/PETROBRAIN_RUNTIME.md` PB-0: World Model API confirmed, ownship state confirmed (aircraft-layer), Mission Understanding format N/A (deferred), **Petrovich perception export still unknown — needs Investigator recon before PB-1 can be planned.**
