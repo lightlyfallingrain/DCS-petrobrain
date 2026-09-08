@@ -19,3 +19,13 @@ entries are removed once created or rejected by the user.
 - **Pattern**: Run many narrow WebSearch queries (community wiki/forum/mod terms) plus WebFetch on the most promising hits to triangulate whether an undocumented API/state is exposed, then synthesize into a dated findings file under `world-model/research/` and produce a short verdict summary
 - **Count**: 19 WebSearch + 5 WebFetch calls this session (investigator subagent researching Petrovich/Mi-24P detection-state extractability)
 - **Benefit**: A dedicated research-recon skill could standardize query fan-out strategy (terminology variants, source prioritization: official docs > wiki > forum > mod source), dedupe overlapping searches, and enforce the dated-report/verdict-summary output format directly — cutting redundant searches and speeding future PB-0-style feasibility investigations
+
+## 2026-09-08 lua-export-syntax-check
+- **Pattern**: After editing `win-mac-sync/to-windows/Export.lua`, run `luac -p <path> && echo <ok-marker>` to check Lua syntax before/after each iteration, repeated across successive edits
+- **Count**: 5 times this session
+- **Benefit**: A small skill/script wrapping the `luac -p` check (with a consistent pass/fail marker and auto-locating the deployed Export.lua path) would save repeated ad hoc invocation and catch typos in the stdlib-only Lua export script faster during PB-1-style live-spike iteration
+
+## 2026-09-08 dcs-debug-log-recon
+- **Pattern**: Inline `python3 - <<EOF ... EOF` heredoc scripts (plus paired `grep -c`/`grep -n` calls) to parse `win-mac-sync/from-windows/dcs-logs/*.log` for probe output — deduplicating raw `list_indication(...)` values, counting probe-pattern occurrences, extracting multi-line log entries
+- **Count**: 5 python3-heredoc log-parsing invocations (plus several companion grep -c/-n calls) this session, all against the same DCS debug-log recon task
+- **Benefit**: A reusable log-recon skill/script (parameterized by probe-pattern name and log path) would standardize DCS export debug-log analysis for live-spike investigations, avoiding rewritten one-off regex/heredoc scripts each iteration

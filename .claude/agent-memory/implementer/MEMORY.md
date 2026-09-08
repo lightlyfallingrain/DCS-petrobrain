@@ -31,3 +31,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M8 probe store](project_m8_probe_store.md) — nearest-cell-only sparse-grid sampling, chunk classifier reuse needed zero new logic, ~23ms/chunk perf, base store fully untouched.
 - [aircraft-layer stage 1-2](project_aircraft_layer_stage1_2.md) — new independent subproject, schema bool-as-int gotcha, LoGetSelfData shape unverified (defensive pcall in Export.lua), stage 3/4 deferred.
 - [PB-1 stage 2-3: body-layer BL-0](project_pb1_stage2_3_body_layer.md) — PerceptionSource scaffolding, LoGetWorldObjects returns lat/lon not x/z, geometry.py deliberately bypasses describe_position for LOS sampling.
+- [PB-1 stage 4-9: HybridPerceptionSource](project_pb1_stage4_9_hybrid_source.md) — HelperAI recursive parser built from prose only (no example dump), association.py tie-margin/debounce judgment calls, range_m includes altitude.
