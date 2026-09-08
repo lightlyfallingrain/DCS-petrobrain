@@ -13,7 +13,12 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 World Model Builder good-enough, gate lifted 2026-09-06 (user decision: move to rest of chain to test/improve end-to-end). Aircraft layer (DCS I/O + API, per `docs/concept/division-or-responsibility.md`) — **done, merged to main 2026-09-07** (`51654ec`). PB-1 (text-only perception logger / BL-0 + BL-1 scaffolding) — **done, ready to merge 2026-09-08**. World Model's own backlog (M9 OSM, incremental per-layer builds) stays deferred/unscheduled — see `world-model/ROADMAP.md`.
 
-**Next milestone: PB-2 (BL-2: contact memory and data association over time).** PB-1's completion does not invalidate or change downstream assumptions — the observation stream is now live-tested and stable, and BL-2 can build on it knowing the source is real HelperAI detection + world-object association (not synthetic). No architectural unknowns remain from PB-1 that would affect BL-2's design.
+**Next milestone: PB-1.5 (naked-eye visual detection channel), before PB-2.** Raised 2026-09-08: PB-1's HelperAI `list_indication(6)` channel only reports contacts found via active optical-scope use — crew naked-eye spotting (visual detection without slewing the scope) is a separate, currently-missing detection channel. FC3 legacy target-info functions (`LoGetTargetInformation`, `LoGetLockedTargetInformation`, `LoGetSightingSystemInfo`) are confirmed dead ends (nil all flight, unsupported for modern modules — see PB-1 live spike). `LoGetWorldObjects` is the only viable base data source but returns **global, unfiltered ground truth** (no coalition/IFF/range filter) — using it directly as a detection source would break the project's core anti-omniscience invariant (Petrovich's knowledge must stay bounded by what he could actually perceive). Scope for this milestone:
+  1. Investigate whether the `LoGetWorldObjects` export/query can itself be constrained (radius around ownship, category/type filter) at the DCS/Lua export layer, to avoid pulling the full global object list every tick (raised FPS-cost concern) — Investigator task, live-probe DCS export API options.
+  2. Design + implement a plausibility/visibility filter (range-by-target-size curve, FOV cone off ownship heading, terrain LOS occlusion — `body-layer/src/perception/geometry.py` already has reusable LOS-masking helpers against world-model elevation, currently unused) that gates `LoGetWorldObjects` candidates down to "what the crew could plausibly see unaided," as a new detection channel parallel to the existing optical-scope channel.
+  3. No FOV/range/plausible-perception design exists yet anywhere in the codebase or `docs/concept/PETROBRAIN_RUNTIME.md` — this is new ground, route through Architect (with Investigator invoked proactively per `CLAUDE.md` Agents section for the DCS-export-filtering unknown) before implementation.
+
+PB-2 (BL-2: contact memory and data association over time) follows after this — PB-1's completion does not invalidate or change downstream assumptions for BL-2, but BL-2 should ideally consume both detection channels (scope + naked-eye) rather than being built against the scope-only channel and reworked later.
 
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
@@ -34,7 +39,9 @@ World Model Builder good-enough, gate lifted 2026-09-06 (user decision: move to 
 
 Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side). Aircraft layer / Mission Interpreter / Runtime work now in scope — see root `CLAUDE.md` "Current priority" (gate lifted 2026-09-06).
 
-(none currently scheduled — M9 moved to Deferred below, 2026-09-06)
+- [ ] **PB-1.5 — Naked-eye visual detection channel.** See Current Focus above for full scope/rationale. Next up, before PB-2.
+
+(World Model M9 moved to Deferred below, 2026-09-06)
 
 ## Backlog
 
