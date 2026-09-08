@@ -27,6 +27,7 @@ World Model Builder (`world-model/`) reached good-enough state 2026-09-06 (M0-M8
 Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory. Currently:
 - `world-model/CLAUDE.md` (see also `world-model/docs/CONVENTIONS.md` for its working rules: DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access).
 - `aircraft-layer/CLAUDE.md` — live DCS I/O pipeline (Export.lua → Windows collector → LAN API). See also `aircraft-layer/WORKFLOW.md` for the cross-machine deploy/run workflow.
+- `body-layer/CLAUDE.md` — Petrovich's belief-state process (contacts, attention, perception ingestion, the brain-facing API). Currently at BL-0/BL-1 tier-independent perception scaffolding only — see `plans/body-layer/plan.md` and `plans/pb1-perception-logger/plan.md`.
 
 ## Agents
 

@@ -8,7 +8,7 @@ Write directly to this directory — it already exists, no need to create it or 
 - [No dep tooling in world-model](project_worldmodel_no_dep_tooling.md) — no venv/lockfile existed before M1; create `world-model/.venv` ad hoc, use pytest `pythonpath` ini for src/tests imports.
 - [Verify full suite, not just new files](verify_full_suite_not_just_new_files.md) — ruff check can flag pre-existing drift in untouched files; fix in its own small commit.
 - [Append, don't overwrite implementation.md](feedback_implementation_log_append.md) — multi-stage plans share one implementation.md; read/append, never replace.
-- [world-model mypy_path needs cwd=world-model/](project_worldmodel_mypy_path_cwd.md) — strict-checking tools/tests imports (raster, coordinates) fails from repo root; cd into world-model/ first.
+- [mypy config discovery is CWD-only](project_worldmodel_mypy_path_cwd.md) — mypy never finds a subproject's pyproject.toml from repo root; any cross-subproject mypy_path (body-layer -> world-model/src) needs cd first, not just world-model tools/tests.
 - [M2 raster open questions](project_m2_raster_open_questions.md) — RasterCharts `level` semantics unresolved (clipmap analogy doesn't transfer); test_coordinates.py I001 recurred 3x, needs root-cause not re-fix.
 - [Overpass needs User-Agent](project_overpass_user_agent.md) — urllib default has none; overpass-api.de returns HTTP 406 with no payload until one is set.
 - [Draw attribution into rendered images](feedback_render_attribution_into_image.md) — OSM attribution must be `draw.text`'d onto overlay PNGs, not just printed to stdout; `world-model/tools/` isn't in the mandated check commands but new tool files should still be checked individually.
@@ -30,3 +30,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M7 Stage 2 SRTM provenance](project_m7_stage2_srtm_provenance.md) — grid.provenance schema bump v2->v3, required field on ElevationGrid/SurfaceGrid, "most recent grid wins" ordering now matters, plan's file list vs its own locked decisions can conflict.
 - [M8 probe store](project_m8_probe_store.md) — nearest-cell-only sparse-grid sampling, chunk classifier reuse needed zero new logic, ~23ms/chunk perf, base store fully untouched.
 - [aircraft-layer stage 1-2](project_aircraft_layer_stage1_2.md) — new independent subproject, schema bool-as-int gotcha, LoGetSelfData shape unverified (defensive pcall in Export.lua), stage 3/4 deferred.
+- [PB-1 stage 2-3: body-layer BL-0](project_pb1_stage2_3_body_layer.md) — PerceptionSource scaffolding, LoGetWorldObjects returns lat/lon not x/z, geometry.py deliberately bypasses describe_position for LOS sampling.
+- [PB-1 stage 4-9: HybridPerceptionSource](project_pb1_stage4_9_hybrid_source.md) — HelperAI recursive parser built from prose only (no example dump), association.py tie-margin/debounce judgment calls, range_m includes altitude.

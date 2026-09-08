@@ -1,0 +1,50 @@
+[
+  {
+    "dcs_model_time_s": 100.0,
+    "received_wall_clock_s": 1700000000.0,
+    "position_x_m": 10000.0,
+    "position_y_m": 500.0,
+    "position_z_m": 20000.0,
+    "pitch_rad": 0.0,
+    "bank_rad": 0.0,
+    "yaw_rad": 0.0,
+    "heading_true_rad": 0.0,
+    "ias_mps": 60.0,
+    "tas_mps": 65.0,
+    "altitude_msl_m": 450.0,
+    "altitude_agl_m": 300.0,
+    "altitude_radar_m": 295.0
+  },
+  {
+    "dcs_model_time_s": 100.2,
+    "received_wall_clock_s": 1700000000.2,
+    "position_x_m": 10012.0,
+    "position_y_m": 500.0,
+    "position_z_m": 20000.0,
+    "pitch_rad": 0.0,
+    "bank_rad": 0.0,
+    "yaw_rad": 0.0,
+    "heading_true_rad": 0.0,
+    "ias_mps": 60.0,
+    "tas_mps": 65.0,
+    "altitude_msl_m": 450.0,
+    "altitude_agl_m": 300.0,
+    "altitude_radar_m": 295.0
+  },
+  {
+    "dcs_model_time_s": 100.4,
+    "received_wall_clock_s": 1700000000.4,
+    "position_x_m": 10024.0,
+    "position_y_m": 500.0,
+    "position_z_m": 20000.0,
+    "pitch_rad": 0.0,
+    "bank_rad": 0.0,
+    "yaw_rad": 1.5707963267948966,
+    "heading_true_rad": 1.5707963267948966,
+    "ias_mps": 60.0,
+    "tas_mps": 65.0,
+    "altitude_msl_m": 450.0,
+    "altitude_agl_m": 300.0,
+    "altitude_radar_m": 295.0
+  }
+]

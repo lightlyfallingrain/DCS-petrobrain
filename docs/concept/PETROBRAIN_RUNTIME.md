@@ -211,35 +211,62 @@ mechanics in more detail.
 
 ## Perception adapter
 
-The first major technical unknown is:
+**Status (2026-09-08): shipped, as a hybrid design neither originally-anticipated tier
+predicted.** `plans/pb1-perception-logger/plan.md` (see that plan's Session 4 and its
+"Association design" section for the full record) ran a live-DCS spike answering the technical
+unknown this section originally posed — what Petrovich detection/target state can actually be
+extracted from DCS — across four independent channels (`list_indication(2)`/ASP-17 sight values,
+`get_param_handle` on the sight's named params, `LoGetTargetInformation`,
+`LoGetLockedTargetInformation`/`LoGetSightingSystemInfo`). **Every numeric-geometry channel is
+confirmed dead** (nil, empty, or stuck at zero across four live flights) — Petrovich's detection
+engine is compiled/native, not reachable via any documented Lua/Export API, and reverse-engineering
+it was explicitly considered and rejected as out of scope (breaks the read-only-DCS-access
+invariant, no sanctioned API surface). **One channel works and is real**:
+`list_indication(HELPERAI_DEVICE_ID)` (device ID `6`, confirmed live) returns Petrovich's own
+spotting/classification text (`middle_list_text`/`lower_list_text`/`lower_lower_list_text`, e.g.
+`"Ural truck"`) — no numeric field of any kind, confirmed across ~4000 live samples.
 
-> What Petrovich detection/target state can actually be extracted from DCS?
+The shipped design (`aircraft-layer/dcs-export/Export.lua`,
+`aircraft-layer/src/schema/petrovich_indication.py`,
+`body-layer/src/perception/hybrid_source.py`, `body-layer/src/perception/association.py`) splits
+the observation into two mechanisms with different jobs:
 
-Investigate:
+- **Detection existence is real, not synthetic.** `HybridPerceptionSource` never emits an
+  `Observation` unless HelperAI's own live UI actually populated `middle_list_text` — this is
+  Petrovich's own (compiled, unreachable) detection logic deciding something is there, not a
+  heuristic standing in for that decision. This is the invariant's primary defense, structurally
+  stronger than either originally-anticipated tier (a full real feed with real bearing, or a pure
+  ground-truth proxy) would have been.
+- **Which world object the detection refers to, and its geometry, is inferred, not read.** No
+  channel ever exposes native bearing/range — `perception.association`'s `associate()` resolves
+  the classification text against a `LoGetWorldObjects` candidate pool (no coalition/IFF
+  filtering) using a range-cap + forward-hemisphere plausibility filter and keyword-overlap
+  type-match scoring, then `perception.geometry` computes bearing/range from ownship to whichever
+  candidate (or best-guess candidate) it resolved. A confident single match emits at
+  `confidence≈0.6` (`method: "bearing_range_terrain"`); an ambiguous multi-candidate scene still
+  emits, from the nearest tied candidate, at `confidence≈0.25`
+  (`method: "bearing_range_terrain_ambiguous_association"`) rather than staying silent — the
+  current `Observation` schema has no "detection happened, position unknown" representation, so
+  this is the closest achievable approximation without a schema change (a possible fast-follow).
 
-- Petrovich target list / HelperAI indication;
-- `list_indication()`;
-- cockpit export;
-- Export.lua;
-- cockpit arguments;
-- Mi-24 Lua cockpit scripts;
-- DCS-BIOS-style approaches;
-- community Petrovich export experiments.
-
-Ideal normalized observation:
+Realized observation shape (`source: "petrovich_detection_associated"`, not the originally-drafted
+`petrovich_detection`):
 
 ```yaml
 observation:
   timestamp: 1281.4
-  source: petrovich_detection
-  classification: BMP
+  source: petrovich_detection_associated
+  classification: Ural truck
   bearing_deg: 32
   range_m: 3100
+  provenance: petrovich_indication+world_objects
 ```
 
-Using aircraft position and heading, deterministic code may then infer a world position if accuracy is sufficient.
-
-If actual Petrovich perception cannot be exported, document that limitation before building an approximation.
+This is neither of this section's originally-anticipated designs — not a full real feed with real
+bearing, and not a pure ground-truth proxy — it is a hybrid: real detection existence + gated
+classification from Petrovich's own UI, synthetic geometry derived from world-object association.
+See `plans/pb1-perception-logger/plan.md`'s Invariant Check for the full reasoning on why this
+split still satisfies "Petrovich must not be omniscient."
 
 ## Contact identity
 

@@ -1,0 +1,24 @@
+{
+  "dcs_model_time_s": 100.2,
+  "received_wall_clock_s": 1700000000.2,
+  "objects": [
+    {
+      "object_id": 42,
+      "object_type": "BMP-2",
+      "coalition": 1.0,
+      "lat_deg": 35.10,
+      "lon_deg": 35.95,
+      "altitude_m": 120.0,
+      "heading_true_rad": 0.0
+    },
+    {
+      "object_id": 43,
+      "object_type": "T-72B",
+      "coalition": 1.0,
+      "lat_deg": 35.11,
+      "lon_deg": 35.96,
+      "altitude_m": 118.0,
+      "heading_true_rad": 1.57
+    }
+  ]
+}
