@@ -414,7 +414,17 @@ already merged per this branch's git history — `08ba9c0`, `6cd5be6`). Remainin
    Session 4 above — "stage 4's tier branch" no longer exists in its original form, replaced by
    the hybrid design's stages 4-9.)*
 
-### Decisions Requiring User Input (new, 2026-09-08)
+### Decisions (resolved 2026-09-08)
+
+All three confirmed as recommended, no changes to the design above:
+1. Low-confidence best-guess for ambiguous association, ship now; schema extension
+   (nullable `bearing_deg`/`range_m` or `unresolved: bool`) deferred to a fast-follow if real
+   ambiguous scenes make it matter in practice.
+2. No coalition/IFF filtering in `association.py` for PB-1 — text-only logger, no contact memory
+   yet, keep scope tight.
+3. New `GET /petrovich_indication/latest` endpoint, separate from `/world_objects/latest`.
+
+### Decisions Requiring User Input (new, 2026-09-08) — RESOLVED, see above
 
 1. **Ambiguous-association compromise (see "Association design" above).** An ambiguous
    detection still emits an `Observation` built from the nearest candidate at low confidence,
