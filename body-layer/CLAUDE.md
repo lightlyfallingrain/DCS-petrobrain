@@ -65,11 +65,17 @@ Run a single test: `pytest body-layer/tests/test_file.py::test_name -q`.
 
 **Running the live logger** (`src/logger.py`'s `main()`): `src` isn't installed as a package,
 same non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector (see its `WORKFLOW.md`).
-From `cd body-layer`:
+**Must use `body-layer/.venv`'s interpreter, not the system/plain `python`** — the world-model
+seam pulls in `pyproj`, which is only installed in this subproject's own venv (see
+`## Tech stack` above on why that dependency exists). From `cd body-layer`:
 
 ```sh
-PYTHONPATH=src:../world-model/src python -m logger --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName>
+PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName>
 ```
+
+(Or `source .venv/bin/activate` first, then drop the `.venv/bin/` prefix.) Plain `python -m
+logger` (no venv) fails with `ModuleNotFoundError: No module named 'pyproj'` once it reaches the
+world-model import chain.
 
 Omitting `../world-model/src` from `PYTHONPATH` fails immediately at startup with
 `ModuleNotFoundError: No module named 'coordinates'` (the world-model seam, imported
