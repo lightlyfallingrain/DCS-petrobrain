@@ -6,14 +6,14 @@ body-layer, per `plans/pb1-perception-logger/plan.md`'s framing of the two
 seams. Stdlib only (`urllib.request`), consistent with `aircraft-layer/`'s
 and `world-model/`'s dependency policy.
 
-`GET /world_objects/latest` is the endpoint `plans/pb1-perception-logger/
-plan.md` stage 3 adds to the aircraft layer (`aircraft-layer/src/api/
-server.py`) alongside the pre-existing `GET /telemetry/latest`
-(`aircraft-layer/src/api/server.py`, `aircraft-layer/src/schema`). Both
-return JSON `null` when the collector's cache is still empty -- not an
-error, Export.lua may not have connected or DCS may not be running a
-mission -- and this client passes that through as `None` rather than
-raising.
+`GET /world_objects/latest` (stage 3) and `GET /petrovich_indication/latest`
+(stage 4) are the endpoints `plans/pb1-perception-logger/plan.md` adds to
+the aircraft layer (`aircraft-layer/src/api/server.py`) alongside the
+pre-existing `GET /telemetry/latest` (`aircraft-layer/src/api/server.py`,
+`aircraft-layer/src/schema`). All three return JSON `null` when the
+collector's cache is still empty -- not an error, Export.lua may not have
+connected or DCS may not be running a mission -- and this client passes
+that through as `None` rather than raising.
 """
 
 from __future__ import annotations
@@ -68,6 +68,22 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /world_objects/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
+        """`GET /petrovich_indication/latest` -> the most recent HelperAI
+        indication sample as a dict (see `aircraft-layer/src/schema/
+        petrovich_indication.py`'s `PetrovichIndicationSample.to_dict`,
+        i.e. `{"dcs_model_time_s", "received_wall_clock_s", "fields"}` where
+        `fields` is the flattened `{leaf_name: text}` record), or `None` if
+        nothing has been received yet."""
+        result = self._get_json("/petrovich_indication/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /petrovich_indication/latest, got {type(result).__name__}"
             )
         return result
 

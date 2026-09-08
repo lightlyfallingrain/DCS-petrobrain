@@ -19,6 +19,11 @@ from aircraft_client import AircraftLayerClient, AircraftLayerError
 
 _TELEMETRY_BODY = {"dcs_model_time_s": 123.5, "position_x_m": 1.0}
 _WORLD_OBJECTS_BODY = {"dcs_model_time_s": 123.5, "objects": []}
+_PETROVICH_INDICATION_BODY = {
+    "dcs_model_time_s": 123.5,
+    "received_wall_clock_s": 1000.0,
+    "fields": {"middle_list_text": "Ural truck"},
+}
 
 
 def _make_handler() -> type[BaseHTTPRequestHandler]:
@@ -28,6 +33,8 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
                 self._respond(200, _TELEMETRY_BODY)
             elif self.path == "/world_objects/latest":
                 self._respond(200, _WORLD_OBJECTS_BODY)
+            elif self.path == "/petrovich_indication/latest":
+                self._respond(200, _PETROVICH_INDICATION_BODY)
             elif self.path == "/telemetry/empty":
                 self._respond(200, None)
             elif self.path == "/not-json":
@@ -80,6 +87,14 @@ def test_get_world_objects_latest_returns_parsed_dict(server_url: str) -> None:
     result = client.get_world_objects_latest()
 
     assert result == _WORLD_OBJECTS_BODY
+
+
+def test_get_petrovich_indication_latest_returns_parsed_dict(server_url: str) -> None:
+    client = AircraftLayerClient(base_url=server_url)
+
+    result = client.get_petrovich_indication_latest()
+
+    assert result == _PETROVICH_INDICATION_BODY
 
 
 def test_get_telemetry_latest_returns_none_when_empty(server_url: str) -> None:
