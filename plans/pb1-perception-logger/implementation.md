@@ -275,3 +275,41 @@ supersession note; there is one concrete `PerceptionSource`
   re-emits, rather than silently staying suppressed indefinitely. Noted in the module docstring;
   flagged here as a judgment call, not a plan requirement, in case live testing shows it needs
   retuning (e.g. a minimum re-emit interval even without a gap).
+
+### Stage 7 live acceptance test (2026-09-08, user-run)
+
+Full pipeline run live end-to-end for the first time: canonical `Export.lua` (redeployed,
+replacing a stale copy without the `list_indication(6)` push) → collector (also had to be
+restarted after a code sync — was running pre-stages-4-9 code, causing an initial
+`/petrovich_indication/latest` 404) → `body-layer`'s `python -m logger`.
+
+**Debugging notes along the way, all now fixed in docs/code, not left as tribal knowledge:**
+- `aircraft-layer/WORKFLOW.md`'s documented `python -m collector` and the new `python -m logger`
+  command both failed as literally written — neither `src/` is an installed package, so
+  `PYTHONPATH=src` (aircraft-layer) / `PYTHONPATH=src:../world-model/src` (body-layer) is
+  required, not optional. Fixed in both `WORKFLOW.md` and `body-layer/CLAUDE.md`.
+  (`fb32fc3`)
+- `python -m logger` additionally requires `body-layer/.venv`'s interpreter specifically, not
+  system `python` — the world-model seam pulls in `pyproj`, only installed in that venv. Also
+  fixed in `body-layer/CLAUDE.md`. (`fb32fc3`)
+- A stale collector process (running code from before the stage 4-9 commits) caused an initial
+  404 on the new endpoint even after the aircraft-layer source was synced — restarting the
+  process, not just updating the files, was required. Not a code bug; a deploy-process reminder
+  worth remembering for future live tests on this pipeline.
+- A `.85` IP-typo (`.9.85` vs `.0.85`) caused an initial connection timeout, unrelated to the
+  pipeline itself.
+
+**Once correctly deployed, the pipeline worked end-to-end on the first real attempt**, and the
+live flight incidentally exercised exactly the scenario only fixture-tested before: 4 similar
+Ural trucks near each other, all populated in Petrovich's cockpit target list simultaneously —
+`association.py`'s ambiguous-candidate path, not just its clean single-candidate path. Two real
+observations logged:
+
+```
+t_sim=266.39 aircraft=(124147.4, 127321.3, 570.0) classification=Ural truck bearing_deg=294.1 range_m=4020
+t_sim=303.07 aircraft=(124844.8, 125820.7, 655.1) classification=Ural truck bearing_deg=293.5 range_m=2377
+```
+
+Both bearing/range values are plausible for the flight geometry (user-confirmed). This is the
+live acceptance evidence `plans/pb1-perception-logger/plan.md` stage 7 required before PB-1 could
+be considered done.
