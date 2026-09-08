@@ -22,8 +22,13 @@ content, even empty) to turn on verbose logging to
 
 ```
 cd aircraft-layer
+set PYTHONPATH=src
 python -m collector
 ```
+
+(PowerShell: `$env:PYTHONPATH="src"`; macOS/Linux: `PYTHONPATH=src python -m collector`.)
+`src` isn't installed as a package — `PYTHONPATH` is required, not optional; `python -m collector`
+alone fails with `No module named collector`.
 
 This starts two servers in one process, sharing one in-memory cache:
 

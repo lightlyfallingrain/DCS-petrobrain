@@ -63,6 +63,19 @@ though the code is correct. The only correct invocation is `cd body-layer && myp
 
 Run a single test: `pytest body-layer/tests/test_file.py::test_name -q`.
 
+**Running the live logger** (`src/logger.py`'s `main()`): `src` isn't installed as a package,
+same non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector (see its `WORKFLOW.md`).
+From `cd body-layer`:
+
+```sh
+PYTHONPATH=src:../world-model/src python -m logger --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName>
+```
+
+Omitting `../world-model/src` from `PYTHONPATH` fails immediately at startup with
+`ModuleNotFoundError: No module named 'coordinates'` (the world-model seam, imported
+transitively via `perception.association`), not a delayed failure once a poll needs elevation
+data — both path entries are required from the first line.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
