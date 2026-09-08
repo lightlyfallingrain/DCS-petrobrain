@@ -1,28 +1,34 @@
-"""Local TCP listener that receives Export.lua's telemetry + world-objects push.
+"""Local TCP listener that receives Export.lua's telemetry + world-objects +
+Petrovich-indication push.
 
 Export.lua is deliberately dumb (plan decision 2): it only ever pushes its
 own ownship state (and, since `plans/pb1-perception-logger/plan.md` stage 3,
-`LoGetWorldObjects` ground truth) to this local collector over loopback, and
-never listens for or answers requests itself. This server is the other end
-of that single push connection -- it accepts one connection at a time from
-Export.lua running inside the same DCS install, reads newline-delimited JSON
-lines, and feeds each parsed line into whichever of `TelemetryCache`/
-`WorldObjectsCache` matches its shape.
+`LoGetWorldObjects` ground truth, and since that plan's stage 4,
+`list_indication(HELPERAI_DEVICE_ID)`'s raw dump) to this local collector
+over loopback, and never listens for or answers requests itself. This
+server is the other end of that single push connection -- it accepts one
+connection at a time from Export.lua running inside the same DCS install,
+reads newline-delimited JSON lines, and feeds each parsed line into
+whichever of `TelemetryCache`/`WorldObjectsCache`/`PetrovichIndicationCache`
+matches its shape.
 
-Both line kinds share one connection and one JSON-lines wire format but have
-distinct shapes: a telemetry line is a flat object with a top-level `"x"`
-key; a world-objects line has a top-level `"objects"` key instead (see
-`schema.TelemetrySample`/`schema.WorldObjectsSnapshot`). `_handle_line`
-distinguishes them by that key's presence before parsing, rather than trying
-one parser and falling back to the other on failure -- a genuinely malformed
-line of either kind should be logged and dropped once, not misattributed to
-the wrong schema's error message.
+All three line kinds share one connection and one JSON-lines wire format but
+have distinct shapes: a telemetry line is a flat object with a top-level
+`"x"` key; a world-objects line has a top-level `"objects"` key instead; a
+Petrovich-indication line has a top-level `"indication"` key instead (see
+`schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
+`schema.PetrovichIndicationSample`). `_handle_line` distinguishes them by
+that key's presence before parsing, rather than trying each parser in turn
+and falling back on failure -- a genuinely malformed line of any kind should
+be logged and dropped once, not misattributed to the wrong schema's error
+message.
 
 This module is intentionally thin. Its correctness against a real Export.lua
 is validated by the live DCS mission test (plan stage 3), not by unit tests
 -- the parsing and caching logic it delegates to (`schema.TelemetrySample`,
-`schema.WorldObjectsSnapshot`, `TelemetryCache`, `WorldObjectsCache`) is
-what's unit-tested.
+`schema.WorldObjectsSnapshot`, `schema.PetrovichIndicationSample`,
+`TelemetryCache`, `WorldObjectsCache`, `PetrovichIndicationCache`) is what's
+unit-tested.
 """
 
 from __future__ import annotations
@@ -34,8 +40,10 @@ import time
 from types import TracebackType
 from typing import Self
 
-from collector.cache import TelemetryCache, WorldObjectsCache
+from collector.cache import PetrovichIndicationCache, TelemetryCache, WorldObjectsCache
 from schema import (
+    PetrovichIndicationParseError,
+    PetrovichIndicationSample,
     TelemetryParseError,
     TelemetrySample,
     WorldObjectParseError,
@@ -58,11 +66,13 @@ class CollectorServer:
         self,
         cache: TelemetryCache,
         world_objects_cache: WorldObjectsCache,
+        petrovich_indication_cache: PetrovichIndicationCache,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
         self._cache = cache
         self._world_objects_cache = world_objects_cache
+        self._petrovich_indication_cache = petrovich_indication_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -153,6 +163,18 @@ class CollectorServer:
                 return
             logger.debug("parsed world-objects snapshot: %r", snapshot)
             self._world_objects_cache.push(snapshot)
+            return
+
+        if "indication" in data:
+            try:
+                indication_sample = PetrovichIndicationSample.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except PetrovichIndicationParseError:
+                logger.warning("dropping malformed petrovich-indication line: %r", line)
+                return
+            logger.debug("parsed petrovich-indication sample: %r", indication_sample)
+            self._petrovich_indication_cache.push(indication_sample)
             return
 
         try:

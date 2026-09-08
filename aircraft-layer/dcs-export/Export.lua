@@ -34,6 +34,21 @@ LuaSocket and an unsanitized `io`/`lfs` environment by default):
     finding 10. Field-level detail there is moderate-confidence
     (search-summary-sourced, not a primary-source read) -- pcall-guarded
     and defensively type-checked below for the same reason LoGetSelfData is.
+  - list_indication(HELPERAI_DEVICE_ID) -- Petrovich's own HelperAI
+    spotting/classification text (device ID 6, confirmed live via a
+    disposable spike probe, see
+    aircraft-layer/research/2026-09-08-pb1-live-spike-results.md finding 1).
+    Returns one raw Lua string, a recursive tree of
+    "-----...-----\n<name>\n<value-if-any>\nchildren are {...}" blocks --
+    pushed here as-is, with zero Lua-side tree parsing (that lives in
+    aircraft-layer/src/schema/petrovich_indication.py, mirroring the
+    JSON-encoding split every other feed in this file already follows).
+    Confirmed live to carry classification text only
+    (middle_list_text/lower_list_text/lower_lower_list_text, e.g.
+    "Ural truck") -- no numeric field of any kind. This is the sole
+    detection-existence gate body-layer's HybridPerceptionSource uses; all
+    geometry still comes from LoGetWorldObjects above, per that research
+    note's net conclusion.
   - LuaExportActivityNextEvent(t) -- required export callback, but NOT a
     throttle on LuaExportAfterNextFrame despite reading that way in some
     documentation: stage 5 confirmed live that DCS calls this correctly on
@@ -72,6 +87,12 @@ local HOST = "127.0.0.1"
 local PORT = 7790
 local EXPORT_INTERVAL_S = 0.2 -- 5 Hz, per plan's confirmed conservative starting rate
 local RECONNECT_INTERVAL_S = 5.0
+
+-- HelperAI's device ID, confirmed live (not desk-researched) per
+-- aircraft-layer/research/2026-09-08-pb1-live-spike-results.md: matched by
+-- ccHelperAIIndicator_Mi24's 0-indexed registration position in
+-- indicators_list-grepped.lua.
+local HELPERAI_DEVICE_ID = 6
 
 -- Debug logging, gated so the branch is free when off. DCS internals here
 -- are heavily unverified (field shapes, module load behavior) and this
@@ -245,6 +266,23 @@ local function encode_world_objects_line(t, world_objects)
     return "{\"t\":" .. tostring(t) .. ",\"objects\":[" .. table.concat(parts, ",") .. "]}\n"
 end
 
+-- Encodes one list_indication(HELPERAI_DEVICE_ID) poll as a single JSON
+-- line: {"t":<model time>,"indication":"<raw dump string>"}. `raw` is
+-- list_indication's own returned string, pushed through verbatim (via
+-- encode_scalar/json_escape_string, the same string-escaping path
+-- encode_world_objects_line already uses for object type/coalition
+-- strings) -- no tree parsing on this side, per this file's "deliberately
+-- dumb" policy. Parsing the recursive "-----...-----\n<name>\n<value>\n
+-- children are {...}" format into a flat record happens in
+-- aircraft-layer/src/schema/petrovich_indication.py.
+local function encode_petrovich_indication_line(t, raw)
+    return "{\"t\":" .. tostring(t) .. ",\"indication\":" .. encode_scalar(raw) .. "}\n"
+end
+
+local function get_helperai_indication()
+    return list_indication(HELPERAI_DEVICE_ID)
+end
+
 local function safe_call(fn)
     local ok, a, b, c = pcall(fn)
     if not ok then
@@ -396,6 +434,28 @@ function LuaExportAfterNextFrame()
             debug_log("world-objects send failed: " .. tostring(wo_err))
             client:close()
             client = nil
+        end
+    end
+
+    -- HelperAI (Petrovich detection text) poll, same throttle/socket/
+    -- pcall-guard/one-shot-dump mechanism as the LoGetWorldObjects poll
+    -- above -- only reached if the connection is still alive after that
+    -- send.
+    if client ~= nil then
+        local indication = safe_call(get_helperai_indication)
+        if indication ~= nil then
+            if not DUMPED_PETROVICH_INDICATION then
+                DUMPED_PETROVICH_INDICATION = true
+                debug_log("list_indication(HELPERAI_DEVICE_ID) raw dump:\n" .. tostring(indication))
+            end
+
+            local indication_line = encode_petrovich_indication_line(t, indication)
+            local pi_ok, pi_err = client:send(indication_line)
+            if not pi_ok then
+                debug_log("petrovich-indication send failed: " .. tostring(pi_err))
+                client:close()
+                client = nil
+            end
         end
     end
 end

@@ -35,6 +35,10 @@ import json
 from dataclasses import dataclass
 from typing import Any, Final
 
+from .petrovich_indication import (
+    PetrovichIndicationParseError,
+    PetrovichIndicationSample,
+)
 from .world_objects import (
     WorldObjectParseError,
     WorldObjectSample,
@@ -42,6 +46,8 @@ from .world_objects import (
 )
 
 __all__ = [
+    "PetrovichIndicationParseError",
+    "PetrovichIndicationSample",
     "TelemetryParseError",
     "TelemetrySample",
     "WorldObjectParseError",

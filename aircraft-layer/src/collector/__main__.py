@@ -21,7 +21,7 @@ import time
 from api.server import DEFAULT_HOST as API_DEFAULT_HOST
 from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
-from collector.cache import TelemetryCache, WorldObjectsCache
+from collector.cache import PetrovichIndicationCache, TelemetryCache, WorldObjectsCache
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 
 
@@ -59,16 +59,25 @@ def main() -> None:
 
     cache = TelemetryCache()
     world_objects_cache = WorldObjectsCache()
+    petrovich_indication_cache = PetrovichIndicationCache()
 
     collector = CollectorServer(
-        cache, world_objects_cache, host=args.host, port=args.port
+        cache,
+        world_objects_cache,
+        petrovich_indication_cache,
+        host=args.host,
+        port=args.port,
     )
     collector.open()
     collector_thread = threading.Thread(target=collector.serve_forever, daemon=True)
     collector_thread.start()
 
     api = TelemetryAPIServer(
-        cache, world_objects_cache, host=args.api_host, port=args.api_port
+        cache,
+        world_objects_cache,
+        host=args.api_host,
+        port=args.api_port,
+        petrovich_indication_cache=petrovich_indication_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
