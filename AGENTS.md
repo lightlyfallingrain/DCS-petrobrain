@@ -36,6 +36,14 @@ Full per-role responsibilities, priorities, checklists, and output-style detail:
 
 ---
 
+## Auto-Advance
+
+Once a role sequence starts, move to the next stage automatically — do not stop to ask "should I proceed?" between stages. Reviewer → Implementer is a loop: if Reviewer finds required fixes, hand back to Implementer and continue the loop until Reviewer approves, then proceed to DoD without asking.
+
+Only stop and hand control to the user mid-sequence when one of the Escalation Rules below applies, or a step genuinely needs the user's own input, verification, or perception (e.g. live DCS acceptance testing, a judgment call only the user can make). Otherwise keep going through Architect → Implementer → Reviewer → (loop) → DoD in one continuous run.
+
+---
+
 ## Escalation Rules
 
 Stop and ask the user when:
@@ -44,6 +52,8 @@ Stop and ask the user when:
 - the feature is much larger or smaller than expected
 - existing tests must be rewritten rather than extended
 - the requested change conflicts with project invariants
+
+When multiple reasonable technical approaches exist and none of the above apply, pick one and proceed — do not escalate — if the tradeoff is **local, reversible, and does not materially affect** product behavior, future architecture, dependencies, cost, or risk. State which approach was chosen and why in the plan or commit, so the user can revisit it later if needed. Escalate only when a decision is consequential, difficult to reverse, or there is genuine ambiguity about expected behavior.
 
 ---
 
