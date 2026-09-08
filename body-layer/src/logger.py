@@ -5,24 +5,26 @@ Polls ownship telemetry from the aircraft layer plus whatever
 text line (`t_sim`, aircraft position, classification, `bearing_deg`,
 `range_m`) -- no LLM, no contact memory, no association. That's BL-2/PB-2.
 
-Written entirely against `perception.source.PerceptionSource`, so it does
-not know or care which concrete tier is behind it -- per
-`plans/pb1-perception-logger/plan.md` stage 5. No concrete tier exists yet
-(stage 1's live spike, and stage 4's tier branch it gates, are both out of
-this plan's scope), so there is deliberately no `__main__`/CLI entrypoint
-here yet: constructing a real `PerceptionLogger` needs a real
-`PerceptionSource` to pass in, which does not exist until stage 4 picks a
-tier. `PerceptionLogger` itself is fully built and tested (against a fake
-`PerceptionSource`) so that stage 4+ only has to plug a concrete source in
-and add the entrypoint.
+`PerceptionLogger` itself is written entirely against `perception.source.
+PerceptionSource`, so it does not know or care which concrete tier is
+behind it -- per `plans/pb1-perception-logger/plan.md` stage 5. `main()`
+below is the one place that plugs in a concrete tier
+(`perception.hybrid_source.HybridPerceptionSource`, the only concrete
+`PerceptionSource` this project builds, per that plan's stage 6/"Single
+implementation, not two" section) and drives the poll loop -- kept as thin
+CLI wiring, separate from `PerceptionLogger`'s own tier-agnostic logic.
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
+import time
 from dataclasses import dataclass
 from typing import TextIO
 
 from aircraft_client import AircraftLayerClient
+from perception.hybrid_source import HybridPerceptionSource
 from perception.source import Observation, OwnshipState, PerceptionSource
 
 
@@ -66,3 +68,52 @@ class PerceptionLogger:
             for line in lines:
                 print(line, file=self.output)
         return lines
+
+
+_DEFAULT_POLL_INTERVAL_S = 1.0
+
+
+def main() -> None:
+    """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
+    ...` -- polls `PerceptionLogger.run_once()` on a fixed interval against
+    a real `HybridPerceptionSource` until interrupted. Not exercised by
+    automated tests (a live/replay-loop driver, same posture as
+    `aircraft-layer/src/collector/__main__.py`'s own untested `main()`);
+    `PerceptionLogger`'s and `HybridPerceptionSource`'s own logic is."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--aircraft-layer-url",
+        required=True,
+        help="aircraft-layer LAN API base URL, e.g. http://192.168.1.50:7791",
+    )
+    parser.add_argument(
+        "--theatre",
+        required=True,
+        help="DCS theatre name for world-object lat/lon -> DCS x/z conversion, e.g. Syria",
+    )
+    parser.add_argument(
+        "--poll-interval-s",
+        type=float,
+        default=_DEFAULT_POLL_INTERVAL_S,
+        help="seconds between poll ticks",
+    )
+    args = parser.parse_args()
+
+    aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
+    source = HybridPerceptionSource(
+        aircraft_client=aircraft_client, theatre=args.theatre
+    )
+    perception_logger = PerceptionLogger(
+        aircraft_client=aircraft_client, source=source, output=sys.stdout
+    )
+
+    try:
+        while True:
+            perception_logger.run_once()
+            time.sleep(args.poll_interval_s)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
