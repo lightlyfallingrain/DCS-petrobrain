@@ -127,7 +127,19 @@ Existing PB-1/PB-1.5 tests are **extended, not rewritten** — `emit_mode` defau
 
 ### Implementation Plan
 
-**Stage 0 — Scope-channel repair (see Decision 1; recommended in-scope).**
+**Stage -1 — Aircraft-layer ownship flag (PREREQUISITE, do first; see Decision 2).**
+Separate branch and separate commits from BL-2 — it is a different subproject and a wire-format
+change to `/world_objects/latest` affecting every consumer. `Export.lua` identifies the player's
+own object (`LoGetPlayerPlaneId()`) and marks it; the marker is added to `WorldObjectSample` in
+`aircraft-layer/src/schema/world_objects.py`. **Flag, do not omit** — ownship's entry stays in the
+snapshot. Body layer then filters on the flag inside detection and **deletes
+`association.exclude_ownship` and `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` entirely**; the flag makes the
+50 m proximity check unnecessary, not merely redundant.
+*Acceptance:* fixture tests both sides; **plus a live sortie leg** confirming the flag is set on
+the player's aircraft and that no ownship echo appears — the flag's correctness cannot be
+established from fixtures, since the whole point is what `LoGetPlayerPlaneId()` returns live.
+
+**Stage 0 — Scope-channel repair (Decision 1: user confirmed in-scope).**
 Own commits, own before/after evidence, per the backlog's requirement that this not ride along
 invisibly. (a) `association._type_match_score` scores against raw type *and* reporting name.
 (b) `hybrid_source` emits one `Observation` per distinct populated leaf among the five
@@ -194,7 +206,7 @@ contacts.
 One sortie with mixed placed targets (at minimum: a truck group **and** a SAM site or ships — not
 Ural trucks alone, which is the coincidence that hid the namespace bug through PB-1's acceptance).
 Protocol: (a) confirm scope-channel observations now appear for non-truck units — stage 0's live
-half; (b) `contacts` lists what the player can see and nothing he cannot; (c) fly away from a
+half, **best-effort, not a gate on BL-2** (see the scope-emphasis note under Decision 1); (b) `contacts` lists what the player can see and nothing he cannot; (c) fly away from a
 tracked contact and confirm detected → lost → reacquired with plausible `last_seen_ago_s`;
 (d) run `stats` at the end and record the observation count for the volume risk below.
 
@@ -210,7 +222,8 @@ tracked contact and confirm detected → lost → reacquired with plausible `las
   contact memory, an object passing within `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` stops producing
   observations, so a tracked contact transitions to **lost exactly when the aircraft is closest to
   it** — troop insertion/extraction, hovering over a target. BL-1 had no memory, so this was
-  invisible. See Decision 2.
+  invisible. **Resolved by stage -1** — the aircraft-layer flag removes the window entirely rather
+  than narrowing it. See Decision 2.
 - **Cross-channel class compatibility is weak.** `"SA-3 launcher"` (scope) does not resolve to an
   `op_class` through `object_model`'s keyword table. Contained by the three-valued gate, but it
   means fusion will under-merge on SAM/ship types, producing duplicate contacts. Acceptable per
@@ -223,7 +236,10 @@ tracked contact and confirm detected → lost → reacquired with plausible `las
   this — terrain intersection cannot recover angular resolution that was never observed.
 - **Stage 0's live half depends on the scope channel firing at all** — it is populated only ~2% of
   flight time and is sight-gated (Finding 7). A sortie that never dwells on the sight will produce
-  no scope evidence, and the stage-0 before/after will rest on fixtures alone. Flag before flying.
+  no scope evidence, and the stage-0 before/after will rest on fixtures alone. **Accepted, no
+  longer a blocker:** per the user's scope-emphasis note (Decision 1), BL-2's live acceptance rides
+  on the naked-eye channel; fixture-only evidence for stage 0 is sufficient for this milestone, and
+  the scope channel gets its real live workout when target acquisition/firing is built.
 - **No coalition/IFF filtering** anywhere in either channel — carried forward unchanged, now with
   the added consequence that friendly and hostile objects share one contact namespace.
 
@@ -265,32 +281,41 @@ tracked contact and confirm detected → lost → reacquired with plausible `las
 
 ---
 
-### Decisions Requiring User Input
+### Decisions Requiring User Input — all three answered by the user, 2026-09-09
 
-1. **Is the stage-0 scope-channel repair in scope for BL-2?** *Recommend yes.* BL-2's *machinery*
-   does not depend on the scope channel — contact memory, decay, lifecycle and the console are all
-   buildable and fixture-testable against the naked-eye channel alone. But **cross-channel fusion
-   is an explicit BL-2 deliverable** (deferred here by PB-1.5 Decision 3), and validating fusion
-   against a channel that scores 0 on ships, SAMs and most armour means either a fusion path that
-   never fires or one validated only on Ural trucks — the exact coincidence that let this bug
-   survive PB-1's acceptance test. The backlog's requirement that the fix get "its own before/after
-   evidence and live re-test" is honoured by keeping it in its own commits and its own line in the
-   stage-6 protocol, rather than by a separate branch and milestone cycle. **This does enlarge the
-   milestone**, which is why it is a question and not a silent inclusion.
+1. **Is the stage-0 scope-channel repair in scope for BL-2?** — **YES, in scope.** (Recommendation
+   accepted.) BL-2's *machinery* does not depend on the scope channel, but cross-channel fusion is
+   an explicit BL-2 deliverable, and validating fusion against a channel that scores 0 on ships,
+   SAMs and most armour means either a fusion path that never fires or one validated only on Ural
+   trucks — the coincidence that let this bug survive PB-1's acceptance. Kept in its own commits
+   with its own before/after evidence, per the backlog's requirement.
 
-2. **The ownship 50 m false-negative window.** Three options: (a) accept as a known BL-2 caveat and
-   raise the backlog item's priority — *recommended*; (b) add a body-side mitigation (suppress
-   `CONTACT_LOST` while the contact's last-known position is inside the exclusion radius) —
-   *recommend against*: a heuristic layered on a heuristic, and it would mask the real fix;
-   (c) pull the aircraft-layer ownship flag into BL-2 — correct but a wire-format change affecting
-   every consumer of `/world_objects/latest`, and a different subproject's milestone. Recommending
-   (a), but this is a cross-subproject scope call, not mine.
+   **Scope-emphasis note (user, same decision):** *the scope channel matters when we get into
+   target acquisition and firing; for now, focus on naked-eye (and "binocular") detection.* Read
+   here as: stage 0 is repaired and **fixture-validated**, but BL-2's live acceptance and any
+   calibration effort ride on the naked-eye channel. Stage 6(a) is therefore best-effort evidence,
+   not a gate — which also retires the "stage 0's live half may never fire" risk below. The scope
+   channel gets its real live workout in the future acquire/lock/fire milestone that needs it.
 
-3. **Does BL-2 emit `summary` prose, or `facts` + `certainty` only?** *Recommend a minimal
-   one-line summary*: the console needs a human-readable line regardless, and writing it here is
-   what proves the `certainty` enum is actually right rather than plausible. Real templating stays
-   BL-5a. This touches `plans/body-layer/plan.md` §10 decision 4 (the pre-digestion posture), which
-   you deferred — flagging it because BL-2 is where it first becomes concrete.
+2. **The ownship 50 m false-negative window.** — **Option (c): flag it in the aircraft layer, per
+   the backlog item. Do this first.** (The plan recommended (a), accept-as-caveat; the user chose
+   the stronger fix and ordered it ahead of BL-2.) This becomes **stage -1**, a prerequisite on its
+   own branch: `Export.lua` flags the player's own object, `WorldObjectSample` carries the marker,
+   the body layer filters on it, and `association.exclude_ownship` +
+   `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` are deleted outright.
+
+   *Why the ordering is right, not merely a preference:* BL-2 is exactly the layer that converts
+   this window from a silent gap into a **wrong belief** (a contact goes "lost" precisely when the
+   aircraft is closest to it — troop insertion/extraction). Fixing it before contact memory exists
+   means BL-2 is never built or tuned against that artefact. It also means the deletion happens
+   once, rather than BL-2 inheriting the heuristic and unpicking it later.
+
+3. **Does BL-2 emit `summary` prose, or `facts` + `certainty` only?** — **Summary.**
+   (Recommendation accepted.) A minimal one-line summary per contact: the console needs a
+   human-readable line regardless, and writing it is what proves the `certainty` enum is actually
+   right rather than merely plausible. Real templating stays BL-5a. This settles
+   `plans/body-layer/plan.md` §10 decision 4 (the pre-digestion posture) for BL-2's scope —
+   previously deferred.
 
 **Decisions made without escalation** (local, reversible, recorded per AGENTS.md): the `belief/`
 package boundary; the `Percept` projection (CLAUDE.md's no-omniscience invariant decides this — it
