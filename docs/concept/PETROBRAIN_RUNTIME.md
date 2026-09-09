@@ -268,6 +268,77 @@ classification from Petrovich's own UI, synthetic geometry derived from world-ob
 See `plans/pb1-perception-logger/plan.md`'s Invariant Check for the full reasoning on why this
 split still satisfies "Petrovich must not be omniscient."
 
+### Second channel: naked-eye (binocular-aided) visual spotting
+
+**Status (2026-09-09): shipped.** `plans/pb1.5-naked-eye-detection/plan.md` adds a second,
+independent `PerceptionSource` — `body-layer/src/perception/naked_eye_source.py`'s
+`NakedEyePerceptionSource` — alongside `HybridPerceptionSource`, not a replacement for it.
+`logger.py` polls both every tick and concatenates their `Observation`s (a plain
+`list[PerceptionSource]`, no `CompositePerceptionSource` abstraction — PB-1.5's Affected Modules
+section).
+
+Investigator's Session 5 recon (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
+ambient-detection.md`) found two things directly in DCS's own Lua files that reshaped this
+channel's design:
+
+- **A real ambient "N CONTACTS, H O'CLOCK" callout exists**, composed at runtime from a fragment
+  bank in `HelperAI_lengths_ng.lua` — a well-defined perceptual vocabulary (coarse ground/air
+  class, 12 clock bearings, 24 range buckets, count/formation buckets) that is ED's own model of
+  what a crew member can perceive. Whether any of it is Lua-exportable remains unconfirmed — no
+  `list_indication` tree or param handle mirroring it has been found yet.
+- **`HelperAI.lua` exposes ED's own naked-eye detection-model tuning constants**
+  (`min_angular_radius` by recognition tier, `scan_rad_around_point`, `extra_eyesight_ratio`, among
+  others) — a far better basis for a synthetic detectability filter than an invented range
+  heuristic, even without a confirmed exported detection-existence signal to gate on.
+
+**Asymmetric invariant story, by design.** Unlike Hybrid, this channel has no real
+detection-existence signal behind it at all — that gap is the plan's central, explicitly-accepted
+risk (Decision #1, "affirmed: proceed," a time-limited acceptance pending Investigator's still-open
+live probe for a real exportable signal). Its anti-omniscience defense is two-pronged instead:
+
+- **Input-side gate** (`body-layer/src/perception/visibility.py`) — an FOV cone, an
+  angular-radius-derived range threshold (`object_model.py`'s per-type size ÷
+  `HelperAI.lua`'s `min_angular_radius[medres]`, capped at `HelperAI.lua`'s
+  `scan_rad_around_point = 2500 m`), and real terrain LOS (`geometry.line_of_sight_clear`, its
+  first concrete consumer). All three must pass or the candidate is dropped outright — no
+  fabricated low-confidence guess.
+- **Output-side quantisation** (`naked_eye_source.py`) — the surviving geometry is snapped to ED's
+  own ambient-callout vocabulary before an `Observation` is built: bearing to the nearest of the 12
+  `OP_A1H`…`OP_A12H` clock positions, range to the nearest of the 24 `OP_D...` buckets, and
+  classification to `object_model.py`'s ED coarse-class bucket — discarding precision ("about
+  1.2 km, 2 o'clock, armored" instead of "1,247 m, bearing 47.3°, BMP-2") a crew member could not
+  actually have had. This caps what any downstream memory/dialogue layer can ever claim Petrovich
+  knew, independent of the input-side filter's own strictness.
+
+**The binocular-aided premise** (plan Decision #6, user-affirmed): this channel models a crew
+observer using handheld binoculars, not the unaided eye, even though "naked-eye" remains the
+channel's name (the milestone, branch, and research file all carry it). The range multiplier this
+implies (~4×, numerically the same value as `HelperAI.lua`'s `extra_eyesight_ratio` but owned here
+as a deliberate binocular-magnification modeling choice, not a transcription of that constant's
+unverified native role) means `NAKED_EYE_RANGE_CAP_M = 2500 m` genuinely binds for ground vehicles
+(a Ural truck's uncapped threshold is ~3 km, a T-72's ~3.5 km) rather than sitting decorative behind
+a much shorter bare-`medres` threshold.
+
+Realized observation shape (`source: "naked_eye_visual_filtered"`):
+
+```yaml
+observation:
+  timestamp: 1281.4
+  source: naked_eye_visual_filtered
+  classification: OP_ARMORED
+  bearing_deg: 60          # quantised to the nearest OP_A*H clock position
+  range_m: 1500             # quantised to the nearest OP_D... bucket
+  provenance: world_objects/visibility_filter_only
+  confidence: 0.4           # capped below Hybrid's 0.6 -- weaker evidence, no real detection gate
+```
+
+Out of scope for this revision, flagged rather than silently dropped: count/formation quantisation
+(needs object clustering this plan doesn't build), cross-channel deduplication between Hybrid and
+naked-eye `Observation`s of the same real object (left to a future contact-memory layer), and the
+aircraft-layer Lua-side distance cap on `/world_objects/latest` (deferred until real object counts
+show it's needed). See that plan's Risks section for the full list, including the adjacent,
+out-of-scope finding that `hybrid_source.py` may be discarding real multi-contact HelperAI rows.
+
 ## Contact identity
 
 Repeated observations need persistent contact identities.
