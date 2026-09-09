@@ -87,6 +87,39 @@ def range_m(observer: GeoPosition, target: GeoPosition) -> float:
     return math.sqrt(delta_x * delta_x + delta_z * delta_z + delta_alt * delta_alt)
 
 
+def project_from_bearing_range(
+    observer: GeoPosition, bearing_deg: float, range_m: float
+) -> GeoPosition:
+    """Inverse of `bearing_deg()`/`range_m()` above: given an observer
+    position, a true bearing (degrees clockwise from north), and a slant
+    range, return the position that bearing/range pair implies.
+
+    `range_m()` above returns *slant* range (includes the altitude
+    component), but a bearing/range pair alone cannot disambiguate how much
+    of that range is horizontal vs. vertical -- doing so needs a terrain
+    model, which this function deliberately does not have (see next
+    paragraph). This function therefore assumes the target is at the
+    observer's own altitude (ground range == slant range), which is exactly
+    the "flat, no terrain" simplification `plans/pb2-contact-memory/plan.md`
+    Stage 1 calls for.
+
+    Deliberately crude, by design -- `belief.association_over_time`'s only
+    caller uses this to get an uncertainty-gated candidate position for
+    percept<->contact matching, not to populate `Observation.
+    derived_world_position` (which stays real ground truth from a
+    concrete source's own candidate lookup, never this projection).
+    BL-3 replaces this with a terrain-aware estimate once world-model's
+    elevation grid can adjudicate target altitude from range; that
+    correction is out of scope here.
+    """
+    bearing_rad = math.radians(bearing_deg)
+    delta_x = range_m * math.cos(bearing_rad)
+    delta_z = range_m * math.sin(bearing_rad)
+    return GeoPosition(
+        x=observer.x + delta_x, z=observer.z + delta_z, alt_m=observer.alt_m
+    )
+
+
 def elevation_at(
     conn: sqlite3.Connection, theatre: str, x: float, z: float
 ) -> float | None:

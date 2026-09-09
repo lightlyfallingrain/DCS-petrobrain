@@ -48,6 +48,19 @@ from typing import Any, Final, Protocol, runtime_checkable
 #: rather than in that module.
 SOURCE_NAKED_EYE_VISUAL_FILTERED: Final[str] = "naked_eye_visual_filtered"
 
+#: Per-source `Observation.id` prefixes (`plans/pb2-contact-memory/plan.md`'s
+#: Interface confirmation gap 1). `HybridPerceptionSource` and
+#: `NakedEyePerceptionSource` each mint ids from their own per-instance
+#: counter (`f"{prefix}_{count}"`) -- without a distinct prefix per source,
+#: two independently-numbered `"OBS_1"`s from the two channels would collide
+#: in an append-only observation log keyed by id (`belief.contacts.
+#: ContactStore`), silently overwriting one another. Declared here rather
+#: than in each source module, mirroring `SOURCE_NAKED_EYE_VISUAL_FILTERED`
+#: above -- both sources import both their `source` value and their id
+#: prefix from this one shared home.
+OBSERVATION_ID_PREFIX_HYBRID: Final[str] = "HYBRID_OBS"
+OBSERVATION_ID_PREFIX_NAKED_EYE: Final[str] = "NAKEDEYE_OBS"
+
 
 @dataclass(frozen=True, slots=True)
 class OwnshipState:

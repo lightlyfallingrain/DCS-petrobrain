@@ -32,6 +32,7 @@ pythonpath = ["src", "../world-model/src"]
 # invocation-cwd-independent. Includes world-model's own first-party
 # packages that body-layer imports in-process across the seam.
 known-first-party = [
+    "belief",
     "perception",
     "aircraft_client",
     "replay",

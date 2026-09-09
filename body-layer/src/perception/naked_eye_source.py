@@ -84,6 +84,7 @@ from aircraft_client import AircraftLayerClient
 from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
 from perception.source import (
+    OBSERVATION_ID_PREFIX_NAKED_EYE,
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
     Observation,
@@ -238,7 +239,7 @@ class NakedEyePerceptionSource:
 
         self._observation_count += 1
         return Observation(
-            id=f"OBS_{self._observation_count}",
+            id=f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}",
             contact_id=None,
             t_sim=now_sim,
             t_wall=time.time(),

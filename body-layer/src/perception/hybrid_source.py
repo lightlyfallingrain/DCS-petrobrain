@@ -57,7 +57,12 @@ from typing import Any, Final
 
 from aircraft_client import AircraftLayerClient
 from perception.association import WorldObjectCandidate, associate, filter_ownship
-from perception.source import DerivedWorldPosition, Observation, OwnshipState
+from perception.source import (
+    OBSERVATION_ID_PREFIX_HYBRID,
+    DerivedWorldPosition,
+    Observation,
+    OwnshipState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +160,7 @@ class HybridPerceptionSource:
             self._observation_count += 1
             observations.append(
                 Observation(
-                    id=f"OBS_{self._observation_count}",
+                    id=f"{OBSERVATION_ID_PREFIX_HYBRID}_{self._observation_count}",
                     contact_id=None,
                     t_sim=now_sim,
                     t_wall=time.time(),
