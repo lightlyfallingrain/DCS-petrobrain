@@ -21,6 +21,17 @@ the body/brain process, on either Windows or Mac (compute topology note in
   shape/lifecycle as the other two `/latest` endpoints. Raw parsed text
   only -- no detection/interpretation/association logic here, that is
   body-layer's job (`body-layer/src/perception/association.py`).
+- `POST /text/push` -> the aircraft layer's first inbound/write path
+  (`plans/dcs-text-panel-output/plan.md`, BL-2.5). Body `{"text": "<string>"}`;
+  a non-empty (after `.strip()`) string forwards to
+  `collector.text_sender.TextOverlaySender.send_line`, which fires the line at
+  the in-cockpit overlay Hook script over loopback UDP, and responds
+  `200 {"ok": true}`. `400 {"error": ...}` on a missing/invalid/empty `text`
+  field or non-JSON body; `503 {"error": "text push not configured"}` if this
+  server was built without a `text_sender` (matching the
+  optional-cache-defaults-to-empty pattern below, rather than crashing). This
+  endpoint carries opaque display strings only -- no aircraft state, no
+  commands, no code -- everything else on this API remains read-only.
 
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
@@ -47,6 +58,7 @@ from typing import Any, Self
 from urllib.parse import urlparse
 
 from collector.cache import PetrovichIndicationCache, TelemetryCache, WorldObjectsCache
+from collector.text_sender import TextOverlaySender
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +69,7 @@ DEFAULT_PORT = 7791
 _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
+_TEXT_PUSH_PATH = "/text/push"
 
 
 def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
@@ -82,6 +95,7 @@ def _make_handler(
     cache: TelemetryCache,
     world_objects_cache: WorldObjectsCache,
     petrovich_indication_cache: PetrovichIndicationCache,
+    text_sender: TextOverlaySender | None,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -101,6 +115,37 @@ def _make_handler(
                 )
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
+
+        def do_POST(self) -> None:
+            path = urlparse(self.path).path
+            if path == _TEXT_PUSH_PATH:
+                self._handle_text_push()
+                return
+            self._respond_json(404, {"error": f"not found: {path}"})
+
+        def _handle_text_push(self) -> None:
+            if text_sender is None:
+                self._respond_json(503, {"error": "text push not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            text = data.get("text")
+            if not isinstance(text, str) or not text.strip():
+                self._respond_json(400, {"error": "'text' must be a non-empty string"})
+                return
+
+            text_sender.send_line(text)
+            self._respond_json(200, {"ok": True})
 
         def _respond_json(self, status: int, body: Any) -> None:
             payload = json.dumps(body).encode("utf-8")
@@ -126,13 +171,16 @@ class TelemetryAPIServer:
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
         petrovich_indication_cache: PetrovichIndicationCache | None = None,
+        text_sender: TextOverlaySender | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache` default to a
         # fresh, never-populated cache rather than being required -- keeps
         # every existing `TelemetryAPIServer(cache, host=..., port=...)`
         # call site (tests included) working unchanged; the corresponding
         # `/latest` endpoint on such a server just always answers `null`,
-        # same as an empty cache would.
+        # same as an empty cache would. `text_sender` defaults to `None`
+        # rather than a real sender for the same reason -- `/text/push`
+        # answers `503` rather than crashing when it isn't configured.
         self._cache = cache
         self._world_objects_cache = (
             world_objects_cache
@@ -144,6 +192,7 @@ class TelemetryAPIServer:
             if petrovich_indication_cache is not None
             else PetrovichIndicationCache()
         )
+        self._text_sender = text_sender
         self._host = host
         self._port = port
         self._httpd: ThreadingHTTPServer | None = None
@@ -172,7 +221,10 @@ class TelemetryAPIServer:
         self._httpd = ThreadingHTTPServer(
             (self._host, self._port),
             _make_handler(
-                self._cache, self._world_objects_cache, self._petrovich_indication_cache
+                self._cache,
+                self._world_objects_cache,
+                self._petrovich_indication_cache,
+                self._text_sender,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)
