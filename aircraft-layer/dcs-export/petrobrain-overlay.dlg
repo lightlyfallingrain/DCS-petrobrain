@@ -6,69 +6,75 @@
 -- `DialogLoader.spawnDialogFromFile(lfs.writedir() ..
 -- "Scripts\\Hooks\\petrobrain-overlay.dlg", nil)`.
 --
--- UNVERIFIED AGAINST A LIVE DCS SESSION as of authorship -- see
--- plans/dcs-text-panel-output/plan.md Stage 2.
+-- UNVERIFIED AGAINST A LIVE DCS SESSION as of this revision -- see
+-- plans/dcs-text-panel-output/plan.md, "Output-target decision, revisited
+-- after live acceptance". Stages 2 and 4's *original* chrome-heavy version
+-- did pass live acceptance; this revision restyles it to read like DCS's
+-- own native message feed rather than an application window, per that
+-- decision -- the geometry/skin changes below are new and unverified even
+-- though the underlying transport already proved out live.
 --
--- Structure modeled on two real, installed reference files, read in full
--- this session (see
--- aircraft-layer/research/2026-09-09-dcs-text-panel-output-channel.md):
---   - $DCS_SAVED_GAMES_PATH/Mods/services/DCS-SRS/UI/DCS-SRS-Overlay.dlg
---     (Window root, draggable, a Panel child for the background box).
---   - $DCS_INSTALL_PATH/Scripts/UI/gameMessages.dlg (DCS's own shipped
---     AutoScrollText usage -- `type = "AutoScrollText"`, a `skin.skins.text`
---     sub-skin overriding color/font/fontSize/shadow only). Its base skin,
---     $DCS_INSTALL_PATH/dxgui/skins/skinME/auto_scroll_text.skin.lua, already
---     sets `textWrapping = true` on that same "text" sub-skin by default
---     (Session 2 Finding 17) -- not re-declared below for the same reason
---     gameMessages.dlg's own real instances don't re-declare it either.
+-- Restyle grounded directly in two real, installed files (read in full this
+-- session, both under $DCS_INSTALL_PATH, read-only):
+--   - `Scripts/UI/gameMessages.dlg` -- DCS's own native radio/trigger
+--     message boxes. This is where every value below that isn't already
+--     unchanged from the prior revision comes from:
+--       * Outer `Window`: `skin.states.released[1].bkg.center_center =
+--         "0x00000000"` (fully transparent -- alpha 00, no opaque panel)
+--         and `skin.params.headerHeight = 0` (no title bar, and therefore
+--         no close button -- DCS's own message window has neither). Its own
+--         `text` field is left as DCS's placeholder ("New dialog") but
+--         never renders, because `headerHeight = 0` removes the header area
+--         that would draw it -- this file instead sets `text = ""`
+--         explicitly, belt-and-braces, rather than relying solely on
+--         `headerHeight`.
+--       * The message box itself (`autoScrollTextRadio`) has no separate
+--         background panel widget at all -- text floats directly over the
+--         3D scene. Its own per-line `text` sub-skin sets
+--         `bkg.center_center = "$nil$"` (no box behind each line either),
+--         confirming legibility comes entirely from the glyph shadow below,
+--         not from any panel. This file's `Box`/`Panel` child (the prior
+--         revision's opaque dark rectangle) is removed to match.
+--       * Screen position: `autoScrollTextRadio` sits at `(x=29, y=59)`
+--         inside a `Window` whose own bounds are anchored to the top-left
+--         corner of the screen (`layout.data.anchorInfos[1]` has `top`/
+--         `left` both `type="min", offset=0`). This is DCS's own real
+--         choice of where to put a message box, not a guess -- this file's
+--         outer window moves from the prior revision's arbitrary (20, 20)
+--         to (20, 50), so that `MessageText`'s own (10, 10) inset from the
+--         window corner lands at approximately (30, 60) -- matching
+--         `gameMessages.dlg`'s real (29, 59) to within a few px.
+--       * Text style was already correct in the prior revision and is
+--         unchanged: color `0xf5f5f4ff` (near-white), font
+--         `DejaVuLGCSansCondensed-Bold.ttf`, `fontSize = 12`, shadow color
+--         `0x000000ff`, shadow offset `(1, 1)` -- exactly
+--         `gameMessages.dlg`'s own per-line text skin. This 1px black drop
+--         shadow, not a panel, is what keeps near-white text legible over
+--         bright terrain -- confirmed as the real mechanism DCS itself
+--         relies on for the same problem (legible message text over an
+--         arbitrary 3D background), not an invented substitute.
+--   - `dxgui/skins/skinME/auto_scroll_text.skin.lua` -- confirms the base
+--     `AutoScrollText` skin's own per-line `text` sub-skin already defaults
+--     to `bkg.center_center = "0x0000007d"` (a faint translucent box) --
+--     `gameMessages.dlg`'s `"$nil$"` override is what removes it, which
+--     this file now copies rather than leaving the semi-opaque default in
+--     place.
 --
--- One child differs from both references: a single AutoScrollText widget
--- ("MessageText") is used directly, per the plan's Message Model, instead
--- of SRS's manually-stacked-Static array -- DCS's own native message system
--- already is "a small scrolling log of short text lines" (this project's
--- exact shape) and manages accumulate/expire natively via
--- addText()/clear(), so no per-line Y-offset bookkeeping is needed here.
+-- `MessageText`'s height is no longer a fixed constant here -- see
+-- `petrobrain-overlay-hook.lua`'s `apply_content_size()` for why (BL-2.5
+-- follow-up, "window clips its last line" fix) and why a static guessed
+-- pixel budget was rejected in favour of it. The bounds below are only the
+-- pre-first-message default, immediately overridden by the Hook script's
+-- own `setBounds`/`setSize` calls.
 
 dialog = {
     ["children"] = {
-        ["Box"] = {
-            ["children"] = {
-            },
-            ["params"] = {
-                ["bounds"] = {
-                    ["h"] = 200,
-                    ["w"] = 420,
-                    ["x"] = 0,
-                    ["y"] = 0,
-                },
-                ["enabled"] = true,
-                ["text"] = "",
-                ["tooltip"] = "",
-                ["visible"] = true,
-                ["zindex"] = 0,
-            },
-            ["skin"] = {
-                ["params"] = {
-                    ["name"] = "panelSkin",
-                },
-                ["states"] = {
-                    ["released"] = {
-                        [1] = {
-                            ["bkg"] = {
-                                ["center_center"] = "0x00000090",
-                            },
-                        },
-                    },
-                },
-            },
-            ["type"] = "Panel",
-        },
         ["MessageText"] = {
             ["children"] = {
             },
             ["params"] = {
                 ["bounds"] = {
-                    ["h"] = 180,
+                    ["h"] = 60,
                     ["w"] = 400,
                     ["x"] = 10,
                     ["y"] = 10,
@@ -91,6 +97,9 @@ dialog = {
                             ["states"] = {
                                 ["released"] = {
                                     [1] = {
+                                        ["bkg"] = {
+                                            ["center_center"] = "$nil$",
+                                        },
                                         ["text"] = {
                                             ["color"] = "0xf5f5f4ff",
                                             ["font"] = "DejaVuLGCSansCondensed-Bold.ttf",
@@ -113,10 +122,10 @@ dialog = {
     },
     ["params"] = {
         ["bounds"] = {
-            ["h"] = 200,
+            ["h"] = 80,
             ["w"] = 420,
             ["x"] = 20,
-            ["y"] = 20,
+            ["y"] = 50,
         },
         ["draggable"] = true,
         ["enabled"] = true,
@@ -124,11 +133,12 @@ dialog = {
         ["modal"] = false,
         ["offscreen"] = false,
         ["resizable"] = false,
-        ["text"] = "Petrobrain Overlay",
+        ["text"] = "",
         ["zOrder"] = 120,
     },
     ["skin"] = {
         ["params"] = {
+            ["headerHeight"] = 0,
             ["name"] = "windowSkin",
         },
         ["states"] = {
