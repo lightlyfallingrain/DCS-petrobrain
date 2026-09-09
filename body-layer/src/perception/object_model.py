@@ -119,7 +119,13 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     ("strela-1", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-9
     ("tor 9a331", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-15
     ("chap_torm2", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-15
-    ("tank", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    # No bare "tank" keyword. It was measured against all 595 real DCS type
+    # names and scored 8 false positives and zero true positives -- real
+    # armour is named T-72/Leopard/Merkava/Challenger2, never "tank", while
+    # "tank" matches fuel trailers (ATZ-60_TANK, TZ-22_TANK), fuel trucks
+    # (M978 HEMTT Tanker), railway tank cars, and the S-3B Tanker aircraft.
+    # Do not re-add it; classify armour by the specific keywords below and
+    # by reporting name. See the research doc cited at the top of this file.
     ("t-55", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
     ("t-72", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
     ("t-80", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
