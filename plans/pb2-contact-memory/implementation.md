@@ -183,3 +183,119 @@ All four scored 0 before this fix — the type-match step would have contributed
   `reporting_names.py`'s own docstring) — the four Finding-6 `object_type` strings matched the
   TSV verbatim (case-insensitively), so no near-miss/fallback behavior was exercised by this
   stage's fixtures. Worth keeping in mind if a future DCS patch renames one of these types.
+
+---
+
+## Stage 1 — Belief core (2026-09-09)
+
+Implemented `plans/pb2-contact-memory/plan.md`'s Stage 1: `Percept`, `ContactStore` with an
+append-only observation log, per-source `Observation.id` prefixes, `project_from_bearing_range`,
+and percept->contact gating. Landed across three commits: the `Percept`/id-prefix/geometry
+groundwork (already committed separately as `021ae11`, "Add Percept projection and per-source id
+prefixes (PB-2 Stage 1a)"), then `association_over_time.py` + its tests, then `contacts.py` +
+its tests — split per the task's instruction to commit incrementally rather than hold everything
+uncommitted.
+
+### Files Changed
+
+**Already committed (021ae11), summarized here for completeness:**
+- `body-layer/src/belief/percept.py` — `Percept` (t_sim, source, classification_raw, bearing_deg,
+  range_m, ownship_at_observation, observation_id) + `percept_of(Observation) -> Percept`.
+  Structurally drops every DCS truth field (`derived_world_position`, `contact_id`, `provenance`,
+  `t_wall`) rather than relying on a convention not to read them.
+- `body-layer/src/perception/geometry.py` — `project_from_bearing_range(observer, bearing_deg,
+  range_m) -> GeoPosition`, the inverse of the existing `bearing_deg`/`range_m` pair. Flat,
+  terrainless by design (BL-3 replaces it).
+- `body-layer/src/perception/source.py` — `OBSERVATION_ID_PREFIX_HYBRID` /
+  `OBSERVATION_ID_PREFIX_NAKED_EYE`, wired into `hybrid_source.py`/`naked_eye_source.py`'s id
+  minting, fixing the cross-channel `Observation.id` collision noted in the plan's Interface
+  confirmation.
+
+**This session:**
+- `body-layer/src/belief/association_over_time.py` (new) — percept->contact gating. Spatial gate
+  = `uncertainty_radius_m(percept) + GATE_GROWTH_RATE_MPS * elapsed_s`, where `elapsed_s` is time
+  since the *candidate contact's* last observation (not the percept's own age). Class gate is
+  three-valued (`compatible`/`unknown`/`incompatible`) via `_op_class_of`, which treats a
+  `classification_raw` already shaped like an `OP_*` bucket (naked-eye's output) as pre-resolved,
+  and otherwise runs it through `object_model.profile_for` (substring match), so scope/hybrid free
+  text like `"Ural truck"` resolves to `OP_TRUCK` the same way naked-eye's own quantisation does.
+  A `profile_for` fallback to `object_model.DEFAULT_OP_CLASS` is treated as `None`/unknown, not as
+  a real class value. `passes_gate` requires both gates; `belief.contacts.ContactStore` is the
+  only caller of the decision rule (exactly one pass -> merge, else -> new contact).
+- `body-layer/tests/test_association_over_time.py` (new) — 12 tests: fixed scope uncertainty,
+  naked-eye uncertainty pinned against real `_RANGE_BUCKETS_M` table values, `implied_position`
+  geometry, class-compatibility truth table (same-bucket/different-bucket/cross-channel-resolves/
+  unresolved-free-text), unknown-class-neither-blocks-nor-confirms, spatial pass/fail, class
+  block despite spatial proximity, and gate-radius growth over elapsed time.
+- `body-layer/src/belief/contacts.py` (new) — `Contact` (id, last_position, last_class_raw,
+  contributing_observation_ids, first_seen_sim, last_seen_sim, sighting_spans — deliberately no
+  decay/certainty fields), `SightingSpan` (start_sim, end_sim, source), `ContactStore` (holds
+  contacts + an append-only `Observation` log keyed by id; `ingest(observations, now_sim) ->
+  list[Contact]` runs each observation's `Percept` through the Stage 1 gate against every existing
+  contact and creates/merges per the decision rule; `tick(now_sim)` is a documented no-op
+  placeholder for Stage 2 to extend).
+- `body-layer/tests/test_contacts.py` (new) — 7 tests: same-object-twice -> one contact,
+  two-well-separated -> two contacts, two-ambiguous-candidates -> a third contact (not a merge
+  into either — the plan's explicit anti-guessing acceptance case), append-only observation log,
+  `tick` no-op, and a structural grep-based test that no `belief/*.py` file other than `percept.py`
+  (the one designated exception) contains the literal string `derived_world_position`, with a
+  sanity check that the excluded module does use it (so the grep is exercised, not a tautology).
+
+### Design choices worth recording
+
+- **Uncertainty formula.** Naked-eye: `hypot(range_m * sin(15deg), range_bucket_width_m)` — the
+  30deg clock bucket's half-width for cross-range, the `OP_D*` bucket's real width (precomputed
+  once from `naked_eye_source._RANGE_BUCKETS_M`, not re-derived per call) for down-range, combined
+  via `math.hypot` as a conservative circular radius over two roughly-orthogonal error axes
+  (smaller than summing, larger than taking either alone). The open-ended last bucket (`OP_D10k`,
+  upper bound `inf`) is given the second-to-last bucket's width as a documented fallback, since an
+  unbounded bucket has no true width.
+- **Scope-channel uncertainty.** A flat `SCOPE_UNCERTAINTY_M = 300.0`, independent of range — per
+  the task brief's explicit instruction not to overthink this placeholder, since the scope/hybrid
+  channel has no bucket structure to derive an honest figure from the way naked-eye does.
+  Documented in the module docstring as a placeholder to revisit, not a calibrated value.
+- **Growth term.** `GATE_GROWTH_RATE_MPS = 20.0` (72 km/h) — a generic ground-vehicle
+  order-of-magnitude placeholder, not derived from any specific unit's real top speed. Same
+  revisit-later posture as the scope uncertainty constant.
+- **Distance metric.** 2D (x/z only), not 3D — both channels report ground contacts and neither
+  carries a perceived-altitude field precise enough to gate on independently of the horizontal
+  position it was derived alongside.
+- **Class resolution reuses `object_model.profile_for` rather than a second keyword table.**
+  `profile_for` is substring-based, so it often also matches scope/hybrid free descriptive text
+  incidentally (`"Ural truck"` contains `"ural"`). This is deliberately weak on some real text
+  (`"Slava cruiser"` resolves to unknown, per the plan's accepted risk) — contained by the
+  three-valued gate rather than a second bespoke vocabulary.
+- **Circular import avoided via `TYPE_CHECKING`.** `association_over_time.py` needs `Contact` for
+  type hints but `contacts.py` needs `association_over_time`'s gate functions at runtime — broken
+  with `if TYPE_CHECKING: from belief.contacts import Contact` in `association_over_time.py`,
+  relying on `from __future__ import annotations` (already the module's convention) so the
+  forward reference never needs to resolve at import time.
+
+### Tests Added
+
+See the two new test files' summaries above (12 + 7 = 19 new tests this session).
+
+### Checks
+
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `cd body-layer && mypy src` (and `mypy src tests`, per this subproject's CWD-only
+  config-discovery quirk): pass, no issues in 30 source files
+- `pytest body-layer/tests -q`: 134 passed (113 before this stage + 12 + 7 new; all pre-existing
+  tests still pass unmodified)
+- `git status`: clean working tree after both commits
+
+### Notable Discoveries
+
+- `naked_eye_source.py`'s `_CLOCK_BUCKET_DEG` and `_RANGE_BUCKETS_M` are underscore-prefixed
+  (module-private by convention) but were imported directly into `association_over_time.py`
+  rather than duplicated or re-exported — the plan explicitly says "reuse those, don't invent new
+  numbers," and duplicating the table would create exactly the kind of silent-drift risk the plan
+  is warning against if the two ever diverge. Flagged here in case a future reviewer wants a
+  public re-export instead of the private cross-module import.
+- The Stage 1 acceptance test for the ambiguous-merge case needed careful geometric construction:
+  two candidate contacts must be far enough apart that the *second* one doesn't merge into the
+  *first* when it is created (both created in the same `ingest()` call, processed sequentially),
+  but close enough together that a later percept between them falls within both gates
+  simultaneously. Got this wrong once (50m separation, well inside the 300m gate) before widening
+  to 400m apart / 200m from each — worth remembering as a pattern for Stage 2's fixtures too.
