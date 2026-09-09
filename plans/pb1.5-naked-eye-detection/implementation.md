@@ -339,3 +339,110 @@ Update section for full methodology and caveats)**
 - `PYTHONPATH=src:../world-model/src pytest tests -q` (from `cd body-layer`): 94 passed (was 83
   before this session; net +11 — 6 new `test_object_model.py` tests, 5 new
   `test_reporting_names.py` tests)
+
+## Session — coverage-floor fixture fix (Pass 2 required fix, 2026-09-09)
+
+**What was wrong.** `test_object_model.py::test_coverage_floor_against_real_type_sample`'s
+`"ground"` bucket (100 entries) was built exclusively from real types that already classified —
+zero had `expected_op_class: null`. Since `assert not mismatches` runs before the coverage
+computation and enforces `actual == expected` for every entry, `ground_classified == ground_total`
+was true by construction whenever the test reached the coverage line at all — `ground_coverage`
+could only ever read `1.0`, so `_MIN_GROUND_COVERAGE_FRACTION = 0.9` could never independently
+fail. Pass 2's review required rebuilding the sample as an honest population, not a
+pre-filtered-to-pass one.
+
+**Fix: full enumeration, not a bigger curated sample.** Rather than hand-pick a "fair" subset
+(which just moves the same cherry-picking risk to a different scale), the `"ground"` bucket was
+rebuilt as a **complete enumeration of the real "ground" domain** — every one of the 595 real
+`dcs_object_type` rows in the committed TSV that is neither a ship (via `profile_for`'s own
+`OP_SHIP` result — unambiguous, no judgment call), a WWII unit (reporting name starts with
+`"old "`, matching the module's own guard), nor an aircraft (a word-boundary-safe keyword/regex
+match against ~90 real DCS aircraft type designators, built and checked against the full
+catalogue by script). This mirrors the `"ship"` bucket's own already-established precedent
+("small and fully enumerable, not a random sample of it") rather than inventing a new sampling
+methodology. Categorization was done independently of what `object_model.py` currently
+classifies — the null/non-null split falls out of `profile_for`'s actual current output per
+type, not a pre-existing curated list — which is what makes the resulting number a real
+measurement instead of the same defect in a different shape.
+
+**Numbers.** 316 real "ground" types identified this way; 190 currently classify, 126 fall back
+— **coverage ≈ 60.1%** measured at fixture-build time. This is a full-enumeration measurement,
+not a sample estimate, so it reproduces the "real" full-catalogue number exactly (up to the
+categorization script's own correctness) rather than approximating it. `_MIN_GROUND_COVERAGE_
+FRACTION` was set to `0.5`, comfortably below 0.601 so a future keyword-table regression that
+drops coverage by any material amount fails loudly, while normal noise (a handful of matches
+shifting, a future TSV refresh adding/renaming a few types) doesn't false-positive. The comment
+above the constant records the measured rate and states explicitly that it's a regression floor,
+not a target.
+
+This session's own categorization (316 ground / 60.1%) is close to but not bit-identical to the
+research doc's previously-recorded 64.5% (304 ground / 196 classified) — expected and already
+precedented in that same research doc (its own two prior estimates, 21% vs 24%, didn't match
+exactly either), since both are independently-derived air/wwii/ship categorizations of the same
+underlying data, built by different scripts. **`object_model.py`'s keyword tables and
+`reporting_names.py` were not touched** (only a docstring addition, see below) — the actual
+`profile_for` behaviour against every one of the 595 real types is bit-for-bit identical to
+before this session, confirmed by re-running the categorization script and diffing every
+existing fixture entry (ship/wwii/air/the old ground/ground_deferred rows) against the newly
+computed categorization: all were exact subsets, no reclassification.
+
+**`"ground_deferred"` folded into `"ground"`, not kept.** Its 17 entries (towed AA/mortar,
+SAM-system radars beyond IRIS-T, static structures, airfield support equipment) were real ground
+types the module has deliberately not attempted to classify — exactly "a ground type we haven't
+classified yet," which is what the coverage metric is supposed to measure, not a reason to
+exclude them from its denominator. Keeping a separate always-fallback bucket for exactly the
+types most likely to represent a real coverage gap was judged to have contributed to the original
+defect (an easy place to route anything inconvenient out of the measured population), so it was
+removed rather than kept and documented.
+
+**Optional item taken: WWII-guard docstring corrected**, not left as a known gap. Pass 2 flagged
+that `_WWII_REPORTING_NAME_PREFIX`'s docstring overclaimed completeness (`M4_Sherman`/
+`M4A4_Sherman_FF` → `"M4 Sherman"` and `soldier_wwii_br_01`/`soldier_wwii_us` → `"Soldier"` are
+real WWII units without the `"Old "` prefix). No behavior change — added a docstring paragraph
+naming both exceptions explicitly and instructing a future keyword-table editor to check against
+them directly, not just the prefix. Chosen over adding them to an exclusion list, since that
+would be a keyword-table-adjacent behavior change outside this fix's explicitly narrowed scope
+(`object_model.py`'s keyword tables, `reporting_names.py`, and `visibility.py` were required to
+stay untouched so the measured coverage number couldn't move as a side effect).
+
+**Files changed**
+- `body-layer/tests/fixtures/object_type_coverage_sample.json` — `"ground"` bucket rebuilt as a
+  full enumeration (316 entries, was 100 curated); `"ground_deferred"` bucket removed (folded
+  in); `"ship"`/`"wwii"`/`"air"` buckets unchanged; `_comment` rewritten to document the
+  categorization method and the measured rate.
+- `body-layer/tests/test_object_model.py` — `_MIN_GROUND_COVERAGE_FRACTION` lowered from `0.9`
+  (unreachable) to `0.5` (below the measured 0.601, with room to move); its comment rewritten to
+  state the measured rate and that the floor is a regression guard, not a target;
+  `test_coverage_floor_against_real_type_sample`'s docstring updated to describe the bucket as a
+  full enumeration and drop `"ground_deferred"`; the out-of-scope-bucket loop narrowed from
+  `("air", "wwii", "ground_deferred")` to `("air", "wwii")`.
+- `body-layer/src/perception/object_model.py` — docstring-only addition above
+  `_WWII_REPORTING_NAME_PREFIX` naming the two known non-`"Old "`-prefixed WWII exceptions. No
+  logic change.
+
+**Tests** — no new test functions; existing `test_coverage_floor_against_real_type_sample` and
+the out-of-scope-bucket loop now exercise the rebuilt fixture. Verified directly (not just via
+the assertion) that the fixture yields 0 mismatches and `ground_coverage = 190/316 ≈ 0.6013`
+against current code.
+
+**Checks**
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `mypy src` (from `cd body-layer`): pass, no issues in 12 source files
+- `PYTHONPATH=src:../world-model/src pytest tests -q` (from `cd body-layer`): 95 passed (test
+  count unchanged from before this session — no test functions added/removed, only fixture data
+  and comments)
+
+**Notable discoveries**
+- The word-boundary-naive substring check almost reintroduced a Finding-1/Finding-4-shaped bug
+  in the categorization script itself: an unqualified `"a-6"` (for the A-6 Intruder) and `"a-10"`
+  (for the A-10) matched inside `"SA-6 launcher"` and `"SA-10 Flap Lid radar"` respectively,
+  which would have miscategorized two real SAM-system types as "air" and silently dropped them
+  from the ground population. Caught by cross-checking the new categorization against every
+  entry already present in the previous (pre-fix) fixture as a subset invariant before trusting
+  the new "ground" list — the previous fixture's `"ground"`/`"ground_deferred"` bucket already
+  had both types correctly as ground/SAM entries, and the invariant check failed loudly until the
+  keyword matching was made word-boundary-safe. Not a change to any shipped code (this script
+  isn't committed, only its output), but worth remembering next time a similar categorization
+  script is built against this TSV: DCS's `"SA-N"` naming convention collides with several
+  Western aircraft type codes as bare substrings.

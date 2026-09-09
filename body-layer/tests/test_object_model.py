@@ -17,11 +17,21 @@ from perception.object_model import (
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-# Measured against this fixture's "ground" bucket (97/97, see
-# test_coverage_floor_against_real_type_sample below) -- a floor a bit below
-# that so a future keyword edit has some room to shuffle individual matches
-# without failing, while still catching an actual regression (e.g. the
-# reporting-name table in this commit being silently reverted or broken).
+# The fixture's "ground" bucket is a full enumeration of every real
+# `dcs_object_type` in the 595-row catalogue that is neither a ship, a WWII
+# unit, nor an aircraft (see the fixture's own `_comment` for exactly how
+# that categorization is done, independent of what perception.object_model
+# currently classifies -- the thing the previous version of this fixture got
+# wrong). Measured against that full 316-type population when this floor was
+# set: 190 classified (~60.1%, see test_coverage_floor_against_real_type_
+# sample below). The floor is set well below that measured rate -- a
+# *regression guard*, not a target -- so it has room to move (a future
+# keyword edit shifting a handful of matches, or DCS adding/renaming a few
+# types on a future TSV refresh) without failing on noise, while still
+# catching a real regression (e.g. the reporting-name table being silently
+# reverted, broken, or its data file emptied -- which would drop coverage
+# by tens of points, not a couple).
+#
 # Deliberately scoped to the "ground" bucket only, not a blended percentage
 # across every bucket in the fixture -- a blended number is exactly the
 # metric that hid this module's original ground-unit coverage gap (measured
@@ -29,9 +39,16 @@ _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # number, since aircraft/WWII/deliberately-out-of-scope types this module
 # never targets dominated the denominator. See
 # aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md's
-# Addendum for that history and the full-catalogue numbers (measured
-# separately, against all 595 real types, not this curated sample).
-_MIN_GROUND_COVERAGE_FRACTION = 0.9
+# Addendum for that history. The 60.1% figure above is this session's own
+# independently-recomputed measurement (a full-enumeration script against
+# the same 595-row catalogue, not a curated sample) -- close to but not
+# bit-identical to the research doc's previously-recorded 64.5%, expected
+# for the same reason that doc's own two prior estimates (21% vs 24%)
+# didn't match exactly either: both are honest, independently-derived
+# ground/air/wwii categorizations of the same underlying data, not the same
+# script. `perception.object_model` and `perception.reporting_names`
+# themselves were not touched to produce this number.
+_MIN_GROUND_COVERAGE_FRACTION = 0.5
 
 
 def test_unmatched_object_type_falls_back_to_default_profile() -> None:
@@ -225,19 +242,28 @@ def test_coverage_floor_against_real_type_sample() -> None:
     units (deliberately excluded) + 276 modern ground units (thinly covered,
     ~21% -- the real gap). See the research doc's Addendum.
 
-    - `"ground"` (modern ground combat vehicles/systems this module
-      targets): the coverage floor applies here, and only here.
+    - `"ground"` (every real `dcs_object_type` that is neither a ship, a
+      WWII unit, nor an aircraft -- combat vehicles/systems this module
+      targets *and* real ground/support types it deliberately hasn't
+      attempted to classify, e.g. towed AA/mortar pieces, SAM-system radars
+      beyond the one named in scope, static structures, airfield support
+      equipment): the coverage floor applies here, and only here. This is a
+      **full enumeration** of that real population (see the fixture's own
+      `_comment`), not a curated sample -- every currently-unclassified real
+      ground type carries `expected_op_class: null` here, so the coverage
+      number below is an actual measurement, not a value pinned at 1.0 by
+      construction (the defect this fixture used to have, and the reason it
+      was rebuilt -- there used to be a separate `"ground_deferred"` bucket
+      for the deliberately-uncovered types, excluded from this floor's
+      denominator; folded into `"ground"` because "a real ground type we
+      haven't classified yet" is exactly what this metric measures).
     - `"ship"`: already its own fully-covered category (not a "ground
       unit"), asserted at 100% as a plain regression guard, not the metric
       under test.
-    - `"air"`, `"wwii"`, `"ground_deferred"` (aircraft/helicopters/UAVs;
-      ED's `"Old ..."`-prefixed WWII reporting names; and real ground/
-      support types this pass deliberately left uncovered -- towed AA/
-      mortar pieces, SAM systems beyond the one named in scope, static
-      structures, airfield support equipment): must stay at the fallback.
-      Reported/asserted separately, not blended into the ground floor,
-      because covering them was never this module's goal (air, WWII) or
-      this pass's goal (`ground_deferred`) -- see object_model.py's
+    - `"air"`, `"wwii"` (aircraft/helicopters/UAVs; ED's `"Old ..."`-prefixed
+      WWII reporting names): must stay at the fallback. Reported/asserted
+      separately, not blended into the ground floor, because covering them
+      was never this module's goal -- see object_model.py's
       `_REPORTING_NAME_KEYWORD_PROFILES` docstring for the reasoning.
 
     Every entry is checked individually first (both the "should classify"
@@ -286,10 +312,10 @@ def test_coverage_floor_against_real_type_sample() -> None:
         f"OP_SHIP coverage regressed: {ship_classified}/{ship_total} classified"
     )
 
-    # air / wwii / ground_deferred must stay entirely at the fallback --
-    # any of these unexpectedly getting classified means a keyword aimed at
-    # modern ground units is over-matching out-of-scope real types.
-    for out_of_scope_bucket in ("air", "wwii", "ground_deferred"):
+    # air / wwii must stay entirely at the fallback -- any of these
+    # unexpectedly getting classified means a keyword aimed at modern
+    # ground units is over-matching out-of-scope real types.
+    for out_of_scope_bucket in ("air", "wwii"):
         classified = classified_by_bucket.get(out_of_scope_bucket, 0)
         assert classified == 0, (
             f"{out_of_scope_bucket!r} bucket unexpectedly classified "

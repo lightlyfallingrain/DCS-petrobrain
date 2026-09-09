@@ -340,6 +340,18 @@ _REPORTING_NAME_KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...
 #: -- every one of these 56+ reporting names starts with this literal
 #: prefix (`"Old military truck"`, `"Old car"`, `"Old flak gun"`, ...), which
 #: makes it a cheap, general guard rather than an enumerated exclusion list.
+#:
+#: **This is not a complete WWII-unit exclusion, only a complete exclusion
+#: for the "Old "-prefixed subset.** At least two real WWII types don't use
+#: the prefix: `M4_Sherman`/`M4A4_Sherman_FF` (reporting name `"M4 Sherman"`)
+#: and `soldier_wwii_br_01`/`soldier_wwii_us` (reporting name `"Soldier"`,
+#: shared with modern infantry). Neither is a live bug today -- no keyword
+#: in `_REPORTING_NAME_KEYWORD_PROFILES` matches `"sherman"`, and a WWII
+#: soldier matching the bare `"soldier"` keyword is harmless (same size/
+#: class as a modern one either way) -- but a future broad keyword (e.g. a
+#: tank keyword that happens to also read "sherman") would slip past this
+#: guard silently. Check new keywords against these two names, not just the
+#: prefix, before trusting this guard to have covered WWII.
 _WWII_REPORTING_NAME_PREFIX: Final[str] = "old "
 
 
