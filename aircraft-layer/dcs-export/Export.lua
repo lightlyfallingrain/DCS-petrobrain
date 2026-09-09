@@ -246,12 +246,26 @@ end
 -- documented shape is a sparse id-keyed table. An object missing
 -- LatLongAlt or Heading is skipped rather than sent with a placeholder --
 -- absence should drop the entry, not fabricate a position.
-local function encode_world_objects_line(t, world_objects)
+--
+-- `player_plane_id` is this poll's `LoGetPlayerPlaneId()` result (nil if
+-- that call itself failed, see safe_call at the caller). Per-object
+-- `is_ownship` is `true`/`false` when `player_plane_id` is known, or JSON
+-- `null` when it isn't -- absence of the player-plane id must not be
+-- silently reported as "not ownship" for every object, since that's a
+-- fabricated fact, not an observed one (see `WorldObjectSample.is_ownship`'s
+-- docstring in `aircraft-layer/src/schema/world_objects.py`). The object is
+-- still sent either way -- flagging, never omitting, ownship's own entry is
+-- the whole point of this field (backlog decision, `todo/todo.md`).
+local function encode_world_objects_line(t, world_objects, player_plane_id)
     local parts = {}
     for object_id, obj in pairs(world_objects) do
         local lla = obj.LatLongAlt
         if lla ~= nil and obj.Heading ~= nil
             and lla.Lat ~= nil and lla.Long ~= nil and lla.Alt ~= nil then
+            local is_ownship = nil
+            if player_plane_id ~= nil then
+                is_ownship = (object_id == player_plane_id)
+            end
             parts[#parts + 1] = "{"
                 .. "\"id\":" .. encode_scalar(object_id)
                 .. ",\"type\":" .. encode_scalar(obj.Name or "")
@@ -260,6 +274,7 @@ local function encode_world_objects_line(t, world_objects)
                 .. ",\"lon\":" .. encode_scalar(lla.Long)
                 .. ",\"alt_m\":" .. encode_scalar(lla.Alt)
                 .. ",\"heading_true_rad\":" .. encode_scalar(obj.Heading)
+                .. ",\"is_ownship\":" .. encode_scalar(is_ownship)
                 .. "}"
         end
     end
@@ -421,6 +436,13 @@ function LuaExportAfterNextFrame()
     -- EXPORT_INTERVAL_S, per the check above), same socket, same
     -- pcall-guarded read, same one-shot debug dump of the raw shape before
     -- any field-name assumption is baked in.
+    --
+    -- LoGetPlayerPlaneId() identifies the player's own object among
+    -- LoGetWorldObjects()'s unfiltered/global entries (that table's pairs()
+    -- key is the same numeric object id LoGetPlayerPlaneId() returns, per
+    -- the research doc `encode_world_objects_line` above cites) -- pcall-
+    -- guarded the same way as every other export read.
+    local player_plane_id = safe_call(LoGetPlayerPlaneId)
     local world_objects = safe_call(LoGetWorldObjects)
     if world_objects ~= nil then
         if not DUMPED_WORLD_OBJECTS then
@@ -428,7 +450,7 @@ function LuaExportAfterNextFrame()
             debug_dump("LoGetWorldObjects()", world_objects)
         end
 
-        local world_objects_line = encode_world_objects_line(t, world_objects)
+        local world_objects_line = encode_world_objects_line(t, world_objects, player_plane_id)
         local wo_ok, wo_err = client:send(world_objects_line)
         if not wo_ok then
             debug_log("world-objects send failed: " .. tostring(wo_err))

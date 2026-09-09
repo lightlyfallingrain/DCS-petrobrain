@@ -28,6 +28,7 @@ def _snapshot(t: float, wall: float) -> WorldObjectsSnapshot:
                 lon_deg=35.9,
                 altitude_m=50.0,
                 heading_true_rad=1.2,
+                is_ownship=False,
             ),
         ),
     )
