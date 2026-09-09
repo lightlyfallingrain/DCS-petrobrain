@@ -108,3 +108,125 @@ Full read — read the complete diffs for `hybrid_source.py`, `naked_eye_source.
 being the plan's core acceptance test). Ran format/lint/type/test myself and independently
 verified the mypy typing claim by introducing and reverting a real typo rather than trusting the
 report. Did not re-verify Stage -1/0/1/2 files, per the existing approvals above.
+
+---
+
+## Review: Stage 4 (Tools and console)
+
+Branch: `feature/pb2-contact-memory`. Reviewed against `plans/pb2-contact-memory/plan.md`'s
+"Stage 4 — Tools and console" section and `plans/pb2-contact-memory/implementation.md`'s Stage 4
+entry. Stages -1 through 3 already reviewed/approved above and not re-reviewed here.
+
+### Review Summary
+
+Read `tools.py`, `console.py`, `contacts.py`'s diff, `logger.py`'s full diff, `test_tools.py`,
+`test_console.py` and `test_logger.py`'s diff in full; ran verification commands myself.
+
+- **`facts` absent-not-empty invariant.** `test_describe_contact_facts_never_carry_bl3_scope_keys`
+  genuinely checks `key not in facts` for `semantic`/`general_area`/`relative_now`/`clock` (the
+  plan text says `urgency` lives in `phrasing_hints`, not `facts` — checked separately below).
+  Reading `tools.py`'s `_contact_facts` directly: the dict literal assigns exactly `id`,
+  `classification`, `certainty`, `visible`, `last_seen_ago_s`, `position`, `sources`, `attention`,
+  plus a conditional `attention_source` — none of the BL-3/BL-4 keys are assigned at all, not
+  conditionally omitted. `_contact_phrasing_hints` returns only `{"certainty": ...}` — `urgency`
+  is never assigned anywhere in the file. Confirmed absence is structural (no key ever created),
+  not a runtime filter that could regress.
+- **Identity invariant.** `grep -n "derived_world_position\|object_id" src/belief/tools.py
+  src/belief/console.py src/belief/contacts.py` returns nothing. `tools.py`'s docstring reword
+  (flagged by the implementer as tripping Stage 1's grep-based structural test) reads as a genuine
+  reword — it now says "`Observation`'s DCS ground-truth position field" instead of naming the
+  field, and the code itself only ever reads `Contact.last_position`, which `contacts.py`
+  populates via `association_over_time.implied_position(percept)` (a `Percept`, never an
+  `Observation`). `test_tools.py`/`test_console.py`'s own fixtures plant
+  `derived_world_position=(99999.0, 99999.0)` and assert the returned `position` is *not* that
+  value — a real leak would fail these tests, not just the grep. No bypass.
+- **§3.3 tool shape.** `ContactResult` (`{facts, summary, phrasing_hints}`) matches §3.4's
+  documented triple; the four real tools' signatures are reasonable, provisional interpretations
+  consistent with how prior stages handled the same doc-gap (no literal §3.3 schema exists to
+  check against character-for-character).
+- **Console is logic-free.** Read `console.py` end to end: every one of `contacts`/`show`/
+  `history`/`find`/`watch`/`unwatch`/`stats` parses its argument and calls straight into a
+  `belief.tools` function, formatting the returned dict/list into strings. No certainty
+  computation, gating, or filtering decision happens in `console.py` — the `filter` string is
+  validated against a literal tuple and passed through to `tools.get_contacts`, not applied
+  locally. `test_console_module_contains_no_belief_logic` mechanically pins this (every public
+  `tools.py` function name must appear in `console.py`'s source; `console.py` must not import
+  `belief.decay`/`belief.association_over_time`) — verified this actually runs and passes.
+- **`watch_contact`/`unwatch_contact`/`get_stats` reasoning holds.** Both watch functions are
+  three-line find-and-set operations; `get_stats` is three `len()` calls. None compute certainty,
+  gate contacts, or make a policy judgment — they're bookkeeping, consistent with the plan's "no
+  console-only logic" constraint and the implementer's own justification for adding them to
+  `tools.py` rather than `console.py`.
+- **`Attention` stays a bare enum.** `contacts.py`'s diff is purely additive: `Attention =
+  Literal["normal", "watch"]` plus two new `Contact` fields, both defaulted. No cooldown, no
+  relevance scoring, no BL-4 policy — `watch_contact`/`unwatch_contact` in `tools.py` just set/
+  clear the two fields. No encroachment on BL-4's scope.
+- **Scripted-session acceptance test.** `test_scripted_console_session_over_a_replayed_stream`
+  ingests a real `Observation`, ticks the store, and runs `contacts` → `show` → `watch` →
+  `contacts watched` → (tick past `LOST_THRESHOLD_S`) → `contacts visible` → `history` → `find` →
+  `unwatch` → `stats`, asserting exact transcript strings at each step (e.g. `"CONTACT_1: Ural
+  truck, observed, currently visible."`, the lost-state summary, the `CONTACT_LOST` event kind,
+  final `stats` line). This checks actual output text, not just "doesn't crash."
+- **Backward compatibility.** `git diff` on `contacts.py` shows the two new `Contact` fields both
+  defaulted (`attention: Attention = "normal"`, `attention_source: str | None = None`); `git diff`
+  on pre-existing test files (`test_logger.py`, `test_hybrid_source.py`, `test_naked_eye_source.py`,
+  `test_contacts.py`) between the Stage 3 approval commit and HEAD shows only `test_logger.py`
+  changed, and that diff is a pure 19-line addition (one new test function) — zero existing
+  assertion lines touched anywhere.
+- **`logger.py`'s REPL threading.** Read `_run_poll_loop`/`_run_console_repl`/`main()` in full.
+  The poll thread mutates `ContactStore` (`ingest`/`tick`) while the REPL thread reads it via
+  `belief.tools` functions with no lock. Checked whether this is a plausible crash/corruption risk
+  rather than theoretical: `ContactStore.contacts`/`.observations`/`.events` are all properties
+  that return a **fresh copy** (`list(self._contacts.values())`, `dict(self._observations)`,
+  `list(self._events)`) — under CPython's GIL, these copy constructors run as a single atomic C
+  call with no bytecode-boundary yield point, so a concurrent `dict`/`list` mutation on the poll
+  thread cannot produce a "changed size during iteration" exception or a torn read. The one
+  cross-thread mutation of a *shared object* is `watch_contact`/`unwatch_contact` setting
+  `contact.attention`/`.attention_source` on the main thread while the poll thread's `record()`/
+  `tick()` may concurrently set `last_position`/`last_class_raw`/`sighting_spans`/
+  `last_emitted_certainty` on the same `Contact` — disjoint attribute sets, and individual
+  attribute assignment is itself atomic under the GIL, so at worst a command sees a `Contact`
+  mid-update (e.g. `last_position` updated but `last_seen_sim` not yet) — a stale-read hazard, not
+  a crash or corruption. Given this is an explicitly single-operator debug console over an
+  in-memory store (per `logger.py`'s own docstring, "not a claim of hardened concurrency"), this
+  is a defensible best-effort posture, not a required fix.
+
+Ran all verification myself:
+
+- `ruff format --check src tests`: pass (39 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from `body-layer/`): pass, no issues in 20 source files
+- `pytest tests -q`: **196 passed** — consistent with the claimed 163 + 33 new, 0 modified (only
+  `test_logger.py` among pre-existing test files changed, and only by one added test)
+- `git status`: clean. `git log` shows the four claimed Stage 4 commits (`3642599`, `56faed5`,
+  `9ef3aa0`, `17a916f`) cleanly on top of Stage 3's approval commit.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- **No dedicated `urgency`-absence test.** `test_describe_contact_facts_never_carry_bl3_scope_keys`
+  checks `semantic`/`general_area`/`relative_now`/`clock` in `facts`, but `urgency`'s absence
+  (correctly, in `phrasing_hints`) is only verified by reading `tools.py`'s source, not pinned by
+  a test the way the other four keys are. Low risk since `_contact_phrasing_hints` is a three-line
+  function unlikely to grow accidentally, but a one-line `assert "urgency" not in
+  result["phrasing_hints"]` would close the gap symmetrically with the `facts` test (optional).
+- **REPL threading has no lock**, as discussed above — defensible for this stage's single-operator
+  debug-console posture, but worth a one-line note (already present in `logger.py`'s docstring) if
+  `--console` is ever used with more than one concurrent reader/writer. No action needed now.
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read — read `tools.py`, `console.py`, `contacts.py`'s diff, `logger.py`'s full diff and
+docstring, `test_tools.py` and `test_console.py` in full, and `test_logger.py`'s diff. Verified
+the absent-not-empty and identity invariants directly against source and fixture data (not just
+trusting the implementer's self-report), and reasoned through the REPL's thread-safety from
+`ContactStore`'s actual property implementations rather than accepting the "best-effort" framing
+on faith. Ran format/lint/type/test myself. Did not re-verify Stage -1/0/1/2/3 files, per the
+existing approvals above.
