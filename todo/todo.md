@@ -51,10 +51,49 @@ is a framing and priority shift, not a contract change. What it does raise is th
 scope channel's known defects — the user confirmed that channel stays, being needed for future
 acquire/lock/fire gameplay.
 
-**PB-2 / BL-2 (in progress — planned, not started, 2026-09-09).** Contact memory and data
-association over time. Branch `feature/pb2-contact-memory`; plan at
-`plans/pb2-contact-memory/plan.md` (Architect pass done, commits `bb9eeb4` + `46eb24c`).
-**No implementation has begun.**
+**PB-2 / BL-2 (done, merged to main 2026-09-09).** Contact memory and data association over
+time. All stages complete: -1 (aircraft-layer `is_ownship` flag, replacing the old
+`association.exclude_ownship`/`OWNSHIP_ECHO_EXCLUSION_RADIUS_M` proximity heuristic), 0
+(scope-channel type-namespace repair — `association._type_match_score` now resolves DCS type
+names through `reporting_names` before scoring, and `hybrid_source.py` emits one `Observation`
+per distinct HelperAI list-text leaf), 1 (belief core — `belief/percept.py`'s `Percept`
+projection structurally drops all DCS truth fields; `belief/contacts.py`'s `ContactStore`;
+`belief/association_over_time.py`'s three-valued spatial+class gating), 2 (decay/certainty
+ladder — `observed`/`tracked`/`estimated`/`lost` — and detected/lost/reacquired lifecycle events
+in `belief/decay.py`/`events.py`), 3 (`emit_mode` on both sources, `--console` pipeline wiring),
+4 (`belief/tools.py`'s `get_contacts`/`describe_contact`/`get_contact_history`/`find_contact` —
+the brain API's body, minus a transport — plus `belief/console.py`'s debug REPL), 5
+(cross-channel fusion validated by fixture). All five review passes approved with zero required
+fixes; DoD ran the file-level gate (`plans/pb2-contact-memory/dod-check.md`) pending Stage 6.
+
+**Stage 6 (live acceptance) passed 2026-09-09.** User flew a real sortie against `--console`.
+One real bug found and fixed live: `--console`'s poll thread queried a `world_model_conn` opened
+on the main thread — `sqlite3.Connection` is thread-affine, so this crashed on first poll.
+Fixed by opening the connection and building sources on the poll thread itself
+(`_run_console_poll_loop`), with a new regression test that drives a real sqlite connection
+across a real thread boundary (the class of bug `test_logger.py`'s fakes structurally couldn't
+catch). Two small live-testing UX fixes followed: the poll loop's periodic contact-count print
+was flooding the REPL (`output=None` in console mode; state now queried on demand via
+`contacts`/`stats`), and the REPL now prints a command-help banner at startup
+(`belief.console.HELP_TEXT`). User confirmed live: naked-eye already discriminating
+`OP_SRSAM`/`OP_MRSAM` at range, contact/certainty/decay output looked correct (`estimated`
+aging via `last seen Ns ago`), `stats` reporting plausible counts (91 contacts / 179
+observations / 91 events over one sortie segment).
+
+*Does this change the next milestone?* Per the plan's "Second-Order Effects": unblocks BL-3
+(world enrichment — `Contact` is the record it enriches, `project_from_bearing_range` is the
+explicit stub BL-3 replaces) and BL-5 (`tools.py` already returns the frozen response shape,
+BL-5 reduces to attaching a transport) cheaply; narrows future DCS-truth access (the `Percept`
+boundary is now the thing any later feature must justify crossing); complicates BL-4 (must build
+policy on the `certainty` table/bare attention enum landed here, not restate them) and BL-9
+(belief-vs-truth visualisation should read the observation log, not source internals). One
+real backlog item surfaced during Stage 5 fixture validation, not by live evidence: BL-2's
+`certainty`/classification fusion is last-writer-wins, not quality-weighted (see Backlog) —
+live sortie evidence didn't surface this as an actual problem this time, but it's unresolved.
+Six other independent items were raised alongside this milestone and filed to Backlog rather
+than folded in: aircraft-layer export-throttle split, live FPS measurement for
+`LoGetWorldObjects`, a DCS radio-panel SRS-fallback output channel, and a much-later attention
+direction/detection-cones milestone.
 
 *Confirmed:* `PerceptionSource` needs no protocol change — BL-2 consumes both channels through the
 existing interface. But planning found three defects in already-merged PB-1/PB-1.5 code that BL-2
