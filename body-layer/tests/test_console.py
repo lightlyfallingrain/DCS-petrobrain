@@ -189,7 +189,11 @@ def test_format_event_for_overlay_uses_describe_contact_summary() -> None:
 
     line = format_event_for_overlay(store, event, now_sim=0.0)
 
-    assert line == "CONTACT_DETECTED: Ural truck, observed, currently visible."
+    contact_id = store.contacts[0].id
+    assert (
+        line
+        == f"{contact_id}: CONTACT_DETECTED, Ural truck, observed, currently visible."
+    )
 
 
 def test_format_event_for_overlay_falls_back_when_contact_not_found() -> None:
@@ -207,7 +211,7 @@ def test_format_event_for_overlay_falls_back_when_contact_not_found() -> None:
 
     line = format_event_for_overlay(store, event, now_sim=0.0)
 
-    assert line == "CONTACT_DETECTED CONTACT_missing"
+    assert line == "CONTACT_missing: CONTACT_DETECTED"
 
 
 def test_console_module_contains_no_belief_logic() -> None:

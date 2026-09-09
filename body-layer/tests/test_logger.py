@@ -284,7 +284,7 @@ def test_console_runner_pushes_one_line_per_newly_materialized_event() -> None:
     (event,) = runner.store.events
     assert event.kind == "CONTACT_DETECTED"
     assert overlay_client.pushed == [
-        f"CONTACT_DETECTED: {contact.last_class_raw}, observed, currently visible."
+        f"{contact.id}: CONTACT_DETECTED, {contact.last_class_raw}, observed, currently visible."
     ]
 
 
@@ -296,10 +296,17 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
     one poll are guaranteed to become two separate contacts
     (association_over_time's class-incompatibility gate), so both fire
     CONTACT_DETECTED in the same `tick()` call -- exactly the "remaining
-    events in the same batch" case."""
+    events in the same batch" case.
+
+    Contact ids are predicted rather than read back after the fact
+    (`ContactStore._new_contact_id` is a monotonic per-store counter
+    starting at 1, and this test uses a single fresh store -- `CONTACT_1`
+    for the batch's first observation, `CONTACT_2` for its second, `CONTACT_3`
+    for the follow-up poll's one observation), since `fail_on` must be
+    configured before the call that assigns those ids."""
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)
-    failing_text = "CONTACT_DETECTED: BMP-2, observed, currently visible."
+    failing_text = "CONTACT_1: CONTACT_DETECTED, BMP-2, observed, currently visible."
     overlay_client = FakeOverlayClient(fail_on=frozenset({failing_text}))
     observations = [
         _make_observation(ownship, id="OBS_bmp", classification_raw="BMP-2"),
@@ -324,7 +331,7 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
     # The failing push never landed; the *other* event in the same batch
     # still got pushed -- the failure did not skip the rest of the batch.
     assert overlay_client.pushed == [
-        "CONTACT_DETECTED: Ural truck, observed, currently visible."
+        "CONTACT_2: CONTACT_DETECTED, Ural truck, observed, currently visible."
     ]
 
     # The next poll's pushes proceed normally -- one failure does not wedge
@@ -340,8 +347,8 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
     ]
     runner.run_once()
     assert overlay_client.pushed == [
-        "CONTACT_DETECTED: Ural truck, observed, currently visible.",
-        "CONTACT_DETECTED: Mi-8 helicopter, observed, currently visible.",
+        "CONTACT_2: CONTACT_DETECTED, Ural truck, observed, currently visible.",
+        "CONTACT_3: CONTACT_DETECTED, Mi-8 helicopter, observed, currently visible.",
     ]
 
 
