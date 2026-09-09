@@ -15,7 +15,7 @@ user approval per `CLAUDE.md`.
 | 3 — body-layer wiring | Done, reviewed, fixture-tested |
 | 4 — live acceptance sortie | **Passed live 2026-09-09** — contact events render in-cockpit |
 | Reviewer | **Approved, no required fixes** (`review.md`) |
-| Refinement pass | **In flight** — see below |
+| Refinement pass | **Done, unreviewed** (`f8cca80`, `499811b`, `cc4599e`) — see below |
 | DoD | Not started; blocked on the confirmation sortie below |
 
 Commits: `7a336f0` (plan) → `9b8115b` (stage 1) → `e380126` (stage 2) → `482ce2a` (stage 3) →
@@ -30,7 +30,34 @@ to `net.dostring_in` → `trigger.action.outText`. Rationale recorded in `plan.m
 "Output-target decision, revisited after live acceptance". The rejected path stays documented and
 remains available (DCS-gRPC uses it in production).
 
-An implementer agent was given three tasks. If its work is incomplete or lost, this is the spec:
+**Done 2026-09-09, not yet reviewed and not yet flown.** What was built, against the three tasks
+originally specified (kept below since they are still the acceptance criteria for the sortie):
+
+- **Restyle** — `headerHeight = 0` removes the title bar and close button together; the `Box`/`Panel`
+  child dropped and window `bkg` set fully transparent (`0x00000000`), per-line text sub-skin `bkg`
+  nilled, so text floats over the scene. Position `(20, 50)`, chosen so the rendered text origin
+  lands within a few px of `gameMessages.dlg`'s own real `(29, 59)`. `draggable = true` kept —
+  compatibility with `headerHeight = 0` confirmed from that same real file. Near-white + 1px black
+  shadow was already correct, unchanged.
+- **Contact id** — `format_event_for_overlay` now emits `"<contact id>: <kind>, <summary>"`, reusing
+  `console.py`'s existing `"<id>: ..."` convention.
+- **Clipped line** — new `apply_content_size()` calls `calcSize()` after every `addText()` and
+  resizes to the real reported content height, clamped `[60, 380]px`. The plan's one-time diagnostic
+  promoted into the live sizing mechanism instead of a bigger guessed constant. **This is genuinely
+  new runtime behaviour and the most load-bearing unverified piece of the pass.**
+
+Grounded in real shipped files: all window chrome, position, legibility values, and the
+`headerHeight=0` + `draggable=true` compatibility — from `Scripts/UI/gameMessages.dlg`. The
+implementer's own judgement, flagged as such: the `MIN/MAX_CONTENT_HEIGHT_PX` bounds and the choice
+to make `calcSize()` a live mechanism.
+
+**Six-identical-lines question, partly resolved**: `lifecycle_event_kind` makes a same-contact
+re-fire of `CONTACT_DETECTED` structurally impossible — it fires only when `previous_certainty is
+None`, true exactly once per contact. So the six lines were either six genuine contacts, or
+association-gate churn minting duplicate contacts for one object. Not investigated further, per
+instruction; the contact-id fix makes it diagnosable on the next sortie. **Watch for it.**
+
+Original task spec, retained as the sortie's acceptance criteria:
 
 1. **Restyle the overlay to read like DCS's native message feed.** Currently 420×200, top-left,
    with a "Petrobrain Overlay" title bar, an X close button, and an opaque dark panel — all
@@ -59,7 +86,7 @@ UNVERIFIED, same discipline as the original stage 2.
 
 ## Next steps, in order
 
-1. Reviewer pass on the refinement work.
+1. Reviewer pass on the refinement work (`f8cca80`, `499811b`) — **not yet run**.
 2. **User flies one short confirmation sortie** — chrome gone, contact ids on the lines, no clipped
    line. This is the only step that needs the user.
 3. DoD, then merge on user approval.
