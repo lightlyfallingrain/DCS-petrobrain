@@ -133,40 +133,54 @@ since the flag's correctness cannot be established from fixtures.
 BL-2 should consume both detection channels (scope + naked-eye) rather than being built against the
 scope-only channel and reworked later.
 
-**BL-2.5 (in progress, started 2026-09-09).** `feature/dcs-text-panel-output`. In-cockpit text
-mirror: a small scrolling DCS overlay window fed by a new write-back channel through the aircraft
-layer, so live sortie testing can be read in-cockpit instead of alt-tabbing to an external log.
-Promoted from the Backlog to an interim milestone ahead of BL-3 by user decision, 2026-09-09.
+**BL-2.5 (done, merged 2026-09-09).** `feature/dcs-text-panel-output`. In-cockpit text mirror:
+a small scrolling DCS overlay window fed by a new write-back channel through the aircraft layer,
+so live sortie testing can be read in-cockpit instead of alt-tabbing to an external log. Promoted
+from the Backlog to an interim milestone ahead of BL-3 by user decision, 2026-09-09. DoD passed
+on same day; merge pending user approval.
 
-Two Investigator passes settled the DCS-internals questions
-(`aircraft-layer/research/2026-09-09-dcs-text-panel-output-channel.md`); ED's Hook-state API doc is
-vendored at `aircraft-layer/research/reference/Sim_ControlAPI.md`. The Export environment cannot
-write to screen at all, so the channel is a **GUI/Hook-state overlay** (`Saved Games/DCS/Scripts/
-Hooks/`) built on DCS's own `AutoScrollText` widget, fed by loopback UDP from the collector —
-modelled directly on SRS's installed overlay, which is the same pattern working in production. The
-`net.dostring_in` → `trigger.action.outText` bridge was rejected: it needs an `autoexec.cfg` opt-in
-ED itself labels obsolete/unsafe, and shares DCS's global message queue.
+**Investigator settlement:** Two passes closed DCS-internals unknowns (`aircraft-layer/research/
+2026-09-09-dcs-text-panel-output-channel.md`). Export environment cannot write to screen at all
+— no window in an unsandboxed Lua state. Solution: Hook-state overlay (Saved Games/DCS/Scripts/
+Hooks/) built on DCS's own `AutoScrollText` widget, fed by loopback UDP from the collector, modeled
+on SRS's production overlay pattern. Alternative path (`net.dostring_in` → `trigger.action.outText`)
+rejected: requires `autoexec.cfg` opt-in ED labels obsolete/unsafe, and shares global message queue
+with mission author text/ATC, wrong architectural shape for BL-10 SRS fallback.
 
-Transport: body-layer → `POST /text/push` (new) → collector → loopback UDP 7792 → Hook script. This
-is the **aircraft layer's first inbound/write path**; `aircraft-layer/CLAUDE.md`'s "read-only
-telemetry pipeline" framing is rewritten as part of the milestone. Wire schema is deliberately
-content-only (`{"text": ...}`) so BL-10's SRS-fallback channel can reuse the transport with a
-different producer.
+**Transport & scope:** Body-layer → `POST /text/push` (new) → collector → UDP 7792 → Hook script.
+**First aircraft-layer write path:** `aircraft-layer/CLAUDE.md` reframed from "read-only telemetry
+pipeline" to "read-mostly with narrow write channels." Wire schema is content-only (`{"text": ...}`)
+for content-agnostic reuse by BL-10's SRS text channel. All new code staged as aircraft-layer and
+body-layer components; no DCS installation touched.
 
-Stages: 1 aircraft-layer transport (no DCS) · 2 overlay Hook script (needs DCS, cheap smoke check) ·
-3 body-layer wiring (fixture-tested) · 4 live acceptance sortie (**user-only**, folded together with
-the backlogged `LoGetWorldObjects` FPS measurement). Full plan, decisions, and risks:
-`plans/dcs-text-panel-output/plan.md`.
+**Stages 1–4 complete, 1-4 reviewed & live-verified:** (1) collector transport + UDP sender +
+`POST /text/push` API endpoint + unit tests; (2) Hook script + `.dlg` file matching SRS reference
+implementation; (3) body-layer producer wiring (`push_text_line`, `format_event_for_overlay`, `--overlay`
+flag) + tests; (4) user flew real sortie 2026-09-09, contact events observed in-cockpit. Reviewer
+approved stages 1/3 with zero required fixes. Both subprojects' verification gate (ruff format/lint,
+mypy --strict, pytest) passes: 67 aircraft-layer + 210 body-layer tests.
 
-**Stages 2 and 4 passed live 2026-09-09** — contact events render in-cockpit during a real sortie.
-Reviewer approved stages 1/3 with no required fixes (`plans/dcs-text-panel-output/review.md`).
-Seeing it live, the user raised that the result imitates DCS's native radio message panel rather
-than being it, and **decided to keep the overlay and restyle it** rather than take the
-`net.dostring_in` → `trigger.action.outText` path (rationale recorded in the plan's
-"Output-target decision, revisited after live acceptance"). Refinement pass in progress: strip the
-window chrome copied from SRS, plus two defects the live screenshot exposed — overlay lines carry
-no contact id, and the window clips its last line. Needs one more short confirmation sortie
-before DoD. Resume point for a fresh session: `plans/dcs-text-panel-output/session-state.md` (transient, delete at DoD).
+**Refinement pass (post-live-acceptance, 2026-09-09):** User raised that the overlay imitates DCS's
+native radio panel rather than being it, decided to keep overlay and restyle it (not `net.dostring_in`
+→ `trigger.action.outText` path). Refinement: strip chrome, restyle to match DCS's own
+`gameMessages.dlg` values (every claim verified byte-by-byte against real files by Reviewer), plus two
+defects from user's screenshot — overlay lines had no contact id, window clipped last line. Contact
+id fix (`f8cca80`, format now `"<id>: <kind>, <summary>"`) approved and kept. Restyle commit
+(`499811b`, bundled with clipping fix) flown in confirmation sortie 2026-09-09 and **rejected by user —
+reads worse in cockpit than the titled window despite being factually grounded in real DCS values.**
+User instruction: revert to titled window. Reverted `99c2586`, keeping contact-id, taking clipping
+fix with it (known lossy pattern: bundled commits). Clipping defect (`"last line cut off, never
+half-rendered"`) now open backlog item (candidate fix: dynamic sizing independent of cosmetics).
+
+**Key lesson from refinement:** Grounding a design in authoritative source values does not guarantee
+visual acceptance. Live experimental validation required before visual design commitment. Separately,
+bundling cosmetic and correctness changes in one commit creates lossy reversion — separate by concern
+so future reverts don't collateral-damage unrelated fixes (recorded to NOTES.md).
+
+**No architectural change for BL-2.6:** Overlay transport is content-agnostic; BL-2.6's
+classification-change events flow through same `format_event_for_overlay` without changes.
+Recommendation (plan note, not discovery): BL-2.6 should explicitly update that function to enrich
+mirrored lines with semantic content, keeping in-cockpit display synchronized with console output.
 
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
@@ -188,7 +202,7 @@ before DoD. Resume point for a fresh session: `plans/dcs-text-panel-output/sessi
 Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side). Aircraft layer / Mission Interpreter / Runtime work now in scope — see root `CLAUDE.md` "Current priority" (gate lifted 2026-09-06).
 
 - [x] **PB-1.5 — Naked-eye visual detection channel.** Done, merged to main 2026-09-09. Live acceptance passed. See Current Focus.
-- [~] **BL-2.5 — In-cockpit text mirror (DCS overlay output channel).** Interim milestone, scheduled between BL-2 and BL-3 by user decision 2026-09-09. In progress. See Current Focus and `plans/dcs-text-panel-output/plan.md`.
+- [x] **BL-2.5 — In-cockpit text mirror (DCS overlay output channel).** Done, DoD passed 2026-09-09. Interim milestone, scheduled between BL-2 and BL-3 by user decision. Live acceptance sortie passed; refinement restyle rejected and reverted. See Current Focus and `plans/dcs-text-panel-output/dod-check.md`. Pending user approval to merge.
 - [ ] **BL-2.6 (label provisional) — Classification refinement.** *Scheduled next, after BL-2.5 and before BL-3 (user decision, 2026-09-09).* Fire an event when a contact's identification becomes more specific — `something → tank → T-72`, `unknown group → SAM site → SA-6`. User's framing: these transitions are exactly the information DCS internals do not give, and they make the system useful for gameplay rather than only for observing it.
   Not just an event. Investigation 2026-09-09 found the data can't currently support it:
   1. **Naked-eye classification is range-independent.** `perception/naked_eye_source.py` emits
@@ -361,6 +375,25 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   BL-3 (user decision, 2026-09-09).** Status and detail live in Current Focus, not here.
   Plan: `plans/dcs-text-panel-output/plan.md`.
   Original entry: Raised 2026-09-09. SRS (voice) is the intended eventual output channel for Petrovich's messages, but is not yet implemented; even once it exists, a text-panel fallback is wanted for when the SRS server isn't connected. Concrete near-term value: mirror the body-layer log output to DCS's in-game radio message text panel now, during development — makes live sortie testing (BL-2 acceptance, PB-1.5 calibration, etc.) far easier to observe in-cockpit instead of only in an external log file. Needs investigation: how to write to that panel from outside mission-scripting context (likely `trigger.action.outText` or similar, callable only from mission/hook Lua, not obviously from the Export environment aircraft-layer currently uses) — probably an aircraft-layer-side addition (new outbound path, mirroring the existing inbound Export.lua polling) or a separate hook script. Investigator task before implementation, per project convention for unverified DCS-internals questions.
+
+- [ ] **BL-2.5: overlay window clips its last line at 420×200.** Raised 2026-09-09 during
+  refinement pass. A full line should be shown or not shown, never half-rendered. Root cause: the
+  dynamic sizing fix (`apply_content_size()`, which called `calcSize()` after each `addText()` to
+  detect real content height) was bundled with the restyle in commit `499811b` and reverted with it
+  when the restyle was rejected. Candidate fix: re-implement dynamic sizing as an independent
+  concern, separate from cosmetic changes. Not blocking BL-2.5 doD — the original 420×200 titled
+  window with optional close button remains functional and was live-verified; the defect is known
+  and documented.
+
+- [ ] **BL-2.5: overlay has no dismiss affordance.** Raised in Reviewer's optional findings
+  2026-09-09 during refinement pass review. With the restyle reverted, the titled window with its
+  close button *is* back, so this is moot for now. Original concern: restyle removed the title bar
+  and close button (matching DCS's own `gameMessages.dlg` design, which also has neither), leaving
+  no way to dismiss an unwanted line early — only wait out `DEFAULT_DURATION_S=20`. User is aware
+  and accepts this limitation for dev-visibility use; not a defect, just a property of the design.
+  May become annoying during screen capture or when the overlay is in the way of something else —
+  if so, the fix is to lower the timeout or add a per-line click-dismiss affordance, but those
+  changes are speculative and not needed for current use.
 
 - [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.**
   **Absorbed into BL-2.6 (classification refinement), scheduled next — see Milestones.**
