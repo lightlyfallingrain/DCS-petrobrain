@@ -377,3 +377,56 @@ def test_detection_clearing_then_reappearing_with_same_text_re_emits() -> None:
     assert len(first) == 1
     assert second == []
     assert len(third) == 1
+
+
+def test_every_poll_mode_re_emits_an_unchanged_detection_set() -> None:
+    # Stage 3 (plans/pb2-contact-memory/plan.md Interface confirmation gap
+    # 2): under emit_mode="every_poll", a statically visible detection must
+    # keep producing an Observation every poll rather than being debounced
+    # away after the first -- the belief layer, not this source, now owns
+    # de-duplication.
+    world_objects = {
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication({"middle_list_text": "Ural truck"}),
+            _indication({"middle_list_text": "Ural truck"}),
+            _indication({"middle_list_text": "Ural truck"}),
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+    third = source.poll(100.4, _ownship())
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert len(third) == 1
+
+
+def test_every_poll_mode_still_returns_nothing_when_detection_clears() -> None:
+    world_objects = {
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(
+        [_indication({"middle_list_text": "Ural truck"}), _indication(None)],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+
+    assert len(first) == 1
+    assert second == []

@@ -53,7 +53,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from aircraft_client import AircraftLayerClient
 from perception.association import WorldObjectCandidate, associate, filter_ownship
@@ -104,6 +104,16 @@ class HybridPerceptionSource:
 
     aircraft_client: AircraftLayerClient
     theatre: str
+    #: `"on_change"` (default) preserves PB-1's original text-equality
+    #: debounce byte-for-byte -- every existing test constructs this class
+    #: without passing `emit_mode` and must keep passing untouched
+    #: (`plans/pb2-contact-memory/plan.md` Stage 3). `"every_poll"` skips the
+    #: debounce check entirely and emits one `Observation` per distinct
+    #: populated leaf on every poll, regardless of whether the detection set
+    #: changed -- source-level debounce was a PB-1 device to keep the text
+    #: logger readable and starves the belief layer's decay/lifecycle logic
+    #: of the continuity it needs (plan's Interface confirmation gap 2).
+    emit_mode: Literal["on_change", "every_poll"] = "on_change"
 
     _last_emitted_texts: tuple[str, ...] | None = field(
         default=None, init=False, repr=False
@@ -124,7 +134,7 @@ class HybridPerceptionSource:
             # is treated as new, per the module docstring.
             self._last_emitted_texts = None
             return []
-        if distinct_texts == self._last_emitted_texts:
+        if self.emit_mode == "on_change" and distinct_texts == self._last_emitted_texts:
             return []  # unchanged detection set -- debounced, don't re-emit
 
         world_objects = self.aircraft_client.get_world_objects_latest()
