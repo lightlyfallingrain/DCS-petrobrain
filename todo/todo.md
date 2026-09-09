@@ -45,6 +45,37 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 ## Backlog
 
+- [ ] **Exclude the ownship by identity rather than by proximity.** The 2026-09-09 fix
+  (`association.exclude_ownship`, commit `549aee6`) drops any world object within
+  `OWNSHIP_ECHO_EXCLUSION_RADIUS_M = 50.0` m of ownship. That is correct for the bug it fixes and
+  has no false positives in practice, but it is a heuristic standing in for an exact answer, and it
+  carries a narrow false-*negative* window: any genuine object within 50 m of the aircraft is
+  silently dropped. Plausible cases — troops disembarking beside a landed helicopter, another
+  aircraft in close formation, a vehicle the aircraft is hovering directly over.
+
+  The exact fix is identity-based and lives one layer down: `Export.lua` knows the player's own
+  object via the DCS export API (`LoGetPlayerPlaneId()`), so it could omit that entry from the
+  `world_objects` payload, or flag it so body-layer can drop it by id rather than by distance. That
+  removes the false-negative window entirely and is robust regardless of what
+  `LoGetWorldObjects`'s `pairs()` key turns out to mean.
+
+  Not done in the bug fix because it is an aircraft-layer change affecting every consumer of
+  `/world_objects/latest`, where the body-layer-side fix was contained and shippable. Worth doing
+  when aircraft-layer is next touched.
+
+- [ ] **Settle whether `LoGetWorldObjects`'s `object_id` is stable across polls** — needs a live
+  capture, described in `plans/pb1.5-naked-eye-detection/debug.md` "Needs live DCS".
+  `world_objects.py`'s own docstring calls it "the numeric key from Lua `pairs()` iteration" and a
+  "within-one-poll identifier only until verified live", and Lua does not guarantee `pairs()`
+  order. Both perception channels' debounce keys on it.
+
+  The 2026-09-09 debugging established the debounce mechanism is *not* broken given a stable id —
+  the live log's irregular repetition was the FOV gate flapping on a meaningless near-zero-baseline
+  bearing, fully explained by the ownship bug. So this is unconfirmed rather than known-broken, and
+  was deliberately not "fixed" speculatively. **The next live sortie settles it for free**: with the
+  ownship echo gone, if real contacts re-emit on every poll instead of once, the ids are unstable.
+  Watch for that during acceptance testing.
+
 - [?] **Direction (raised 2026-09-09, needs Architect): stop consuming DCS's detection at all, and
   own perception end-to-end.** After the PB-1.5 live probe
   (`aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`), the user's position is
