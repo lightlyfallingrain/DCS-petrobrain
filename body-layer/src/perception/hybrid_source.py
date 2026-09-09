@@ -10,7 +10,11 @@ Each `poll()`:
    returns `[]` -- absence/no-change reported as absence, not a fabricated
    or repeated poll.
 2. Fetches the latest `LoGetWorldObjects` snapshot (`GET /world_objects/
-   latest`) and converts it to `association.WorldObjectCandidate`s.
+   latest`), converts it to `association.WorldObjectCandidate`s, and drops
+   the player's own aircraft via `association.exclude_ownship()` --
+   `LoGetWorldObjects` is unfiltered ground truth and includes ownship
+   itself (see that function's docstring; found via a live sortie,
+   `plans/pb1.5-naked-eye-detection/debug.md`).
 3. Calls `association.associate()` to resolve which candidate (if any) the
    detection refers to.
 4. Builds one `Observation` from the resolved candidate's geometry, or
@@ -35,7 +39,7 @@ import time
 from dataclasses import dataclass, field
 
 from aircraft_client import AircraftLayerClient
-from perception.association import WorldObjectCandidate, associate
+from perception.association import WorldObjectCandidate, associate, exclude_ownship
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
 logger = logging.getLogger(__name__)
@@ -84,10 +88,13 @@ class HybridPerceptionSource:
             self._record_drop(classification, "no world-objects snapshot available")
             return []
 
-        candidates = [
-            WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
-            for obj in world_objects.get("objects", [])
-        ]
+        candidates = exclude_ownship(
+            [
+                WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
+                for obj in world_objects.get("objects", [])
+            ],
+            ownship_state,
+        )
         result = associate(classification, ownship_state, candidates)
         if result is None:
             self._record_drop(classification, "no plausible world-object candidate")

@@ -15,6 +15,11 @@ entries are removed once created or rejected by the user.
 - **Count**: 18+ sed-based line extraction calls
 - **Benefit**: Replace verbose sed syntax with a simpler "read lines X-Y from file" operation; reduces cognitive load and command formulation errors when agents need to iteratively navigate large documents
 
+## 2026-09-09 python-inline-file-transformation
+- **Pattern**: Python inline scripts (run via `python3 - <<'PY'...`) that read a file, apply structured transformations (regex, string replacement, regex substitution on specific fields), write back, and optionally git-add the result
+- **Count**: 6+ calls (lines 49, 56, 73, 74, 75, 89, 100 of transcript) transforming Markdown plans, Lua probe code, and Python test fixtures
+- **Benefit**: Replace boilerplate Python heredoc→open→read→transform→write→commit with a higher-level "apply these regex rules to file" operation, reducing script formulation errors and cognitive load for agents doing doc updates, code generation, and test fixture maintenance
+
 ## 2026-09-09 test-and-commit-cycle
 - **Pattern**: Update test files with Python inline scripts, validate with pytest/ruff/mypy checks, then create git commits with detailed messages
 - **Count**: 3+ cycles of (edit test → run format+lint+type+test → git commit)

@@ -21,8 +21,10 @@ from perception.association import (
     AMBIGUOUS_ASSOCIATION_METHOD,
     CONFIDENT_ASSOCIATION_CONFIDENCE,
     CONFIDENT_ASSOCIATION_METHOD,
+    OWNSHIP_ECHO_EXCLUSION_RADIUS_M,
     WorldObjectCandidate,
     associate,
+    exclude_ownship,
 )
 from perception.source import OwnshipState
 
@@ -181,3 +183,39 @@ def test_world_object_candidate_from_dict_converts_lat_lon_via_coordinates(
     assert candidate.x == 1234.0
     assert candidate.z == 5678.0
     assert candidate.alt_m == 120.0
+
+
+def test_exclude_ownship_drops_a_candidate_essentially_co_located_with_ownship() -> (
+    None
+):
+    # Reproduces the PB-1.5 live-sortie bug: LoGetWorldObjects is unfiltered
+    # ground truth and includes the player's own aircraft (see
+    # exclude_ownship's docstring). A candidate a few metres from ownship --
+    # well within the exclusion radius, the kind of residual you'd expect
+    # between two independent DCS-reported positions for the same aircraft
+    # -- must be dropped as the ownship echo, not treated as a real contact.
+    ownship = _ownship()
+    self_echo = _candidate(999, "Mi-24P", x=3.0, z=-2.0)
+
+    assert exclude_ownship([self_echo], ownship) == []
+
+
+def test_exclude_ownship_keeps_a_candidate_outside_the_radius() -> None:
+    ownship = _ownship()
+    far_candidate = _candidate(
+        1, "Ural-4320", x=OWNSHIP_ECHO_EXCLUSION_RADIUS_M + 1.0, z=0.0
+    )
+
+    assert exclude_ownship([far_candidate], ownship) == [far_candidate]
+
+
+def test_exclude_ownship_drops_a_candidate_exactly_at_the_radius_boundary() -> None:
+    # exclude_ownship keeps only strictly-greater-than-radius candidates
+    # (range_m > OWNSHIP_ECHO_EXCLUSION_RADIUS_M), so a candidate exactly at
+    # the radius is still treated as the ownship echo and dropped.
+    ownship = _ownship()
+    boundary_candidate = _candidate(
+        1, "Ural-4320", x=OWNSHIP_ECHO_EXCLUSION_RADIUS_M, z=0.0
+    )
+
+    assert exclude_ownship([boundary_candidate], ownship) == []
