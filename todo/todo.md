@@ -45,6 +45,34 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 ## Backlog
 
+- [ ] **`association.py` matches across two different DCS name namespaces and scores 0 on most real
+  units** — found 2026-09-09 while validating PB-1.5's `object_model.py`. `HybridPerceptionSource`
+  matches HelperAI's detection text against `LoGetWorldObjects` candidates via
+  `association._type_match_score`, but the two feeds speak **different vocabularies**: HelperAI
+  emits Petrovich's *reporting* names (`"Slava cruiser"`, `"SA-3 launcher"`, `"Tarantul III
+  corvette"`, `"SA-3 Low Blow radar"`) while `LoGetWorldObjects` emits DCS *type* names
+  (`MOSCOW`, `5p73 s-125 ln`, `MOLNIYA`, `snr s-125 tr`). Measured scores for those four real
+  pairs: **0, 0, 0, 0**. `"Ural truck"` vs `Ural-375` scores 1 — the only case that works, and
+  only because the two names coincidentally share a word.
+
+  This is not theoretical: those are exactly the units the PB-1 spike log actually captured
+  (`aircraft-layer/research/2026-09-08-...`, Session 5 part 2, Finding 6). PB-1's live acceptance
+  test passed because it used Ural trucks — the single type where the coincidence holds. So the
+  scope channel's association is likely near-nonfunctional for ships, SAM sites and most armour,
+  and this was invisible until now.
+
+  **The fix is already in the repo**: PB-1.5 committed ED's complete 595-row type→reporting-name
+  mapping (`body-layer/src/perception/data/dcs_type_to_reporting_name.tsv` +
+  `reporting_names.py`). `association.py` should resolve each `LoGetWorldObjects` type name to its
+  reporting name before scoring, so both sides speak the namespace HelperAI actually uses.
+
+  Not fixed under PB-1.5 — it is PB-1 code, already merged to `main`, and a behaviour change to
+  the scope channel deserves its own before/after evidence and live re-test rather than riding
+  along in a milestone about a different channel. Related to, but distinct from, the multi-contact
+  gap flagged in `plans/pb1.5-naked-eye-detection/plan.md` Risks (`hybrid_source.py` reads only
+  `middle_list_text` and may be discarding real simultaneous rows). Both are worth doing in one
+  pass over `hybrid_source.py`/`association.py`.
+
 - [ ] **Incremental per-layer pipeline builds** — `build_region` currently deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. User-requested capability: run individual pipeline sections (e.g., roads only, elevation only, validation only) and *add* that data into an existing store, allowing staged builds and partial re-runs when debugging a single layer. Deferred post-M7 (raised during M7 DoD acceptance testing, explicitly not blocking). Considered for M8 and **explicitly dropped** from it (2026-09-06) to keep that milestone scoped to the probe store — this remains open and unscheduled for a later milestone. M9 (OSM) would benefit from it; see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` for context and `world-model/src/build/pipeline.py`'s `build_region` implementation.
 
 ## Deferred
