@@ -189,6 +189,31 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 - [x] **PB-1.5 — Naked-eye visual detection channel.** Done, merged to main 2026-09-09. Live acceptance passed. See Current Focus.
 - [~] **BL-2.5 — In-cockpit text mirror (DCS overlay output channel).** Interim milestone, scheduled between BL-2 and BL-3 by user decision 2026-09-09. In progress. See Current Focus and `plans/dcs-text-panel-output/plan.md`.
+- [ ] **BL-2.6 (label provisional) — Classification refinement.** *Scheduled next, after BL-2.5 and before BL-3 (user decision, 2026-09-09).* Fire an event when a contact's identification becomes more specific — `something → tank → T-72`, `unknown group → SAM site → SA-6`. User's framing: these transitions are exactly the information DCS internals do not give, and they make the system useful for gameplay rather than only for observing it.
+  Not just an event. Investigation 2026-09-09 found the data can't currently support it:
+  1. **Naked-eye classification is range-independent.** `perception/naked_eye_source.py` emits
+     `object_model.profile_for(...).op_class` — a fixed bucket per DCS type, from a table of
+     eight (`OP_ARMORED`, `OP_TRUCK`, `OP_SRSAM`, `OP_MRSAM`, `OP_SPAAG`, `OP_ZU23`,
+     `OP_INFANTRY`, `OP_SHIP`). A T-72 reads `OP_ARMORED` at 6 km exactly as at 200 m, so there
+     is no `something` stage and no refinement on closure. Arguably an anti-omniscience gap in
+     its own right: naked-eye at 6 km should not reliably separate armour from a truck.
+     Grading specificity by observation quality (range, angular size, dwell, channel) is the
+     real work here.
+  2. **The `tank → T-72` half is producible today** — the scope/HelperAI channel passes
+     Petrovich's own indication text through verbatim (`perception/hybrid_source.py`), which
+     carries specific type names. A naked-eye `OP_ARMORED` contact later seen on the scope
+     genuinely refines.
+  3. **…but it would oscillate.** `Contact.last_class_raw` is a single last-writer-wins string,
+     so the next naked-eye tick overwrites `T-72` back to `OP_ARMORED` and back again, firing
+     spurious refine/de-refine events. **This absorbs the existing backlog item** on BL-2's
+     last-writer-wins certainty/classification fusion — theoretical until now, load-bearing the
+     moment this event exists. Needs a specificity ordering so a better classification is never
+     overwritten by a worse one.
+  `CONTACT_CLASSIFICATION_CHANGED` is already named in `body-layer/src/belief/events.py` and
+  `docs/concept/PETROBRAIN_RUNTIME.md`'s event model as a post-BL-2 candidate, so this pulls a
+  planned event forward rather than inventing one. Needs an Architect pass; label to be confirmed
+  with the plan (BL-2.6 follows BL-2.5's interim precedent, but it is contact-memory work, so
+  the architect should confirm the family fits).
 
 (World Model M9 moved to Deferred below, 2026-09-06)
 
@@ -333,7 +358,10 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   Plan: `plans/dcs-text-panel-output/plan.md`.
   Original entry: Raised 2026-09-09. SRS (voice) is the intended eventual output channel for Petrovich's messages, but is not yet implemented; even once it exists, a text-panel fallback is wanted for when the SRS server isn't connected. Concrete near-term value: mirror the body-layer log output to DCS's in-game radio message text panel now, during development — makes live sortie testing (BL-2 acceptance, PB-1.5 calibration, etc.) far easier to observe in-cockpit instead of only in an external log file. Needs investigation: how to write to that panel from outside mission-scripting context (likely `trigger.action.outText` or similar, callable only from mission/hook Lua, not obviously from the Export environment aircraft-layer currently uses) — probably an aircraft-layer-side addition (new outbound path, mirroring the existing inbound Export.lua polling) or a separate hook script. Investigator task before implementation, per project convention for unverified DCS-internals questions.
 
-- [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.** Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
+- [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.**
+  **Absorbed into BL-2.6 (classification refinement), scheduled next — see Milestones.**
+  It stops being theoretical there: without a specificity ordering, refinement events
+  oscillate. Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
 
 ## Deferred
 
