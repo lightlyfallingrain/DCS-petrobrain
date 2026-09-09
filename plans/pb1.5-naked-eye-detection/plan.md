@@ -407,7 +407,41 @@ own, at the cost of that vocabulary's exportability still being unconfirmed for 
 that most wants it (this one) — the second-order win and the second-order risk share the same
 root cause.
 
-### Decisions Requiring User Input
+### Decisions — resolved 2026-09-09
+
+1. **Affirmed: proceed.** The user accepted the ED-grounded-but-unverified filter as this
+   channel's sole gate "for now," explicitly expecting to revisit it at a later stage. Treat that
+   as a time-limited acceptance, not a settled architecture: if Implementation stage 7's probe
+   finds a real signal, the source swap it enables is the expected path, not an optional
+   refinement.
+6. **Affirmed: `medres` × `extra_eyesight_ratio` (0.008 rad, ×4.0).** The user's reason
+   supersedes the consistency argument this plan used to justify it, and is stronger: **the
+   channel is meant to model observation with handheld binoculars, not the unaided eye** — a
+   direction the user was already heading independently of the ED constants. That reframes the
+   ×4 from "an unverified reading of what ED's constant multiplies" into a deliberate modeling
+   choice this project owns, so the derivation's remaining uncertainty about
+   `extra_eyesight_ratio`'s native role no longer sits underneath the default. Consequences to
+   carry into implementation:
+   - The ~4x magnification is the *design intent*, so the constant should be named and documented
+     for that (binocular-aided observation), not as a transcription of ED's tuning file. The
+     resulting truck ≈ 3 km / T-72 ≈ 3.5 km ranges are the target behaviour, and
+     `NAKED_EYE_RANGE_CAP_M = 2500` genuinely binds.
+   - "Naked-eye" is now a misnomer for the channel. Not renaming it in this plan (the milestone,
+     branch, and research file all carry the name), but `visibility.py`/`naked_eye_source.py`
+     docstrings must state plainly that this models a binocular-aided crew observer, so a future
+     reader doesn't re-derive the constants from an unaided-eye premise and "correct" them.
+   - Revisit alongside Decision 1: if a real ambient signal is ever adopted as the gate, the
+     binocular assumption stops being load-bearing for detection and survives only as a range/
+     confidence prior.
+
+**Proceeding on the stated recommendation, not explicitly affirmed** (decisions 2–5 were offered
+with recommendations and left unanswered; flagged here so they stay visible rather than silently
+becoming settled): **#2** nearest-first cap at 3 per poll; **#3** no cross-channel dedup, left to
+BL-2; **#4** defer the aircraft-layer Lua distance cap until real object counts show it is needed;
+**#5** count/formation quantisation out of v1. Any of these can be changed cheaply mid-
+implementation — say so and it will be.
+
+### Decisions Requiring User Input (original statements, retained for rationale)
 
 1. **Is a filter with no real DCS-sourced detection-existence signal behind it — even one modeled
    on ED's own published constants and quantised to ED's own vocabulary — an acceptable sole gate
