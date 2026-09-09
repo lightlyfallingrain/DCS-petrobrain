@@ -523,7 +523,9 @@ explains why: there is no template, only concatenated audio fragments composed n
 ## Session 5 Addendum, part 2 — re-analysis of the existing PB-1 spike log
 
 Before designing a new live probe, the PB-1 spike log already on the Windows box was re-analysed:
-`~/Saved Games/DCS/Logs/aircraft_layer_debug.log` (2.6 MB, 2026-09-08, spanning 00:10–23:34).
+`~/Saved Games/DCS/Logs/aircraft_layer_debug.log` (2.6 MB, 2026-09-08, spanning 00:10–23:34;
+preserved on the Windows box as `aircraft_layer_debug.2026-09-08-pb1-spike.log` so the PB-1.5
+probe run starts against a clean log).
 It contains **5,719 per-sample `list_indication` dumps** — 3,652 on device 6 (HelperAI) and 2,067
 on device 2 (ASP17) — not the one-shot dump the current production `Export.lua` emits, so the
 spike-era harness logged every sample. Two of Session 4's open items close from this data alone,
