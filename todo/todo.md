@@ -158,8 +158,10 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 ## Backlog
 
-- [ ] **Aircraft layer should flag the ownship; body layer filters it out in detection logic.**
+- [x] **Aircraft layer should flag the ownship; body layer filters it out in detection logic.**
   *(User decision, 2026-09-09 — supersedes the earlier "omit or flag" framing recorded here.)*
+  **Done — PB-2 Stage -1** (`is_ownship` flag, `association.exclude_ownship`/
+  `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` heuristic removed). See Current Focus PB-2 entry.
 
   **Aircraft layer**: add an ownship marker to each `/world_objects/latest` entry —
   `Export.lua` can identify the player's own object via the DCS export API
