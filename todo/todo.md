@@ -166,7 +166,7 @@ than being it, and **decided to keep the overlay and restyle it** rather than ta
 "Output-target decision, revisited after live acceptance"). Refinement pass in progress: strip the
 window chrome copied from SRS, plus two defects the live screenshot exposed — overlay lines carry
 no contact id, and the window clips its last line. Needs one more short confirmation sortie
-before DoD.
+before DoD. Resume point for a fresh session: `plans/dcs-text-panel-output/session-state.md` (transient, delete at DoD).
 
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
