@@ -517,3 +517,76 @@ explains why: there is no template, only concatenated audio fragments composed n
   **ruled out** and should be dropped from that probe.
 - Q1 (`LoGetWorldObjects` cost/filtering) is unchanged from the main findings: no native radius or
   coalition argument; Lua-side distance guard recommended.
+
+---
+
+## Session 5 Addendum, part 2 — re-analysis of the existing PB-1 spike log
+
+Before designing a new live probe, the PB-1 spike log already on the Windows box was re-analysed:
+`~/Saved Games/DCS/Logs/aircraft_layer_debug.log` (2.6 MB, 2026-09-08, spanning 00:10–23:34).
+It contains **5,719 per-sample `list_indication` dumps** — 3,652 on device 6 (HelperAI) and 2,067
+on device 2 (ASP17) — not the one-shot dump the current production `Export.lua` emits, so the
+spike-era harness logged every sample. Two of Session 4's open items close from this data alone,
+with no new flight required.
+
+### Finding 5 — `upper_upper_list_text` is **tested and always empty**; `upper_list_text` does not exist
+
+Across all **76** device-6 samples in which `middle_list_holder` was populated,
+`upper_upper_list_text` is present in the tree and **empty in every one**. `upper_list_text`
+never appears as an element at all in any of the 3,652 device-6 samples — despite being defined
+in `HelperAI_page_common.lua` (lines 924–932). This upgrades Session 1's structural *inference*
+about these two leaves to **reproduced-locally**, and closes the "untested sibling leaves" gap
+that Sessions 1–4 carried forward. Neither leaf is a candidate ambient-detection carrier. —
+**evidence:** reproduced-locally (log re-analysis) — **source:** `aircraft_layer_debug.log`.
+
+### Finding 6 — the HelperAI list is **multi-contact**, not single-selected-target
+
+The populated samples carry *several distinct simultaneous contacts*, not one. The four distinct
+`(middle, upper_upper, lower, lower_lower)` tuples observed:
+
+| first seen | n | `middle_list_text` | `upper_upper` | `lower_list_text` | `lower_lower_list_text` |
+|---|---|---|---|---|---|
+| 00:22:00 | 5  | `Ural truck`    | `` | `Ural truck`             | `` |
+| 00:22:01 | 12 | `Ural truck`    | `` | `Ural truck`             | `Ural truck` |
+| 16:29:20 | 39 | `Slava cruiser` | `` | `Tarantul III corvette`  | `` |
+| 16:49:35 | 20 | `SA-3 launcher` | `` | `SA-3 launcher`          | `SA-3 Low Blow radar` |
+
+`Slava cruiser` + `Tarantul III corvette`, and `SA-3 launcher` + `SA-3 Low Blow radar`, are
+different objects held **at the same time**. The five `*_list_text` leaves are therefore a
+scrolling **window into a multi-row target list** (`middle` = highlighted row, `upper_*`/`lower_*`
+= neighbours), which is consistent with the ED forum bug reports about "the Petrovich target list
+refreshing too fast to select from." This refines — and partly corrects — PB-1's framing of this
+channel as reporting a single actively-selected target: the list holds a *set*, and selection
+merely moves the highlight within it. — **evidence:** reproduced-locally (log re-analysis) —
+**source:** `aircraft_layer_debug.log`.
+
+Implication for PB-1.5 and for BL-2: the scope channel may already be able to yield more than one
+contact per poll. `hybrid_source.py`/`association.py` should be re-checked against this — if they
+assume one contact per populated indication, they are discarding real rows.
+
+### Finding 7 — the list is populated only ~2% of the time
+
+76 of 3,652 device-6 samples (2.1%). The list is empty in the overwhelming majority of flight
+time, consistent with it being gated on something specific rather than reflecting ambient
+awareness.
+
+### What still requires a live probe
+
+The 76 populated samples cannot be attributed to naked-eye vs. scope-driven detection after the
+fact — the spike flights were not flown under a controlled no-scope-slew protocol, and the log
+carries no marker for when Petrovich's voice callout fired. The remaining question is unchanged
+and still needs one controlled sortie:
+
+> During a naked-eye-only pass (ASP-17 never slewed), does **any** exported Lua value change at
+> the moment the ambient `"N CONTACTS, H O'CLOCK"` callout fires?
+
+Revised probe design (supersedes Session 4's step 2, which targeted `list_indication(1)`/PKV and
+is now void per Finding 1):
+- Log `list_indication(6)` **on change only**, with model time — the full tree, not selected leaves.
+- Sweep `list_cockpit_params()` each tick and log **only changed params**, with model time. This
+  is the practical substitute for a `get_param_handle` sweep from the Export.lua environment,
+  where individual param handles are not addressable by name without knowing them in advance.
+- Drop `list_indication(1)` entirely.
+- The user marks each callout — the cleanest in-band marker is a distinctive cockpit switch
+  actuation at the moment the callout is heard, which shows up as a changed param and timestamps
+  the event inside the log itself, avoiding wall-clock correlation across two machines.
