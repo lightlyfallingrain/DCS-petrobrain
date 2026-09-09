@@ -11,6 +11,22 @@ twice. Same "unvalidated starting vocabulary" caveat applies here: this is a
 hand-authored starting guess, not a validated catalogue of real DCS
 unit-type dimensions (see the plan's Risks section).
 
+**Keyword vocabulary is checked against real DCS `object_type` strings, not
+guessed English/NATO-designation words.** A review pass found the original
+OP_SHIP keywords (`cruiser`/`frigate`/`corvette`/...) and the original SA-3/
+6/8/9/13/15 keywords (`sa-3`/`sa-6`/...) were both domain-mismatched -- they
+read like plausible English/NATO descriptors but do not appear as substrings
+of any real DCS ship or SAM `object_type` (ED's real identifiers are hull/
+component proper nouns: `"Slava"`, `"5p73 s-125 ln"`, `"Kub 2P25 ln"`,
+`"Tor 9A331"`). Both categories were re-derived against ED's own 595-entry
+DCS-type -> Petrovich-reporting-name mapping (`HelperAI_reporting_names.lua`)
+and coverage numbers recorded in `aircraft-layer/research/
+2026-09-09-object-model-keyword-coverage.md`. This does not make the table
+exhaustive or validated for every category (armor/truck coverage is still a
+thin, unvalidated hand-authored guess, tracked as backlog in that research
+doc) -- only OP_SHIP and the SA-3/6/8/9/13/15 OP_SRSAM/OP_MRSAM entries have
+been checked against real type strings this way.
+
 **Where the size comes from, stated plainly** (plan's Proposed Defaults):
 `LoGetWorldObjects`/`WorldObjectSample` carries no physical-dimensions field
 (only `object_type`, position, heading, coalition -- confirmed by reading
@@ -84,12 +100,23 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     ("zu23", ObjectTypeProfile(size_m=5.0, op_class="OP_ZU23")),
     ("infantry", ObjectTypeProfile(size_m=1.8, op_class="OP_INFANTRY")),
     ("soldier", ObjectTypeProfile(size_m=1.8, op_class="OP_INFANTRY")),
-    ("sa-3", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),
-    ("sa-6", ObjectTypeProfile(size_m=9.0, op_class="OP_MRSAM")),
-    ("sa-8", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),
-    ("sa-9", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),
-    ("sa-13", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),
-    ("sa-15", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),
+    # SA-3/6/8/9/13/15 keyed on real DCS `object_type` substrings, not the
+    # NATO reporting-name shorthand ("sa-3" etc.) the table previously used
+    # -- that shorthand is unreachable against real data for the same reason
+    # the old OP_SHIP keywords were (see this module's research citation):
+    # `LoGetWorldObjects` returns DCS's own component/hull identifiers
+    # ("5p73 s-125 ln", "Kub 2P25 ln", "Tor 9A331", ...), which very rarely
+    # contain the NATO "SA-N" designation as a literal substring. Verified
+    # against 595 real DCS unit type names (research doc below).
+    ("s-125", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-3
+    ("kub ", ObjectTypeProfile(size_m=9.0, op_class="OP_MRSAM")),  # SA-6
+    ("osa", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-8
+    # "strela-10" before "strela-1": "Strela-10M3" also contains "strela-1"
+    # as a prefix, so the more specific SA-13 keyword must win first-match.
+    ("strela-10", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-13
+    ("strela-1", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-9
+    ("tor 9a331", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-15
+    ("chap_torm2", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-15
     ("tank", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
     ("t-55", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
     ("t-72", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
@@ -101,12 +128,63 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     ("kamaz", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
     ("zil", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
     ("truck", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
-    ("cruiser", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
-    ("frigate", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
-    ("corvette", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
-    ("destroyer", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
-    ("boat", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
-    ("ship", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    # OP_SHIP: real DCS ship-type-name substrings (hull/proper-noun model
+    # names -- "Slava", "leander-gun-achilles", "CastleClass_01", ...), not
+    # English hull-class words ("cruiser"/"frigate"/...) -- `object_type`
+    # never carries the latter, so the previous six-keyword list was
+    # unreachable against real data (this fix's primary defect). This list
+    # was derived by checking every one of ED's 57 ship-class unit types
+    # (research doc below) and choosing a substring per type/family that
+    # does not collide with any of the other ~538 non-ship type names.
+    ("albatros", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("bdk-775", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("chap_project22160", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("cvn_", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("cv_1143_5", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("castleclass", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("cleveland_class", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("elnya", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("essex", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("forrestal", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("kilo", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("kuznecow", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("lha_tarawa", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("lst_mk2", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("la_combattante", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("molniya", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("moscow", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("mogami", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("neustrash", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("perry", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("piotr", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("rezky", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("ship_tilde", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("stennis", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("ticonderog", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("type_021", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("type_052", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("type_054", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("type_071", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("type_093", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("arleigh_burke", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("samuel_chase", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("uboat", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("ara_vdm", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("hms_invincible", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("leander-gun", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("santafe", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    # Found by broadening the ship-vocabulary search (reporting names using
+    # "vessel"/"craft"/"tug"/"landing"/etc., not just "ship"/hull-class
+    # words) beyond the 47 initially checked -- see the research doc.
+    ("dry-cargo ship", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("handywind", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("harbortug", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("higgins_boat", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("schnellboot", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("seawise_giant", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("zwezdny", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("atconveyor", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
+    ("speedboat", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
 )
 
 
