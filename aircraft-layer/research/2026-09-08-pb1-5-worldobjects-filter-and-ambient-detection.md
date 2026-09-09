@@ -392,3 +392,128 @@ files, unless the two missing PKV page files are trivial to pull in the same syn
 - `PKV_page.lua` / `PKV_base_page.lua` content — unread, would directly answer the question.
 - Whether `list_indication(1)` returns anything at all outside of PVK's mechanical
   on/off/slew-limit state remains untested live.
+
+---
+
+## Session 5 Addendum (2026-09-09, Windows machine) — PKV page files read (hypothesis refuted), and the ambient-callout vocabulary found
+
+**Machine:** Windows (direct DCS install access, no Dropbox sync needed).
+**DCS version:** `2.9.29.27278` (`/mnt/f/Games/DCS World/autoupdate.cfg`).
+**Files fetched** (DCS install → `win-mac-sync/from-windows/`): `PKV_base_page.lua`,
+`PKV_page.lua`, `PKV_definitions.lua`, plus four previously-unread HelperAI files —
+`HelperAI.lua`, `HelperAI_sound.lua`, `HelperAI_lengths_ng.lua`, `HelperAI_reporting_names.lua`.
+
+### Finding 1 — the PKV hypothesis is **refuted**
+
+`PKV_page.lua` (17 lines) and `PKV_base_page.lua` (77 lines) contain **no text elements, no
+`list_indication` tree, and no detection-related controllers**. PKV is purely the PKV-gunsight
+*reticle renderer*: `PKV_page.lua` draws one collimated texture element (`pkv_grid`) with a single
+controller `{{"SightBrightness"}}`; `PKV_base_page.lua` adds two hidden mesh polys
+(`SymbologyBox`, `total_field_of_view` — a 32-vertex circle at `TFOV = 110` mrad, both
+`isvisible = false`); `PKV_definitions.lua` is a texture-element helper factory. There is no
+`get_param_handle`, no `ceStringPoly`, no count/bearing anything.
+
+**Conclusion:** `devices.PKV` does not mirror the ambient contact callout. The Session 2 structural
+inference (registration position 1 = periscope/observation subsystem = plausible source) was
+wrong — PKV is the sight *optics*, not the observation *logic*. — **evidence:**
+reproduced-locally (full file read) — **source:** `win-mac-sync/from-windows/PKV_page.lua`,
+`PKV_base_page.lua`, `PKV_definitions.lua`.
+
+Corollary: the live probe of `list_indication(1)` proposed as Session 4's step 2 is now **low
+value** — there is no string tree on that device to return. Deprioritize it.
+
+### Finding 2 — the `"N CONTACTS, H O'CLOCK"` callout is **real, and its full vocabulary is in plain Lua**
+
+`HelperAI_lengths_ng.lua` (never read in any prior session) is a WAV-duration precomputation table
+that hands `filenames_for_c` / `times` to native code. Its `filenames` list is, in effect, **the
+complete enum of Petrovich's composed-speech fragments**, each annotated with its C-side enum name
+in a trailing comment. The ambient spotting callout is assembled at runtime from these fragments —
+which is exactly why Sessions 1–4 found no literal `"CONTACTS"` / `"O'CLOCK"` string anywhere.
+
+The vocabulary (verbatim enum names from the comments):
+
+| Dimension | Fragments |
+|---|---|
+| Detection event | `OP_SEE_AIR`, `OP_SEE_GROUND` (`Op_AirDetected`, `Op_GroundDetected`) |
+| Acknowledgement | `OP_ROGER` (`Op_RogerSearch`) |
+| Bearing | `OP_A1H` … `OP_A12H` — 12 clock positions |
+| Range | `OP_D100M`…`OP_D1000M` (100 m steps), `OP_D1_1p5k`…`OP_D4p5_5k` (500 m steps), `OP_D5_6k`…`OP_D9_10k` (1 km steps), `OP_D10k` (beyond) — **24 buckets** |
+| Elevation | `OP_TARGET_HIGHER`, `OP_TARGET_LOWER` |
+| Count | `OP_1UNIT`, `OP_2UNITS`, `OP_3UNITS`, `OP_TO5UNITS`, `OP_5TO7UNITS`, `OP_8TO10UNITS`, `OP_ABOUT15UNITS`, `OP_MORETHAN15UNITS` |
+| Formation | `OP_SINGLE`, `OP_GROUP` |
+| Ground class | `OP_ARMORED`, `OP_TRUCK(S)`, `OP_INFANTRY`, `OP_SRSAM`, `OP_MRSAM`, `OP_LRSAM`, `OP_SPAAG`, `OP_ZU23`, `OP_GROUPSOMETHING`, `OP_SHIP(S)` |
+| Air class | `OP_HELI(S)`, `OP_COMBATHELI(S)`, `OP_TRANSPORTHELI(S)`, `OP_UNMANNED`, `OP_PROPPLANE(S)`, `OP_JET(S)` |
+| Other | `OP_LAUNCH`, smoke colours (`OP_WHITESMOKE`…`OP_BLACKSMOKE`) |
+
+The user's observed `9 CONTACTS, 1 O'CLOCK` is `OP_8TO10UNITS` + `OP_A1H`. — **evidence:**
+reproduced-locally (full file read) — **source:**
+`win-mac-sync/from-windows/HelperAI_lengths_ng.lua` lines 20–120.
+
+Note the sound-*event* catalogue in `HelperAI_sound.lua` (`observ_on`, `target_acq`,
+`still_searching`, `sight_blocked`, …, ~100 CPG events, one `.ogg` per event) is a **separate,
+non-composed** channel and contains **no** contact-count/bearing event. The ambient callout lives
+only in the composed `_lengths_ng` fragment bank. This distinction matters: the two channels are
+wired differently, and only the composed one carries structured perception content.
+
+### Finding 3 — DCS's own naked-eye detection model constants (directly reusable for PB-1.5)
+
+`HelperAI.lua` (72 lines, never read in any prior session) is a plain-Lua tuning-constant file for
+the Petrovich AI, and it exposes ED's actual detection parameters:
+
+```lua
+group_criterion              = 20      -- units, grouping threshold
+min_angular_radius_for_group = 0.05    -- rad
+scan_rad_around_point        = 2500    -- m
+min_angular_radius = { lowres = 0.0043, medres = 0.008, hires = 0.02, iff = 0.025 }  -- rad
+min_contrast_f               = 0.001
+extra_eyesight_ratio         = 4.0
+min_fog_transparency         = 0.3
+slowpoke_search_radius       = 15
+atgm_range_114 = 4500 ; atgm_range_120 = 6000
+```
+
+`min_angular_radius` is precisely a **range-by-target-size curve**, expressed as ED intends it: a
+target is detectable when its angular radius exceeds a threshold that varies by recognition tier
+(`lowres` = "something is there" ≈ 0.0043 rad → a 6 m truck detectable to ~1.4 km; `medres`,
+`hires` = classification tiers; `iff` = friend/foe tier, the strictest). Combined with
+`min_contrast_f`, `min_fog_transparency`, and `extra_eyesight_ratio`, this is a far better basis
+for PB-1.5's plausibility filter than an invented heuristic. — **evidence:** reproduced-locally
+(full file read) — **source:** `win-mac-sync/from-windows/HelperAI.lua`.
+
+### Finding 4 — exhaustive negative on a literal callout string
+
+`grep -rIi` for `contact` / `o'clock` / `oclock` across: the entire `Mods/aircraft/Mi-24P/` tree
+(all Lua), the Mi-24P `l10n/en/LC_MESSAGES/messages.mo` (65 strings, cockpit-options only), **all**
+`l10n/en/*.mo` files in the DCS install (only `dcs.mo` carries the 376 `pAi:` reporting names — no
+count/bearing template among them), and `strings`/`strings -el` over `Mi24.dll` and
+`CockpitMi24.dll` — **zero matches** for a contact-count or clock-bearing template. Finding 2
+explains why: there is no template, only concatenated audio fragments composed natively.
+— **evidence:** reproduced-locally (grep/strings) — **source:** local searches this session.
+
+### Verdict / impact on PB-1.5
+
+1. **A real ambient (naked-eye) detection channel unambiguously exists in DCS**, with a
+   well-defined perceptual granularity that DCS itself considers correct for a crew member:
+   coarse class, clock bearing, bucketed range, bucketed count, higher/lower. This is a strong
+   anti-omniscience template — arguably *better* than what PB-1.5's plan currently proposes,
+   because it is ED's own model of what the co-pilot can perceive, not ours.
+2. **It is still not shown to be Lua-exportable.** The fragment bank is consumed by native code
+   (`filenames_for_c`); no `list_indication` tree, param handle, or export hook has been found
+   that mirrors the composed callout. The PKV lead is now closed. The remaining untested leaves
+   are HelperAI's `upper_list_text` / `upper_upper_list_text` (Session 1's structural inference
+   says they share the selection gate, unverified), and any `get_param_handle` on device 6.
+3. **Design consequence, either way:** even if the callout proves unexportable, PB-1.5 should
+   model its synthetic filter on the constants in Finding 3 and quantise its output to the
+   vocabulary in Finding 2, so the naked-eye channel produces the same shape of belief DCS's own
+   crew AI does. That decouples the design from the exportability question — a later live probe
+   that finds a real signal would then be a *source* upgrade, not a redesign.
+
+### Unresolved (carried forward)
+
+- Whether **any** exported Lua value changes at the moment the ambient callout fires. The
+  remaining test is the Session-1-style live probe on device 6 (full recursive `list_indication(6)`
+  dump incl. `upper_list_text`/`upper_upper_list_text`, plus a `get_param_handle` sweep), timed
+  against a naked-eye-only spot with the ASP-17 never slewed. `list_indication(1)`/PKV is now
+  **ruled out** and should be dropped from that probe.
+- Q1 (`LoGetWorldObjects` cost/filtering) is unchanged from the main findings: no native radius or
+  coalition argument; Lua-side distance guard recommended.
