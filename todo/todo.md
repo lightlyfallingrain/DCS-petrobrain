@@ -158,6 +158,16 @@ Stages: 1 aircraft-layer transport (no DCS) · 2 overlay Hook script (needs DCS,
 the backlogged `LoGetWorldObjects` FPS measurement). Full plan, decisions, and risks:
 `plans/dcs-text-panel-output/plan.md`.
 
+**Stages 2 and 4 passed live 2026-09-09** — contact events render in-cockpit during a real sortie.
+Reviewer approved stages 1/3 with no required fixes (`plans/dcs-text-panel-output/review.md`).
+Seeing it live, the user raised that the result imitates DCS's native radio message panel rather
+than being it, and **decided to keep the overlay and restyle it** rather than take the
+`net.dostring_in` → `trigger.action.outText` path (rationale recorded in the plan's
+"Output-target decision, revisited after live acceptance"). Refinement pass in progress: strip the
+window chrome copied from SRS, plus two defects the live screenshot exposed — overlay lines carry
+no contact id, and the window clips its last line. Needs one more short confirmation sortie
+before DoD.
+
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
 **PB-1 (done, 2026-09-08):** `feature/pb1-perception-logger` ready to merge. Stages 1–3 (live spike, BL-0 harness, world_objects endpoint) completed earlier; stages 4–9 (hybrid HelperAI perception source + association + text logger) completed with zero Reviewer required fixes across two review passes. Live acceptance test (stage 7) ran end-to-end on real Mi-24P sortie with manually-placed ground targets; two observations logged with plausible bearing/range values in an ambiguous-candidate scenario (4 Ural trucks clustered together). The original architecture (two-tier branching on geometry source) was completely falsified by Session 4's live spike; pivoted to single hybrid implementation (HelperAI text as real detection gate, `LoGetWorldObjects` geometry via association algorithm). Full history: `plans/pb1-perception-logger/plan.md`, `implementation.md`, `review.md`, `dod-check.md`. Key lessons harvested to `NOTES.md`: live spikes resolve DCS architectural unknowns better than desk research; PYTHONPATH/venv gaps only surface in end-to-end deployment; ambiguous-scene live testing essential for association validation.

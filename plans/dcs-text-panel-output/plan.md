@@ -108,6 +108,36 @@ satisfied or discharged by this plan.
 
 ---
 
+### Output-target decision, revisited after live acceptance (user decision, 2026-09-09)
+
+The backlog item this milestone came from asked for **DCS's native in-game radio message text
+panel**. This plan instead specified a custom `dxgui` overlay window (see "Approach not taken"
+above). After Stage 2 and Stage 4 both passed live, the user saw the working overlay and raised
+exactly that divergence — the result imitates the radio feed rather than being it.
+
+**Decision: keep the overlay; restyle it to read like the native message feed.** Not a switch to
+`net.dostring_in` → `trigger.action.outText`. The tradeoff as put to the user:
+
+- The native feed costs a `Saved Games/DCS/Config/autoexec.cfg` enabling an API ED itself labels
+  "OBSOLETE and UNSAFE" — a standing config change on the user's machine, not a repo change.
+- It shares DCS's single global on-screen message queue with mission-author text, ATC, and radio
+  subtitles. That matters more, not less, once this becomes BL-10's real SRS fallback: Petrovich's
+  speech interleaved with ATC is the wrong long-term shape.
+- The overlay path was already working live, and the gap was cosmetic — chrome (title bar, close
+  button, opaque panel) copied wholesale from SRS, not anything structural.
+
+So the divergence is closed by making the overlay *look* right rather than by changing channel.
+The `net.dostring_in` path stays rejected and documented above; DCS-gRPC's production use of it
+(Session 1 Finding 10) means it remains a real option if this decision is ever revisited.
+
+**Follow-up work under this decision** (refinement pass, post-acceptance): strip the title bar,
+close button and opaque background; position and style per DCS's own `Scripts/UI/gameMessages.dlg`
+and `dxgui` skins; plus two defects the user's screenshot exposed — overlay lines carried no contact
+id (six distinct contacts and one contact re-firing six times rendered identically), and the window
+clipped its last line at 420×200.
+
+---
+
 ### Message model (Session 2 findings applied)
 
 **Widget: `AutoScrollText`, not a manual `Static`-per-line stack.** Refining Session 1's
