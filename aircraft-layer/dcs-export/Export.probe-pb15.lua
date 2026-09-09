@@ -356,7 +356,14 @@ end
 -- that change rarely, which is the shape a detection-state flip has.
 local PB15_VOLATILE_AFTER = 8
 
+-- ASP-17 sight device. Logged alongside HelperAI so the OBSERV ON/OFF state
+-- is recorded *in the log itself* rather than relying on the pilot's memory
+-- of when they toggled it -- which matters because OBSERV OFF is the whole
+-- test condition (see WORKFLOW.md).
+local PB15_ASP17_DEVICE_ID = 2
+
 local pb15_prev_indication = nil
+local pb15_prev_asp17 = nil
 local pb15_prev_params = nil -- nil until the baseline sweep has run
 local pb15_change_count = {}
 local pb15_retired = {}
@@ -378,7 +385,20 @@ local function pb15_probe(t)
         end
     end
 
-    -- 2. Cockpit-param sweep, changed entries only. `list_cockpit_params` is
+    -- 2. ASP-17 sight tree, on change. This is what tells us, after the fact,
+    --    whether the sight was on or off when a contact callout fired.
+    local asp17 = safe_call(function()
+        return list_indication(PB15_ASP17_DEVICE_ID)
+    end)
+    if asp17 ~= nil then
+        local raw17 = tostring(asp17)
+        if raw17 ~= pb15_prev_asp17 then
+            pb15_prev_asp17 = raw17
+            pb15_log(string.format("t=%.2f ASP17 CHANGED:\n%s", t, raw17))
+        end
+    end
+
+    -- 3. Cockpit-param sweep, changed entries only. `list_cockpit_params` is
     --    the only way to reach params from the Export.lua environment without
     --    knowing each handle's name in advance, which is exactly the position
     --    we are in. pcall-guarded via safe_call in case it is unavailable.

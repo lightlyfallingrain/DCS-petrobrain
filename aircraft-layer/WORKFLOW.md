@@ -118,19 +118,45 @@ production script.
    the probe block is a no-op.
 3. Delete any stale `Saved Games\DCS\Logs\pb15_probe.log` so the run is clean.
 
-**Flight protocol** — the discipline matters more than the flying:
+**Flight protocol** — the discipline matters more than the flying.
 
-- Place a handful of ground targets (trucks/armour are the easiest classes to
-  get a callout on) at varied ranges out to ~5 km.
-- **Never slew the ASP-17.** The whole point is to isolate ambient spotting
-  from the scope channel; one slew contaminates the sortie.
-- Turn Petrovich's observation mode on and fly passes that bring the targets
-  into view.
-- **Mark every callout in-band.** When you hear `"N CONTACTS, H O'CLOCK"`,
-  immediately flip one distinctive cockpit switch that you touch at no other
-  time. It shows up in the log as a changed param and timestamps the event
-  inside the log itself — far more reliable than correlating wall-clock
-  across two machines. Say which switch you used when handing the log over.
+The point is to catch a contact callout that cannot have come from the sight. An earlier draft of
+this section said "never slew the ASP-17," which was wrong: Petrovich drives the sight, not the
+pilot, so if you tell him to scan he *will* slew it. **`OBSERV OFF` is the real control** — sight
+off, so any contact report has to come from the other channel.
+
+The Session 2 screenshot already hints at the answer: `OBSERV OFF` → `9 CONTACTS, 1 O'CLOCK` →
+`OBSERV ON` → `CAN'T MOVE SIGHT YET`. The callout fired with the sight off. This sortie is to
+capture that moment with the log running.
+
+Fly it as an A/B, both segments over the same targets:
+
+- **Setup.** Place ground targets — trucks or armour give the easiest callouts — at varied ranges
+  out to ~5 km, spread across bearings so a clock position is meaningful.
+- **Segment A — `OBSERV OFF`.** Fly passes bringing targets into view. This is the segment that
+  matters: any `"N CONTACTS, H O'CLOCK"` here is naked-eye by construction.
+- **Segment B — `OBSERV ON`.** Same targets, same passes, sight active. This is the control: it
+  shows what the log looks like when the callout *is* sight-driven, so the two can be compared.
+
+**Mark every callout in-band.** When you hear `"N CONTACTS, H O'CLOCK"`, immediately flip one
+distinctive cockpit switch that you touch at no other time. It lands in the log as a changed param
+and timestamps the event inside the log itself — far more reliable than correlating wall-clock
+across two machines. Say which switch you used when handing the log over.
+
+You do not need to track the OBSERV transitions by hand: the probe logs `list_indication(2)`
+(the ASP-17) on change, so the sight's state is recorded in-band and each callout can be
+attributed to a segment after the fact.
+
+**What the result will mean**
+
+- Callouts in segment A, and something in the log changes at the marker → a real ambient signal
+  exists and is Lua-readable. That is the strong outcome: it becomes the detection gate, replacing
+  PB-1.5's filter as a source swap.
+- Callouts in segment A, but nothing in the log changes → naked-eye detection is real but has no
+  exported companion. PB-1.5's filter stands as the only option, and the question is closed.
+- No callouts at all in segment A → the ambient callout is sight-gated after all, and the Session 2
+  screenshot was a lagging callout from a prior scan. Worth knowing, and it would strengthen the
+  case for the synthetic filter.
 
 **Restore afterwards**: copy `aircraft-layer/dcs-export/Export.lua` back over
 `Saved Games\DCS\Scripts\Export.lua` and delete `pb15_probe.flag`.
