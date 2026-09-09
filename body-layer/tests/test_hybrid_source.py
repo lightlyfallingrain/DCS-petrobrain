@@ -258,6 +258,104 @@ def test_classification_change_re_emits() -> None:
     assert second[0].classification_raw == "BMP"
 
 
+# --- PB-2 Stage 0b: multiple simultaneous list-text leaves
+# (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-
+# detection.md` Finding 6) yield multiple `Observation`s per poll, each
+# claiming a distinct candidate.
+
+
+def test_sa3_launcher_and_radar_leaves_yield_two_observations() -> None:
+    # Reproduces Finding 6's real sampled tuple: middle_list_text and
+    # lower_list_text both read "SA-3 launcher" (deduplicated to one
+    # distinct text) while lower_lower_list_text reads "SA-3 Low Blow radar"
+    # -- two distinct real objects held at the same time, not one.
+    world_objects = {
+        "objects": [
+            _world_object(1, "5p73 s-125 ln", lat_deg=1000.0, lon_deg=0.0),
+            _world_object(2, "snr s-125 tr", lat_deg=1000.0, lon_deg=50.0),
+        ]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication(
+                {
+                    "middle_list_text": "SA-3 launcher",
+                    "lower_list_text": "SA-3 launcher",
+                    "lower_lower_list_text": "SA-3 Low Blow radar",
+                }
+            )
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 2
+    classifications = {obs.classification_raw for obs in observations}
+    assert classifications == {"SA-3 launcher", "SA-3 Low Blow radar"}
+    # Each observation claims its own candidate, not the same one twice --
+    # the two candidates sit at different ranges from ownship (z=0 vs z=50),
+    # so distinct ranges is proof of distinct candidates.
+    ranges = {round(obs.range_m, 3) for obs in observations}
+    assert len(ranges) == 2
+
+
+def test_slava_cruiser_and_tarantul_corvette_leaves_yield_two_observations() -> None:
+    # Reproduces Finding 6's other real sampled tuple: middle_list_text
+    # "Slava cruiser" and lower_list_text "Tarantul III corvette" -- two
+    # distinct real ships held at the same time.
+    world_objects = {
+        "objects": [
+            _world_object(1, "MOSCOW", lat_deg=1000.0, lon_deg=0.0),
+            _world_object(2, "MOLNIYA", lat_deg=1000.0, lon_deg=50.0),
+        ]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication(
+                {
+                    "middle_list_text": "Slava cruiser",
+                    "lower_list_text": "Tarantul III corvette",
+                }
+            )
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 2
+    classifications = {obs.classification_raw for obs in observations}
+    assert classifications == {"Slava cruiser", "Tarantul III corvette"}
+
+
+def test_repeated_text_across_leaves_is_deduplicated_to_one_observation() -> None:
+    # middle_list_text and lower_list_text carrying the SAME text (a single
+    # highlighted row plus its own neighbour echo, per Finding 6's Ural-truck
+    # samples) must not produce two Observations for one real object.
+    world_objects = {
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication(
+                {
+                    "middle_list_text": "Ural truck",
+                    "lower_list_text": "Ural truck",
+                }
+            )
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+
+
 def test_detection_clearing_then_reappearing_with_same_text_re_emits() -> None:
     world_objects = {
         "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]

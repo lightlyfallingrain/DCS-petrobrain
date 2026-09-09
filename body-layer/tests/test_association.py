@@ -246,3 +246,57 @@ def test_filter_ownship_keeps_a_candidate_even_when_co_located_with_ownship() ->
     close_but_real = _candidate(2, "Ural-4320", x=3.0, z=-2.0, is_ownship=False)
 
     assert filter_ownship([close_but_real]) == [close_but_real]
+
+
+# --- PB-2 Stage 0a: `_type_match_score` against real DCS type/reporting-name
+# tuples (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
+# ambient-detection.md` Finding 6). Before the reporting-name resolution fix,
+# every one of these scored 0 against the raw `object_type` -- only the
+# Ural-truck coincidence (already covered above) scored nonzero. Direct
+# `_type_match_score` tests (private function) are used here rather than
+# routing through `associate()`, since the point is the score itself, not
+# the surrounding decision logic already covered by the tests above.
+
+
+@pytest.mark.parametrize(
+    ("classification_raw", "object_type"),
+    [
+        ("Slava cruiser", "MOSCOW"),
+        ("Tarantul III corvette", "MOLNIYA"),
+        ("SA-3 launcher", "5p73 s-125 ln"),
+        ("SA-3 Low Blow radar", "snr s-125 tr"),
+    ],
+)
+def test_type_match_score_is_nonzero_for_real_reporting_name_tuples(
+    classification_raw: str, object_type: str
+) -> None:
+    # Before the reporting-name resolution fix, raw-type-only keyword
+    # overlap scored 0 for all four of these -- see the before/after table
+    # in plans/pb2-contact-memory/implementation.md.
+    assert association._type_match_score(classification_raw, object_type) > 0
+
+
+def test_type_match_score_still_scores_the_ural_truck_coincidence() -> None:
+    # The one case that scored nonzero before this fix (raw object_type
+    # shares a keyword with the classification text directly) must not
+    # regress.
+    assert association._type_match_score("Ural truck", "Ural-4320") > 0
+
+
+def test_sa3_launcher_and_radar_resolve_confidently_against_real_types() -> None:
+    # End-to-end through associate(): two distinct real SA-3 objects, each
+    # only plausibly named by its own reporting name, both resolve
+    # unambiguously once type-match scoring can see the reporting name.
+    ownship = _ownship(heading_true_deg=0.0)
+    launcher = _candidate(1, "5p73 s-125 ln", x=1000.0, z=0.0)
+    radar = _candidate(2, "snr s-125 tr", x=1000.0, z=50.0)
+
+    launcher_result = associate("SA-3 launcher", ownship, [launcher, radar])
+    radar_result = associate("SA-3 Low Blow radar", ownship, [launcher, radar])
+
+    assert launcher_result is not None
+    assert launcher_result.candidate is launcher
+    assert launcher_result.ambiguous is False
+    assert radar_result is not None
+    assert radar_result.candidate is radar
+    assert radar_result.ambiguous is False
