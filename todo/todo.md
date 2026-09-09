@@ -117,8 +117,8 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   ownship echo gone, if real contacts re-emit on every poll instead of once, the ids are unstable.
   Watch for that during acceptance testing.
 
-- [?] **Direction (raised 2026-09-09, needs Architect): stop consuming DCS's detection at all, and
-  own perception end-to-end.** After the PB-1.5 live probe
+- [>] **Direction (raised 2026-09-09; parked by user decision 2026-09-09): stop consuming DCS's
+  detection at all, and own perception end-to-end.** After the PB-1.5 live probe
   (`aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`), the user's position is
   that this "heavily leans towards entirely dropping the current naked-eye DCS detection logic,
   possibly even suppressing the texts in the radio callouts, and implementing our own detection
@@ -161,7 +161,17 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   **Net remaining scope of this item**, once the deferrals above are taken out: adopt PB-1.5's
   filter as the primary detection mechanism rather than a fallback, and stop treating DCS's ambient
   output as an input we are waiting on. Both are framing/documentation changes plus calibration —
-  no new machinery. Still `[?]`: do not start without the user's instruction.
+  no new machinery.
+
+  **Parked 2026-09-09 (user decision), going straight to PB-2 instead.** No longer `[?]`/"decision
+  needed": the four questions above were all answered, which settled every architectural call this
+  item was going to make — there is no module boundary to draw and no interface to change, so the
+  *Architect* pass named in the original heading is no longer required. What remains is (1) a
+  framing/documentation pass reclassifying `visibility.py` from fallback to primary mechanism, and
+  (2) calibration of the tier/range constants against the "if the player can see a unit, Petrovich
+  should too" standard. Calibration is the only real work and needs live sorties, so it is better
+  folded into a milestone that is flying anyway than run as its own. Do not start without the
+  user's instruction.
 
 - [ ] **`association.py` matches across two different DCS name namespaces and scores 0 on most real
   units** — *priority raised 2026-09-09: the user confirmed the scope channel is needed for later
