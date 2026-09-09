@@ -1,0 +1,4 @@
+# Vendored verbatim copies of DCS-shipped documentation. Keep byte-for-byte identical to the
+# install (CRLF included) so the MD5s recorded in README.md stay checkable against
+# $DCS_INSTALL_PATH. Do not let git normalise line endings here.
+* -text
