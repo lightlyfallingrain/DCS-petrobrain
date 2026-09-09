@@ -134,9 +134,15 @@ def test_ownship_echo_is_excluded_and_detection_drops_with_no_other_candidate() 
 
 
 def test_ownship_echo_does_not_prevent_a_real_candidate_from_associating() -> None:
+    # The echo deliberately carries the SAME object_type as the real target.
+    # With a mismatched type (e.g. "Mi-24P"), `associate()`'s own type-match
+    # tie-break discards it regardless of `exclude_ownship`, and this test
+    # passes whether or not the fix is present -- it did exactly that until
+    # Pass 3 caught it. Tying the type removes that confound, so the only
+    # thing that can still discriminate is the ownship exclusion itself.
     world_objects = {
         "objects": [
-            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0),  # ownship echo
+            _world_object(999, "Ural-4320", lat_deg=3.0, lon_deg=-2.0),  # ownship echo
             _world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0),  # real target
         ]
     }
