@@ -322,3 +322,250 @@ Implementer's first spike on almost line-for-line.
   known to work broadly, but this session found no Mi-24P-specific or VR-specific confirmation
   beyond the general community track record. Low risk, but worth a quick visual check during the
   first live spike.
+
+---
+
+## Session 2 (2026-09-09) — closing the `dxgui`/`Static` sizing-evidence gap
+
+**DCS version:** 2.9.29.27278 (unchanged, `$DCS_INSTALL_PATH/autoupdate.cfg`). Static/file
+recon only — no live DCS session, per this session's instruction.
+
+### Question
+
+Session 1's "Unresolved" flagged that no `dxgui`/`Static`/`DialogLoader` Lua source was found,
+leaving character-limit and wrap/truncate/overflow behavior undetermined. This session searches
+harder for that source and for indirect real-world evidence (a working addon's own sizing
+choices), so an Implementer can commit to window/line-length assumptions without a live probe.
+
+### Findings
+
+13. **The full `dxgui` Lua source tree exists and was missed by Session 1** — **evidence:
+    reproduced-locally** — **source:** `$DCS_INSTALL_PATH/dxgui/` (not `Scripts/UI/` or any path
+    Session 1 checked — it is a top-level install directory, sibling to `Scripts/`). Contains
+    `dxgui/bind/*.lua` (86 widget-binding files including `Static.lua`, `Widget.lua`,
+    `AutoScrollText.lua`, `Box.lua`, `Window.lua`), `dxgui/loader/DialogLoader.lua` +
+    `WidgetParams.lua`, and `dxgui/skins/skinME/*.skin.lua` (2000+ skin files) — 2130 files total,
+    all plain-text Lua, none packed/zipped. A full `find` across the install for any zip archive
+    that might hold packed UI scripts (2406 zips found) turned up only textures/models/liveries —
+    no packed UI resource exists. `$DCS_INSTALL_PATH/API/` has no `dxgui`-specific document beyond
+    `Sim_ControlAPI.md` (already read in Session 1). **This closes the "maybe it's hidden
+    somewhere" question: this Lua tree is the complete, real, and only documentation ED ships for
+    `dxgui` — there is nothing further to find on disk.**
+14. **`Static.lua` itself carries no text-limit/wrap logic — it is a thin wrapper; the real
+    behavior lives in the shared `Widget.lua` base class and opaque native `gui.*` calls** —
+    **evidence: reproduced-locally** — **source:** `dxgui/bind/Static.lua` (57 lines, read in
+    full) and `dxgui/bind/Widget.lua` (read in full). `Static.lua`'s only Static-specific methods
+    are `setAngle`/`getAngle`/`setPivotPoint`/`getPivotPoint`/`getTextLinesCount`/`getTextLines`;
+    `setText`/`getText`/`setSize`/`getSize`/`calcSize` are inherited from `Widget.lua` and each is
+    a direct passthrough to a native function (`gui.WidgetSetText`, `gui.WidgetCalcSize`, etc. —
+    `Widget.lua` lines 60-65, 119-144). **The exact wrap algorithm, per-character width, and
+    overflow/clipping behavior are compiled into the native (C++) DCS engine and are not visible
+    in any Lua file anywhere in the install** — Session 1's core problem is confirmed to persist
+    at the deepest level obtainable from static recon. However, the surrounding evidence below
+    gives strong indirect bounds that were not available in Session 1.
+15. **Text wrapping is a per-skin boolean (`textWrapping`), default `false`, toggled via
+    `Widget:setWrapping()`** — **evidence: reproduced-locally** — **source:** `Widget.lua` lines
+    236-240 (`function setWrapping(self, wrapping) ... skin.skinData.params.textWrapping =
+    wrapping ... end`, commented `-- FIXME: remove it` in the shipped source itself); confirmed as
+    a real, engine-recognized parameter via `dxgui/loader/WidgetParams.lua` line 448
+    (`textWrapping = createParam('Text Wrapping'):getFuncName('getTextWrapping')...`). The
+    **default `Static` skin** (`skin_names.lua` line 370 maps `staticSkin = 'static.skin.lua'`,
+    the skin nearly every plain `Static` widget uses unless overridden) sets
+    `["textWrapping"] = false` and `["fontSize"] = 12`, font
+    `DejaVuLGCSansCondensed-BoldOblique.ttf` (`dxgui/skins/skinME/static.skin.lua`, read in full).
+    **Conclusion: an unstyled `Static` widget does NOT wrap by default** — wrapping must be
+    explicitly turned on in its skin.
+16. **DCS's own native on-screen message system (radio subtitles and `trigger.action.outText`)
+    is built on exactly this `dxgui` stack, and its real shipped dialog gives concrete pixel/font
+    numbers** — **evidence: reproduced-locally (real shipped file, not a guess)** — **source:**
+    `$DCS_INSTALL_PATH/Scripts/UI/gameMessages.dlg` (538 lines, read in full). It defines two
+    message boxes side by side: `autoScrollTextRadio` (radio/chat text, left) and
+    `autoScrollTextTrig` (right — the position and naming strongly indicate this is the
+    `trigger.action.outText`/mission-message channel, though the `.dlg` itself doesn't label it
+    explicitly as such — flagged as inferred-from-naming/position, not proven by an explicit
+    comment). Both are `type = "AutoScrollText"`, not `Static`. Exact geometry (normal-resolution
+    profile): **w=237, h=64**, `fontSize=12`, font `DejaVuLGCSansCondensed-Bold.ttf`. A
+    "large text"/high-DPI variant (`autoScrollTextTrig_High`) exists alongside it: **w=246, h=89,
+    fontSize=20** — width barely changes while font size and height jump, consistent with an
+    accessibility/large-text option rather than a proportional resolution scale.
+17. **`AutoScrollText` — a distinct, higher-level widget from `Static` — is what DCS actually uses
+    for this scrolling-message use case, and its default skin wraps text** — **evidence:
+    reproduced-locally** — **source:** `dxgui/bind/AutoScrollText.lua` (40 lines, read in full:
+    `addText(self, text, duration)` and `clear(self)`, both direct native passthroughs — it
+    manages its own internal timed-message list, not something the caller stacks manually) and
+    `dxgui/skins/skinME/auto_scroll_text.skin.lua` (241 lines, read in full). The composite skin
+    has an outer `textWrapping=false` but its inner `"text"` sub-skin (the one actually applied to
+    each rendered message line) sets **`textWrapping = true`** (line 130), `fontSize=14`. **This
+    directly falsifies a "dxgui text never wraps" assumption**: DCS's own production message
+    widget does wrap, by explicit skin configuration — it is `Static`'s default that doesn't wrap,
+    not a `dxgui`-wide limitation.
+18. **SRS's real, currently-installed, working overlay (re-read in full this session) uses plain
+    `Static` widgets and deliberately opts OUT of wrapping** — **evidence: reproduced-locally** —
+    **source:** `$DCS_SAVED_GAMES_PATH/Mods/services/DCS-SRS/Scripts/DCS-SRS-OverlayGameGUI.lua`
+    (879 lines) and `$DCS_SAVED_GAMES_PATH/Mods/services/DCS-SRS/UI/DCS-SRS-Overlay.dlg` (its
+    paired dialog file, not previously read by Session 1 — this session located and read it via
+    the `DialogLoader.spawnDialogFromFile(...)` call at line 630). Concrete numbers:
+    - Overlay window: `WIDTH = 420`, `HEIGHT = 200` (line 55-56).
+    - Each message line is one `Static` widget: `setBounds(10, offset, WIDTH-10, _msg.height)`
+      with `_msg.height = 20` fixed, `offset` incremented by 20 per line (lines 616-621) — i.e.
+      **410px-wide, 20px-tall, one line per message, stacked vertically by hand.**
+    - The three message-color skins it applies (`eWhiteText`/`eYellowText`/`eRedText`, defined in
+      `DCS-SRS-Overlay.dlg` lines 30-118) **each explicitly set `["textWrapping"] = false`**
+      (lines 47, 80, 113) — SRS deliberately disables wrapping rather than relying on a default,
+      and specifies no `fontSize` override (so it inherits the base `staticSkin` default of 12,
+      per Finding 15).
+    - **No truncation, length-check, or `string.sub` call of any kind was found anywhere in the
+      879-line file** (grepped for `sub(`, `len(`, `trunc`, `#message` — no matches) — SRS ships
+      arbitrary-length radio-callsign/frequency strings straight to `setText()` with zero
+      client-side length management, and has done so across a large, long-running user base with
+      no widely known "overlay text corrupts/crashes on long names" failure mode. **This is strong
+      but indirect evidence** (evidence: inferred, from a real addon's shipped design choice, not
+      a confirmed engine-clipping test) **that an over-length string on a non-wrapping `Static`
+      overflows visually (draws past the box edge) rather than crashing, silently vanishing, or
+      corrupting the widget** — no Lua-level proof of the exact pixel-clip behavior exists, since
+      that logic is native (Finding 14).
+19. **Two self-diagnostic native calls exist on `Static` that were not mentioned in Session 1 and
+    are directly actionable for a Hook script without needing to hand-guess character limits** —
+    **evidence: documented** (present in the shipped binding, i.e. part of the real callable API
+    surface; not exercised live this session) — **source:** `dxgui/bind/Static.lua` lines 50-56
+    (`getTextLinesCount(self)` / `getTextLines(self)`, native `gui.StaticGetTextLinesCount` /
+    `gui.StaticGetTextLines`) and `dxgui/bind/Widget.lua` lines 141-144 (`calcSize(self) ->
+    width, height`, native `gui.WidgetCalcSize` — the natural, unclamped size the widget's current
+    text would need). A Hook script can call `calcSize()` right after `setText()` to learn the
+    real pixel width/height the current string needs, and `getTextLinesCount()`/`getTextLines()`
+    to learn how many lines the native renderer actually produced — genuinely useful runtime
+    self-diagnosis, not previously identified.
+20. **Only two Hook-state addons are installed on this machine** (task item 3) — **evidence:
+    reproduced-locally** — **source:** `ls "$DCS_SAVED_GAMES_PATH/Scripts/Hooks/"` →
+    `DCS-SRS-hook.lua`, `OpenKneeboardDCSExt.lua`(+ its `.dll`), `lottafGameGUI.lua`. LotAtc's hook
+    was already confirmed in Session 1's Finding 9 to do direct device manipulation, not
+    `dxgui`/text at all. OpenKneeboard uses its own external-rendering DLL, not `dxgui`
+    (`grep -rl "dxgui" .../Scripts/Hooks/ .../Mods/services/` finds nothing outside DCS-SRS). **No
+    second locally-installed `dxgui`-text data point exists beyond SRS** — this is itself the
+    finding for task item 3, not a gap in the search.
+21. **A third-party GitHub project (`rkusa/dcs-scratchpad`) independently confirms typical
+    `dxgui` text-widget conventions, though it uses `EditBox`/a resizable text-area widget, not
+    `Static`** — **evidence: documented (external published source, fetched and quoted this
+    session, not run)** — **source:**
+    [`rkusa/dcs-scratchpad`](https://github.com/rkusa/dcs-scratchpad),
+    `Scripts/Hooks/scratchpad-hook.lua` (fetched via raw.githubusercontent.com). It sets
+    `skin.skinData.states.released[1].text.fontSize = config.fontSize` with a default of 14px
+    (matching the 12-16px range seen across every DCS-shipped skin this session read), and
+    dynamically resizes its text area on window resize
+    (`textarea:setSize(newWidth, newHeight - panelsHeight - 20)`) rather than hand-picking a fixed
+    character limit — i.e. a real community author solved the same "how big can this box be"
+    problem by measuring/resizing at runtime, not by hard-coding a char count. No explicit
+    character-limit or truncation logic exists in its source either.
+22. **Hoggit wiki and a targeted WebSearch found nothing further** — **evidence: documented
+    (absence confirmed)** — **source:** `wiki.hoggitworld.com/view/DCS_server_gameGUI` (fetched,
+    covers only the Hook callback/Control-API/Network-API surface, zero mention of `dxgui` text
+    rendering); WebSearch for `dxgui Static widget setText character limit`/`dxgui ... truncated
+    OR wraps OR overflow` returned no page with documented empirical limits. One promising ED
+    forum thread was found —
+    [`forum.dcs.world/topic/315834` "dxgui - has anyone figured this out and how to use it?"](https://forum.dcs.world/topic/315834-dxgui-has-anyone-figured-this-out-and-how-to-use-it-tutorials-help/)
+    — but `forum.dcs.world` blocked the fetch with HTTP 403, consistent with the project's known
+    pattern (`.claude/agent-memory/investigator/forum-dcs-world-fetch.md`). **Not recorded as an
+    unread gap per that pattern** — if the Architect wants this thread's content, ask the user to
+    open it manually and paste it back; not attempted further by this session.
+
+### Reproducible Test
+
+```bash
+# Finding 13 — confirm the dxgui source tree and rule out packed/zipped UI resources
+find "$DCS_INSTALL_PATH/dxgui" -type f | wc -l                       # 2130
+find "$DCS_INSTALL_PATH" -iname "*.zip" | wc -l                      # 2406, all textures/models/liveries
+find "$DCS_INSTALL_PATH/API" -iname "*dxgui*" -o -iname "*GUI*"      # no matches beyond Sim_ControlAPI.md
+
+# Finding 14-15 — Static's thin wrapper + default no-wrap skin
+sed -n '1,60p' "$DCS_INSTALL_PATH/dxgui/bind/Static.lua"
+sed -n '230,245p' "$DCS_INSTALL_PATH/dxgui/bind/Widget.lua"
+grep -n "staticSkin" "$DCS_INSTALL_PATH/dxgui/skins/skinME/skin_names.lua" | head -1
+cat "$DCS_INSTALL_PATH/dxgui/skins/skinME/static.skin.lua"
+
+# Finding 16 — DCS's own native message-box geometry
+cat "$DCS_INSTALL_PATH/Scripts/UI/gameMessages.dlg"
+
+# Finding 17 — AutoScrollText wraps by default
+cat "$DCS_INSTALL_PATH/dxgui/bind/AutoScrollText.lua"
+cat "$DCS_INSTALL_PATH/dxgui/skins/skinME/auto_scroll_text.skin.lua"   # see line 130, textWrapping=true
+
+# Finding 18 — SRS's real sizing/no-wrap/no-truncate choices
+grep -n "setBounds\|WIDTH\|HEIGHT" \
+  "$DCS_SAVED_GAMES_PATH/Mods/services/DCS-SRS/Scripts/DCS-SRS-OverlayGameGUI.lua"
+grep -n "textWrapping" "$DCS_SAVED_GAMES_PATH/Mods/services/DCS-SRS/UI/DCS-SRS-Overlay.dlg"
+grep -n "sub(\|len(\|trunc" \
+  "$DCS_SAVED_GAMES_PATH/Mods/services/DCS-SRS/Scripts/DCS-SRS-OverlayGameGUI.lua"   # no matches
+
+# Finding 19 — self-diagnostic calls available to a Hook script
+grep -n "getTextLinesCount\|getTextLines" "$DCS_INSTALL_PATH/dxgui/bind/Static.lua"
+grep -n "calcSize" "$DCS_INSTALL_PATH/dxgui/bind/Widget.lua"
+
+# Finding 20 — second local dxgui data point search
+ls "$DCS_SAVED_GAMES_PATH/Scripts/Hooks/"
+grep -rl "dxgui" "$DCS_SAVED_GAMES_PATH/Scripts/Hooks/" "$DCS_SAVED_GAMES_PATH/Mods/services/"
+```
+
+No probe script was written to `aircraft-layer/tools/` (module has no `tools/` dir) or committed
+as a standalone file — every command above is a direct read/grep against the existing install and
+is reproducible as-is.
+
+### Possible Approaches
+
+Session 1's recommendation (a new Hook-state overlay, SRS-pattern, socket-fed by the collector)
+stands. This session adds a concrete choice within that recommendation, now that both native
+patterns have been read in full:
+
+1. **Recommended refinement: build on `AutoScrollText`, not `Static`+`Box` like SRS.** DCS's own
+   production message system (Finding 16-17) already is "a small scrolling log of short text
+   lines" — exactly this project's stated shape — and its default skin wraps text automatically
+   (Finding 17), has a native accumulate/expire API (`addText(text, duration)`, `clear()`,
+   Finding 17) instead of the caller hand-managing an array of `Static` widgets and Y-offsets the
+   way SRS does (Finding 18). This avoids re-implementing line-stacking/offset math and gets
+   wrapping "for free" from a widget ED already ships and maintains, at some cost in control over
+   exact per-line layout compared to SRS's fully manual approach. This is a design choice for the
+   Architect, not decided here — SRS's `Static`-per-line pattern remains a fully valid, proven
+   fallback if `AutoScrollText`'s automatic behavior turns out to be awkward in practice (e.g. its
+   message-expiry-by-duration model may not map cleanly onto a persistent scrolling log that the
+   consumer wants to control the exact contents of at all times).
+2. **Either way, call `calcSize()`/`getTextLinesCount()` after `setText()`/`addText()` as a
+   runtime self-check** (Finding 19) rather than hand-deriving a character-per-line constant from
+   font metrics — this is a real, cheap, already-available API that sidesteps needing an exact
+   glyph-width number at all. Worth a single live-probe line item (log the returned values for a
+   few test strings of known length) during the first live spike, rather than treated as still
+   theoretically unresolved.
+3. **If `Static`+fixed-line-height is chosen anyway (the SRS pattern)**: disable wrapping
+   explicitly (`textWrapping=false`, matching the default) and pre-truncate on the sender
+   (collector) side to a conservative length before `setText()`, since Finding 18's "overflows
+   rather than crashes" conclusion is inferred, not proven — truncating defensively costs nothing
+   and removes the one genuinely unverified failure mode (Unresolved, below).
+
+### Unresolved (Session 2)
+
+This session's recon **resolves** Session 1's "dxgui/Static/DialogLoader internals" unresolved
+item as far as static file recon can go (Findings 13-21 above) — the module source exists, is
+fully readable, and gives concrete, real, shipped-product numbers to anchor sizing decisions
+(Finding 16: 237×64px @ fontSize 12 is DCS's own native message-box geometry). What remains
+genuinely open, and needs a live probe (deferred to the eventual acceptance sortie, not this
+session, per the task's static-recon-only constraint):
+
+- **The exact native overflow/clip behavior for a non-wrapping `Static` widget fed an
+  over-length string** (Finding 18) — inferred from SRS's design choices and multi-year lack of
+  reported failures, not confirmed by reading the (closed-source, native) rendering code itself.
+  A live probe: create a `Static` widget with `textWrapping=false` sized like SRS's (410×20px,
+  fontSize 12) and `setText()` a deliberately long string (150+ chars); observe whether it draws
+  past the box edge, gets pixel-clipped at the box boundary, or something else. Confirms or
+  refutes Finding 18's "overflow, not crash" inference.
+- **Exact characters-per-line at a given `fontSize`/box-width combination** — genuinely no exact
+  number exists anywhere (native glyph metrics for `DejaVuLGCSansCondensed*.ttf` at a given point
+  size are not in any Lua file). Possible Approach 2's `calcSize()`/`getTextLinesCount()` runtime
+  self-check sidesteps needing this number precomputed, and is the recommended resolution path
+  rather than a hand-derived px/char estimate.
+- **Whether `AutoScrollText`'s `addText(text, duration)` duration-based expiry model is
+  compatible with this project's "persistent scrolling log the consumer controls" use case**, or
+  whether it fights against it (e.g. old lines disappearing on a timer the collector doesn't
+  control) — not investigated this session; relevant only if Possible Approach 1 (build on
+  `AutoScrollText`) is the direction chosen, and easy to check in the same first live spike.
+- **`forum.dcs.world/topic/315834`** — a plausibly relevant ED forum thread on reverse-engineering
+  `dxgui`, blocked by the same 403 pattern as all `forum.dcs.world` fetches this session. Ask the
+  user to open and paste it manually if the Architect wants a second opinion beyond this session's
+  file-recon findings — not treated as an unread gap per project convention.

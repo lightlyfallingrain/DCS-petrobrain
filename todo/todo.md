@@ -133,6 +133,31 @@ since the flag's correctness cannot be established from fixtures.
 BL-2 should consume both detection channels (scope + naked-eye) rather than being built against the
 scope-only channel and reworked later.
 
+**BL-2.5 (in progress, started 2026-09-09).** `feature/dcs-text-panel-output`. In-cockpit text
+mirror: a small scrolling DCS overlay window fed by a new write-back channel through the aircraft
+layer, so live sortie testing can be read in-cockpit instead of alt-tabbing to an external log.
+Promoted from the Backlog to an interim milestone ahead of BL-3 by user decision, 2026-09-09.
+
+Two Investigator passes settled the DCS-internals questions
+(`aircraft-layer/research/2026-09-09-dcs-text-panel-output-channel.md`); ED's Hook-state API doc is
+vendored at `aircraft-layer/research/reference/Sim_ControlAPI.md`. The Export environment cannot
+write to screen at all, so the channel is a **GUI/Hook-state overlay** (`Saved Games/DCS/Scripts/
+Hooks/`) built on DCS's own `AutoScrollText` widget, fed by loopback UDP from the collector —
+modelled directly on SRS's installed overlay, which is the same pattern working in production. The
+`net.dostring_in` → `trigger.action.outText` bridge was rejected: it needs an `autoexec.cfg` opt-in
+ED itself labels obsolete/unsafe, and shares DCS's global message queue.
+
+Transport: body-layer → `POST /text/push` (new) → collector → loopback UDP 7792 → Hook script. This
+is the **aircraft layer's first inbound/write path**; `aircraft-layer/CLAUDE.md`'s "read-only
+telemetry pipeline" framing is rewritten as part of the milestone. Wire schema is deliberately
+content-only (`{"text": ...}`) so BL-10's SRS-fallback channel can reuse the transport with a
+different producer.
+
+Stages: 1 aircraft-layer transport (no DCS) · 2 overlay Hook script (needs DCS, cheap smoke check) ·
+3 body-layer wiring (fixture-tested) · 4 live acceptance sortie (**user-only**, folded together with
+the backlogged `LoGetWorldObjects` FPS measurement). Full plan, decisions, and risks:
+`plans/dcs-text-panel-output/plan.md`.
+
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
 **PB-1 (done, 2026-09-08):** `feature/pb1-perception-logger` ready to merge. Stages 1–3 (live spike, BL-0 harness, world_objects endpoint) completed earlier; stages 4–9 (hybrid HelperAI perception source + association + text logger) completed with zero Reviewer required fixes across two review passes. Live acceptance test (stage 7) ran end-to-end on real Mi-24P sortie with manually-placed ground targets; two observations logged with plausible bearing/range values in an ambiguous-candidate scenario (4 Ural trucks clustered together). The original architecture (two-tier branching on geometry source) was completely falsified by Session 4's live spike; pivoted to single hybrid implementation (HelperAI text as real detection gate, `LoGetWorldObjects` geometry via association algorithm). Full history: `plans/pb1-perception-logger/plan.md`, `implementation.md`, `review.md`, `dod-check.md`. Key lessons harvested to `NOTES.md`: live spikes resolve DCS architectural unknowns better than desk research; PYTHONPATH/venv gaps only surface in end-to-end deployment; ambiguous-scene live testing essential for association validation.
@@ -153,6 +178,7 @@ scope-only channel and reworked later.
 Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side). Aircraft layer / Mission Interpreter / Runtime work now in scope — see root `CLAUDE.md` "Current priority" (gate lifted 2026-09-06).
 
 - [x] **PB-1.5 — Naked-eye visual detection channel.** Done, merged to main 2026-09-09. Live acceptance passed. See Current Focus.
+- [~] **BL-2.5 — In-cockpit text mirror (DCS overlay output channel).** Interim milestone, scheduled between BL-2 and BL-3 by user decision 2026-09-09. In progress. See Current Focus and `plans/dcs-text-panel-output/plan.md`.
 
 (World Model M9 moved to Deferred below, 2026-09-06)
 
@@ -291,7 +317,11 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 - [ ] **Aircraft-layer: measure `LoGetWorldObjects` FPS cost live before tuning its poll rate.** Raised 2026-09-09 alongside the throttle-split item above; same trigger, kept separate since one is a code change and the other is a measurement task that should land first and inform it. `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md`'s "Unresolved" section already flags this: no confirmed, quantified per-call cost of `LoGetWorldObjects` at realistic unit counts (~50–200) exists — only qualitative forum/Tacview-wiki folklore ("can be inefficient, ED has partially optimized it," no hard numbers). The current 5 Hz was picked as "conservative starting rate," not a measured-safe one, and there's no native radius/category filter at the API level, so cost scales with total map object count regardless of poll rate. User proposed 2 Hz as a guess balancing slow-moving-ground-unit tracking against staying responsive to being fired at; before committing to that or any number, fly with world-objects export on/off at 5/2/1 Hz and diff FPS/frame-time to settle it empirically. Also worth checking live whether "being fired at" is even served by `LoGetWorldObjects`'s poll rate at all — nothing currently reads it for threat/launch detection (that's position/identity data, not an event stream), so the urgent-callout-latency reasoning may want its own dedicated signal later (e.g. RWR export) rather than riding on the ground-scene poll rate.
 
-- [~] **DCS radio message text panel as an SRS fallback / dev-visibility output channel.** Raised 2026-09-09. SRS (voice) is the intended eventual output channel for Petrovich's messages, but is not yet implemented; even once it exists, a text-panel fallback is wanted for when the SRS server isn't connected. Concrete near-term value: mirror the body-layer log output to DCS's in-game radio message text panel now, during development — makes live sortie testing (BL-2 acceptance, PB-1.5 calibration, etc.) far easier to observe in-cockpit instead of only in an external log file. Needs investigation: how to write to that panel from outside mission-scripting context (likely `trigger.action.outText` or similar, callable only from mission/hook Lua, not obviously from the Export environment aircraft-layer currently uses) — probably an aircraft-layer-side addition (new outbound path, mirroring the existing inbound Export.lua polling) or a separate hook script. Investigator task before implementation, per project convention for unverified DCS-internals questions.
+- [~] **DCS radio message text panel as an SRS fallback / dev-visibility output channel.**
+  **Promoted out of the backlog: this is now BL-2.5, an interim milestone scheduled ahead of
+  BL-3 (user decision, 2026-09-09).** Status and detail live in Current Focus, not here.
+  Plan: `plans/dcs-text-panel-output/plan.md`.
+  Original entry: Raised 2026-09-09. SRS (voice) is the intended eventual output channel for Petrovich's messages, but is not yet implemented; even once it exists, a text-panel fallback is wanted for when the SRS server isn't connected. Concrete near-term value: mirror the body-layer log output to DCS's in-game radio message text panel now, during development — makes live sortie testing (BL-2 acceptance, PB-1.5 calibration, etc.) far easier to observe in-cockpit instead of only in an external log file. Needs investigation: how to write to that panel from outside mission-scripting context (likely `trigger.action.outText` or similar, callable only from mission/hook Lua, not obviously from the Export environment aircraft-layer currently uses) — probably an aircraft-layer-side addition (new outbound path, mirroring the existing inbound Export.lua polling) or a separate hook script. Investigator task before implementation, per project convention for unverified DCS-internals questions.
 
 - [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.** Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
 

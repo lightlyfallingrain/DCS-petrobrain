@@ -7,3 +7,4 @@ One line per entry, under ~150 characters: `- [Title](file.md) — one-line hook
 - [Aircraft layer architecture](project_aircraft_layer_architecture.md) — 3-hop pipeline (Export.lua push-only → Windows collector → LAN JSON API), world-model queries live in body layer not aircraft layer.
 - [PB-1.5 naked-eye revision](project_pb1_5_naked_eye_revision.md) — no size field on world_objects, HelperAI.lua's ED detection constants, ambient-callout vocabulary, PKV refuted, hybrid_source multi-row gap.
 - [BL-2 contact memory design](project_bl2_contact_memory_design.md) — belief/ package, Percept truth-quarantine, emit_mode debounce fix, 3 latent defects in merged PB-1/1.5 code.
+- [BL-2.5 text panel output](project_bl25_text_panel_output.md) — PB-x vs BL-x naming precedent, aircraft-layer's first write path, dxgui source found under install root not Scripts/.

@@ -793,9 +793,18 @@ aircraft-layer and Mission-Interpreter work, not body's.
   console is deliberately the ancestor of the brain API: every command added here should be one
   that later becomes a brain tool. Design it that way from the start rather than retrofitting.
 
+- **BL-2.5 — In-cockpit text mirror (DCS overlay output channel)** *(interim, no PB- equivalent)*
+  Inserted between BL-2 and BL-3 by user decision, 2026-09-09. Mirrors belief lifecycle events into
+  a DCS Hook-state overlay window so live sortie testing is readable in-cockpit. Not a cognition
+  tier — dev/test instrumentation that also lays the transport BL-10's SRS text fallback reuses.
+  See `plans/dcs-text-panel-output/plan.md`.
+
 - **BL-3 — World enrichment** *(= PB-3)*
   World-position estimation from bearing/range + terrain, world-model semantic queries, current
   relative geometry recomputation, semantic caching.
+  Follow-up inherited from BL-2.5: its `belief.console.format_event_for_overlay` can only surface
+  BL-2's vocabulary (classification + certainty). BL-3's plan should enrich the mirrored line with
+  the new semantic fields rather than leaving the cockpit overlay stuck at BL-2's wording.
 
 - **BL-4 — Attention and events** *(= PB-4, plus the runtime doc's event model section)*
   Attention states, area attention, event detection, cooldown/chatter suppression, the event
