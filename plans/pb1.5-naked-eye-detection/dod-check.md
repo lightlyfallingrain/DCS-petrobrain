@@ -99,7 +99,7 @@ User confirmed independently: `ruff format --check`, `ruff check`, `mypy src`, `
 
 1. **The scope channel stays as a distinct source** (user confirmed, needed for future acquire/lock/fire gameplay). This raises the priority of the `association.py` cross-namespace bug: the scope channel is no longer a "maybe-someday" feature, it is on the path to wanted gameplay. Should be addressed before that gameplay work starts.
 
-2. **The visibility filter's range/tier constants are now product-critical, not provisional.** The user's direction ("if the player can see a unit, Petrovich should too") makes calibration against real gameplay essential, not optional. The probe's Finding 5 ("Petrovich detects considerably later than the player can see") is a live signal to revisit `NAKED_EYE_RANGE_CAP_M = 2500` during acceptance testing. Not a blocker for merge, but a priority for the first live sortie.
+2. **The visibility filter's range/tier constants are now product-critical, not provisional.** The user's direction ("if the player can see a unit, Petrovich should too") makes calibration against real gameplay essential, not optional. The probe's Finding 5 ("Petrovich detects considerably later than the player can see") already prompted raising `NAKED_EYE_RANGE_CAP_M` from 2500 m to 5000 m (commit `abca037`), which moved the binding constraint off the cap and onto the per-type size curve. What acceptance testing should now judge is whether *those* thresholds feel right — truck 3000 m, T-72 3500 m — not the cap. Not a blocker for merge, but a priority for the first live sortie.
 
 3. **Contact memory/fusion (BL-2) becomes more important.** With the naked-eye channel now primary (high detection volume), cross-channel deduplication and persistent contact identity become design constraints, not nice-to-haves. The plan explicitly deferred these to BL-2 ("left to BL-2's future contact-memory layer"). That deferral is sound, but BL-2's design should account for high inbound observation volume from a single source, not assume balanced dual-source feeds.
 
@@ -181,8 +181,17 @@ Logger will poll the aircraft-layer API and emit observations to stdout as they 
 - **Expected result:** No naked-eye observation emitted, even though the target is well within range and unobstructed.
 
 **Segment C: Out-of-range targets**
-- Position a target at 5+ km range (beyond `NAKED_EYE_RANGE_CAP_M = 2500` m)
-- **Expected result:** Observation may or may not emit depending on the target's size and the calculated angular-radius threshold, but should be rare. Infantry at 5 km should NOT be detected (900 m effective range with binocular multiplier). A large ship at 5 km may be detected (effective range ~4500 m); this is acceptable.
+
+Since `NAKED_EYE_RANGE_CAP_M = 5000` m now binds only for ships, the per-type **size curve** is what
+actually gates ground targets. Test that curve directly rather than the cap — place two identical
+trucks and check the boundary:
+
+- One Ural truck at ~2.5 km → **should** be reported (below its 3000 m threshold)
+- One Ural truck at ~3.5 km → should **not** be reported (above it)
+- Infantry at ~1.5 km → should **not** be reported (900 m threshold)
+
+Same type at both ranges is the point: it isolates range from every other variable. If both trucks
+report, or neither does, the size curve is not doing its job.
 
 **Segment D: Terrain occlusion**
 - Position a target behind a ridge or hill, so no line-of-sight exists from the aircraft to the target
@@ -219,7 +228,7 @@ All fields should be present and well-formed. No error messages, no crashes.
 
 1. ✓ In-FOV, in-range, unobstructed targets are detected and reported with sensible bearing/range quantisation and coarse class (not fallback `OP_GROUPSOMETHING`).
 2. ✓ Out-of-FOV targets are NOT reported (FOV gate works).
-3. ✓ Out-of-range targets are NOT reported (or reported very rarely for large objects near the 2500 m cap).
+3. ✓ Out-of-range targets are NOT reported — specifically, the far truck in Segment C is absent while the near one is present.
 4. ✓ Terrain-occluded targets are NOT reported (LOS gate works).
 5. ✓ Dense clusters report a maximum of 3 new detections per poll tick, with correct nearest-first ordering.
 6. ✓ Scope channel continues to work alongside naked-eye channel; no interference, no crashes.
@@ -237,13 +246,26 @@ All fields should be present and well-formed. No error messages, no crashes.
 
 ### Calibration Notes
 
-**Range expectations (binocular-aided, from the plan's table):**
-- Infantry squad (1.8 m): ~900 m max
-- Ural truck (6 m): ~3 km max (will often bind at cap 2500 m)
-- T-72 (7 m): ~3.5 km max
-- SA-3 launcher (9 m): ~4.5 km max (will bind at cap 2500 m)
+**Range expectations (binocular-aided; `medres` 0.008 rad x 4.0, capped at 5000 m):**
 
-These are the target behaviours confirmed with the user. If you see trucks consistently failing to detect at 2.5 km on flat desert (the probe's Finding 5 scenario), the cap may need raising; that is a post-acceptance-test tuning decision, not a failure of the acceptance test itself.
+| target | size | effective detection range |
+|---|---|---|
+| infantry | 1.8 m | 900 m |
+| Ural truck | 6 m | 3000 m |
+| T-72 | 7 m | 3500 m |
+| SA-3 launcher | 9 m | 4500 m |
+| ship | 100 m | 5000 m (**the only case the cap binds**) |
+
+These are the intended behaviours per Decision #6. Note the cap was already raised from 2500 m to
+5000 m in response to the probe's Finding 5, so no ground vehicle binds on it any more — the size
+curve does the discriminating, which is the point of deriving thresholds from ED's angular-radius
+model.
+
+**What to judge, given the user's standard ("if the player can see a unit, Petrovich should too"):**
+whether a truck first reporting at ~3 km on open terrain feels right. If targets are plainly visible
+on screen well before that, the tier is the lever, not the cap — `medres` (0.008) could move to
+`lowres` (0.0043), which would roughly double every range (truck ~5.6 km, then capped to 5000 m).
+That is a post-acceptance tuning decision, not an acceptance failure.
 
 **Bearing quantisation:**
 Clock positions are 30° apart: 12 o'clock = 0°, 1 o'clock = 30°, 3 o'clock = 90°, 6 o'clock = 180°, 9 o'clock = 270°. The logger should report one of these 12 values (in true degrees, not relative).
