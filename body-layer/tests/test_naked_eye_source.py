@@ -93,6 +93,36 @@ def test_no_world_objects_snapshot_returns_empty() -> None:
     assert source.poll(100.0, _ownship()) == []
 
 
+def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
+    # Reproduces the PB-1.5 live-sortie bug: LoGetWorldObjects is unfiltered
+    # ground truth and includes the player's own aircraft, a few metres from
+    # ownship's own telemetry position (identity-mapped lat/lon here mirrors
+    # the small residual seen live). Before the exclude_ownship fix this
+    # produced a phantom OP_GROUPSOMETHING contact pinned at the smallest
+    # range bucket with a meaningless (near-zero-baseline) bearing.
+    world_objects = {
+        "objects": [_world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0)]
+    }
+    source, _client = _source(world_objects)
+
+    assert source.poll(100.0, _ownship()) == []
+
+
+def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0),  # ownship echo
+            _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),  # real target
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].classification_raw == "OP_INFANTRY"
+
+
 def test_no_visible_candidates_returns_empty() -> None:
     world_objects = {
         "objects": [_world_object(1, "Ural-4320", lat_deg=6000.0, lon_deg=0.0)]

@@ -115,6 +115,42 @@ def test_new_classification_with_no_plausible_candidate_drops() -> None:
     assert source.poll(100.0, _ownship()) == []
 
 
+def test_ownship_echo_is_excluded_and_detection_drops_with_no_other_candidate() -> None:
+    # Reproduces the PB-1.5 live-sortie bug for the association/scope
+    # channel too: LoGetWorldObjects includes the player's own aircraft, a
+    # few metres from ownship's own telemetry position. With no other
+    # candidate present, exclude_ownship leaves associate() with nothing to
+    # resolve against, so the detection is dropped rather than associated
+    # with ownship itself.
+    world_objects = {
+        "objects": [_world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0)]
+    }
+    client = FakeAircraftClient(
+        [_indication({"middle_list_text": "Ural truck"})], world_objects=world_objects
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    assert source.poll(100.0, _ownship()) == []
+
+
+def test_ownship_echo_does_not_prevent_a_real_candidate_from_associating() -> None:
+    world_objects = {
+        "objects": [
+            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0),  # ownship echo
+            _world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0),  # real target
+        ]
+    }
+    client = FakeAircraftClient(
+        [_indication({"middle_list_text": "Ural truck"})], world_objects=world_objects
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].range_m == 1000.0
+
+
 def test_new_classification_with_a_confident_candidate_emits_one_observation() -> None:
     world_objects = {
         "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]

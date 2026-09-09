@@ -65,6 +65,24 @@ FORWARD_HEMISPHERE_HALF_WIDTH_DEG: Final[float] = 90.0
 #: is treated as the unambiguous winner.
 TYPE_MATCH_TIE_MARGIN: Final[int] = 0
 
+#: Any candidate within this distance of ownship's own position is treated
+#: as the player's own aircraft appearing in its own `LoGetWorldObjects`
+#: table, not a distinct object -- `LoGetWorldObjects` is confirmed global,
+#: unfiltered ground truth with no own-aircraft exclusion (see
+#: `aircraft-layer/src/schema/world_objects.py`'s module docstring, and the
+#: forum thread it cites confirming multiplayer returns "data from all
+#: devices"). Without this, ownship shows up as a phantom near-zero-range
+#: contact (see `plans/pb1.5-naked-eye-detection/debug.md` for the live-
+#: sortie symptom this fixes -- pinned-minimum range bucket, meaningless
+#: jittery bearing from a near-zero baseline vector, and the unclassified
+#: `OP_GROUPSOMETHING` fallback since aircraft types match no keyword).
+#: `50.0` m is chosen well above the Mi-24P's own physical extent (~17 m
+#: fuselage/rotor span) and any plausible per-tick position residual between
+#: `LoGetSelfData` (ownship telemetry) and `LoGetWorldObjects`'s own-aircraft
+#: entry, and well below both channels' real range caps (2500-5000 m) so it
+#: cannot plausibly suppress a real target.
+OWNSHIP_ECHO_EXCLUSION_RADIUS_M: Final[float] = 50.0
+
 CONFIDENT_ASSOCIATION_CONFIDENCE: Final[float] = 0.6
 CONFIDENT_ASSOCIATION_METHOD: Final[str] = "bearing_range_terrain"
 
@@ -118,6 +136,26 @@ class AssociationResult:
     confidence: float
     method: str
     ambiguous: bool
+
+
+def exclude_ownship(
+    candidates: Sequence[WorldObjectCandidate], ownship: OwnshipState
+) -> list[WorldObjectCandidate]:
+    """Drop any candidate within `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` of
+    ownship's own position -- see that constant's docstring for why this is
+    necessary. Both `HybridPerceptionSource` and `NakedEyePerceptionSource`
+    call this on their raw `WorldObjectCandidate` list before running their
+    own filtering, since both build that list from the same unfiltered
+    `LoGetWorldObjects` snapshot."""
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    return [
+        candidate
+        for candidate in candidates
+        if range_m(
+            observer, GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
+        )
+        > OWNSHIP_ECHO_EXCLUSION_RADIUS_M
+    ]
 
 
 def associate(
