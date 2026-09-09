@@ -11,7 +11,12 @@ from belief import percept as percept_module
 from belief.classification import SpecificityLevel
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S
-from belief.events import CONTACT_DETECTED, CONTACT_LOST, CONTACT_REACQUIRED
+from belief.events import (
+    CONTACT_CLASSIFICATION_CHANGED,
+    CONTACT_DETECTED,
+    CONTACT_LOST,
+    CONTACT_REACQUIRED,
+)
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
     DerivedWorldPosition,
@@ -123,6 +128,46 @@ def test_founding_percept_seeds_classification_at_its_own_level() -> None:
     contact = store.contacts[0]
     assert contact.classification.level == SpecificityLevel.TYPE
     assert contact.classification.value == "T-72"
+
+
+def test_tick_mints_classification_changed_after_the_lifecycle_event() -> None:
+    """Founding tick emits CONTACT_DETECTED only (Stage 3's `previous is
+    None` rule -- no synthetic classification event on a brand new
+    contact). A subsequent percept that refines the classification (class
+    -> type, same real object) must mint CONTACT_CLASSIFICATION_CHANGED on
+    the *next* tick, ordered after that tick's own lifecycle event (per
+    `ContactStore.tick`'s docstring)."""
+    store = ContactStore()
+    founding = _observation(
+        obs_id="OBS_1",
+        t_sim=0.0,
+        classification_raw="OP_ARMORED",
+        classification_level=2,
+    )
+    store.ingest([founding], now_sim=0.0)
+    store.tick(now_sim=0.0)
+
+    assert [event.kind for event in store.events] == [CONTACT_DETECTED]
+
+    refining = _observation(
+        obs_id="OBS_2",
+        t_sim=1.0,
+        classification_raw="T-72",
+        classification_level=3,
+    )
+    store.ingest([refining], now_sim=1.0)
+    store.tick(now_sim=1.0)
+
+    kinds = [event.kind for event in store.events]
+    assert kinds == [CONTACT_DETECTED, CONTACT_CLASSIFICATION_CHANGED]
+    change_event = store.events[-1]
+    assert change_event.previous_classification == "OP_ARMORED"
+    assert change_event.classification == "T-72"
+    assert change_event.direction == "refined"
+
+    # Idempotent: ticking again at the same now_sim must not re-emit.
+    store.tick(now_sim=1.0)
+    assert len(store.events) == 2
 
 
 def test_ingest_logs_observations_append_only() -> None:

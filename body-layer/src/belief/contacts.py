@@ -34,7 +34,12 @@ from belief.classification import (
     new_classification_belief,
 )
 from belief.decay import Certainty, certainty_of
-from belief.events import Event, lifecycle_event_kind
+from belief.events import (
+    CONTACT_CLASSIFICATION_CHANGED,
+    Event,
+    classification_event,
+    lifecycle_event_kind,
+)
 from belief.percept import Percept, percept_of
 from perception.geometry import GeoPosition
 from perception.source import Observation
@@ -125,6 +130,10 @@ class Contact:
     sighting_spans: list[SightingSpan] = field(default_factory=list)
     classification_lockout_until_sim: float | None = None
     last_emitted_certainty: Certainty | None = None
+    #: Stage 3's twin of `last_emitted_certainty`, for `belief.events.
+    #: classification_event`'s comparison -- written only by `ContactStore.
+    #: tick`, never by `record`.
+    last_emitted_classification: ClassificationBelief | None = None
     attention: Attention = "normal"
     attention_source: str | None = None
 
@@ -259,20 +268,25 @@ class ContactStore:
         return touched
 
     def tick(self, now_sim: float) -> None:
-        """Materialise lifecycle events for every known contact as of
-        `now_sim`. For each contact: compute its current `belief.decay.
-        Certainty`, compare against `last_emitted_certainty` via `belief.
-        events.lifecycle_event_kind`, append the resulting `Event` (if any)
-        to the log, then update `last_emitted_certainty` regardless of
+        """Materialise lifecycle *and* classification events for every
+        known contact as of `now_sim`. For each contact, per event kind:
+        compute its current state, compare against the contact's own
+        last-emitted snapshot of that state, append the resulting `Event`
+        (if any) to the log, then update the snapshot regardless of
         whether an event fired -- the comparison on the *next* `tick()` call
         must be against this call's result, not the last event.
 
+        **Ordering, per contact: lifecycle event first, then classification
+        event** (`plans/classification-refinement/plan.md` Stage 3) -- a
+        `CONTACT_DETECTED` must precede that same contact's first
+        classification refinement, never follow it.
+
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
-        call (no repeated events), since `last_emitted_certainty` is already
-        up to date by then. This is what preserves BL-0's replay
-        determinism: the same recorded stream, ticked at the same sim-times,
-        always produces the same event log."""
+        call (no repeated events), since both snapshots are already up to
+        date by then. This is what preserves BL-0's replay determinism: the
+        same recorded stream, ticked at the same sim-times, always produces
+        the same event log."""
         for contact in self._contacts.values():
             current_certainty = certainty_of(contact, now_sim)
             kind = lifecycle_event_kind(
@@ -289,6 +303,28 @@ class ContactStore:
                     )
                 )
             contact.last_emitted_certainty = current_certainty
+
+            direction = classification_event(
+                contact.last_emitted_classification, contact.classification
+            )
+            if direction is not None:
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=CONTACT_CLASSIFICATION_CHANGED,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                        previous_classification=(
+                            contact.last_emitted_classification.value
+                            if contact.last_emitted_classification is not None
+                            else None
+                        ),
+                        classification=contact.classification.value,
+                        direction=direction,
+                    )
+                )
+            contact.last_emitted_classification = contact.classification
 
     def _new_contact_id(self) -> str:
         self._next_contact_number += 1
