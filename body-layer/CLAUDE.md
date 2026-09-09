@@ -68,10 +68,14 @@ Run a single test: `pytest body-layer/tests/test_file.py::test_name -q`.
 same non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector (see its `WORKFLOW.md`).
 **Must use `body-layer/.venv`'s interpreter, not the system/plain `python`** — the world-model
 seam pulls in `pyproj`, which is only installed in this subproject's own venv (see
-`## Tech stack` above on why that dependency exists). From `cd body-layer`:
+`## Tech stack` above on why that dependency exists). **Also requires `--world-model-db`**
+(PB-1.5): `NakedEyePerceptionSource`'s terrain line-of-sight gate needs a built world-model
+region `.sqlite` to run at all, per `docs/concept/PETROBRAIN_RUNTIME.md`'s naked-eye section
+and the world-model seam note above — there is no default and no way to run the logger without
+one. From `cd body-layer`:
 
 ```sh
-PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName>
+PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --aircraft-layer-url http://<aircraft-layer-host>:7791 --theatre <TheatreName> --world-model-db <path-to-region.sqlite>
 ```
 
 (Or `source .venv/bin/activate` first, then drop the `.venv/bin/` prefix.) Plain `python -m
@@ -125,11 +129,13 @@ data — both path entries are required from the first line.
   real network call, unlike the world-model seam.
 - `src/replay.py` — BL-0 replay harness: drives any `PerceptionSource.poll()` over a recorded
   sequence of ownship states, no live DCS/aircraft-layer connection required.
-- `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a
-  `PerceptionSource`, formats each `Observation` as flat text; fully tested against a fake
+- `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
+  `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete
-  `HybridPerceptionSource` and drives the poll loop (`python -m logger --aircraft-layer-url ...
-  --theatre ...`) — untested by design, same posture as `aircraft-layer/src/collector/
+  `HybridPerceptionSource` and (PB-1.5) `NakedEyePerceptionSource` and drives the poll loop
+  (`python -m logger --aircraft-layer-url ... --theatre ... --world-model-db ...` — see
+  "Running the live logger" above; `--world-model-db` is required by `NakedEyePerceptionSource`'s
+  terrain LOS gate) — untested by design, same posture as `aircraft-layer/src/collector/
   __main__.py`'s own live-process entrypoint.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
