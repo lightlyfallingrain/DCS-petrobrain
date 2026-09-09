@@ -16,9 +16,9 @@ The numeric value happens to match `extra_eyesight_ratio` (4.0), but this
 project owns the ×4 as "what a crew member sees through binoculars,"
 independent of whatever `extra_eyesight_ratio` actually multiplies in DCS's
 native code. Do not re-derive the defaults below from an unaided-eye
-assumption and "correct" them to be stricter -- the resulting truck ~3 km /
-T-72 ~3.5 km pre-cap ranges (`NAKED_EYE_RANGE_CAP_M` binding both down to
-2500 m) are the intended target behaviour, confirmed with the user.
+assumption and "correct" them to be stricter -- the resulting infantry
+~900 m / truck ~3 km / T-72 ~3.5 km ranges are the intended target
+behaviour, confirmed with the user.
 
 Composes three independent plausibility gates over one
 `association.WorldObjectCandidate` (reused, not duplicated) against one
@@ -38,7 +38,7 @@ detection here to be ambiguous *about*):
    rather than a flat range. This module works it backwards into a range
    threshold: `range_threshold = object_model.size_m(object_type) /
    NAKED_EYE_GATING_ANGULAR_RADIUS_RAD * BINOCULAR_RANGE_MULTIPLIER`, capped
-   at `NAKED_EYE_RANGE_CAP_M` (`HelperAI.lua`'s `scan_rad_around_point`)
+   at `NAKED_EYE_RANGE_CAP_M` as a sanity bound
    regardless of what the formula computes for a given object's looked-up
    size -- this project's own derivation from ED's published constants, not
    a verified reproduction of ED's actual formula (see the plan's Risks
@@ -99,12 +99,28 @@ NAKED_EYE_GATING_TIER_NAME: Final[str] = "medres"
 #: constant's (unverified) native role.
 BINOCULAR_RANGE_MULTIPLIER: Final[float] = 4.0
 
-#: `HelperAI.lua`'s `scan_rad_around_point` (metres) -- ED's own scanning-
-#: radius constant, adopted as this channel's outer range bound regardless
-#: of what the angular-radius formula computes for a given object's looked-
-#: up size (so a very large object, e.g. a ship, can't produce an
-#: implausibly long detection range from the formula alone).
-NAKED_EYE_RANGE_CAP_M: Final[float] = 2500.0
+#: Outer range bound, applied regardless of what the angular-radius formula
+#: computes for a given object's looked-up size, so a very large object
+#: (e.g. a ship, ~28 km from the formula alone) can't produce an absurd
+#: detection range.
+#:
+#: **Not** ED's `scan_rad_around_point` (2500 m), which this was until the
+#: 2026-09-09 live probe. That value made the cap the dominant term rather
+#: than a sanity bound -- it bound *every* ground vehicle, so the
+#: angular-radius size curve had no effect at all below it, defeating the
+#: point of deriving from ED's model. The probe also found Petrovich
+#: detecting units the F10 map placed beyond 2500 m, and the pilot observed
+#: seeing targets on screen well before any contact report
+#: (`aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`,
+#: Finding 5). Raised to match `association.RANGE_CAP_M`, so neither
+#: detection channel is bounded tighter than the other for no reason.
+#:
+#: With this value the size curve does the discriminating -- infantry ~900 m,
+#: truck ~3 km, T-72 ~3.5 km, SA-3 launcher ~4.5 km all fall below the cap --
+#: and only ships are capped. Deliberately un-tuned; the user's instruction
+#: was "raise it, we'll fine-tune later," so treat it as a starting point to
+#: calibrate during live acceptance testing, not a settled number.
+NAKED_EYE_RANGE_CAP_M: Final[float] = 5000.0
 
 #: A filter pass here is structurally weaker evidence than a real HelperAI
 #: detection (`association.CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6`) -- there

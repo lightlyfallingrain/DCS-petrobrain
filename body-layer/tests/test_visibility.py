@@ -76,23 +76,30 @@ def test_infantry_just_outside_medres_tier_range_is_not_visible() -> None:
     assert result is None
 
 
-def test_ural_truck_range_cap_binds_before_the_uncapped_tier_threshold() -> None:
-    # Ural truck: size 6 m, uncapped medres*4 threshold = 3000 m, but
-    # NAKED_EYE_RANGE_CAP_M = 2500 m binds first -- the plan's target
-    # behaviour ("truck ~3 km before the cap").
+def test_ural_truck_size_curve_binds_below_the_range_cap() -> None:
+    # Ural truck: size 6 m, medres*4 threshold = 3000 m, which is inside
+    # NAKED_EYE_RANGE_CAP_M (5000 m). The size curve does the discriminating
+    # here, not the cap -- that is the point of deriving the threshold from
+    # ED's angular-radius model, and it was NOT true while the cap was 2500 m
+    # (see that constant's comment).
     ownship = _ownship(heading_true_deg=0.0)
-    inside_cap = _candidate("Ural-4320", x=2400.0, z=0.0)
-    beyond_cap = _candidate("Ural-4320", x=2600.0, z=0.0)
+    inside = _candidate("Ural-4320", x=2900.0, z=0.0)
+    beyond = _candidate("Ural-4320", x=3100.0, z=0.0)
 
-    assert check_visibility(ownship, inside_cap, _FAKE_CONN, _THEATRE) is not None
+    assert check_visibility(ownship, inside, _FAKE_CONN, _THEATRE) is not None
+    assert check_visibility(ownship, beyond, _FAKE_CONN, _THEATRE) is None
+
+
+def test_range_cap_binds_only_for_objects_the_size_curve_would_let_run_away() -> None:
+    # A ship (size 100 m) computes a medres*4 threshold of 50 km, which is
+    # absurd -- NAKED_EYE_RANGE_CAP_M is the sanity bound that stops it. This
+    # is now the cap's only job.
+    ownship = _ownship(heading_true_deg=0.0)
+    at_cap = _candidate("MOLNIYA", x=NAKED_EYE_RANGE_CAP_M, z=0.0)
+    beyond_cap = _candidate("MOLNIYA", x=NAKED_EYE_RANGE_CAP_M + 100.0, z=0.0)
+
+    assert check_visibility(ownship, at_cap, _FAKE_CONN, _THEATRE) is not None
     assert check_visibility(ownship, beyond_cap, _FAKE_CONN, _THEATRE) is None
-
-
-def test_candidate_at_exactly_the_range_cap_is_visible() -> None:
-    ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Ural-4320", x=NAKED_EYE_RANGE_CAP_M, z=0.0)
-
-    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is not None
 
 
 def test_candidate_outside_fov_is_not_visible() -> None:
