@@ -23,6 +23,7 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from belief.association_over_time import implied_position, passes_gate
 from belief.decay import Certainty, certainty_of
@@ -30,6 +31,14 @@ from belief.events import Event, lifecycle_event_kind
 from belief.percept import Percept, percept_of
 from perception.geometry import GeoPosition
 from perception.source import Observation
+
+#: `Contact.attention`'s closed set -- Stage 4's "bare attention enum", per
+#: the plan: no policy, cooldown, or relevance scoring lives here (that is
+#: BL-4). `belief.console`'s `watch`/`unwatch` commands are the only mutator
+#: (via `belief.tools.watch_contact`/`unwatch_contact`); nothing in Stage 0-3
+#: sets this field, so it stays `"normal"` for every contact until Stage 4's
+#: console marks one.
+Attention = Literal["normal", "watch"]
 
 #: `ContactStore`-minted contact id prefix. Distinct in shape from the
 #: per-source `Observation.id` prefixes (`perception.source.
@@ -82,6 +91,8 @@ class Contact:
     last_seen_sim: float = 0.0
     sighting_spans: list[SightingSpan] = field(default_factory=list)
     last_emitted_certainty: Certainty | None = None
+    attention: Attention = "normal"
+    attention_source: str | None = None
 
     def record(self, percept: Percept) -> None:
         """Fold `percept` into this contact's last-known state. Called only
