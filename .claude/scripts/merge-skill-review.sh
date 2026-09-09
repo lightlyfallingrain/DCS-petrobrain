@@ -3,7 +3,7 @@
 # agent-memory (populated by the SubagentStop skill-gap detector), injects
 # context so the model presents them to the user for review.
 #
-PROJECT_DIR="/Users/sg/Code/DCS-petrobrain"
+PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
 STDIN=$(cat)
 CMD=$(echo "$STDIN" | jq -r '.tool_input.command // ""')

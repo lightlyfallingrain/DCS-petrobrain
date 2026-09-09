@@ -13,7 +13,6 @@ Runs every mechanical DoD check — quality gates, code violation scans, file si
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-cd /Users/sg/Code/DCS-petrobrain
 
 FEATURE="${1:-}"
 SUBPROJECT="${2:-}"

@@ -6,7 +6,7 @@ type: user-invocable
 
 Usage: `/check [world-model|aircraft-layer|body-layer]`
 
-Run in `/Users/sg/Code/DCS-petrobrain`. If a subproject arg is given, check only that one.
+Run from the repo root. If a subproject arg is given, check only that one.
 Otherwise auto-detect from `git status --porcelain` which of `world-model/`, `aircraft-layer/`,
 `body-layer/` have modified/untracked files and check each detected one; if none are touched,
 default to `world-model` (preserves prior single-subproject behavior).

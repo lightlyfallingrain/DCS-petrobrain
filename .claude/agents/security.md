@@ -210,7 +210,7 @@ Never silently accept a risk. Always surface it and let the user decide.
 
 ## Persistent Agent Memory
 
-You have a persistent, file-based memory system at `/Users/sg/Code/DCS-petrobrain/.claude/agent-memory/security/`. This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
+You have a persistent, file-based memory system at `.claude/agent-memory/security/` (relative to the repo root). This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
 Save memories about:
 - Recurring vulnerability patterns found in this codebase

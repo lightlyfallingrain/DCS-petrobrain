@@ -107,7 +107,7 @@ After writing the file, summarize it inline for the user.
 
 ## Persistent Agent Memory
 
-You have a persistent, file-based memory system at `/Users/sg/Code/DCS-petrobrain/.claude/agent-memory/implementer/`. This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
+You have a persistent, file-based memory system at `.claude/agent-memory/implementer/` (relative to the repo root). This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
 **This path is always repo-root-relative, never subproject-relative — even when your cwd or the
 task's code is scoped to `world-model/`, `aircraft-layer/`, or `body-layer/`.** Writing to e.g.

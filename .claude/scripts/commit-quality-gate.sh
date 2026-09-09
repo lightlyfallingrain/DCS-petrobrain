@@ -4,7 +4,7 @@
 # format/lint/type/test commands (per its own CLAUDE.md "Commands" section), not just
 # world-model's. Blocks the commit with combined output on any failure.
 set -uo pipefail
-cd /Users/sg/Code/DCS-petrobrain
+cd $CLAUDE_PROJECT_DIR
 
 STAGED=$(git diff --cached --name-only)
 FAIL=0
