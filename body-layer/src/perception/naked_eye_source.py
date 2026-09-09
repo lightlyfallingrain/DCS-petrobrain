@@ -339,6 +339,12 @@ class NakedEyePerceptionSource:
                 method=_DERIVED_POSITION_METHOD,
             ),
             provenance=PROVENANCE_VISIBILITY_FILTER_ONLY,
+            # Class level (2), unchanged behaviour for this stage --
+            # `plans/classification-refinement/plan.md` Stage 6 is where
+            # this channel starts varying by achieved visibility tier
+            # (reaching type level at `hires` range); Stage 2 declares the
+            # level explicitly without changing what's emitted.
+            classification_level=2,
         )
 
 

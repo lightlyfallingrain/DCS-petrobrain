@@ -8,6 +8,7 @@ import pathlib
 
 from belief import contacts as contacts_module
 from belief import percept as percept_module
+from belief.classification import SpecificityLevel
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.events import CONTACT_DETECTED, CONTACT_LOST, CONTACT_REACQUIRED
@@ -32,6 +33,7 @@ def _observation(
     range_m: float = 1000.0,
     source: str = SOURCE_PETROVICH_DETECTION_ASSOCIATED,
     ownship: OwnshipState | None = None,
+    classification_level: int = 2,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -47,6 +49,7 @@ def _observation(
             x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
         ),
         provenance="test_fixture",
+        classification_level=classification_level,
     )
 
 
@@ -101,6 +104,25 @@ def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     assert len(store.contacts) == 3
     newest = store.contacts[-1]
     assert newest.contributing_observation_ids == ["OBS_C"]
+
+
+def test_founding_percept_seeds_classification_at_its_own_level() -> None:
+    """`Contact.from_percept` must seed `classification` from the founding
+    percept's own `classification_level`, not a hardcoded default -- a
+    type-level founding observation must found the contact at type level."""
+    store = ContactStore()
+    obs = _observation(
+        obs_id="OBS_1",
+        t_sim=0.0,
+        classification_raw="T-72",
+        classification_level=3,
+    )
+
+    store.ingest([obs], now_sim=0.0)
+
+    contact = store.contacts[0]
+    assert contact.classification.level == SpecificityLevel.TYPE
+    assert contact.classification.value == "T-72"
 
 
 def test_ingest_logs_observations_append_only() -> None:

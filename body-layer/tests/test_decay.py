@@ -4,6 +4,7 @@ plan's acceptance criteria ("each `certainty` row is pinned by a test")."""
 
 from __future__ import annotations
 
+from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.decay import (
     LOST_THRESHOLD_S,
@@ -19,6 +20,11 @@ def _contact(last_seen_sim: float) -> Contact:
         id="CONTACT_1",
         last_position=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
         last_class_raw="OP_TRUCK",
+        classification=new_classification_belief(
+            value="OP_TRUCK",
+            level=SpecificityLevel.CLASS,
+            established_sim=last_seen_sim,
+        ),
         first_seen_sim=last_seen_sim,
         last_seen_sim=last_seen_sim,
     )
