@@ -97,3 +97,117 @@ test_hybrid_source.py's new tests) were spot-checked for the specific acceptance
 names (SA-3 two-observation case, ambiguous-merge case, structural no-truth-field test), not read
 line-by-line in full — low risk, since the underlying implementation was already read directly
 and the test counts were independently confirmed via pytest.
+
+---
+
+## Review: Stage 2 (Decay, certainty, lifecycle)
+
+Branch: `feature/pb2-contact-memory`. Reviewed against `plans/pb2-contact-memory/plan.md`'s
+"Stage 2 — Decay, certainty, lifecycle" section and `plans/pb2-contact-memory/implementation.md`'s
+Stage 2 entry. Stages -1, 0, 1 already reviewed/approved above and not re-reviewed here.
+
+### Review Summary
+
+**§3.4 claim verified.** Read `docs/concept/PETROBRAIN_RUNTIME.md` directly. There is no numbered
+"§3.4" section anywhere in the doc and no concrete certainty enum/threshold table. The only
+relevant content is the unnumbered `## Uncertainty and memory decay` heading (lines 440–469),
+which names exactly four attributes with relative decay speeds (identity slow, exact position
+fast, general area medium/slow, last movement direction medium) and exactly four example
+wordings ("I see him." / "I think he was..." / "Last saw him..." / "I lost him."), with no named
+levels or numbers. The implementer's claim is accurate, not a rationalization for skipping work.
+The derived four-level ladder (`observed`/`tracked`/`estimated`/`lost`) maps onto the four
+wordings in the obvious 1:1 order and is documented as a placeholder in `decay.py`'s module
+docstring and per-constant comments — this is a reasonable, well-flagged interpretation, not a
+drift from intent. No required fix here.
+
+**Code read directly, not just tests:**
+
+- `certainty_of` (`body-layer/src/belief/decay.py:97-109`) is genuinely pure — takes
+  `(contact, now_sim)`, computes `elapsed_s = max(0.0, now_sim - contact.last_seen_sim)`, reads
+  only `contact.last_seen_sim`, writes nothing, imports nothing time-related. Ladder is top-down
+  first-match-wins as required (`observed` ≤5s, `tracked` ≤30s, `estimated` ≤120s, else `lost`).
+  Negative elapsed time clamps to 0 (`observed`), tested explicitly.
+- `lifecycle_event_kind` (`body-layer/src/belief/events.py:51-79`) is a pure 3-branch comparison
+  over `(previous_certainty, current_certainty)` with no `Contact`/`ContactStore` access. Verified
+  the "skip two ticks" case by construction, not just by reading the docstring: because
+  `certainty_of` is computed fresh from `now_sim - last_seen_sim` every call (not from
+  `last_emitted_certainty`'s tick time), a contact that goes straight from `observed` to `lost`
+  without an intervening tick still gets `was_lost=False, is_lost=True` → `CONTACT_LOST` correctly
+  emitted, once. `contacts.py:210-225`'s `tick()` confirms this — it always calls `certainty_of`
+  against real elapsed time, never against "time since last tick." The `None → lost` special case
+  (no synthetic detected+lost pair) is a deliberate, documented design call, consistent with "no
+  event that misrepresents what was actually perceived."
+- **Determinism test** (`test_contacts.py:198-211`,
+  `test_identical_replay_twice_produces_byte_identical_events`) does exercise real sim-time-driven
+  logic — `_replay_detected_lost_reacquired` drives `ingest`/`tick` through a detected → (decay to)
+  lost → reacquired sequence using explicit `now_sim` values, and the assertion is
+  `store_a.events == store_b.events` (dataclass equality, so field-for-field: id, contact_id,
+  kind, t_sim, certainty all compared), not just `len(...) ==`. Confirmed `decay.py`/`events.py`/
+  `contacts.py` contain no `time.time()`/`datetime`/`perf_counter` calls (grepped directly) — if
+  wall-clock time leaked in anywhere, event ids/kinds are still deterministic (minted from a
+  counter, and t_sim is an explicit argument), but `certainty` values would become sensitive to
+  real inter-call latency and could plausibly diverge near a boundary across two sequential
+  replay calls in the same test process. The test would catch that class of regression, not just
+  confirm something trivially deterministic by construction.
+- **Boundary coverage** (`test_decay.py`, 9 tests): each of the three thresholds
+  (`OBSERVED_WINDOW_S`, `POSITION_HALF_LIFE_S`, `LOST_THRESHOLD_S`) has its own at-boundary and
+  just-past-boundary test, plus zero-elapsed, far-past-lost, and negative-elapsed cases. One test
+  per edge, not one broad test — matches the plan's "each `certainty` row is pinned by a test."
+  `test_events.py` (6 tests) covers every `lifecycle_event_kind` branch including same-level
+  no-ops and all three sub-level combinations while alive.
+- **Identity invariant.** Grepped `decay.py`/`events.py` myself for `derived_world_position` and
+  `object_id` — no hits in either file. The Stage 1 structural grep test in `test_contacts.py`
+  (`test_belief_source_never_references_derived_world_position`) globs all of `belief/*.py`, so it
+  already covers these two new files without modification.
+- **Six half-life constants**: `OBSERVED_WINDOW_S`, `POSITION_HALF_LIFE_S`, `LOST_THRESHOLD_S` are
+  read by `certainty_of`; `MOTION_HALF_LIFE_S`, `GENERAL_AREA_HALF_LIFE_S`, `IDENTITY_HALF_LIFE_S`
+  are declared `Final[float]` module-level constants with comments explicitly stating "not yet
+  consumed" and which future milestone (BL-3/BL-4) will consume them. `ruff check` passes clean —
+  module-level `Final` constants aren't flagged as unused by ruff/mypy the way a local variable
+  would be, and there's no dead code path referencing them; they read as a documented, intentional
+  placeholder table, not leftover debug scaffolding.
+- **No scope creep**: grepped `src/` for `emit_mode`, and confirmed no `tools.py`/`console.py`
+  exist under `belief/` (directory listing: `__init__.py`, `association_over_time.py`,
+  `contacts.py`, `decay.py`, `events.py`, `percept.py`). `percept.py` and
+  `association_over_time.py` untouched this stage, consistent with implementation.md's claim.
+
+Ran checks myself rather than trusting the log: `ruff format --check src tests`,
+`ruff check src tests`, `cd body-layer && mypy src` (18 files) all pass clean;
+`pytest body-layer/tests -q` → **151 passed**, matching the claimed count exactly
+(134 + 9 + 6 + 2). `git status` confirms a clean working tree; `git log` shows the two claimed
+commits (`e00e505` decay/events + tests, `2626c6c` contacts.py wiring + integration tests) plus
+the two doc-log commits on top, all on this branch.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- **`Contact.last_emitted_certainty` documentation vs. mutation surface**: the field is documented
+  as "written only by `ContactStore.tick`," which is true of production code paths, but it's a
+  plain mutable dataclass field with no property/setter enforcement — nothing stops a future
+  caller (e.g. Stage 4's console/tools code) from setting it directly and silently breaking the
+  invariant `tick()` relies on. Not a Stage 2 defect (Stage 1 already established this pattern for
+  `Contact`'s other fields via `record()`), but worth a note for whoever writes `tools.py` in
+  Stage 4 not to touch this field directly (optional).
+- **`OBSERVED_WINDOW_S = 5.0` is described as "close to one polling interval" but body-layer polls
+  at ~1 Hz** — a 5x margin above the stated poll rate. This is flagged and justified in the code
+  comment as accounting for "no direct signal for was this contact in the most recent poll's
+  batch," so it's a documented judgment call, not an oversight, and is explicitly a placeholder
+  per the plan's "tune against real sessions, do not argue now" instruction. No action needed now;
+  worth revisiting alongside the other placeholder constants when real session data exists
+  (optional).
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read — read `decay.py`, `events.py`, and the changed portions of `contacts.py` in full;
+read `docs/concept/PETROBRAIN_RUNTIME.md`'s relevant section directly rather than trusting the
+implementer's paraphrase; read `test_decay.py` and `test_events.py` in full (both are short and
+exhaustive); read the new `test_contacts.py` additions (replay helper, ordering test, determinism
+test, tick-mutation test) in full. Ran format/lint/type/test myself. Did not re-read Stage 0/1
+files already verified in the section above.
