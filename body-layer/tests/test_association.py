@@ -21,10 +21,9 @@ from perception.association import (
     AMBIGUOUS_ASSOCIATION_METHOD,
     CONFIDENT_ASSOCIATION_CONFIDENCE,
     CONFIDENT_ASSOCIATION_METHOD,
-    OWNSHIP_ECHO_EXCLUSION_RADIUS_M,
     WorldObjectCandidate,
     associate,
-    exclude_ownship,
+    filter_ownship,
 )
 from perception.source import OwnshipState
 
@@ -45,13 +44,26 @@ def _ownship(*, heading_true_deg: float = 0.0) -> OwnshipState:
 
 
 def _candidate(
-    object_id: int, object_type: str, *, x: float, z: float, alt_m: float = 500.0
+    object_id: int,
+    object_type: str,
+    *,
+    x: float,
+    z: float,
+    alt_m: float = 500.0,
+    is_ownship: bool | None = False,
 ) -> WorldObjectCandidate:
     # alt_m defaults to ownship's own altitude (see _ownship) so range_m's
     # slant-range altitude component is zero and tests can assert exact
-    # ground-distance values without doing trigonometry by hand.
+    # ground-distance values without doing trigonometry by hand. is_ownship
+    # defaults to False -- these fixtures represent real, distinct objects
+    # unless a test says otherwise.
     return WorldObjectCandidate(
-        object_id=object_id, object_type=object_type, x=x, z=z, alt_m=alt_m
+        object_id=object_id,
+        object_type=object_type,
+        x=x,
+        z=z,
+        alt_m=alt_m,
+        is_ownship=is_ownship,
     )
 
 
@@ -183,39 +195,54 @@ def test_world_object_candidate_from_dict_converts_lat_lon_via_coordinates(
     assert candidate.x == 1234.0
     assert candidate.z == 5678.0
     assert candidate.alt_m == 120.0
+    assert candidate.is_ownship is None  # key absent from the source dict
 
 
-def test_exclude_ownship_drops_a_candidate_essentially_co_located_with_ownship() -> (
-    None
-):
-    # Reproduces the PB-1.5 live-sortie bug: LoGetWorldObjects is unfiltered
-    # ground truth and includes the player's own aircraft (see
-    # exclude_ownship's docstring). A candidate a few metres from ownship --
-    # well within the exclusion radius, the kind of residual you'd expect
-    # between two independent DCS-reported positions for the same aircraft
-    # -- must be dropped as the ownship echo, not treated as a real contact.
-    ownship = _ownship()
-    self_echo = _candidate(999, "Mi-24P", x=3.0, z=-2.0)
-
-    assert exclude_ownship([self_echo], ownship) == []
-
-
-def test_exclude_ownship_keeps_a_candidate_outside_the_radius() -> None:
-    ownship = _ownship()
-    far_candidate = _candidate(
-        1, "Ural-4320", x=OWNSHIP_ECHO_EXCLUSION_RADIUS_M + 1.0, z=0.0
+def test_world_object_candidate_from_dict_reads_is_ownship_flag() -> None:
+    candidate = WorldObjectCandidate.from_dict(
+        {
+            "object_id": 1,
+            "object_type": "Mi-24P",
+            "lat_deg": 35.1,
+            "lon_deg": 35.9,
+            "altitude_m": 120.0,
+            "is_ownship": True,
+        },
+        theatre="Syria",
     )
 
-    assert exclude_ownship([far_candidate], ownship) == [far_candidate]
+    assert candidate.is_ownship is True
 
 
-def test_exclude_ownship_drops_a_candidate_exactly_at_the_radius_boundary() -> None:
-    # exclude_ownship keeps only strictly-greater-than-radius candidates
-    # (range_m > OWNSHIP_ECHO_EXCLUSION_RADIUS_M), so a candidate exactly at
-    # the radius is still treated as the ownship echo and dropped.
-    ownship = _ownship()
-    boundary_candidate = _candidate(
-        1, "Ural-4320", x=OWNSHIP_ECHO_EXCLUSION_RADIUS_M, z=0.0
-    )
+def test_filter_ownship_drops_a_candidate_flagged_true() -> None:
+    # Replaces the old proximity-radius ownship exclusion: the aircraft-layer
+    # now identifies ownship directly via LoGetPlayerPlaneId() (see
+    # filter_ownship's docstring), so the flag alone decides, regardless of
+    # the candidate's actual position.
+    self_echo = _candidate(999, "Mi-24P", x=3.0, z=-2.0, is_ownship=True)
 
-    assert exclude_ownship([boundary_candidate], ownship) == []
+    assert filter_ownship([self_echo]) == []
+
+
+def test_filter_ownship_keeps_a_candidate_flagged_false() -> None:
+    far_candidate = _candidate(1, "Ural-4320", x=5000.0, z=0.0, is_ownship=False)
+
+    assert filter_ownship([far_candidate]) == [far_candidate]
+
+
+def test_filter_ownship_keeps_a_candidate_with_unknown_ownship_status() -> None:
+    # is_ownship=None means LoGetPlayerPlaneId() failed that poll -- must be
+    # kept, not treated as either confirmed ownship or confirmed not-ownship
+    # (see WorldObjectCandidate.is_ownship's docstring).
+    unknown_candidate = _candidate(1, "Ural-4320", x=10.0, z=0.0, is_ownship=None)
+
+    assert filter_ownship([unknown_candidate]) == [unknown_candidate]
+
+
+def test_filter_ownship_keeps_a_candidate_even_when_co_located_with_ownship() -> None:
+    # Proximity alone no longer matters -- a real object a few metres from
+    # ownship (troop insertion/close formation) must survive as long as it
+    # isn't flagged is_ownship=True.
+    close_but_real = _candidate(2, "Ural-4320", x=3.0, z=-2.0, is_ownship=False)
+
+    assert filter_ownship([close_but_real]) == [close_but_real]

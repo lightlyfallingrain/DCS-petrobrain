@@ -18,13 +18,12 @@ refers to, and how confidently. Picking the wrong nearby object among
 several similar ones is an association error, not an omniscience leak.
 
 That describes `associate()`, which remains the module's subject. It is no
-longer true of the module as a whole: `exclude_ownship()` below *is* an
+longer true of the module as a whole: `filter_ownship()` below *is* an
 unconditional pre-filter, called by both `HybridPerceptionSource` and
 `NakedEyePerceptionSource` before any channel-specific logic. It lives here
 rather than in `geometry.py` -- the more obvious home for something every
-tier shares -- because `WorldObjectCandidate` is defined in this module and
-this module already imports from `geometry.py`, so moving it there would be
-circular. Placement is deliberate, not expedient.
+tier shares -- because `WorldObjectCandidate` is defined in this module.
+Placement is deliberate, not expedient.
 
 Algorithm (plan's "Association design" section, unchanged here):
 1. Candidate pool = every `WorldObjectCandidate` passed in, no coalition/IFF
@@ -74,24 +73,6 @@ FORWARD_HEMISPHERE_HALF_WIDTH_DEG: Final[float] = 90.0
 #: is treated as the unambiguous winner.
 TYPE_MATCH_TIE_MARGIN: Final[int] = 0
 
-#: Any candidate within this distance of ownship's own position is treated
-#: as the player's own aircraft appearing in its own `LoGetWorldObjects`
-#: table, not a distinct object -- `LoGetWorldObjects` is confirmed global,
-#: unfiltered ground truth with no own-aircraft exclusion (see
-#: `aircraft-layer/src/schema/world_objects.py`'s module docstring, and the
-#: forum thread it cites confirming multiplayer returns "data from all
-#: devices"). Without this, ownship shows up as a phantom near-zero-range
-#: contact (see `plans/pb1.5-naked-eye-detection/debug.md` for the live-
-#: sortie symptom this fixes -- pinned-minimum range bucket, meaningless
-#: jittery bearing from a near-zero baseline vector, and the unclassified
-#: `OP_GROUPSOMETHING` fallback since aircraft types match no keyword).
-#: `50.0` m is chosen well above the Mi-24P's own physical extent (~17 m
-#: fuselage/rotor span) and any plausible per-tick position residual between
-#: `LoGetSelfData` (ownship telemetry) and `LoGetWorldObjects`'s own-aircraft
-#: entry, and well below both channels' real range caps (2500-5000 m) so it
-#: cannot plausibly suppress a real target.
-OWNSHIP_ECHO_EXCLUSION_RADIUS_M: Final[float] = 50.0
-
 CONFIDENT_ASSOCIATION_CONFIDENCE: Final[float] = 0.6
 CONFIDENT_ASSOCIATION_METHOD: Final[str] = "bearing_range_terrain"
 
@@ -113,6 +94,14 @@ class WorldObjectCandidate:
     x: float
     z: float
     alt_m: float
+    #: `None` when the aircraft-layer poll that produced this candidate
+    #: couldn't determine ownship identity that tick (`LoGetPlayerPlaneId()`
+    #: failed) -- see `WorldObjectSample.is_ownship`'s docstring
+    #: (`aircraft-layer/src/schema/world_objects.py`) for the tri-state
+    #: contract. `filter_ownship()` below only drops candidates where this
+    #: is `True`; `None` is kept rather than silently coerced to "not
+    #: ownship" or "is ownship" either way.
+    is_ownship: bool | None
 
     @staticmethod
     def from_dict(data: dict[str, Any], *, theatre: str) -> WorldObjectCandidate:
@@ -124,12 +113,14 @@ class WorldObjectCandidate:
         `associate()` function below so that function stays fixture-testable
         with plain `WorldObjectCandidate` instances."""
         x, z = wgs84_to_dcs(theatre, float(data["lat_deg"]), float(data["lon_deg"]))
+        is_ownship_raw = data.get("is_ownship")
         return WorldObjectCandidate(
             object_id=int(data["object_id"]),
             object_type=str(data["object_type"]),
             x=x,
             z=z,
             alt_m=float(data["altitude_m"]),
+            is_ownship=None if is_ownship_raw is None else bool(is_ownship_raw),
         )
 
 
@@ -147,24 +138,22 @@ class AssociationResult:
     ambiguous: bool
 
 
-def exclude_ownship(
-    candidates: Sequence[WorldObjectCandidate], ownship: OwnshipState
+def filter_ownship(
+    candidates: Sequence[WorldObjectCandidate],
 ) -> list[WorldObjectCandidate]:
-    """Drop any candidate within `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` of
-    ownship's own position -- see that constant's docstring for why this is
-    necessary. Both `HybridPerceptionSource` and `NakedEyePerceptionSource`
-    call this on their raw `WorldObjectCandidate` list before running their
-    own filtering, since both build that list from the same unfiltered
-    `LoGetWorldObjects` snapshot."""
-    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
-    return [
-        candidate
-        for candidate in candidates
-        if range_m(
-            observer, GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
-        )
-        > OWNSHIP_ECHO_EXCLUSION_RADIUS_M
-    ]
+    """Drop any candidate whose `is_ownship` is `True` -- the aircraft-layer
+    flag set from `LoGetPlayerPlaneId()` (see `WorldObjectCandidate.is_ownship`'s
+    docstring), replacing an earlier 50 m proximity-radius heuristic that had
+    a false-negative window for any genuine object within 50 m of ownship
+    (troop insertion/extraction, close formation, hovering directly over a
+    target -- `todo/todo.md` backlog item). Only `True` is dropped: `None`
+    (ownship identity undetermined that poll) and `False` are both kept, per
+    the same "don't fabricate a fact you don't have" reasoning as the flag's
+    own tri-state contract. Both `HybridPerceptionSource` and
+    `NakedEyePerceptionSource` call this on their raw `WorldObjectCandidate`
+    list before running their own filtering, since both build that list from
+    the same unfiltered `LoGetWorldObjects` snapshot."""
+    return [candidate for candidate in candidates if candidate.is_ownship is not True]
 
 
 def associate(

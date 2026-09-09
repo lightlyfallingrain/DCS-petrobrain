@@ -40,7 +40,12 @@ def _ownship() -> OwnshipState:
 
 
 def _world_object(
-    object_id: int, object_type: str, *, lat_deg: float, lon_deg: float
+    object_id: int,
+    object_type: str,
+    *,
+    lat_deg: float,
+    lon_deg: float,
+    is_ownship: bool | None = False,
 ) -> dict[str, Any]:
     return {
         "object_id": object_id,
@@ -50,6 +55,7 @@ def _world_object(
         "lon_deg": lon_deg,
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
+        "is_ownship": is_ownship,
     }
 
 
@@ -95,13 +101,15 @@ def test_no_world_objects_snapshot_returns_empty() -> None:
 
 def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
     # Reproduces the PB-1.5 live-sortie bug: LoGetWorldObjects is unfiltered
-    # ground truth and includes the player's own aircraft, a few metres from
-    # ownship's own telemetry position (identity-mapped lat/lon here mirrors
-    # the small residual seen live). Before the exclude_ownship fix this
-    # produced a phantom OP_GROUPSOMETHING contact pinned at the smallest
-    # range bucket with a meaningless (near-zero-baseline) bearing.
+    # ground truth and includes the player's own aircraft, identified here
+    # by the aircraft-layer's is_ownship flag rather than proximity. Before
+    # the original fix this produced a phantom OP_GROUPSOMETHING contact
+    # pinned at the smallest range bucket with a meaningless (near-zero-
+    # baseline) bearing.
     world_objects = {
-        "objects": [_world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0)]
+        "objects": [
+            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0, is_ownship=True)
+        ]
     }
     source, _client = _source(world_objects)
 
@@ -111,7 +119,9 @@ def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
 def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
     world_objects = {
         "objects": [
-            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0),  # ownship echo
+            _world_object(
+                999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0, is_ownship=True
+            ),  # ownship echo
             _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),  # real target
         ]
     }

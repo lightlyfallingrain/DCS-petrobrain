@@ -48,7 +48,7 @@ def _candidate(
     object_type: str, *, x: float, z: float, alt_m: float = 500.0
 ) -> WorldObjectCandidate:
     return WorldObjectCandidate(
-        object_id=1, object_type=object_type, x=x, z=z, alt_m=alt_m
+        object_id=1, object_type=object_type, x=x, z=z, alt_m=alt_m, is_ownship=False
     )
 
 

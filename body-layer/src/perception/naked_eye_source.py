@@ -15,10 +15,12 @@ Each `poll()`:
    `/petrovich_indication/latest` (unlike `HybridPerceptionSource`, this
    channel has no real detection-existence signal to gate on at all; see
    `visibility.py`'s module docstring and the plan's Invariant Check). Runs
-   the raw candidate list through `association.exclude_ownship()` before
+   the raw candidate list through `association.filter_ownship()` before
    anything else -- `LoGetWorldObjects` is unfiltered ground truth and
-   includes the player's own aircraft (see that function's docstring; a bug
-   found via a live sortie, `plans/pb1.5-naked-eye-detection/debug.md`).
+   includes the player's own aircraft, identified by the aircraft-layer's
+   `is_ownship` flag (see that function's docstring; the flag replaced an
+   earlier proximity heuristic found necessary via a live sortie,
+   `plans/pb1.5-naked-eye-detection/debug.md`).
 2. Runs every candidate through `visibility.check_visibility()`.
 3. **Quantises the surviving geometry to ED's ambient-callout vocabulary**
    (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
@@ -80,7 +82,7 @@ from typing import Final
 
 from aircraft_client import AircraftLayerClient
 from perception import object_model
-from perception.association import WorldObjectCandidate, exclude_ownship
+from perception.association import WorldObjectCandidate, filter_ownship
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
@@ -188,12 +190,11 @@ class NakedEyePerceptionSource:
             self._previously_visible_ids = frozenset()
             return []
 
-        candidates = exclude_ownship(
+        candidates = filter_ownship(
             [
                 WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
                 for obj in world_objects.get("objects", [])
-            ],
-            ownship_state,
+            ]
         )
 
         visible: list[tuple[WorldObjectCandidate, VisibilityResult]] = []
