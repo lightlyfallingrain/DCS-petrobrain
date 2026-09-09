@@ -1,9 +1,11 @@
 """Tests for `logger.PerceptionLogger`/`format_observation_line`.
 
-Uses a fake `AircraftLayerClient`-shaped object and a fake `PerceptionSource`
--- no concrete tier exists yet (deferred to `plans/pb1-perception-logger/
-plan.md` stage 4), so this is exactly the "stage 4+ just plugs a concrete
-source in" scenario the plan calls for.
+Uses fake `AircraftLayerClient`-shaped objects and fake `PerceptionSource`s
+-- concrete tiers exist now (`HybridPerceptionSource`,
+`NakedEyePerceptionSource`), but `PerceptionLogger` itself is written
+entirely against the `PerceptionSource` protocol and doesn't need a real one
+to demonstrate its own poll/format/print logic, or (PB-1.5) that it polls
+and concatenates more than one source correctly.
 """
 
 from __future__ import annotations
@@ -42,13 +44,15 @@ class FakeSource:
         return self._observations
 
 
-def _make_observation(ownship: OwnshipState) -> Observation:
+def _make_observation(
+    ownship: OwnshipState, *, id: str = "OBS_1", source: str = "proxy_heuristic"
+) -> Observation:
     return Observation(
-        id="OBS_1",
+        id=id,
         contact_id=None,
         t_sim=ownship.t_sim,
         t_wall=0.0,
-        source="proxy_heuristic",
+        source=source,
         classification_raw="BMP",
         bearing_deg=32.0,
         range_m=3100.0,
@@ -66,6 +70,7 @@ def test_format_observation_line_includes_all_pb1_fields() -> None:
 
     assert "t_sim=200.00" in line
     assert "aircraft=(5000.0, 8000.0, 350.0)" in line
+    assert "source=proxy_heuristic" in line
     assert "classification=BMP" in line
     assert "bearing_deg=32.0" in line
     assert "range_m=3100" in line
@@ -74,7 +79,7 @@ def test_format_observation_line_includes_all_pb1_fields() -> None:
 def test_run_once_returns_empty_when_no_telemetry_yet() -> None:
     logger = PerceptionLogger(
         aircraft_client=FakeAircraftClient(None),  # type: ignore[arg-type]
-        source=FakeSource([]),
+        sources=[FakeSource([])],
     )
 
     assert logger.run_once() == []
@@ -87,7 +92,7 @@ def test_run_once_formats_and_returns_lines_for_each_observation() -> None:
 
     logger = PerceptionLogger(
         aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        source=FakeSource(observations),
+        sources=[FakeSource(observations)],
     )
 
     lines = logger.run_once()
@@ -104,10 +109,38 @@ def test_run_once_prints_to_configured_output() -> None:
 
     logger = PerceptionLogger(
         aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
-        source=FakeSource(observations),
+        sources=[FakeSource(observations)],
         output=output,
     )
 
     logger.run_once()
 
     assert "classification=BMP" in output.getvalue()
+
+
+def test_run_once_polls_every_source_and_concatenates_observations() -> None:
+    # PB-1.5: PerceptionLogger.sources is a plain list, polled and
+    # concatenated in order -- no CompositePerceptionSource abstraction
+    # (plans/pb1.5-naked-eye-detection/plan.md's Affected Modules section).
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    hybrid_observation = _make_observation(
+        ownship, id="OBS_hybrid", source="petrovich_detection_associated"
+    )
+    naked_eye_observation = _make_observation(
+        ownship, id="OBS_naked_eye", source="naked_eye_visual_filtered"
+    )
+
+    logger = PerceptionLogger(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[
+            FakeSource([hybrid_observation]),
+            FakeSource([naked_eye_observation]),
+        ],
+    )
+
+    lines = logger.run_once()
+
+    assert len(lines) == 2
+    assert "source=petrovich_detection_associated" in lines[0]
+    assert "source=naked_eye_visual_filtered" in lines[1]
