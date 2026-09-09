@@ -15,33 +15,20 @@ merge). Plan committed as `5cf8969`. **No implementation code written yet.**
 | Implementer | **Not started — deliberately stopped here by the user** |
 | Reviewer / DoD | Not started |
 
-**The user stopped the Auto-Advance chain after the Architect.** Do not start implementing on
-resume without checking in — and in particular, **four decisions are escalated and unanswered**
-(below). Decision 1 changes what the milestone's headline behaviour looks like, and Stage 2
-onwards depends on it.
+**Resolved 2026-09-09 — all four decisions answered.** `plan.md` updated in place to match
+(design section, worked tables, Stage 6 wording, Decisions section). Implementer proceeding on
+Stages 1–4 per Auto-Advance.
 
-## The four escalated decisions — UNANSWERED as of 2026-09-09
+## The four decisions — resolved 2026-09-09
 
-Full text in `plan.md`, "Decisions Requiring User Input". In short:
+Full text/rationale now in `plan.md`'s "Decisions" section (rewritten from "Requiring User Input"
+to record the resolution). In short:
 
-1. **Cap the naked-eye channel at coarse class, or let it reach a specific type at close range?**
-   Plan of record caps it — the investigator established ED's own ambient vocabulary has *no*
-   per-model fragments, so coarse class is ED's answer to "what can a crew member see without the
-   sight." Under the cap, `something → tank → T-72` still lands in full, but `T-72` arrives from
-   the **scope**, not from closure. **This is the load-bearing one** — it decides what the user
-   actually sees in the cockpit. Architect recommends: cap.
-2. **Move the naked-eye gating tier `medres` → `lowres` (Stage 7)?** A *separate axis* from
-   grading. Grading alone cannot produce a `something` stage — that needs the detection gate
-   extended outward, so Petrovich also notices **more**, further away. That is the opposite
-   direction from "make him worse," which is why it needs an explicit yes. Architect recommends:
-   yes.
-3. **`NAKED_EYE_RANGE_CAP_M = 5000`** — accept that it binds the presence tier and flattens the
-   size curve for everything truck-sized and up, or raise it (to what)? Already open from PB-1.5;
-   BL-2.6 is where it starts to matter.
-4. **Should classification *level* ever decay, not just confidence?** Plan says no — confidence
-   decays, level is sticky. The user's own framing ("Petrovich forgetting that he identified
-   something is arguably correct") points the other way. One-constant change; cheaply revisitable
-   after Stage 8 rather than blocking Stage 1.
+1. **Naked-eye reaches type at close range (`hires` → level 3 via `reporting_name_for`), not
+   capped at class.** Departs from the architect's cap recommendation.
+2. **Gating tier moves `medres` → `lowres` (Stage 7).** Accepted, per architect recommendation.
+3. **`NAKED_EYE_RANGE_CAP_M = 5000`.** Accepted as-is; deferred to post-Stage-8 tuning.
+4. **Classification level stays sticky; only confidence decays.** Accepted, per plan of record.
 
 Also flagged: Stage 7 will **rewrite rather than extend** the tier-threshold assertions in
 `test_visibility.py` / `test_naked_eye_source.py`, since those constants are the thing being

@@ -79,32 +79,34 @@ it is already grounded in ED's constants rather than invented, and a second inde
 would create a second calibration surface that can disagree with the first — producing a contact
 that is detected but incoherently classified. One curve, one place to tune.
 
-**The naked-eye channel tops out at level 2 (class). Level 3 (type) is reached only through the
-scope channel.** This follows the investigator's Q2 finding (below): ED's own ambient-callout
-fragment bank contains **no per-model vocabulary at all** — the composed callout is architecturally
-capped at coarse class. Mirroring that ceiling is both the grounded choice and, on reflection, the
-better story: you learn a specific type by *looking through the sight*, not by squinting harder.
-It also keeps the two channels genuinely differentiated, which is what makes the refinement event
-mean something. See Decision 1 — the alternative (let naked-eye reach type at very close range) is
-a one-constant change, but it is a deliberate departure from the only grounded model available.
+**Decision 1 resolved by the user (2026-09-09): naked-eye reaches level 3 (type) at close range,
+not just level 2.** This departs from the architect's recommendation (cap at class), which rested
+on the investigator's Q2 finding that ED's own ambient-callout fragment bank has no per-model
+vocabulary at all. The user's call is explicit: closure alone should be able to complete
+`something → tank → T-72`, not only `something → tank`. Consequence: the `hires` tier promotes to
+level 3 using `reporting_name_for(object_type)` for its value — ground truth, exactly as the scope
+channel already does, so the existing "Petrovich can never mis-identify, only fail to identify"
+caveat (Risks) applies here too, not only to the scope channel. This narrows what actually
+differentiates the two channels (both can now reach type on their own), but the scope channel is
+still the only path that reaches type *without* closing to `hires` range, which stays a genuine
+distinction — the user's framing was about *what's reachable*, not about making channels identical.
 
-So the three tiers map to **two levels plus a confidence gradient**, for a target of characteristic
-size `S` at range `R` (`M` = 4.0):
+So the three tiers map to **three levels plus a confidence gradient**, for a target of
+characteristic size `S` at range `R` (`M` = 4.0):
 
 | condition | level | emitted value | confidence |
 |---|---|---|---|
 | `R > S/lowres * M` (or > range cap) | — | not detected; no observation at all | — |
 | `S/medres * M < R ≤ S/lowres * M` | 1 presence | `PRESENCE_CLASS` | low |
 | `S/hires * M < R ≤ S/medres * M` | 2 class | `profile_for(t).op_class` (today's behaviour) | medium |
-| `R ≤ S/hires * M` | 2 class | same value | **high** |
+| `R ≤ S/hires * M` | 3 type | `reporting_name_for(object_type)` | **high** |
 
-The `hires` tier is not discarded — it separates "that's armour" from "that's *definitely* armour"
-via `classification.confidence`, which §3.4's `certainty` derivation table already consumes. Every
-tier stays load-bearing without inventing a rung ED does not have.
+The `hires` tier is not just a confidence bump anymore — it is the naked-eye channel's own path to
+level 3. Every tier stays load-bearing without inventing a rung ED does not have.
 
 Worked, with the current constants (`NAKED_EYE_RANGE_CAP_M = 5000`):
 
-| object | size | class, high-conf ≤ | class ≤ | presence ≤ | capped at |
+| object | size | type ≤ | class ≤ | presence ≤ | capped at |
 |---|---|---|---|---|---|
 | infantry | 1.8 m | 360 m | 900 m | 1674 m | — |
 | Ural truck | 6 m | 1200 m | 3000 m | 5581 m | **5000 m** |
@@ -112,17 +114,19 @@ Worked, with the current constants (`NAKED_EYE_RANGE_CAP_M = 5000`):
 | SA-3 launcher | 9 m | 1800 m | 4500 m | 8372 m | **5000 m** |
 
 This is the visible behaviour change and it is the point: today a T-72 reads `OP_ARMORED` at 3.5 km
-exactly as at 200 m; after this it is `OP_ARMORED` between 1.4 and 3.5 km, `OP_ARMORED` *held
-confidently* inside 1.4 km, and merely "something" beyond — out to a detection range roughly 1.9x
-today's.
+exactly as at 200 m; after this it is `T-72` inside 1.4 km, `OP_ARMORED` between 1.4 and 3.5 km, and
+merely "something" beyond — out to a detection range roughly 1.9x today's.
 
 **Channel is the other axis.** The scope/HelperAI channel emits Petrovich's own indication text
 verbatim, which is type-specific by construction (real committed samples: `Ural truck`,
 `SA-3 launcher`, `SA-3 Low Blow radar`, `Slava cruiser`, `Tarantul III corvette`, `Civilian bus`).
-Scope observations are therefore **level 3 by channel**, not by parsing the string. This is what
-makes `OP_ARMORED → T-72` a genuine refinement rather than a vocabulary swap, and it is the whole
-of the user's `something → tank → T-72` sequence: `something` and `tank` from closure on the
-naked-eye channel, `T-72` from the scope.
+Scope observations are therefore **level 3 by channel**, not by parsing the string — no range gate
+at all, since the scope always carries type text regardless of how far the target is. The naked-eye
+channel now also reaches level 3, but only at `hires` range; beyond that it holds at class or
+presence. So the user's `something → tank → T-72` sequence can complete two ways: entirely on the
+naked-eye channel by closing to `hires` range, or via `something`/`tank` from closure followed by
+`T-72` from the scope at any range. Both are genuine refinements, not vocabulary swaps, because the
+level ordering is what the fusion rule keys on, not which channel produced the claim.
 
 **Dwell and aspect are deliberately out of v1.** Dwell has no ED grounding and would be a second
 independent input; aspect and contrast/fog have no available inputs at all (a gap PB-1.5 already
@@ -323,10 +327,11 @@ never share a commit** — the BL-2.5 lesson (a bundled cosmetic change made the
    calibration."
 6. **Range-graded specificity in the naked-eye channel — mechanism.** `visibility.py` computes the
    *achieved* tier instead of returning the constant `"medres"`; `naked_eye_source.py` maps it to
-   `(level, confidence)` and emits accordingly. **Gating tier stays `medres` in this commit**, so
-   the only new behaviour is that close targets now carry a higher classification confidence.
-   Still no new detections and no presence tier — the presence tier is unreachable until the gate
-   moves, which is deliberately the next, separately revertible commit.
+   `(level, value, confidence)` — `hires` now emits `reporting_name_for(object_type)` at level 3,
+   per Decision 1. **Gating tier stays `medres` in this commit**, so the only new behaviour is that
+   close targets (already inside `medres`) now sometimes resolve to a specific type instead of a
+   confidence bump. Still no presence tier — that is unreachable until the gate moves, which is
+   deliberately the next, separately revertible commit.
 7. **Calibration — move the gating tier `medres` → `lowres` (its own commit).** One constant, its
    documented consequences, and the retuned threshold tests. This is the anti-omniscience change:
    Petrovich now notices things further out and says less about them. Revertible in one line.
@@ -434,35 +439,21 @@ which is why Stage 10's doc edit is not optional.
 
 ---
 
-### Decisions Requiring User Input
+### Decisions — resolved by the user, 2026-09-09
 
-1. **Should the naked-eye channel be capped at coarse class, or reach a specific type at very close
-   range?** The plan of record caps it at class, because the investigator established that ED's own
-   ambient vocabulary has no per-model fragments at all — coarse class is ED's answer to "what can a
-   crew member perceive without the sight." Under that cap, the user's `something → tank → T-72`
-   sequence still lands in full, but `T-72` arrives from the **scope**, not from closure. The
-   alternative — let `hires` promote to level 3 using `reporting_name_for(object_type)` — is a
-   one-constant change and makes closure alone sufficient, at the cost of departing from the only
-   grounded model we have and blurring the two channels' distinct roles. **Recommendation: cap at
-   class.** Flagged because it changes what the milestone's headline transition looks like in the
-   cockpit, which is the user's call, not mine.
-2. **Move the naked-eye gating tier from `medres` to `lowres` (Stage 7)?** This is the crux, and it
-   is a *separate axis* from grading specificity. Grading alone (Stages 1–6) makes Petrovich worse
-   at range within his current detection envelope, but it cannot produce a `something` stage —
-   reaching "something" requires extending the detection gate outward, which means he also notices
-   **more** things, further away, than he does today. **Recommendation: yes, move it** — the user
-   explicitly named `something → tank → T-72`, and a `lowres` detection paired with a
-   `presence`-level claim is honest in a way today's `medres`-gate-with-a-class-label is not. But
-   the "notices more" half deserves an explicit yes, because it is the opposite direction from
-   "make him worse."
-3. **`NAKED_EYE_RANGE_CAP_M`** — leave at 5000 m and accept that the presence tier is cap-bound and
-   size-flat for anything truck-sized or larger, or raise it (to what?) so the size curve
-   discriminates at that tier too? PB-1.5 left this as "raise it, we'll fine-tune later," so it is
-   already open; BL-2.6 is where it starts to matter.
-4. **Should classification level ever fall with time, not only on contradiction?** The plan says no
-   (confidence decays, level is sticky), on the grounds that a crew member becomes less sure rather
-   than reverting to "something," and that a decaying level reintroduces oscillation on a slow
-   clock. The user's own framing — "Petrovich forgetting that he identified something is arguably
-   correct" — points the other way. If the answer is "it should decay," it is a one-constant change
-   (an expiry on `established_sim`), so this can be revisited cheaply after Stage 8 rather than
-   blocking Stage 1.
+All four answered before implementation start; the design sections above already reflect them.
+Recorded here for the record.
+
+1. **Naked-eye caps at class, or reaches type at close range? → Reaches type.** Departs from the
+   architect's cap recommendation. `hires` now promotes to level 3 via
+   `reporting_name_for(object_type)` — see the design section above and Stage 6. Consequence
+   carried through: "Petrovich can never mis-identify, only fail to identify" (Risks) now applies
+   to the naked-eye channel's `hires` tier too, not only to the scope channel.
+2. **Move the naked-eye gating tier `medres` → `lowres` (Stage 7)? → Yes**, per the architect's
+   recommendation. Petrovich's detection envelope widens ~1.86x (~3.5x area) so the presence tier
+   becomes reachable; watch contact volume at Stage 8 per the Risks section.
+3. **`NAKED_EYE_RANGE_CAP_M = 5000`? → Accept, defer.** Left as-is; revisit after Stage 8's live
+   tuning data if the flattened size curve at the cap proves to matter in practice.
+4. **Should classification level decay, not just confidence? → No, level stays sticky**, per the
+   plan of record and the architect's recommendation. Confidence decay via `IDENTITY_HALF_LIFE_S`
+   is the only decay mechanism for classification.
