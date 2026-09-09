@@ -52,3 +52,20 @@ is otherwise search-summary-sourced, not a primary Hoggit page read (couldn't fi
 Licensing note for Architect: DCS-ExportScripts is
 LGPL-3.0, reusable, but recommended reimplementing its ~15-line list_indication-parsing pattern directly rather
 than adopting the whole framework, consistent with this project's stdlib-only/"deliberately dumb" Export.lua policy.
+
+**Session 6 (2026-09-09, live DCS install access, BL-2.6 recon) — general pattern confirmed: every
+`HelperAI.lua` tuning constant is config-only, never read by any Lua consumer.** Grepped
+`min_angular_radius`, `min_angular_radius_for_group`, `scan_rad_around_point`, `min_contrast_f`,
+`min_fog_transparency`, `extra_eyesight_ratio`, `slowpoke_*` (4 constants), `safety_switch_time`,
+`usr_time`, `scho_time`, `pn_time`, `shoot_in_time`, `atgm_range_114/120` individually across the
+entire Mi-24P Lua tree — each is referenced **only** at its own definition line in `HelperAI.lua`.
+Also `strings`-swept `Mi24.dll`/`CockpitMi24.dll` plus 4 core engine DLLs (`edCore.dll`,
+`World.dll`, `WorldGeneral.dll`, `Terrain.dll`) for the `min_angular_radius` tier keys
+(`lowres`/`medres`/`hires`/`iff`) — zero matches anywhere. **Conclusion for future sessions: any
+constant defined in `HelperAI.lua` should be assumed native-consumed-only and NOT expect to find a
+Lua call site confirming its semantics — don't re-run this grep pattern per-constant, the result
+generalizes.** Full detail + the same session's `OP_*` fragment-bank enumeration (coarse-class-only,
+confirmed exhaustive — no per-model vocabulary, no singular "unidentified" fragment distinct from
+`OP_GROUPSOMETHING`) and the `list_indication`-range-coarsening question (no evidence either way,
+structural argument only) are in
+`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md` Session 6.

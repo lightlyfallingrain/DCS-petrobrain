@@ -637,3 +637,188 @@ is packed in `Sounds.edce`, 120 MB, which was not opened):
 3. **It sharpens the project's own motivation.** A text-only callout is precisely the "disconnected
    game system" this project exists to replace with crew-like behaviour, and it means no audio
    channel needs to be intercepted or talked over.
+
+---
+
+## Session 6 (2026-09-09, DCS machine, direct install access) — BL-2.6 classification-refinement recon
+
+**Trigger:** Architect planning BL-2.6 (classification refinement, gradient specificity by
+observation quality) needs to know whether the `min_angular_radius` tier table and the ambient
+fragment bank actually say anything about *what* each tier of recognition gates, and whether
+`list_indication`'s specific-name text ever degrades with range. Four questions, answered below.
+This session ran with live read access to `$DCS_INSTALL_PATH` (`/mnt/f/Games/DCS World`,
+`2.9.29.27278`, unchanged from Session 5) — no sync round-trip needed.
+
+### Q1 — Tier semantics: is `lowres`/`medres`/`hires`/`iff` mapping to detection-existence vs.
+classification-content documented anywhere, or pure inference?
+
+**Clean negative — evidence: documented absence (reproduced-locally).** `min_angular_radius`
+(and its sibling `min_angular_radius_for_group`) is defined exactly once, in
+`HelperAI.lua` lines 34-40, and referenced **nowhere else** in the entire Mi-24P Lua tree —
+confirmed by `grep -rn 'min_angular_radius'` across
+`Mods/aircraft/Mi-24P` (only the definition site matches) and across all of
+`Mods/aircraft` and `CoreMods` (still only the one file). `HelperAI_page_common.lua`,
+`HelperAI_indicator.lua`, and `HelperAI_page.lua` — the files that build the visible
+`list_indication` tree — were re-checked directly this session and contain no reference to it
+either.
+
+A `strings -a -n 5` sweep for the literal tier-key strings `lowres`, `medres`, `hires`, `iff`, and
+for `min_angular_radius`/`angular_radius`, across `Mi24.dll`, `CockpitMi24.dll` (both in
+`Mods/aircraft/Mi-24P/bin/`), and four plausible shared-engine DLLs in the main DCS `bin/`
+(`edCore.dll`, `World.dll`, `WorldGeneral.dll`, `Terrain.dll`) returned **zero matches** across
+all six binaries — **source:** this session's `strings` output. So there is no readable
+string/symbol anywhere in the shipped files (Lua or binary) that names what each tier gates —
+Session 5's reading ("`lowres` = existence, `medres`/`hires` = classification tiers, `iff` =
+friend/foe") remains **inference from the key names and conventional simulation vocabulary**
+(a low→high "resolution" ladder is a standard way to name a detectability curve), not something
+any shipped file states. This is a genuine, verified negative, not an unread gap.
+
+**Caveat on the negative:** a `strings` scan can miss a tier-key comparison implemented via a
+hashed/interned string ID rather than a literal `lua_getfield(L, -1, "lowres")` call — absence of
+the literal string rules out the simplest form of native consumption, not every possible one. No
+stronger method (disassembly) was attempted; that would be a large escalation in effort for a
+question Architect can likely route around (see Possible Approaches).
+
+### Q2 — Complete `OP_*` ground-class enum; singular "something" fragment; specific-type vocabulary
+
+**Reproduced-locally — full 70-fragment enumeration**, re-read directly from
+`HelperAI_lengths_ng.lua` on the install this session (byte-identical to the Session 5 copy in
+`win-mac-sync/from-windows/`). Ground-class fragments (the complete set, verbatim):
+
+`OP_ARMORED`, `OP_TRUCK`, `OP_TRUCKS`, `OP_INFANTRY`, `OP_SRSAM`, `OP_MRSAM`, `OP_LRSAM`,
+`OP_SPAAG`, `OP_ZU23`, `OP_GROUPSOMETHING`, `OP_SHIPS`, `OP_SHIP`.
+
+(Air-class fragments, for completeness: `OP_HELI(S)`, `OP_COMBATHELI(S)`, `OP_TRANSPORTHELI(S)`,
+`OP_UNMANNED`, `OP_PROPPLANE(S)`, `OP_JET(S)`.)
+
+**No singular "something/unidentified" fragment exists distinct from `OP_GROUPSOMETHING`.** The
+full 131-line `filenames` table (lines 21-125) was searched exhaustively for any variant of
+"something"/"unknown"/"unidentified" — `Op_GroupSomething` (→ `OP_GROUPSOMETHING`) is the **only**
+such entry. There is no `Op_Something` singular counterpart.
+
+**`OP_GROUPSOMETHING` semantics — inferred, not confirmed.** Every other class fragment follows a
+"bare class name, separately pluralized where needed" pattern (`Op_Truck`/`Op_Trucks`,
+`Op_Ship`/`Op_Ships`, `Op_Heli`/`Op_Helis`, …) and relies on the independent formation modifiers
+`OP_SINGLE`/`OP_GROUP` to express count-shape. `OP_GROUPSOMETHING` is the one class fragment that
+bakes "GROUP" directly into its own name rather than fitting that pattern — which is suggestive
+that it's used as a generic catch-all regardless of the `OP_SINGLE`/`OP_GROUP` modifier (i.e.
+"unidentified," full stop, not specifically "a group of unidentified things"), but **this is
+inference from naming asymmetry alone** — the native composition logic that actually decides when
+to emit this fragment is not in any Lua file, so it cannot be confirmed either way. — **evidence:
+inferred.**
+
+**No specific-unit-type vocabulary exists in this bank at all.** Every ground- and air-class
+fragment above is a coarse category; there is no per-model fragment (no "T-72", no "Ural", no
+"SA-3" specifically — only the SAM-*range-tier* classes `OP_SRSAM`/`OP_MRSAM`/`OP_LRSAM`). This
+confirms DCS's own composed ambient callout tops out at coarse class — it cannot, by construction,
+say more than "armored," "truck(s)," "SAM (short/medium/long)," etc. — **evidence:
+reproduced-locally** (exhaustive read of the fragment bank, cross-referenced against the separate
+`reporting_names` table below, which is where all the specific names live instead).
+
+### Q3 — Does `list_indication`'s specific-name text itself coarsen with range?
+
+**No evidence found that it does; not conclusively ruled out either — a mixed-strength answer.**
+
+- **Structural (reproduced-locally, negative):** `HelperAI_page_common.lua`,
+  `HelperAI_indicator.lua`, `HelperAI_page.lua` contain **zero** distance/range-conditional logic
+  anywhere near the `*_list_text` controllers — re-confirmed this session (`grep -n -iE
+  'dist|range'` on all three returns nothing). `HelperAI_sound.lua`'s only range-related strings
+  (`c_range_neg`, `c_range_closer`, `in_range`) are ATGM weapon-envelope audio cues, unrelated to
+  the classification-list text.
+- **The name source itself has no range dimension (reproduced-locally):** `list_indication`'s
+  specific names are drawn from `reporting_names` (`HelperAI_reporting_names.lua`, 376 entries,
+  re-read in full this session) — a flat `unit_type_string -> "pAi:Display Name"` dictionary with
+  **no conditional logic, no distance parameter, and no consumer anywhere else in the Lua tree**
+  (the only other file matching a `reporting_names` grep is `HelperAI.lua`'s `dofile(...)` load
+  line, not an access). Structurally, a pure key→value lookup by type has nothing to vary with
+  range even if the native caller wanted it to — the range-degradation, if it exists at all, would
+  have to be an entirely separate/parallel decision made natively before the lookup, not a
+  property of this table.
+- **Live-log evidence is present but not a designed test (inferred/consistent, not
+  reproduced-locally):** today's production log (`aircraft_layer_debug.log`, 5
+  `list_indication(HELPERAI_DEVICE_ID)` dumps) had an **empty** list at every dump (no target
+  selected all session) — contributes nothing. The 2026-09-08 spike log's 76 populated samples
+  (Session 5 Finding 6) show four distinct target clusters, and **every cluster carries one
+  specific name throughout its own span** ("Ural truck", "Slava cruiser" + "Tarantul III
+  corvette", "SA-3 launcher" + "SA-3 Low Blow radar") — never a generic/coarse name where a
+  specific one would be expected. This is consistent with "always full specificity," but it is
+  **not** a same-target-at-multiple-ranges comparison (no target ID or range was correlated across
+  separated time windows in that data), so it cannot fully rule out range-based degradation on its
+  own.
+
+**Net:** best available answer is "no — text is always the full reporting name once a target is
+in the list, with no mechanism found (Lua-side) that could vary it by range," but this rests on a
+structural absence-of-logic argument plus a non-adversarial live sample, not a controlled test.
+See Possible Approaches for the specific probe that would close this.
+
+### Q4 — Dwell/accumulation: does recognition accumulate with observation time?
+
+**Clean negative, same pattern as Q1 — evidence: reproduced-locally (exhaustive grep, zero
+consumers).** Every timer/tuning constant `HelperAI.lua` defines —
+`slowpoke_search_radius`, `slowpoke_max_time`, `slowpoke_ratio`, `slowpoke_diagonal_ratio`,
+`safety_switch_time`, `usr_time`, `scho_time`, `pn_time`, `shoot_in_time`, `atgm_range_114`,
+`atgm_range_120`, `scan_rad_around_point`, `min_contrast_f`, `min_fog_transparency`,
+`extra_eyesight_ratio`, `device_timer_dt` — was grepped individually across the entire Mi-24P
+Lua tree this session. None is referenced anywhere outside its own definition line in
+`HelperAI.lua` (`device_timer_dt` also appears, unrelatedly, as a locally-scoped variable name in
+~20 unrelated cockpit-instrument files — not the same symbol). No Lua-visible dwell timer,
+progressive-identification state, or per-target confidence accumulator exists anywhere in this
+tree; if one exists at all, it is entirely native and unverifiable from local sources.
+
+Two naming-only groupings, both **evidence: inferred** (naming/position, zero corroborating
+logic):
+- `safety_switch_time` / `usr_time` / `scho_time` / `pn_time` / `shoot_in_time` sit immediately
+  beside `atgm_range_114` / `atgm_range_120` in the file and read as an ATGM launch-sequence /
+  guidance-mode timer group (Shturm/Ataka missile flight profile — `pn` plausibly "proportional
+  navigation"), not a detection-dwell group.
+- `slowpoke_ratio` / `slowpoke_max_time` / `slowpoke_diagonal_ratio` / `slowpoke_search_radius`
+  form a distinct cluster whose names suggest a "slow-moving/hard-to-reacquire target" search-loop
+  heuristic (Petrovich's own scan-pattern behavior), not a per-target recognition-confidence
+  accumulator.
+
+The only detection-related model surfaced by *any* investigation to date — Q1's
+`min_angular_radius` table — is framed as a pure geometric/instantaneous threshold (angular size
+of the target vs. a per-tier cutoff), with no time term anywhere in its definition. Taken
+together, the shipped files are consistent with a per-frame, not time-integrated, detection
+criterion, but this is an absence-based inference, not a documented mechanism.
+
+### Possible Approaches (BL-2.6 design implications)
+
+1. **Do not build BL-2.6's tier semantics on the `lowres`/`medres`/`hires`/`iff` labels as if ED
+   had confirmed their meaning.** Treat the interpretation as a *design choice PB-1.5/BL-2.6
+   borrows from ED's naming convention*, not a verified fact. State this explicitly in the BL-2.6
+   plan so a future reader doesn't re-promote it to "documented."
+2. **For Q2, the practical design conclusion is solid regardless of the Q1 gap:** DCS's own
+   ambient/naked-eye model — both the fragment vocabulary (coarse class only) and the
+   `min_angular_radius` geometric curve — caps at coarse-class specificity with no dwell
+   component found. BL-2.6's specificity ladder can safely mirror that shape (coarse class only at
+   long/naked-eye range, specific reporting name only once scope-selected) without needing the
+   tier-to-behavior mapping resolved, since the *scope* channel (which already carries specific
+   names via `reporting_names`) is a separate, already-integrated data source
+   (`petrovich_indication`) from the *ambient* channel this table would gate.
+3. **For Q3, if BL-2.6's design depends on knowing for certain whether `list_indication` text ever
+   degrades with range, run one controlled live probe**: track a single ground unit while closing
+   distance (or opening it) under active scope selection, logging `list_indication(6)` alongside
+   `/telemetry/latest` (ownship) and `/world_objects/latest` (target position) each sample, and
+   check whether the returned name ever changes for that one unit as range crosses any threshold.
+   Given the structural evidence above (flat dictionary, no range parameter, no conditional logic
+   anywhere near the text controllers), this probe is a confirmation step, not expected to
+   overturn the finding — low priority unless BL-2.6 specifically needs the "reproduced-locally"
+   strength rather than the current structural argument.
+4. **For Q4, since no accumulation mechanism was found, BL-2.6 is free to design its own dwell/
+   time-weighted confidence model without contradicting anything DCS itself does** — there's
+   nothing here to imitate or diverge from; this is a genuinely open design surface for Architect,
+   not one where "match ED's model" is available as an anchor (unlike Q2, where ED's coarse-class
+   ceiling gives a concrete target to mirror or deliberately exceed).
+
+### Unresolved (Session 6)
+
+- Whether the `min_angular_radius` tier keys are consumed via a hashed/non-literal string
+  comparison in native code (Q1's caveat) — would require disassembly, not attempted.
+- Q3's live-log evidence is not a designed same-target/multiple-ranges test; the controlled probe
+  in Possible Approaches #3 is the only way to fully close this rather than rely on the structural
+  argument.
+- Whether `OP_GROUPSOMETHING`'s naming asymmetry (Q2) actually reflects "generic catch-all" vs.
+  "specifically a group" in the native composition logic — unverifiable without disassembly or a
+  live probe that forces an unidentified-target ambient callout and reads the exact fragment
+  sequence used.
