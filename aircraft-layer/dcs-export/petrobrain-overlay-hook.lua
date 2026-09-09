@@ -147,8 +147,10 @@ local MAX_CONTENT_HEIGHT_PX = 380
 
 --: Screen position. Grounded in DCS's own real placement, not a guess:
 --: `Scripts/UI/gameMessages.dlg`'s `autoScrollTextRadio` message box sits
---: at (29, 59) inside a Window anchored to the screen's top-left corner
---: (`layout.data.anchorInfos[1]`, top/left both `type="min", offset=0`).
+--: at (29, 59) inside a Window whose bounds are anchored with
+--: `layout.data.anchorInfos[1]` = top/bottom `type="min"`, left/right
+--: `type="max"` (all offset 0). Only the (29, 59) is load-bearing here --
+--: WINDOW_X/Y below are hardcoded, not derived from that anchor data.
 --: This window's own MessageText widget is inset (PADDING, PADDING) from
 --: the window corner, so WINDOW_X/Y are chosen so MessageText's own
 --: top-left lands at approximately (30, 60) -- matching DCS's real
@@ -207,9 +209,10 @@ local petrobrainOverlay = {}
 -- whether AutoScrollText degrades by internally scrolling (matching its
 -- name) or by pixel-clipping the newest/oldest line in that case; not
 -- resolvable by static recon (native rendering code, same limitation as
--- Session 2's Finding 14/18). Wrapped in its own pcall by both call sites
--- so a failure here degrades to "stale box size for this message," never a
--- crashed frame.
+-- Session 2's Finding 14/18). Error-contained at every call site -- wrapped
+-- in its own pcall in `listen`, and reached only under `pcall(
+-- log_sizing_probes)` in the diagnostic path -- so a failure here degrades
+-- to "stale box size for this message," never a crashed frame.
 local function apply_content_size()
     local natural_w, natural_h = message_text:calcSize()
     local content_h = natural_h

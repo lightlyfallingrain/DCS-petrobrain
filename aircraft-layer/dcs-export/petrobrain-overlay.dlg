@@ -36,9 +36,11 @@
 --         not from any panel. This file's `Box`/`Panel` child (the prior
 --         revision's opaque dark rectangle) is removed to match.
 --       * Screen position: `autoScrollTextRadio` sits at `(x=29, y=59)`
---         inside a `Window` whose own bounds are anchored to the top-left
---         corner of the screen (`layout.data.anchorInfos[1]` has `top`/
---         `left` both `type="min", offset=0`). This is DCS's own real
+--         inside a `Window` whose own bounds are anchored with
+--         `layout.data.anchorInfos[1]` = `top`/`bottom` `type="min"`,
+--         `left`/`right` `type="max"` (all offset 0). Only the (29, 59)
+--         is load-bearing here -- this file's position values are
+--         hardcoded, not derived from that anchor data. It is DCS's own real
 --         choice of where to put a message box, not a guess -- this file's
 --         outer window moves from the prior revision's arbitrary (20, 20)
 --         to (20, 50), so that `MessageText`'s own (10, 10) inset from the

@@ -35,3 +35,26 @@ are checkable from the shipped Lua source.
 
 See also [[project_pb2_belief_invariants]] for the general pattern of grepping real installed
 files rather than trusting a plan's claims about DCS internals at face value.
+
+**Follow-up (BL-2.5 restyle pass, 2026-09-09)**: this technique also catches citation drift, not
+just missing citations. Diffing the implementer's own quoted claim about `gameMessages.dlg`'s
+`layout.data.anchorInfos` ("top/left both `type=\"min\"`") against the real file found `left`/
+`right` are actually `type="max"` — a minor mis-transcription that didn't change any actual number
+(the position constants were hardcoded, not parsed from the anchor data) but would have gone
+unnoticed without re-reading the cited file directly rather than trusting the implementer's summary
+of it. Always re-read the cited source file yourself; don't just check that a citation exists.
+
+Also: two things only the *full post-change file* (not just the diff hunks) can establish —
+(1) call-graph nil-safety for a new helper function (trace every call site back to confirm the
+widgets/state it touches are always initialized first — here, `apply_content_size()`'s two call
+sites both post-date `window`/`message_text` assignment, confirmed by reading `onSimulationFrame`'s
+full guard structure, not visible from the hunk alone); (2) pcall/error-containment chains, since a
+function can be "protected" by an ancestor's `pcall` without wrapping itself. Read the whole file
+when a diff introduces a new function with error-handling claims in its own comment — verify the
+claim against the actual call sites, don't take the comment's word for it (here it was close, not
+wrong — one level looser than literally stated).
+
+Widget.lua's binding return order is worth confirming directly rather than assumed: `calcSize()`/
+`getSize()` return `(width, height)` and `setSize`/`setBounds`/`setPosition` are independent (no
+documented side effect from one on the other), which settles "does repeated resizing accumulate
+drift" — no, each call is an idempotent absolute set, not a relative adjustment.

@@ -15,7 +15,7 @@ user approval per `CLAUDE.md`.
 | 3 — body-layer wiring | Done, reviewed, fixture-tested |
 | 4 — live acceptance sortie | **Passed live 2026-09-09** — contact events render in-cockpit |
 | Reviewer | **Approved, no required fixes** (`review.md`) |
-| Refinement pass | **Done, unreviewed** (`f8cca80`, `499811b`, `cc4599e`) — see below |
+| Refinement pass | **Done, reviewed & approved** (`f8cca80`, `499811b`, `cc4599e`) — no required fixes; two Optional comment-accuracy nits applied on top — see below |
 | DoD | Not started; blocked on the confirmation sortie below |
 
 Commits: `7a336f0` (plan) → `9b8115b` (stage 1) → `e380126` (stage 2) → `482ce2a` (stage 3) →
@@ -86,7 +86,18 @@ UNVERIFIED, same discipline as the original stage 2.
 
 ## Next steps, in order
 
-1. Reviewer pass on the refinement work (`f8cca80`, `499811b`) — **not yet run**.
+1. ~~Reviewer pass on the refinement work~~ — **done 2026-09-09, approved, zero required
+   fixes** (`review.md`, section "Refinement pass review"). Two Optional findings were applied:
+   the `anchorInfos[1]` citation in `petrobrain-overlay-hook.lua`/`petrobrain-overlay.dlg`
+   claimed top/left `type="min"` when the real file has top/bottom `min`, left/right `max`
+   (position constants are hardcoded, so no behaviour change), and `apply_content_size`'s
+   pcall-containment comment was reworded (one call site is contained transitively, not
+   wrapped directly). Reviewer independently re-ran the gate: 67 aircraft-layer / 210
+   body-layer tests, ruff + mypy --strict clean, both subprojects. One Recommended, not
+   blocking: **no dismiss/hide affordance remains** — removing the title bar removed the close
+   button with it (matching DCS's own `gameMessages.dlg`, which also has none), and the window
+   is created at DCS startup regardless of whether `--overlay` is used, so a shown line cannot
+   be dismissed early, only waited out (20s expiry). Conscious-awareness item for the sortie.
 2. **User flies one short confirmation sortie** — chrome gone, contact ids on the lines, no clipped
    line. This is the only step that needs the user.
 3. DoD, then merge on user approval.
