@@ -15,7 +15,7 @@ user approval per `CLAUDE.md`.
 | 3 — body-layer wiring | Done, reviewed, fixture-tested |
 | 4 — live acceptance sortie | **Passed live 2026-09-09** — contact events render in-cockpit |
 | Reviewer | **Approved, no required fixes** (`review.md`) |
-| Refinement pass | **Done, reviewed & approved** (`f8cca80`, `499811b`, `cc4599e`) — no required fixes; two Optional comment-accuracy nits applied on top — see below |
+| Refinement pass | **Partly reverted 2026-09-09.** Contact id (`f8cca80`) kept. Restyle (`499811b`) **flown and rejected — reverted**, taking the clipped-line fix with it by user choice. See "Restyle reverted" below |
 | DoD | Not started; blocked on the confirmation sortie below |
 
 Commits: `7a336f0` (plan) → `9b8115b` (stage 1) → `e380126` (stage 2) → `482ce2a` (stage 3) →
@@ -84,6 +84,25 @@ corner of the screen, draggable" and a titled window) and `body-layer/CLAUDE.md`
 The DCS-side artifacts cannot be verified without a live DCS — mark changed visual behaviour
 UNVERIFIED, same discipline as the original stage 2.
 
+## Restyle reverted (2026-09-09)
+
+The confirmation sortie rejected the restyle. `499811b`'s four files
+(`petrobrain-overlay.dlg`, `petrobrain-overlay-hook.lua`, `aircraft-layer/CLAUDE.md`,
+`aircraft-layer/WORKFLOW.md`) are restored **byte-identically** to their pre-restyle
+(`f8cca80`) state — verified with `git diff f8cca80` over those paths, empty. The overlay is
+again the titled 420x200 opaque-panel window that passed stages 2 and 4.
+
+The user was asked before acting and chose the **whole-commit revert** over keeping the
+sizing fix, so `apply_content_size()` is gone too and **task 3 (clipped last line) is open
+again**. `833228c`'s comment nits went with it (they edited restyle-added lines). Nothing
+else was lost: only `833228c` had touched those four files since `499811b`, and the
+contact-id fix lives in a separate commit.
+
+Do not re-derive the restyle from `gameMessages.dlg` on a retry — the grounding was already
+verified correct against the real shipped file by the reviewer, so the failure was design
+judgement, not bad values. Get the user's specific objection first. `499811b` holds the work
+if it is ever wanted back.
+
 ## Next steps, in order
 
 1. ~~Reviewer pass on the refinement work~~ — **done 2026-09-09, approved, zero required
@@ -98,8 +117,10 @@ UNVERIFIED, same discipline as the original stage 2.
    button with it (matching DCS's own `gameMessages.dlg`, which also has none), and the window
    is created at DCS startup regardless of whether `--overlay` is used, so a shown line cannot
    be dismissed early, only waited out (20s expiry). Conscious-awareness item for the sortie.
-2. **User flies one short confirmation sortie** — chrome gone, contact ids on the lines, no clipped
-   line. This is the only step that needs the user.
+2. ~~User flies one short confirmation sortie~~ — **flown 2026-09-09. FAILED.** The restyled
+   overlay read worse in the cockpit than the original titled window. User instruction: revert
+   to the original dialog. Done — see "Restyle reverted" below. Contact ids on the lines
+   (task 2) survive; the clipped last line (task 3) is **open again**.
 3. DoD, then merge on user approval.
 4. Architect pass on **BL-2.6 — Classification refinement** (`todo/todo.md` Milestones), then
    Implementer → Reviewer → DoD per AGENTS.md Auto-Advance. Its full findings and the user's

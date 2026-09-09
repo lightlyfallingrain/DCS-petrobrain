@@ -308,3 +308,33 @@ legibility) and the entire Task 3 mechanism (`apply_content_size`'s live resize 
 whether `MIN_CONTENT_HEIGHT_PX`/`MAX_CONTENT_HEIGHT_PX` are well-chosen) — same discipline as
 Stage 2's original authorship, marked as such in the Lua file's own header, `WORKFLOW.md`, and
 `aircraft-layer/CLAUDE.md`.
+
+## Restyle reverted after the confirmation sortie (2026-09-09)
+
+The refinement pass's **restyle** was flown and **rejected by the user**: the chrome-free,
+fully-transparent overlay read *worse* in the cockpit than the original titled window it
+replaced. User instruction: revert to the original dialog.
+
+`499811b`'s four files (`petrobrain-overlay.dlg`, `petrobrain-overlay-hook.lua`,
+`aircraft-layer/CLAUDE.md`, `aircraft-layer/WORKFLOW.md`) were restored byte-identically to
+their pre-restyle (`f8cca80`) state. The overlay is again the version that passed stage 2/4
+live acceptance: titled "Petrobrain Overlay" window with a close button, opaque dark
+`Box`/`Panel`, fixed 420x200 at top-left `(20, 20)`, draggable.
+
+**What the revert also took with it, by the user's explicit choice** (asked before acting,
+both options presented): `apply_content_size()` — the dynamic `calcSize()`-driven sizing that
+fixed the clipped last line. It lived in the same commit as the restyle, and the user chose
+the whole-commit revert over a partial one. **So refinement task 3 (the window clips its last
+line at 420x200 — a line should be shown or not shown, never half-rendered) is OPEN again.**
+Also reverted: `833228c`'s two comment-accuracy nits, since they edited restyle-added lines.
+
+**What survives:** `f8cca80`'s contact-id fix — overlay lines still render
+`"<contact id>: <kind>, <summary>"`. Refinement task 2 stays done.
+
+*Why the restyle failed is not recorded here* — the user's verdict was "worse than the
+original dialog", without a per-value breakdown. Anyone reattempting this should get that
+detail first rather than re-deriving values from `gameMessages.dlg` again; the grounding was
+sound (the reviewer verified every value against the real shipped file), so the failure was
+one of design judgement — most likely that near-white text with a 1px shadow floating over
+pale desert terrain is simply less legible than the same text on an opaque panel, which is the
+one thing the opaque panel was doing. The restyle remains recoverable from `499811b`.

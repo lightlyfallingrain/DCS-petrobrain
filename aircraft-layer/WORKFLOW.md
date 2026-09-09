@@ -20,17 +20,12 @@ content, even empty) to turn on verbose logging to
 
 ## Deploy the overlay Hook script (Windows box, once per change)
 
-**UNVERIFIED against a live DCS session as of this revision** — the
-transport and mechanism (Hook-state window, loopback UDP, `addText`) passed
-live acceptance already (`plans/dcs-text-panel-output/plan.md` Stage 2 +
-Stage 4), but the *restyle* below (position, no title bar/close button, no
-opaque panel, dynamic height) is new since that acceptance run, per the
-2026-09-09 user decision recorded in the plan's "Output-target decision,
-revisited after live acceptance" — authored from DCS's own shipped
-`Scripts/UI/gameMessages.dlg` (the native radio/trigger message boxes) and
-`aircraft-layer/research/2026-09-09-dcs-text-panel-output-channel.md`, not
-yet run against a real DCS process. Copy both files to
-`Saved Games\DCS\Scripts\Hooks\`:
+**UNVERIFIED against a live DCS session** (`plans/dcs-text-panel-output/plan.md`
+Stage 2) — authored from `aircraft-layer/research/2026-09-09-dcs-text-panel-output-channel.md`
+and modeled directly on DCS-SRS's own installed, working overlay
+(`Mods\Services\DCS-SRS\Scripts\DCS-SRS-OverlayGameGUI.lua` +
+`Mods\Services\DCS-SRS\UI\DCS-SRS-Overlay.dlg`), but not run against a real DCS
+process. Copy both files to `Saved Games\DCS\Scripts\Hooks\`:
 
 - `aircraft-layer/dcs-export/petrobrain-overlay-hook.lua` ->
   `Saved Games\DCS\Scripts\Hooks\petrobrain-overlay.lua`
@@ -42,23 +37,14 @@ deployed copy in place. Unlike `Export.lua`, Hook scripts load once into the
 GUI Lua state at DCS **application** startup, not per-mission — restart DCS
 (not just the mission) after copying either file for a change to take effect.
 
-This opens a second window, styled to read like DCS's own native message
-feed rather than an application window — no title bar, no close button, no
-opaque background, near-white text with a 1px drop shadow for legibility
-over bright terrain, positioned near the top-left corner (offset to
-approximate the real screen position of DCS's own message box, per
-`gameMessages.dlg`) — showing the last few lines body-layer's `--overlay`
-mode pushes (each line now prefixed with its contact id, e.g.
-`CONTACT_3: CONTACT_DETECTED, ...`, so repeated/distinct contacts are
-distinguishable), expiring each line after 20s. Its height now tracks
-content automatically (bounded, not a fixed guessed pixel budget) so a full
-line is never clipped mid-height. Still draggable. It listens on loopback
-UDP port 7792 — distinct from Export.lua's own port (7790) and the LAN API
-port (7791) — fed by the collector's `POST /text/push` (see "Query from the
-Mac" below). If the window never appears, looks wrong, or `dcs.log` shows a
-Lua error tagged `PetrobrainOverlay`, that is exactly what the next live
-check is for; this deploy step alone does not confirm the script actually
-works.
+This opens a second window (420x200px by default, top-left corner of the
+screen, draggable) showing the last few lines body-layer's `--overlay` mode
+pushes, expiring each line after 20s. It listens on loopback UDP port 7792 —
+distinct from Export.lua's own port (7790) and the LAN API port (7791) — fed
+by the collector's `POST /text/push` (see "Query from the Mac" below). If the
+window never appears, or `dcs.log` shows a Lua error tagged
+`PetrobrainOverlay`, that is exactly what Stage 2's live check is for; this
+deploy step alone does not confirm the script actually works.
 
 ## Run the collector (Windows box)
 
