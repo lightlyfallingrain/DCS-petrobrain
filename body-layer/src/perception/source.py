@@ -17,21 +17,36 @@ tier can fill in without knowing about contact association, which is BL-1+
 work this plan does not build. `contact_id` is always `None` from a
 `PerceptionSource.poll()` call; association happens downstream, later.
 
-`source` is a plain `str`, not a closed `Literal`/enum: the two plans this
+`source` is a plain `str`, not a closed `Literal`/enum: the plans this
 package was built against enumerate different candidate values
 (`petrovich_detection`/`inferred`/`player_report` in `plans/body-layer/
 plan.md` §5, `proxy_heuristic` added in `plans/pb1-perception-logger/
-plan.md`'s Affected Modules section) and neither concrete tier exists yet to
-settle which values are actually needed -- closing the type now would either
-under-cover or bake in a guess. Revisit once a concrete `PerceptionSource`
-ships.
+plan.md`'s Affected Modules section) and, at the time this module was
+written, no concrete tier existed yet to settle which values were actually
+needed -- closing the type then would have either under-covered or baked in
+a guess. Two concrete tiers exist now (`hybrid_source.
+SOURCE_PETROVICH_DETECTION_ASSOCIATED`, defined in that module, and
+`SOURCE_NAKED_EYE_VISUAL_FILTERED` below), but a third source value still
+isn't enough of a settled set to justify closing the type -- revisit if a
+third tier ships.
+
+`SOURCE_NAKED_EYE_VISUAL_FILTERED` is documented here rather than in
+`naked_eye_source.py` (unlike `hybrid_source.py`'s own
+`SOURCE_PETROVICH_DETECTION_ASSOCIATED`) per
+`plans/pb1.5-naked-eye-detection/plan.md`'s Affected Modules section --
+`naked_eye_source.py` imports it from here.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
+
+#: `perception.naked_eye_source.NakedEyePerceptionSource`'s `Observation.
+#: source` value -- see module docstring for why this constant lives here
+#: rather than in that module.
+SOURCE_NAKED_EYE_VISUAL_FILTERED: Final[str] = "naked_eye_visual_filtered"
 
 
 @dataclass(frozen=True, slots=True)
