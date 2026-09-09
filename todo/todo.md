@@ -51,7 +51,48 @@ is a framing and priority shift, not a contract change. What it does raise is th
 scope channel's known defects — the user confirmed that channel stays, being needed for future
 acquire/lock/fire gameplay.
 
-PB-2 (BL-2: contact memory and data association over time) follows after this — PB-1's completion does not invalidate or change downstream assumptions for BL-2, but BL-2 should ideally consume both detection channels (scope + naked-eye) rather than being built against the scope-only channel and reworked later.
+**PB-2 / BL-2 (in progress — planned, not started, 2026-09-09).** Contact memory and data
+association over time. Branch `feature/pb2-contact-memory`; plan at
+`plans/pb2-contact-memory/plan.md` (Architect pass done, commits `bb9eeb4` + `46eb24c`).
+**No implementation has begun.**
+
+*Confirmed:* `PerceptionSource` needs no protocol change — BL-2 consumes both channels through the
+existing interface. But planning found three defects in already-merged PB-1/PB-1.5 code that BL-2
+would otherwise inherit, all verified against the source: `Observation.id` collides across channels
+(both mint `OBS_{n}` from their own counter); the source-level on-change debounce would starve a
+decaying belief layer (a statically visible tank emits once, then ages to "lost" while Petrovich
+stares at it); and `derived_world_position` carries exact DCS truth into records belief code reads.
+
+*Core design decision:* contact identity never consults `object_id` or any truth field — identity
+is geometric, from perceived attributes only. Not conservatism about the 2026-09-09 id-stability
+evidence: a passthrough of the DCS key would make Petrovich incapable of confusing two identical
+trucks, which is the omniscience CLAUDE.md forbids. Consequence: unstable ids would degrade the
+observation *rate*, never corrupt belief.
+
+*Staging:* **-1** aircraft-layer ownship flag (prerequisite, own branch) → **0** scope-channel
+repair → **1** belief core → **2** decay/certainty/lifecycle → **3** emission policy → **4**
+tools+console → **5** fusion validation → **6** live sortie (user-only). Stages 0–5 are
+fixture-testable.
+
+*User decisions on the plan's three escalations (2026-09-09), recorded in the plan:*
+1. Stage-0 scope-channel repair **is in scope**, with the emphasis note that the scope channel
+   matters for future target acquisition/firing — so for now it is repaired and *fixture*-validated
+   while BL-2's live acceptance rides on the naked-eye/binocular channel. Stage 6(a) is best-effort,
+   not a gate.
+2. Ownship: **flag it in the aircraft layer per the Backlog item, and do it first** (the plan had
+   recommended accept-as-caveat; user chose the stronger fix). BL-2 is the layer that turns the 50 m
+   window from a silent gap into a *wrong belief* — a contact goes "lost" exactly when the aircraft
+   is closest to it — so fixing it first means BL-2 is never built or tuned against that artefact.
+3. BL-2 **does** emit a minimal one-line `summary` per contact. Settles `plans/body-layer/plan.md`
+   §10 decision 4 for BL-2's scope.
+
+*Next action:* stage -1 on branch `feature/ownship-flag` (created off `main`, currently empty — no
+commits). Spec is the Backlog item below. Needs a live sortie leg to verify `LoGetPlayerPlaneId()`,
+since the flag's correctness cannot be established from fixtures.
+
+*Session note:* PB-1's completion does not invalidate or change downstream assumptions for BL-2, but
+BL-2 should consume both detection channels (scope + naked-eye) rather than being built against the
+scope-only channel and reworked later.
 
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
