@@ -45,3 +45,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [PB-2 Stage 4 tools/console](project_pb2_stage4_tools_console.md) — extra tool fns beyond the named four, grep-based derived_world_position test trap, mypy repeated-expression narrowing gotcha.
 - [PB-2 Stage 5 cross-channel fusion](project_pb2_stage5_cross_channel_fusion.md) — gate radius uses the new percept's own range-derived uncertainty; certainty_of is pure recency, not quality-weighted.
 - [BL-2.5 overlay Hook script](project_bl2_5_overlay_hook.md) — DCS ships a real JSON.lua in Hook state (don't hand-roll a decoder); module() unneeded if no bare globals; lupa syntax-checks Lua without DCS/root.
+- [BL-2.5 restyle follow-up](project_bl2_5_restyle_followup.md) — gameMessages.dlg grounds "look native" questions; prefer live calcSize()-driven sizing over a bigger guessed constant; reuse existing id-render convention.
