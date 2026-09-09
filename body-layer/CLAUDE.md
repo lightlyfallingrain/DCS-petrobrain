@@ -166,9 +166,14 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   over `tools.py`, owning no belief logic of its own; every command (`contacts`, `show <id>`,
   `history <id>`, `find <text>`, `watch <id>`/`unwatch <id>`, `stats`) dispatches 1:1 into a
   `tools.py` function. `format_event_for_overlay` (BL-2.5,
-  `plans/dcs-text-panel-output/plan.md`) — `"<kind>: <summary>"` for one
-  `belief.events.Event`, reusing `tools.describe_contact`'s existing
-  `summary` field rather than new belief-reading logic; consumed by
+  `plans/dcs-text-panel-output/plan.md`) — `"<contact id>: <kind>, <summary>"`
+  for one `belief.events.Event`, reusing `tools.describe_contact`'s existing
+  `summary` field rather than new belief-reading logic, and reusing the
+  `"<id>: ..."` convention `console.py`'s own `contacts`/`show <id>`
+  rendering already uses rather than inventing a second one; the leading id
+  is what lets the overlay tell six distinct contacts apart from repeated
+  events on one (a live-acceptance follow-up fix, 2026-09-09 — the original
+  `"<kind>: <summary>"` line carried no contact id at all). Consumed by
   `logger.ConsolePerceptionRunner`'s `--overlay` mirror, not by the console
   REPL itself.
 - `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
