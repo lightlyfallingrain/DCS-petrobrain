@@ -17,16 +17,21 @@ from perception.object_model import (
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-# Measured against this fixture (78/92, see
+# Measured against this fixture's "ground" bucket (97/97, see
 # test_coverage_floor_against_real_type_sample below) -- a floor a bit below
 # that so a future keyword edit has some room to shuffle individual matches
 # without failing, while still catching an actual regression (e.g. the
-# OP_SHIP or SA-3/6/8/9/13/15 fix in this commit being silently reverted or
-# broken). Not a claim about coverage of the full real DCS type catalogue --
-# see aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md
-# for that (measured separately against all 595 real types, not this curated
-# sample).
-_MIN_COVERAGE_FRACTION = 0.8
+# reporting-name table in this commit being silently reverted or broken).
+# Deliberately scoped to the "ground" bucket only, not a blended percentage
+# across every bucket in the fixture -- a blended number is exactly the
+# metric that hid this module's original ground-unit coverage gap (measured
+# ~21% against the full real catalogue) behind a healthier-looking overall
+# number, since aircraft/WWII/deliberately-out-of-scope types this module
+# never targets dominated the denominator. See
+# aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md's
+# Addendum for that history and the full-catalogue numbers (measured
+# separately, against all 595 real types, not this curated sample).
+_MIN_GROUND_COVERAGE_FRACTION = 0.9
 
 
 def test_unmatched_object_type_falls_back_to_default_profile() -> None:
@@ -141,22 +146,106 @@ def test_ship_keyword_matches_second_real_type_name() -> None:
     assert profile.op_class == "OP_SHIP"
 
 
+def test_reporting_name_resolution_classifies_an_irregular_raw_type() -> None:
+    # "CHAP_T90M" contains no raw-table keyword substring at all (no
+    # "t-90" -- the raw type name is irregular), which is exactly the
+    # coverage gap the reporting-name table closes: it resolves to
+    # Petrovich's reporting name "T-90M" (regular) and matches there.
+    profile = profile_for("CHAP_T90M")
+
+    assert profile.size_m == 7.0
+    assert profile.op_class == "OP_ARMORED"
+
+
+def test_reporting_name_resolution_matches_a_truck_named_reporting_name() -> None:
+    # "ATZ-5" itself contains no raw-table keyword ("ural" is not a raw
+    # substring of "ATZ-5"), but its reporting name is "Ural fuel truck".
+    profile = profile_for("ATZ-5")
+
+    assert profile.size_m == 6.0
+    assert profile.op_class == "OP_TRUCK"
+
+
+def test_raw_table_takes_precedence_over_reporting_name_table() -> None:
+    # "MOSCOW" already matches the raw table's "moscow" OP_SHIP keyword.
+    # Its reporting name ("Slava cruiser") would also match a hull-class
+    # word if the reporting-name table had one -- this asserts the raw
+    # table is tried first and wins, per profile_for's documented order.
+    profile = profile_for("MOSCOW")
+
+    assert profile.op_class == "OP_SHIP"
+
+
+def test_wwii_reporting_name_does_not_get_classified_by_a_modern_keyword() -> None:
+    # "Bedford_MWD" resolves (via the mapping) to reporting name "Old
+    # military truck" -- WWII, but it contains the same "truck" substring
+    # the modern-unit OP_TRUCK keyword uses. The WWII-prefix guard in
+    # profile_for must skip the whole reporting-name pass for this type, or
+    # this would wrongly return OP_TRUCK.
+    profile = profile_for("Bedford_MWD")
+
+    assert profile.op_class == DEFAULT_OP_CLASS
+
+
+def test_ss26_launcher_is_truck_not_sam() -> None:
+    # SS-26 (Iskander) is a surface-to-*surface* ballistic missile TEL, not
+    # a SAM -- classifying it OP_SRSAM/OP_MRSAM just because its reporting
+    # name ends in "launcher" would be the same domain-mismatch trap as the
+    # original OP_SHIP bug (see object_model.py's
+    # _REPORTING_NAME_KEYWORD_PROFILES docstring).
+    profile = profile_for("CHAP_9K720_HE")
+
+    assert profile.op_class == "OP_TRUCK"
+
+
+def test_unmapped_type_still_falls_back_to_raw_table_behaviour() -> None:
+    # Not in the reporting-name mapping at all -- must behave exactly as it
+    # did before that mapping existed (raw-table match, here none, so
+    # default).
+    profile = profile_for("SomeFutureDCSUnit-2027")
+
+    assert profile.op_class == DEFAULT_OP_CLASS
+
+
 def test_coverage_floor_against_real_type_sample() -> None:
-    """Per-entry regression guard plus an aggregate coverage floor, against
-    `tests/fixtures/object_type_coverage_sample.json`'s committed sample of
-    real DCS `object_type` strings (see that file's `_comment` and
+    """Per-entry regression guard plus a **per-bucket** coverage measurement,
+    against `tests/fixtures/object_type_coverage_sample.json`'s committed
+    sample of real DCS `object_type` strings (see that file's `_comment` and
     `aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md`
     for provenance). This is the test the review required: a measurement
     against real data, not a fabricated string that would pass even if the
     underlying keyword table stopped matching anything real (exactly how
-    the old `test_ship_keyword` masked the OP_SHIP domain-mismatch bug this
-    fix addresses).
+    the old `test_ship_keyword` masked the OP_SHIP domain-mismatch bug that
+    fix addressed).
 
-    Every entry is checked individually (both the "should classify" and the
-    "should legitimately fall back" cases -- object_model.py does not
-    attempt air/building/full-SAM-catalogue coverage, so some fallbacks in
-    the fixture are the *correct*, expected outcome, not a gap), so this
-    also catches a keyword accidentally over-matching an out-of-scope type.
+    Bucketed rather than one blended percentage, because a blended number is
+    exactly what hid this module's original ground-unit coverage gap: the
+    "78% fallback" headline looked like it meant "mostly unclassified junk",
+    when the residual was actually 132 aircraft (never targeted) + 56 WWII
+    units (deliberately excluded) + 276 modern ground units (thinly covered,
+    ~21% -- the real gap). See the research doc's Addendum.
+
+    - `"ground"` (modern ground combat vehicles/systems this module
+      targets): the coverage floor applies here, and only here.
+    - `"ship"`: already its own fully-covered category (not a "ground
+      unit"), asserted at 100% as a plain regression guard, not the metric
+      under test.
+    - `"air"`, `"wwii"`, `"ground_deferred"` (aircraft/helicopters/UAVs;
+      ED's `"Old ..."`-prefixed WWII reporting names; and real ground/
+      support types this pass deliberately left uncovered -- towed AA/
+      mortar pieces, SAM systems beyond the one named in scope, static
+      structures, airfield support equipment): must stay at the fallback.
+      Reported/asserted separately, not blended into the ground floor,
+      because covering them was never this module's goal (air, WWII) or
+      this pass's goal (`ground_deferred`) -- see object_model.py's
+      `_REPORTING_NAME_KEYWORD_PROFILES` docstring for the reasoning.
+
+    Every entry is checked individually first (both the "should classify"
+    and the "should legitimately fall back" cases), so this also catches a
+    keyword accidentally over-matching an out-of-scope type -- e.g. a "Old
+    military truck" WWII type wrongly picked up by a broad `"truck"`
+    keyword aimed at modern units, or an aircraft type wrongly picked up by
+    an armor keyword.
     """
     fixture = json.loads(
         (_FIXTURES_DIR / "object_type_coverage_sample.json").read_text()
@@ -164,22 +253,46 @@ def test_coverage_floor_against_real_type_sample() -> None:
     entries = fixture["entries"]
 
     mismatches: list[str] = []
-    classified_count = 0
+    classified_by_bucket: dict[str, int] = {}
+    total_by_bucket: dict[str, int] = {}
     for entry in entries:
         object_type = entry["object_type"]
+        bucket = entry["bucket"]
         expected_op_class = entry["expected_op_class"] or DEFAULT_OP_CLASS
         actual_op_class = profile_for(object_type).op_class
         if actual_op_class != expected_op_class:
             mismatches.append(
-                f"{object_type!r}: expected {expected_op_class!r}, got {actual_op_class!r}"
+                f"{object_type!r} ({bucket}): expected {expected_op_class!r}, "
+                f"got {actual_op_class!r}"
             )
+        total_by_bucket[bucket] = total_by_bucket.get(bucket, 0) + 1
         if actual_op_class != DEFAULT_OP_CLASS:
-            classified_count += 1
+            classified_by_bucket[bucket] = classified_by_bucket.get(bucket, 0) + 1
 
     assert not mismatches, "\n".join(mismatches)
 
-    coverage_fraction = classified_count / len(entries)
-    assert coverage_fraction >= _MIN_COVERAGE_FRACTION, (
-        f"coverage against real-type sample dropped to {coverage_fraction:.3f} "
-        f"({classified_count}/{len(entries)}), below floor {_MIN_COVERAGE_FRACTION}"
+    ground_classified = classified_by_bucket.get("ground", 0)
+    ground_total = total_by_bucket.get("ground", 0)
+    ground_coverage = ground_classified / ground_total
+    assert ground_coverage >= _MIN_GROUND_COVERAGE_FRACTION, (
+        f"modern-ground-unit coverage dropped to {ground_coverage:.3f} "
+        f"({ground_classified}/{ground_total}), below floor "
+        f"{_MIN_GROUND_COVERAGE_FRACTION}"
     )
+
+    ship_classified = classified_by_bucket.get("ship", 0)
+    ship_total = total_by_bucket.get("ship", 0)
+    assert ship_classified == ship_total, (
+        f"OP_SHIP coverage regressed: {ship_classified}/{ship_total} classified"
+    )
+
+    # air / wwii / ground_deferred must stay entirely at the fallback --
+    # any of these unexpectedly getting classified means a keyword aimed at
+    # modern ground units is over-matching out-of-scope real types.
+    for out_of_scope_bucket in ("air", "wwii", "ground_deferred"):
+        classified = classified_by_bucket.get(out_of_scope_bucket, 0)
+        assert classified == 0, (
+            f"{out_of_scope_bucket!r} bucket unexpectedly classified "
+            f"{classified} entries -- a keyword is over-matching out-of-scope "
+            f"types (see this test's docstring)"
+        )

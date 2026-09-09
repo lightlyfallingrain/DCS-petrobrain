@@ -173,3 +173,88 @@ a committed ~595-row DCS-derived data file and changes `object_model.py`'s looku
 the recommended next step if PB-1.5's class output is judged too information-poor in live testing —
 which is the natural place to find out, since Implementation stage 5's acceptance test is where a
 crew callout of "group of somethings" for a column of T-90s would become obvious.
+
+---
+
+## Update (same date) — the reporting-name fix was implemented
+
+The "not done here" recommendation above was implemented this session, approved explicitly by
+the user with modern ground units as the priority, WWII units (`Old …` reporting names)
+out of scope, and aircraft/helicopters/UAVs deferred. Summary — full decision log in
+`plans/pb1.5-naked-eye-detection/implementation.md`.
+
+**What changed.** `HelperAI_reporting_names.lua`'s full 595-row mapping is now committed at
+`body-layer/src/perception/data/dcs_type_to_reporting_name.tsv` (loaded by the new
+`perception/reporting_names.py`, which also documents DCS-version-specificity and how to
+regenerate the file from a future DCS install). `object_model.py`'s `profile_for` tries its
+existing raw-`object_type` keyword table first (unchanged, zero regression risk), then — only if
+that finds nothing — resolves `object_type` to its reporting name and runs a second keyword pass
+against *that* (`_REPORTING_NAME_KEYWORD_PROFILES`), skipping the whole second pass for any
+reporting name starting with ED's own `"Old "` WWII-unit prefix. ~45 new keywords were added,
+each checked against all 595 real reporting names for collisions before inclusion (script-based,
+same method as the original OP_SHIP/SA-* fix) — covering modern tanks/IFVs/APCs/recon vehicles
+(`T-90A/M`, `T-64BV`, `T-84 Oplot`, `T-62M`, `Challenger 2`, `Chieftain`, `BMD-1`, `BRDM-2`
+(+ATGM), `Stryker` (CV/ICV/MGS/ATGM), `FV101 Scorpion`, `FV107 Scimitar`, `M-ATV`/`MaxxPro MRAP`,
+`AAV7`, `TOS-1A`, `M1 Abrams`, `M109 Paladin`, `M113`, `M2 Bradley`, `M60 Patton`, `Leclerc`,
+`Leopard 1/2`, `FV510 Warrior`, `Merkava`, `LAV-25`, `MTLB(u)`, `Marder`, `ZBD-04`, `ZTZ-96`,
+`ZSU-57-2`, `Type 59`, `T-155 Firtina`, `DANA`, `PLZ-05`, `PT-76`, `TPz Fuchs`, `Tigr`,
+`VAB Mephisto`, `Cobra`, `2S1/2S3/2S9/2S19`), self-propelled AAA/gun-missile hybrids (`2S6
+Tunguska`, `M163 Vulcan`, `Pantsir-S1`/SA-22, `Gepard` — `OP_SPAAG`, matching the existing
+`shilka` entry), the one SAM system named in scope (`IRIS-T` launcher/radar/command post as one
+group — `OP_MRSAM`, since "medium" is in the system's own name) plus two short-range SAM
+launchers found while spot-checking (`M48 Chaparral`, `M6 Linebacker` — `OP_SRSAM`), wheeled
+TEL/rocket-artillery/fuel-cargo trucks (`M142 HIMARS`, `M270 MLRS`, `BM-30`/`BM-27`, `Ural fuel
+truck` variants `ATZ-5`/`ATMZ-5`/`ATZ-10`, generic `truck`/`bus`/`Insurgent technical` — all
+`OP_TRUCK`), and dismounted troops/MANPAD teams (generic `soldier`/`manpad` — `OP_INFANTRY`).
+
+**A deliberate false-positive avoidance, worth flagging on its own**: `SS-26 launcher` and
+`Scud_B` (`"SS-1 Scud launcher"`) are wheeled TEL trucks for surface-to-*surface* ballistic
+missiles, not SAMs. Both were bucketed `OP_TRUCK`, not `OP_SRSAM`/`OP_MRSAM`, specifically to
+avoid the same "the word sounds like a SAM" trap Finding 1 above documented for `OP_SHIP` — a
+reporting name ending in `"launcher"` is not sufficient evidence of an anti-air weapon system.
+
+**What was deliberately left uncovered, and why** (see `object_model.py`'s
+`_REPORTING_NAME_KEYWORD_PROFILES` docstring for the fuller version): towed (not self-propelled)
+AA/mortar pieces (`ZPU-4`, `KS-19`, `S-60`, `Mortar`) have no correct ED bucket (`OP_SPAAG` means
+self-propelled); standalone SAM-system radars/command posts beyond IRIS-T (Patriot, Hawk, NASAMS,
+Roland, Rapier, SA-2/5/10/11's many radar/CP/launcher components) were not attempted — assigning
+them a correct SR/MR/LR class needs real-world per-system verification this pass didn't do, and
+getting it wrong risks exactly the false-positive trap flagged above; static structures
+(bunkers/outposts/beacons) and airfield ground-support equipment (tugs/generators) aren't
+vehicles at all. Aircraft/helicopters/UAVs remain entirely unclassified, deliberately — ED's own
+vocabulary does have air-class buckets (`OP_HELI(S)`, `OP_JET(S)`, etc.), but this channel reports
+ground contacts, and adding an air branch is a separate, later scope decision.
+
+**Coverage, measured against the same full 595-row real-type catalogue** (methodology: a script
+categorizes each row as WWII (`"Old "`-prefixed reporting name), air/heli/UAV (a reporting-name
+keyword/regex list built by reading through the residual this session — a slightly different,
+more inclusive categorization than the original Addendum's manual 132/56 estimate above, so the
+totals below don't reconcile exactly with that table; both are honest, independently-derived
+estimates, not the same script), ship (already `OP_SHIP` via the pre-existing raw table, held
+constant), or ground (everything else — the denominator that matters here):
+
+| | Before this fix | After this fix |
+|---|---|---|
+| Overall fallback (`OP_GROUPSOMETHING`), full 595 | 464 (78.0%) | 341 (57.3%) |
+| **Modern-ground-unit coverage** (ships/WWII/air excluded from the denominator; 304 real types) | 73 (24.0%) | **196 (64.5%)** |
+
+Two things worth noting about these numbers: first, the "before" ground figure (24.0%) is close
+to but not identical to the original Addendum's hand-estimated 21% (74/350) — expected, since
+that estimate was an eyeball split, not a script, and this session's air/WWII categorization is
+its own independent (more inclusive) pass; both point at the same real gap. Second, two pre-existing,
+already-documented issues surfaced again while computing these numbers, unrelated to this
+session's fix: `Finding 4`'s `"tank"` false positive (`S-3B Tanker`, an S-3 Viking tanker
+*aircraft*, still gets `OP_ARMORED` from the old raw keyword) and the deliberate prior-session
+decision to cover WWII-era ships under `OP_SHIP` via raw type-name keywords regardless of their
+`"Old …"`-prefixed reporting name (`Essex`, `Uboat_VIIC`, etc. — a ship is accurately a ship
+regardless of era, unlike a generic `"truck"` keyword, which is why this session's *new* WWII
+guard applies only to the reporting-name pass, not the pre-existing raw-table ship coverage).
+Neither is a regression from this session's work; both are called out here for anyone reproducing
+these numbers who might otherwise read them as new bugs.
+
+Full before/after detail (which types moved from fallback to which `op_class`, false-positive
+checks against WWII/air) is reproducible via the coverage-floor test at
+`body-layer/tests/test_object_model.py::test_coverage_floor_against_real_type_sample` and its
+fixture `body-layer/tests/fixtures/object_type_coverage_sample.json`, or by re-running the
+category script above against `body-layer/src/perception/data/dcs_type_to_reporting_name.tsv`
+directly (not itself committed, a short one-off — same posture as the original Method section).

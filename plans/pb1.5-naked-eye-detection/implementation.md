@@ -211,3 +211,131 @@ Applied the three required fixes from `review.md` plus its one non-blocking reco
   same name/count, added `test_ship_keyword_matches_second_real_type_name`,
   `test_sa6_keyword_is_mrsam_not_srsam`, `test_sa6_keyword_does_not_match_unrelated_kubelwagen`,
   `test_coverage_floor_against_real_type_sample`)
+
+---
+
+### Session: `object_model.py` modern-ground-unit coverage (reporting-name lookup)
+
+User-approved follow-up to the research doc's "Not done here" recommendation
+(`aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md`'s Addendum): raise
+ground-unit classification coverage by resolving `object_type` to Petrovich's reporting name (via
+a newly-committed data file extracted from `HelperAI_reporting_names.lua`) and keyword-matching
+on that, instead of only the raw irregular DCS type string. Priorities set by the user explicitly:
+modern ground units in scope (the target), WWII units (`Old …` reporting names) out of scope,
+aircraft/helicopters/UAVs deferred.
+
+**Files changed**
+- `body-layer/src/perception/data/dcs_type_to_reporting_name.tsv` (new) — the full 595-row,
+  376-distinct-reporting-name DCS-type → reporting-name mapping, committed as source data (not
+  gitignored — this is a small, versioned lookup table shipped with the code, not a raw DCS
+  extraction dump). Provenance: same `HelperAI_reporting_names.lua` fetch as the original
+  OP_SHIP/SA-* fix session (DCS `2.9.29.27278`), cited via the research doc per this project's
+  convention for install-derived Lua, never via the gitignored `win-mac-sync/` path it was
+  fetched through.
+- `body-layer/src/perception/reporting_names.py` (new) — `reporting_name_for(object_type) ->
+  str | None`, a cached (`functools.cache`) parse of the TSV, case-insensitive exact lookup.
+  Docstring records the DCS-version-specificity and a step-by-step regeneration procedure (extract
+  from `HelperAI_reporting_names.lua` again on a future DCS update) for a future session that
+  doesn't have this one's context.
+- `body-layer/src/perception/object_model.py` — `profile_for` now tries the existing raw-type
+  keyword table first (unchanged, byte-for-byte behavior preserved for everything it already
+  covered), and only if that finds nothing, resolves the reporting name and runs a second keyword
+  pass (`_REPORTING_NAME_KEYWORD_PROFILES`, ~45 new entries) against it. A WWII guard
+  (`_WWII_REPORTING_NAME_PREFIX = "old "`) skips the whole second pass for any reporting name
+  starting with ED's own `"Old "` convention, so a broad keyword aimed at modern units (`"truck"`,
+  `"soldier"`) can't incidentally sweep up a WWII type that happens to share the word (confirmed
+  live: `"Old military truck"` reporting names exist and would otherwise match `"truck"`).
+- `body-layer/tests/test_reporting_names.py` (new) — 5 tests for the loader (known-type
+  resolution, case-insensitivity, unmapped → `None`, an irregular-type example, a WWII example).
+- `body-layer/tests/test_object_model.py` — added 6 targeted tests for the new mechanism
+  (reporting-name resolution closing an irregular-raw-type gap, raw-table precedence over the new
+  table, the WWII guard directly, the SS-26/false-positive-avoidance decision, unmapped-type
+  fallback) and restructured `test_coverage_floor_against_real_type_sample` (see below).
+- `body-layer/tests/fixtures/object_type_coverage_sample.json` — rebuilt with a `bucket` field per
+  entry (`ship`/`ground`/`air`/`wwii`/`ground_deferred`) and expanded from 92 to 183 entries
+  (adding ~90 newly-covered modern-ground types, WWII-truck regression guards, and
+  deliberately-out-of-scope ground/support types); the 3 pre-existing entries whose expected
+  outcome changed by this fix (`Scud_B`, `2S6 Tunguska`, `ZSU_57_2` — previously fallback,
+  correctly now classified) were updated in place.
+- `aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md` — appended an "Update"
+  section recording what was implemented, the false-positive-avoidance decisions, what was
+  deliberately left uncovered and why, and the before/after coverage numbers.
+
+**Tests added**
+- `test_reporting_name_resolution_classifies_an_irregular_raw_type` — `CHAP_T90M` (no raw-table
+  keyword match at all) resolves via its reporting name `T-90M` to `OP_ARMORED`.
+- `test_reporting_name_resolution_matches_a_truck_named_reporting_name` — `ATZ-5` → `Ural fuel
+  truck` → `OP_TRUCK`.
+- `test_raw_table_takes_precedence_over_reporting_name_table` — `MOSCOW` still resolves via the
+  raw table, not the new one, per `profile_for`'s documented order.
+- `test_wwii_reporting_name_does_not_get_classified_by_a_modern_keyword` — `Bedford_MWD` (→ "Old
+  military truck") stays at the default profile despite containing "truck".
+- `test_ss26_launcher_is_truck_not_sam` — `CHAP_9K720_HE` (SS-26/Iskander TEL) is `OP_TRUCK`, not
+  a SAM class, despite its reporting name ending in "launcher".
+- `test_unmapped_type_still_falls_back_to_raw_table_behaviour` — a type not in the mapping at all
+  degrades exactly as it did before the mapping existed.
+- `test_known_type_resolves_to_its_real_reporting_name`, `test_lookup_is_case_insensitive`,
+  `test_unmapped_type_returns_none`, `test_irregular_type_resolves_to_a_regular_reporting_name`,
+  `test_wwii_type_resolves_to_its_old_prefixed_reporting_name` (all in `test_reporting_names.py`)
+  — direct coverage of the loader module.
+- `test_coverage_floor_against_real_type_sample` restructured to compute a coverage floor on the
+  `"ground"` bucket only (>= 0.9, actual 100/100 = 100% against the fixture), asserts `"ship"` stays
+  at 100% as a plain regression guard, and asserts `"air"`/`"wwii"`/`"ground_deferred"` stay at
+  exactly 0% classified — replacing the old single blended floor (0.8 across everything), which
+  is exactly the metric that hid the original ground-unit gap (see the research doc's Addendum).
+
+**Judgment calls made this session**
+- **Raw table tried first, reporting-name table only as a second pass** (not "reporting-name
+  primary, raw-type only as fallback for unmapped types," which is closer to the plan's literal
+  phrasing). Chosen because it guarantees zero regression risk on the already-verified OP_SHIP/
+  SA-* keywords (checked against real strings in the prior session) — those keep matching exactly
+  as before regardless of what the new table contains — while the reporting-name pass still gets
+  a chance at every type the raw table doesn't already resolve, whether or not that type happens
+  to be in the mapping. Net effect on every currently-tested type is identical either way; the
+  only behavioral difference is for types the raw table doesn't match but the mapping does map to
+  something the *reporting-name* table also wouldn't want to override — none were found.
+- **OP_SPAAG chosen over OP_SRSAM for gun/missile-hybrid self-propelled AAA** (2S6 Tunguska,
+  Pantsir-S1/SA-22, M163 Vulcan, Gepard) — matches the existing `"shilka"` raw-table precedent
+  (a gun-based or gun+missile SPAAG system, not a missile-only SAM launcher). `M48 Chaparral`/`M6
+  Linebacker` (missile-only, no gun) went to `OP_SRSAM` instead, for the same reason.
+  `IRIS-T` went to `OP_MRSAM` specifically because "medium" is in the system's own name (IRIS-T
+  **S**urface **L**aunched **M**edium-range) — a documented reading, not a guess.
+- **SS-26 launcher and Scud_B deliberately bucketed OP_TRUCK, not OP_SRSAM/OP_MRSAM** — both are
+  wheeled TEL trucks for surface-to-*surface* ballistic missiles. A reporting name ending in
+  "launcher" is not evidence of an anti-air system; forcing these into a SAM bucket would be
+  exactly the "sounds like the right category" trap the original OP_SHIP fix (Finding 1) already
+  found and fixed once. Flagged prominently in both the code comment and the research doc so a
+  future reader doesn't "fix" this back the wrong way.
+- **Mortars, towed AA guns (ZPU-4/KS-19/S-60), and standalone SAM-system radars/command posts
+  beyond IRIS-T (Patriot/Hawk/NASAMS/Roland/Rapier/SA-2/5/10/11's many components) were
+  deliberately left unclassified**, not attempted. No correct ED bucket exists for a towed (not
+  self-propelled) weapon, and assigning a correct SR/MR/LR class to each named SAM system without
+  per-system real-world verification risks the same false-positive trap avoided for SS-26/Scud
+  above. Recorded as backlog in the research doc's Update section, not silently dropped.
+- **A modest expansion beyond the user's named examples** (M1 Abrams, Leopard 1/2, M2 Bradley,
+  M113, M109 Paladin, Merkava, Leclerc, LAV-25, MTLB, Marder, ZBD-04, ZTZ-96, PT-76, 2S1/2S3/2S9/
+  2S19 SPGs, Gepard, M48 Chaparral, M6 Linebacker, M270 MLRS/BM-30/BM-27, generic
+  truck/bus/soldier/manpad/insurgent-technical keywords) — judged in-scope as completing the same
+  "modern ground units" category the user named specific examples from (tanks/IFVs/APCs/SPGs/
+  trucks), using the identical verification discipline (checked against all 595 real reporting
+  names for collisions before inclusion), not new scope. Every addition was individually checked
+  against the WWII and air buckets to confirm no false-positive leak (2 pre-existing, unrelated
+  leaks were found and are documented as pre-existing in the research doc, not introduced by this
+  session — Finding 4's `"tank"`/`S-3B Tanker` false positive, and a prior session's deliberate
+  choice to classify WWII-era ships as `OP_SHIP` via raw type keywords regardless of their
+  `"Old …"`-prefixed reporting name).
+
+**Coverage (measured against the full 595-row real DCS type catalogue, see the research doc's
+Update section for full methodology and caveats)**
+- Overall fallback (`OP_GROUPSOMETHING`): 78.0% → 57.3%.
+- Modern-ground-unit coverage (ships/WWII/air excluded from the denominator — 304 real types,
+  this session's own categorization, close to but not identical to the original Addendum's
+  hand-estimated 350): **24.0% → 64.5%** (73 → 196 classified).
+
+**Checks**
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `mypy src` (from `cd body-layer`): pass, no issues in 12 source files
+- `PYTHONPATH=src:../world-model/src pytest tests -q` (from `cd body-layer`): 94 passed (was 83
+  before this session; net +11 — 6 new `test_object_model.py` tests, 5 new
+  `test_reporting_names.py` tests)
