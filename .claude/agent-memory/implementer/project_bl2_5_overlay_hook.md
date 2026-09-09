@@ -30,14 +30,21 @@ the lines that run *before* its own `module()` call.
 
 **Lua files can be syntax-checked (and even table-literal-inspected) without a DCS install or any
 system package manager access**, via `pip install lupa` (a Python binding that bundles its own Lua
-runtime, cp312 wheel, no compiler needed) inside a throwaway venv (`python3 -m venv ...`, needs
-`dangerouslyDisableSandbox: true` for both the venv pip install and any apt/sudo attempts, which
-will fail anyway without root). `LuaRuntime().compile(src)` parses+compiles without executing (no
-DCS globals needed); `LuaRuntime().execute(src); rt.globals().dialog` lets you walk a `.dlg`
-table's actual structure to confirm widget types/bounds/child keys match what the paired script
-expects. This is strictly weaker than a live DCS load (can't catch wrong `dxgui` API call shapes)
-but catches real typos/structural mistakes a pure text review misses. Reusable for any future
-DCS-side Lua authored without a live DCS session.
+runtime, cp312 wheel, no compiler needed) inside a throwaway venv (`python3 -m venv ...`). **Update
+(BL-2.5 follow-up pass, 2026-09-09): this pip install worked with plain Bash, no
+`dangerouslyDisableSandbox` needed** -- contradicts this note's original claim below; re-check
+before assuming escalation is required, it may be session/environment-dependent rather than a fixed
+rule. `LuaRuntime().execute(src); rt.globals().dialog` lets you walk a `.dlg` table's actual
+structure to confirm widget types/bounds/child keys match what the paired script expects --
+plain `.compile()`/`load()` and `fn, err = load(src)` unpacking is finicky through lupa's Python
+binding (raises "iteration is only supported for tables" on direct unpack); instead run
+`local fn, err = load(src); return (fn ~= nil), tostring(err)` via `lua.execute(...)` and read the
+two-tuple Python-side. This is strictly weaker than a live DCS load (can't catch wrong `dxgui` API
+call shapes) but catches real typos/structural mistakes a pure text review misses. Reusable for any
+future DCS-side Lua authored without a live DCS session.
+
+Original (unconfirmed this pass) claim, kept for context: needs `dangerouslyDisableSandbox: true`
+for both the venv pip install and any apt/sudo attempts, which will fail anyway without root.
 
 **`curl` was denied by this sandbox's Bash permission system for reasons unrelated to network
 access** (plain loopback POST); `python3 -c "urllib.request..."` worked immediately with no special
