@@ -494,6 +494,14 @@ function LuaExportAfterNextFrame()
     end
     last_export_t = t
 
+    -- PB-1.5 spike instrumentation. Deliberately placed BEFORE the collector
+    -- connection logic below: everything from here down returns early if the
+    -- collector isn't running, if ownship data isn't ready, or if a send
+    -- fails, and the probe must not silently produce an empty log because of
+    -- any of those. It writes its own file and needs no socket. No-op unless
+    -- pb15_probe.flag exists.
+    pb15_probe(t)
+
     if client == nil then
         if t < next_reconnect_attempt_t then
             return
@@ -611,7 +619,4 @@ function LuaExportAfterNextFrame()
         end
     end
 
-    -- PB-1.5 spike instrumentation, last so it can never affect the exports
-    -- above. No-op unless pb15_probe.flag exists.
-    pb15_probe(t)
 end
