@@ -634,3 +634,97 @@ including `urgency` anywhere in `tools.py`.
   design" posture (`ConsolePerceptionRunner`/`Console` themselves, which those two functions
   call, are both fully tested). `last_t_sim`'s tracking is tested directly on
   `ConsolePerceptionRunner`, which is the one piece of new *logic* Stage 4 added to `logger.py`.
+
+## Stage 5 — Cross-channel fusion validation (2026-09-09)
+
+Validation-only, as scoped: no `belief/*.py` or `perception/*.py` production code was touched.
+One new file, `body-layer/tests/test_cross_channel_fusion.py`, built entirely on top of Stages
+1-4's existing machinery (`Percept`, `ContactStore.ingest`, `association_over_time`'s gating,
+`decay.certainty_of`). No production gap was found — every acceptance criterion in the plan's
+Stage 5 section was directly testable against the code as it stands.
+
+### Files Changed
+
+- `body-layer/tests/test_cross_channel_fusion.py` (new, 6 tests) — builds `Observation`s shaped
+  like each concrete source's real output (`SOURCE_PETROVICH_DETECTION_ASSOCIATED` with
+  scope-style free-text `classification_raw` like `"Ural truck"`/`"SA-3 launcher"`;
+  `SOURCE_NAKED_EYE_VISUAL_FILTERED` with an already-bucketed `OP_*` string), mirroring
+  `test_contacts.py`'s/`test_association_over_time.py`'s existing fixture style rather than
+  introducing a new one.
+
+### What each fixture proves
+
+1. `test_same_poll_both_channels_on_same_object_merge_into_one_contact` — both channels report
+   the same object at the same `t_sim`, fed through one `ingest()` call. One `Contact` results;
+   `contributing_observation_ids` and the sources read back off the observation log (via
+   `ContactStore.observations`, keyed by those ids) contain both
+   `SOURCE_PETROVICH_DETECTION_ASSOCIATED` and `SOURCE_NAKED_EYE_VISUAL_FILTERED`. (`Contact` has
+   no direct "sources" field — `sighting_spans[*].source` or, as used here, a lookup through the
+   observation log are the two ways to recover this; `belief.tools.get_contacts`'s own `sources`
+   key reads `sighting_spans`, confirmed by reading `tools.py`.)
+2. `test_adjacent_polls_staggered_channels_merge_not_duplicate` — naked-eye at t=0, scope one
+   second later at t=1, two separate `ingest()` calls (staggered, not simultaneous). Still one
+   contact — the spatial gate's elapsed-time growth term easily covers a 1s gap at this range.
+3. `test_certainty_tracks_recency_of_last_contributing_observation_not_quality` — see "Finding on
+   'certainty reflects the better observation'" below.
+4. `test_two_distinct_nearby_objects_stay_two_contacts` — a scope observation (bearing 0,
+   range 1000) and a naked-eye observation (bearing 90, range 1000) in the same poll, ~1414m
+   apart — comfortably outside both channels' gate radii at that range (naked-eye ≈277m,
+   scope=300m fixed). Two contacts, not one, despite being class-compatible.
+5. `test_unresolvable_scope_class_text_does_not_block_spatially_close_merge` — the plan's own
+   Risks & Unknowns example: scope free text `"SA-3 launcher"` (confirmed directly against
+   `object_model.profile_for` to fall back to `DEFAULT_OP_CLASS`, i.e. resolve to `unknown`, not
+   `incompatible`) alongside a spatially-coincident naked-eye `"OP_ARMORED"` observation. One
+   contact results — `unknown` does not block a spatially-compatible merge, confirming Stage 1's
+   three-valued-gate design intent holds for a real weak-vocabulary case, not just the
+   same-channel unit tests already in `test_association_over_time.py`.
+6. `test_lost_threshold_sanity_bound_for_certainty_fixture` — pins fixture 3's `t_sim=40.0`
+   strictly between `POSITION_HALF_LIFE_S` and `LOST_THRESHOLD_S` against the real constants, so a
+   future constant change fails this test loudly instead of silently invalidating fixture 3.
+
+### Finding on "certainty reflecting the better of the two observations"
+
+The plan's acceptance criterion says "`certainty` reflecting the better of the two
+observations." `decay.certainty_of` is a pure function of `now_sim - contact.last_seen_sim`
+only — it has no notion of which *source*, or which observation's own
+`association_over_time.uncertainty_radius_m`, was tighter. So in the current implementation
+"better" collapses to "more recent," not "higher precision": whichever channel observed most
+recently sets the contact's certainty, even when that channel's own positional uncertainty is
+*wider* than the previous contributor's.
+
+Demonstrated concretely: naked-eye observes at t=0 (uncertainty ≈277m at range=1000m, tighter
+than the scope channel's fixed 300m). Left alone, the contact decays to `"estimated"` by t=40. A
+second observation from the *wider-uncertainty* scope channel at t=40 immediately restores
+certainty to `"observed"` — `certainty_of` only asks "how long since last seen," not "was this
+contributor's own reading better." `Contact.last_class_raw` behaves the same way (`Contact.
+record`'s own docstring: "always derived from the most recent percept ... never ... fusion") — the
+most recent contributor's classification wins outright, not a fused or higher-confidence one.
+
+This is reported as a finding per the task brief's instruction, not treated as a bug: Stage 2's
+`certainty_of` was deliberately built as a pure recency ladder (see that stage's implementation
+notes above), and nothing in Stages 1-4 claims otherwise. If a future stage wants certainty (or
+classification) to actually weigh which channel/observation was more precise, that is new
+behavior belonging to whichever milestone revisits `decay.py` or `Contact.record` — not something
+this validation stage should silently patch in.
+
+### Checks
+
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `cd body-layer && mypy src`: pass, no issues in 20 source files (unchanged file count — no
+  `src/` files touched this stage)
+- `pytest body-layer/tests -q`: 202 passed (196 before this stage + 6 new; every pre-existing test
+  passes unmodified)
+- `git status`: clean working tree after this stage's commit
+
+### Notable Discoveries
+
+- No production gap found. The one thing that needed adjusting during writing was the negative
+  fixture's geometry, not the code: an initial attempt separated the two objects purely by range
+  (1000m vs 1600m) along the same bearing, which accidentally pushed the naked-eye observation's
+  own range-derived uncertainty (≈649m at range=1600m) past the 600m gap, causing a false merge.
+  Fixed by separating the two objects by bearing instead (0° vs 90°, both at range=1000m, ~1414m
+  apart) — a fixture-construction fix, not a code fix; flagged here since it's the kind of
+  "gate radius depends on the *new* percept's own range, not just channel identity" detail future
+  fixture-writers in this file should keep in mind, mirroring Stage 1's own note about the
+  ambiguous-merge fixture needing careful geometric construction.
