@@ -96,6 +96,13 @@ stdin in the foreground — type `contacts`, `show <id>`, `history <id>`, `find 
 `watch <id>` / `unwatch <id>`, or `stats` and press enter. The REPL reads `ConsolePerceptionRunner.
 last_t_sim` (updated by the poll thread every poll) as each command's `now_sim`.
 
+Add `--overlay` alongside `--console` (BL-2.5, `plans/dcs-text-panel-output/plan.md`) to also
+mirror belief lifecycle events (`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`) to a DCS
+in-cockpit text overlay via the same `--aircraft-layer-url` instance's `POST /text/push` — no
+separate URL/flag needed. Defaults off; without it, behavior is unchanged. See
+`aircraft-layer/WORKFLOW.md`'s "Deploy the overlay Hook script" section for the DCS-side half of
+this channel — UNVERIFIED against a live DCS session as of authorship.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
@@ -135,7 +142,12 @@ last_t_sim` (updated by the poll thread every poll) as each command's `now_sim`.
   `source: "petrovich_detection_associated"` on every emitted `Observation`.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API
   (`GET /telemetry/latest`, `GET /world_objects/latest`, `GET /petrovich_indication/latest`). A
-  real network call, unlike the world-model seam.
+  real network call, unlike the world-model seam. `push_text_line` (BL-2.5,
+  `plans/dcs-text-panel-output/plan.md`) is this client's one write call
+  (`POST /text/push`, the aircraft layer's only inbound path) — unlike the
+  `get_*` methods above, it raises `AircraftLayerError` on any failure
+  rather than swallowing it, since `logger.ConsolePerceptionRunner`'s
+  per-push try/except is where that failure is meant to be caught.
 - `src/replay.py` — BL-0 replay harness: drives any `PerceptionSource.poll()` over a recorded
   sequence of ownship states, no live DCS/aircraft-layer connection required.
 - `src/belief/` — PB-2's observation-*consumption* package (`perception/` stays observation
@@ -153,7 +165,17 @@ last_t_sim` (updated by the poll thread every poll) as each command's `now_sim`.
   no policy/cooldown — that is BL-4). `console.py` (BL-2 Stage 4) — a line parser + pretty-printer
   over `tools.py`, owning no belief logic of its own; every command (`contacts`, `show <id>`,
   `history <id>`, `find <text>`, `watch <id>`/`unwatch <id>`, `stats`) dispatches 1:1 into a
-  `tools.py` function.
+  `tools.py` function. `format_event_for_overlay` (BL-2.5,
+  `plans/dcs-text-panel-output/plan.md`) — `"<contact id>: <kind>, <summary>"`
+  for one `belief.events.Event`, reusing `tools.describe_contact`'s existing
+  `summary` field rather than new belief-reading logic, and reusing the
+  `"<id>: ..."` convention `console.py`'s own `contacts`/`show <id>`
+  rendering already uses rather than inventing a second one; the leading id
+  is what lets the overlay tell six distinct contacts apart from repeated
+  events on one (a live-acceptance follow-up fix, 2026-09-09 — the original
+  `"<kind>: <summary>"` line carried no contact id at all). Consumed by
+  `logger.ConsolePerceptionRunner`'s `--overlay` mirror, not by the console
+  REPL itself.
 - `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
   `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete
@@ -176,7 +198,16 @@ last_t_sim` (updated by the poll thread every poll) as each command's `now_sim`.
   poll thread ever touches it, so it must be opened there rather than on the main thread before
   spawning. The runner no longer prints its periodic contact-count line in `--console` mode
   (`output=None`) — that line was spamming the REPL's own prompt/output on every poll; state is
-  queried on demand via `contacts`/`stats` instead.
+  queried on demand via `contacts`/`stats` instead. BL-2.5 adds `ConsolePerceptionRunner.
+  overlay_client: AircraftLayerClient | None` (mirroring `output`'s optional-sink pattern) and a
+  `--overlay` flag (`main()`, default off, only meaningful with `--console`): when set, every
+  lifecycle event newly appended by a poll's `tick()` call is formatted
+  (`belief.console.format_event_for_overlay`) and pushed (`AircraftLayerClient.push_text_line`)
+  to the in-cockpit text overlay, one `try`/`except AircraftLayerError` per push — the one place
+  in this file a defensive try/except is load-bearing rather than cosmetic, since a failed push
+  must degrade to "no overlay line for this event," never stop the poll loop or skip the rest of
+  the batch. `PerceptionLogger`'s plain per-`Observation` stream does not get this wiring
+  (line-noise vs. signal tradeoff).
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a

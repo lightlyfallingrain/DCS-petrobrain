@@ -133,6 +133,55 @@ since the flag's correctness cannot be established from fixtures.
 BL-2 should consume both detection channels (scope + naked-eye) rather than being built against the
 scope-only channel and reworked later.
 
+**BL-2.5 (done, merged 2026-09-09).** `feature/dcs-text-panel-output`. In-cockpit text mirror:
+a small scrolling DCS overlay window fed by a new write-back channel through the aircraft layer,
+so live sortie testing can be read in-cockpit instead of alt-tabbing to an external log. Promoted
+from the Backlog to an interim milestone ahead of BL-3 by user decision, 2026-09-09. DoD passed
+on same day; merge pending user approval.
+
+**Investigator settlement:** Two passes closed DCS-internals unknowns (`aircraft-layer/research/
+2026-09-09-dcs-text-panel-output-channel.md`). Export environment cannot write to screen at all
+— no window in an unsandboxed Lua state. Solution: Hook-state overlay (Saved Games/DCS/Scripts/
+Hooks/) built on DCS's own `AutoScrollText` widget, fed by loopback UDP from the collector, modeled
+on SRS's production overlay pattern. Alternative path (`net.dostring_in` → `trigger.action.outText`)
+rejected: requires `autoexec.cfg` opt-in ED labels obsolete/unsafe, and shares global message queue
+with mission author text/ATC, wrong architectural shape for BL-10 SRS fallback.
+
+**Transport & scope:** Body-layer → `POST /text/push` (new) → collector → UDP 7792 → Hook script.
+**First aircraft-layer write path:** `aircraft-layer/CLAUDE.md` reframed from "read-only telemetry
+pipeline" to "read-mostly with narrow write channels." Wire schema is content-only (`{"text": ...}`)
+for content-agnostic reuse by BL-10's SRS text channel. All new code staged as aircraft-layer and
+body-layer components; no DCS installation touched.
+
+**Stages 1–4 complete, 1-4 reviewed & live-verified:** (1) collector transport + UDP sender +
+`POST /text/push` API endpoint + unit tests; (2) Hook script + `.dlg` file matching SRS reference
+implementation; (3) body-layer producer wiring (`push_text_line`, `format_event_for_overlay`, `--overlay`
+flag) + tests; (4) user flew real sortie 2026-09-09, contact events observed in-cockpit. Reviewer
+approved stages 1/3 with zero required fixes. Both subprojects' verification gate (ruff format/lint,
+mypy --strict, pytest) passes: 67 aircraft-layer + 210 body-layer tests.
+
+**Refinement pass (post-live-acceptance, 2026-09-09):** User raised that the overlay imitates DCS's
+native radio panel rather than being it, decided to keep overlay and restyle it (not `net.dostring_in`
+→ `trigger.action.outText` path). Refinement: strip chrome, restyle to match DCS's own
+`gameMessages.dlg` values (every claim verified byte-by-byte against real files by Reviewer), plus two
+defects from user's screenshot — overlay lines had no contact id, window clipped last line. Contact
+id fix (`f8cca80`, format now `"<id>: <kind>, <summary>"`) approved and kept. Restyle commit
+(`499811b`, bundled with clipping fix) flown in confirmation sortie 2026-09-09 and **rejected by user —
+reads worse in cockpit than the titled window despite being factually grounded in real DCS values.**
+User instruction: revert to titled window. Reverted `99c2586`, keeping contact-id, taking clipping
+fix with it (known lossy pattern: bundled commits). Clipping defect (`"last line cut off, never
+half-rendered"`) now open backlog item (candidate fix: dynamic sizing independent of cosmetics).
+
+**Key lesson from refinement:** Grounding a design in authoritative source values does not guarantee
+visual acceptance. Live experimental validation required before visual design commitment. Separately,
+bundling cosmetic and correctness changes in one commit creates lossy reversion — separate by concern
+so future reverts don't collateral-damage unrelated fixes (recorded to NOTES.md).
+
+**No architectural change for BL-2.6:** Overlay transport is content-agnostic; BL-2.6's
+classification-change events flow through same `format_event_for_overlay` without changes.
+Recommendation (plan note, not discovery): BL-2.6 should explicitly update that function to enrich
+mirrored lines with semantic content, keeping in-cockpit display synchronized with console output.
+
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
 **PB-1 (done, 2026-09-08):** `feature/pb1-perception-logger` ready to merge. Stages 1–3 (live spike, BL-0 harness, world_objects endpoint) completed earlier; stages 4–9 (hybrid HelperAI perception source + association + text logger) completed with zero Reviewer required fixes across two review passes. Live acceptance test (stage 7) ran end-to-end on real Mi-24P sortie with manually-placed ground targets; two observations logged with plausible bearing/range values in an ambiguous-candidate scenario (4 Ural trucks clustered together). The original architecture (two-tier branching on geometry source) was completely falsified by Session 4's live spike; pivoted to single hybrid implementation (HelperAI text as real detection gate, `LoGetWorldObjects` geometry via association algorithm). Full history: `plans/pb1-perception-logger/plan.md`, `implementation.md`, `review.md`, `dod-check.md`. Key lessons harvested to `NOTES.md`: live spikes resolve DCS architectural unknowns better than desk research; PYTHONPATH/venv gaps only surface in end-to-end deployment; ambiguous-scene live testing essential for association validation.
@@ -153,6 +202,36 @@ scope-only channel and reworked later.
 Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side). Aircraft layer / Mission Interpreter / Runtime work now in scope — see root `CLAUDE.md` "Current priority" (gate lifted 2026-09-06).
 
 - [x] **PB-1.5 — Naked-eye visual detection channel.** Done, merged to main 2026-09-09. Live acceptance passed. See Current Focus.
+- [x] **BL-2.5 — In-cockpit text mirror (DCS overlay output channel).** Done, DoD passed 2026-09-09. Interim milestone, scheduled between BL-2 and BL-3 by user decision. Live acceptance sortie passed; refinement restyle rejected and reverted. See Current Focus and `plans/dcs-text-panel-output/dod-check.md`. Pending user approval to merge.
+- [ ] **BL-2.6 (label provisional) — Classification refinement.** *Scheduled next, after BL-2.5 and before BL-3 (user decision, 2026-09-09).* Fire an event when a contact's identification becomes more specific — `something → tank → T-72`, `unknown group → SAM site → SA-6`. User's framing: these transitions are exactly the information DCS internals do not give, and they make the system useful for gameplay rather than only for observing it.
+  Not just an event. Investigation 2026-09-09 found the data can't currently support it:
+  1. **Naked-eye classification is range-independent.** `perception/naked_eye_source.py` emits
+     `object_model.profile_for(...).op_class` — a fixed bucket per DCS type, from a table of
+     eight (`OP_ARMORED`, `OP_TRUCK`, `OP_SRSAM`, `OP_MRSAM`, `OP_SPAAG`, `OP_ZU23`,
+     `OP_INFANTRY`, `OP_SHIP`). A T-72 reads `OP_ARMORED` at 6 km exactly as at 200 m, so there
+     is no `something` stage and no refinement on closure. Arguably an anti-omniscience gap in
+     its own right: naked-eye at 6 km should not reliably separate armour from a truck.
+     Grading specificity by observation quality (range, angular size, dwell, channel) is the
+     real work here.
+  2. **The `tank → T-72` half is producible today** — the scope/HelperAI channel passes
+     Petrovich's own indication text through verbatim (`perception/hybrid_source.py`), which
+     carries specific type names. A naked-eye `OP_ARMORED` contact later seen on the scope
+     genuinely refines.
+  3. **…but it would oscillate.** `Contact.last_class_raw` is a single last-writer-wins string,
+     so the next naked-eye tick overwrites `T-72` back to `OP_ARMORED` and back again, firing
+     spurious refine/de-refine events. **This absorbs the existing backlog item** on BL-2's
+     last-writer-wins certainty/classification fusion — theoretical until now, load-bearing the
+     moment this event exists. Needs a specificity ordering so a better classification is never
+     overwritten by a worse one.
+  **Grading is the intent, confirmed by the user 2026-09-09.** Making Petrovich *worse* at long
+  range is the goal, not a cost to be minimised: it is the anti-omniscience principle applied to
+  classification. Expect BL-2's existing live behaviour to change visibly and PB-1.5's calibration
+  to be revisited — that is an accepted consequence, not a regression to guard against.
+  `CONTACT_CLASSIFICATION_CHANGED` is already named in `body-layer/src/belief/events.py` and
+  `docs/concept/PETROBRAIN_RUNTIME.md`'s event model as a post-BL-2 candidate, so this pulls a
+  planned event forward rather than inventing one. Needs an Architect pass; label to be confirmed
+  with the plan (BL-2.6 follows BL-2.5's interim precedent, but it is contact-memory work, so
+  the architect should confirm the family fits).
 
 (World Model M9 moved to Deferred below, 2026-09-06)
 
@@ -291,9 +370,35 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 - [ ] **Aircraft-layer: measure `LoGetWorldObjects` FPS cost live before tuning its poll rate.** Raised 2026-09-09 alongside the throttle-split item above; same trigger, kept separate since one is a code change and the other is a measurement task that should land first and inform it. `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md`'s "Unresolved" section already flags this: no confirmed, quantified per-call cost of `LoGetWorldObjects` at realistic unit counts (~50–200) exists — only qualitative forum/Tacview-wiki folklore ("can be inefficient, ED has partially optimized it," no hard numbers). The current 5 Hz was picked as "conservative starting rate," not a measured-safe one, and there's no native radius/category filter at the API level, so cost scales with total map object count regardless of poll rate. User proposed 2 Hz as a guess balancing slow-moving-ground-unit tracking against staying responsive to being fired at; before committing to that or any number, fly with world-objects export on/off at 5/2/1 Hz and diff FPS/frame-time to settle it empirically. Also worth checking live whether "being fired at" is even served by `LoGetWorldObjects`'s poll rate at all — nothing currently reads it for threat/launch detection (that's position/identity data, not an event stream), so the urgent-callout-latency reasoning may want its own dedicated signal later (e.g. RWR export) rather than riding on the ground-scene poll rate.
 
-- [ ] **DCS radio message text panel as an SRS fallback / dev-visibility output channel.** Raised 2026-09-09. SRS (voice) is the intended eventual output channel for Petrovich's messages, but is not yet implemented; even once it exists, a text-panel fallback is wanted for when the SRS server isn't connected. Concrete near-term value: mirror the body-layer log output to DCS's in-game radio message text panel now, during development — makes live sortie testing (BL-2 acceptance, PB-1.5 calibration, etc.) far easier to observe in-cockpit instead of only in an external log file. Needs investigation: how to write to that panel from outside mission-scripting context (likely `trigger.action.outText` or similar, callable only from mission/hook Lua, not obviously from the Export environment aircraft-layer currently uses) — probably an aircraft-layer-side addition (new outbound path, mirroring the existing inbound Export.lua polling) or a separate hook script. Investigator task before implementation, per project convention for unverified DCS-internals questions.
+- [~] **DCS radio message text panel as an SRS fallback / dev-visibility output channel.**
+  **Promoted out of the backlog: this is now BL-2.5, an interim milestone scheduled ahead of
+  BL-3 (user decision, 2026-09-09).** Status and detail live in Current Focus, not here.
+  Plan: `plans/dcs-text-panel-output/plan.md`.
+  Original entry: Raised 2026-09-09. SRS (voice) is the intended eventual output channel for Petrovich's messages, but is not yet implemented; even once it exists, a text-panel fallback is wanted for when the SRS server isn't connected. Concrete near-term value: mirror the body-layer log output to DCS's in-game radio message text panel now, during development — makes live sortie testing (BL-2 acceptance, PB-1.5 calibration, etc.) far easier to observe in-cockpit instead of only in an external log file. Needs investigation: how to write to that panel from outside mission-scripting context (likely `trigger.action.outText` or similar, callable only from mission/hook Lua, not obviously from the Export environment aircraft-layer currently uses) — probably an aircraft-layer-side addition (new outbound path, mirroring the existing inbound Export.lua polling) or a separate hook script. Investigator task before implementation, per project convention for unverified DCS-internals questions.
 
-- [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.** Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
+- [ ] **BL-2.5: overlay window clips its last line at 420×200.** Raised 2026-09-09 during
+  refinement pass. A full line should be shown or not shown, never half-rendered. Root cause: the
+  dynamic sizing fix (`apply_content_size()`, which called `calcSize()` after each `addText()` to
+  detect real content height) was bundled with the restyle in commit `499811b` and reverted with it
+  when the restyle was rejected. Candidate fix: re-implement dynamic sizing as an independent
+  concern, separate from cosmetic changes. Not blocking BL-2.5 doD — the original 420×200 titled
+  window with optional close button remains functional and was live-verified; the defect is known
+  and documented.
+
+- [ ] **BL-2.5: overlay has no dismiss affordance.** Raised in Reviewer's optional findings
+  2026-09-09 during refinement pass review. With the restyle reverted, the titled window with its
+  close button *is* back, so this is moot for now. Original concern: restyle removed the title bar
+  and close button (matching DCS's own `gameMessages.dlg` design, which also has neither), leaving
+  no way to dismiss an unwanted line early — only wait out `DEFAULT_DURATION_S=20`. User is aware
+  and accepts this limitation for dev-visibility use; not a defect, just a property of the design.
+  May become annoying during screen capture or when the overlay is in the way of something else —
+  if so, the fix is to lower the timeout or add a per-line click-dismiss affordance, but those
+  changes are speculative and not needed for current use.
+
+- [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.**
+  **Absorbed into BL-2.6 (classification refinement), scheduled next — see Milestones.**
+  It stops being theoretical there: without a specificity ordering, refinement events
+  oscillate. Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
 
 ## Deferred
 

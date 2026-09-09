@@ -7,8 +7,14 @@ sample to stdout for manual verification (plan stage 2); that dump is kept
 (`--dump-interval`) since it's still useful for watching the pipeline without
 a separate HTTP client.
 
+A `TextOverlaySender` (`plans/dcs-text-panel-output/plan.md`, BL-2.5) is also
+constructed here and handed to `TelemetryAPIServer` so `POST /text/push` can
+forward lines to the in-cockpit overlay Hook script over loopback UDP -- the
+one inbound/write path on this otherwise read-only pipeline.
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
-       [--api-port PORT] [--dump-interval SECONDS] [--debug]
+       [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
+       [--dump-interval SECONDS] [--debug]
 """
 
 from __future__ import annotations
@@ -23,6 +29,9 @@ from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
 from collector.cache import PetrovichIndicationCache, TelemetryCache, WorldObjectsCache
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
+from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
+from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
+from collector.text_sender import TextOverlaySender
 
 
 def main() -> None:
@@ -38,6 +47,17 @@ def main() -> None:
     )
     parser.add_argument(
         "--api-port", type=int, default=API_DEFAULT_PORT, help="Mac-facing LAN API port"
+    )
+    parser.add_argument(
+        "--text-overlay-host",
+        default=TEXT_OVERLAY_DEFAULT_HOST,
+        help="in-cockpit overlay Hook script listener host (loopback)",
+    )
+    parser.add_argument(
+        "--text-overlay-port",
+        type=int,
+        default=TEXT_OVERLAY_DEFAULT_PORT,
+        help="in-cockpit overlay Hook script listener port",
     )
     parser.add_argument(
         "--dump-interval",
@@ -60,6 +80,10 @@ def main() -> None:
     cache = TelemetryCache()
     world_objects_cache = WorldObjectsCache()
     petrovich_indication_cache = PetrovichIndicationCache()
+    text_sender = TextOverlaySender(
+        host=args.text_overlay_host, port=args.text_overlay_port
+    )
+    text_sender.open()
 
     collector = CollectorServer(
         cache,
@@ -78,6 +102,7 @@ def main() -> None:
         host=args.api_host,
         port=args.api_port,
         petrovich_indication_cache=petrovich_indication_cache,
+        text_sender=text_sender,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -93,6 +118,7 @@ def main() -> None:
     finally:
         api.close()
         collector.close()
+        text_sender.close()
 
 
 if __name__ == "__main__":

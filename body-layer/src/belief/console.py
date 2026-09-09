@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import TextIO
 
 from belief.contacts import ContactStore
+from belief.events import Event
 from belief.tools import (
     ContactFilter,
     ContactResult,
@@ -198,6 +199,34 @@ def _format_contact_block(result: ContactResult) -> list[str]:
             lines.append(f"  {key}: {facts[key]}")
     lines.append(f"summary: {result['summary']}")
     return lines
+
+
+def format_event_for_overlay(store: ContactStore, event: Event, now_sim: float) -> str:
+    """One line for BL-2.5's in-cockpit overlay mirror
+    (`logger.ConsolePerceptionRunner`, `plans/dcs-text-panel-output/plan.md`):
+    `"<id>: <kind>, <summary>"` for the event's contact, reusing
+    `describe_contact`'s existing `summary` field rather than inventing new
+    belief-reading logic here (this module owns no belief logic, see the
+    module docstring).
+
+    The leading `"<id>: "` matches `_format_contact_line`/
+    `_format_contact_block`'s own `contacts`/`show <id>` rendering above --
+    the one existing convention this module already has for writing a
+    contact id into a line of text, reused rather than invented fresh.
+    Without it, the overlay's fixed-duration message feed cannot distinguish
+    six sightings of one re-firing contact from six distinct contacts (BL-2.5
+    follow-up, live-acceptance screenshot finding, 2026-09-09) -- both render
+    as identical `CONTACT_DETECTED: ...` lines.
+
+    Falls back to `"<contact_id>: <kind>"` if the contact is no longer found
+    -- should not normally happen, since events are only ever derived from a
+    contact that exists at tick time (`belief.contacts.ContactStore.tick`),
+    but kept as a defensive fallback rather than an assumption this function
+    bakes in."""
+    result = describe_contact(store, event.contact_id, now_sim)
+    if result is None:
+        return f"{event.contact_id}: {event.kind}"
+    return f"{event.contact_id}: {event.kind}, {result['summary']}"
 
 
 def _format_history_entry(entry: dict[str, object]) -> str:

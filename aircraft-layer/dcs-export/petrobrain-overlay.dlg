@@ -1,0 +1,145 @@
+-- Petrobrain in-cockpit text overlay (BL-2.5) -- widget/skin definition.
+--
+-- Deploy alongside petrobrain-overlay-hook.lua to
+-- `Saved Games\DCS\Scripts\Hooks\petrobrain-overlay.dlg` (see
+-- aircraft-layer/WORKFLOW.md). Loaded via
+-- `DialogLoader.spawnDialogFromFile(lfs.writedir() ..
+-- "Scripts\\Hooks\\petrobrain-overlay.dlg", nil)`.
+--
+-- UNVERIFIED AGAINST A LIVE DCS SESSION as of authorship -- see
+-- plans/dcs-text-panel-output/plan.md Stage 2.
+--
+-- Structure modeled on two real, installed reference files, read in full
+-- this session (see
+-- aircraft-layer/research/2026-09-09-dcs-text-panel-output-channel.md):
+--   - $DCS_SAVED_GAMES_PATH/Mods/services/DCS-SRS/UI/DCS-SRS-Overlay.dlg
+--     (Window root, draggable, a Panel child for the background box).
+--   - $DCS_INSTALL_PATH/Scripts/UI/gameMessages.dlg (DCS's own shipped
+--     AutoScrollText usage -- `type = "AutoScrollText"`, a `skin.skins.text`
+--     sub-skin overriding color/font/fontSize/shadow only). Its base skin,
+--     $DCS_INSTALL_PATH/dxgui/skins/skinME/auto_scroll_text.skin.lua, already
+--     sets `textWrapping = true` on that same "text" sub-skin by default
+--     (Session 2 Finding 17) -- not re-declared below for the same reason
+--     gameMessages.dlg's own real instances don't re-declare it either.
+--
+-- One child differs from both references: a single AutoScrollText widget
+-- ("MessageText") is used directly, per the plan's Message Model, instead
+-- of SRS's manually-stacked-Static array -- DCS's own native message system
+-- already is "a small scrolling log of short text lines" (this project's
+-- exact shape) and manages accumulate/expire natively via
+-- addText()/clear(), so no per-line Y-offset bookkeeping is needed here.
+
+dialog = {
+    ["children"] = {
+        ["Box"] = {
+            ["children"] = {
+            },
+            ["params"] = {
+                ["bounds"] = {
+                    ["h"] = 200,
+                    ["w"] = 420,
+                    ["x"] = 0,
+                    ["y"] = 0,
+                },
+                ["enabled"] = true,
+                ["text"] = "",
+                ["tooltip"] = "",
+                ["visible"] = true,
+                ["zindex"] = 0,
+            },
+            ["skin"] = {
+                ["params"] = {
+                    ["name"] = "panelSkin",
+                },
+                ["states"] = {
+                    ["released"] = {
+                        [1] = {
+                            ["bkg"] = {
+                                ["center_center"] = "0x00000090",
+                            },
+                        },
+                    },
+                },
+            },
+            ["type"] = "Panel",
+        },
+        ["MessageText"] = {
+            ["children"] = {
+            },
+            ["params"] = {
+                ["bounds"] = {
+                    ["h"] = 180,
+                    ["w"] = 400,
+                    ["x"] = 10,
+                    ["y"] = 10,
+                },
+                ["enabled"] = true,
+                ["text"] = "",
+                ["tooltip"] = "",
+                ["visible"] = true,
+                ["zindex"] = 1,
+            },
+            ["skin"] = {
+                ["params"] = {
+                    ["appearDuration"] = 0,
+                    ["disappearDuration"] = 0,
+                    ["name"] = "autoScrollTextSkin",
+                },
+                ["skins"] = {
+                    ["text"] = {
+                        ["skinData"] = {
+                            ["states"] = {
+                                ["released"] = {
+                                    [1] = {
+                                        ["text"] = {
+                                            ["color"] = "0xf5f5f4ff",
+                                            ["font"] = "DejaVuLGCSansCondensed-Bold.ttf",
+                                            ["fontSize"] = 12,
+                                            ["shadowColor"] = "0x000000ff",
+                                            ["shadowOffset"] = {
+                                                ["horz"] = 1,
+                                                ["vert"] = 1,
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            ["type"] = "AutoScrollText",
+        },
+    },
+    ["params"] = {
+        ["bounds"] = {
+            ["h"] = 200,
+            ["w"] = 420,
+            ["x"] = 20,
+            ["y"] = 20,
+        },
+        ["draggable"] = true,
+        ["enabled"] = true,
+        ["hasCursor"] = false,
+        ["modal"] = false,
+        ["offscreen"] = false,
+        ["resizable"] = false,
+        ["text"] = "Petrobrain Overlay",
+        ["zOrder"] = 120,
+    },
+    ["skin"] = {
+        ["params"] = {
+            ["name"] = "windowSkin",
+        },
+        ["states"] = {
+            ["released"] = {
+                [1] = {
+                    ["bkg"] = {
+                        ["center_center"] = "0x00000000",
+                    },
+                },
+            },
+        },
+    },
+    ["type"] = "Window",
+}
