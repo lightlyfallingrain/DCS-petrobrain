@@ -136,3 +136,40 @@ matches that analysis.
   coverage-floor regression test. Reproducing this doc's full-595 numbers requires re-fetching
   the source file from a Windows DCS install and re-running the extraction script (not itself
   committed; a short one-off, described in Method above).
+
+---
+
+## Addendum — what the residual 78% actually contains
+
+The headline "78.0% `OP_GROUPSOMETHING`" understates ground coverage in one direction and
+overstates it in another, so it should not be quoted on its own. Breaking the 464 unclassified
+real DCS types down by what they are:
+
+| bucket | count | relevant to a ground-spotting channel? |
+|---|---:|---|
+| aircraft / helicopters / UAVs | 132 | no — this channel reports ground contacts |
+| WWII-era units (`Old …` reporting names) | 56 | rarely, mission-dependent |
+| **modern ground units** | **276** | **yes** |
+
+So the residual is *not* mostly irrelevant aircraft. Counting only modern ground units, coverage
+is roughly **74 classified / 350 total ≈ 21%** — thinner than the headline suggests, and thin
+exactly where the channel is supposed to work. Representative misses: `T-90A`, `T-90M`, `T-64BV`,
+`Challenger 2`, `Chieftain`, `BMD-1`, `BRDM-2` (and its ATGM variant), `Stryker CV`, `M142
+HIMARS`, `2S6 Tunguska`, `FV101 Scorpion`, `FV107 Scimitar`, `IRIS-T` launcher/radar/CP, `SS-26
+launcher`, `TOS-1A`, `M-ATV MRAP`, and several `Ural fuel truck` variants that the existing
+`ural` keyword does not reach because their type names are `ATZ-5`/`ATMZ-5`/`ATZ-10`.
+
+**Why this is cheap to improve, if it is judged worth improving.** The misses are not hard cases —
+they fail only because keyword matching runs against DCS *type* names (`CHAP_T90M`, `ATZ-5`,
+`B600_drivable`), which are irregular, rather than against Petrovich's *reporting* names (`T-90M`,
+`Ural fuel truck`, `Aircraft tug`), which are highly regular. ED's own complete 595-row
+type → reporting-name mapping exists in `HelperAI_reporting_names.lua` in the install. Shipping
+that mapping as a data file and keyword-matching on the reporting name would convert most of the
+276 into real classifications with roughly the same size of keyword table, and would additionally
+give the channel ED's own naming for free.
+
+**Not done here**, because it is a design change beyond the review's required fixes: it introduces
+a committed ~595-row DCS-derived data file and changes `object_model.py`'s lookup key. Recorded as
+the recommended next step if PB-1.5's class output is judged too information-poor in live testing —
+which is the natural place to find out, since Implementation stage 5's acceptance test is where a
+crew callout of "group of somethings" for a column of T-90s would become obvious.
