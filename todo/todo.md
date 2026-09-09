@@ -209,6 +209,10 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
      last-writer-wins certainty/classification fusion — theoretical until now, load-bearing the
      moment this event exists. Needs a specificity ordering so a better classification is never
      overwritten by a worse one.
+  **Grading is the intent, confirmed by the user 2026-09-09.** Making Petrovich *worse* at long
+  range is the goal, not a cost to be minimised: it is the anti-omniscience principle applied to
+  classification. Expect BL-2's existing live behaviour to change visibly and PB-1.5's calibration
+  to be revisited — that is an accepted consequence, not a regression to guard against.
   `CONTACT_CLASSIFICATION_CHANGED` is already named in `body-layer/src/belief/events.py` and
   `docs/concept/PETROBRAIN_RUNTIME.md`'s event model as a post-BL-2 candidate, so this pulls a
   planned event forward rather than inventing one. Needs an Architect pass; label to be confirmed
