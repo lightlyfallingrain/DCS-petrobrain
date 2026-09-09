@@ -33,6 +33,7 @@ def test_from_json_line_parses_all_objects() -> None:
     assert first.lon_deg == 35.9
     assert first.altitude_m == 50.0
     assert first.heading_true_rad == 1.2
+    assert first.is_ownship is None  # key absent from VALID_LINE entirely
 
 
 def test_from_json_line_accepts_empty_objects_list() -> None:
@@ -101,6 +102,68 @@ def test_from_json_line_rejects_boolean_for_numeric_id() -> None:
 
     with pytest.raises(WorldObjectParseError, match="must be a number"):
         WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+
+def test_from_json_line_accepts_true_is_ownship() -> None:
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"Mi-24P","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"is_ownship":true}]}\n'
+    )
+
+    snapshot = WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+    assert snapshot.objects[0].is_ownship is True
+
+
+def test_from_json_line_accepts_false_is_ownship() -> None:
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"BMP-2","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"is_ownship":false}]}\n'
+    )
+
+    snapshot = WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+    assert snapshot.objects[0].is_ownship is False
+
+
+def test_from_json_line_accepts_null_is_ownship() -> None:
+    # LoGetPlayerPlaneId() itself failed that poll -- genuinely unknown,
+    # must not be coerced to False (see WorldObjectSample.is_ownship's
+    # docstring).
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"BMP-2","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"is_ownship":null}]}\n'
+    )
+
+    snapshot = WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+    assert snapshot.objects[0].is_ownship is None
+
+
+def test_from_json_line_rejects_non_boolean_is_ownship() -> None:
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"BMP-2","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"is_ownship":"yes"}]}\n'
+    )
+
+    with pytest.raises(WorldObjectParseError, match="must be a boolean or null"):
+        WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+
+def test_to_dict_round_trips_is_ownship() -> None:
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"Mi-24P","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"is_ownship":true}]}\n'
+    )
+
+    snapshot = WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+    assert snapshot.to_dict()["objects"][0]["is_ownship"] is True
 
 
 def test_to_dict_round_trips_field_names() -> None:

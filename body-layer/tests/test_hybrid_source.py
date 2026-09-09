@@ -30,7 +30,12 @@ def _ownship() -> OwnshipState:
 
 
 def _world_object(
-    object_id: int, object_type: str, *, lat_deg: float, lon_deg: float
+    object_id: int,
+    object_type: str,
+    *,
+    lat_deg: float,
+    lon_deg: float,
+    is_ownship: bool | None = False,
 ) -> dict[str, Any]:
     return {
         "object_id": object_id,
@@ -40,6 +45,7 @@ def _world_object(
         "lon_deg": lon_deg,
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
+        "is_ownship": is_ownship,
     }
 
 
@@ -117,13 +123,15 @@ def test_new_classification_with_no_plausible_candidate_drops() -> None:
 
 def test_ownship_echo_is_excluded_and_detection_drops_with_no_other_candidate() -> None:
     # Reproduces the PB-1.5 live-sortie bug for the association/scope
-    # channel too: LoGetWorldObjects includes the player's own aircraft, a
-    # few metres from ownship's own telemetry position. With no other
-    # candidate present, exclude_ownship leaves associate() with nothing to
-    # resolve against, so the detection is dropped rather than associated
-    # with ownship itself.
+    # channel too: LoGetWorldObjects includes the player's own aircraft,
+    # identified here by the aircraft-layer's is_ownship flag rather than
+    # proximity. With no other candidate present, filter_ownship leaves
+    # associate() with nothing to resolve against, so the detection is
+    # dropped rather than associated with ownship itself.
     world_objects = {
-        "objects": [_world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0)]
+        "objects": [
+            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0, is_ownship=True)
+        ]
     }
     client = FakeAircraftClient(
         [_indication({"middle_list_text": "Ural truck"})], world_objects=world_objects
@@ -136,13 +144,16 @@ def test_ownship_echo_is_excluded_and_detection_drops_with_no_other_candidate() 
 def test_ownship_echo_does_not_prevent_a_real_candidate_from_associating() -> None:
     # The echo deliberately carries the SAME object_type as the real target.
     # With a mismatched type (e.g. "Mi-24P"), `associate()`'s own type-match
-    # tie-break discards it regardless of `exclude_ownship`, and this test
+    # tie-break discards it regardless of `filter_ownship`, and this test
     # passes whether or not the fix is present -- it did exactly that until
-    # Pass 3 caught it. Tying the type removes that confound, so the only
-    # thing that can still discriminate is the ownship exclusion itself.
+    # Pass 3 caught it (back when exclusion was proximity-based). Tying the
+    # type removes that confound, so the only thing that can still
+    # discriminate is the ownship exclusion itself.
     world_objects = {
         "objects": [
-            _world_object(999, "Ural-4320", lat_deg=3.0, lon_deg=-2.0),  # ownship echo
+            _world_object(
+                999, "Ural-4320", lat_deg=3.0, lon_deg=-2.0, is_ownship=True
+            ),  # ownship echo
             _world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0),  # real target
         ]
     }
@@ -247,6 +258,104 @@ def test_classification_change_re_emits() -> None:
     assert second[0].classification_raw == "BMP"
 
 
+# --- PB-2 Stage 0b: multiple simultaneous list-text leaves
+# (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-
+# detection.md` Finding 6) yield multiple `Observation`s per poll, each
+# claiming a distinct candidate.
+
+
+def test_sa3_launcher_and_radar_leaves_yield_two_observations() -> None:
+    # Reproduces Finding 6's real sampled tuple: middle_list_text and
+    # lower_list_text both read "SA-3 launcher" (deduplicated to one
+    # distinct text) while lower_lower_list_text reads "SA-3 Low Blow radar"
+    # -- two distinct real objects held at the same time, not one.
+    world_objects = {
+        "objects": [
+            _world_object(1, "5p73 s-125 ln", lat_deg=1000.0, lon_deg=0.0),
+            _world_object(2, "snr s-125 tr", lat_deg=1000.0, lon_deg=50.0),
+        ]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication(
+                {
+                    "middle_list_text": "SA-3 launcher",
+                    "lower_list_text": "SA-3 launcher",
+                    "lower_lower_list_text": "SA-3 Low Blow radar",
+                }
+            )
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 2
+    classifications = {obs.classification_raw for obs in observations}
+    assert classifications == {"SA-3 launcher", "SA-3 Low Blow radar"}
+    # Each observation claims its own candidate, not the same one twice --
+    # the two candidates sit at different ranges from ownship (z=0 vs z=50),
+    # so distinct ranges is proof of distinct candidates.
+    ranges = {round(obs.range_m, 3) for obs in observations}
+    assert len(ranges) == 2
+
+
+def test_slava_cruiser_and_tarantul_corvette_leaves_yield_two_observations() -> None:
+    # Reproduces Finding 6's other real sampled tuple: middle_list_text
+    # "Slava cruiser" and lower_list_text "Tarantul III corvette" -- two
+    # distinct real ships held at the same time.
+    world_objects = {
+        "objects": [
+            _world_object(1, "MOSCOW", lat_deg=1000.0, lon_deg=0.0),
+            _world_object(2, "MOLNIYA", lat_deg=1000.0, lon_deg=50.0),
+        ]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication(
+                {
+                    "middle_list_text": "Slava cruiser",
+                    "lower_list_text": "Tarantul III corvette",
+                }
+            )
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 2
+    classifications = {obs.classification_raw for obs in observations}
+    assert classifications == {"Slava cruiser", "Tarantul III corvette"}
+
+
+def test_repeated_text_across_leaves_is_deduplicated_to_one_observation() -> None:
+    # middle_list_text and lower_list_text carrying the SAME text (a single
+    # highlighted row plus its own neighbour echo, per Finding 6's Ural-truck
+    # samples) must not produce two Observations for one real object.
+    world_objects = {
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication(
+                {
+                    "middle_list_text": "Ural truck",
+                    "lower_list_text": "Ural truck",
+                }
+            )
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+
+
 def test_detection_clearing_then_reappearing_with_same_text_re_emits() -> None:
     world_objects = {
         "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
@@ -268,3 +377,56 @@ def test_detection_clearing_then_reappearing_with_same_text_re_emits() -> None:
     assert len(first) == 1
     assert second == []
     assert len(third) == 1
+
+
+def test_every_poll_mode_re_emits_an_unchanged_detection_set() -> None:
+    # Stage 3 (plans/pb2-contact-memory/plan.md Interface confirmation gap
+    # 2): under emit_mode="every_poll", a statically visible detection must
+    # keep producing an Observation every poll rather than being debounced
+    # away after the first -- the belief layer, not this source, now owns
+    # de-duplication.
+    world_objects = {
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication({"middle_list_text": "Ural truck"}),
+            _indication({"middle_list_text": "Ural truck"}),
+            _indication({"middle_list_text": "Ural truck"}),
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+    third = source.poll(100.4, _ownship())
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert len(third) == 1
+
+
+def test_every_poll_mode_still_returns_nothing_when_detection_clears() -> None:
+    world_objects = {
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(
+        [_indication({"middle_list_text": "Ural truck"}), _indication(None)],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+
+    assert len(first) == 1
+    assert second == []

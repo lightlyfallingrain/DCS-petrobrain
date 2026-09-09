@@ -1,6 +1,7 @@
-# Reviewer Memory Index
+# Memory Index
 
-- [Keyword vocabulary domain check](feedback_keyword_vocabulary_domain_check.md) — separate thin-coverage (plan-licensed) from domain-mismatch (real bug) in hand-authored object_type keyword tables; check tests use real-shaped identifiers.
-- [body-layer research dir convention](project_body_layer_research_dir_convention.md) — DCS-internals findings for body-layer/aircraft-layer go in `aircraft-layer/research/`, not `world-model/research/`.
-- [Coverage-floor fixture check](feedback_coverage_floor_fixture_check.md) — a "coverage floor" test is vacuous if its fixture is curated to only-passing entries; check assertion order and whether the bucket includes real misses.
-- [Empirically disable-and-rerun regression tests](feedback_regression_test_empirical_check.md) — don't just read new regression tests, actually strip the fix and re-run them; a multi-candidate fixture can be rescued by an unrelated later filter stage.
+- [PB-2 belief invariants](project_pb2_belief_invariants.md) — no truth fields in belief/, no gating tiebreak; re-grep every future stage review.
+- [PB-2 placeholder constants](project_pb2_placeholder_constants.md) — SCOPE_UNCERTAINTY_M/GATE_GROWTH_RATE_MPS are documented placeholders, not tuned values.
+- [PB-2 ContactStore thread safety](project_pb2_contactstore_thread_safety.md) — accessors return copies, so unlocked poll/REPL threads are safe from crashes; check copy-vs-reference before flagging.
+- [PB-2 Stage 5 fusion finding](project_pb2_stage5_fusion_finding.md) — certainty/classification confirmed last-writer-wins, tracked in todo.md backlog; PB-2/BL-2 fixture-testable work now complete.
+- [PB-2 review log append-only](project_pb2_review_log_append_only.md) — review.md accumulates per-stage sections; always append (Edit), never Write-overwrite — did this wrong once, recovered via git.

@@ -15,10 +15,12 @@ Each `poll()`:
    `/petrovich_indication/latest` (unlike `HybridPerceptionSource`, this
    channel has no real detection-existence signal to gate on at all; see
    `visibility.py`'s module docstring and the plan's Invariant Check). Runs
-   the raw candidate list through `association.exclude_ownship()` before
+   the raw candidate list through `association.filter_ownship()` before
    anything else -- `LoGetWorldObjects` is unfiltered ground truth and
-   includes the player's own aircraft (see that function's docstring; a bug
-   found via a live sortie, `plans/pb1.5-naked-eye-detection/debug.md`).
+   includes the player's own aircraft, identified by the aircraft-layer's
+   `is_ownship` flag (see that function's docstring; the flag replaced an
+   earlier proximity heuristic found necessary via a live sortie,
+   `plans/pb1.5-naked-eye-detection/debug.md`).
 2. Runs every candidate through `visibility.check_visibility()`.
 3. **Quantises the surviving geometry to ED's ambient-callout vocabulary**
    (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
@@ -49,25 +51,45 @@ Each `poll()`:
    a crew member could actually have perceived and said out loud
    (`bearing_deg`, `range_m`, `classification_raw`), not to this channel's
    internal bookkeeping of where the real object actually is.
-4. **Per-object debounce**: tracks the set of `object_id`s that passed the
-   filter on the *previous* poll. Emits one `Observation` only for an
-   `object_id` newly entering the currently-visible set (mirrors
-   `HybridPerceptionSource`'s change-debounce, but keyed on object-id set
-   membership rather than text-equality, since there's no text here). A
-   missing `/world_objects/latest` snapshot resets this state, mirroring
-   `HybridPerceptionSource.poll()`'s debounce-reset-on-gap for
-   `middle_list_text` -- so the next real snapshot's candidates are treated
-   as newly-appearing rather than silently already-seen.
-5. **Simultaneous-detection cap** (`NAKED_EYE_MAX_NEW_PER_POLL`) -- caps how
-   many *newly-appearing* objects one poll can emit, nearest-first (by
-   exact, un-quantised range). Objects visible-but-not-emitted this poll
-   still count as "previously visible" for the next poll's debounce
-   comparison -- per the plan's Affected Modules wording ("tracks the set of
-   `object_id`s that passed the filter on the *previous* poll"), this cap
-   gates *emission*, not visible-set membership; a capped-out object is not
-   retried on a later poll unless it actually leaves and re-enters the
-   visible set. Guards against an unrealistic "instant global awareness"
-   flood the moment the aircraft turns toward a dense object cluster.
+4. **Per-object debounce** (`emit_mode="on_change"`, the default): tracks the
+   set of `object_id`s that passed the filter on the *previous* poll. Emits
+   one `Observation` only for an `object_id` newly entering the
+   currently-visible set (mirrors `HybridPerceptionSource`'s change-debounce,
+   but keyed on object-id set membership rather than text-equality, since
+   there's no text here). A missing `/world_objects/latest` snapshot resets
+   this state, mirroring `HybridPerceptionSource.poll()`'s
+   debounce-reset-on-gap for `middle_list_text` -- so the next real snapshot's
+   candidates are treated as newly-appearing rather than silently
+   already-seen.
+5. **Simultaneous-detection cap** (`NAKED_EYE_MAX_NEW_PER_POLL`) -- under
+   `emit_mode="on_change"`, caps how many *newly-appearing* objects one poll
+   can emit, nearest-first (by exact, un-quantised range). Objects
+   visible-but-not-emitted this poll still count as "previously visible" for
+   the next poll's debounce comparison -- per the plan's Affected Modules
+   wording ("tracks the set of `object_id`s that passed the filter on the
+   *previous* poll"), this cap gates *emission*, not visible-set membership;
+   a capped-out object is not retried on a later poll unless it actually
+   leaves and re-enters the visible set. Guards against an unrealistic
+   "instant global awareness" flood the moment the aircraft turns toward a
+   dense object cluster.
+
+   `emit_mode="every_poll"` (`plans/pb2-contact-memory/plan.md` Stage 3, its
+   Interface confirmation gap 2) re-reads this same cap as an
+   *acquisition-rate* limit instead: a separate `_acquired_ids` set grows by
+   at most `NAKED_EYE_MAX_NEW_PER_POLL` newly-visible objects per poll
+   (nearest-first, same throttle), but every object already in that set
+   keeps emitting an `Observation` on *every* subsequent poll for as long as
+   it stays visible -- it is never capped out of its own repeat emission the
+   way `on_change` caps it out of re-*entering* the debounce set. This is
+   deliberately a second, independent piece of state from the `on_change`
+   debounce set below (`_previously_visible_ids`), not a re-read of the same
+   field: `on_change`'s existing behaviour (an object capped out of a
+   simultaneous flood is marked "already seen" and never retried at all,
+   `test_candidates_dropped_by_the_cap_are_not_retried_next_poll`) must stay
+   byte-for-byte, while `every_poll`'s acquisition set must instead keep
+   retrying a not-yet-acquired object every poll until the throttle admits
+   it. The two sets happen to evolve identically except in that overflow
+   case.
 """
 
 from __future__ import annotations
@@ -76,12 +98,13 @@ import math
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, Literal
 
 from aircraft_client import AircraftLayerClient
 from perception import object_model
-from perception.association import WorldObjectCandidate, exclude_ownship
+from perception.association import WorldObjectCandidate, filter_ownship
 from perception.source import (
+    OBSERVATION_ID_PREFIX_NAKED_EYE,
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
     Observation,
@@ -172,8 +195,22 @@ class NakedEyePerceptionSource:
     aircraft_client: AircraftLayerClient
     theatre: str
     world_model_conn: sqlite3.Connection
+    #: `"on_change"` (default) preserves the original per-object debounce
+    #: byte-for-byte -- every existing test constructs this class without
+    #: passing `emit_mode` and must keep passing untouched
+    #: (`plans/pb2-contact-memory/plan.md` Stage 3). `"every_poll"` emits one
+    #: `Observation` per currently-acquired, currently-visible object on
+    #: every poll -- see module docstring point 5 for how
+    #: `NAKED_EYE_MAX_NEW_PER_POLL` is re-read under this mode.
+    emit_mode: Literal["on_change", "every_poll"] = "on_change"
 
     _previously_visible_ids: frozenset[int] = field(
+        default_factory=frozenset, init=False, repr=False
+    )
+    #: `emit_mode="every_poll"`'s own acquisition-set state -- deliberately
+    #: separate from `_previously_visible_ids` above (see module docstring
+    #: point 5); unused under `emit_mode="on_change"`.
+    _acquired_ids: frozenset[int] = field(
         default_factory=frozenset, init=False, repr=False
     )
     _observation_count: int = field(default=0, init=False, repr=False)
@@ -186,14 +223,14 @@ class NakedEyePerceptionSource:
             # HybridPerceptionSource's debounce-reset-on-gap for
             # middle_list_text (see that module's poll() docstring).
             self._previously_visible_ids = frozenset()
+            self._acquired_ids = frozenset()
             return []
 
-        candidates = exclude_ownship(
+        candidates = filter_ownship(
             [
                 WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
                 for obj in world_objects.get("objects", [])
-            ],
-            ownship_state,
+            ]
         )
 
         visible: list[tuple[WorldObjectCandidate, VisibilityResult]] = []
@@ -207,6 +244,26 @@ class NakedEyePerceptionSource:
         currently_visible_ids = frozenset(
             candidate.object_id for candidate, _result in visible
         )
+
+        if self.emit_mode == "every_poll":
+            to_emit = self._acquire_every_poll(visible, currently_visible_ids)
+        else:
+            to_emit = self._acquire_on_change(visible, currently_visible_ids)
+
+        return [
+            self._build_observation(now_sim, ownship_state, candidate, result)
+            for candidate, result in to_emit
+        ]
+
+    def _acquire_on_change(
+        self,
+        visible: list[tuple[WorldObjectCandidate, VisibilityResult]],
+        currently_visible_ids: frozenset[int],
+    ) -> list[tuple[WorldObjectCandidate, VisibilityResult]]:
+        """Original per-object debounce: emit only newly-visible objects,
+        nearest-first, capped at `NAKED_EYE_MAX_NEW_PER_POLL`. Every
+        currently-visible object -- emitted or capped-out -- becomes
+        "already seen" for the next poll (see module docstring point 5)."""
         newly_visible = [
             (candidate, result)
             for candidate, result in visible
@@ -216,10 +273,39 @@ class NakedEyePerceptionSource:
         capped = newly_visible[:NAKED_EYE_MAX_NEW_PER_POLL]
 
         self._previously_visible_ids = currently_visible_ids
+        return capped
+
+    def _acquire_every_poll(
+        self,
+        visible: list[tuple[WorldObjectCandidate, VisibilityResult]],
+        currently_visible_ids: frozenset[int],
+    ) -> list[tuple[WorldObjectCandidate, VisibilityResult]]:
+        """`emit_mode="every_poll"`'s acquisition-rate throttle: at most
+        `NAKED_EYE_MAX_NEW_PER_POLL` not-yet-acquired objects (nearest-first)
+        join the acquired set this poll; every acquired object still visible
+        this poll is emitted, regardless of when it was acquired -- so a
+        continuously-visible object emits every poll instead of aging to
+        "lost" the way a blocked-cap re-entry would (module docstring
+        point 5)."""
+        not_yet_acquired = [
+            (candidate, result)
+            for candidate, result in visible
+            if candidate.object_id not in self._acquired_ids
+        ]
+        not_yet_acquired.sort(key=lambda item: item[1].range_m)
+        newly_acquired = not_yet_acquired[:NAKED_EYE_MAX_NEW_PER_POLL]
+        newly_acquired_ids = frozenset(
+            candidate.object_id for candidate, _result in newly_acquired
+        )
+
+        self._acquired_ids = (
+            self._acquired_ids & currently_visible_ids
+        ) | newly_acquired_ids
 
         return [
-            self._build_observation(now_sim, ownship_state, candidate, result)
-            for candidate, result in capped
+            (candidate, result)
+            for candidate, result in visible
+            if candidate.object_id in self._acquired_ids
         ]
 
     def _build_observation(
@@ -237,7 +323,7 @@ class NakedEyePerceptionSource:
 
         self._observation_count += 1
         return Observation(
-            id=f"OBS_{self._observation_count}",
+            id=f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}",
             contact_id=None,
             t_sim=now_sim,
             t_wall=time.time(),

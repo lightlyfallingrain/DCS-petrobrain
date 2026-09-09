@@ -82,7 +82,13 @@ Returns the most recent `LoGetWorldObjects` ground-truth snapshot (raw
 position/type/coalition/heading only, no detection filtering — that's
 body-layer's job) as a JSON object, or JSON `null` on the same "not an
 error" basis as `/telemetry/latest`. Added by
-`plans/pb1-perception-logger/plan.md` stage 3. See
+`plans/pb1-perception-logger/plan.md` stage 3. Each object also carries
+`is_ownship` (`true`/`false`/`null` — see
+`aircraft-layer/src/schema/world_objects.py`'s docstring for the tri-state
+meaning), added by the `todo/todo.md` backlog item replacing body-layer's
+50 m proximity-based ownship exclusion with an identity flag set from
+`LoGetPlayerPlaneId()`. The player's own aircraft is still included in the
+snapshot, flagged rather than dropped. See
 `aircraft-layer/src/schema/world_objects.py` for the field list/units.
 
 ## PB-1.5 ambient-detection probe (spike, temporary)

@@ -18,13 +18,12 @@ refers to, and how confidently. Picking the wrong nearby object among
 several similar ones is an association error, not an omniscience leak.
 
 That describes `associate()`, which remains the module's subject. It is no
-longer true of the module as a whole: `exclude_ownship()` below *is* an
+longer true of the module as a whole: `filter_ownship()` below *is* an
 unconditional pre-filter, called by both `HybridPerceptionSource` and
 `NakedEyePerceptionSource` before any channel-specific logic. It lives here
 rather than in `geometry.py` -- the more obvious home for something every
-tier shares -- because `WorldObjectCandidate` is defined in this module and
-this module already imports from `geometry.py`, so moving it there would be
-circular. Placement is deliberate, not expedient.
+tier shares -- because `WorldObjectCandidate` is defined in this module.
+Placement is deliberate, not expedient.
 
 Algorithm (plan's "Association design" section, unchanged here):
 1. Candidate pool = every `WorldObjectCandidate` passed in, no coalition/IFF
@@ -32,7 +31,9 @@ Algorithm (plan's "Association design" section, unchanged here):
 2. Plausibility filter: drop candidates outside `RANGE_CAP_M` or outside
    `FORWARD_HEMISPHERE_HALF_WIDTH_DEG` of ownship's true heading.
 3. Type-match scoring: keyword overlap between the detection's
-   classification text and each surviving candidate's `object_type`.
+   classification text and each surviving candidate's `object_type`, or its
+   resolved reporting name, whichever scores higher (`_type_match_score`,
+   `plans/pb2-contact-memory/plan.md` Stage 0).
 4. Decision: zero survivors -> `None` (caller drops the detection, emits no
    `Observation`). Exactly one survivor, or one candidate strictly
    top-scored by more than `TYPE_MATCH_TIE_MARGIN`: confident single match
@@ -55,6 +56,7 @@ from typing import Any, Final
 
 from coordinates import wgs84_to_dcs
 from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.reporting_names import reporting_name_for
 from perception.source import OwnshipState
 
 #: Generous optical-detection envelope for a ground vehicle from a
@@ -73,24 +75,6 @@ FORWARD_HEMISPHERE_HALF_WIDTH_DEG: Final[float] = 90.0
 #: ambiguous -- any candidate with a strictly higher keyword-overlap score
 #: is treated as the unambiguous winner.
 TYPE_MATCH_TIE_MARGIN: Final[int] = 0
-
-#: Any candidate within this distance of ownship's own position is treated
-#: as the player's own aircraft appearing in its own `LoGetWorldObjects`
-#: table, not a distinct object -- `LoGetWorldObjects` is confirmed global,
-#: unfiltered ground truth with no own-aircraft exclusion (see
-#: `aircraft-layer/src/schema/world_objects.py`'s module docstring, and the
-#: forum thread it cites confirming multiplayer returns "data from all
-#: devices"). Without this, ownship shows up as a phantom near-zero-range
-#: contact (see `plans/pb1.5-naked-eye-detection/debug.md` for the live-
-#: sortie symptom this fixes -- pinned-minimum range bucket, meaningless
-#: jittery bearing from a near-zero baseline vector, and the unclassified
-#: `OP_GROUPSOMETHING` fallback since aircraft types match no keyword).
-#: `50.0` m is chosen well above the Mi-24P's own physical extent (~17 m
-#: fuselage/rotor span) and any plausible per-tick position residual between
-#: `LoGetSelfData` (ownship telemetry) and `LoGetWorldObjects`'s own-aircraft
-#: entry, and well below both channels' real range caps (2500-5000 m) so it
-#: cannot plausibly suppress a real target.
-OWNSHIP_ECHO_EXCLUSION_RADIUS_M: Final[float] = 50.0
 
 CONFIDENT_ASSOCIATION_CONFIDENCE: Final[float] = 0.6
 CONFIDENT_ASSOCIATION_METHOD: Final[str] = "bearing_range_terrain"
@@ -113,6 +97,14 @@ class WorldObjectCandidate:
     x: float
     z: float
     alt_m: float
+    #: `None` when the aircraft-layer poll that produced this candidate
+    #: couldn't determine ownship identity that tick (`LoGetPlayerPlaneId()`
+    #: failed) -- see `WorldObjectSample.is_ownship`'s docstring
+    #: (`aircraft-layer/src/schema/world_objects.py`) for the tri-state
+    #: contract. `filter_ownship()` below only drops candidates where this
+    #: is `True`; `None` is kept rather than silently coerced to "not
+    #: ownship" or "is ownship" either way.
+    is_ownship: bool | None
 
     @staticmethod
     def from_dict(data: dict[str, Any], *, theatre: str) -> WorldObjectCandidate:
@@ -124,12 +116,14 @@ class WorldObjectCandidate:
         `associate()` function below so that function stays fixture-testable
         with plain `WorldObjectCandidate` instances."""
         x, z = wgs84_to_dcs(theatre, float(data["lat_deg"]), float(data["lon_deg"]))
+        is_ownship_raw = data.get("is_ownship")
         return WorldObjectCandidate(
             object_id=int(data["object_id"]),
             object_type=str(data["object_type"]),
             x=x,
             z=z,
             alt_m=float(data["altitude_m"]),
+            is_ownship=None if is_ownship_raw is None else bool(is_ownship_raw),
         )
 
 
@@ -147,24 +141,22 @@ class AssociationResult:
     ambiguous: bool
 
 
-def exclude_ownship(
-    candidates: Sequence[WorldObjectCandidate], ownship: OwnshipState
+def filter_ownship(
+    candidates: Sequence[WorldObjectCandidate],
 ) -> list[WorldObjectCandidate]:
-    """Drop any candidate within `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` of
-    ownship's own position -- see that constant's docstring for why this is
-    necessary. Both `HybridPerceptionSource` and `NakedEyePerceptionSource`
-    call this on their raw `WorldObjectCandidate` list before running their
-    own filtering, since both build that list from the same unfiltered
-    `LoGetWorldObjects` snapshot."""
-    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
-    return [
-        candidate
-        for candidate in candidates
-        if range_m(
-            observer, GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
-        )
-        > OWNSHIP_ECHO_EXCLUSION_RADIUS_M
-    ]
+    """Drop any candidate whose `is_ownship` is `True` -- the aircraft-layer
+    flag set from `LoGetPlayerPlaneId()` (see `WorldObjectCandidate.is_ownship`'s
+    docstring), replacing an earlier 50 m proximity-radius heuristic that had
+    a false-negative window for any genuine object within 50 m of ownship
+    (troop insertion/extraction, close formation, hovering directly over a
+    target -- `todo/todo.md` backlog item). Only `True` is dropped: `None`
+    (ownship identity undetermined that poll) and `False` are both kept, per
+    the same "don't fabricate a fact you don't have" reasoning as the flag's
+    own tri-state contract. Both `HybridPerceptionSource` and
+    `NakedEyePerceptionSource` call this on their raw `WorldObjectCandidate`
+    list before running their own filtering, since both build that list from
+    the same unfiltered `LoGetWorldObjects` snapshot."""
+    return [candidate for candidate in candidates if candidate.is_ownship is not True]
 
 
 def associate(
@@ -256,8 +248,26 @@ def _keywords(text: str) -> set[str]:
 
 def _type_match_score(classification_raw: str, object_type: str) -> int:
     """Keyword overlap between HelperAI's coarse classification text (e.g.
-    `"Ural truck"`) and a candidate's DCS unit-type identifier (e.g.
-    `"Ural-4320"`). **Unvalidated against real multi-object scenes** -- see
-    `plans/pb1-perception-logger/plan.md`'s Risks section; this is a
-    starting guess, not a validated vocabulary table."""
-    return len(_keywords(classification_raw) & _keywords(object_type))
+    `"Slava cruiser"`) and a candidate's DCS unit-type identifier (e.g.
+    `"MOSCOW"`). HelperAI's own classification text is drawn from ED's
+    reporting-name vocabulary, not the raw `object_type` string -- the two
+    are frequently unrelated words (`"Slava cruiser"` vs `"MOSCOW"`,
+    `"SA-3 launcher"` vs `"5p73 s-125 ln"`), so scoring against the raw type
+    alone silently returns 0 for most non-coincidental cases (see
+    `plans/pb2-contact-memory/plan.md` Stage 0, and
+    `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-
+    detection.md` Finding 6 for the real tuples that surfaced this). Resolve
+    `object_type` through `reporting_names.reporting_name_for` and score
+    against **both** the raw type and the resolved reporting name, taking
+    the max -- so a candidate whose raw type happens to share a keyword
+    (e.g. the Ural-truck coincidence) still scores at least as well as
+    before, and nothing that matched before this fix regresses."""
+    classification_keywords = _keywords(classification_raw)
+    raw_score = len(classification_keywords & _keywords(object_type))
+
+    reporting_name = reporting_name_for(object_type)
+    if reporting_name is None:
+        return raw_score
+
+    reporting_score = len(classification_keywords & _keywords(reporting_name))
+    return max(raw_score, reporting_score)

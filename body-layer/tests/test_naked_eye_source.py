@@ -40,7 +40,12 @@ def _ownship() -> OwnshipState:
 
 
 def _world_object(
-    object_id: int, object_type: str, *, lat_deg: float, lon_deg: float
+    object_id: int,
+    object_type: str,
+    *,
+    lat_deg: float,
+    lon_deg: float,
+    is_ownship: bool | None = False,
 ) -> dict[str, Any]:
     return {
         "object_id": object_id,
@@ -50,6 +55,7 @@ def _world_object(
         "lon_deg": lon_deg,
         "altitude_m": 500.0,
         "heading_true_rad": 0.0,
+        "is_ownship": is_ownship,
     }
 
 
@@ -95,13 +101,15 @@ def test_no_world_objects_snapshot_returns_empty() -> None:
 
 def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
     # Reproduces the PB-1.5 live-sortie bug: LoGetWorldObjects is unfiltered
-    # ground truth and includes the player's own aircraft, a few metres from
-    # ownship's own telemetry position (identity-mapped lat/lon here mirrors
-    # the small residual seen live). Before the exclude_ownship fix this
-    # produced a phantom OP_GROUPSOMETHING contact pinned at the smallest
-    # range bucket with a meaningless (near-zero-baseline) bearing.
+    # ground truth and includes the player's own aircraft, identified here
+    # by the aircraft-layer's is_ownship flag rather than proximity. Before
+    # the original fix this produced a phantom OP_GROUPSOMETHING contact
+    # pinned at the smallest range bucket with a meaningless (near-zero-
+    # baseline) bearing.
     world_objects = {
-        "objects": [_world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0)]
+        "objects": [
+            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0, is_ownship=True)
+        ]
     }
     source, _client = _source(world_objects)
 
@@ -111,7 +119,9 @@ def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
 def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
     world_objects = {
         "objects": [
-            _world_object(999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0),  # ownship echo
+            _world_object(
+                999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0, is_ownship=True
+            ),  # ownship echo
             _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),  # real target
         ]
     }
@@ -243,6 +253,102 @@ def test_candidates_dropped_by_the_cap_are_not_retried_next_poll() -> None:
 
     assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
     assert second == []
+
+
+def test_every_poll_mode_re_emits_a_continuously_visible_candidate() -> None:
+    # Stage 3 (plans/pb2-contact-memory/plan.md Interface confirmation gap
+    # 2): under emit_mode="every_poll", a continuously-visible object must
+    # keep emitting an Observation on every poll instead of being debounced
+    # away after acquisition.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+    third = source.poll(100.4, _ownship())
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert len(third) == 1
+
+
+def test_every_poll_mode_stops_emitting_once_the_candidate_leaves() -> None:
+    visible = {"objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]}
+    empty: dict[str, Any] = {"objects": []}
+    client = FakeAircraftClient(visible)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    client._world_objects = empty
+    second = source.poll(100.2, _ownship())
+
+    assert len(first) == 1
+    assert second == []
+
+
+def test_every_poll_mode_still_throttles_first_time_acquisition() -> None:
+    # 5 simultaneously-new infantry candidates, cap = 3 -- the acquisition
+    # throttle still applies to *first-time* acquisition even under
+    # every_poll, guarding against instant global awareness.
+    world_objects = {
+        "objects": [
+            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
+            for i in range(1, 6)
+        ]
+    }
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+
+    assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
+
+
+def test_every_poll_mode_progressively_acquires_capped_overflow() -> None:
+    # Unlike on_change (where a capped-out object is never retried), every_
+    # poll's acquisition set must keep retrying a not-yet-acquired object on
+    # later polls until the throttle admits it -- the whole point of
+    # re-reading NAKED_EYE_MAX_NEW_PER_POLL as an acquisition-rate limit
+    # rather than an emission cap.
+    world_objects = {
+        "objects": [
+            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
+            for i in range(1, 6)
+        ]
+    }
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+
+    assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
+    # first poll's 3 acquired objects re-emit, plus the 2 remaining
+    # overflow objects are now acquired and emitted for the first time.
+    assert len(second) == 5
 
 
 def test_quantise_bearing_snaps_to_nearest_clock_position() -> None:

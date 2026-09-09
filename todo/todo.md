@@ -51,7 +51,87 @@ is a framing and priority shift, not a contract change. What it does raise is th
 scope channel's known defects — the user confirmed that channel stays, being needed for future
 acquire/lock/fire gameplay.
 
-PB-2 (BL-2: contact memory and data association over time) follows after this — PB-1's completion does not invalidate or change downstream assumptions for BL-2, but BL-2 should ideally consume both detection channels (scope + naked-eye) rather than being built against the scope-only channel and reworked later.
+**PB-2 / BL-2 (done, merged to main 2026-09-09).** Contact memory and data association over
+time. All stages complete: -1 (aircraft-layer `is_ownship` flag, replacing the old
+`association.exclude_ownship`/`OWNSHIP_ECHO_EXCLUSION_RADIUS_M` proximity heuristic), 0
+(scope-channel type-namespace repair — `association._type_match_score` now resolves DCS type
+names through `reporting_names` before scoring, and `hybrid_source.py` emits one `Observation`
+per distinct HelperAI list-text leaf), 1 (belief core — `belief/percept.py`'s `Percept`
+projection structurally drops all DCS truth fields; `belief/contacts.py`'s `ContactStore`;
+`belief/association_over_time.py`'s three-valued spatial+class gating), 2 (decay/certainty
+ladder — `observed`/`tracked`/`estimated`/`lost` — and detected/lost/reacquired lifecycle events
+in `belief/decay.py`/`events.py`), 3 (`emit_mode` on both sources, `--console` pipeline wiring),
+4 (`belief/tools.py`'s `get_contacts`/`describe_contact`/`get_contact_history`/`find_contact` —
+the brain API's body, minus a transport — plus `belief/console.py`'s debug REPL), 5
+(cross-channel fusion validated by fixture). All five review passes approved with zero required
+fixes; DoD ran the file-level gate (`plans/pb2-contact-memory/dod-check.md`) pending Stage 6.
+
+**Stage 6 (live acceptance) passed 2026-09-09.** User flew a real sortie against `--console`.
+One real bug found and fixed live: `--console`'s poll thread queried a `world_model_conn` opened
+on the main thread — `sqlite3.Connection` is thread-affine, so this crashed on first poll.
+Fixed by opening the connection and building sources on the poll thread itself
+(`_run_console_poll_loop`), with a new regression test that drives a real sqlite connection
+across a real thread boundary (the class of bug `test_logger.py`'s fakes structurally couldn't
+catch). Two small live-testing UX fixes followed: the poll loop's periodic contact-count print
+was flooding the REPL (`output=None` in console mode; state now queried on demand via
+`contacts`/`stats`), and the REPL now prints a command-help banner at startup
+(`belief.console.HELP_TEXT`). User confirmed live: naked-eye already discriminating
+`OP_SRSAM`/`OP_MRSAM` at range, contact/certainty/decay output looked correct (`estimated`
+aging via `last seen Ns ago`), `stats` reporting plausible counts (91 contacts / 179
+observations / 91 events over one sortie segment).
+
+*Does this change the next milestone?* Per the plan's "Second-Order Effects": unblocks BL-3
+(world enrichment — `Contact` is the record it enriches, `project_from_bearing_range` is the
+explicit stub BL-3 replaces) and BL-5 (`tools.py` already returns the frozen response shape,
+BL-5 reduces to attaching a transport) cheaply; narrows future DCS-truth access (the `Percept`
+boundary is now the thing any later feature must justify crossing); complicates BL-4 (must build
+policy on the `certainty` table/bare attention enum landed here, not restate them) and BL-9
+(belief-vs-truth visualisation should read the observation log, not source internals). One
+real backlog item surfaced during Stage 5 fixture validation, not by live evidence: BL-2's
+`certainty`/classification fusion is last-writer-wins, not quality-weighted (see Backlog) —
+live sortie evidence didn't surface this as an actual problem this time, but it's unresolved.
+Six other independent items were raised alongside this milestone and filed to Backlog rather
+than folded in: aircraft-layer export-throttle split, live FPS measurement for
+`LoGetWorldObjects`, a DCS radio-panel SRS-fallback output channel, and a much-later attention
+direction/detection-cones milestone.
+
+*Confirmed:* `PerceptionSource` needs no protocol change — BL-2 consumes both channels through the
+existing interface. But planning found three defects in already-merged PB-1/PB-1.5 code that BL-2
+would otherwise inherit, all verified against the source: `Observation.id` collides across channels
+(both mint `OBS_{n}` from their own counter); the source-level on-change debounce would starve a
+decaying belief layer (a statically visible tank emits once, then ages to "lost" while Petrovich
+stares at it); and `derived_world_position` carries exact DCS truth into records belief code reads.
+
+*Core design decision:* contact identity never consults `object_id` or any truth field — identity
+is geometric, from perceived attributes only. Not conservatism about the 2026-09-09 id-stability
+evidence: a passthrough of the DCS key would make Petrovich incapable of confusing two identical
+trucks, which is the omniscience CLAUDE.md forbids. Consequence: unstable ids would degrade the
+observation *rate*, never corrupt belief.
+
+*Staging:* **-1** aircraft-layer ownship flag (prerequisite, own branch) → **0** scope-channel
+repair → **1** belief core → **2** decay/certainty/lifecycle → **3** emission policy → **4**
+tools+console → **5** fusion validation → **6** live sortie (user-only). Stages 0–5 are
+fixture-testable.
+
+*User decisions on the plan's three escalations (2026-09-09), recorded in the plan:*
+1. Stage-0 scope-channel repair **is in scope**, with the emphasis note that the scope channel
+   matters for future target acquisition/firing — so for now it is repaired and *fixture*-validated
+   while BL-2's live acceptance rides on the naked-eye/binocular channel. Stage 6(a) is best-effort,
+   not a gate.
+2. Ownship: **flag it in the aircraft layer per the Backlog item, and do it first** (the plan had
+   recommended accept-as-caveat; user chose the stronger fix). BL-2 is the layer that turns the 50 m
+   window from a silent gap into a *wrong belief* — a contact goes "lost" exactly when the aircraft
+   is closest to it — so fixing it first means BL-2 is never built or tuned against that artefact.
+3. BL-2 **does** emit a minimal one-line `summary` per contact. Settles `plans/body-layer/plan.md`
+   §10 decision 4 for BL-2's scope.
+
+*Next action:* stage -1 on branch `feature/ownship-flag` (created off `main`, currently empty — no
+commits). Spec is the Backlog item below. Needs a live sortie leg to verify `LoGetPlayerPlaneId()`,
+since the flag's correctness cannot be established from fixtures.
+
+*Session note:* PB-1's completion does not invalidate or change downstream assumptions for BL-2, but
+BL-2 should consume both detection channels (scope + naked-eye) rather than being built against the
+scope-only channel and reworked later.
 
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
@@ -117,8 +197,8 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   ownship echo gone, if real contacts re-emit on every poll instead of once, the ids are unstable.
   Watch for that during acceptance testing.
 
-- [?] **Direction (raised 2026-09-09, needs Architect): stop consuming DCS's detection at all, and
-  own perception end-to-end.** After the PB-1.5 live probe
+- [>] **Direction (raised 2026-09-09; parked by user decision 2026-09-09): stop consuming DCS's
+  detection at all, and own perception end-to-end.** After the PB-1.5 live probe
   (`aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`), the user's position is
   that this "heavily leans towards entirely dropping the current naked-eye DCS detection logic,
   possibly even suppressing the texts in the radio callouts, and implementing our own detection
@@ -161,7 +241,17 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   **Net remaining scope of this item**, once the deferrals above are taken out: adopt PB-1.5's
   filter as the primary detection mechanism rather than a fallback, and stop treating DCS's ambient
   output as an input we are waiting on. Both are framing/documentation changes plus calibration —
-  no new machinery. Still `[?]`: do not start without the user's instruction.
+  no new machinery.
+
+  **Parked 2026-09-09 (user decision), going straight to PB-2 instead.** No longer `[?]`/"decision
+  needed": the four questions above were all answered, which settled every architectural call this
+  item was going to make — there is no module boundary to draw and no interface to change, so the
+  *Architect* pass named in the original heading is no longer required. What remains is (1) a
+  framing/documentation pass reclassifying `visibility.py` from fallback to primary mechanism, and
+  (2) calibration of the tier/range constants against the "if the player can see a unit, Petrovich
+  should too" standard. Calibration is the only real work and needs live sorties, so it is better
+  folded into a milestone that is flying anyway than run as its own. Do not start without the
+  user's instruction.
 
 - [ ] **`association.py` matches across two different DCS name namespaces and scores 0 on most real
   units** — *priority raised 2026-09-09: the user confirmed the scope channel is needed for later
@@ -195,7 +285,25 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 - [ ] **Incremental per-layer pipeline builds** — `build_region` currently deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. User-requested capability: run individual pipeline sections (e.g., roads only, elevation only, validation only) and *add* that data into an existing store, allowing staged builds and partial re-runs when debugging a single layer. Deferred post-M7 (raised during M7 DoD acceptance testing, explicitly not blocking). Considered for M8 and **explicitly dropped** from it (2026-09-06) to keep that milestone scoped to the probe store — this remains open and unscheduled for a later milestone. M9 (OSM) would benefit from it; see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` for context and `world-model/src/build/pipeline.py`'s `build_region` implementation.
 
+- [ ] **Aircraft-layer: split the export throttle so `LoGetWorldObjects`/HelperAI can poll slower than self-data.** Raised 2026-09-09 during PB-2 work. `aircraft-layer/dcs-export/Export.lua`'s `EXPORT_INTERVAL_S = 0.2` (5 Hz) is a single shared throttle (`last_export_t` in `LuaExportAfterNextFrame`) gating self-data (attitude/IAS/heading), `LoGetWorldObjects`, and the HelperAI poll together — there's no way today to slow one feed without slowing all three. User's reasoning: ground units tracked by `LoGetWorldObjects` move slowly and don't need 5 Hz; self-data (and any future threat-reaction signal) may still want a faster rate. Fix: two independent interval constants/throttle states instead of one. Not urgent — no measured FPS cost yet to react to (see next item) — but a clean, low-risk refactor once someone's in `Export.lua` anyway. Confirmed BL-2's contact-decay timescales (30s position half-life, 120s lost-threshold, `plans/pb2-contact-memory/plan.md` Stage 2) are ~2 orders of magnitude slower than either 5 Hz or a candidate 2 Hz, so this change has no effect on belief quality — it's purely an export-cost/latency tradeoff.
+
+- [ ] **Aircraft-layer: measure `LoGetWorldObjects` FPS cost live before tuning its poll rate.** Raised 2026-09-09 alongside the throttle-split item above; same trigger, kept separate since one is a code change and the other is a measurement task that should land first and inform it. `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md`'s "Unresolved" section already flags this: no confirmed, quantified per-call cost of `LoGetWorldObjects` at realistic unit counts (~50–200) exists — only qualitative forum/Tacview-wiki folklore ("can be inefficient, ED has partially optimized it," no hard numbers). The current 5 Hz was picked as "conservative starting rate," not a measured-safe one, and there's no native radius/category filter at the API level, so cost scales with total map object count regardless of poll rate. User proposed 2 Hz as a guess balancing slow-moving-ground-unit tracking against staying responsive to being fired at; before committing to that or any number, fly with world-objects export on/off at 5/2/1 Hz and diff FPS/frame-time to settle it empirically. Also worth checking live whether "being fired at" is even served by `LoGetWorldObjects`'s poll rate at all — nothing currently reads it for threat/launch detection (that's position/identity data, not an event stream), so the urgent-callout-latency reasoning may want its own dedicated signal later (e.g. RWR export) rather than riding on the ground-scene poll rate.
+
+- [ ] **DCS radio message text panel as an SRS fallback / dev-visibility output channel.** Raised 2026-09-09. SRS (voice) is the intended eventual output channel for Petrovich's messages, but is not yet implemented; even once it exists, a text-panel fallback is wanted for when the SRS server isn't connected. Concrete near-term value: mirror the body-layer log output to DCS's in-game radio message text panel now, during development — makes live sortie testing (BL-2 acceptance, PB-1.5 calibration, etc.) far easier to observe in-cockpit instead of only in an external log file. Needs investigation: how to write to that panel from outside mission-scripting context (likely `trigger.action.outText` or similar, callable only from mission/hook Lua, not obviously from the Export environment aircraft-layer currently uses) — probably an aircraft-layer-side addition (new outbound path, mirroring the existing inbound Export.lua polling) or a separate hook script. Investigator task before implementation, per project convention for unverified DCS-internals questions.
+
+- [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.** Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
+
 ## Deferred
 
 - Spatial storage/library choice — resolved by M5: stdlib `sqlite3` + R*Tree, JSON geometry (not GeoPackage/SpatiaLite/PostGIS). See `world-model/research/2026-09-04-m5-first-persistent-model.md`.
 - M9 — OSM augmentation (geofabrik). **Deferred, value reassessed 2026-09-06.** OSM's original role split ("DCS = where, OSM = what") is now partly absorbed: DCS-native gives exact roads/named places/elevation, and M8's live-probe path can fill point-level `surface_type`/water ground-truth incrementally with zero new dependency. Remaining unique OSM value is narrow — settlement **boundary polygons** (DCS only gives town-center points) and semantic **tags** (road class/ref, land-use, POI type) that neither DCS nor probing produce. Not worth the new-dependency/`.osm.pbf`-parsing cost (see `plans/m9-osm-geofabrik/plan.md` open dependency decision) while no downstream consumer (Mission Interpreter/Runtime, both not yet built) needs settlement-extent reasoning or richer naming. Revisit only when such a consumer's requirements actually call for it — user decides when.
+
+- **Attention direction and detection cones (much-later milestone).** Raised 2026-09-09 during PB-2 work; deliberately deferred, not started. Today's perception channels (naked-eye/binocular quantised filter, HelperAI scope text) both implicitly assume Petrovich is looking everywhere at once within range/FOV gates — no notion of *where* his attention is actually pointed, or which of several distinct real optical modes he's using. Future design should model this properly:
+  - **Distinct optical modes**, each with its own field-of-view/acuity/movement-tradeoff, not one blended model:
+    - **Peripheral vision** — very wide FOV, poor at classification/ID, but picks up *movement* near-instantly; unexpected motion (i.e. not the wingman) should be able to grab focus for threat triage even outside the current focus area.
+    - **Naked-eye focus** — narrower than peripheral, good at detection/ID at closer range, tracks smoothly through maneuvering.
+    - **Binoculars** — zoom, much better detection/ID at range, very narrow FOV, unusable during aggressive maneuvering.
+    - **APS-17** (or whatever the in-game equivalent is) — its own distinct mode, binocular-like but with its own optics/operating logic — needs its own investigation before modeling.
+  - **Attention/scan state**: focus can be on a specific target, a specific direction/sector, or a full-visibility scan; state needs to persist and drive which optical mode is "active" for perception-source gating.
+  - **Scanning loop logic**, e.g.: wide peripheral scan → focus on something interesting → classify → binoculars for ID/detail → classify → return to wide scan; interrupted periodically by a full-area sweep for emergent threats even while working a directed search (pilot-requested sector, or mission brief expected-threat direction/clock bearing) — loop back to the priority sector afterward.
+  - Why this matters for what's already built: `NakedEyePerceptionSource`'s FOV/angular-size/LOS gating (PB-1.5) and BL-2's belief layer both currently treat "can Petrovich see it" as a single binary gate, not as a function of current attention mode/direction — this milestone would change what feeds `Percept`/`Observation` in the first place, upstream of everything BL-2 built. Not a BL-2 change; a future perception-layer milestone, likely well after BL-4 (attention/relevance policy, which currently only has the bare `watch`/`unwatch` enum from PB-2 Stage 4 to build on).

@@ -5,31 +5,47 @@ branch on).
 
 Each `poll()`:
 1. Fetches the latest HelperAI indication (`GET /petrovich_indication/
-   latest`). If `middle_list_text` isn't populated, or hasn't changed since
-   the last poll that produced an `Observation` (debounce, see below),
-   returns `[]` -- absence/no-change reported as absence, not a fabricated
-   or repeated poll.
+   latest`). Reads all five `*_list_text` leaves (`LIST_TEXT_FIELDS`), not
+   just `middle_list_text` -- `aircraft-layer/research/2026-09-08-pb1-5-
+   worldobjects-filter-and-ambient-detection.md` Finding 6 established these
+   five leaves are a scrolling **window into a multi-row target list**, not
+   one selected target: real sampled data held `Slava cruiser` +
+   `Tarantul III corvette`, and separately `SA-3 launcher` +
+   `SA-3 Low Blow radar`, as distinct simultaneous rows. Collapses to the
+   distinct populated texts, in `LIST_TEXT_FIELDS` order, de-duplicated
+   within this poll (`middle_list_text` and `lower_list_text` are frequently
+   the same text, per Finding 6's table). If nothing is populated, or the
+   whole set of distinct texts is unchanged since the last poll that
+   produced `Observation`s (debounce, see below), returns `[]`.
 2. Fetches the latest `LoGetWorldObjects` snapshot (`GET /world_objects/
    latest`), converts it to `association.WorldObjectCandidate`s, and drops
-   the player's own aircraft via `association.exclude_ownship()` --
+   the player's own aircraft via `association.filter_ownship()` --
    `LoGetWorldObjects` is unfiltered ground truth and includes ownship
-   itself (see that function's docstring; found via a live sortie,
+   itself, identified by the aircraft-layer's `is_ownship` flag (see that
+   function's docstring; the flag replaced an earlier 50 m proximity
+   heuristic found necessary via a live sortie,
    `plans/pb1.5-naked-eye-detection/debug.md`).
-3. Calls `association.associate()` to resolve which candidate (if any) the
-   detection refers to.
-4. Builds one `Observation` from the resolved candidate's geometry, or
-   returns `[]` if `associate()` found nothing plausible (a drop, logged as
+3. Calls `association.associate()` once per distinct populated leaf text, in
+   order, to resolve which candidate (if any) each refers to. A candidate
+   claimed by one leaf is removed from the pool before the next leaf is
+   associated, so two leaves naming two real, distinct objects (the SA-3
+   pair above) cannot both resolve to the same candidate.
+4. Builds one `Observation` per successfully-resolved leaf. A leaf for which
+   `associate()` finds nothing plausible is dropped individually (logged as
    a rate signal, not per-instance noise -- per the plan's Association
-   design section).
+   design section) without blocking the other leaves in the same poll.
 
-Debounce is a simple "only emit when `middle_list_text` differs from the
-text that produced the last emitted `Observation`" check -- the exact window
-is an implementation detail, not an architectural one (plan stage 6), picked
-here because it's the cheapest thing that stops a persisting detection from
-spamming `logger.py`'s output every poll tick while still re-emitting
-immediately on any real change (including a detection clearing and a new
-one appearing later, even with the same text -- see `poll`'s handling of a
-momentarily-empty `middle_list_text` resetting the debounce state).
+Debounce compares the *whole set* of distinct populated texts this poll
+against the set that produced the last emitted `Observation`s -- the exact
+window is an implementation detail, not an architectural one (plan stage 6),
+picked here because it's the cheapest thing that stops a persisting
+detection set from spamming `logger.py`'s output every poll tick while still
+re-emitting immediately on any real change (including every leaf clearing
+and the same text reappearing later -- see `poll`'s handling of a
+momentarily-empty leaf set resetting the debounce state). This mirrors PB-1's
+single-`middle_list_text`-value debounce exactly when only one leaf is ever
+populated, which is why every existing on_change test still passes
+unmodified.
 """
 
 from __future__ import annotations
@@ -37,19 +53,47 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import Any, Final, Literal
 
 from aircraft_client import AircraftLayerClient
-from perception.association import WorldObjectCandidate, associate, exclude_ownship
-from perception.source import DerivedWorldPosition, Observation, OwnshipState
+from perception.association import WorldObjectCandidate, associate, filter_ownship
+from perception.source import (
+    OBSERVATION_ID_PREFIX_HYBRID,
+    DerivedWorldPosition,
+    Observation,
+    OwnshipState,
+)
 
 logger = logging.getLogger(__name__)
 
-#: The HelperAI controller name association gates on -- the confirmed-live
-#: "which target is currently selected" text
-#: (aircraft-layer/research/2026-09-08-pb1-live-spike-results.md finding 1).
-MIDDLE_LIST_TEXT_FIELD = "middle_list_text"
+#: The five HelperAI list-text controller names, in on-screen top-to-bottom
+#: order -- a scrolling window into a multi-row target list (see module
+#: docstring, Finding 6). `upper_list_text` is defined in
+#: `HelperAI_page_common.lua` but never observed populated across 3,652 live
+#: samples (Finding 5); kept in this tuple anyway for symmetry and because a
+#: future DCS patch could start populating it -- reading a field that's
+#: always absent costs nothing.
+LIST_TEXT_FIELDS: Final[tuple[str, ...]] = (
+    "upper_upper_list_text",
+    "upper_list_text",
+    "middle_list_text",
+    "lower_list_text",
+    "lower_lower_list_text",
+)
 
 SOURCE_PETROVICH_DETECTION_ASSOCIATED = "petrovich_detection_associated"
+
+
+def _distinct_populated_texts(fields: dict[str, Any]) -> tuple[str, ...]:
+    """The populated `LIST_TEXT_FIELDS` leaves' text values, in field order,
+    de-duplicated by text (first occurrence wins) -- see module docstring
+    point 1."""
+    seen: list[str] = []
+    for field_name in LIST_TEXT_FIELDS:
+        text = fields.get(field_name)
+        if text and text not in seen:
+            seen.append(text)
+    return tuple(seen)
 
 
 @dataclass
@@ -60,8 +104,18 @@ class HybridPerceptionSource:
 
     aircraft_client: AircraftLayerClient
     theatre: str
+    #: `"on_change"` (default) preserves PB-1's original text-equality
+    #: debounce byte-for-byte -- every existing test constructs this class
+    #: without passing `emit_mode` and must keep passing untouched
+    #: (`plans/pb2-contact-memory/plan.md` Stage 3). `"every_poll"` skips the
+    #: debounce check entirely and emits one `Observation` per distinct
+    #: populated leaf on every poll, regardless of whether the detection set
+    #: changed -- source-level debounce was a PB-1 device to keep the text
+    #: logger readable and starves the belief layer's decay/lifecycle logic
+    #: of the continuity it needs (plan's Interface confirmation gap 2).
+    emit_mode: Literal["on_change", "every_poll"] = "on_change"
 
-    _last_emitted_classification: str | None = field(
+    _last_emitted_texts: tuple[str, ...] | None = field(
         default=None, init=False, repr=False
     )
     _observation_count: int = field(default=0, init=False, repr=False)
@@ -73,58 +127,79 @@ class HybridPerceptionSource:
             return []
 
         fields = indication.get("fields", {})
-        classification = fields.get(MIDDLE_LIST_TEXT_FIELD)
-        if not classification:
-            # No current detection -- reset debounce so the *next* populated
-            # text (even if identical to the last one seen before this gap)
+        distinct_texts = _distinct_populated_texts(fields)
+        if not distinct_texts:
+            # No current detections -- reset debounce so the *next* populated
+            # text set (even if identical to the one seen before this gap)
             # is treated as new, per the module docstring.
-            self._last_emitted_classification = None
+            self._last_emitted_texts = None
             return []
-        if classification == self._last_emitted_classification:
-            return []  # unchanged detection -- debounced, don't re-emit
+        if self.emit_mode == "on_change" and distinct_texts == self._last_emitted_texts:
+            return []  # unchanged detection set -- debounced, don't re-emit
 
         world_objects = self.aircraft_client.get_world_objects_latest()
         if world_objects is None:
-            self._record_drop(classification, "no world-objects snapshot available")
+            for classification in distinct_texts:
+                self._record_drop(classification, "no world-objects snapshot available")
             return []
 
-        candidates = exclude_ownship(
+        candidates = filter_ownship(
             [
                 WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
                 for obj in world_objects.get("objects", [])
-            ],
-            ownship_state,
+            ]
         )
-        result = associate(classification, ownship_state, candidates)
-        if result is None:
-            self._record_drop(classification, "no plausible world-object candidate")
-            return []
 
-        self._last_emitted_classification = classification
-        self._observation_count += 1
-        observation = Observation(
-            id=f"OBS_{self._observation_count}",
-            contact_id=None,
-            t_sim=now_sim,
-            t_wall=time.time(),
-            source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
-            classification_raw=classification,
-            bearing_deg=result.bearing_deg,
-            range_m=result.range_m,
-            ownship_at_observation=ownship_state,
-            derived_world_position=DerivedWorldPosition(
-                x=result.candidate.x,
-                z=result.candidate.z,
-                confidence=result.confidence,
-                method=result.method,
-            ),
-            provenance=(
-                "petrovich_indication+world_objects/ambiguous_association"
-                if result.ambiguous
-                else "petrovich_indication+world_objects"
-            ),
-        )
-        return [observation]
+        observations: list[Observation] = []
+        for classification in distinct_texts:
+            result = associate(classification, ownship_state, candidates)
+            if result is None:
+                self._record_drop(classification, "no plausible world-object candidate")
+                continue
+
+            # Remove the claimed candidate before associating the next leaf
+            # so two leaves naming two real, distinct objects (e.g. the SA-3
+            # launcher + radar pair) cannot both resolve to the same
+            # candidate -- see module docstring point 3.
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate is not result.candidate
+            ]
+
+            self._observation_count += 1
+            observations.append(
+                Observation(
+                    id=f"{OBSERVATION_ID_PREFIX_HYBRID}_{self._observation_count}",
+                    contact_id=None,
+                    t_sim=now_sim,
+                    t_wall=time.time(),
+                    source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                    classification_raw=classification,
+                    bearing_deg=result.bearing_deg,
+                    range_m=result.range_m,
+                    ownship_at_observation=ownship_state,
+                    derived_world_position=DerivedWorldPosition(
+                        x=result.candidate.x,
+                        z=result.candidate.z,
+                        confidence=result.confidence,
+                        method=result.method,
+                    ),
+                    provenance=(
+                        "petrovich_indication+world_objects/ambiguous_association"
+                        if result.ambiguous
+                        else "petrovich_indication+world_objects"
+                    ),
+                )
+            )
+
+        if observations:
+            # Mirrors PB-1's original single-classification debounce, which
+            # only advanced `_last_emitted_classification` on a successful
+            # association -- a persistently-unassociable detection is
+            # retried every poll, not silently debounced away.
+            self._last_emitted_texts = distinct_texts
+        return observations
 
     def _record_drop(self, classification: str, reason: str) -> None:
         self._dropped_count += 1
