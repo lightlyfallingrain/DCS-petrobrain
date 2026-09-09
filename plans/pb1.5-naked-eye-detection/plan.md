@@ -434,6 +434,19 @@ root cause.
      binocular assumption stops being load-bearing for detection and survives only as a range/
      confidence prior.
 
+7. **Recorded (post-implementation, Reviewer's non-blocking recommendation): range-bucket
+   quantisation snaps *up* to the containing bucket's ceiling, named by that ceiling — this is
+   the canonical semantics, not an implementation accident to "fix" toward literal-nearest-of-24
+   later.** E.g. 549 m quantises to `OP_D600M`, not `OP_D500M`. ED's own research doc (Finding 2,
+   `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md`)
+   defines the 24 `OP_D...` bucket *names* but does not specify a rounding direction for mapping
+   an arbitrary metre value into one, so this was genuinely underspecified by the plan's "snapped
+   to the nearest" wording. The implemented reading — bucket-containment, monotonic, named by
+   upper bound — is a defensible interpretation of ED's own naming convention (each `OP_D...` name
+   already reads as an upper bound, e.g. `OP_D600M` = "the 500–600 m bucket") and is correctly
+   tested as such (`naked_eye_source.py`'s quantisation tests). A future reader should not
+   silently change this to literal-nearest-bucket without realizing it was a deliberate choice.
+
 **Proceeding on the stated recommendation, not explicitly affirmed** (decisions 2–5 were offered
 with recommendations and left unanswered; flagged here so they stay visible rather than silently
 becoming settled): **#2** nearest-first cap at 3 per poll; **#3** no cross-channel dedup, left to
