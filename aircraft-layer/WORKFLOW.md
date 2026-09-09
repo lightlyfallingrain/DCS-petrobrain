@@ -84,3 +84,53 @@ body-layer's job) as a JSON object, or JSON `null` on the same "not an
 error" basis as `/telemetry/latest`. Added by
 `plans/pb1-perception-logger/plan.md` stage 3. See
 `aircraft-layer/src/schema/world_objects.py` for the field list/units.
+
+## PB-1.5 ambient-detection probe (spike, temporary)
+
+`aircraft-layer/dcs-export/Export.probe-pb15.lua` is the production
+`Export.lua` plus one extra instrumentation block. It exists to answer the
+last question left open by
+`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md`:
+
+> During a naked-eye-only pass, does **any** exported Lua value change at the
+> moment Petrovich's ambient `"N CONTACTS, H O'CLOCK"` callout fires?
+
+Delete the file once that is settled — it must not drift into a second
+production script.
+
+**What it logs** (to `Saved Games\DCS\Logs\pb15_probe.log`, separate from
+`aircraft_layer_debug.log`):
+
+- The full `list_indication(6)` tree, **only when it changes**. No named-leaf
+  targeting: Session 5 retired `upper_list_text`/`upper_upper_list_text` as
+  candidates, so the whole tree is the subject.
+- A `list_cockpit_params()` sweep, **only the params that changed**. Params
+  that change more than 8 times are retired permanently as volatile (rotor
+  RPM, needles, gauges) and logged once as `RETIRED (volatile)`. What survives
+  is the set of rarely-changing params — the shape a detection-state flip has.
+
+**Setup**
+
+1. Copy `aircraft-layer/dcs-export/Export.probe-pb15.lua` to
+   `Saved Games\DCS\Scripts\Export.lua` (overwriting the production copy —
+   this file is a superset, so the collector keeps working unchanged).
+2. Create `Saved Games\DCS\Scripts\pb15_probe.flag` (empty file). Without it
+   the probe block is a no-op.
+3. Delete any stale `Saved Games\DCS\Logs\pb15_probe.log` so the run is clean.
+
+**Flight protocol** — the discipline matters more than the flying:
+
+- Place a handful of ground targets (trucks/armour are the easiest classes to
+  get a callout on) at varied ranges out to ~5 km.
+- **Never slew the ASP-17.** The whole point is to isolate ambient spotting
+  from the scope channel; one slew contaminates the sortie.
+- Turn Petrovich's observation mode on and fly passes that bring the targets
+  into view.
+- **Mark every callout in-band.** When you hear `"N CONTACTS, H O'CLOCK"`,
+  immediately flip one distinctive cockpit switch that you touch at no other
+  time. It shows up in the log as a changed param and timestamps the event
+  inside the log itself — far more reliable than correlating wall-clock
+  across two machines. Say which switch you used when handing the log over.
+
+**Restore afterwards**: copy `aircraft-layer/dcs-export/Export.lua` back over
+`Saved Games\DCS\Scripts\Export.lua` and delete `pb15_probe.flag`.
