@@ -56,6 +56,7 @@ def main() -> None:
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    logger = logging.getLogger(__name__)
 
     cache = TelemetryCache()
     world_objects_cache = WorldObjectsCache()
@@ -87,7 +88,7 @@ def main() -> None:
         while True:
             time.sleep(args.dump_interval)
             sample = cache.latest()
-            print(sample if sample is not None else "(no sample received yet)")
+            logger.debug(sample if sample is not None else "(no sample received yet)")
     except KeyboardInterrupt:
         pass
     finally:
