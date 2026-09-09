@@ -282,3 +282,52 @@ Clock positions are 30° apart: 12 o'clock = 0°, 1 o'clock = 30°, 3 o'clock = 
 All mechanical checks pass. Both review passes' fixes are applied and verified. Known-open items are properly recorded and scoped. The milestone-completion question is answered: the synthetic filter becomes the primary implementation (no downstream architectural change needed, but scope-channel bugs now matter more for future gameplay). Acceptance testing is ready to run with the user in the cockpit.
 
 **Next step:** User runs the acceptance test plan above. No merge until after acceptance testing is complete.
+
+
+---
+
+## Live acceptance test — PASSED (2026-09-09)
+
+Flown by the user on the Windows DCS box after the ownship-echo fix (`549aee6`,
+`b083595`). Accepted by the user; merge approved.
+
+### Observed
+
+```
+t_sim=37.05 aircraft=(-386566.0, 388110.7, 933.6) source=naked_eye_visual_filtered classification=OP_ARMORED bearing_deg=51.6 range_m=3500
+t_sim=70.31 aircraft=(-385359.3, 389191.6, 924.0) source=naked_eye_visual_filtered classification=OP_ARMORED bearing_deg=1.1  range_m=3500
+```
+
+### What this confirms
+
+- **The ownship echo is gone.** The previous run's continuous phantom stream
+  (`range_m=100`, `OP_GROUPSOMETHING`, scattered bearings) does not recur.
+- **The range gate is exact, not clamped.** 3500 m is precisely `OP_ARMORED`'s
+  threshold (7 m / 0.008 rad x 4.0). A target crosses it while being approached
+  and the debounce emits once at the crossing, so a *first* sighting of armour
+  lands at 3500 m by construction. Two distinct bearings 33 s apart is two
+  separate armour units, each caught at its own threshold crossing — not one
+  object reported twice, and not a clamped value.
+- **Classification works on live data.** `OP_ARMORED`, not the
+  `OP_GROUPSOMETHING` fallback — the reporting-name lookup added this session is
+  doing its job outside fixtures.
+- **The debounce works.** Two emissions in 70 s rather than hundreds.
+
+### Backlog item closed by this sortie
+
+`object_id` stability across polls was filed as unconfirmed after the previous
+run, on the grounds that `world_objects.py` calls it "the numeric key from Lua
+`pairs()` iteration" and Lua does not guarantee `pairs()` order. **If the ids
+reshuffled between polls the debounce would re-emit every object every tick.**
+Two emissions in 70 seconds is direct evidence that it does not. Resolved by
+live observation rather than by a dedicated probe — the prediction recorded in
+the backlog item ("the next live sortie settles it for free") held.
+
+### Not exercised, and honestly so
+
+Only armour was reported. Consistent with the design — the bus needs 3000 m and
+infantry 900 m, so on the passes flown they may never have crossed their
+thresholds inside the +/-60 deg cone. The acceptance plan's Segment C (two
+identical targets either side of a threshold) and the infantry/bus tiers remain
+untested against the user's "if the player can see a unit, Petrovich should too"
+standard. Tier calibration is the open follow-up, not a defect.
