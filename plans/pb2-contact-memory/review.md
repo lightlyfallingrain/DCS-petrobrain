@@ -230,3 +230,131 @@ trusting the implementer's self-report), and reasoned through the REPL's thread-
 `ContactStore`'s actual property implementations rather than accepting the "best-effort" framing
 on faith. Ran format/lint/type/test myself. Did not re-verify Stage -1/0/1/2/3 files, per the
 existing approvals above.
+
+---
+
+## Review: Stage 5 (Cross-channel fusion validation)
+
+Branch: `feature/pb2-contact-memory`. Reviewed against `plans/pb2-contact-memory/plan.md`'s
+"Stage 5 — Cross-channel fusion validation" section, `plans/pb2-contact-memory/implementation.md`'s
+Stage 5 entry, and the new `todo/todo.md` backlog item ("BL-2's certainty/classification fusion
+is last-writer-wins, not quality-weighted"). Stages -1 through 4 already reviewed/approved above
+and not re-reviewed here. This is a test-only stage — one new file,
+`body-layer/tests/test_cross_channel_fusion.py` (6 tests), no production code touched.
+
+### Review Summary
+
+Read the full new test file, `belief/decay.py`, `belief/contacts.py`,
+`belief/association_over_time.py`, and `perception/object_model.py`'s `profile_for` in full; ran
+a live interpreter check against the actual keyword table; ran verification commands myself.
+
+- **Same-poll fusion test** (`test_same_poll_both_channels_on_same_object_merge_into_one_contact`)
+  genuinely feeds a scope `Observation` (`SOURCE_PETROVICH_DETECTION_ASSOCIATED`, free-text
+  `"Ural truck"`) and a naked-eye `Observation` (`SOURCE_NAKED_EYE_VISUAL_FILTERED`, bucketed
+  `"OP_TRUCK"`) through one `ContactStore.ingest()` call. `ContactStore.ingest` (`contacts.py:186-
+  204`) processes the batch in a loop, gating each observation against the *current* `_contacts`
+  dict — since the first observation's own contact-creation mutates that dict in place, the
+  second is genuinely gated against a real contact, not a coincidence of loose radii (both are at
+  bearing 0°/range 1000m, so `distance_m == 0 <= gate_radius`). `contributing_observation_ids`
+  and `_sources_in` (reading through `store.observations`, keyed correctly per `contacts.py`'s
+  actual field names) confirm both sources landed on one contact.
+- **Adjacent-poll fusion test** — two genuinely separate `ingest()` calls at `t_sim=0.0` and
+  `t_sim=1.0`. Read `association_over_time.passes_gate`/`spatial_gate_radius_m` directly: the
+  second call's gate radius is computed against the *existing* contact's `last_seen_sim` (set by
+  the first `record()` call), so this exercises the real elapsed-time growth term
+  (`GATE_GROWTH_RATE_MPS * 1.0` = 20m of margin on top of ~277-300m of source uncertainty) — no
+  scaffolding pre-assigns a contact id; `Contact.from_percept`/`_new_contact_id` mint it exactly
+  as production code does.
+- **"Certainty reflects the better observation" finding — verified independently, not taken on
+  faith.** Read `decay.certainty_of` (`decay.py:97-109`): it is a pure function of
+  `now_sim - contact.last_seen_sim` with no reference to `uncertainty_radius_m`, observation
+  source, or any per-observation quality signal — confirms the test's/backlog's claim exactly.
+  Read `Contact.record` (`contacts.py:97-106`): `self.last_class_raw = percept.classification_raw`
+  unconditionally overwrites on every call, with no comparison against the previous value —
+  confirms `last_class_raw` is genuinely last-writer-wins, not merely under-tested. The test
+  itself (`test_certainty_tracks_recency_of_last_contributing_observation_not_quality`) asserts
+  real, falsifiable behavior at two points (`certainty_of(..., 40.0) == "estimated"` before the
+  second observation, `== "observed"` and `last_class_raw == "Ural truck"` after it) — this is an
+  honest test of current behavior, not one relaxed to pass regardless of input; flipping either
+  assertion's expected value would fail against the real code. The backlog entry
+  (`todo/todo.md:255`) accurately states the mechanism (`certainty_of` is recency-only,
+  `last_class_raw` is last-writer-wins) and the concrete failure mode (a later, wider-uncertainty
+  observation fully resets certainty over an earlier, tighter one) without overstating it as a bug
+  — it correctly frames Stage 2's pure-recency ladder as a documented placeholder design, per that
+  stage's own review, not a defect introduced here.
+- **Negative case geometry.** `test_two_distinct_nearby_objects_stay_two_contacts` separates the
+  two objects by bearing (0° vs 90°, both range 1000m) rather than range, ~1414m apart. Verified
+  against `association_over_time.uncertainty_radius_m`/`spatial_gate_radius_m` directly: the
+  gating percept here is the second (naked-eye) observation, whose own range-derived uncertainty
+  at range=1000m (~277m, matches the figure the test cites from
+  `test_association_over_time.py`'s sibling test) plus zero elapsed-time growth (same poll) is
+  nowhere near the ~1414m separation — the negative case genuinely fails the gate, not by
+  coincidence. The implementer's reported false-merge discovery with a range-separated fixture
+  (1000m vs 1600m along the same bearing) is consistent with the formula: naked-eye's down-range
+  term is a *range-bucket width*, which grows with range, so a range-separated pair can end up
+  with a *larger* gate radius than the physical gap between them at longer range — this reflects a
+  genuine, correct understanding of the gate formula, not a fixture hack. On whether the
+  range-growing-uncertainty behavior itself needs a comment: it doesn't — wider uncertainty at
+  longer range for a fixed angular/range-bucket quantisation is physically correct behavior
+  (`association_over_time.py`'s module docstring already documents the down-range term as
+  "the width of the `OP_D*` range bucket the observation fell into"), not a gap. No action needed.
+- **Weak cross-channel class compatibility test.** `profile_for("SA-3 launcher")` was independently
+  run against the real keyword table (not assumed): confirmed it resolves to `DEFAULT_OP_CLASS`
+  (`"OP_GROUPSOMETHING"`) — the table keys the real DCS S-125 SA-3 system on `"s-125"` (a real
+  `object_type` substring, per `object_model.py:105-113`'s own comment on the reporting-name vs.
+  NATO-shorthand rework), which `"sa-3 launcher"` does not contain, so no pass-1 or pass-2 match
+  occurs and the fallback correctly fires. `_op_class_of` (`association_over_time.py:170-181`)
+  treats a `DEFAULT_OP_CLASS` result as `None`, i.e. `unknown`, exactly as the test's docstring
+  claims. The test proves the three-valued gate's designed behavior (unknown never blocks a
+  spatially-valid merge) against a real weak-vocabulary case — this is Stage 1's design being
+  validated, not re-implemented; no new gating logic was added.
+- **Scope discipline.** `git show --stat e927899` (the Stage 5 commit) touches exactly
+  `.claude/agent-memory/implementer/MEMORY.md`, one new agent-memory file,
+  `body-layer/tests/test_cross_channel_fusion.py`, and `plans/pb2-contact-memory/implementation.md`
+  — zero changes under `belief/` or `perception/`. `git diff e927899^ e927899 --stat -- body-layer/
+  tests` shows only the one new test file; no pre-existing test file was modified.
+- **Identity invariant.** Every fixture's `_observation()` helper populates
+  `derived_world_position` (a real, non-optional `Observation` field, so its presence is
+  structurally required, not a leak by itself) with an arbitrary marker value
+  (`x=99999.0, z=99999.0`). Checked every assertion in the file: none reference
+  `derived_world_position` or any object-id field — assertions only check `len(store.contacts)`,
+  `contributing_observation_ids`, `_sources_in(...)` (which reads `Observation.source`, not
+  position), `certainty_of(...)`, and `last_class_raw`. No gating expectation or identity
+  assertion is smuggling in ground-truth data.
+
+Ran all verification myself:
+
+- `ruff format --check src tests`: pass (40 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (from `body-layer/`): pass, no issues in 20 source files (unchanged file count,
+  consistent with "test-only stage")
+- `pytest tests -q`: **202 passed** — consistent with the claimed 196 + 6 new, 0 modified; `git
+  diff e927899^ e927899 --stat -- body-layer/tests` confirms no pre-existing test file changed
+- `git status`: clean working tree. `git log` shows `e927899` ("Add Stage 5 cross-channel fusion
+  validation tests (PB-2)") followed by `b894769` (two `todo/todo.md` backlog additions,
+  correctly outside this stage's scope per the task brief) — both committed, nothing pending.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None. This stage is deliberately minimal (validation-only, no production code) and the one
+finding it surfaced is already correctly captured as a backlog item rather than papered over.
+
+### Verdict
+
+APPROVED
+
+PB-2/BL-2's fixture-testable work is now complete. Stage 6 (live acceptance) requires a real DCS
+sortie and is user-only — nothing further for Reviewer to do on this branch until that runs.
+
+### Review Confidence
+
+Full read — read the complete new test file, `belief/decay.py`, `belief/contacts.py`, and
+`belief/association_over_time.py` in full, and independently ran `object_model.profile_for("SA-3
+launcher")` against the live keyword table rather than trusting the implementer's or the test
+docstring's claim. Verified the commit's file scope directly via `git show --stat` and `git diff
+--stat`. Ran format/lint/type/test myself. Did not re-verify Stage -1/0/1/2/3/4 files, per the
+existing approvals above.
