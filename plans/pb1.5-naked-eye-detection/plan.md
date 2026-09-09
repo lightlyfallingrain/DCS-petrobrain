@@ -277,6 +277,26 @@ their *combination* into a detectability decision is this project's own derivati
   expose real dimensions is a possible future upgrade, not pursued now (see Risks).
 - `NAKED_EYE_MAX_NEW_PER_POLL = 3` — caps newly-emitted detections per poll tick, nearest-first.
   Unchanged by Session 5.
+- **`extra_eyesight_ratio = 4.0` is currently unused, and that is probably the derivation's
+  largest single error — in the *strict* direction.** Working the tiers into ranges gives, for
+  size-as-numerator (metres):
+
+  | object | `lowres` | `medres` | `hires` | `medres` × 4.0 |
+  |---|---|---|---|---|
+  | infantry (1.8 m) | 419 | 225 | 90 | 900 |
+  | Ural truck (6 m) | 1395 | 750 | 300 | 3000 |
+  | T-72 (7 m) | 1628 | 875 | 350 | 3500 |
+  | SA-3 launcher (9 m) | 2093 | 1125 | 450 | 4500 |
+
+  At bare `medres` a truck is detectable only to 750 m, so `NAKED_EYE_RANGE_CAP_M = 2500` would
+  essentially never bind for any ground vehicle — the cap would be decorative. That sits badly
+  against two other ED constants: `scan_rad_around_point = 2500` implies ED scans meaningfully out
+  to 2.5 km, and Finding 2's callout vocabulary carries range buckets all the way to `OP_D10k`.
+  Folding in `extra_eyesight_ratio = 4.0` reconciles all three — `medres × 4` puts a truck at
+  3000 m, which the 2500 m cap then actually binds. That consistency is suggestive, **not
+  evidence**: the constant's real role in ED's native formula is unknown, and it may apply to a
+  different tier, a different quantity, or only to the AI's own scan rather than to detection
+  range. Treat this as a live question for the tier decision, not a resolved multiplier.
 
 ### Implementation Plan
 
@@ -321,6 +341,15 @@ their *combination* into a detectability decision is this project's own derivati
 
 ### Risks & Unknowns
 
+- **The derivation's error direction is unknown, and the arithmetic suggests it is strict rather
+  than generous** — the opposite of what the next bullet guards against. See Proposed Defaults'
+  `extra_eyesight_ratio` table: at bare `medres`, ground vehicles drop out between 225 m and
+  1.1 km, well inside ED's own 2.5 km scan radius and far inside a callout vocabulary that reaches
+  `OP_D10k`. An over-strict filter fails quietly — Petrovich simply never mentions things a crew
+  would obviously see — which is harder to notice in testing than the over-generous failure below,
+  and is the more likely outcome of the two on these numbers. The live acceptance test
+  (Implementation stage 5) should be read with this in mind: "reported nothing" is a result to
+  investigate, not a pass.
 - **Core invariant risk** (restated from Invariant Check): even ED-model-grounded, this channel's
   "not omniscient" defense is still a heuristic *derivation*, not a verified reproduction of ED's
   actual formula — the native code also factors `min_contrast_f`, `extra_eyesight_ratio`, and
@@ -411,7 +440,15 @@ root cause.
    aggregate `OP_1UNIT`…`OP_MORETHAN15UNITS`/`OP_SINGLE`/`OP_GROUP` buckets, since those need
    object clustering this plan doesn't build. Confirm this scope cut is acceptable, or whether a
    minimal clustering pass belongs in this plan after all rather than waiting for BL-2.
-6. **Angular-radius recognition tier** (new, from this revision): `medres` (0.008 rad) is proposed
-   as the default gating tier over `lowres` (bare existence) because the channel's output includes
-   a coarse class, which `lowres` alone wouldn't honestly support. Confirm this reasoning, or
-   prefer the more conservative `lowres` tier with class reported as "unclassified" more often.
+6. **Angular-radius recognition tier, and whether `extra_eyesight_ratio` belongs in the formula**
+   (new, from this revision): `medres` (0.008 rad) is proposed as the default gating tier over
+   `lowres` (bare existence) because the channel's output includes a coarse class, which `lowres`
+   alone wouldn't honestly support. But the tier choice cannot be settled independently of
+   `extra_eyesight_ratio = 4.0`, which the current derivation ignores: at bare `medres` a truck
+   drops out at 750 m and the 2500 m range cap never binds, whereas `medres × 4` puts it at 3000 m
+   and the cap becomes meaningful (see the table in Proposed Defaults). Three coherent options —
+   bare `medres` (strictest, cap inert), bare `lowres` (truck ≈ 1.4 km, cap still mostly inert),
+   or `medres × extra_eyesight_ratio` (truck ≈ 3 km, cap binds, and consistent with ED's own
+   2.5 km scan radius). Recommend the third, on the consistency argument, while noting it rests on
+   an unverified reading of what that constant multiplies. This is worth deciding before
+   implementation rather than tuning afterwards, since it moves detection range by ~4x.
