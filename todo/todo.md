@@ -13,10 +13,43 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 World Model Builder good-enough, gate lifted 2026-09-06 (user decision: move to rest of chain to test/improve end-to-end). Aircraft layer (DCS I/O + API, per `docs/concept/division-or-responsibility.md`) — **done, merged to main 2026-09-07** (`51654ec`). PB-1 (text-only perception logger / BL-0 + BL-1 scaffolding) — **done, ready to merge 2026-09-08**. World Model's own backlog (M9 OSM, incremental per-layer builds) stays deferred/unscheduled — see `world-model/ROADMAP.md`.
 
-**Next milestone: PB-1.5 (naked-eye visual detection channel), before PB-2.** Raised 2026-09-08: PB-1's HelperAI `list_indication(6)` channel only reports contacts found via active optical-scope use — crew naked-eye spotting (visual detection without slewing the scope) is a separate, currently-missing detection channel. FC3 legacy target-info functions (`LoGetTargetInformation`, `LoGetLockedTargetInformation`, `LoGetSightingSystemInfo`) are confirmed dead ends (nil all flight, unsupported for modern modules — see PB-1 live spike). `LoGetWorldObjects` is the only viable base data source but returns **global, unfiltered ground truth** (no coalition/IFF/range filter) — using it directly as a detection source would break the project's core anti-omniscience invariant (Petrovich's knowledge must stay bounded by what he could actually perceive). Scope for this milestone:
-  1. Investigate whether the `LoGetWorldObjects` export/query can itself be constrained (radius around ownship, category/type filter) at the DCS/Lua export layer, to avoid pulling the full global object list every tick (raised FPS-cost concern) — Investigator task, live-probe DCS export API options.
-  2. Design + implement a plausibility/visibility filter (range-by-target-size curve, FOV cone off ownship heading, terrain LOS occlusion — `body-layer/src/perception/geometry.py` already has reusable LOS-masking helpers against world-model elevation, currently unused) that gates `LoGetWorldObjects` candidates down to "what the crew could plausibly see unaided," as a new detection channel parallel to the existing optical-scope channel.
-  3. No FOV/range/plausible-perception design exists yet anywhere in the codebase or `docs/concept/PETROBRAIN_RUNTIME.md` — this is new ground, route through Architect (with Investigator invoked proactively per `CLAUDE.md` Agents section for the DCS-export-filtering unknown) before implementation.
+**PB-1.5 (done, merged to main 2026-09-09).** `feature/pb1.5-naked-eye-detection`. A second,
+independent perception channel: `NakedEyePerceptionSource` reports plausibly-visible ground objects
+from `LoGetWorldObjects`, gated by FOV + angular-size + terrain-LOS, and quantised to ED's own
+callout vocabulary (12 clock bearings, 24 range buckets, coarse class). New modules
+`object_model.py`, `visibility.py`, `naked_eye_source.py`, `reporting_names.py` plus ED's committed
+595-row DCS-type→reporting-name mapping. 102 body-layer tests.
+
+*The milestone's central question was answered, and the answer was negative.* A purpose-built live
+probe (`aircraft-layer/dcs-export/Export.probe-pb15.lua`, flown as an OBSERV OFF / OBSERV ON A/B)
+established that **DCS's ambient contact callout has no Lua-readable companion** — `list_indication(6)`
+produced zero change events across the whole sight-off segment while `GROUND, 11 O'CLOCK` and
+`GROUND, 12 O'CLOCK` appeared on screen, and the HelperAI tree is not even instantiated until the
+sight comes on. So the synthetic filter is not a fallback awaiting a better signal; it is the only
+implementation. Full findings: `aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`.
+Also recovered from the module's own Lua: ED's detection constants (`HelperAI.lua`) and the composed
+callout vocabulary (`HelperAI_lengths_ng.lua`), both in
+`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md`.
+
+*Key decisions:* the channel deliberately models a **binocular-aided** observer (`medres` 0.008 rad
+x 4.0), not the unaided eye — the user's choice, so "naked-eye" is now a misnomer the code docstrings
+warn about. `NAKED_EYE_RANGE_CAP_M` was raised 2500 → 5000 m so the per-type size curve, not the cap,
+does the discriminating (infantry 900 m, truck 3000, T-72 3500, SA-3 4500; only ships cap).
+
+*One live bug, found and fixed:* the first sortie reported the ownship itself as a contact —
+`LoGetWorldObjects` is unfiltered and includes the player's aircraft, which neither channel excluded.
+Fixed in both channels (`association.exclude_ownship`); the scope channel had the same latent bug.
+
+*Open follow-ups, none blocking:* tier calibration against the user's "if the player can see a unit,
+Petrovich should too" standard (infantry at 900 m is the tightest); identity-based rather than
+proximity-based ownship exclusion; ground-unit classification coverage at 60.1% by deliberate choice.
+All in Backlog.
+
+*Does this change the next milestone?* **No architectural change for PB-2/BL-2.** Both channels
+already flow through the uniform `PerceptionSource` interface, so "the synthetic channel is primary"
+is a framing and priority shift, not a contract change. What it does raise is the priority of the
+scope channel's known defects — the user confirmed that channel stays, being needed for future
+acquire/lock/fire gameplay.
 
 PB-2 (BL-2: contact memory and data association over time) follows after this — PB-1's completion does not invalidate or change downstream assumptions for BL-2, but BL-2 should ideally consume both detection channels (scope + naked-eye) rather than being built against the scope-only channel and reworked later.
 
@@ -39,7 +72,7 @@ PB-2 (BL-2: contact memory and data association over time) follows after this �
 
 Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side). Aircraft layer / Mission Interpreter / Runtime work now in scope — see root `CLAUDE.md` "Current priority" (gate lifted 2026-09-06).
 
-- [ ] **PB-1.5 — Naked-eye visual detection channel.** See Current Focus above for full scope/rationale. Next up, before PB-2.
+- [x] **PB-1.5 — Naked-eye visual detection channel.** Done, merged to main 2026-09-09. Live acceptance passed. See Current Focus.
 
 (World Model M9 moved to Deferred below, 2026-09-06)
 
@@ -63,7 +96,7 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   `/world_objects/latest`, where the body-layer-side fix was contained and shippable. Worth doing
   when aircraft-layer is next touched.
 
-- [ ] **Settle whether `LoGetWorldObjects`'s `object_id` is stable across polls** — needs a live
+- [x] **Settle whether `LoGetWorldObjects`'s `object_id` is stable across polls** — **closed 2026-09-09 by live evidence.** PB-1.5's acceptance sortie emitted 2 observations in 70 s; unstable ids would have re-emitted every object every tick. The prediction recorded below ("the next live sortie settles it for free") held. Original entry: — needs a live
   capture, described in `plans/pb1.5-naked-eye-detection/debug.md` "Needs live DCS".
   `world_objects.py`'s own docstring calls it "the numeric key from Lua `pairs()` iteration" and a
   "within-one-poll identifier only until verified live", and Lua does not guarantee `pairs()`
