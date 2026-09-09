@@ -7,110 +7,950 @@
     "",
     "Each entry's `expected_op_class` is what perception.object_model.profile_for",
     "should currently return for that real type (null means the fallback/",
-    "DEFAULT_OP_CLASS case is the *correct*, expected outcome for this type,",
-    "not a gap to close -- object_model.py does not attempt air/building/",
-    "artillery/full-SAM-catalogue classification).",
+    "DEFAULT_OP_CLASS case is the *correct*, expected outcome for this type).",
+    "",
+    "`bucket` classifies *why* -- used to compute a coverage floor on the",
+    "bucket that actually matters (`ground`: modern ground units this module",
+    "targets) instead of one blended percentage across everything, which is",
+    "exactly the metric that hid this module's original ground-unit gap (see",
+    "aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md's",
+    "Addendum): 'ship' (OP_SHIP, its own already-covered category, not a",
+    "'ground unit'); 'air' (aircraft/helicopters/UAVs, deliberately deferred,",
+    "must stay at fallback); 'wwii' (ED's 'Old ...'-prefixed reporting names,",
+    "deliberately excluded even when a modern-unit keyword like 'truck' would",
+    "otherwise catch them -- see object_model.py's WWII-prefix guard); ",
+    "'ground_deferred' (real ground/support types this pass deliberately did",
+    "not attempt -- towed AA/mortar pieces, SAM systems beyond the one named",
+    "in scope (IRIS-T), static structures, airfield support equipment -- must",
+    "stay at fallback, not counted toward the 'ground' floor since covering",
+    "them was never this pass's goal); 'ground' (modern ground combat",
+    "vehicles/systems this module targets -- tanks/IFVs/APCs/SPGs/SPAAG/SAM/",
+    "trucks/infantry -- the coverage floor applies to this bucket only).",
     "",
     "Individual type-name strings only (no reporting names, no full extracted",
-    "table) -- see aircraft-layer/research/2026-09-09-object-model-keyword-",
-    "coverage.md for the source (ED's HelperAI_reporting_names.lua, 595",
-    "entries total) and the full coverage numbers this sample was drawn to",
-    "demonstrate. All 57 real DCS ship object_type values are included here",
-    "since that set is small and fully enumerable (the OP_SHIP category this",
-    "fix targets), not a random sample of it."
+    "table -- the full table itself is now committed at",
+    "src/perception/data/dcs_type_to_reporting_name.tsv) -- see",
+    "aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md for",
+    "the source (ED's HelperAI_reporting_names.lua, 595 entries total) and",
+    "the full coverage numbers this sample was drawn to demonstrate. All 57",
+    "real DCS ship object_type values are included here since that set is",
+    "small and fully enumerable, not a random sample of it."
   ],
   "entries": [
-    {"object_type": "ALBATROS", "expected_op_class": "OP_SHIP"},
-    {"object_type": "BDK-775", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CHAP_Project22160", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CHAP_Project22160_TorM2KM", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CVN_71", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CVN_72", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CVN_73", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CVN_75", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CV_1143_5", "expected_op_class": "OP_SHIP"},
-    {"object_type": "CastleClass_01", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Cleveland_Class", "expected_op_class": "OP_SHIP"},
-    {"object_type": "ELNYA", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Essex", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Forrestal", "expected_op_class": "OP_SHIP"},
-    {"object_type": "IMPROVED_KILO", "expected_op_class": "OP_SHIP"},
-    {"object_type": "KILO", "expected_op_class": "OP_SHIP"},
-    {"object_type": "KUZNECOW", "expected_op_class": "OP_SHIP"},
-    {"object_type": "LHA_Tarawa", "expected_op_class": "OP_SHIP"},
-    {"object_type": "LST_Mk2", "expected_op_class": "OP_SHIP"},
-    {"object_type": "La_Combattante_II", "expected_op_class": "OP_SHIP"},
-    {"object_type": "MOLNIYA", "expected_op_class": "OP_SHIP"},
-    {"object_type": "MOSCOW", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Mogami", "expected_op_class": "OP_SHIP"},
-    {"object_type": "NEUSTRASH", "expected_op_class": "OP_SHIP"},
-    {"object_type": "PERRY", "expected_op_class": "OP_SHIP"},
-    {"object_type": "PIOTR", "expected_op_class": "OP_SHIP"},
-    {"object_type": "REZKY", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Ship_Tilde_Supply", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Stennis", "expected_op_class": "OP_SHIP"},
-    {"object_type": "TICONDEROG", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Type_021_1", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Type_052B", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Type_052C", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Type_054A", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Type_071", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Type_093", "expected_op_class": "OP_SHIP"},
-    {"object_type": "USS_Arleigh_Burke_IIa", "expected_op_class": "OP_SHIP"},
-    {"object_type": "USS_Samuel_Chase", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Uboat_VIIC", "expected_op_class": "OP_SHIP"},
-    {"object_type": "ara_vdm", "expected_op_class": "OP_SHIP"},
-    {"object_type": "hms_invincible", "expected_op_class": "OP_SHIP"},
-    {"object_type": "leander-gun-achilles", "expected_op_class": "OP_SHIP"},
-    {"object_type": "leander-gun-andromeda", "expected_op_class": "OP_SHIP"},
-    {"object_type": "leander-gun-ariadne", "expected_op_class": "OP_SHIP"},
-    {"object_type": "leander-gun-condell", "expected_op_class": "OP_SHIP"},
-    {"object_type": "leander-gun-lynch", "expected_op_class": "OP_SHIP"},
-    {"object_type": "santafe", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Dry-cargo ship-1", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Dry-cargo ship-2", "expected_op_class": "OP_SHIP"},
-    {"object_type": "HandyWind", "expected_op_class": "OP_SHIP"},
-    {"object_type": "HarborTug", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Higgins_boat", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Schnellboot_type_S130", "expected_op_class": "OP_SHIP"},
-    {"object_type": "Seawise_Giant", "expected_op_class": "OP_SHIP"},
-    {"object_type": "ZWEZDNY", "expected_op_class": "OP_SHIP"},
-    {"object_type": "atconveyor", "expected_op_class": "OP_SHIP"},
-    {"object_type": "speedboat", "expected_op_class": "OP_SHIP"},
-    {"object_type": "T-72B", "expected_op_class": "OP_ARMORED"},
-    {"object_type": "T-72B3", "expected_op_class": "OP_ARMORED"},
-    {"object_type": "T-80B", "expected_op_class": "OP_ARMORED"},
-    {"object_type": "T-80UD", "expected_op_class": "OP_ARMORED"},
-    {"object_type": "BTR-80", "expected_op_class": "OP_ARMORED"},
-    {"object_type": "BMP-2", "expected_op_class": "OP_ARMORED"},
-    {"object_type": "BMP-3", "expected_op_class": "OP_ARMORED"},
-    {"object_type": "KAMAZ Truck", "expected_op_class": "OP_TRUCK"},
-    {"object_type": "Ural-375", "expected_op_class": "OP_TRUCK"},
-    {"object_type": "ZIL-131 KUNG", "expected_op_class": "OP_TRUCK"},
-    {"object_type": "Infantry AK", "expected_op_class": "OP_INFANTRY"},
-    {"object_type": "Infantry AK ver2", "expected_op_class": "OP_INFANTRY"},
-    {"object_type": "5p73 s-125 ln", "expected_op_class": "OP_SRSAM"},
-    {"object_type": "Kub 2P25 ln", "expected_op_class": "OP_MRSAM"},
-    {"object_type": "Osa 9A33 ln", "expected_op_class": "OP_SRSAM"},
-    {"object_type": "Strela-1 9P31", "expected_op_class": "OP_SRSAM"},
-    {"object_type": "Strela-10M3", "expected_op_class": "OP_SRSAM"},
-    {"object_type": "Tor 9A331", "expected_op_class": "OP_SRSAM"},
-    {"object_type": "CHAP_TorM2", "expected_op_class": "OP_SRSAM"},
-    {"object_type": "ZSU-23-4 Shilka", "expected_op_class": "OP_SPAAG"},
-    {"object_type": "ZU-23 Emplacement", "expected_op_class": "OP_ZU23"},
-    {"object_type": "F-16C_50", "expected_op_class": null},
-    {"object_type": "Su-27", "expected_op_class": null},
-    {"object_type": "AH-64D", "expected_op_class": null},
-    {"object_type": "house1arm", "expected_op_class": null},
-    {"object_type": "Hawk ln", "expected_op_class": null},
-    {"object_type": "Patriot ln", "expected_op_class": null},
-    {"object_type": "S-300PS 40B6M tr", "expected_op_class": null},
-    {"object_type": "SA-11 Buk LN 9A310M1", "expected_op_class": null},
-    {"object_type": "S-200_Launcher", "expected_op_class": null},
-    {"object_type": "Scud_B", "expected_op_class": null},
-    {"object_type": "2S6 Tunguska", "expected_op_class": null},
-    {"object_type": "ZSU_57_2", "expected_op_class": null},
-    {"object_type": "Kubelwagen_82", "expected_op_class": null},
-    {"object_type": "generator_5i57", "expected_op_class": null}
+    {
+      "object_type": "ALBATROS",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "BDK-775",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CHAP_Project22160",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CHAP_Project22160_TorM2KM",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CVN_71",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CVN_72",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CVN_73",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CVN_75",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CV_1143_5",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "CastleClass_01",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Cleveland_Class",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "ELNYA",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Essex",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Forrestal",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "IMPROVED_KILO",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "KILO",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "KUZNECOW",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "LHA_Tarawa",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "LST_Mk2",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "La_Combattante_II",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "MOLNIYA",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "MOSCOW",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Mogami",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "NEUSTRASH",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "PERRY",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "PIOTR",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "REZKY",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Ship_Tilde_Supply",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Stennis",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "TICONDEROG",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Type_021_1",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Type_052B",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Type_052C",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Type_054A",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Type_071",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Type_093",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "USS_Arleigh_Burke_IIa",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "USS_Samuel_Chase",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Uboat_VIIC",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "ara_vdm",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "hms_invincible",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "leander-gun-achilles",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "leander-gun-andromeda",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "leander-gun-ariadne",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "leander-gun-condell",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "leander-gun-lynch",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "santafe",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Dry-cargo ship-1",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Dry-cargo ship-2",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "HandyWind",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "HarborTug",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Higgins_boat",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Schnellboot_type_S130",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "Seawise_Giant",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "ZWEZDNY",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "atconveyor",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "speedboat",
+      "expected_op_class": "OP_SHIP",
+      "bucket": "ship"
+    },
+    {
+      "object_type": "T-72B",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "T-72B3",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "T-80B",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "T-80UD",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "BTR-80",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "BMP-2",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "BMP-3",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "KAMAZ Truck",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Ural-375",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ZIL-131 KUNG",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Infantry AK",
+      "expected_op_class": "OP_INFANTRY",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Infantry AK ver2",
+      "expected_op_class": "OP_INFANTRY",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "5p73 s-125 ln",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Kub 2P25 ln",
+      "expected_op_class": "OP_MRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Osa 9A33 ln",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Strela-1 9P31",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Strela-10M3",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Tor 9A331",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_TorM2",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ZSU-23-4 Shilka",
+      "expected_op_class": "OP_SPAAG",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ZU-23 Emplacement",
+      "expected_op_class": "OP_ZU23",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_T90A",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_T90M",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_T64BV",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_T84OplotM",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "T-62M",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Challenger2",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Chieftain_mk3",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "BMD-1",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "BRDM-2",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "BRDM-2_malyutka",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_M1130",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M1126 Stryker ICV",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M1128 Stryker MGS",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M1134 Stryker ATGM",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_FV101",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_FV107",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_MATV",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "MaxxPro_MRAP",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "AAV7",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_TOS1A",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M-1 Abrams",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M1A2C_SEP_V3",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M-109",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M-113",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M-2 Bradley",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M-60",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Leclerc",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Leopard-2",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Leopard1A3",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "MCV-80",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Merkava_Mk4",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "LAV-25",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "MTLB",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Grad_FDDM",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Marder",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ZBD04A",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ZTZ96B",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ZSU_57_2",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "TYPE-59",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "T155_Firtina",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "SpGH_Dana",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "PLZ05",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "PT_76",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "TPZ",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Tigr_233036",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "VAB_Mephisto",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Cobra",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "SAU 2-C9",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "SAU Akatsia",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "SAU Gvozdika",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "SAU Msta",
+      "expected_op_class": "OP_ARMORED",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "2S6 Tunguska",
+      "expected_op_class": "OP_SPAAG",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Vulcan",
+      "expected_op_class": "OP_SPAAG",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_PantsirS1",
+      "expected_op_class": "OP_SPAAG",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Gepard",
+      "expected_op_class": "OP_SPAAG",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M48 Chaparral",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "M6 Linebacker",
+      "expected_op_class": "OP_SRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_IRISTSLM_LN",
+      "expected_op_class": "OP_MRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_IRISTSLM_STR",
+      "expected_op_class": "OP_MRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_IRISTSLM_CP",
+      "expected_op_class": "OP_MRSAM",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_M142_GMLRS_M30",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "CHAP_9K720_HE",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Scud_B",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "MLRS",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Smerch",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Uragan_BM-27",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ATZ-5",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ATMZ-5",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "ATZ-10",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "P20_drivable",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "IKARUS Bus",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "tt_DSHK",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "tt_ZPU4",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "HL_B8M1",
+      "expected_op_class": "OP_TRUCK",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "JTAC",
+      "expected_op_class": "OP_INFANTRY",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Paratrooper RPG-16",
+      "expected_op_class": "OP_INFANTRY",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "SA-18 Igla manpad",
+      "expected_op_class": "OP_INFANTRY",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Stinger comm",
+      "expected_op_class": "OP_INFANTRY",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "Igla manpad INS",
+      "expected_op_class": "OP_INFANTRY",
+      "bucket": "ground"
+    },
+    {
+      "object_type": "F-16C_50",
+      "expected_op_class": null,
+      "bucket": "air"
+    },
+    {
+      "object_type": "Su-27",
+      "expected_op_class": null,
+      "bucket": "air"
+    },
+    {
+      "object_type": "AH-64D",
+      "expected_op_class": null,
+      "bucket": "air"
+    },
+    {
+      "object_type": "Kubelwagen_82",
+      "expected_op_class": null,
+      "bucket": "wwii"
+    },
+    {
+      "object_type": "Bedford_MWD",
+      "expected_op_class": null,
+      "bucket": "wwii"
+    },
+    {
+      "object_type": "Allies_Director",
+      "expected_op_class": null,
+      "bucket": "wwii"
+    },
+    {
+      "object_type": "CCKW_353",
+      "expected_op_class": null,
+      "bucket": "wwii"
+    },
+    {
+      "object_type": "Blitz_36-6700A",
+      "expected_op_class": null,
+      "bucket": "wwii"
+    },
+    {
+      "object_type": "bofors40",
+      "expected_op_class": null,
+      "bucket": "wwii"
+    },
+    {
+      "object_type": "2B11 mortar",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "ZPU4",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "KS-19",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "S-60_Type59_Artillery",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "1L13 EWR",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "Patriot ln",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "Hawk ln",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "S-300PS 40B6M tr",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "SA-11 Buk LN 9A310M1",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "S-200_Launcher",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "NASAMS_LN_B",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "rapier_fsa_launcher",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "Bunker",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "outpost",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "TACAN_beacon",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "house1arm",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    },
+    {
+      "object_type": "generator_5i57",
+      "expected_op_class": null,
+      "bucket": "ground_deferred"
+    }
   ]
 }

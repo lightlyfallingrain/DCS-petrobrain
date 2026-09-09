@@ -52,6 +52,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+from perception.reporting_names import reporting_name_for
+
 
 @dataclass(frozen=True, slots=True)
 class ObjectTypeProfile:
@@ -187,16 +189,187 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     ("speedboat", ObjectTypeProfile(size_m=100.0, op_class="OP_SHIP")),
 )
 
+#: Second keyword pass, run only when `_KEYWORD_PROFILES` (raw `object_type`)
+#: finds nothing -- keyed on Petrovich's *reporting* name (via
+#: `reporting_names.reporting_name_for`), not the raw DCS type string. This
+#: is the mechanism that closes most of the "modern ground units" coverage
+#: gap recorded in `aircraft-layer/research/2026-09-09-object-model-keyword-
+#: coverage.md`'s Addendum: raw type names for these families are irregular
+#: (`CHAP_T90M`, `ATZ-5`, `CHAP_M1130`), but ED's own reporting names for the
+#: same types are regular (`T-90M`, `Ural fuel truck`, `Stryker CV`) --
+#: derived from the same 595-row `HelperAI_reporting_names.lua` mapping as
+#: the OP_SHIP/SA-* fix above, shipped as `data/dcs_type_to_reporting_name.tsv`
+#: (see `reporting_names.py` for provenance/regeneration).
+#:
+#: **Scope of this pass, and why:**
+#: - **Modern ground units are the target** -- tanks/IFVs/APCs/recon
+#:   vehicles, SPGs, self-propelled AAA, wheeled rocket-artillery/TEL
+#:   launchers, fuel/cargo trucks, dismounted troops/MANPAD teams. All
+#:   entries below were checked against every one of the 595 real reporting
+#:   names (script in the research doc) to confirm no accidental match
+#:   against an aircraft, WWII, or unrelated type.
+#: - **WWII units are deliberately excluded, not merely un-targeted**: every
+#:   `profile_for` lookup through this table first checks the resolved
+#:   reporting name does not start with `"Old "` (ED's own WWII-era-unit
+#:   naming convention in this table, e.g. `"Old military truck"`,
+#:   `"Old car"`) and skips the whole pass if it does. This exists because a
+#:   deliberately-broad, useful keyword here (`"truck"`, `"soldier"`) would
+#:   otherwise also catch WWII types that happen to share the word (a WWII
+#:   truck is still, physically, a truck) -- the plan explicitly calls for
+#:   WWII units to keep falling back rather than incidentally getting
+#:   classified as a side effect of a broad keyword aimed at modern units.
+#: - **Aircraft/helicopters/UAVs are deliberately deferred, not covered**:
+#:   ED's own vocabulary does have air-class buckets (`OP_HELI(S)`,
+#:   `OP_COMBATHELI(S)`, `OP_TRANSPORTHELI(S)`, `OP_UNMANNED`,
+#:   `OP_PROPPLANE(S)`, `OP_JET(S)` -- `aircraft-layer/research/2026-09-08-
+#:   pb1-5-worldobjects-filter-and-ambient-detection.md` Session 5 Finding
+#:   2), but this channel (`perception.naked_eye_source`) reports ground
+#:   contacts, and adding an air branch is a separate, later scope decision
+#:   -- no air-class keyword was added here, and none of the ground keywords
+#:   below match a real aircraft reporting name (checked).
+#: - **Some real ground/support types still have no correct ED bucket and
+#:   were deliberately left unclassified rather than force-fit**: towed
+#:   (not self-propelled) AA/mortar pieces (`ZPU-4`, `KS-19`, `S-60`,
+#:   `Mortar`) aren't `OP_SPAAG` (that class means self-propelled) and
+#:   there's no towed-weapon class; standalone SAM-system radars/command
+#:   posts beyond the one system named in scope (IRIS-T, below) risk the
+#:   same false-positive trap `OP_SHIP`/`"tank"` already hit (see the
+#:   research doc) without per-system range-class verification this pass
+#:   didn't do; static structures (bunkers, outposts, beacons) and airfield
+#:   ground-support equipment (tugs, generators) aren't vehicles at all.
+#:   `"ss-26"` and `"scud"` are a deliberate instance of this same care: both
+#:   are wheeled TEL trucks for surface-to-*surface* missiles, not SAMs --
+#:   despite reporting names ending in `"launcher"`, they are bucketed
+#:   `OP_TRUCK`, not `OP_SRSAM`/`OP_MRSAM`, to avoid exactly the "launcher"-
+#:   sounds-like-a-SAM domain mismatch the research doc's Finding 1 warned
+#:   about for ships.
+_REPORTING_NAME_KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
+    # Modern tanks / IFVs / APCs / recon vehicles / SPGs -- one shared
+    # OP_ARMORED/7m bucket, matching the existing raw-table convention of
+    # not sub-dividing armor by weight/role.
+    ("t-90", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("t-84", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("t-64", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("t-62", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("challenger", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("chieftain", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("bmd", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("brdm", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("stryker", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("scorpion", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("scimitar", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("mrap", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("aav7", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("tos-1a", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("abrams", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("paladin", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("m113", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("bradley", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("patton", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("leclerc", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("leopard", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("warrior", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("merkava", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("lav-25", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("mtlb", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("marder", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("zbd", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("ztz", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("zsu-57", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("type 59", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("t-155", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("dana", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("plz", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("pt-76", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("tpz", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("fuchs", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("tigr", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("vab", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("cobra", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    # "2s1" is a literal substring of "2S19"'s reporting name -- both being
+    # OP_ARMORED means this is harmless (first-match wins either way), kept
+    # as two explicit entries only for readability against the real names.
+    ("2s1", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("2s19", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("2s3", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    ("2s9", ObjectTypeProfile(size_m=7.0, op_class="OP_ARMORED")),
+    # Self-propelled AAA / gun-missile hybrids -- same OP_SPAAG/6m bucket as
+    # the existing raw "shilka" entry (2S6 Tunguska and Pantsir-S1/SA-22 are
+    # both gun+missile SPAAG systems, not pure SAM launchers, so OP_SPAAG is
+    # the accurate ED bucket rather than OP_SRSAM).
+    ("2s6", ObjectTypeProfile(size_m=6.0, op_class="OP_SPAAG")),
+    ("vulcan", ObjectTypeProfile(size_m=6.0, op_class="OP_SPAAG")),
+    ("sa-22", ObjectTypeProfile(size_m=6.0, op_class="OP_SPAAG")),
+    ("gepard", ObjectTypeProfile(size_m=6.0, op_class="OP_SPAAG")),
+    # IRIS-T's launcher, radar, and command post are covered as one group
+    # (the plan names all three together) -- "medium" is in the real
+    # system's own name (IRIS-T SLM = Surface Launched Medium-range), so
+    # OP_MRSAM is a documented reading of the reporting name, not a guess.
+    ("iris-t", ObjectTypeProfile(size_m=9.0, op_class="OP_MRSAM")),
+    # M48 Chaparral / M6 Linebacker: tracked short-range SAM launchers
+    # (MIM-72/Stinger respectively), unlike the gun-based systems above --
+    # OP_SRSAM is the accurate bucket, not OP_SPAAG.
+    ("chaparral", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),
+    ("linebacker", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),
+    # Wheeled TEL launchers / rocket artillery / fuel-cargo trucks -- one
+    # shared OP_TRUCK/6m bucket, matching the existing raw-table convention
+    # (ural/kamaz/zil/truck are already one bucket there too).
+    ("himars", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
+    ("ss-26", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),  # see docstring
+    ("scud", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),  # see docstring
+    ("mlrs", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
+    ("bm-30", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
+    ("bm-27", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
+    ("truck", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
+    ("bus", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
+    ("insurgent tech", ObjectTypeProfile(size_m=6.0, op_class="OP_TRUCK")),
+    # Dismounted troops / MANPAD teams -- same OP_INFANTRY/1.8m bucket as
+    # the existing raw "infantry"/"soldier" entries (ED's own reporting
+    # names for these are literally "Soldier ..."/"...MANPADS").
+    ("soldier", ObjectTypeProfile(size_m=1.8, op_class="OP_INFANTRY")),
+    ("manpad", ObjectTypeProfile(size_m=1.8, op_class="OP_INFANTRY")),
+)
+
+#: ED's own WWII-era-unit naming convention in `HelperAI_reporting_names.lua`
+#: -- every one of these 56+ reporting names starts with this literal
+#: prefix (`"Old military truck"`, `"Old car"`, `"Old flak gun"`, ...), which
+#: makes it a cheap, general guard rather than an enumerated exclusion list.
+_WWII_REPORTING_NAME_PREFIX: Final[str] = "old "
+
 
 def profile_for(object_type: str) -> ObjectTypeProfile:
-    """Look up `object_type`'s size/class profile via case-insensitive
-    substring match against `_KEYWORD_PROFILES` (first match wins). Returns
-    `_DEFAULT_PROFILE` if nothing matches -- absence of a recognized
-    vocabulary entry degrades to a generic profile, matching
-    `association.py`'s posture of degrading rather than failing on an
-    unfamiliar `object_type` string, never a crash."""
+    """Look up `object_type`'s size/class profile.
+
+    Two passes, in order:
+
+    1. Case-insensitive substring match against `_KEYWORD_PROFILES` (raw
+       `object_type`, first match wins) -- unchanged from before the
+       reporting-name mapping existed, so every type this already covered
+       (ships, SA-3/6/8/9/13/15, existing armor/truck/infantry) keeps
+       working identically regardless of the mapping below.
+    2. If that finds nothing, resolve `object_type` to Petrovich's reporting
+       name (`reporting_names.reporting_name_for`) and match *that* against
+       `_REPORTING_NAME_KEYWORD_PROFILES`, skipping this pass entirely for
+       a WWII-era reporting name (`_WWII_REPORTING_NAME_PREFIX`) -- see that
+       table's docstring for why.
+
+    Returns `_DEFAULT_PROFILE` if neither pass matches (including when
+    `object_type` isn't in the reporting-name mapping at all -- an
+    unmapped/new-to-this-DCS-version type still gets pass 1 above, so this
+    degrades exactly like it did before this mapping existed, never a
+    crash)."""
     text = object_type.lower()
     for keyword, profile in _KEYWORD_PROFILES:
         if keyword in text:
             return profile
+
+    reporting_name = reporting_name_for(object_type)
+    if reporting_name is not None and not reporting_name.lower().startswith(
+        _WWII_REPORTING_NAME_PREFIX
+    ):
+        reporting_text = reporting_name.lower()
+        for keyword, profile in _REPORTING_NAME_KEYWORD_PROFILES:
+            if keyword in reporting_text:
+                return profile
+
     return _DEFAULT_PROFILE
