@@ -1,5 +1,5 @@
 """Tests for `belief.contacts` -- `Contact`, `SightingSpan`, `ContactStore`
-(`plans/pb2-contact-memory/plan.md` Stage 1)."""
+(`plans/pb2-contact-memory/plan.md` Stages 1 and 2)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import pathlib
 from belief import contacts as contacts_module
 from belief import percept as percept_module
 from belief.contacts import ContactStore
+from belief.decay import LOST_THRESHOLD_S
+from belief.events import CONTACT_DETECTED, CONTACT_LOST, CONTACT_REACQUIRED
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
     DerivedWorldPosition,
@@ -110,15 +112,22 @@ def test_ingest_logs_observations_append_only() -> None:
     assert store.observations == {"OBS_1": obs}
 
 
-def test_tick_does_not_raise_and_does_not_mutate_contacts() -> None:
+def test_tick_updates_last_emitted_certainty_without_replacing_the_contact() -> None:
+    """Stage 2 supersedes Stage 1's placeholder assertion that `tick` is a
+    no-op -- `tick` now materialises `last_emitted_certainty` (see
+    `test_decay.py`/`test_events.py` for the certainty/event logic itself).
+    This test only checks `tick` mutates the existing `Contact` in place
+    rather than replacing it or touching its other fields."""
     store = ContactStore()
     obs = _observation(obs_id="OBS_1", t_sim=0.0)
     store.ingest([obs], now_sim=0.0)
-    before = list(store.contacts)
+    contact = store.contacts[0]
+    assert contact.last_emitted_certainty is None
 
-    store.tick(now_sim=5.0)
+    store.tick(now_sim=0.0)
 
-    assert store.contacts == before
+    assert store.contacts == [contact]
+    assert contact.last_emitted_certainty == "observed"
 
 
 def test_belief_source_never_references_derived_world_position() -> None:
@@ -149,3 +158,54 @@ def test_belief_source_never_references_derived_world_position() -> None:
     # would actually fail if percept.py's exception were removed and the
     # field leaked elsewhere (i.e. the grep is exercised, not a tautology).
     assert "derived_world_position" in inspect.getsource(percept_module)
+
+
+def _replay_detected_lost_reacquired(store: ContactStore) -> None:
+    """One contact, observed once, ticked while unseen until it decays to
+    `lost`, then observed again and ticked back to a live certainty. Shared
+    by the ordering test and the determinism test below so both run the
+    exact same sequence."""
+    first = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    store.ingest([first], now_sim=0.0)
+    store.tick(now_sim=0.0)
+
+    lost_at = LOST_THRESHOLD_S + 1.0
+    store.tick(now_sim=lost_at)
+
+    second = _observation(
+        obs_id="OBS_2", t_sim=lost_at + 1.0, bearing_deg=0.0, range_m=1000.0
+    )
+    store.ingest([second], now_sim=lost_at + 1.0)
+    store.tick(now_sim=lost_at + 1.0)
+
+
+def test_replayed_stream_produces_detected_lost_reacquired_in_order() -> None:
+    store = ContactStore()
+
+    _replay_detected_lost_reacquired(store)
+
+    assert [event.kind for event in store.events] == [
+        CONTACT_DETECTED,
+        CONTACT_LOST,
+        CONTACT_REACQUIRED,
+    ]
+    # All three events belong to the one contact that exists throughout.
+    assert len(store.contacts) == 1
+    contact_id = store.contacts[0].id
+    assert all(event.contact_id == contact_id for event in store.events)
+
+
+def test_identical_replay_twice_produces_byte_identical_events() -> None:
+    """Determinism: the same sequence, replayed on two independent stores,
+    must produce equal `Event` lists field-for-field -- not just an equal
+    count. `now_sim` alone drives every decision (`tick`'s own docstring),
+    so two independent replays of the same recorded stream must agree
+    exactly."""
+    store_a = ContactStore()
+    store_b = ContactStore()
+
+    _replay_detected_lost_reacquired(store_a)
+    _replay_detected_lost_reacquired(store_b)
+
+    assert store_a.events == store_b.events
+    assert len(store_a.events) == 3

@@ -1,16 +1,23 @@
 """`Contact`, `SightingSpan`, `ContactStore` -- `plans/pb2-contact-memory/
 plan.md` Stage 1's persistent belief record and its append-only observation
-log. Deliberately minimal: no decay, no certainty enum, no lifecycle events
-(`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`) -- those are Stage
-2. This module only has to hold the *shape* Stage 2 extends: a contact's
-last-known perceived state, its contributing observation ids, and per-source
-sighting spans.
+log, extended by Stage 2 with decay-driven certainty and lifecycle events
+(`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`).
 
 Everything a `Contact` knows comes from a `belief.percept.Percept` --
 `ContactStore.ingest` never reads `perception.source.Observation`'s DCS
 ground-truth position field or its object id (see `percept.py`'s module
 docstring for why that boundary is structural, not a convention to
 remember).
+
+`ContactStore.tick` is Stage 2's addition: it materialises lifecycle events
+purely from `now_sim` (never wall clock, preserving BL-0's replay
+determinism) by comparing each contact's freshly computed `belief.decay.
+Certainty` against its `last_emitted_certainty`, via `belief.events.
+lifecycle_event_kind`. `tick` owns event-id minting and the
+`last_emitted_certainty` update; the comparison logic itself lives in
+`events.py`, kept pure and store-agnostic -- the same split Stage 1 drew
+between `association_over_time.passes_gate` (pure decision) and `ingest`
+(bookkeeping).
 """
 
 from __future__ import annotations
@@ -18,6 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from belief.association_over_time import implied_position, passes_gate
+from belief.decay import Certainty, certainty_of
+from belief.events import Event, lifecycle_event_kind
 from belief.percept import Percept, percept_of
 from perception.geometry import GeoPosition
 from perception.source import Observation
@@ -27,6 +36,11 @@ from perception.source import Observation
 #: OBSERVATION_ID_PREFIX_*`) -- a contact id never collides with an
 #: observation id because the two id spaces are never compared or merged.
 _CONTACT_ID_PREFIX = "CONTACT"
+
+#: `ContactStore`-minted `Event.id` prefix, distinct in shape from both id
+#: spaces above for the same reason -- an event id never collides with a
+#: contact id or an observation id.
+_EVENT_ID_PREFIX = "EVENT"
 
 
 @dataclass
@@ -45,11 +59,20 @@ class SightingSpan:
 
 @dataclass
 class Contact:
-    """One persistent belief record -- deliberately minimal per Stage 1: no
-    decay, no certainty enum, no lifecycle state. `last_position` and
-    `last_class_raw` are always derived from the most recent percept merged
-    into this contact, never from any earlier one -- there is no fusion or
-    averaging across observations at this stage."""
+    """One persistent belief record. `last_position` and `last_class_raw`
+    are always derived from the most recent percept merged into this
+    contact, never from any earlier one -- there is no fusion or averaging
+    across observations.
+
+    `last_emitted_certainty` is Stage 2's addition: the `belief.decay.
+    Certainty` this contact held the last time `ContactStore.tick` computed
+    one for it, `None` until the first `tick()` call after creation. It is
+    written only by `ContactStore.tick` (never by `record`/`ingest`) --
+    `record` updates *what* is known about the contact; `tick` is solely
+    responsible for noticing *when that knowledge's freshness* has crossed a
+    lifecycle boundary. Kept on `Contact` rather than in a side table because
+    it is exactly the "last-emitted state" `events.lifecycle_event_kind`
+    needs compared against, per contact."""
 
     id: str
     last_position: GeoPosition
@@ -58,6 +81,7 @@ class Contact:
     first_seen_sim: float = 0.0
     last_seen_sim: float = 0.0
     sighting_spans: list[SightingSpan] = field(default_factory=list)
+    last_emitted_certainty: Certainty | None = None
 
     def record(self, percept: Percept) -> None:
         """Fold `percept` into this contact's last-known state. Called only
@@ -110,7 +134,9 @@ class ContactStore:
     def __init__(self) -> None:
         self._contacts: dict[str, Contact] = {}
         self._observations: dict[str, Observation] = {}
+        self._events: list[Event] = []
         self._next_contact_number = 0
+        self._next_event_number = 0
 
     @property
     def contacts(self) -> list[Contact]:
@@ -122,6 +148,13 @@ class ContactStore:
         """The append-only observation log, keyed by `Observation.id`. A
         read-only view -- callers must not mutate the returned dict."""
         return dict(self._observations)
+
+    @property
+    def events(self) -> list[Event]:
+        """Every lifecycle event materialised so far by `tick`, in the order
+        it was emitted. A read-only view -- callers must not mutate the
+        returned list."""
+        return list(self._events)
 
     def ingest(self, observations: list[Observation], now_sim: float) -> list[Contact]:
         """Run each of `observations` through the percept->contact gate
@@ -160,13 +193,41 @@ class ContactStore:
         return touched
 
     def tick(self, now_sim: float) -> None:
-        """Stage 1 placeholder -- Stage 2 materialises `CONTACT_LOST`
-        transitions here by comparing derived state against last-emitted
-        state, driven by `now_sim`. No decay/lifecycle logic exists yet, so
-        this is a no-op; kept so Stage 2 can extend `ContactStore` without
-        changing its public shape."""
-        return
+        """Materialise lifecycle events for every known contact as of
+        `now_sim`. For each contact: compute its current `belief.decay.
+        Certainty`, compare against `last_emitted_certainty` via `belief.
+        events.lifecycle_event_kind`, append the resulting `Event` (if any)
+        to the log, then update `last_emitted_certainty` regardless of
+        whether an event fired -- the comparison on the *next* `tick()` call
+        must be against this call's result, not the last event.
+
+        Driven purely by `now_sim`, never wall clock -- calling `tick`
+        repeatedly with the same `now_sim` is idempotent after the first
+        call (no repeated events), since `last_emitted_certainty` is already
+        up to date by then. This is what preserves BL-0's replay
+        determinism: the same recorded stream, ticked at the same sim-times,
+        always produces the same event log."""
+        for contact in self._contacts.values():
+            current_certainty = certainty_of(contact, now_sim)
+            kind = lifecycle_event_kind(
+                contact.last_emitted_certainty, current_certainty
+            )
+            if kind is not None:
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=kind,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                    )
+                )
+            contact.last_emitted_certainty = current_certainty
 
     def _new_contact_id(self) -> str:
         self._next_contact_number += 1
         return f"{_CONTACT_ID_PREFIX}_{self._next_contact_number}"
+
+    def _new_event_id(self) -> str:
+        self._next_event_number += 1
+        return f"{_EVENT_ID_PREFIX}_{self._next_event_number}"
