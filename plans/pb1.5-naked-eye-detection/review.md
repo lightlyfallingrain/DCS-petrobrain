@@ -158,3 +158,145 @@ invalidate that). Did not re-verify the 595-type/`HelperAI_reporting_names.lua` 
 numbers directly (the file is gitignored and outside this review's access pattern) — taken as
 given from the task prompt, consistent with how the module's own keyword list reads against a
 real ship-type naming convention.
+
+---
+
+## Pass 2 — review-fix commits + reporting-name lookup + cap raise (2026-09-09)
+
+Reviewed `4ca7bcb`, `b5b5021`, `e22f67e`, `90c569a`, `abca037` against this file's Pass-1
+required fixes, `plan.md`, and `aircraft-layer/research/2026-09-09-object-model-keyword-
+coverage.md`. Read in full: `object_model.py`, `reporting_names.py`, `visibility.py`'s diff,
+`body-layer/CLAUDE.md`'s diff, `test_object_model.py`, `test_reporting_names.py`, `test_visibility.py`'s
+diff, the coverage-sample fixture, the committed TSV, and the research doc (including its two
+addenda). Independently reproduced the coverage numbers and audited every reporting-name keyword
+against the full 595-row real-type catalogue with a script (not just trusted the commit messages)
+— reported below rather than taken on faith, since that is the whole point of this pass.
+
+All three of Pass 1's required fixes are done and hold up: `OP_SHIP`/SA-*-keyword domain mismatch
+fixed against real type strings, `body-layer/CLAUDE.md`'s run commands fixed in both places
+(Commands section and the Structure section's `src/logger.py` bullet), and the coverage finding
+is recorded at `aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md`, later
+extended in-place with two well-labelled addenda documenting the reporting-name-lookup work
+rather than losing that history. `90c569a`'s bare-`"tank"` removal is exactly the class of fix
+the research doc's own Finding 4 called for — correctly typed as a perception defect (a fuel
+truck read as armour), not tidiness, with a real regression test using the 6 real type names that
+falsely matched.
+
+### Required Fixes
+
+- **The new "coverage floor" test in `test_object_model.py` cannot fail independently of the
+  per-entry check next to it — it is mathematically guaranteed to read 1.0 given how the fixture
+  was built, which defeats the stated purpose of restructuring it.** Every one of the fixture's
+  100 `"ground"`-bucket entries has a non-null `expected_op_class` (confirmed:
+  `entry["expected_op_class"] is None` count is 0 across all 100), i.e. the bucket was populated
+  exclusively from types already known to classify correctly — not a representative or random
+  sample of the true "ground" population, where real coverage is measured at 64.5% (196/304) in
+  the same research doc this test cites. Because `assert not mismatches` runs *before* the
+  coverage-floor assertion and would already fail on any entry whose actual class diverges from
+  its expected class, by the time `ground_coverage = ground_classified / ground_total` is computed
+  every "ground" entry has, by construction, already been proven to match its expectation — so
+  `ground_classified == ground_total` always holds whenever the test reaches that line at all.
+  `_MIN_GROUND_COVERAGE_FRACTION = 0.9` can never independently trigger; it is strictly subsumed
+  by the stronger per-entry check and is dead code dressed up as a coverage metric. This is the
+  same failure mode Pass 1 required a fix for (a test that reads as "validated against real data"
+  but cannot actually catch the regression it claims to guard against) — reintroduced here in a
+  different shape: instead of one fabricated string, it's a curated set of only-passing real
+  strings. Fix: either (a) rebuild the `"ground"` bucket as an honest sample of the full 304-type
+  ground population — including a fair share of the ~108 real, currently-unclassified ground
+  types (the ones that are neither `"ground_deferred"`'s deliberately-out-of-scope set nor
+  currently covered) — with `expected_op_class: null` for those, and set the floor meaningfully
+  below the measured 64.5% so it can move and actually catch a regression; or (b) if the intent
+  really is "don't let today's 100 known-good classifications silently break," rename/redocument
+  the assertion honestly as a per-entry regression guard (which it already effectively is via
+  `mismatches`) and stop presenting `ground_coverage` as a coverage measurement, since it isn't
+  one as currently built. (a) is preferable — it is what the docstring and commit message already
+  claim this test does.
+
+### Optional Refinements
+
+- **The `_WWII_REPORTING_NAME_PREFIX = "old "` guard's docstring over-claims completeness, and
+  the gap is real (though currently harmless).** Grepping the committed TSV for WWII-flavoured
+  types turns up at least two reporting names that are WWII units but do *not* start with `"Old
+  "`: `M4_Sherman`/`M4A4_Sherman_FF` both resolve to `"M4 Sherman"` (no prefix), and
+  `soldier_wwii_br_01`/`soldier_wwii_us` both resolve to plain `"Soldier"`. Checked against every
+  keyword in `_REPORTING_NAME_KEYWORD_PROFILES` (script, not inspection) — none currently matches
+  `"sherman"`, so `profile_for("M4_Sherman")` still correctly falls back today, and `"soldier"`
+  matching the bare `"Soldier"` reporting name is harmless anyway (a WWII soldier is physically
+  the same size as a modern one, so `OP_INFANTRY`/1.8 m is accurate regardless of era — and that
+  raw-table `"soldier"` keyword predates this session's work, not a new regression). So this is
+  not a live bug. But the guard's docstring claim ("every one of these 56+ reporting names starts
+  with this literal prefix") is not accurate, and the mechanism is one un-lucky future keyword
+  addition (e.g. a broad tank keyword that happens to also read "sherman") away from silently
+  reclassifying a WWII unit as modern armour — exactly the failure class this guard exists to
+  prevent. Recommend either tightening the docstring's claim (it holds for the 56 reporting names
+  the "Old " scan was run against, not literally every WWII unit in the table) or adding the two
+  Sherman reporting names to an explicit exclusion supplementing the prefix check, next time this
+  table is touched.
+- **`ground_deferred` bucket assignments spot-checked and are honest.** All 17 entries (towed
+  AA/mortar pieces, standalone SAM-system radars/launchers beyond IRIS-T, static structures,
+  airfield support equipment) genuinely have no correct ED ground-vehicle bucket, matching the
+  docstring's own reasoning — not a dumping ground for real misses dressed up as "deliberately
+  out of scope." No issue here; noted because it's the natural place a coverage-floor fixture
+  could be gamed in the *other* direction (hiding real gaps as "deferred" rather than as
+  "already-passing"), and it wasn't.
+- **Reporting-name-pass audit against the full 595-row catalogue found no aircraft/ship
+  false positives.** Ran every `_REPORTING_NAME_KEYWORD_PROFILES` keyword against all 376 distinct
+  real reporting names independently (not just the curated fixture) — every match list is exactly
+  the intended real type(s), nothing unexpected (no aircraft, no unrelated ground/support type).
+  Confirms the research doc's "checked against all 595 real reporting names for collisions" claim
+  for this table. `"cobra"` (→ `OP_ARMORED`, the VBL Cobra 4x4) was worth checking by name given
+  Bell's AH-1 Cobra shares the word — no collision, because this table (`HelperAI_reporting_names.lua`)
+  doesn't carry aircraft reporting names for AH-1 in the first place.
+- **The committed TSV, its loader, and the drift story are sound.** No duplicate keys under
+  case-insensitive folding (checked programmatically, 0 of 595). `reporting_names.py`'s two-pass
+  fallback (unmapped type → raw-table pass, not a crash) is correctly documented and tested
+  (`test_reporting_names.py::test_unmapped_type_returns_none`,
+  `test_object_model.py::test_unmapped_type_still_falls_back_to_raw_table_behaviour`).
+  Regeneration steps are concrete and actionable (file location, extraction method, format,
+  re-test command). Committing it is the right call and consistent with `body-layer/CLAUDE.md`'s
+  own existing convention (`tests/fixtures/` is committed directly, unlike `world-model/data/`) —
+  this is small (16 KB), derived, static reference data next to the code that consumes it, not
+  the kind of raw/generated bulk dataset the root invariant about `world-model/data/` is aimed at.
+  Correctly placed under `body-layer/src/perception/data/` (runtime data) rather than
+  `aircraft-layer/research/` (dated findings) — the research doc records the *investigation*,
+  the TSV is the *data*, and both are where this project's conventions say they should be.
+- **`NAKED_EYE_RANGE_CAP_M`'s raise to 5000 m is well-documented and honestly labelled as
+  un-tuned.** The doc comment no longer claims to be ED's `scan_rad_around_point` — it now says
+  plainly what it replaced and why, cites the live-probe finding that motivated the raise, and
+  states outright that it's a starting point for live-tuning per the user's own instruction, not
+  a settled number. Both rewritten tests changed what they actually assert rather than just
+  changing numbers to keep passing: `test_ural_truck_size_curve_binds_below_the_range_cap` now
+  proves the size curve (not the cap) is the binding constraint for a truck at the new cap value,
+  and `test_range_cap_binds_only_for_objects_the_size_curve_would_let_run_away` uses a real ship
+  type (`"MOLNIYA"`) with both an at-cap and a beyond-cap case, genuinely exercising the cap as
+  the ship's binding constraint rather than asserting a value that would pass regardless. Verified
+  the boundary semantics directly in `visibility.py`: `candidate_range_m > range_threshold_m`
+  fails closed, so exactly-at-cap is correctly still visible, matching the test.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES
+
+One required fix, and it is test-only: the coverage-floor assertion in
+`test_coverage_floor_against_real_type_sample` needs a fixture built from an honest sample of the
+real "ground" population (not exclusively already-passing entries) before it does what its
+docstring and this project's own review history says it should do. Nothing here touches
+`object_model.py`'s actual keyword tables, `reporting_names.py`'s loader, or `visibility.py`'s
+gating logic — all of that is sound, well-tested against real data (independently re-audited this
+pass, not just trusted), and the two-pass lookup, the WWII guard's *current* behaviour, and the
+cap raise are all correctly implemented. Given the user's stated direction (naked-eye becomes the
+*primary* detection mechanism, not a fallback), this fixture fix is worth doing before that
+transition raises the stakes on this table's coverage claims being trustworthy — but it does not
+block anything else in this pass, and the un-tuned cap constant is honestly labelled as such,
+which is what "raise it, we'll fine-tune later" calls for at this stage.
+
+### Review Confidence
+
+Full read. All five commits' diffs read in full; `object_model.py` and `reporting_names.py` read
+in full (not diffed against Pass 1's versions, since both were substantially rewritten);
+`visibility.py`'s and `body-layer/CLAUDE.md`'s diffs read in full; every new/changed test file
+read in full. Independently reproduced the coverage-floor test's mechanics by hand (not just read
+the assertion) and independently scripted the full-catalogue false-positive audit for both keyword
+tables rather than trusting the research doc's claim of having done so. Did not re-run
+format/lint/type/test (user independently confirmed all pass; no source changes were made during
+this review that would invalidate that).
