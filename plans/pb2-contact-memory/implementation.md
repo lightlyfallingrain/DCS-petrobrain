@@ -522,3 +522,115 @@ directly: first poll acquires 3/5, second poll (all 5 still visible) emits all 5
   despite the plan listing it under "Modified" files from the start — backfilled a Structure
   bullet for it here alongside the new `--console` entrypoint documentation, rather than leaving
   it further out of date into Stage 4.
+
+## Stage 4 — Tools and console (2026-09-09)
+
+### Files Changed
+
+- `body-layer/src/belief/tools.py` (new) — the brain API's body, minus a transport. Four §3.3
+  functions (`get_contacts`, `describe_contact`, `get_contact_history`, `find_contact`) plus
+  `watch_contact`/`unwatch_contact`/`get_stats` (see "Why three extra tool functions" below).
+  `ContactResult` is a `TypedDict` for the `{facts, summary, phrasing_hints}` triple. All four
+  contact-facing functions share `_contact_facts`/`_contact_summary`/`_contact_phrasing_hints`
+  helpers over one `_contact_result` builder, so the shape can't drift between them.
+- `body-layer/src/belief/contacts.py` — added `Attention = Literal["normal", "watch"]` and two
+  new `Contact` fields, `attention: Attention = "normal"` and `attention_source: str | None =
+  None` — Stage 4's "bare attention enum + source field," mutated only by `tools.watch_contact`/
+  `unwatch_contact`. Both default such that every existing Stage 0-3 test (which never
+  constructs a `Contact` mentioning either field) is unaffected.
+- `body-layer/src/belief/console.py` (new) — line parser + pretty-printer over `tools.py`.
+  `Console.handle_line(line, now_sim)` dispatches `contacts [all|visible|watched]`, `show <id>`,
+  `history <id>`, `find <text>`, `watch <id>`/`unwatch <id>`, `stats` into the matching `tools.py`
+  function and formats the result as one or more lines; returns what it printed (mirroring
+  `logger.PerceptionLogger.run_once`'s pattern) so tests don't need to capture stdout.
+- `body-layer/src/logger.py` — `--console` now runs an interactive REPL, not just a periodic
+  count line. `ConsolePerceptionRunner` gained `last_t_sim: float | None`, updated every
+  `run_once()`. `main()`'s `--console` branch starts the poll loop
+  (`_run_poll_loop`) on a background daemon thread and runs `_run_console_repl` (reads stdin
+  line by line, dispatches into a `belief.console.Console` sharing the same `ContactStore`) in
+  the foreground, using `last_t_sim` as each command's `now_sim`.
+- `body-layer/CLAUDE.md` — documented `tools.py`/`console.py`'s actual shape (replacing the
+  Stage 0-3 "not yet built" note) and the Stage 4 REPL wiring in "Running the live logger" and
+  the Structure section.
+- `body-layer/tests/test_tools.py` (new, 19 tests) — the four §3.3 functions' facts/summary/
+  phrasing_hints shape, the absent-not-empty constraint on BL-3-scope keys, that `position` is
+  the percept-implied position rather than the fixture's ground-truth `derived_world_position`,
+  filter behaviour, `find_contact` matching only on perceived classification, and
+  watch/unwatch/stats round-trips.
+- `body-layer/tests/test_console.py` (new, 13 tests) — per-command usage/error messages, the
+  plan's required scripted-session acceptance test (ingest → tick → `contacts`/`show`/`watch`/
+  `contacts watched` while visible, then tick past `LOST_THRESHOLD_S` and repeat against
+  `history`/`find`/`unwatch`/`stats`), output-stream printing, and two structural checks: every
+  public `tools.py` function name appears in `console.py`'s source, and `console.py` never
+  imports `belief.decay`/`belief.association_over_time` directly.
+- `body-layer/tests/test_logger.py` — one new test, `last_t_sim` is `None` before the first poll
+  and set to the polled `t_sim` after.
+
+### Why three extra tool functions beyond the four named in the plan's Stage 4 heading
+
+The task instructions listed exactly four `tools.py` functions but also required `watch`/
+`unwatch`/`stats` as console commands under the constraint "console.py ... owns no belief logic
+itself, just parses commands and formats `tools.py`'s output" and the plan's own acceptance
+criterion ("every console command maps 1:1 to a §3.3 tool name with no console-only logic").
+§3.3's real equivalents (`set_attention`, `get_attention_state`) are BL-4/BL-5 work not being
+built here. Resolved by adding `watch_contact`/`unwatch_contact`/`get_stats` to `tools.py` in the
+same plain-function shape as the four real §3.3 tools, so the state mutation and counting still
+live outside `console.py` — consistent with the module's docstring, which flags this choice
+explicitly rather than silently reinterpreting the "four functions" instruction.
+
+### `facts` shape chosen
+
+```
+facts:
+  id: str
+  classification: {value: str}          # Contact.last_class_raw, perceived only
+  certainty: "observed"|"tracked"|"estimated"|"lost"   # belief.decay.certainty_of
+  visible: bool                          # certainty == "observed"
+  last_seen_ago_s: float
+  position: {dcs: {x: float, z: float}}  # Contact.last_position -- percept-implied,
+                                          # never the observation's ground-truth position
+  sources: list[str]                     # sorted distinct sighting-span sources
+  attention: "normal"|"watch"
+  attention_source: str                  # present only when attention == "watch"
+summary: str        # one plain sentence, e.g. "Ural truck, tracked, last seen 12s ago."
+phrasing_hints:
+  certainty: "current"|"recent"|"remembered"|"lost"   # distinct vocabulary from the
+                                                        # internal certainty ladder, per §3.4
+```
+
+No `semantic`, `general_area`, `relative_now`, or `urgency` key is ever present — each is either
+BL-3 (world enrichment, current-ownship-relative geometry) or BL-4 (threat assessment) work this
+stage does not build, and the plan's constraint requires them absent, not present-and-null.
+Pinned by `test_describe_contact_facts_never_carry_bl3_scope_keys` and by `phrasing_hints` never
+including `urgency` anywhere in `tools.py`.
+
+### Checks
+
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `cd body-layer && mypy src`: pass, no issues in 20 source files
+- `pytest body-layer/tests -q`: 196 passed (163 before this stage + 19 + 13 + 1 new; every
+  pre-existing test passes unmodified)
+- `git status`: clean working tree after all three commits
+
+### Notable Discoveries
+
+- Stage 1's structural test (`test_belief_source_never_references_derived_world_position`) greps
+  every `belief/*.py` file's raw source text for the literal substring `"derived_world_position"`
+  (except `percept.py`). `tools.py`'s first docstring draft explained the identity invariant by
+  naming that field directly and tripped this test — not a bug in the test, exactly the kind of
+  future-`belief/`-module case its own docstring says it's meant to catch. Reworded to describe
+  the field ("`Observation`'s DCS ground-truth position field") without repeating its literal
+  name.
+- `store.contacts[0].attention` read twice in one test body, with an equality assertion against
+  `"watch"` in between, made mypy narrow the *repeated expression*'s type to `Literal["watch"]`
+  for the rest of the test — a later `== "normal"` comparison against that narrowed type became a
+  `comparison-overlap` error even though the underlying object had genuinely changed in between.
+  Not a real bug; worked around by binding `store.contacts[0]` to a local variable at each point
+  instead of re-evaluating the same attribute-access expression, which stops mypy from treating
+  the second read as the same narrowed value.
+- No threading test was written for `logger.py`'s new `_run_poll_loop`/`_run_console_repl`
+  functions — consistent with the project's existing "`main()`'s CLI wiring is untested by
+  design" posture (`ConsolePerceptionRunner`/`Console` themselves, which those two functions
+  call, are both fully tested). `last_t_sim`'s tracking is tested directly on
+  `ConsolePerceptionRunner`, which is the one piece of new *logic* Stage 4 added to `logger.py`.
