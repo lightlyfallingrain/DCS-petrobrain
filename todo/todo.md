@@ -66,24 +66,35 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   the range/tier constants product-critical rather than provisional, and raises whether the scope
   channel stays a second source or becomes just one more input to our own model.
 
-  **Open questions, none answered yet — this is why it needs Architect, not a snap decision:**
-  1. Can DCS's radio callout texts actually be suppressed? Unknown. Any approach touching module
-     files fights integrity checks and is overwritten by updates. A user-side subtitle/message
-     setting may exist — the Session 2 finding on DCS's `SUBTITLE` option is a lead, unverified.
-     Investigator task before any plan commits to it.
-  2. Is suppression even wanted? Two crew members reporting the same contact differently is a real
-     immersion problem, but silencing DCS's own AI is a bigger intervention than this project has
-     made anywhere so far, and it is not reversible for the user mid-mission.
-  3. Does the HelperAI scope channel survive as a distinct source (real detection gate, per PB-1),
-     or collapse into our model as one input among several? PB-1's association is separately known
-     to be broken across namespaces (backlog item above), so its current value is lower than it
-     looks.
-  4. What does this do to BL-2/PB-2, which was to consume both channels?
+  **Open questions — all four answered by the user 2026-09-09:**
+  1. *Can DCS's radio callout texts be suppressed?* **Needs investigation, deferred.** Any approach
+     touching module files fights integrity checks and is overwritten by updates; DCS's `SUBTITLE`
+     option (Session 2 finding) is an unverified lead. Investigator task if/when this is revived.
+  2. *Is suppression wanted?* **Only if possible, and low priority — deferred.** Not a blocker for
+     anything else here.
+  3. *Does the HelperAI scope channel survive as a distinct source?* **Yes — it stays.** The user
+     needs it for later gameplay: commanding Petrovich to acquire a target, lock it, and fire.
+     Those are a future, currently-deferred milestone, but they depend on the scope channel, so it
+     is not collapsed into our own model and not dropped. **Consequence: the association namespace
+     bug (backlog item below) matters more than its "PB-1 code, already merged" framing suggests —
+     it is on the path to a wanted feature, not a dead branch.**
+  4. *What does this do to BL-2/PB-2?* **Very little.** BL-2 (contact memory and association —
+     persistent contact identities, detected/lost/reacquired, observation-vs-belief split, decay,
+     behind a debug console that is the ancestor of the brain API; see `plans/body-layer/plan.md`)
+     consumes `Observation` records through the `PerceptionSource` interface regardless of which
+     channel produced them, and was never going to consume the DCS ambient channel because that
+     channel is not readable. The only real change is emphasis: our own synthetic channel becomes
+     BL-2's main source of contacts, with the scope channel as the second. No interface change.
 
-  Not scheduled. Do not start without the user's instruction — this is a `[?]` decision item.
+  **Net remaining scope of this item**, once the deferrals above are taken out: adopt PB-1.5's
+  filter as the primary detection mechanism rather than a fallback, and stop treating DCS's ambient
+  output as an input we are waiting on. Both are framing/documentation changes plus calibration —
+  no new machinery. Still `[?]`: do not start without the user's instruction.
 
 - [ ] **`association.py` matches across two different DCS name namespaces and scores 0 on most real
-  units** — found 2026-09-09 while validating PB-1.5's `object_model.py`. `HybridPerceptionSource`
+  units** — *priority raised 2026-09-09: the user confirmed the scope channel is needed for later
+  gameplay (commanding Petrovich to acquire/lock/fire), so this is on the path to a wanted feature
+  rather than dead code.* — found 2026-09-09 while validating PB-1.5's `object_model.py`. `HybridPerceptionSource`
   matches HelperAI's detection text against `LoGetWorldObjects` candidates via
   `association._type_match_score`, but the two feeds speak **different vocabularies**: HelperAI
   emits Petrovich's *reporting* names (`"Slava cruiser"`, `"SA-3 launcher"`, `"Tarantul III
