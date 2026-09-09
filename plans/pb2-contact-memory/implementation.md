@@ -299,3 +299,139 @@ See the two new test files' summaries above (12 + 7 = 19 new tests this session)
   but close enough together that a later percept between them falls within both gates
   simultaneously. Got this wrong once (50m separation, well inside the 300m gate) before widening
   to 400m apart / 200m from each — worth remembering as a pattern for Stage 2's fixtures too.
+
+---
+
+## Stage 2 — Decay, certainty, lifecycle (2026-09-09)
+
+Implemented `plans/pb2-contact-memory/plan.md`'s Stage 2: per-attribute decay half-lives, the
+`certainty` lifecycle ladder, `CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED` event
+derivation, and `ContactStore.tick` wired to materialise them. Landed in two commits: `decay.py`
++ `events.py` + their pinned unit tests first, then `contacts.py`'s `tick` wiring + integration
+tests, per the task's incremental-commit instruction.
+
+`docs/concept/PETROBRAIN_RUNTIME.md` has no numbered "§3.4" section and no concrete `certainty`
+enum or threshold table — its "Uncertainty and memory decay" section (searched for "certainty";
+closest match) only names the four *attributes* that should decay at different rates (identity
+slow, exact position fast, general area medium/slow, last movement direction medium) and the four
+*wordings* the resulting confidence should support ("I see him." / "I think he was..." / "Last
+saw him..." / "I lost him."). The plan's own text anticipated this ("derive the actual levels and
+thresholds ... if it specifies them, otherwise make a reasonable minimal set and document the
+choice") — the four-level ladder below (`observed`/`tracked`/`estimated`/`lost`) was derived to
+match those four wordings 1:1, not copied from an existing table.
+
+### Files Changed
+
+- `body-layer/src/belief/decay.py` (new) — five named `Final[float]` half-life/window constants
+  (seconds) and `Certainty = Literal["observed", "tracked", "estimated", "lost"]`, plus
+  `certainty_of(contact, now_sim) -> Certainty`: a pure, top-down (first-match-wins) ladder over
+  `elapsed_s = now_sim - contact.last_seen_sim`. See "Half-lives and thresholds chosen" below for
+  the numbers and their justification.
+- `body-layer/src/belief/events.py` (new) — `EventKind` (`CONTACT_DETECTED`/`CONTACT_LOST`/
+  `CONTACT_REACQUIRED`, the three of `docs/concept/PETROBRAIN_RUNTIME.md`'s "Event model" list
+  BL-2 scopes in), `Event` (id, contact_id, kind, t_sim, certainty), and
+  `lifecycle_event_kind(previous_certainty, current_certainty) -> EventKind | None` — a pure,
+  three-branch comparison (crossing into `lost`, crossing out of `lost`, or neither) with one
+  documented special case: a contact whose *first* tick already finds it past `LOST_THRESHOLD_S`
+  (previous certainty `None`, current `lost`) emits nothing, not a synthetic
+  `CONTACT_DETECTED`+`CONTACT_LOST` pair.
+- `body-layer/src/belief/contacts.py` — `Contact` gains `last_emitted_certainty: Certainty | None
+  = None`, written only by `tick` (never by `record`/`ingest`). `ContactStore` gains an
+  append-only `_events: list[Event]` log, an `events` read-only property, and an `_EVENT_ID_PREFIX
+  = "EVENT"` id space distinct from contact/observation ids. `tick(now_sim)` now: for each known
+  contact, computes `certainty_of(contact, now_sim)`, compares it against
+  `last_emitted_certainty` via `lifecycle_event_kind`, appends any resulting `Event`, then updates
+  `last_emitted_certainty` unconditionally (so the *next* `tick()` compares against this call's
+  result, not the last emitted event) — matches the task brief's instruction, still driven purely
+  by `now_sim`.
+- `body-layer/tests/test_contacts.py` — replaced Stage 1's `test_tick_does_not_raise_and_does_
+  not_mutate_contacts` (that assertion is now false by design — see Constraints note below) with
+  `test_tick_updates_last_emitted_certainty_without_replacing_the_contact`. Added
+  `test_replayed_stream_produces_detected_lost_reacquired_in_order` and
+  `test_identical_replay_twice_produces_byte_identical_events`, both driven by a shared
+  `_replay_detected_lost_reacquired` helper so the two tests run the exact same sequence.
+
+### Half-lives and thresholds chosen
+
+All five constants live in `decay.py`, justified individually in comments there; summarized here:
+
+| Constant | Value | Role |
+| --- | --- | --- |
+| `OBSERVED_WINDOW_S` | 5.0 s | `elapsed_s` at or below this = `"observed"`. Close to one polling interval (body-layer's documented ~1 Hz), since `certainty_of` has no direct "was this contact in the most recent poll's batch" signal, only elapsed time. |
+| `POSITION_HALF_LIFE_S` | 30.0 s | `"tracked"` boundary. Order-of-magnitude time a ground vehicle needs to move roughly its own gate-uncertainty radius at `association_over_time.GATE_GROWTH_RATE_MPS` (20 m/s) — "trust the exact spot for about half a minute." |
+| `LOST_THRESHOLD_S` | 120.0 s (4x `POSITION_HALF_LIFE_S`) | `"estimated"`/`"lost"` boundary. Long enough that `"estimated"` means something distinct from `"tracked"`, short enough a contact doesn't linger as `"estimated"` once plainly lost. |
+| `MOTION_HALF_LIFE_S` | 60.0 s | Declared, not yet consumed — no motion estimate exists on `Contact` yet (BL-4). Placed between position and general-area per the concept doc's ordering. |
+| `GENERAL_AREA_HALF_LIFE_S` | 180.0 s | Declared, not yet consumed — no `general_area` field exists on `Contact` yet (BL-3). |
+| `IDENTITY_HALF_LIFE_S` | 600.0 s | Declared, not yet consumed — no per-attribute identity confidence exists on `Contact` yet. |
+
+Only `OBSERVED_WINDOW_S`, `POSITION_HALF_LIFE_S`, and `LOST_THRESHOLD_S` are actually read by
+`certainty_of` today, since `Contact` doesn't yet carry separate identity/motion/general-area
+attributes to decay independently — those three constants exist now so the plan's "one table"
+requirement is satisfied from the start, and BL-3/BL-4 extend this table rather than starting a
+second one (the plan's own "Complicates BL-4" note).
+
+The `certainty` ladder itself, evaluated top-down in `certainty_of`:
+
+```
+elapsed_s <= OBSERVED_WINDOW_S (5s)      -> "observed"
+elapsed_s <= POSITION_HALF_LIFE_S (30s)  -> "tracked"
+elapsed_s <= LOST_THRESHOLD_S (120s)     -> "estimated"
+else                                      -> "lost"
+```
+
+### Constraints followed
+
+- No `emit_mode`, `tools.py`, or `console.py` work — out of scope for this stage, untouched.
+- `percept.py` and `association_over_time.py`'s gating logic untouched.
+- Identity invariant preserved: no file under `belief/` (other than the documented `percept.py`
+  exception) reads `derived_world_position`/`object_id` — the existing structural grep test in
+  `test_contacts.py` covers `decay.py`/`events.py` too since it globs all of `belief/*.py`.
+- Stage 1's `test_tick_does_not_raise_and_does_not_mutate_contacts` was modified, not left
+  standing — its assertion ("tick does not mutate contacts") was Stage 1's own documented
+  placeholder behavior, explicitly earmarked in that test's docstring and in `contacts.py`'s
+  Stage 1 module docstring for Stage 2 to replace. Recorded here per the project's "don't modify
+  existing tests without permission" rule, since this is the one pre-existing test this stage
+  touched.
+
+### Tests Added
+
+- `test_decay.py` (9 tests) — one per certainty level/boundary: exact-zero and at-the-boundary for
+  each of the three thresholds, just-past-the-boundary for each transition, `"lost"` staying
+  `"lost"` far past the threshold, and negative-elapsed-time clamping to `"observed"`.
+- `test_events.py` (6 tests) — every `lifecycle_event_kind` branch: new-contact-not-lost ->
+  detected (all three non-lost levels), new-contact-already-lost -> nothing, any-live-level ->
+  lost (all three), lost -> any-live-level -> reacquired (all three), still-lost -> nothing again,
+  and sub-level changes while alive (observed<->tracked<->estimated, including a same-level
+  no-op) -> nothing.
+- `test_contacts.py` — `test_tick_updates_last_emitted_certainty_without_replacing_the_contact`
+  (replaces the Stage 1 placeholder test),
+  `test_replayed_stream_produces_detected_lost_reacquired_in_order` (the plan's required
+  acceptance case), `test_identical_replay_twice_produces_byte_identical_events` (determinism,
+  asserting equal `Event` lists field-for-field via dataclass equality, not just equal counts).
+
+### Checks
+
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `cd body-layer && mypy src`: pass, no issues in 18 source files
+- `pytest body-layer/tests -q`: 151 passed (134 before this stage + 9 + 6 + 2 new; all
+  pre-existing tests pass, one Stage 1 placeholder test replaced as documented above)
+- `git status`: clean working tree after both commits
+
+### Notable Discoveries
+
+- The concept doc's "§3.4 certainty table" the task brief pointed to does not exist as a numbered
+  section or a concrete table — `docs/concept/PETROBRAIN_RUNTIME.md` only has unnumbered `##`
+  headings, and "Uncertainty and memory decay" (its actual closest content) states the *shape* of
+  the requirement (four attributes, four decay speeds, four resulting wordings) without naming
+  concrete levels or thresholds. This stage's four-level ladder is therefore an original but
+  tightly-constrained derivation (matching the four wordings 1:1), not a transcription — worth
+  flagging for whoever tunes these against real sessions, since there's no upstream table to
+  reconcile against, only the four example sentences.
+- `lifecycle_event_kind`'s "already lost on first tick emits nothing" branch was a deliberate
+  design call not spelled out in the plan text — the plan only says "materialise `CONTACT_LOST`
+  transitions ... by comparing derived state against last-emitted state," which is silent on
+  what a `None -> lost` comparison should do. Chose "nothing" over "detected then immediately
+  lost" because the latter would be a synthetic pair with no real transition behind it (the
+  contact was never live long enough to be meaningfully "detected" as an event). Flagged here in
+  case a future stage's console/tools work wants the opposite behavior for debugging visibility.
