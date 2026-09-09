@@ -255,6 +255,102 @@ def test_candidates_dropped_by_the_cap_are_not_retried_next_poll() -> None:
     assert second == []
 
 
+def test_every_poll_mode_re_emits_a_continuously_visible_candidate() -> None:
+    # Stage 3 (plans/pb2-contact-memory/plan.md Interface confirmation gap
+    # 2): under emit_mode="every_poll", a continuously-visible object must
+    # keep emitting an Observation on every poll instead of being debounced
+    # away after acquisition.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+    third = source.poll(100.4, _ownship())
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert len(third) == 1
+
+
+def test_every_poll_mode_stops_emitting_once_the_candidate_leaves() -> None:
+    visible = {"objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]}
+    empty: dict[str, Any] = {"objects": []}
+    client = FakeAircraftClient(visible)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    client._world_objects = empty
+    second = source.poll(100.2, _ownship())
+
+    assert len(first) == 1
+    assert second == []
+
+
+def test_every_poll_mode_still_throttles_first_time_acquisition() -> None:
+    # 5 simultaneously-new infantry candidates, cap = 3 -- the acquisition
+    # throttle still applies to *first-time* acquisition even under
+    # every_poll, guarding against instant global awareness.
+    world_objects = {
+        "objects": [
+            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
+            for i in range(1, 6)
+        ]
+    }
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+
+    assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
+
+
+def test_every_poll_mode_progressively_acquires_capped_overflow() -> None:
+    # Unlike on_change (where a capped-out object is never retried), every_
+    # poll's acquisition set must keep retrying a not-yet-acquired object on
+    # later polls until the throttle admits it -- the whole point of
+    # re-reading NAKED_EYE_MAX_NEW_PER_POLL as an acquisition-rate limit
+    # rather than an emission cap.
+    world_objects = {
+        "objects": [
+            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
+            for i in range(1, 6)
+        ]
+    }
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    second = source.poll(100.2, _ownship())
+
+    assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
+    # first poll's 3 acquired objects re-emit, plus the 2 remaining
+    # overflow objects are now acquired and emitted for the first time.
+    assert len(second) == 5
+
+
 def test_quantise_bearing_snaps_to_nearest_clock_position() -> None:
     # 47 deg relative bearing (from heading 0) is nearer 2 o'clock (60 deg)
     # than 1 o'clock (30 deg) -- a clean, non-boundary regression anchor.
