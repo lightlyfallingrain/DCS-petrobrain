@@ -79,18 +79,16 @@ never a bad merge) rather than building a second keyword table here.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final
 
+from belief.classification import class_compatibility
 from belief.percept import Percept
-from perception import object_model
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.naked_eye_source import _CLOCK_BUCKET_DEG, _RANGE_BUCKETS_M
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
-
-ClassCompatibility = Literal["compatible", "unknown", "incompatible"]
 
 #: Placeholder fixed uncertainty for the scope/hybrid channel -- see module
 #: docstring. Not range-derived: this channel has no bucket structure to
@@ -165,30 +163,6 @@ def implied_position(percept: Percept) -> GeoPosition:
         alt_m=percept.ownship_at_observation.alt_m,
     )
     return project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)
-
-
-def _op_class_of(classification_raw: str) -> str | None:
-    """Resolve `classification_raw` (either an already-bucketed naked-eye
-    `OP_*` string, or scope/hybrid free text) to an `OP_*` bucket, or `None`
-    if unknown. See module docstring."""
-    if classification_raw.startswith("OP_") and (
-        classification_raw != object_model.DEFAULT_OP_CLASS
-    ):
-        return classification_raw
-    profile = object_model.profile_for(classification_raw)
-    if profile.op_class == object_model.DEFAULT_OP_CLASS:
-        return None
-    return profile.op_class
-
-
-def class_compatibility(a_raw: str, b_raw: str) -> ClassCompatibility:
-    """Three-valued class compatibility between two `classification_raw`
-    strings. See module docstring."""
-    a_class = _op_class_of(a_raw)
-    b_class = _op_class_of(b_raw)
-    if a_class is None or b_class is None:
-        return "unknown"
-    return "compatible" if a_class == b_class else "incompatible"
 
 
 def spatial_gate_radius_m(percept: Percept, contact: Contact, now_sim: float) -> float:
