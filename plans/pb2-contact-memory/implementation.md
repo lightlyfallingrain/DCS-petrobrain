@@ -435,3 +435,90 @@ else                                      -> "lost"
   lost" because the latter would be a synthetic pair with no real transition behind it (the
   contact was never live long enough to be meaningfully "detected" as an event). Flagged here in
   case a future stage's console/tools work wants the opposite behavior for debugging visibility.
+
+## Stage 3 — Emission policy and pipeline wiring (2026-09-09)
+
+### Files Changed
+
+- `body-layer/src/perception/hybrid_source.py` — added `emit_mode: Literal["on_change",
+  "every_poll"] = "on_change"`. Under `"every_poll"` the text-equality debounce check is skipped
+  entirely (`if self.emit_mode == "on_change" and distinct_texts == self._last_emitted_texts`);
+  everything else (leaf collection, association, per-leaf Observation building) is unchanged.
+  `_last_emitted_texts` is still updated unconditionally on a successful poll — harmless, since
+  `every_poll` never reads it.
+- `body-layer/src/perception/naked_eye_source.py` — added the same `emit_mode` field, plus a
+  second, independent piece of state (`_acquired_ids: frozenset[int]`) and `poll()` split into
+  `_acquire_on_change`/`_acquire_every_poll`. See "Acquisition-cap vs. emission-cap" below for
+  why two separate sets, not a re-read of one.
+- `body-layer/src/logger.py` — added `ConsolePerceptionRunner` (mirrors `PerceptionLogger`'s
+  testable-core/thin-`main()` split) and a `--console` CLI flag; `_build_sources()` factors out
+  the two-tier construction so both the plain-logger path (`emit_mode="on_change"`) and
+  `--console` path (`emit_mode="every_poll"`) share tier wiring and diverge only on mode/consumer.
+- `body-layer/tests/test_hybrid_source.py` — 2 new tests: `every_poll` re-emits an unchanged
+  detection set every poll; still returns nothing when detection clears.
+- `body-layer/tests/test_naked_eye_source.py` — 4 new tests: `every_poll` re-emits a
+  continuously-visible candidate; stops once it leaves; still throttles first-time acquisition at
+  the cap; progressively acquires capped overflow on later polls (the test that pins the
+  acquisition-vs-emission-cap distinction directly).
+- `body-layer/tests/test_logger.py` — 4 new tests for `ConsolePerceptionRunner`: no telemetry
+  returns empty; ingests observations into its store; reuses one store across calls (mirroring
+  `main()`'s loop); prints the periodic `contacts=N observations=N` line.
+- `body-layer/tests/test_emission_pipeline.py` (new) — the plan's required Stage 3 acceptance
+  test: drives a real `NakedEyePerceptionSource` + `belief.contacts.ContactStore` together over a
+  simulated 60 s at 1 Hz. Under `every_poll`, a stationary continuously-visible object stays
+  `certainty_of(contact, 60.0) == "observed"`; under `on_change` (single emission then debounce)
+  it does not, by the same point — the contrast that motivates Stage 3.
+- `body-layer/CLAUDE.md` — documented the `belief/` package (undocumented since Stage 1) and the
+  `--console` entrypoint, per the plan's Affected Modules list.
+
+### Acquisition-cap vs. emission-cap (naked-eye)
+
+The plan's instruction was to re-read `NAKED_EYE_MAX_NEW_PER_POLL` as an acquisition-rate limit
+rather than an emission cap. A single re-read is not possible without breaking an existing,
+unmodifiable test: `test_candidates_dropped_by_the_cap_are_not_retried_next_poll` requires that
+under the default `on_change` mode, 5 simultaneously-new candidates against a cap of 3 emit only
+3, and the other 2 are *never* retried (marked "already seen" regardless of the cap) — this is
+`on_change`'s original, byte-for-byte-preserved behaviour.
+
+But Stage 3's own acceptance requirement for `every_poll` is closer to the opposite: an object
+that missed the throttle must be retried on a later poll (progressively acquired), not dropped
+forever, or a dense scene would permanently under-populate belief. Satisfying both meant keeping
+two independent pieces of state:
+
+- `_previously_visible_ids` (unchanged, `on_change`-only): every currently-visible object —
+  emitted or capped-out — becomes "already seen" for next poll's debounce comparison. A
+  capped-out object leaves the debounce set only by actually leaving and re-entering visibility.
+- `_acquired_ids` (new, `every_poll`-only): grows by at most `NAKED_EYE_MAX_NEW_PER_POLL`
+  not-yet-acquired objects per poll (nearest-first, same throttle), intersected with
+  currently-visible each poll (so a departed object must re-acquire on return, same shape as
+  `on_change`). Every object already in this set re-emits every poll it stays visible, regardless
+  of the cap — the cap only ever gates *entry*, never repeat emission of an already-acquired
+  object.
+
+The two sets evolve identically except in the capped-overflow case, which is exactly where the
+plan's fix needed to land. `test_every_poll_mode_progressively_acquires_capped_overflow` pins this
+directly: first poll acquires 3/5, second poll (all 5 still visible) emits all 5 — 3 re-emitting,
+2 acquired for the first time.
+
+### Checks
+
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `cd body-layer && mypy src`: pass, no issues in 18 source files
+- `pytest body-layer/tests -q`: 163 passed (151 before this stage + 2 + 4 + 4 + 2 new; every
+  pre-existing test passes unmodified, per the plan's constraint)
+- `git status`: clean working tree after all four commits (todo/todo.md carried an unrelated,
+  pre-existing modification from outside this stage's work and was deliberately left unstaged —
+  not part of this task)
+
+### Notable Discoveries
+
+- `belief/decay.py`'s `OBSERVED_WINDOW_S = 5.0` (from Stage 2) made the acceptance test's "stays
+  observed" assertion depend only on emission continuity, not on tuning: at a 1 Hz poll rate,
+  `every_poll` keeps `elapsed_s` since last observation at ~1 s every tick, comfortably inside the
+  5 s window, so no Stage 2 constant needed adjusting for this stage's fixture to demonstrate the
+  fix.
+- `body-layer/CLAUDE.md` had never been updated for the `belief/` package across Stages 0-2
+  despite the plan listing it under "Modified" files from the start — backfilled a Structure
+  bullet for it here alongside the new `--console` entrypoint documentation, rather than leaving
+  it further out of date into Stage 4.
