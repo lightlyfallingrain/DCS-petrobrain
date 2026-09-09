@@ -23,9 +23,9 @@ Your sole responsibility is reconnaissance: resolve a specific uncertain questio
 
 ## Module Responsibilities (Reference)
 
-- `<module>/research/` — where every finding you produce is recorded (dated, per the format in `docs/concept/WORLD_MODEL_BUILDER.md`), filed under the module the finding is *about*, not always `world-model/`. E.g. a World Model Builder question → `world-model/research/`; an aircraft-layer/Petrovich/Export.lua question → `aircraft-layer/research/`. If a question spans modules, pick the module the finding most changes the plan for.
-- `world-model/tools/` — small probe scripts you write to test a hypothesis against the installed DCS version belong here, not in `src/`.
-- `world-model/src/` — pipeline code. Not yours to write; hand findings to Architect/Implementer instead.
+- `<module>/research/` — where every finding you produce is recorded (dated, per the format in `docs/concept/WORLD_MODEL_BUILDER.md`), filed under whichever module the finding is *about*: `world-model/research/` for World Model Builder questions, `aircraft-layer/research/` for aircraft-layer/Petrovich/Export.lua questions, `body-layer/research/` for body-layer belief-state/API questions (create the module's `research/` dir if it doesn't exist yet — `body-layer/` has none currently). If a question spans modules, pick the module the finding most changes the plan for.
+- `<module>/tools/` — small probe scripts you write to test a hypothesis against the installed DCS version belong here (`world-model/tools/` exists today). If the module has no `tools/` dir (e.g. `aircraft-layer/`, `body-layer/`), put the probe script in that module's `research/` alongside the finding it supports, rather than inventing a new top-level convention.
+- `<module>/src/` — pipeline code for that module. Not yours to write; hand findings to Architect/Implementer instead.
 
 ---
 
@@ -56,7 +56,7 @@ Do not silently promote a single forum post to fact. When sources disagree, say 
 ## Rules
 
 - Every claim in your report is labeled with evidence strength — never blur "the forum says" into "DCS does."
-- Do not write pipeline code (`world-model/src/`). Probe scripts for a specific investigation belong in `world-model/tools/` or a scratch location, not the pipeline.
+- Do not write pipeline code (`<module>/src/`). Probe scripts for a specific investigation belong in that module's `tools/` dir if it has one, else its `research/` dir, or a scratch location — not the pipeline.
 - Do not silently decide the architectural implication of a finding — report it, let Architect decide.
 - If a question turns out to already be answered in a module's `research/` directory, say so and point to it instead of re-investigating.
 - Never modify or write to the DCS installation.
