@@ -189,3 +189,122 @@ out of scope for this pass entirely.
   whether `AutoScrollText`'s wrapping behaves as the research predicted,
   whether the sizing-probe diagnostic's log lines actually appear) has been
   confirmed — that is squarely the user's Stage 2 live check.
+
+---
+
+### Follow-up: restyle + two defect fixes (2026-09-09)
+
+Refinement pass after Stage 2 + Stage 4 both passed live acceptance, driven by the user's
+"Output-target decision, revisited after live acceptance" (see plan.md): keep the overlay, but
+make it read like DCS's own native message feed, plus fix two defects the user's screenshot
+exposed. Not a new stage of the original plan — same milestone, same branch.
+
+**Task 1 — restyle (window chrome, position, legibility).** `aircraft-layer/dcs-export/
+petrobrain-overlay.dlg` and `petrobrain-overlay-hook.lua` changed. Grounded directly in
+`$DCS_INSTALL_PATH/Scripts/UI/gameMessages.dlg` (DCS's own native radio/trigger message boxes),
+read in full this session:
+
+- **No title bar, no close button**: `skin.params.headerHeight = 0` on the outer `Window` (matches
+  `gameMessages.dlg`'s own override) plus `text = ""`. `gameMessages.dlg`'s own window has neither
+  a header nor a close-button widget — removing the header removes both in one change, not two
+  separate fixes.
+- **No opaque panel**: the prior revision's `Box`/`Panel` child (a `0x00000090` dark rectangle) is
+  removed entirely; the outer `Window`'s own background is set to `0x00000000` (fully transparent —
+  alpha `00`), and `MessageText`'s per-line `text` sub-skin background is set to `"$nil$"`
+  (`gameMessages.dlg`'s own override — the base `auto_scroll_text.skin.lua` skin otherwise defaults
+  that to a faint `0x0000007d` translucent box per-line, which was still visible chrome). Text now
+  floats directly over the 3D scene, exactly as `gameMessages.dlg` does.
+- **Legibility without a panel**: the prior revision's text style (`color = 0xf5f5f4ff` near-white,
+  font `DejaVuLGCSansCondensed-Bold.ttf`, `fontSize = 12`, `shadowColor = 0x000000ff`,
+  `shadowOffset = {horz=1, vert=1}`) already matched `gameMessages.dlg`'s own values exactly and
+  needed no change — confirmed, not assumed, by reading that file this session. The 1px black drop
+  shadow, not a background box, is what keeps near-white text legible over bright terrain in DCS's
+  own real design — directly relevant to the user's stated pale-desert-terrain case.
+- **Screen position**: moved from the prior revision's arbitrary `(20, 20)` to `(20, 50)`, grounded
+  in `gameMessages.dlg`'s own `autoScrollTextRadio` widget position `(29, 59)` inside a
+  top-left-anchored window (`layout.data.anchorInfos[1]`, `top`/`left` both `type="min", offset=0`).
+  `MessageText`'s own 10px inset from the window corner puts its rendered top-left at approximately
+  `(30, 60)` — within a few px of DCS's real placement, not a fresh guess. `draggable = true` is
+  kept (confirmed compatible with `headerHeight = 0` by `gameMessages.dlg` itself, which sets both).
+
+**Task 2 — contact id in overlay lines** (defect: six `CONTACT_DETECTED: OP_ARMORED, observed,
+currently visible.` lines were indistinguishable). `belief.console.format_event_for_overlay`
+changed from `"<kind>: <summary>"` to `"<contact id>: <kind>, <summary>"` — reusing
+`console.py`'s own existing `"<id>: ..."` convention (`_format_contact_line`/
+`_format_contact_block`, the `contacts`/`show <id>` commands) rather than inventing a second id
+format. `event.contact_id` is used directly (it's the same value `describe_contact`'s `facts['id']`
+would return, since events are only ever derived from a contact that exists at tick time) — no new
+lookup needed. Fallback case (`describe_contact` returns `None`, defensive-only) changed from
+`"<kind> <contact_id>"` to `"<contact_id>: <kind>"` for the same consistency.
+
+Tests updated: `test_format_event_for_overlay_uses_describe_contact_summary`,
+`test_format_event_for_overlay_falls_back_when_contact_not_found` (`test_console.py`); three
+string-literal assertions in `test_logger.py`
+(`test_console_runner_pushes_one_line_per_newly_materialized_event`,
+`test_console_runner_overlay_push_failure_is_isolated_per_push`, twice). The push-failure-isolation
+test now predicts contact ids (`CONTACT_1`/`CONTACT_2`/`CONTACT_3`) ahead of the call that assigns
+them, documented inline as relying on `ContactStore._new_contact_id`'s monotonic per-store counter
+starting at 1 for a fresh store — necessary because `fail_on` must be configured before the
+`run_once()` call that both assigns the ids and triggers the push.
+
+**Six-identical-lines question (task's explicit ask, not fixed speculatively)**: `belief.events.
+lifecycle_event_kind` makes a literal same-contact re-fire of `CONTACT_DETECTED` structurally
+impossible under current code — that transition only fires when `previous_certainty is None`, which
+is true exactly once per `Contact` (its founding tick); a contact that goes fully lost and comes
+back fires `CONTACT_REACQUIRED`, never a second `CONTACT_DETECTED`. So the six lines were either (a)
+six genuinely distinct real contacts, or (b) association-gate churn — `association_over_time`'s gate
+failing to merge repeat percepts of one physical object into its existing contact, minting a new
+`Contact`/`CONTACT_DETECTED` each time. Both would have looked identical under the old id-less
+format; the id fix above makes this directly diagnosable on the next sortie without further
+guessing: distinct `CONTACT_N` ids across the six lines confirms (a) or (b) is happening (own
+positions/timestamps would then distinguish them), and if a tight cluster of new ids appears for
+what's visually one object, that is a real, reportable association-gate bug — not fixed here, per
+the task's explicit instruction not to chase this speculatively.
+
+**Task 3 — clipped last line** (defect: the 6th of 6 lines was cut off mid-height at the prior
+revision's fixed `420×200`, `HEIGHT` constant). Root cause is not fully certain from static recon —
+`MAX_LINE_LENGTH = 200` chars at 400px width/`fontSize 12` with `AutoScrollText`'s wrapping means a
+single event line can itself wrap to multiple visual lines (more so now that Task 2 lengthened
+every line with a contact-id prefix), so "6 messages" was plausibly more like 9-12 wrapped visual
+lines needing more than the fixed 180px content budget — but the exact native wrap/line-height
+metrics are compiled into DCS's closed-source renderer and not recoverable by reading any Lua file
+(confirmed already in Session 2 Findings 14/18 of the research doc).
+
+Given that, a bigger guessed constant was rejected in favour of using the plan's own suggested
+runtime self-diagnostic (`calcSize()`/`getTextLinesCount()`) as the live sizing mechanism itself,
+not only as a one-time log: `petrobrain-overlay-hook.lua`'s new `apply_content_size()` calls
+`message_text:calcSize()` after every `addText()` and resizes both `MessageText` and the window to
+exactly that natural content height, clamped to `[MIN_CONTENT_HEIGHT_PX=60,
+MAX_CONTENT_HEIGHT_PX=380]`. `calcSize()`/`setSize()` are both confirmed-real `Widget.lua` API
+(direct `gui.WidgetCalcSize`/`gui.WidgetSetSize` passthroughs, read in full this session) — this is
+new runtime behaviour, not previously exercised, and therefore the most load-bearing unverified
+piece of this pass. Accepted worst case, documented in the Lua file itself: a burst of many
+messages within one `DEFAULT_DURATION_S` (20s) window can still make `calcSize()` report more than
+`MAX_CONTENT_HEIGHT_PX`, and it is unverified whether `AutoScrollText` then degrades by internally
+scrolling (consistent with its name) or by pixel-clipping — same open question as before, just
+pushed to a much less likely trigger. The existing one-time sizing-probe function was extended to
+also log the post-resize window size for three known-length probe strings, so the next live session
+gives concrete numbers to sanity-check `MIN_CONTENT_HEIGHT_PX`/`MAX_CONTENT_HEIGHT_PX` against,
+rather than this pass's estimate standing unchecked indefinitely.
+
+Both `.dlg` and `.lua` files were re-verified with the same `lupa`-based technique as the original
+authorship pass (syntax-parse via `load()`, plus walking the `.dlg`'s table structure to confirm
+`headerHeight`, the transparent `bkg`, the nilled per-line `bkg`, and the removed `Box` child are
+all actually present as written) — this is strictly weaker than a live DCS load and cannot confirm
+`calcSize()`/`setSize()`'s actual runtime behaviour, but rules out syntax/structural mistakes.
+
+**Docs updated**: `aircraft-layer/WORKFLOW.md` ("Deploy the overlay Hook script" — new appearance
+description, dropped the stale "420x200px... top-left corner... draggable" line) and
+`aircraft-layer/CLAUDE.md`/`body-layer/CLAUDE.md` (verification-status note and
+`format_event_for_overlay`'s format string, respectively).
+
+**Checks**: `ruff format --check`/`ruff check`/`mypy --strict`/`pytest` all pass for both
+subprojects (aircraft-layer 67 tests, body-layer 210 tests) — aircraft-layer's Python surface is
+unchanged by this pass (only Lua/`.dlg`/docs), so its test count is identical to the prior revision;
+body-layer's 210 (same count, three files' string literals updated, no new/removed tests).
+
+**Still unverified pending the user's next sortie**: the entire restyle (window position/chrome/
+legibility) and the entire Task 3 mechanism (`apply_content_size`'s live resize behaviour, and
+whether `MIN_CONTENT_HEIGHT_PX`/`MAX_CONTENT_HEIGHT_PX` are well-chosen) — same discipline as
+Stage 2's original authorship, marked as such in the Lua file's own header, `WORKFLOW.md`, and
+`aircraft-layer/CLAUDE.md`.
