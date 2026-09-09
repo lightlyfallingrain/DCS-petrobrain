@@ -197,6 +197,25 @@ def test_console_runner_reuses_a_store_across_calls() -> None:
     assert len(store.observations) == 2
 
 
+def test_console_runner_tracks_last_t_sim_for_the_repl() -> None:
+    # PB-2 Stage 4: main()'s REPL thread reads `last_t_sim` as `now_sim` for
+    # whatever console command the operator just typed -- unset until the
+    # first successful poll, then updated every poll after.
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(None),  # type: ignore[arg-type]
+        sources=[FakeSource([])],
+    )
+    assert runner.last_t_sim is None
+
+    runner.aircraft_client = FakeAircraftClient(telemetry)  # type: ignore[assignment]
+    runner.run_once()
+
+    assert runner.last_t_sim == ownship.t_sim
+
+
 def test_console_runner_prints_a_periodic_contact_count_line() -> None:
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)

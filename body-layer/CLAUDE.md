@@ -87,12 +87,14 @@ Omitting `../world-model/src` from `PYTHONPATH` fails immediately at startup wit
 transitively via `perception.association`), not a delayed failure once a poll needs elevation
 data — both path entries are required from the first line.
 
-Add `--console` (PB-2 Stage 3) to run the belief-consuming pipeline instead of the plain text
-logger: both sources are built at `emit_mode="every_poll"` and fed into a `belief.contacts.
-ContactStore` (`ingest` + `tick`) each poll, per Stage 3's fix for source-level debounce
-starving the belief layer's decay/lifecycle logic of continuity. Output for this stage is a
-minimal periodic `contacts=N observations=N` line — the real console REPL is BL-2 Stage 4, not
-yet built.
+Add `--console` (PB-2 Stage 3, extended by Stage 4) to run the belief-consuming pipeline instead
+of the plain text logger: both sources are built at `emit_mode="every_poll"` and fed into a
+`belief.contacts.ContactStore` (`ingest` + `tick`) each poll, per Stage 3's fix for source-level
+debounce starving the belief layer's decay/lifecycle logic of continuity. `main()` runs that poll
+loop on a background daemon thread and drives an interactive `belief.console.Console` REPL over
+stdin in the foreground — type `contacts`, `show <id>`, `history <id>`, `find <text>`,
+`watch <id>` / `unwatch <id>`, or `stats` and press enter. The REPL reads `ConsolePerceptionRunner.
+last_t_sim` (updated by the poll thread every poll) as each command's `now_sim`.
 
 ## Testing
 
@@ -144,8 +146,14 @@ yet built.
   gating, distinct from `perception/association.py`'s within-one-poll detection→world-object
   resolution), `decay.py` (per-attribute half-lives, the `certainty` lifecycle ladder —
   `observed`/`tracked`/`estimated`/`lost`), `events.py` (`CONTACT_DETECTED`/`CONTACT_LOST`/
-  `CONTACT_REACQUIRED` derivation). `tools.py`/`console.py` (the brain-facing query API and its
-  debug REPL) are BL-2 Stage 4, not yet built.
+  `CONTACT_REACQUIRED` derivation). `tools.py` (BL-2 Stage 4) — the brain-facing query API's
+  body, minus a transport: `get_contacts`/`describe_contact`/`get_contact_history`/`find_contact`
+  return `plans/body-layer/plan.md` §3.4's `{facts, summary, phrasing_hints}` triple, plus
+  `watch_contact`/`unwatch_contact`/`get_stats` (a bare attention enum + source field on `Contact`,
+  no policy/cooldown — that is BL-4). `console.py` (BL-2 Stage 4) — a line parser + pretty-printer
+  over `tools.py`, owning no belief logic of its own; every command (`contacts`, `show <id>`,
+  `history <id>`, `find <text>`, `watch <id>`/`unwatch <id>`, `stats`) dispatches 1:1 into a
+  `tools.py` function.
 - `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
   `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete
@@ -158,7 +166,10 @@ yet built.
   both sources at `emit_mode="every_poll"` and ingests+ticks a `belief.contacts.ContactStore`
   instead of formatting text lines — `ConsolePerceptionRunner` itself *is* tested (against fakes,
   mirroring `PerceptionLogger`'s own tests), only `main()`'s CLI wiring is not. The default
-  (no `--console`) path is unchanged and still uses `emit_mode="on_change"`.
+  (no `--console`) path is unchanged and still uses `emit_mode="on_change"`. Stage 4 adds
+  `_run_poll_loop`/`_run_console_repl`: `main()`'s `--console` branch now runs the poll loop on a
+  background daemon thread and a `belief.console.Console` REPL over stdin in the foreground, both
+  against the same `ContactStore`, coordinated through `ConsolePerceptionRunner.last_t_sim`.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a

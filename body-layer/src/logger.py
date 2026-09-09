@@ -27,17 +27,27 @@ type is needed to combine multiple sources' output. Revisit only if a third
 source or real fusion logic (that plan's Decision #3) makes a composite
 class earn its keep.
 
-**`--console` (PB-2 Stage 3)**: the plain text-logger path above is
-unchanged and stays the default -- both sources still built at their
-`emit_mode="on_change"` default. `--console` instead builds both sources at
-`emit_mode="every_poll"` (Stage 3's fix for the Interface confirmation
-section's gap 2: source-level debounce starves the belief layer of the
-continuity `belief.decay`'s certainty ladder needs) and drives
+**`--console` (PB-2 Stage 3, extended by Stage 4)**: the plain text-logger
+path above is unchanged and stays the default -- both sources still built at
+their `emit_mode="on_change"` default. `--console` instead builds both
+sources at `emit_mode="every_poll"` (Stage 3's fix for the Interface
+confirmation section's gap 2: source-level debounce starves the belief layer
+of the continuity `belief.decay`'s certainty ladder needs) and drives
 `ConsolePerceptionRunner`, which ingests+ticks a `belief.contacts.
-ContactStore` each poll instead of formatting text lines. Its only
-observable output for this stage is a periodic contact/observation-count
-line -- Stage 4 replaces that with the real `belief.console` REPL; building
-that REPL is explicitly out of scope here.
+ContactStore` each poll instead of formatting text lines, printing a
+periodic contact/observation-count line.
+
+Stage 4 adds the real `belief.console.Console` REPL on top of that poll
+loop: `main()` runs `ConsolePerceptionRunner.run_once()` on a background
+daemon thread (`_run_poll_loop`) while the foreground thread reads commands
+from stdin and dispatches them into `Console.handle_line`, against the same
+`ContactStore` the poll loop is filling. `ConsolePerceptionRunner.
+last_t_sim` is the seam between the two: the poll thread updates it every
+poll, the REPL thread reads it as `now_sim` for whatever command the user
+just typed. This is deliberately the simplest wiring that lets a live
+operator type `contacts`/`show <id>`/etc. while telemetry keeps flowing --
+not a claim of hardened concurrency, appropriate for a single-user debug
+console over an in-memory store.
 """
 
 from __future__ import annotations
@@ -45,12 +55,14 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient
+from belief.console import Console
 from belief.contacts import ContactStore
 from perception.geometry import open_world_model
 from perception.hybrid_source import HybridPerceptionSource
@@ -129,13 +141,19 @@ class ConsolePerceptionRunner:
     sources: list[PerceptionSource]
     store: ContactStore = field(default_factory=ContactStore)
     output: TextIO | None = None
+    last_t_sim: float | None = None
 
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
         print one minimal contact/observation-count line. Returns an empty
         list (prints nothing) if the aircraft layer has no telemetry yet,
-        mirroring `PerceptionLogger.run_once`."""
+        mirroring `PerceptionLogger.run_once`.
+
+        `last_t_sim` is updated on every successful poll (Stage 4) -- the
+        REPL loop in `main()` reads it as the `now_sim` for whatever console
+        command the operator just typed, since the REPL has no telemetry
+        feed of its own."""
         telemetry = self.aircraft_client.get_telemetry_latest()
         if telemetry is None:
             return []
@@ -147,6 +165,7 @@ class ConsolePerceptionRunner:
         ]
         self.store.ingest(observations, now_sim=ownship.t_sim)
         self.store.tick(ownship.t_sim)
+        self.last_t_sim = ownship.t_sim
         if self.output is not None:
             print(
                 f"t_sim={ownship.t_sim:.2f} "
@@ -181,6 +200,33 @@ def _build_sources(
 
 
 _DEFAULT_POLL_INTERVAL_S = 1.0
+
+
+def _run_poll_loop(
+    runner: ConsolePerceptionRunner, poll_interval_s: float, stop_event: threading.Event
+) -> None:
+    """Stage 4's background poll thread: keeps calling `runner.run_once()`
+    (which fills `runner.store` and updates `runner.last_t_sim`) until
+    `stop_event` is set, on the same interval the plain logger path uses."""
+    while not stop_event.is_set():
+        runner.run_once()
+        stop_event.wait(poll_interval_s)
+
+
+def _run_console_repl(runner: ConsolePerceptionRunner, console: Console) -> None:
+    """Stage 4's foreground REPL: reads one command per line from stdin and
+    dispatches it into `console`, using `runner.last_t_sim` (set by the
+    background poll thread) as `now_sim`. Before the first successful poll,
+    `last_t_sim` is `None` and commands run against `now_sim=0.0` -- an
+    empty store either way, so this only affects how an immediately-typed
+    command's (nonexistent) elapsed-time fields would read, not correctness.
+    Exits on EOF (e.g. Ctrl-D) or `KeyboardInterrupt`."""
+    try:
+        for line in sys.stdin:
+            now_sim = runner.last_t_sim if runner.last_t_sim is not None else 0.0
+            console.handle_line(line, now_sim=now_sim)
+    except KeyboardInterrupt:
+        pass
 
 
 def main() -> None:
@@ -225,9 +271,9 @@ def main() -> None:
         help=(
             "run the belief-consuming pipeline (both sources at "
             "emit_mode='every_poll', ingested+ticked into a belief.contacts."
-            "ContactStore) instead of the plain on_change text logger -- "
-            "PB-2 Stage 3; prints a periodic contact/observation-count line "
-            "only, the real console REPL is Stage 4"
+            "ContactStore) and an interactive belief.console REPL over "
+            "stdin instead of the plain on_change text logger -- PB-2 "
+            "Stage 3/4"
         ),
     )
     args = parser.parse_args()
@@ -247,9 +293,16 @@ def main() -> None:
                 ),
                 output=sys.stdout,
             )
-            while True:
-                console_runner.run_once()
-                time.sleep(args.poll_interval_s)
+            stop_event = threading.Event()
+            poll_thread = threading.Thread(
+                target=_run_poll_loop,
+                args=(console_runner, args.poll_interval_s, stop_event),
+                daemon=True,
+            )
+            poll_thread.start()
+            console = Console(store=console_runner.store, output=sys.stdout)
+            _run_console_repl(console_runner, console)
+            stop_event.set()
         else:
             perception_logger = PerceptionLogger(
                 aircraft_client=aircraft_client,
