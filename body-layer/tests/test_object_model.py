@@ -296,3 +296,23 @@ def test_coverage_floor_against_real_type_sample() -> None:
             f"{classified} entries -- a keyword is over-matching out-of-scope "
             f"types (see this test's docstring)"
         )
+
+
+def test_bare_tank_keyword_is_not_reintroduced() -> None:
+    """A bare "tank" substring must never classify a type as armour.
+
+    Measured against all 595 real DCS unit type names, "tank" scored zero true
+    positives and eight false positives: fuel trailers, fuel trucks, railway
+    tank cars, and an aerial tanker. Real armour never carries "tank" in its
+    DCS type name. This guards the deletion, since "tank" reads like an
+    obviously-correct armour keyword to anyone extending the table.
+    """
+    for object_type in (
+        "ATZ-60_TANK",
+        "TZ-22_TANK",
+        "M978 HEMTT Tanker",
+        "S-3B Tanker",
+        "Tankcartrinity",
+        "German_tank_wagon",
+    ):
+        assert profile_for(object_type).op_class != "OP_ARMORED", object_type
