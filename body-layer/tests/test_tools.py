@@ -94,8 +94,8 @@ def test_get_contacts_orders_most_recently_seen_first() -> None:
         now_sim=500.0,
     )
     results = get_contacts(store, now_sim=500.0)
-    classifications = [r["facts"]["classification"] for r in results]
-    assert classifications == [{"value": "BMP-2"}, {"value": "Ural truck"}]
+    classification_values = [r["facts"]["classification"]["value"] for r in results]
+    assert classification_values == ["BMP-2", "Ural truck"]
 
 
 def test_describe_contact_returns_none_for_unknown_id() -> None:
@@ -110,7 +110,11 @@ def test_describe_contact_facts_shape() -> None:
     assert result is not None
     facts = result["facts"]
     assert facts["id"] == contact.id
-    assert facts["classification"] == {"value": "Ural truck"}
+    classification_facts = facts["classification"]
+    assert isinstance(classification_facts, dict)
+    assert classification_facts["value"] == "Ural truck"
+    assert classification_facts["level"] == "class"
+    assert isinstance(classification_facts["confidence"], float)
     assert facts["certainty"] == "observed"
     assert facts["visible"] is True
     assert facts["last_seen_ago_s"] == 1.0
@@ -194,7 +198,7 @@ def test_find_contact_matches_on_perceived_classification_substring() -> None:
     )
     results = find_contact(store, "ural", now_sim=0.0)
     assert len(results) == 1
-    assert results[0]["facts"]["classification"] == {"value": "Ural truck"}
+    assert results[0]["facts"]["classification"]["value"] == "Ural truck"
 
 
 def test_find_contact_returns_nothing_for_blank_text() -> None:

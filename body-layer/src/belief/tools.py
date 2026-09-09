@@ -86,11 +86,28 @@ def _find_contact(store: ContactStore, contact_id: str) -> Contact | None:
     return None
 
 
+def _classification_facts(contact: Contact) -> dict[str, object]:
+    """`facts.classification`'s shape, moved *toward* `plans/body-layer/
+    plan.md` §3.4's specified `{value, confidence}` (this stage adds
+    `level` too, since the lattice level is exactly what makes the
+    `CONTACT_CLASSIFICATION_CHANGED` transition legible) -- reads
+    `Contact.classification` (the folded best claim), not
+    `last_class_raw` (`plans/classification-refinement/plan.md`'s design
+    section: "everything user-facing ... reads `Contact.classification`
+    instead")."""
+    classification = contact.classification
+    return {
+        "value": classification.value,
+        "level": classification.level.name.lower(),
+        "confidence": classification.confidence,
+    }
+
+
 def _contact_facts(contact: Contact, now_sim: float) -> dict[str, object]:
     certainty = certainty_of(contact, now_sim)
     facts: dict[str, object] = {
         "id": contact.id,
-        "classification": {"value": contact.last_class_raw},
+        "classification": _classification_facts(contact),
         "certainty": certainty,
         "visible": certainty == "observed",
         "last_seen_ago_s": round(max(0.0, now_sim - contact.last_seen_sim), 1),
@@ -112,7 +129,8 @@ def _contact_summary(contact: Contact, now_sim: float) -> str:
     else:
         ago_s = max(0.0, now_sim - contact.last_seen_sim)
         recency = f"last seen {ago_s:.0f}s ago"
-    summary = f"{contact.last_class_raw}, {certainty}, {recency}."
+    classification_value = contact.classification.value or "unknown"
+    summary = f"{classification_value}, {certainty}, {recency}."
     if contact.attention == "watch":
         summary += " Being watched."
     return summary
@@ -207,15 +225,25 @@ def get_contact_history(
 
 
 def find_contact(store: ContactStore, text: str, now_sim: float) -> list[ContactResult]:
-    """Text search over contacts' *perceived* classification
-    (`Contact.last_class_raw`) -- never a truth field. Case-insensitive
-    substring match; empty/whitespace-only `text` matches nothing rather
-    than returning every contact. Most-recently-seen first, mirroring
-    `get_contacts`."""
+    """Text search over contacts' *perceived* classification -- never a
+    truth field. Searches the held best claim (`Contact.classification.
+    value`), not `last_class_raw` (`plans/classification-refinement/
+    plan.md`'s design section: everything user-facing reads `classification`
+    instead), so a contact refined to `"T-72"` is still found by `"T-72"`
+    even if the most recent contributing percept was a coarser re-sighting.
+    Case-insensitive substring match; empty/whitespace-only `text` matches
+    nothing rather than returning every contact; a contact whose
+    classification is still unresolved (`value is None`) never matches.
+    Most-recently-seen first, mirroring `get_contacts`."""
     needle = text.strip().lower()
     if not needle:
         return []
-    matches = [c for c in store.contacts if needle in c.last_class_raw.lower()]
+    matches = [
+        c
+        for c in store.contacts
+        if c.classification.value is not None
+        and needle in c.classification.value.lower()
+    ]
     matches.sort(key=lambda c: c.last_seen_sim, reverse=True)
     return [_contact_result(contact, now_sim) for contact in matches]
 
