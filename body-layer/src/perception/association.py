@@ -17,6 +17,15 @@ decides is only *which* world object that real detection most plausibly
 refers to, and how confidently. Picking the wrong nearby object among
 several similar ones is an association error, not an omniscience leak.
 
+That describes `associate()`, which remains the module's subject. It is no
+longer true of the module as a whole: `exclude_ownship()` below *is* an
+unconditional pre-filter, called by both `HybridPerceptionSource` and
+`NakedEyePerceptionSource` before any channel-specific logic. It lives here
+rather than in `geometry.py` -- the more obvious home for something every
+tier shares -- because `WorldObjectCandidate` is defined in this module and
+this module already imports from `geometry.py`, so moving it there would be
+circular. Placement is deliberate, not expedient.
+
 Algorithm (plan's "Association design" section, unchanged here):
 1. Candidate pool = every `WorldObjectCandidate` passed in, no coalition/IFF
    filtering (plan decision, `Risks & Unknowns`).

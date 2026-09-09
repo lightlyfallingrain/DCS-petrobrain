@@ -300,3 +300,142 @@ the assertion) and independently scripted the full-catalogue false-positive audi
 tables rather than trusting the research doc's claim of having done so. Did not re-run
 format/lint/type/test (user independently confirmed all pass; no source changes were made during
 this review that would invalidate that).
+
+---
+
+## Pass 3 — ownship-echo bug fix, commit `549aee6` (2026-09-09)
+
+Reviewed the single fix commit against `plans/pb1.5-naked-eye-detection/debug.md`'s report.
+Read in full: `debug.md`, the commit's diff (`association.py`, `hybrid_source.py`,
+`naked_eye_source.py`, all three test files), `geometry.py`'s `range_m`/`bearing_deg`,
+`visibility.py` in full (to hand-check the FOV/range-threshold gates against the test
+fixtures' actual numbers), and `association.py`'s `associate()`/`_type_match_score` in full.
+Format/lint/type/test independently verified by the user before this pass (102 passed); not
+re-run, except as below. Empirically verified test discrimination rather than reasoning about it
+in the abstract: temporarily stripped the `exclude_ownship()` call from both channels' `poll()`
+and re-ran the six new tests against the unfixed code, then restored both files and confirmed a
+clean tree and a full green suite (102 passed) afterward.
+
+### Required Fixes
+
+- **One of the six regression tests does not actually test the fix it documents itself as
+  testing.** `test_hybrid_source.py::test_ownship_echo_does_not_prevent_a_real_candidate_from_
+  associating` passes whether or not `exclude_ownship()` runs — confirmed empirically, not just
+  by inspection: with the `exclude_ownship()` call removed from `hybrid_source.py`, this specific
+  test still passes, while its sibling
+  (`test_ownship_echo_is_excluded_and_detection_drops_with_no_other_candidate`) correctly fails.
+  Root cause: the fixture gives the echo `object_type="Mi-24P"` and the real target
+  `object_type="Ural-4320"` against classification text `"Ural truck"`. Without the fix, both
+  candidates survive `associate()`'s plausibility filter (range ~3.6 m and 1000 m are both under
+  `RANGE_CAP_M`; both bearings are inside the forward hemisphere), so the function falls through
+  to `_type_match_score` tie-breaking — `"ural"` scores 1 against the real target and 0 against
+  `"Mi-24P"`, so the echo is discarded by the *pre-existing* type-match logic regardless of
+  `exclude_ownship`. The test therefore provides no regression protection for the claim its own
+  comment makes ("ownship echo does not prevent a real candidate from associating") — this is the
+  same failure mode this project's review history has already required fixes for twice (Pass 1's
+  fabricated-string fixture, Pass 2's coverage-floor fixture built only from already-passing
+  entries): a test that reads as verifying a real-data scenario but would pass unchanged if the
+  fix under test were deleted. Fix: change the fixture so type-match scoring alone cannot
+  discriminate the two candidates — e.g. give the echo an `object_type` that also scores against
+  `"Ural truck"` (or matches the real target's type exactly), so that without `exclude_ownship`
+  the two candidates tie in score and the *nearer* one (the echo, at ~3.6 m) would incorrectly win
+  the ambiguous-tie-break, giving a test that only passes when the exclusion actually ran. The
+  naked-eye channel's equivalent test
+  (`test_ownship_echo_does_not_suppress_a_real_nearby_target`) does not have this problem — it has
+  no type-match step to coincidentally rescue it, and was empirically confirmed to fail correctly
+  without the fix.
+
+- **`association.py`'s module docstring should be updated to acknowledge `exclude_ownship` as a
+  second, distinct responsibility.** Not a request to move the function — see Question 2 below,
+  the current placement is the pragmatic and arguably only sensible one given the module
+  dependency graph (`WorldObjectCandidate` is defined in `association.py`; `geometry.py`, the
+  more obviously "shared by every tier" module, cannot import it without an `association.py` ->
+  `geometry.py` -> `association.py` cycle, since `association.py` already imports `GeoPosition`/
+  `bearing_deg`/`range_m` from `geometry.py`). But the module's own "Scope note" currently states
+  flatly that "this is a *disambiguator*, not a *gate*" — true of `associate()`, and no longer
+  true of the module as a whole now that it also owns an unconditional drop-candidates gate called
+  by both channels before their own filtering. Left as-is, a future reader skimming that scope
+  note (exactly the kind of reader this project's docstrings are written for, per its own
+  established style) could reasonably conclude `exclude_ownship` doesn't belong here or is
+  unaware of the constraint that put it here. A one- or two-line addition to the docstring noting
+  the module now also hosts a shared candidate-sanitization step, and why (type ownership,
+  avoiding a circular import with `geometry.py`), closes the gap cheaply.
+
+### Optional Refinements
+
+- **`OWNSHIP_ECHO_EXCLUSION_RADIUS_M = 50.0` is a reasonable starting value, honestly labelled as
+  un-tuned, and shipping the heuristic now rather than blocking on an `Export.lua`-based identity
+  fix is the right call** — confirmed there is in fact no cheaper identity-based shortcut
+  available today: `OwnshipState` (from `LoGetSelfData`/telemetry) carries no `object_id` field
+  comparable to `LoGetWorldObjects`'s per-object id, so an exact fix genuinely requires an
+  aircraft-layer/`Export.lua` change, not just a body-layer code change, matching the debug
+  report's own framing. Given the alternative was a continuous stream of fabricated contacts
+  (pinned range, wrong classification, meaningless bearing — a direct violation of "code owns
+  facts, models never invent them"), the proximity heuristic is a clear net improvement, reversible,
+  and bounded well inside both channels' real range caps. Worth a one-line addition to the already-
+  filed backlog item, though, that isn't in `debug.md`'s "Needs live DCS" section as currently
+  written: 50 m is roughly 3x the Mi-24P's own physical extent, which is a comfortable margin in
+  general, but the Mi-24P's core mission profile (troop insertion/extraction, hovering directly
+  over or landing beside dismounted troops) is exactly the scenario most likely to put a *real*
+  contact inside that radius — worth flagging explicitly as the concrete case to check for when the
+  live-tuning capture happens, not just "some real object closer than 50 m" in the abstract.
+- **Pass restraint on the debounce/`object_id`-instability question (Question 4) is correct and the
+  reasoning holds up on inspection.** Evidence 5's repro isolates exactly one variable (position/
+  bearing jitter with a *stable* `object_id` held fixed across 20 polls) and reproduces an
+  irregular 5/20 emission pattern in the right ballpark to explain the live log's "7 emissions over
+  ~23 s" — which is sufficient to explain the observed symptom without invoking `object_id`
+  instability, and the report is careful to claim only sufficiency ("not needed to explain"), not
+  that instability was ruled out ("remains genuinely unconfirmed either way" is stated plainly,
+  twice). That is the correct epistemic posture for a claim about `LoGetWorldObjects`'s Lua
+  `pairs()`-iteration key stability, which is a live-DCS-internals question this project's own
+  conventions route through Investigator/a live capture, not through speculative code changes in a
+  debugging session. No speculative patch to the debounce mechanism was made, consistent with the
+  Debugger role's own restraint principle. Filing it as a backlog item requiring a live capture
+  (rather than another synthetic repro) is the right next step, not a shortcut being taken.
+- Exclusion is confirmed correctly placed ahead of both channels' own filtering with no bypass
+  path: grepped for every `WorldObjectCandidate.from_dict` call site in `src/perception/` (exactly
+  two, one per channel) and both route straight into `exclude_ownship()` before
+  `visibility.check_visibility()` (naked-eye) or `associate()` (hybrid) ever sees the list. No
+  third construction path exists.
+- `range_m`'s slant-range (including altitude) is the correct distance metric for this exclusion —
+  a ground-only range would understate the real echo residual for a helicopter whose own
+  altitude differs from its `LoGetWorldObjects` self-entry's reported altitude by rotor-height-
+  scale amounts, still comfortably inside 50 m either way.
+- The strict `>` boundary semantics (drops a candidate exactly at 50.0 m) is correctly tested and
+  matches the constant's own stated intent (a sanity margin, not a hard physical cutoff) — no
+  issue, just confirming the boundary test is not itself vacuous (verified it exercises the
+  intended branch, not an off-by-one that happens to read the same either way).
+- Type hints and docstring cross-references in the new code are complete and consistent with this
+  project's established style; no debug/TODO leftovers found in the diff.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES
+
+The fix's core mechanism is sound, correctly placed ahead of each channel's own filtering with no
+bypass, and directly addresses the confirmed root cause — 5 of the 6 new regression tests were
+empirically confirmed (not just read) to fail without `exclude_ownship()`, including the one that
+matters most (the single-candidate self-association case in the hybrid channel). The one required
+fix is test-only and narrow in scope: one fixture in `test_hybrid_source.py` needs its `object_type`
+values changed so type-match scoring can't coincidentally do the excluding function's job for it —
+mirrors, in miniature, the exact test-integrity failure mode this project's review history keeps
+surfacing, so it's called out explicitly rather than let slide as "close enough." The second
+required fix (a docstring addendum to `association.py`) is documentation-only and does not touch
+behavior. Neither required fix touches `exclude_ownship()`'s logic, its placement, the 50 m
+constant, or the debounce-restraint decision — all four of those hold up under direct scrutiny.
+
+### Review Confidence
+
+Full read. `debug.md`, the full commit diff, and all three touched test files read in full,
+not sampled. Verified the test-discrimination question empirically rather than by reasoning
+alone: disabled the fix in both channels' source files one at a time, ran the affected tests
+against the unfixed code, confirmed which tests correctly failed and which did not, then restored
+both files and reconfirmed a clean tree and a full green run (102 passed). Hand-verified the
+`visibility.py` FOV/range-threshold/LOS gate arithmetic against the naked-eye test fixtures'
+actual coordinates (bearing ~326.3 deg, range ~3.6 m, threshold 2500 m for the `OP_GROUPSOMETHING`
+fallback size) rather than trusting the test's own pass/fail alone. Confirmed via grep that
+`OwnshipState` carries no `object_id` field, supporting the finding that an identity-based fix is
+genuinely unavailable today without an `Export.lua` change (Question 1). Did not re-verify the
+debug report's live-sortie log transcript or the underlying DCS-internals claim about
+`LoGetWorldObjects` including ownship in single-player — that remains explicitly open per
+`debug.md`'s own "Needs live DCS" section, and re-litigating it was out of this pass's scope.
