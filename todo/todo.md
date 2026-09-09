@@ -45,6 +45,43 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 ## Backlog
 
+- [?] **Direction (raised 2026-09-09, needs Architect): stop consuming DCS's detection at all, and
+  own perception end-to-end.** After the PB-1.5 live probe
+  (`aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`), the user's position is
+  that this "heavily leans towards entirely dropping the current naked-eye DCS detection logic,
+  possibly even suppressing the texts in the radio callouts, and implementing our own detection
+  mechanism based on all world objects."
+
+  **Why the probe pushes this way.** DCS's ambient channel is unusable as an input: it emits no
+  Lua-readable signal (probe Finding 1), it is text-only with no audio (Session 5 part 3), its
+  reports lag well behind what the player can plainly see (Finding 5), and the one channel that
+  *is* readable — the HelperAI target list — only exists while the sight is on and is gated on it.
+  So every path that treats DCS as the detection authority is either unreadable, late, or
+  sight-coupled. PB-1.5 already builds the alternative.
+
+  **What it would change.** PB-1.5's `visibility.py` stops being a fallback that stands in for a
+  missing signal, and becomes the primary, intended detection mechanism. That retroactively
+  reframes the plan's Decision 1, which the user accepted "for now" expecting to revisit it —
+  the revisit would resolve *toward* the synthetic filter rather than away from it. It also makes
+  the range/tier constants product-critical rather than provisional, and raises whether the scope
+  channel stays a second source or becomes just one more input to our own model.
+
+  **Open questions, none answered yet — this is why it needs Architect, not a snap decision:**
+  1. Can DCS's radio callout texts actually be suppressed? Unknown. Any approach touching module
+     files fights integrity checks and is overwritten by updates. A user-side subtitle/message
+     setting may exist — the Session 2 finding on DCS's `SUBTITLE` option is a lead, unverified.
+     Investigator task before any plan commits to it.
+  2. Is suppression even wanted? Two crew members reporting the same contact differently is a real
+     immersion problem, but silencing DCS's own AI is a bigger intervention than this project has
+     made anywhere so far, and it is not reversible for the user mid-mission.
+  3. Does the HelperAI scope channel survive as a distinct source (real detection gate, per PB-1),
+     or collapse into our model as one input among several? PB-1's association is separately known
+     to be broken across namespaces (backlog item above), so its current value is lower than it
+     looks.
+  4. What does this do to BL-2/PB-2, which was to consume both channels?
+
+  Not scheduled. Do not start without the user's instruction — this is a `[?]` decision item.
+
 - [ ] **`association.py` matches across two different DCS name namespaces and scores 0 on most real
   units** — found 2026-09-09 while validating PB-1.5's `object_model.py`. `HybridPerceptionSource`
   matches HelperAI's detection text against `LoGetWorldObjects` candidates via
