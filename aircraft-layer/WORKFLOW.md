@@ -138,10 +138,16 @@ Fly it as an A/B, both segments over the same targets:
 - **Segment B — `OBSERV ON`.** Same targets, same passes, sight active. This is the control: it
   shows what the log looks like when the callout *is* sight-driven, so the two can be compared.
 
-**Mark every callout in-band.** When you hear `"N CONTACTS, H O'CLOCK"`, immediately flip one
-distinctive cockpit switch that you touch at no other time. It lands in the log as a changed param
-and timestamps the event inside the log itself — far more reliable than correlating wall-clock
-across two machines. Say which switch you used when handing the log over.
+**Capture every callout.** The callout is **text in the radio-message pop-up**, not a voice line,
+so it persists on screen for a few seconds and can be read verbatim. For each one:
+
+1. Flip one distinctive cockpit switch that you touch at no other time. It lands in the log as a
+   changed param and timestamps the event inside the log itself — far more reliable than
+   correlating wall-clock across two machines. Say which switch you used when handing the log over.
+2. **Write down the exact text** (e.g. `9 CONTACTS, 1 O'CLOCK`). The count bucket and clock bearing
+   can then be checked directly against the `LoGetWorldObjects` ground truth captured in the same
+   log — which is far stronger evidence than "something changed near this timestamp." A screenshot
+   works too.
 
 You do not need to track the OBSERV transitions by hand: the probe logs `list_indication(2)`
 (the ASP-17) on change, so the sight's state is recorded in-band and each callout can be
