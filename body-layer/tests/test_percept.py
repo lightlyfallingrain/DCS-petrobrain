@@ -20,7 +20,9 @@ _TRUTH_FIELD_NAMES = frozenset(
 
 
 def _ownship() -> OwnshipState:
-    return OwnshipState(t_sim=100.0, x=1000.0, z=-500.0, alt_m=600.0, heading_true_deg=90.0)
+    return OwnshipState(
+        t_sim=100.0, x=1000.0, z=-500.0, alt_m=600.0, heading_true_deg=90.0
+    )
 
 
 def _observation(**overrides: object) -> Observation:
