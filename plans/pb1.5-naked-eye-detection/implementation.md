@@ -136,3 +136,78 @@ gitignored (`body-layer/.gitignore`'s `.venv/`) and was not committed.
 Nothing in the plan was found to be wrong, contradictory, or impossible as written for the stages
 implemented here -- the three items above are places where the plan's prose left an implementation
 choice open rather than a defect in the plan itself.
+
+### Review fixes (2026-09-09)
+
+Applied the three required fixes from `review.md` plus its one non-blocking recommendation.
+
+**Files Changed**
+- `body-layer/src/perception/object_model.py` — replaced the unreachable `OP_SHIP` keyword list
+  (English hull-class words: `cruiser`/`frigate`/`corvette`/`destroyer`/`boat`/`ship`) with 57
+  real DCS ship `object_type` substrings, and replaced the SA-3/6/8/9/13/15 keywords (NATO
+  shorthand: `sa-3`/`sa-6`/...) with real DCS component-identifier substrings (`s-125`, `kub `,
+  `osa`, `strela-10`/`strela-1`, `tor 9a331`/`chap_torm2`) — both categories were unreachable
+  against real data for the identical reason (`object_type` never carries the guessed word), per
+  `aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md`. `"kub "` (trailing
+  space) was chosen specifically to avoid a false-positive match on the unrelated real type
+  `"Kubelwagen_82"`. Module docstring updated to cite the research doc and state which categories
+  have been checked against real data (OP_SHIP, SA-3/6/8/9/13/15) vs. not (armor/truck, still an
+  unvalidated hand-authored guess).
+- `body-layer/tests/test_object_model.py` — fixed `test_ship_keyword` (was asserting against the
+  fabricated string `"Grisha corvette"`, which matched the old table by construction and masked
+  the domain-mismatch bug) to use the real DCS type `"MOSCOW"`; added
+  `test_ship_keyword_matches_second_real_type_name` (a differently-shaped real type,
+  `"leander-gun-achilles"`); fixed `test_sa3_keyword` the same way (`"SA-3 Launcher"` was equally
+  fabricated) to use the real type `"5p73 s-125 ln"`; added `test_sa6_keyword_is_mrsam_not_srsam`
+  and `test_sa6_keyword_does_not_match_unrelated_kubelwagen` as spot-checks/regression guards for
+  the SA-6 fix; added `test_coverage_floor_against_real_type_sample`, which loads the new fixture
+  and asserts both per-entry correctness and an aggregate coverage-floor (>= 0.8) so this can't
+  silently regress without a test failure.
+- `body-layer/tests/fixtures/object_type_coverage_sample.json` (new) — curated sample of 92 real
+  DCS `object_type` strings (all 57 real ship types, the fixed SAM/SPAAG entries, existing
+  armor/truck/infantry coverage, and ~14 legitimately-out-of-scope types like aircraft/other-SAM/
+  buildings that are expected to stay at the fallback) backing the new coverage-floor test.
+- `body-layer/CLAUDE.md` — added `--world-model-db <path>` to both documented `python -m logger`
+  examples (the "Running the live logger" section and the `src/logger.py` Structure bullet),
+  which were broken since `logger.py`'s `main()` made that argument required; the Structure
+  bullet was also updated to mention `NakedEyePerceptionSource` (it only named
+  `HybridPerceptionSource` before). Checked `body-layer/WORKFLOW.md` (doesn't exist),
+  `docs/concept/PETROBRAIN_RUNTIME.md`, and `plans/pb1-perception-logger/implementation.md` for
+  the same staleness — none of the others document a runnable command, so no further changes
+  needed.
+- `aircraft-layer/research/2026-09-09-object-model-keyword-coverage.md` (new) — dated finding
+  recording the `HelperAI_reporting_names.lua` resource, the coverage method, and before/after
+  numbers (overall fallback 88.2% -> 78.0%; `OP_SHIP` 6 (coincidental) -> 57; `OP_SRSAM`/
+  `OP_MRSAM` 0 -> 8/2; armor/truck/infantry/ZU23/SPAAG unchanged). Also records two discoveries
+  beyond the review's required scope: the ship category is actually 57 real types, not the 47
+  found by an initial hull-class-word-only search of reporting names (10 more found by
+  broadening to "vessel"/"craft"/"tug"/"landing"); and `OP_ARMORED`'s existing `"tank"` keyword
+  has the identical domain-mismatch bug plus false positives (matches 8 real types, none of them
+  armored vehicles — rail tank wagons, a fuel-tanker truck, a tanker aircraft), left unfixed as
+  out of this review's scope and flagged as backlog.
+- `plans/pb1.5-naked-eye-detection/plan.md` — added Decision 7 recording the Reviewer's
+  non-blocking recommendation: range-bucket quantisation snapping *up* to the containing
+  bucket's ceiling (549 m -> `OP_D600M`) is the canonical, deliberate semantics, not an
+  implementation accident to "fix" toward literal-nearest-of-24 later.
+
+**Judgment calls beyond the review's literal required scope**
+- Widened the OP_SHIP fix from the initially-found 47 real ship types to the full 57 once a
+  broader reporting-name search surfaced 10 more (`Dry-cargo ship-1`/`-2`, `HandyWind`,
+  `HarborTug`, `Higgins_boat`, `Schnellboot_type_S130`, `Seawise_Giant`, `ZWEZDNY`, `atconveyor`,
+  `speedboat`) — judged in-scope because it's completing the audit of the exact category the
+  review required fixing (bounded, fully enumerable, zero false-positive collisions checked
+  against all 595 real types), not new scope.
+- Did **not** fix the `"tank"` keyword's false positives (`OP_ARMORED`, matches 8 real
+  non-armored types) found while spot-checking — that keyword is outside the ships/SAM-SPAAG
+  scope the review named, and the review explicitly treats broader-table work as backlog.
+  Recorded as a discovery in the research doc instead.
+
+**Checks**
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `mypy body-layer/src` (from `cd body-layer`): pass, no issues in 11 source files
+- `PYTHONPATH=src:../world-model/src pytest body-layer/tests -q` (from `cd body-layer`): 83
+  passed (was 79 before this pass; net +4 tests — 2 replaced fabricated-string tests kept the
+  same name/count, added `test_ship_keyword_matches_second_real_type_name`,
+  `test_sa6_keyword_is_mrsam_not_srsam`, `test_sa6_keyword_does_not_match_unrelated_kubelwagen`,
+  `test_coverage_floor_against_real_type_sample`)
