@@ -65,11 +65,25 @@ constructs `ConsolePerceptionRunner` up front with an empty `sources` list
 -- its `store`/`output`/`last_t_sim` fields are safe to share across
 threads (Stage 4 reviewer-confirmed), only `sources` (and the connection it
 holds) needed to move.
+
+**`--overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`)**: only
+meaningful alongside `--console`. When set, `main()` passes the same
+`AircraftLayerClient` instance as `ConsolePerceptionRunner.overlay_client`,
+so every newly materialised lifecycle event
+(`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`) is mirrored to the
+in-cockpit text overlay via `POST /text/push`. Defaults off -- a true no-op
+when absent, since `overlay_client` stays `None` and `run_once` never
+touches the aircraft-layer client for this purpose. `PerceptionLogger`'s
+plain (non-`--console`) per-`Observation` stream deliberately does not get
+this wiring (line-noise vs. signal tradeoff, see the plan's "Deliberately
+not modified" section) -- only `ConsolePerceptionRunner`'s contact-event
+rate is mirrored.
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import sqlite3
 import sys
 import threading
@@ -78,13 +92,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TextIO
 
-from aircraft_client import AircraftLayerClient
-from belief.console import HELP_TEXT, Console
+from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from perception.geometry import open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import Observation, OwnshipState, PerceptionSource
+
+logger = logging.getLogger(__name__)
 
 
 def format_observation_line(ownship: OwnshipState, observation: Observation) -> str:
@@ -165,6 +181,14 @@ class ConsolePerceptionRunner:
     store: ContactStore = field(default_factory=ContactStore)
     output: TextIO | None = None
     last_t_sim: float | None = None
+    #: In-cockpit text overlay mirror (BL-2.5, `--overlay`), mirroring
+    #: `output`'s optional-sink pattern exactly. `None` (the default) is a
+    #: true no-op -- `run_once` never touches the aircraft-layer client for
+    #: this purpose unless it is set. When set, `main()` passes the *same*
+    #: `AircraftLayerClient` instance already used for telemetry -- there is
+    #: no separate URL/CLI argument, `POST /text/push` lives on the exact
+    #: aircraft-layer instance `--aircraft-layer-url` already points at.
+    overlay_client: AircraftLayerClient | None = None
 
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -176,7 +200,19 @@ class ConsolePerceptionRunner:
         `last_t_sim` is updated on every successful poll (Stage 4) -- the
         REPL loop in `main()` reads it as the `now_sim` for whatever console
         command the operator just typed, since the REPL has no telemetry
-        feed of its own."""
+        feed of its own.
+
+        If `overlay_client` is set (BL-2.5), every lifecycle event newly
+        appended by this call's `tick()` is formatted
+        (`belief.console.format_event_for_overlay`) and pushed
+        (`AircraftLayerClient.push_text_line`) to the in-cockpit overlay,
+        one push per event. Each push is wrapped in its own try/except --
+        this is the one place a defensive try/except is load-bearing rather
+        than cosmetic (`plans/dcs-text-panel-output/plan.md` Risks &
+        Unknowns): a failed push (DCS not running, network hiccup) must
+        degrade to "no overlay line for this event," never stop the poll
+        loop, drop the observations already collected this poll, or skip
+        pushing the remaining events in the same batch."""
         telemetry = self.aircraft_client.get_telemetry_latest()
         if telemetry is None:
             return []
@@ -187,8 +223,21 @@ class ConsolePerceptionRunner:
             for observation in source.poll(ownship.t_sim, ownship)
         ]
         self.store.ingest(observations, now_sim=ownship.t_sim)
+        events_before = len(self.store.events)
         self.store.tick(ownship.t_sim)
         self.last_t_sim = ownship.t_sim
+        if self.overlay_client is not None:
+            new_events = self.store.events[events_before:]
+            for event in new_events:
+                text = format_event_for_overlay(self.store, event, ownship.t_sim)
+                try:
+                    self.overlay_client.push_text_line(text)
+                except AircraftLayerError:
+                    logger.warning(
+                        "overlay push failed for event %s (continuing)",
+                        event.id,
+                        exc_info=True,
+                    )
         if self.output is not None:
             print(
                 f"t_sim={ownship.t_sim:.2f} "
@@ -314,6 +363,17 @@ def main() -> None:
             "Stage 3/4"
         ),
     )
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help=(
+            "mirror belief lifecycle events (CONTACT_DETECTED/LOST/"
+            "REACQUIRED) to the in-cockpit text overlay via the aircraft "
+            "layer's POST /text/push -- BL-2.5. Only meaningful with "
+            "--console; defaults off, a true no-op when absent. Reuses the "
+            "same --aircraft-layer-url instance, no separate URL needed."
+        ),
+    )
     args = parser.parse_args()
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
@@ -326,6 +386,7 @@ def main() -> None:
         console_runner = ConsolePerceptionRunner(
             aircraft_client=aircraft_client,
             output=None,
+            overlay_client=aircraft_client if args.overlay else None,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(

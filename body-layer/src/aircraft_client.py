@@ -14,6 +14,16 @@ pre-existing `GET /telemetry/latest` (`aircraft-layer/src/api/server.py`,
 collector's cache is still empty -- not an error, Export.lua may not have
 connected or DCS may not be running a mission -- and this client passes
 that through as `None` rather than raising.
+
+`push_text_line` (BL-2.5, `plans/dcs-text-panel-output/plan.md`) is this
+client's one write call, the aircraft layer's only inbound/write path
+(`POST /text/push`). Unlike the `get_*` methods above, a failure here
+(network error, non-200, invalid JSON) raises `AircraftLayerError` rather
+than being swallowed -- this client call is between two processes that are
+both expected to be reachable when body-layer runs with `--overlay`, so a
+push failure is meaningful information for the caller
+(`logger.ConsolePerceptionRunner`'s per-push try/except is where that
+meaning gets consumed, so one failed push never stops the poll loop).
 """
 
 from __future__ import annotations
@@ -87,6 +97,14 @@ class AircraftLayerClient:
             )
         return result
 
+    def push_text_line(self, text: str) -> None:
+        """`POST /text/push` -> pushes one line to the in-cockpit overlay
+        (`aircraft-layer/src/collector/text_sender.py`, BL-2.5). Raises
+        `AircraftLayerError` on any failure -- see the module docstring for
+        why this call, unlike the `get_*` methods above, does not swallow
+        failure."""
+        self._post_json("/text/push", {"text": text})
+
     def _get_json(self, path: str) -> Any:
         url = f"{self.base_url}{path}"
         try:
@@ -96,5 +114,26 @@ class AircraftLayerClient:
             raise AircraftLayerError(f"request to {url} failed: {exc}") from exc
         try:
             return json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise AircraftLayerError(f"invalid JSON from {url}: {exc}") from exc
+
+    def _post_json(self, path: str, body: dict[str, Any]) -> Any:
+        url = f"{self.base_url}{path}"
+        data = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+                response_body = response.read()
+        except (urllib.error.URLError, OSError) as exc:
+            raise AircraftLayerError(f"request to {url} failed: {exc}") from exc
+        if not response_body:
+            return None
+        try:
+            return json.loads(response_body)
         except json.JSONDecodeError as exc:
             raise AircraftLayerError(f"invalid JSON from {url}: {exc}") from exc

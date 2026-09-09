@@ -14,9 +14,10 @@ import pathlib
 
 from belief import console as console_module
 from belief import tools as tools_module
-from belief.console import Console
+from belief.console import Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
+from belief.events import Event
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -174,6 +175,39 @@ def test_visible_filter_excludes_a_contact_past_the_observed_window() -> None:
     console = Console(store=store)
     now_sim = OBSERVED_WINDOW_S + 1.0
     assert console.handle_line("contacts visible", now_sim=now_sim) == ["no contacts"]
+
+
+def test_format_event_for_overlay_uses_describe_contact_summary() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    (event,) = store.events
+    assert event.kind == "CONTACT_DETECTED"
+
+    line = format_event_for_overlay(store, event, now_sim=0.0)
+
+    assert line == "CONTACT_DETECTED: Ural truck, observed, currently visible."
+
+
+def test_format_event_for_overlay_falls_back_when_contact_not_found() -> None:
+    # Should not normally happen (events are only ever derived from a
+    # contact that exists at tick time) -- exercised directly here as the
+    # defensive fallback the function's docstring describes.
+    store = ContactStore()
+    event = Event(
+        id="EVT_1",
+        contact_id="CONTACT_missing",
+        kind="CONTACT_DETECTED",
+        t_sim=0.0,
+        certainty="observed",
+    )
+
+    line = format_event_for_overlay(store, event, now_sim=0.0)
+
+    assert line == "CONTACT_DETECTED CONTACT_missing"
 
 
 def test_console_module_contains_no_belief_logic() -> None:

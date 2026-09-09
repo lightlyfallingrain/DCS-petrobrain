@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from aircraft_client import AircraftLayerError
 from belief.contacts import ContactStore
 from logger import (
     ConsolePerceptionRunner,
@@ -61,7 +62,11 @@ class FakeSource:
 
 
 def _make_observation(
-    ownship: OwnshipState, *, id: str = "OBS_1", source: str = "proxy_heuristic"
+    ownship: OwnshipState,
+    *,
+    id: str = "OBS_1",
+    source: str = "proxy_heuristic",
+    classification_raw: str = "BMP",
 ) -> Observation:
     return Observation(
         id=id,
@@ -69,7 +74,7 @@ def _make_observation(
         t_sim=ownship.t_sim,
         t_wall=0.0,
         source=source,
-        classification_raw="BMP",
+        classification_raw=classification_raw,
         bearing_deg=32.0,
         range_m=3100.0,
         ownship_at_observation=ownship,
@@ -226,6 +231,118 @@ def test_console_runner_tracks_last_t_sim_for_the_repl() -> None:
     runner.run_once()
 
     assert runner.last_t_sim == ownship.t_sim
+
+
+class FakeOverlayClient:
+    """A `push_text_line`-only double (BL-2.5). `fail_on` names texts that
+    raise `AircraftLayerError` instead of recording -- used to exercise
+    `ConsolePerceptionRunner.run_once`'s per-push isolation."""
+
+    def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
+        self.pushed: list[str] = []
+        self._fail_on = fail_on
+
+    def push_text_line(self, text: str) -> None:
+        if text in self._fail_on:
+            raise AircraftLayerError("simulated push failure")
+        self.pushed.append(text)
+
+
+def test_console_runner_without_overlay_client_pushes_nothing() -> None:
+    # --overlay defaults off: overlay_client stays None, a true no-op --
+    # run_once must behave exactly as before, no AttributeError, no
+    # aircraft-layer call attempted for this purpose.
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+    )
+
+    runner.run_once()
+
+    assert runner.overlay_client is None
+    assert len(runner.store.events) == 1  # the event still fires...
+    # ...it is simply never mirrored anywhere, which is exactly the point.
+
+
+def test_console_runner_pushes_one_line_per_newly_materialized_event() -> None:
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    overlay_client = FakeOverlayClient()
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship, classification_raw="BMP")])],
+        overlay_client=overlay_client,  # type: ignore[arg-type]
+    )
+
+    runner.run_once()
+
+    (contact,) = runner.store.contacts
+    (event,) = runner.store.events
+    assert event.kind == "CONTACT_DETECTED"
+    assert overlay_client.pushed == [
+        f"CONTACT_DETECTED: {contact.last_class_raw}, observed, currently visible."
+    ]
+
+
+def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
+    """The plan's one load-bearing try/except (Risks & Unknowns): a failed
+    push for one event must not stop the poll loop, must not drop the
+    observations already collected this poll, and must not skip pushing the
+    remaining events in the same batch. Two distinct-class observations in
+    one poll are guaranteed to become two separate contacts
+    (association_over_time's class-incompatibility gate), so both fire
+    CONTACT_DETECTED in the same `tick()` call -- exactly the "remaining
+    events in the same batch" case."""
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    failing_text = "CONTACT_DETECTED: BMP-2, observed, currently visible."
+    overlay_client = FakeOverlayClient(fail_on=frozenset({failing_text}))
+    observations = [
+        _make_observation(ownship, id="OBS_bmp", classification_raw="BMP-2"),
+        _make_observation(ownship, id="OBS_truck", classification_raw="Ural truck"),
+    ]
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource(observations)],
+        overlay_client=overlay_client,  # type: ignore[arg-type]
+    )
+
+    returned = runner.run_once()
+
+    # Both observations were still collected and ingested -- a failed push
+    # for the first event's line did not drop anything already gathered
+    # this poll.
+    assert returned == observations
+    assert len(runner.store.contacts) == 2
+    assert len(runner.store.events) == 2
+    assert runner.last_t_sim == ownship.t_sim
+    # The failing push never landed; the *other* event in the same batch
+    # still got pushed -- the failure did not skip the rest of the batch.
+    assert overlay_client.pushed == [
+        "CONTACT_DETECTED: Ural truck, observed, currently visible."
+    ]
+
+    # The next poll's pushes proceed normally -- one failure does not wedge
+    # the overlay client for subsequent polls.
+    runner.sources = [
+        FakeSource(
+            [
+                _make_observation(
+                    ownship, id="OBS_2", classification_raw="Mi-8 helicopter"
+                )
+            ]
+        )
+    ]
+    runner.run_once()
+    assert overlay_client.pushed == [
+        "CONTACT_DETECTED: Ural truck, observed, currently visible.",
+        "CONTACT_DETECTED: Mi-8 helicopter, observed, currently visible.",
+    ]
 
 
 def test_console_runner_prints_a_periodic_contact_count_line() -> None:
