@@ -93,3 +93,93 @@ on a real sortie. Suggested acceptance check: fly a short sortie, hit `GET
 player's own aircraft (by position/type), across both a normal poll and (if easy to force) a
 poll where `LoGetPlayerPlaneId()` might plausibly fail (e.g. very early in mission load) to
 confirm the `null` path is reachable and body-layer keeps such objects rather than dropping them.
+
+---
+
+## Stage 0 — Scope-channel repair (2026-09-09)
+
+Implemented `plans/pb2-contact-memory/plan.md`'s Stage 0 (a) and (b), in their own commits, per
+the backlog's requirement that this repair not ride along invisibly.
+
+### Files Changed
+
+- `body-layer/src/perception/association.py` — `_type_match_score` now resolves each
+  candidate's `object_type` through `reporting_names.reporting_name_for` and scores against
+  **both** the raw type and the resolved reporting name, taking the max. Module docstring's
+  "Type-match scoring" algorithm step updated to reference this. Import added:
+  `from perception.reporting_names import reporting_name_for`.
+- `body-layer/src/perception/hybrid_source.py` — `HybridPerceptionSource.poll()` now reads all
+  five HelperAI `*_list_text` leaves (`LIST_TEXT_FIELDS`: `upper_upper_list_text`,
+  `upper_list_text`, `middle_list_text`, `lower_list_text`, `lower_lower_list_text`), collapses
+  them to the distinct populated texts in that order via the new `_distinct_populated_texts`
+  helper, and associates each distinct text against the candidate pool in order, removing the
+  claimed candidate before the next leaf is associated. Builds one `Observation` per
+  successfully-associated leaf; a leaf that fails to associate is dropped individually
+  (`_record_drop`) without blocking the others. `_last_emitted_classification: str | None` was
+  renamed `_last_emitted_texts: tuple[str, ...] | None`; debounce now compares the whole distinct-
+  text set against the last set that produced at least one `Observation` (mirrors the old
+  single-value semantics exactly whenever only one leaf is ever populated, which is why every
+  existing on_change test needed no changes). Module docstring rewritten to describe the
+  multi-leaf behaviour and cite Finding 6.
+- `body-layer/tests/test_association.py` — new `_type_match_score`/`associate()` tests for the
+  four real Finding-6 tuples (see table below), plus a regression test confirming the pre-fix
+  Ural-truck coincidence still scores nonzero.
+- `body-layer/tests/test_hybrid_source.py` — new tests: SA-3 launcher + radar leaves yield two
+  `Observation`s (the plan's required acceptance case), Slava cruiser + Tarantul III corvette
+  leaves yield two `Observation`s, and a same-text-across-two-leaves case still yields exactly one
+  `Observation` (no double-counting a highlighted row plus its own neighbour echo).
+
+### Before/After score table (`_type_match_score`, Finding 6's four real tuples)
+
+| `classification_raw` (HelperAI) | `object_type` (`LoGetWorldObjects`) | old score | new score |
+| --- | --- | --- | --- |
+| `Slava cruiser` | `MOSCOW` | 0 | 2 |
+| `Tarantul III corvette` | `MOLNIYA` | 0 | 3 |
+| `SA-3 launcher` | `5p73 s-125 ln` | 0 | 3 |
+| `SA-3 Low Blow radar` | `snr s-125 tr` | 0 | 5 |
+
+All four scored 0 before this fix — the type-match step would have contributed nothing to
+`associate()`'s decision for any of these real objects, degrading to the plausibility filter
+(range/forward-hemisphere) alone. The pre-existing Ural-truck coincidence
+(`"Ural truck"` vs `"Ural-4320"`) still scores nonzero (verified by
+`test_type_match_score_still_scores_the_ural_truck_coincidence`), so nothing regresses.
+
+### Tests Added
+
+- `test_type_match_score_is_nonzero_for_real_reporting_name_tuples` (parametrized over the four
+  Finding-6 tuples) — the score table above.
+- `test_type_match_score_still_scores_the_ural_truck_coincidence` — no-regression check.
+- `test_sa3_launcher_and_radar_resolve_confidently_against_real_types` — end-to-end `associate()`
+  proof that both real SA-3 objects resolve unambiguously once reporting-name scoring is in play.
+- `test_sa3_launcher_and_radar_leaves_yield_two_observations` — the plan's required acceptance
+  test: `middle_list_text`/`lower_list_text` both `"SA-3 launcher"` (deduped to one text) plus
+  `lower_lower_list_text` `"SA-3 Low Blow radar"` yields **two** `Observation`s, each claiming a
+  different candidate.
+- `test_slava_cruiser_and_tarantul_corvette_leaves_yield_two_observations` — same shape for the
+  other Finding-6 tuple.
+- `test_repeated_text_across_leaves_is_deduplicated_to_one_observation` — same text on two leaves
+  (a highlighted row echoed on a neighbour leaf) does not double-count.
+
+### Checks
+
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `cd body-layer && mypy src` (per this subproject's CWD-only config-discovery quirk): pass
+- `pytest body-layer/tests -q`: 113 passed (was 104 before this stage; all pre-existing tests
+  still pass unmodified)
+
+### Notable Discoveries
+
+- The existing `_last_emitted_classification`/debounce mechanism only advanced on a *successful*
+  association in the original single-leaf code — a persistently-unassociable detection was
+  retried every poll, not silently debounced away. Preserving this exactly (rather than always
+  updating the debounce state at the end of `poll()`) required an explicit `if observations:`
+  guard before updating `_last_emitted_texts`; getting this wrong would have silently stopped
+  retrying a detection that briefly fails to associate (e.g. `LoGetWorldObjects` momentarily
+  missing the target) until its text changed. No test in the existing suite would have caught
+  this regression — it's a behavior-preservation concern flagged for future stages to be aware of
+  if `emit_mode`/debounce semantics change again in Stage 3.
+- `reporting_name_for` lookup is case-insensitive and exact-match only (per
+  `reporting_names.py`'s own docstring) — the four Finding-6 `object_type` strings matched the
+  TSV verbatim (case-insensitively), so no near-miss/fallback behavior was exercised by this
+  stage's fixtures. Worth keeping in mind if a future DCS patch renames one of these types.
