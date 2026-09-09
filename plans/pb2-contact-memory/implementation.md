@@ -728,3 +728,74 @@ this validation stage should silently patch in.
   "gate radius depends on the *new* percept's own range, not just channel identity" detail future
   fixture-writers in this file should keep in mind, mirroring Stage 1's own note about the
   ambiguous-merge fixture needing careful geometric construction.
+
+## Stage 6 findings — live acceptance testing (2026-09-09)
+
+Surfaced during Stage 6 live-sortie acceptance testing (real DCS session against this branch,
+`--console` mode), not during the Stage 3/4 build that wrote the code — the Debugger role fixed
+this post-hoc, outside the Architect → Implementer → Reviewer chain those stages went through.
+
+### Observed bug
+
+Running `python -m logger --console ...` crashed on the very first poll tick with:
+
+```
+sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread.
+The object was created in thread id 8451039616 and this is thread id 6147420160.
+```
+
+Traceback: `_run_poll_loop` (background poll thread) → `ConsolePerceptionRunner.run_once` →
+`NakedEyePerceptionSource.poll` → `visibility.check_visibility` → `geometry.line_of_sight_clear`
+→ `store.reader.sample_grid`.
+
+### Root cause
+
+`main()`'s `--console` branch opened `world_model_conn` on the **main thread**, built
+`NakedEyePerceptionSource` (which holds that connection) via `_build_sources` on the main thread,
+then handed the resulting `ConsolePerceptionRunner` to a **background** poll thread
+(`_run_poll_loop`, spawned by Stage 4). `sqlite3.Connection`s are thread-affine by default
+(`check_same_thread=True`; `perception.geometry.open_world_model` never overrode that), so the
+first `sample_grid` query issued from the poll thread failed immediately. The plain (non-
+`--console`) path never hit this — connection-open, `_build_sources`, and the poll loop all stay
+on `main()`'s single thread there; only `--console`'s Stage 4 background-thread split introduced
+the bug. Not caught by the existing suite because `test_logger.py` / `test_emission_pipeline.py` /
+`test_naked_eye_source.py` all monkeypatch `visibility.line_of_sight_clear`, so `sample_grid` (and
+therefore the connection) is never actually queried against a real `sqlite3.Connection` crossing a
+real thread boundary in any pre-existing test.
+
+### Fix
+
+`logger.py`: renamed `_run_poll_loop` to `_run_console_poll_loop` and moved `open_world_model(...)`
++ `_build_sources(...)` **into** it, so the connection is opened and the sources that hold it are
+built on the poll thread itself, closed in a `finally` when the loop stops. `main()`'s `--console`
+branch now constructs `ConsolePerceptionRunner` with no `sources` (new `default_factory=list` on
+that field) and passes `aircraft_client`/`theatre`/`args.world_model_db` to the thread target
+instead of a pre-built runner whose sources already hold a wrong-thread connection. The
+non-`--console` path is unchanged (still opens/closes its own connection on `main()`'s single
+thread) aside from an added `try/finally` to close it. Did not reach for
+`check_same_thread=False` — that would paper over the connection's real lifecycle mismatch rather
+than fixing it, and would be a red flag given the world-model seam's shared-file, arguably-shared-
+across-threads usage pattern.
+
+### New regression test
+
+`test_logger.py::test_console_poll_loop_uses_a_thread_local_world_model_connection` — builds a
+real (schema-only, no grid rows needed) world-model `.sqlite` via world-model's own
+`store.writer.open_for_build`, drives `_run_console_poll_loop` on a real background `threading.
+Thread` (mirroring `main()`'s own wiring exactly), and — deliberately *not* monkeypatching
+`visibility.line_of_sight_clear` — lets a real `NakedEyePerceptionSource` reach
+`check_visibility` → `line_of_sight_clear` → `sample_grid` → a genuine sqlite query on that
+thread, the exact call chain from the traceback. Confirmed this test's premise directly: a
+throwaway script opening a connection on the main thread and querying it from a spawned thread
+reproduces the identical `sqlite3.ProgrammingError` this bug report describes, and the new test
+passes cleanly against the fixed `_run_console_poll_loop`.
+
+### Checks
+
+- `ruff format --check body-layer/src body-layer/tests`: pass
+- `ruff check body-layer/src body-layer/tests`: pass
+- `cd body-layer && mypy src`: pass, no issues in 20 source files
+- `pytest body-layer/tests -q`: 203 passed (202 before this fix + 1 new regression test)
+- `git status`: clean working tree after this stage's commit (aside from an unrelated,
+  pre-existing uncommitted change to `body-layer/run-body.sh` from outside this task, left
+  untouched)

@@ -39,15 +39,32 @@ periodic contact/observation-count line.
 
 Stage 4 adds the real `belief.console.Console` REPL on top of that poll
 loop: `main()` runs `ConsolePerceptionRunner.run_once()` on a background
-daemon thread (`_run_poll_loop`) while the foreground thread reads commands
-from stdin and dispatches them into `Console.handle_line`, against the same
-`ContactStore` the poll loop is filling. `ConsolePerceptionRunner.
+daemon thread (`_run_console_poll_loop`) while the foreground thread reads
+commands from stdin and dispatches them into `Console.handle_line`, against
+the same `ContactStore` the poll loop is filling. `ConsolePerceptionRunner.
 last_t_sim` is the seam between the two: the poll thread updates it every
 poll, the REPL thread reads it as `now_sim` for whatever command the user
 just typed. This is deliberately the simplest wiring that lets a live
 operator type `contacts`/`show <id>`/etc. while telemetry keeps flowing --
 not a claim of hardened concurrency, appropriate for a single-user debug
 console over an in-memory store.
+
+**Stage 6 fix (live acceptance testing finding, `plans/pb2-contact-memory/
+implementation.md` "Stage 6 findings")**: `_run_console_poll_loop` opens its
+own `world_model_conn` (via `open_world_model`) and builds its own `sources`
+(via `_build_sources`) *on the poll thread itself*, rather than receiving a
+`ConsolePerceptionRunner` whose `sources` already hold a connection opened
+on `main()`'s thread. `sqlite3.Connection`s are thread-affine by default
+(`check_same_thread=True`, and `open_world_model` never overrides that) --
+a connection opened on one thread and queried from another raises
+`sqlite3.ProgrammingError` on first use. The plain (non-`--console`) path
+never hit this because connection-open, `_build_sources`, and the poll loop
+all stay on the single main thread there; only `--console`'s background
+poll thread crosses a thread boundary with the connection. `main()` still
+constructs `ConsolePerceptionRunner` up front with an empty `sources` list
+-- its `store`/`output`/`last_t_sim` fields are safe to share across
+threads (Stage 4 reviewer-confirmed), only `sources` (and the connection it
+holds) needed to move.
 """
 
 from __future__ import annotations
@@ -138,7 +155,13 @@ class ConsolePerceptionRunner:
     """
 
     aircraft_client: AircraftLayerClient
-    sources: list[PerceptionSource]
+    #: Defaults to empty -- Stage 6's `--console` wiring constructs this
+    #: runner on the main thread before `sources` (and the sqlite connection
+    #: they hold) exist, then has the poll thread populate this field with
+    #: its own thread-local sources once it starts (see module docstring's
+    #: "Stage 6 fix"). Tests that don't care about thread-affinity still pass
+    #: `sources` explicitly, same as before.
+    sources: list[PerceptionSource] = field(default_factory=list)
     store: ContactStore = field(default_factory=ContactStore)
     output: TextIO | None = None
     last_t_sim: float | None = None
@@ -202,15 +225,30 @@ def _build_sources(
 _DEFAULT_POLL_INTERVAL_S = 1.0
 
 
-def _run_poll_loop(
-    runner: ConsolePerceptionRunner, poll_interval_s: float, stop_event: threading.Event
+def _run_console_poll_loop(
+    runner: ConsolePerceptionRunner,
+    aircraft_client: AircraftLayerClient,
+    theatre: str,
+    world_model_db: Path,
+    poll_interval_s: float,
+    stop_event: threading.Event,
 ) -> None:
-    """Stage 4's background poll thread: keeps calling `runner.run_once()`
-    (which fills `runner.store` and updates `runner.last_t_sim`) until
-    `stop_event` is set, on the same interval the plain logger path uses."""
-    while not stop_event.is_set():
-        runner.run_once()
-        stop_event.wait(poll_interval_s)
+    """Stage 4's background poll thread, fixed in Stage 6: opens
+    `world_model_conn` and builds `runner.sources` here, on this thread, then
+    keeps calling `runner.run_once()` (which fills `runner.store` and updates
+    `runner.last_t_sim`) until `stop_event` is set -- see module docstring's
+    "Stage 6 fix" for why the connection can't be built by the caller and
+    handed in. Closes the connection when the loop stops."""
+    world_model_conn = open_world_model(world_model_db)
+    try:
+        runner.sources = _build_sources(
+            aircraft_client, theatre, world_model_conn, emit_mode="every_poll"
+        )
+        while not stop_event.is_set():
+            runner.run_once()
+            stop_event.wait(poll_interval_s)
+    finally:
+        world_model_conn.close()
 
 
 def _run_console_repl(runner: ConsolePerceptionRunner, console: Console) -> None:
@@ -279,31 +317,39 @@ def main() -> None:
     args = parser.parse_args()
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
-    world_model_conn = open_world_model(args.world_model_db)
 
-    try:
-        if args.console:
-            console_runner = ConsolePerceptionRunner(
-                aircraft_client=aircraft_client,
-                sources=_build_sources(
-                    aircraft_client,
-                    args.theatre,
-                    world_model_conn,
-                    emit_mode="every_poll",
-                ),
-                output=sys.stdout,
-            )
-            stop_event = threading.Event()
-            poll_thread = threading.Thread(
-                target=_run_poll_loop,
-                args=(console_runner, args.poll_interval_s, stop_event),
-                daemon=True,
-            )
-            poll_thread.start()
-            console = Console(store=console_runner.store, output=sys.stdout)
+    if args.console:
+        # Stage 6 fix: no world_model_conn opened here -- the poll thread
+        # opens its own (see _run_console_poll_loop / module docstring's
+        # "Stage 6 fix"), since sqlite3 connections are thread-affine and
+        # this runner's sources are consumed only on that thread.
+        console_runner = ConsolePerceptionRunner(
+            aircraft_client=aircraft_client,
+            output=sys.stdout,
+        )
+        stop_event = threading.Event()
+        poll_thread = threading.Thread(
+            target=_run_console_poll_loop,
+            args=(
+                console_runner,
+                aircraft_client,
+                args.theatre,
+                args.world_model_db,
+                args.poll_interval_s,
+                stop_event,
+            ),
+            daemon=True,
+        )
+        poll_thread.start()
+        console = Console(store=console_runner.store, output=sys.stdout)
+        try:
             _run_console_repl(console_runner, console)
+        finally:
             stop_event.set()
-        else:
+            poll_thread.join()
+    else:
+        world_model_conn = open_world_model(args.world_model_db)
+        try:
             perception_logger = PerceptionLogger(
                 aircraft_client=aircraft_client,
                 sources=_build_sources(
@@ -317,8 +363,10 @@ def main() -> None:
             while True:
                 perception_logger.run_once()
                 time.sleep(args.poll_interval_s)
-    except KeyboardInterrupt:
-        pass
+        except KeyboardInterrupt:
+            pass
+        finally:
+            world_model_conn.close()
 
 
 if __name__ == "__main__":
