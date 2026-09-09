@@ -26,7 +26,9 @@ _PETROVICH_INDICATION_BODY = {
 }
 
 
-def _make_handler() -> type[BaseHTTPRequestHandler]:
+def _make_handler(
+    pushed_lines: list[str],
+) -> type[BaseHTTPRequestHandler]:
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/telemetry/latest":
@@ -46,6 +48,15 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
             else:
                 self._respond(404, {"error": "not found"})
 
+        def do_POST(self) -> None:
+            if self.path == "/text/push":
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                body = json.loads(self.rfile.read(length))
+                pushed_lines.append(body["text"])
+                self._respond(200, {"ok": True})
+            else:
+                self._respond(404, {"error": "not found"})
+
         def _respond(self, status: int, body: object) -> None:
             payload = json.dumps(body).encode("utf-8")
             self.send_response(status)
@@ -62,11 +73,25 @@ def _make_handler() -> type[BaseHTTPRequestHandler]:
 
 @pytest.fixture
 def server_url() -> Iterator[str]:
-    httpd = HTTPServer(("127.0.0.1", 0), _make_handler())
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler([]))
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
         yield f"http://127.0.0.1:{httpd.server_port}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.fixture
+def server_url_with_pushed_lines() -> Iterator[tuple[str, list[str]]]:
+    pushed_lines: list[str] = []
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler(pushed_lines))
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}", pushed_lines
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -119,3 +144,21 @@ def test_get_json_raises_on_invalid_json_body(server_url: str) -> None:
 
     with pytest.raises(AircraftLayerError):
         client._get_json("/not-json")
+
+
+def test_push_text_line_posts_to_text_push(
+    server_url_with_pushed_lines: tuple[str, list[str]],
+) -> None:
+    server_url, pushed_lines = server_url_with_pushed_lines
+    client = AircraftLayerClient(base_url=server_url)
+
+    client.push_text_line("CONTACT_DETECTED: BMP-2, observed, currently visible.")
+
+    assert pushed_lines == ["CONTACT_DETECTED: BMP-2, observed, currently visible."]
+
+
+def test_push_text_line_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.push_text_line("hello")
