@@ -71,6 +71,14 @@ specific change.** This is a separate git repo other projects depend on.
      there if a new placeholder is introduced.
    - Commit in the template repo with a clear message. **Ask before pushing** if the template repo
      has a remote — do not push without explicit confirmation.
+   - **Update this project's own `.claude/template.lock`** to the new template HEAD SHA
+     (`git -C ../claude-template rev-parse HEAD`), but only if this project's lock was already
+     at the template's pre-update SHA (i.e. this project was in sync before the push — check
+     `git -C ../claude-template log --oneline <old-lock-sha>..HEAD~N` shows nothing unexpected).
+     This project authored the change, so it's trivially in sync with it — no pull-from-template
+     round trip needed for content this project itself just wrote. If the lock was already behind
+     for unrelated reasons (other template commits this project hasn't pulled yet), don't
+     silently fast-forward past those — flag it and run `pull-from-template` first instead.
 
 7. **Report.** Summarize what was ported, what was left out and why, and what's still open
    (ambiguous items not decided, or approved-but-deferred items).
