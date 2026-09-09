@@ -1,11 +1,14 @@
-"""Tests for `logger.PerceptionLogger`/`format_observation_line`.
+"""Tests for `logger.PerceptionLogger`/`format_observation_line` and (PB-2
+Stage 3) `logger.ConsolePerceptionRunner`.
 
 Uses fake `AircraftLayerClient`-shaped objects and fake `PerceptionSource`s
 -- concrete tiers exist now (`HybridPerceptionSource`,
 `NakedEyePerceptionSource`), but `PerceptionLogger` itself is written
 entirely against the `PerceptionSource` protocol and doesn't need a real one
 to demonstrate its own poll/format/print logic, or (PB-1.5) that it polls
-and concatenates more than one source correctly.
+and concatenates more than one source correctly. `ConsolePerceptionRunner`
+is tested the same way, against a real `belief.contacts.ContactStore` (no
+fake needed -- it's already pure/fixture-testable per `test_contacts.py`).
 """
 
 from __future__ import annotations
@@ -13,7 +16,8 @@ from __future__ import annotations
 import io
 from typing import Any
 
-from logger import PerceptionLogger, format_observation_line
+from belief.contacts import ContactStore
+from logger import ConsolePerceptionRunner, PerceptionLogger, format_observation_line
 from perception.source import Observation, OwnshipState
 
 
@@ -144,3 +148,67 @@ def test_run_once_polls_every_source_and_concatenates_observations() -> None:
     assert len(lines) == 2
     assert "source=petrovich_detection_associated" in lines[0]
     assert "source=naked_eye_visual_filtered" in lines[1]
+
+
+def test_console_runner_returns_empty_when_no_telemetry_yet() -> None:
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(None),  # type: ignore[arg-type]
+        sources=[FakeSource([])],
+    )
+
+    assert runner.run_once() == []
+    assert runner.store.contacts == []
+
+
+def test_console_runner_ingests_observations_into_its_store() -> None:
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    observations = [_make_observation(ownship)]
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource(observations)],
+    )
+
+    returned = runner.run_once()
+
+    assert returned == observations
+    assert len(runner.store.contacts) == 1
+    assert len(runner.store.observations) == 1
+
+
+def test_console_runner_reuses_a_store_across_calls() -> None:
+    # Mirrors how main() drives a fixed ContactStore across the whole poll
+    # loop -- the same object accumulates contacts/observations poll over
+    # poll, it is not rebuilt each run_once() call.
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    store = ContactStore()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship, id="OBS_1")])],
+        store=store,
+    )
+
+    runner.run_once()
+    runner.sources = [FakeSource([_make_observation(ownship, id="OBS_2")])]
+    runner.run_once()
+
+    assert len(store.observations) == 2
+
+
+def test_console_runner_prints_a_periodic_contact_count_line() -> None:
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    output = io.StringIO()
+
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+        output=output,
+    )
+
+    runner.run_once()
+
+    assert "contacts=1" in output.getvalue()
+    assert "observations=1" in output.getvalue()

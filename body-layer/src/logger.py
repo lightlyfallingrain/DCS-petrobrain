@@ -1,4 +1,6 @@
-"""PB-1's actual deliverable: a text-only perception logger.
+"""PB-1's actual deliverable: a text-only perception logger. PB-2 Stage 3
+(`plans/pb2-contact-memory/plan.md`) adds a second, belief-consuming mode
+behind `--console`.
 
 Polls ownship telemetry from the aircraft layer plus whatever
 `PerceptionSource`s it is given, and prints each `Observation` as one flat
@@ -24,18 +26,32 @@ returned `Observation`s before formatting/printing --
 type is needed to combine multiple sources' output. Revisit only if a third
 source or real fusion logic (that plan's Decision #3) makes a composite
 class earn its keep.
+
+**`--console` (PB-2 Stage 3)**: the plain text-logger path above is
+unchanged and stays the default -- both sources still built at their
+`emit_mode="on_change"` default. `--console` instead builds both sources at
+`emit_mode="every_poll"` (Stage 3's fix for the Interface confirmation
+section's gap 2: source-level debounce starves the belief layer of the
+continuity `belief.decay`'s certainty ladder needs) and drives
+`ConsolePerceptionRunner`, which ingests+ticks a `belief.contacts.
+ContactStore` each poll instead of formatting text lines. Its only
+observable output for this stage is a periodic contact/observation-count
+line -- Stage 4 replaces that with the real `belief.console` REPL; building
+that REPL is explicitly out of scope here.
 """
 
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TextIO
+from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient
+from belief.contacts import ContactStore
 from perception.geometry import open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -94,6 +110,76 @@ class PerceptionLogger:
         return lines
 
 
+@dataclass
+class ConsolePerceptionRunner:
+    """PB-2 Stage 3's belief-consuming poll loop, mirroring
+    `PerceptionLogger`'s own split between testable core logic and `main()`'s
+    thin CLI wiring. `sources` are expected to already be constructed at
+    `emit_mode="every_poll"` (`main()`'s job, not this class's) -- unlike
+    `PerceptionLogger`, this class does not care what emission mode its
+    sources use, it only ingests+ticks whatever they return.
+
+    Stage 4 replaces this class's caller with the real `belief.console`
+    REPL; `run_once` returns the poll's `Observation`s (mirroring
+    `PerceptionLogger.run_once`'s return-what-was-produced shape) so a
+    future console can drive the same loop without re-deriving it.
+    """
+
+    aircraft_client: AircraftLayerClient
+    sources: list[PerceptionSource]
+    store: ContactStore = field(default_factory=ContactStore)
+    output: TextIO | None = None
+
+    def run_once(self) -> list[Observation]:
+        """Poll ownship telemetry once, poll every source for observations
+        as of that telemetry's `t_sim`, ingest+tick them into `store`, and
+        print one minimal contact/observation-count line. Returns an empty
+        list (prints nothing) if the aircraft layer has no telemetry yet,
+        mirroring `PerceptionLogger.run_once`."""
+        telemetry = self.aircraft_client.get_telemetry_latest()
+        if telemetry is None:
+            return []
+        ownship = OwnshipState.from_telemetry_dict(telemetry)
+        observations = [
+            observation
+            for source in self.sources
+            for observation in source.poll(ownship.t_sim, ownship)
+        ]
+        self.store.ingest(observations, now_sim=ownship.t_sim)
+        self.store.tick(ownship.t_sim)
+        if self.output is not None:
+            print(
+                f"t_sim={ownship.t_sim:.2f} "
+                f"contacts={len(self.store.contacts)} "
+                f"observations={len(self.store.observations)}",
+                file=self.output,
+            )
+        return observations
+
+
+def _build_sources(
+    aircraft_client: AircraftLayerClient,
+    theatre: str,
+    world_model_conn: sqlite3.Connection,
+    emit_mode: Literal["on_change", "every_poll"],
+) -> list[PerceptionSource]:
+    """Construct both concrete tiers at a given `emit_mode` -- shared by
+    `main()`'s plain-logger path (`"on_change"`) and `--console` path
+    (`"every_poll"`) so the two never drift apart on which tiers are wired
+    in, only on their emission mode and what consumes their output."""
+    return [
+        HybridPerceptionSource(
+            aircraft_client=aircraft_client, theatre=theatre, emit_mode=emit_mode
+        ),
+        NakedEyePerceptionSource(
+            aircraft_client=aircraft_client,
+            theatre=theatre,
+            world_model_conn=world_model_conn,
+            emit_mode=emit_mode,
+        ),
+    ]
+
+
 _DEFAULT_POLL_INTERVAL_S = 1.0
 
 
@@ -133,26 +219,51 @@ def main() -> None:
         default=_DEFAULT_POLL_INTERVAL_S,
         help="seconds between poll ticks",
     )
+    parser.add_argument(
+        "--console",
+        action="store_true",
+        help=(
+            "run the belief-consuming pipeline (both sources at "
+            "emit_mode='every_poll', ingested+ticked into a belief.contacts."
+            "ContactStore) instead of the plain on_change text logger -- "
+            "PB-2 Stage 3; prints a periodic contact/observation-count line "
+            "only, the real console REPL is Stage 4"
+        ),
+    )
     args = parser.parse_args()
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
     world_model_conn = open_world_model(args.world_model_db)
-    sources: list[PerceptionSource] = [
-        HybridPerceptionSource(aircraft_client=aircraft_client, theatre=args.theatre),
-        NakedEyePerceptionSource(
-            aircraft_client=aircraft_client,
-            theatre=args.theatre,
-            world_model_conn=world_model_conn,
-        ),
-    ]
-    perception_logger = PerceptionLogger(
-        aircraft_client=aircraft_client, sources=sources, output=sys.stdout
-    )
 
     try:
-        while True:
-            perception_logger.run_once()
-            time.sleep(args.poll_interval_s)
+        if args.console:
+            console_runner = ConsolePerceptionRunner(
+                aircraft_client=aircraft_client,
+                sources=_build_sources(
+                    aircraft_client,
+                    args.theatre,
+                    world_model_conn,
+                    emit_mode="every_poll",
+                ),
+                output=sys.stdout,
+            )
+            while True:
+                console_runner.run_once()
+                time.sleep(args.poll_interval_s)
+        else:
+            perception_logger = PerceptionLogger(
+                aircraft_client=aircraft_client,
+                sources=_build_sources(
+                    aircraft_client,
+                    args.theatre,
+                    world_model_conn,
+                    emit_mode="on_change",
+                ),
+                output=sys.stdout,
+            )
+            while True:
+                perception_logger.run_once()
+                time.sleep(args.poll_interval_s)
     except KeyboardInterrupt:
         pass
 
