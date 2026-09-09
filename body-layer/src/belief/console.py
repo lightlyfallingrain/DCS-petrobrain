@@ -38,6 +38,21 @@ from belief.tools import (
     watch_contact,
 )
 
+#: Printed once at REPL startup (`logger.py`'s `main()`) -- kept in sync with
+#: the module docstring's command table above by hand; both list the same
+#: seven commands because `handle_line`'s dispatch is the single source of
+#: truth for what actually exists.
+HELP_TEXT = """\
+Petrovich belief console -- commands:
+  contacts [all|visible|watched]  list contacts (default: all)
+  show <id>                       full detail for one contact
+  history <id>                    a contact's sighting/event history
+  find <text>                     search contacts by classification text
+  watch <id>                      mark a contact watched
+  unwatch <id>                    clear a contact's watched mark
+  stats                           observation/contact/event counts
+"""
+
 _CONTACT_FILTERS: tuple[ContactFilter, ...] = ("all", "visible", "watched")
 
 #: `_contact_result`'s `facts` keys, in display order, for `show <id>`'s

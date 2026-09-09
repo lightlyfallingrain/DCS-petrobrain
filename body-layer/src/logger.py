@@ -79,7 +79,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient
-from belief.console import Console
+from belief.console import HELP_TEXT, Console
 from belief.contacts import ContactStore
 from perception.geometry import open_world_model
 from perception.hybrid_source import HybridPerceptionSource
@@ -342,6 +342,7 @@ def main() -> None:
         )
         poll_thread.start()
         console = Console(store=console_runner.store, output=sys.stdout)
+        print(HELP_TEXT, file=sys.stdout)
         try:
             _run_console_repl(console_runner, console)
         finally:
