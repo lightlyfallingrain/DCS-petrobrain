@@ -78,23 +78,31 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 ## Backlog
 
-- [ ] **Exclude the ownship by identity rather than by proximity.** The 2026-09-09 fix
-  (`association.exclude_ownship`, commit `549aee6`) drops any world object within
-  `OWNSHIP_ECHO_EXCLUSION_RADIUS_M = 50.0` m of ownship. That is correct for the bug it fixes and
-  has no false positives in practice, but it is a heuristic standing in for an exact answer, and it
-  carries a narrow false-*negative* window: any genuine object within 50 m of the aircraft is
-  silently dropped. Plausible cases — troops disembarking beside a landed helicopter, another
-  aircraft in close formation, a vehicle the aircraft is hovering directly over.
+- [ ] **Aircraft layer should flag the ownship; body layer filters it out in detection logic.**
+  *(User decision, 2026-09-09 — supersedes the earlier "omit or flag" framing recorded here.)*
 
-  The exact fix is identity-based and lives one layer down: `Export.lua` knows the player's own
-  object via the DCS export API (`LoGetPlayerPlaneId()`), so it could omit that entry from the
-  `world_objects` payload, or flag it so body-layer can drop it by id rather than by distance. That
-  removes the false-negative window entirely and is robust regardless of what
-  `LoGetWorldObjects`'s `pairs()` key turns out to mean.
+  **Aircraft layer**: add an ownship marker to each `/world_objects/latest` entry —
+  `Export.lua` can identify the player's own object via the DCS export API
+  (`LoGetPlayerPlaneId()`). **Flag it, do not omit it**: ownship's entry is still wanted in the
+  snapshot, so dropping it at the source is not acceptable. This is a wire-format addition to
+  `aircraft-layer/src/schema/world_objects.py`'s `WorldObjectSample` and affects every consumer of
+  that endpoint.
 
-  Not done in the bug fix because it is an aircraft-layer change affecting every consumer of
-  `/world_objects/latest`, where the body-layer-side fix was contained and shippable. Worth doing
-  when aircraft-layer is next touched.
+  **Body layer**: filter on that flag inside the detection logic, and **delete
+  `association.exclude_ownship` and `OWNSHIP_ECHO_EXCLUSION_RADIUS_M` entirely** — the flag makes
+  the 50 m proximity check unnecessary, not merely redundant.
+
+  **Why it matters.** The 2026-09-09 fix (`549aee6`) drops any world object within 50 m of
+  ownship. It is correct for the bug it fixes and has no false positives in practice, but it is a
+  heuristic standing in for an exact answer, and it carries a false-*negative* window: any genuine
+  object within 50 m is silently dropped. The concrete high-risk case is **troop insertion and
+  extraction** — a core Mi-24P mission that routinely puts the aircraft within 50 m of real
+  objects; also close formation, and hovering directly over a target. An identity flag closes that
+  window completely and is robust regardless of what `LoGetWorldObjects`'s `pairs()` key means.
+
+  Not done during the bug fix because it is an aircraft-layer change affecting every consumer,
+  where the body-layer-side fix was contained and shippable. Worth doing when aircraft-layer is
+  next touched.
 
 - [x] **Settle whether `LoGetWorldObjects`'s `object_id` is stable across polls** — **closed 2026-09-09 by live evidence.** PB-1.5's acceptance sortie emitted 2 observations in 70 s; unstable ids would have re-emitted every object every tick. The prediction recorded below ("the next live sortie settles it for free") held. Original entry: — needs a live
   capture, described in `plans/pb1.5-naked-eye-detection/debug.md` "Needs live DCS".
