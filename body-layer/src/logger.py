@@ -325,7 +325,7 @@ def main() -> None:
         # this runner's sources are consumed only on that thread.
         console_runner = ConsolePerceptionRunner(
             aircraft_client=aircraft_client,
-            output=sys.stdout,
+            output=None,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(

@@ -167,9 +167,16 @@ last_t_sim` (updated by the poll thread every poll) as each command's `now_sim`.
   instead of formatting text lines — `ConsolePerceptionRunner` itself *is* tested (against fakes,
   mirroring `PerceptionLogger`'s own tests), only `main()`'s CLI wiring is not. The default
   (no `--console`) path is unchanged and still uses `emit_mode="on_change"`. Stage 4 adds
-  `_run_poll_loop`/`_run_console_repl`: `main()`'s `--console` branch now runs the poll loop on a
-  background daemon thread and a `belief.console.Console` REPL over stdin in the foreground, both
-  against the same `ContactStore`, coordinated through `ConsolePerceptionRunner.last_t_sim`.
+  `_run_console_poll_loop`/`_run_console_repl`: `main()`'s `--console` branch now runs the poll
+  loop on a background daemon thread and a `belief.console.Console` REPL over stdin in the
+  foreground, both against the same `ContactStore`, coordinated through
+  `ConsolePerceptionRunner.last_t_sim`. A Stage 6 live-testing fix renamed
+  `_run_poll_loop` → `_run_console_poll_loop` and moved `world_model_conn`'s open (and
+  `_build_sources`) onto that thread itself — `sqlite3.Connection` is thread-affine, and only the
+  poll thread ever touches it, so it must be opened there rather than on the main thread before
+  spawning. The runner no longer prints its periodic contact-count line in `--console` mode
+  (`output=None`) — that line was spamming the REPL's own prompt/output on every poll; state is
+  queried on demand via `contacts`/`stats` instead.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a

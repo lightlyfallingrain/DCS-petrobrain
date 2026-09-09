@@ -43,6 +43,7 @@ all verification commands myself.
   `on_change` for the same stationary, continuously-visible object over the same window. This is
   exactly the wiring the plan calls for — belief-layer decay is what's being tested, not just
   that Observations keep being emitted.
+
 - **`--console` scope.** `ConsolePerceptionRunner.run_once()` does ingest+tick and print one
   `t_sim=... contacts=N observations=N` line — no REPL, no command parsing, nothing beyond the
   minimal wiring the plan describes for this stage. Confirmed no `belief/tools.py` or
@@ -358,3 +359,77 @@ launcher")` against the live keyword table rather than trusting the implementer'
 docstring's claim. Verified the commit's file scope directly via `git show --stat` and `git diff
 --stat`. Ran format/lint/type/test myself. Did not re-verify Stage -1/0/1/2/3/4 files, per the
 existing approvals above.
+
+---
+
+## Review: Stage 6 (live acceptance testing — sqlite3 thread-affinity fix)
+
+Post-hoc Debugger fix (commit `3bb5882`, branch `feature/pb2-contact-memory`) for a real
+sqlite3 thread-affinity crash found during Stage 6 live-sortie acceptance testing of
+`--console` mode. Reviewed against `plans/pb2-contact-memory/debug.md` and the "Stage 6
+findings" section appended to `implementation.md`. All five fixture-testable stages (-1 through
+5) were already reviewed/approved above; this is a post-hoc patch to already-approved Stage 4
+code, not a re-review of those stages.
+
+### Review Summary
+
+`body-layer/src/logger.py`: `_run_poll_loop` renamed to `_run_console_poll_loop`; it now opens
+`world_model_conn` (`open_world_model`) and builds `runner.sources` (`_build_sources`) on the
+poll thread itself, inside a `try/finally` that closes the connection when the loop stops.
+`ConsolePerceptionRunner.sources` defaults to `[]` via `default_factory=list`, letting `main()`
+construct the runner on the main thread before any sources (or the connection they'd hold)
+exist — the poll thread populates `sources` itself, before its first `run_once()` call, so
+there is no window where `run_once()` runs against an empty list unexpectedly. `main()`'s
+`--console` branch passes `aircraft_client`/`theatre`/`args.world_model_db` (the raw path) to
+the thread target instead of a pre-built runner. `poll_thread.join()` was added after
+`stop_event.set()`, correctly ordered (nothing after it assumes the thread has already
+stopped). The non-`--console` path is functionally unchanged, just wrapped in `try/finally` for
+connection cleanup — confirmed by reading `main()`'s `else` branch, same single-thread
+open/build/loop/close sequence as before.
+
+Verified independently, not just read:
+- `ruff format --check`, `ruff check`, `mypy --strict src` all pass; `pytest body-layer/tests
+  -q` reports 203 passed (202 + 1 new), matching the claimed count.
+- Restored the pre-fix `logger.py` (`git show 3bb5882^:body-layer/src/logger.py`) and reran the
+  new test — it fails at collection with `ImportError: cannot import name
+  '_run_console_poll_loop'`, since the fix renamed the function. This is a stronger guarantee
+  than a runtime failure: the old code path cannot coexist with the new test at all.
+- Separately reproduced the underlying mechanism directly (opened a real world-model sqlite
+  connection via `store.writer.open_for_build` on the main thread, queried it from a spawned
+  thread) and got the byte-for-byte same `sqlite3.ProgrammingError: SQLite objects created in a
+  thread can only be used in that same thread` traceback shape the bug report describes,
+  confirming the new test's `NakedEyePerceptionSource` → `check_visibility` →
+  `line_of_sight_clear` → `sample_grid` chain genuinely exercises the real crash mechanism (no
+  monkeypatch of `visibility.line_of_sight_clear` in the new test — confirmed by reading it and
+  grepping the file).
+- `git status` clean; `git log` shows the fix, its findings-doc update, and a follow-on
+  run-script commit, all on the feature branch, nothing uncommitted.
+
+`plans/pb2-contact-memory/debug.md` is a well-formed debug report (observed issue, hypothesis,
+evidence, fix, verification) and `implementation.md`'s "Stage 6 findings" section accurately
+describes the bug and fix without overclaiming — both explicitly flag this as a post-hoc
+Debugger fix outside the Architect → Implementer → Reviewer chain, and both correctly attribute
+the gap to every prior test monkeypatching `visibility.line_of_sight_clear`.
+
+`check_same_thread=False` was deliberately avoided in favor of giving the connection a proper
+thread-local lifecycle — matches the task brief's explicit call-out and is the more correct fix
+for a connection that should live and die with the thread that uses it.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- `body-layer/CLAUDE.md`'s "Structure" section (the `src/logger.py` bullet) still refers to
+  `_run_poll_loop`, the pre-rename name — now stale. Not part of this commit's diff and not
+  behavior-affecting, but worth a one-line fix next time that file is touched so the docs don't
+  drift further from the code. (optional)
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read — read `logger.py` and `test_logger.py` in full, reran format/lint/type/test myself,
+and independently reproduced both the fix's regression-test failure against pre-fix code and
+the underlying sqlite3 cross-thread exception.
