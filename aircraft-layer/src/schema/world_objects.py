@@ -33,6 +33,24 @@ primary-source read -- see that finding for the caveats):
 polls for the same object is unconfirmed** (an open question in the same
 research doc, resolvable only by a live probe) -- treat it as a
 within-one-poll identifier only until verified live.
+
+`is_ownship` identifies the player's own aircraft among `LoGetWorldObjects`'s
+unfiltered/global entries -- that table includes ownship itself (confirmed,
+see finding 10's forum evidence above), and prior to this field the only way
+to exclude it was a 50 m proximity heuristic in body-layer
+(`perception.association.exclude_ownship`, since removed) that had a
+false-negative window for any genuine object within 50 m of the aircraft
+(troop insertion/extraction, close formation). `Export.lua` sets it by
+comparing the object's `pairs()` key against `LoGetPlayerPlaneId()`'s result
+for the same poll. **Tri-state, not boolean**: `true`/`false` when
+`LoGetPlayerPlaneId()` succeeded that poll, `None` when it didn't (a pcall
+failure, same defensive pattern as every other export read) -- `None` must
+never be treated as `False`, since that would silently fabricate "not
+ownship" for an object whose ownship status is genuinely unknown this poll,
+the same reasoning `TelemetrySample.altitude_radar_m` (`schema/__init__.py`)
+already applies to a field that can be legitimately absent. The object is
+still included in the snapshot regardless -- flag, never omit (backlog
+decision, `todo/todo.md`).
 """
 
 from __future__ import annotations
@@ -50,6 +68,11 @@ _REQUIRED_OBJECT_FIELDS: Final[tuple[str, ...]] = (
     "alt_m",
     "heading_true_rad",
 )
+# `is_ownship` is deliberately not in the tuple above: Export.lua always
+# emits the key, but its value may be JSON `null` when LoGetPlayerPlaneId()
+# itself failed that poll -- see `WorldObjectSample.is_ownship`'s docstring
+# above. Handled separately in `from_dict` rather than via
+# `_require_number`'s number-only contract.
 
 
 class WorldObjectParseError(ValueError):
@@ -67,6 +90,7 @@ class WorldObjectSample:
     lon_deg: float
     altitude_m: float
     heading_true_rad: float
+    is_ownship: bool | None
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> WorldObjectSample:
@@ -101,6 +125,17 @@ class WorldObjectSample:
         else:
             coalition = float(coalition_raw)
 
+        is_ownship_raw = data.get("is_ownship")
+        is_ownship: bool | None
+        if is_ownship_raw is None:
+            is_ownship = None
+        elif isinstance(is_ownship_raw, bool):
+            is_ownship = is_ownship_raw
+        else:
+            raise WorldObjectParseError(
+                f"field 'is_ownship' must be a boolean or null, got {is_ownship_raw!r}"
+            )
+
         return WorldObjectSample(
             object_id=int(object_id_raw),
             object_type=object_type_raw,
@@ -109,6 +144,7 @@ class WorldObjectSample:
             lon_deg=_require_number(data, "lon"),
             altitude_m=_require_number(data, "alt_m"),
             heading_true_rad=_require_number(data, "heading_true_rad"),
+            is_ownship=is_ownship,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -120,6 +156,7 @@ class WorldObjectSample:
             "lon_deg": self.lon_deg,
             "altitude_m": self.altitude_m,
             "heading_true_rad": self.heading_true_rad,
+            "is_ownship": self.is_ownship,
         }
 
 
