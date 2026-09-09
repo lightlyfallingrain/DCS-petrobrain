@@ -31,7 +31,9 @@ Algorithm (plan's "Association design" section, unchanged here):
 2. Plausibility filter: drop candidates outside `RANGE_CAP_M` or outside
    `FORWARD_HEMISPHERE_HALF_WIDTH_DEG` of ownship's true heading.
 3. Type-match scoring: keyword overlap between the detection's
-   classification text and each surviving candidate's `object_type`.
+   classification text and each surviving candidate's `object_type`, or its
+   resolved reporting name, whichever scores higher (`_type_match_score`,
+   `plans/pb2-contact-memory/plan.md` Stage 0).
 4. Decision: zero survivors -> `None` (caller drops the detection, emits no
    `Observation`). Exactly one survivor, or one candidate strictly
    top-scored by more than `TYPE_MATCH_TIE_MARGIN`: confident single match
@@ -54,6 +56,7 @@ from typing import Any, Final
 
 from coordinates import wgs84_to_dcs
 from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.reporting_names import reporting_name_for
 from perception.source import OwnshipState
 
 #: Generous optical-detection envelope for a ground vehicle from a
@@ -245,8 +248,26 @@ def _keywords(text: str) -> set[str]:
 
 def _type_match_score(classification_raw: str, object_type: str) -> int:
     """Keyword overlap between HelperAI's coarse classification text (e.g.
-    `"Ural truck"`) and a candidate's DCS unit-type identifier (e.g.
-    `"Ural-4320"`). **Unvalidated against real multi-object scenes** -- see
-    `plans/pb1-perception-logger/plan.md`'s Risks section; this is a
-    starting guess, not a validated vocabulary table."""
-    return len(_keywords(classification_raw) & _keywords(object_type))
+    `"Slava cruiser"`) and a candidate's DCS unit-type identifier (e.g.
+    `"MOSCOW"`). HelperAI's own classification text is drawn from ED's
+    reporting-name vocabulary, not the raw `object_type` string -- the two
+    are frequently unrelated words (`"Slava cruiser"` vs `"MOSCOW"`,
+    `"SA-3 launcher"` vs `"5p73 s-125 ln"`), so scoring against the raw type
+    alone silently returns 0 for most non-coincidental cases (see
+    `plans/pb2-contact-memory/plan.md` Stage 0, and
+    `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-
+    detection.md` Finding 6 for the real tuples that surfaced this). Resolve
+    `object_type` through `reporting_names.reporting_name_for` and score
+    against **both** the raw type and the resolved reporting name, taking
+    the max -- so a candidate whose raw type happens to share a keyword
+    (e.g. the Ural-truck coincidence) still scores at least as well as
+    before, and nothing that matched before this fix regresses."""
+    classification_keywords = _keywords(classification_raw)
+    raw_score = len(classification_keywords & _keywords(object_type))
+
+    reporting_name = reporting_name_for(object_type)
+    if reporting_name is None:
+        return raw_score
+
+    reporting_score = len(classification_keywords & _keywords(reporting_name))
+    return max(raw_score, reporting_score)
