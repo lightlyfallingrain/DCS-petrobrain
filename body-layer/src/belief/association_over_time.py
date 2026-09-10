@@ -22,7 +22,30 @@ terrain, per that function's own documented limitation. A candidate contact
 passes the spatial gate when this implied position is within `gate_radius_m`
 of the contact's last-known perceived position:
 
-    gate_radius_m = uncertainty_radius_m(percept) + GATE_GROWTH_RATE_MPS * elapsed_s
+    gate_radius_m = uncertainty_radius_m(percept)
+        + contact.last_position_uncertainty_m
+        + GATE_GROWTH_RATE_MPS * elapsed_s
+
+Both sides' uncertainty are summed -- `contact.last_position` is itself only
+known to within *its own* founding/most-recent percept's uncertainty, not
+exactly, so gating on the incoming percept's uncertainty alone silently
+assumes the stored position is exact. It is not: naked-eye's bucket
+quantisation in particular re-derives a fresh (bearing, range) pair from
+scratch every poll (the buckets are anchored to the *current* heading -- see
+`naked_eye_source._quantise_bearing`), so two consecutive, genuinely
+identical real positions can legitimately quantise to different buckets and
+imply positions up to roughly a full bucket-width apart, not just the
+half-bucket-width `uncertainty_radius_m` models for a single reading. Only
+budgeting the incoming side under-sizes the gate by up to 2x for exactly
+this case -- confirmed live 2026-09-09: a single missed match from this
+under-sizing spawns a duplicate contact, and because that duplicate itself
+then counts as a second candidate for every subsequent percept near the same
+real object, the two-or-more-candidates ambiguity rule above turns one
+missed match into a permanent one-new-contact-per-poll runaway for the rest
+of the contact's session (see `plans/classification-refinement/debug.md`).
+Summing both sides' uncertainty is the minimal correction: it restores the
+gate to the symmetric, standard-radar-fusion shape (both estimates carry
+error, not just the newer one) without touching the ambiguity policy itself.
 
 `elapsed_s` is the time since *that contact's* last observation (not the
 percept's own age), so a contact that has not been seen in a while gets a
@@ -167,9 +190,15 @@ def implied_position(percept: Percept) -> GeoPosition:
 
 def spatial_gate_radius_m(percept: Percept, contact: Contact, now_sim: float) -> float:
     """The spatial gate radius for `percept` against `contact` at `now_sim`.
-    See module docstring's formula."""
+    See module docstring's formula -- both the incoming percept's own
+    uncertainty and the contact's stored `last_position_uncertainty_m` are
+    budgeted, not just the former."""
     elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
-    return uncertainty_radius_m(percept) + GATE_GROWTH_RATE_MPS * elapsed_s
+    return (
+        uncertainty_radius_m(percept)
+        + contact.last_position_uncertainty_m
+        + GATE_GROWTH_RATE_MPS * elapsed_s
+    )
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:

@@ -19,6 +19,7 @@ def _contact(last_seen_sim: float) -> Contact:
     return Contact(
         id="CONTACT_1",
         last_position=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        last_position_uncertainty_m=0.0,
         last_class_raw="OP_TRUCK",
         classification=new_classification_belief(
             value="OP_TRUCK",

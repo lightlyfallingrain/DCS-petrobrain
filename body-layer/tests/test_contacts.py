@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 import pathlib
 
 from belief import contacts as contacts_module
@@ -19,6 +20,7 @@ from belief.events import (
 )
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
+    SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
     Observation,
     OwnshipState,
@@ -88,27 +90,99 @@ def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     new percept must produce a *third* contact -- the plan's deliberate
     anti-guessing rule (Stage 1 decision rule)."""
     store = ContactStore()
-    # A and B are 400m apart -- far enough that B does not merge into A when
-    # it is created (gate radius at t=0 is SCOPE_UNCERTAINTY_M=300), but
-    # close enough that a percept exactly between them (200m from each)
-    # falls within both of their gates.
+    # A and B are 800m apart -- far enough that B does not merge into A when
+    # it is created (gate radius at t=0 is uncertainty_radius_m(B)=
+    # SCOPE_UNCERTAINTY_M=300 *plus* A's own stored
+    # last_position_uncertainty_m=300, i.e. 600 -- both sides' uncertainty is
+    # budgeted, see `association_over_time`'s module docstring), but close
+    # enough that a percept exactly between them (400m from each) falls
+    # within both of their gates (each gate is also 600 at t=0).
     contact_a_obs = _observation(
         obs_id="OBS_A", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
     contact_b_obs = _observation(
-        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=1400.0
+        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
     )
     store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
     assert len(store.contacts) == 2
 
     ambiguous_obs = _observation(
-        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1200.0
+        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1400.0
     )
     store.ingest([ambiguous_obs], now_sim=0.0)
 
     assert len(store.contacts) == 3
     newest = store.contacts[-1]
     assert newest.contributing_observation_ids == ["OBS_C"]
+
+
+def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> None:
+    """Regression for the live-session bug (2026-09-09,
+    `plans/classification-refinement/debug.md`): a single stationary
+    ground object, tracked purely via `perception.naked_eye_source`'s
+    bearing/range bucket quantisation while ownship slowly turns and
+    translates near the object's hires/medres tier boundary, produced 8
+    `Contact` records for one real T-90A over ~20 polls before the fix.
+
+    Root cause: `naked_eye_source._quantise_bearing` re-derives a fresh
+    (bearing, range) bucket pair every poll, anchored to the *current*
+    heading -- two consecutive, genuinely identical real positions can
+    legitimately land in different buckets, implying positions up to
+    roughly a full bucket-width apart. `association_over_time.
+    spatial_gate_radius_m` used to budget only the *incoming* percept's
+    own uncertainty, silently treating the contact's stored
+    `last_position` as exact -- under-sized by up to 2x for exactly this
+    case. Once a single missed match spawned a second contact for the
+    same real object, every subsequent percept saw two-or-more passing
+    candidates, and `ContactStore.ingest`'s deliberate anti-guessing rule
+    (two-or-more candidates -> new contact, never a tiebreak) turned that
+    one missed match into a permanent one-new-contact-per-poll runaway.
+
+    This test drives the same quantisation helpers `naked_eye_source.py`
+    itself uses, over a maneuvering-ownship/stationary-target geometry
+    empirically confirmed (pre-fix) to trigger the bug, and asserts the
+    real object still resolves to exactly one contact."""
+    from perception.naked_eye_source import _quantise_bearing, _quantise_range_m
+
+    target_x, target_z = 0.0, 1200.0
+    store = ContactStore()
+    ownship_x, ownship_z = -900.0, 0.0
+    heading_deg = 90.0
+    t_sim = 0.0
+
+    for poll in range(40):
+        t_sim += 1.0
+        heading_deg = (heading_deg + 3.0) % 360.0
+        ownship_x += 3.0
+        ownship_z += 1.0
+        ownship = OwnshipState(
+            t_sim=t_sim,
+            x=ownship_x,
+            z=ownship_z,
+            alt_m=500.0,
+            heading_true_deg=heading_deg,
+        )
+        dx = target_x - ownship_x
+        dz = target_z - ownship_z
+        true_bearing_deg = math.degrees(math.atan2(dz, dx)) % 360.0
+        true_range_m = math.hypot(dx, dz)
+        quantised_bearing_deg, _bucket = _quantise_bearing(
+            heading_deg, true_bearing_deg
+        )
+        quantised_range_m, _range_bucket = _quantise_range_m(true_range_m)
+
+        obs = _observation(
+            obs_id=f"OBS_{poll}",
+            t_sim=t_sim,
+            classification_raw="OP_ARMORED",
+            bearing_deg=quantised_bearing_deg,
+            range_m=quantised_range_m,
+            source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+            ownship=ownship,
+        )
+        store.ingest([obs], now_sim=t_sim)
+
+    assert len(store.contacts) == 1
 
 
 def test_founding_percept_seeds_classification_at_its_own_level() -> None:

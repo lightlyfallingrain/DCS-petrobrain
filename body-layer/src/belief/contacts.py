@@ -25,7 +25,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from belief.association_over_time import implied_position, passes_gate
+from belief.association_over_time import (
+    implied_position,
+    passes_gate,
+    uncertainty_radius_m,
+)
 from belief.classification import (
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
@@ -85,6 +89,15 @@ class Contact:
     contact, never from any earlier one -- there is no fusion or averaging
     across observations.
 
+    `last_position_uncertainty_m` is `last_position`'s own error budget --
+    `belief.association_over_time.uncertainty_radius_m` of whichever percept
+    most recently set `last_position` (the founding percept, or the most
+    recent `record()` call). `association_over_time.spatial_gate_radius_m`
+    sums this with the *incoming* percept's uncertainty; gating on the
+    incoming side alone silently treated `last_position` as exact, which it
+    is not -- see that module's docstring for the live duplication bug this
+    fixes (2026-09-09).
+
     `classification` is `plans/classification-refinement/plan.md` Stage 2's
     addition: the contact's *folded* best classification claim (`belief.
     classification.ClassificationBelief`), monotone non-decreasing in
@@ -122,6 +135,7 @@ class Contact:
 
     id: str
     last_position: GeoPosition
+    last_position_uncertainty_m: float
     last_class_raw: str
     classification: ClassificationBelief
     contributing_observation_ids: list[str] = field(default_factory=list)
@@ -143,6 +157,7 @@ class Contact:
         belongs to this contact (via the gate in `belief.
         association_over_time`, or as this contact's founding observation)."""
         self.last_position = implied_position(percept)
+        self.last_position_uncertainty_m = uncertainty_radius_m(percept)
         self.last_class_raw = percept.classification_raw
         incoming = new_classification_belief(
             value=percept.classification_raw,
@@ -182,6 +197,7 @@ class Contact:
         contact = Contact(
             id=contact_id,
             last_position=implied_position(percept),
+            last_position_uncertainty_m=uncertainty_radius_m(percept),
             last_class_raw=percept.classification_raw,
             classification=new_classification_belief(
                 value=percept.classification_raw,
