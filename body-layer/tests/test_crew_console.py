@@ -114,13 +114,13 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     # Player: "Where was that BMP?" -> a memory-backed answer, not a guess.
     answer_lines = console.handle_line("where was that bmp?", now_sim=reacquired_at)
     assert len(answer_lines) == 1
-    assert answer_lines[0].startswith("BMP-2,")
+    assert answer_lines[0].startswith("UNKNOWN BMP-2")
     assert brain_client.payloads == []  # answered from structured memory, no escalation
 
     # A contact report, triggered the same way ("status <id>").
     report_lines = console.handle_line(f"status {contact_id}", now_sim=reacquired_at)
     assert len(report_lines) == 1
-    assert report_lines[0].startswith("BMP-2,")
+    assert report_lines[0].startswith("UNKNOWN BMP-2")
 
     # An injected urgent call -- Stage 5's manual bypass_gate test harness.
     urgent_lines = console.handle_line(

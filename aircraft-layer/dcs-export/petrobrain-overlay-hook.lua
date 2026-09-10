@@ -101,6 +101,12 @@ local TEXT_OVERLAY_PORT = 7792
 --: console/log remains the durable record.
 local DEFAULT_DURATION_S = 20
 
+--: Single-message mode (2026-09-10 user decision -- the panel is mostly a
+--: debug tool for now, this is a small, local change, not a rework): a new
+--: pushed line replaces whatever is currently shown immediately, instead of
+--: accumulating a scrollback via repeated addText() calls. AutoScrollText
+--: has no "replace" call of its own, so this is `clear()` then `addText()`.
+
 --: Starting sizing values (plan "Message Model"), matching SRS's own
 --: proven real-world window footprint. Tunable at Stage 2/4, not a locked
 --: contract.
@@ -222,6 +228,7 @@ function petrobrainOverlay.listen()
             and type(decoded) == "table"
             and type(decoded.text) == "string"
         then
+            message_text:clear()
             message_text:addText(decoded.text, DEFAULT_DURATION_S)
         end
     end

@@ -70,12 +70,27 @@ def test_render_contact_report_returns_none_for_unknown_contact() -> None:
     assert render_contact_report(store, "CONTACT_999", now_sim=0.0) is None
 
 
-def test_render_contact_report_reuses_describe_contact_summary() -> None:
+def test_render_contact_report_follows_coalition_unit_type_clock_range_format() -> None:
     store, contact_id = _store_with_one_contact()
     speech = render_contact_report(store, contact_id, now_sim=0.0)
     assert speech is not None
     assert speech.template == "contact_report"
-    assert speech.text == "BMP-2, observed, currently visible."
+    # No enrichment supplied -> no clock/range fragment; classification_level=2
+    # ("class") with a non-OP_-bucketed raw value falls back to the value itself.
+    assert speech.text == "UNKNOWN BMP-2."
+
+
+def test_render_contact_report_maps_op_class_to_display_word() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="OP_TRUCK")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    speech = render_contact_report(store, contact_id, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "UNKNOWN truck."
 
 
 def test_route_event_urgent_call_bypasses_the_gate() -> None:

@@ -314,7 +314,16 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
 - `src/belief/speech.py` (BL-5a) — `OutgoingSpeech` (§5's record, trimmed), the three body-written
   templated classes (§2.1/§3.6): `render_readback`, `render_contact_report` (single-contact only —
   no clustering exists yet, `docs/concept/PETROBRAIN_RUNTIME.md` line 336), and `route_event`, the
-  outbound routing gate. `route_event` accepts `belief.events.Event | UrgentCall` and checks which
+  outbound routing gate. **`render_contact_report`'s format (2026-09-10 user decision):**
+  `"<COALITION> <unit type>, <clock> o'clock, <range>."`, no longer a verbatim echo of
+  `tools.describe_contact`'s `summary`. Coalition is always `"UNKNOWN"` — no IFF/coalition
+  perception channel exists, and reading `LoGetWorldObjects`'s real coalition into `Contact` would
+  break the no-omniscience invariant `percept.py` enforces; a real implementation should *infer*
+  coalition from unit-type vocabulary + which side's terrain the contact sits in, not ground truth
+  (`ROADMAP.md` backlog, deferred). Unit type reads the classification lattice's level+value
+  (`_unit_type_display`/`_OP_CLASS_DISPLAY`): `"ground contact"`/`"unidentified contact"` at
+  presence/unknown, a human word for a `class`-level `OP_*` bucket, the reporting name verbatim at
+  `type` level. `route_event` accepts `belief.events.Event | UrgentCall` and checks which
   one it got *before* anything else — an `UrgentCall` (Stage 5's manual bypass-gate test harness,
   constructed only by `crew_console.py`'s `!inject-urgent` command; no real threat-detection channel
   exists) speaks immediately with `bypass_gate=True`, no ack/cooldown touched; a `belief.events.Event`
