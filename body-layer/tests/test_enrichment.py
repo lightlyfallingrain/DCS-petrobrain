@@ -1,0 +1,471 @@
+"""Tests for `belief.enrichment` -- `plans/bl3-world-enrichment/plan.md`.
+World-model calls (`describe_position`) and the terrain-aware projection
+(`perception.geometry.project_terrain_aware`) are monkeypatched, same
+posture as `test_geometry.py`'s own LOS tests: this module is about the
+semantic-mapping/caching/motion-derivation logic, not world-model's store
+internals or the terrain fixed-point solve (covered by `test_geometry.py`).
+No live DCS/world-model build required."""
+
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+
+import pytest
+
+from belief import enrichment
+from belief.contacts import ContactStore
+from belief.enrichment import (
+    SemanticFact,
+    WorldEnrichmentCache,
+    motion_when_seen,
+    relative_geometry,
+    semantic_facts_for,
+)
+from perception.geometry import GeoPosition
+from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
+from perception.source import DerivedWorldPosition, Observation, OwnshipState
+
+_FAKE_CONN = sqlite3.connect(":memory:")
+
+
+def _ownship(
+    x: float = 0.0, z: float = 0.0, alt_m: float = 500.0, heading_true_deg: float = 0.0
+) -> OwnshipState:
+    return OwnshipState(
+        t_sim=0.0, x=x, z=z, alt_m=alt_m, heading_true_deg=heading_true_deg
+    )
+
+
+def _observation(
+    *,
+    obs_id: str,
+    t_sim: float,
+    bearing_deg: float = 0.0,
+    range_m: float = 1000.0,
+    classification_raw: str = "Ural truck",
+) -> Observation:
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=bearing_deg,
+        range_m=range_m,
+        ownship_at_observation=_ownship(),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+    )
+
+
+# --- semantic_facts_for -----------------------------------------------
+
+
+@dataclass
+class _FakeInfo:
+    name: str | None = None
+    subtype: str | None = None
+    distance_m: float = 100.0
+    provenance: str = "osm"
+    confidence: str = "high"
+
+
+@dataclass
+class _FakeDescription:
+    nearest_settlement: _FakeInfo | None = None
+    inside_settlement: _FakeInfo | None = None
+    nearest_road: _FakeInfo | None = None
+    nearest_water: _FakeInfo | None = None
+    nearby_ridges: _FakeInfo | None = None
+    nearby_valleys: _FakeInfo | None = None
+
+
+def test_semantic_facts_for_empty_description_returns_no_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+    assert facts == []
+
+
+def test_semantic_facts_for_includes_every_present_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_settlement=_FakeInfo(name="Jableh", distance_m=500.0),
+        inside_settlement=_FakeInfo(name="Jableh"),
+        nearest_road=_FakeInfo(name="Route 1", subtype="highway", distance_m=50.0),
+        nearest_water=_FakeInfo(name="Mediterranean Sea", distance_m=2000.0),
+        nearby_ridges=_FakeInfo(distance_m=800.0),
+        nearby_valleys=_FakeInfo(distance_m=900.0),
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+
+    assert len(facts) == 6
+    assert all(isinstance(fact, SemanticFact) for fact in facts)
+    texts = [fact.text for fact in facts]
+    assert any("Jableh" in text and "near" in text for text in texts)
+    assert any("inside Jableh" == text for text in texts)
+    assert any("Route 1" in text for text in texts)
+    assert any("Mediterranean Sea" in text for text in texts)
+    assert any("ridge" in text for text in texts)
+    assert any("valley" in text for text in texts)
+
+
+def test_semantic_facts_for_confidence_combines_feature_and_position(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_settlement=_FakeInfo(name="Jableh", confidence="high")
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    high_position_conf = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+    low_position_conf = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 0.5
+    )[0]
+
+    assert high_position_conf.confidence == pytest.approx(1.0)
+    assert low_position_conf.confidence == pytest.approx(0.5)
+
+
+def test_semantic_facts_for_unknown_confidence_string_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_settlement=_FakeInfo(name="Jableh", confidence="some_future_value")
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    fact = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+
+    assert fact.confidence == pytest.approx(0.2)  # "unknown" bucket
+
+
+def test_semantic_facts_for_unnamed_settlement_uses_placeholder_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(nearest_settlement=_FakeInfo(name=None))
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    fact = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+
+    assert "unnamed" in fact.text
+    assert fact.feature_id == "settlement:unnamed"
+
+
+# --- WorldEnrichmentCache -----------------------------------------------
+
+
+def _store_with_one_contact() -> tuple[ContactStore, str]:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    return store, contact_id
+
+
+def test_cache_miss_on_first_lookup_computes_and_stores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        calls.append(max_iterations)
+        return GeoPosition(x=observer.x + rng, z=observer.z, alt_m=observer.alt_m)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store, _contact_id = _store_with_one_contact()
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+
+    world_position, facts = cache.get_or_compute(
+        _FAKE_CONN, "Syria", store, contact, now_sim=0.0
+    )
+
+    assert len(calls) == 1
+    assert facts == []
+    assert world_position.x == pytest.approx(1000.0)
+
+
+def test_cache_hit_when_last_position_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        calls.append(1)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store, _contact_id = _store_with_one_contact()
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=5.0)
+
+    assert len(calls) == 1  # second call was a cache hit, no recompute
+
+
+def test_cache_miss_when_last_position_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        calls.append(1)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store, _contact_id = _store_with_one_contact()
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+
+    # A second observation moves the contact -- must invalidate the cache.
+    store.ingest(
+        [_observation(obs_id="OBS_2", t_sim=10.0, range_m=1500.0)], now_sim=10.0
+    )
+    contact = store.contacts[0]
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=10.0)
+
+    assert len(calls) == 2
+
+
+def test_cache_picks_iterative_max_iterations_within_range_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_max_iterations = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        seen_max_iterations.append(max_iterations)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=500.0)], now_sim=0.0)
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+
+    assert seen_max_iterations == [5]
+
+
+def test_cache_picks_single_shot_max_iterations_far_and_unwatched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_max_iterations = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        seen_max_iterations.append(max_iterations)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=5000.0)], now_sim=0.0)
+    contact = store.contacts[0]
+    cache = WorldEnrichmentCache()
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+
+    assert seen_max_iterations == [1]
+
+
+def test_cache_picks_iterative_max_iterations_when_watched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_max_iterations = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        seen_max_iterations.append(max_iterations)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=5000.0)], now_sim=0.0)
+    contact = store.contacts[0]
+    contact.attention = "watch"
+    cache = WorldEnrichmentCache()
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=0.0)
+
+    assert seen_max_iterations == [5]
+
+
+# --- relative_geometry ---------------------------------------------------
+
+
+def test_relative_geometry_target_dead_ahead() -> None:
+    ownship = _ownship(x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0)
+    target = GeoPosition(x=1000.0, z=0.0, alt_m=500.0)
+
+    result = relative_geometry(ownship, target)
+
+    assert result["bearing_deg"] == pytest.approx(0.0)
+    assert result["range_m"] == pytest.approx(1000.0)
+    assert result["clock_position"] == 12
+    assert result["relative_alt_m"] == pytest.approx(0.0)
+
+
+def test_relative_geometry_target_at_three_oclock() -> None:
+    ownship = _ownship(x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0)
+    target = GeoPosition(x=0.0, z=1000.0, alt_m=600.0)
+
+    result = relative_geometry(ownship, target)
+
+    assert result["clock_position"] == 3
+    assert result["relative_alt_m"] == pytest.approx(100.0)
+
+
+def test_relative_geometry_accounts_for_ownship_heading() -> None:
+    # Target due east; ownship heading east means the target is dead ahead
+    # (clock 12), not at clock 3.
+    ownship = _ownship(x=0.0, z=0.0, alt_m=500.0, heading_true_deg=90.0)
+    target = GeoPosition(x=0.0, z=1000.0, alt_m=500.0)
+
+    result = relative_geometry(ownship, target)
+
+    assert result["clock_position"] == 12
+
+
+# --- motion_when_seen ------------------------------------------------------
+
+
+def test_motion_when_seen_returns_none_for_a_single_observation() -> None:
+    store, _contact_id = _store_with_one_contact()
+    contact = store.contacts[0]
+    assert motion_when_seen(store, contact) is None
+
+
+def test_motion_when_seen_derives_direction_from_two_distinct_positions() -> None:
+    store = ContactStore()
+    # Bearing 0 (north/+x) at both t=0 and t=10, but further out the second
+    # time -- must stay within belief.association_over_time's spatial gate
+    # (uncertainty + growth*elapsed) so the two percepts merge into one
+    # contact rather than founding a second one.
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [_observation(obs_id="OBS_2", t_sim=10.0, bearing_deg=0.0, range_m=1100.0)],
+        now_sim=10.0,
+    )
+    assert len(store.contacts) == 1
+    contact = store.contacts[0]
+
+    motion = motion_when_seen(store, contact)
+
+    assert motion is not None
+    assert motion["direction_deg"] == pytest.approx(0.0)
+    assert motion["speed_mps"] == pytest.approx(10.0)
+
+
+def test_motion_when_seen_skips_duplicate_positions() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)],
+        now_sim=0.0,
+    )
+    # Same implied position as OBS_1 (identical bearing/range/observer).
+    store.ingest(
+        [_observation(obs_id="OBS_2", t_sim=5.0, bearing_deg=0.0, range_m=1000.0)],
+        now_sim=5.0,
+    )
+    contact = store.contacts[0]
+
+    assert motion_when_seen(store, contact) is None

@@ -10,15 +10,20 @@ actually knows about a `belief.contacts.Contact`: its id, its last perceived
 classification, its `belief.decay.Certainty`, how long ago it was last
 observed, its last *implied* (belief-derived, not ground-truth) position,
 which source(s) contributed to it, and its bare attention state (this
-stage's addition). §3.4's full response shape also has `semantic` (world-
-model place references) and a clock-bearing `relative_now` -- both are BL-3
-work (world enrichment; relative geometry needs a *current* ownship position
-this module is never given). Those keys are **absent from the dict
-entirely, not present with a null value** -- a consumer must be able to tell
-"BL-2 doesn't know this yet" from "BL-2 checked and found nothing," and a
-present-but-null key collapses that distinction. The same absent-not-empty
-rule is why `phrasing_hints` never carries an `urgency` key here: urgency is
-a threat-assessment judgment this module has no basis to compute (BL-4).
+stage's addition). §3.4's full response shape also has `position.confidence`,
+`semantic` (world-model place references), a clock-bearing `relative_now`,
+and `motion_when_seen` -- BL-3 (`plans/bl3-world-enrichment/plan.md`) adds
+all four, but only when the optional `enrichment: belief.enrichment.
+EnrichmentContext | None` parameter every contact-facing function below
+takes is actually supplied; `None` (the default) leaves `facts` in exactly
+BL-2's original shape, so existing callers are unaffected. Those keys are
+**absent from the dict entirely, not present with a null value** when
+enrichment is unavailable or a given fact has none to report -- a consumer
+must be able to tell "BL-2/BL-3 doesn't know this yet" from "checked and
+found nothing," and a present-but-null key collapses that distinction. The
+same absent-not-empty rule is why `phrasing_hints` never carries an
+`urgency` key here: urgency is a threat-assessment judgment this module has
+no basis to compute (BL-4).
 
 **Identity invariant.** Every function here reads only `Contact` fields,
 which are themselves derived exclusively from `belief.percept.Percept`
@@ -46,10 +51,12 @@ tools, rather than in the console's command dispatch.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Literal, TypedDict
 
 from belief.contacts import Contact, ContactStore
-from belief.decay import Certainty, certainty_of
+from belief.decay import Certainty, certainty_of, position_confidence
+from belief.enrichment import EnrichmentContext, motion_when_seen, relative_geometry
 
 #: `phrasing_hints.certainty`'s vocabulary -- deliberately distinct wording
 #: from the internal `belief.decay.Certainty` ladder (`"observed"` etc.),
@@ -86,7 +93,12 @@ def _find_contact(store: ContactStore, contact_id: str) -> Contact | None:
     return None
 
 
-def _contact_facts(contact: Contact, now_sim: float) -> dict[str, object]:
+def _contact_facts(
+    contact: Contact,
+    now_sim: float,
+    store: ContactStore,
+    enrichment: EnrichmentContext | None = None,
+) -> dict[str, object]:
     certainty = certainty_of(contact, now_sim)
     facts: dict[str, object] = {
         "id": contact.id,
@@ -102,7 +114,38 @@ def _contact_facts(contact: Contact, now_sim: float) -> dict[str, object]:
     }
     if contact.attention_source is not None:
         facts["attention_source"] = contact.attention_source
+    if enrichment is not None:
+        _add_enrichment_facts(facts, contact, now_sim, store, enrichment)
     return facts
+
+
+def _add_enrichment_facts(
+    facts: dict[str, object],
+    contact: Contact,
+    now_sim: float,
+    store: ContactStore,
+    enrichment: EnrichmentContext,
+) -> None:
+    """BL-3's addition to `facts` -- `plans/bl3-world-enrichment/plan.md`.
+    Mutates `facts` in place (the `position` dict already built by
+    `_contact_facts` above gains a `confidence` key; `semantic`/
+    `relative_now`/`motion_when_seen` are new top-level keys, the last one
+    omitted entirely rather than `None` when `belief.enrichment.
+    motion_when_seen` has too little history to derive a direction)."""
+    position_conf = position_confidence(contact, now_sim)
+    position_dict = facts["position"]
+    assert isinstance(position_dict, dict)
+    position_dict["confidence"] = position_conf
+
+    world_position, semantic_facts = enrichment.cache.get_or_compute(
+        enrichment.conn, enrichment.theatre, store, contact, now_sim
+    )
+    facts["semantic"] = [asdict(fact) for fact in semantic_facts]
+    facts["relative_now"] = relative_geometry(enrichment.ownship, world_position)
+
+    motion = motion_when_seen(store, contact)
+    if motion is not None:
+        facts["motion_when_seen"] = motion
 
 
 def _contact_summary(contact: Contact, now_sim: float) -> str:
@@ -123,9 +166,14 @@ def _contact_phrasing_hints(contact: Contact, now_sim: float) -> dict[str, objec
     return {"certainty": _PHRASING_CERTAINTY[certainty]}
 
 
-def _contact_result(contact: Contact, now_sim: float) -> ContactResult:
+def _contact_result(
+    contact: Contact,
+    now_sim: float,
+    store: ContactStore,
+    enrichment: EnrichmentContext | None = None,
+) -> ContactResult:
     return ContactResult(
-        facts=_contact_facts(contact, now_sim),
+        facts=_contact_facts(contact, now_sim, store, enrichment),
         summary=_contact_summary(contact, now_sim),
         phrasing_hints=_contact_phrasing_hints(contact, now_sim),
     )
@@ -135,31 +183,40 @@ def get_contacts(
     store: ContactStore,
     now_sim: float,
     filter: ContactFilter | None = None,
+    enrichment: EnrichmentContext | None = None,
 ) -> list[ContactResult]:
     """List current contacts, most-recently-seen first. `filter` is
     deliberately minimal -- `"visible"` (currently `certainty == "observed"`)
     and `"watched"` (`attention == "watch"`) are the only two BL-2 has real
-    machinery for; §3.3's `"threats"`/`"near_aircraft"` need threat
-    assessment and a current ownship position this module does not have
-    (BL-4/BL-3), so they are not offered rather than faked."""
+    machinery for; §3.3's `"threats"`/`"near_aircraft"` still need threat
+    assessment (BL-4), so they are not offered rather than faked. `enrichment`
+    (BL-3, optional) is threaded into every returned result the same way."""
     contacts = store.contacts
     if filter == "visible":
         contacts = [c for c in contacts if certainty_of(c, now_sim) == "observed"]
     elif filter == "watched":
         contacts = [c for c in contacts if c.attention == "watch"]
     contacts = sorted(contacts, key=lambda c: c.last_seen_sim, reverse=True)
-    return [_contact_result(contact, now_sim) for contact in contacts]
+    return [
+        _contact_result(contact, now_sim, store, enrichment) for contact in contacts
+    ]
 
 
 def describe_contact(
-    store: ContactStore, contact_id: str, now_sim: float
+    store: ContactStore,
+    contact_id: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
 ) -> ContactResult | None:
-    """Everything BL-2 knows about one contact, or `None` if `contact_id`
-    does not exist -- callers must not invent a contact for an unknown id."""
+    """Everything BL-2/BL-3 knows about one contact, or `None` if
+    `contact_id` does not exist -- callers must not invent a contact for an
+    unknown id. `enrichment` (BL-3, optional) adds `position.confidence`,
+    `semantic`, `relative_now`, and (where derivable) `motion_when_seen` to
+    `facts`; omitted, this is byte-for-byte BL-2's original behavior."""
     contact = _find_contact(store, contact_id)
     if contact is None:
         return None
-    return _contact_result(contact, now_sim)
+    return _contact_result(contact, now_sim, store, enrichment)
 
 
 def get_contact_history(
@@ -206,18 +263,28 @@ def get_contact_history(
     return entries
 
 
-def find_contact(store: ContactStore, text: str, now_sim: float) -> list[ContactResult]:
+def find_contact(
+    store: ContactStore,
+    text: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> list[ContactResult]:
     """Text search over contacts' *perceived* classification
     (`Contact.last_class_raw`) -- never a truth field. Case-insensitive
     substring match; empty/whitespace-only `text` matches nothing rather
     than returning every contact. Most-recently-seen first, mirroring
-    `get_contacts`."""
+    `get_contacts`. `enrichment` (BL-3, optional, not named in the plan's
+    explicit function list but threaded here too for consistency with
+    `get_contacts`/`describe_contact` -- both build the same `ContactResult`
+    via `_contact_result`, so leaving this one unenriched would be a
+    surprising, undocumented gap) is threaded into every returned result the
+    same way."""
     needle = text.strip().lower()
     if not needle:
         return []
     matches = [c for c in store.contacts if needle in c.last_class_raw.lower()]
     matches.sort(key=lambda c: c.last_seen_sim, reverse=True)
-    return [_contact_result(contact, now_sim) for contact in matches]
+    return [_contact_result(contact, now_sim, store, enrichment) for contact in matches]
 
 
 def watch_contact(

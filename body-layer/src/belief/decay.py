@@ -29,6 +29,7 @@ caller that turns `certainty_of`'s result into a state change.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
@@ -107,3 +108,15 @@ def certainty_of(contact: Contact, now_sim: float) -> Certainty:
     if elapsed_s <= LOST_THRESHOLD_S:
         return "estimated"
     return "lost"
+
+
+def position_confidence(contact: Contact, now_sim: float) -> float:
+    """Numeric position confidence, `(0, 1]`, exponentially decaying with a
+    half-life of `POSITION_HALF_LIFE_S` since `contact.last_seen_sim` --
+    BL-3's (`plans/bl3-world-enrichment/plan.md` step 2) numeric counterpart
+    to `certainty_of`'s discrete ladder above, and the one number `belief.
+    enrichment`'s `position`/`semantic`/`motion_when_seen` fields all key
+    off. Pure, like every other function in this module -- no ticker, no
+    mutation, no wall-clock."""
+    elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
+    return math.pow(0.5, elapsed_s / POSITION_HALF_LIFE_S)

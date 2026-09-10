@@ -5,8 +5,15 @@ the plan's absent-not-empty constraint on `facts`."""
 
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import dataclass
+
+import pytest
+
+from belief import enrichment as enrichment_module
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
+from belief.enrichment import EnrichmentContext
 from belief.tools import (
     describe_contact,
     find_contact,
@@ -18,6 +25,49 @@ from belief.tools import (
 )
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
+
+_FAKE_CONN = sqlite3.connect(":memory:")
+
+
+@dataclass
+class _FakeInfo:
+    name: str | None = None
+    subtype: str | None = None
+    distance_m: float = 100.0
+    provenance: str = "osm"
+    confidence: str = "high"
+
+
+@dataclass
+class _FakeDescription:
+    nearest_settlement: _FakeInfo | None = None
+    inside_settlement: _FakeInfo | None = None
+    nearest_road: _FakeInfo | None = None
+    nearest_water: _FakeInfo | None = None
+    nearby_ridges: _FakeInfo | None = None
+    nearby_valleys: _FakeInfo | None = None
+
+
+def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(name="Jableh")
+        ),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    return EnrichmentContext(
+        conn=_FAKE_CONN,
+        theatre="Syria",
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+        ),
+    )
 
 
 def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
@@ -237,3 +287,71 @@ def test_get_stats_counts_observations_contacts_and_events() -> None:
     store.tick(now_sim=0.0)
     stats = get_stats(store)
     assert stats == {"observations": 1, "contacts": 1, "events": 1}
+
+
+# --- BL-3 enrichment threading -------------------------------------------
+
+
+def test_describe_contact_without_enrichment_matches_bl2_shape() -> None:
+    """`enrichment=None` (the default) must leave `facts` byte-for-byte
+    BL-2's original shape -- see `test_describe_contact_facts_shape`."""
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    result = describe_contact(store, contact.id, now_sim=0.0)
+    assert result is not None
+    assert result["facts"]["position"] == {
+        "dcs": {"x": contact.last_position.x, "z": contact.last_position.z}
+    }
+    for key in ("semantic", "relative_now", "motion_when_seen"):
+        assert key not in result["facts"]
+
+
+def test_describe_contact_with_enrichment_adds_the_four_bl3_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    result = describe_contact(
+        store, contact.id, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+    assert result is not None
+    facts = result["facts"]
+
+    position = facts["position"]
+    assert isinstance(position, dict)
+    assert position["confidence"] == pytest.approx(1.0)
+
+    semantic = facts["semantic"]
+    assert isinstance(semantic, list)
+    assert len(semantic) == 1
+    assert semantic[0]["text"] == "near Jableh (100m)"
+
+    relative_now = facts["relative_now"]
+    assert isinstance(relative_now, dict)
+    assert relative_now["clock_position"] in range(1, 13)
+
+    # A single contributing observation -- too little history for a
+    # direction, so the key must be absent, not None.
+    assert "motion_when_seen" not in facts
+
+
+def test_get_contacts_threads_enrichment_through_every_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store_with_one_contact()
+    results = get_contacts(
+        store, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+    assert len(results) == 1
+    assert "semantic" in results[0]["facts"]
+
+
+def test_find_contact_threads_enrichment_through_every_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _store_with_one_contact()
+    results = find_contact(
+        store, "ural", now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+    assert len(results) == 1
+    assert "semantic" in results[0]["facts"]

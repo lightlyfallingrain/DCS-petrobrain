@@ -11,15 +11,42 @@ from __future__ import annotations
 import ast
 import inspect
 import pathlib
+import sqlite3
+from dataclasses import dataclass
+
+import pytest
 
 from belief import console as console_module
+from belief import enrichment as enrichment_module
 from belief import tools as tools_module
 from belief.console import Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
+from belief.enrichment import EnrichmentContext
 from belief.events import Event
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
+
+_FAKE_CONN = sqlite3.connect(":memory:")
+
+
+@dataclass
+class _FakeInfo:
+    name: str | None = None
+    subtype: str | None = None
+    distance_m: float = 100.0
+    provenance: str = "osm"
+    confidence: str = "high"
+
+
+@dataclass
+class _FakeDescription:
+    nearest_settlement: _FakeInfo | None = None
+    inside_settlement: _FakeInfo | None = None
+    nearest_road: _FakeInfo | None = None
+    nearest_water: _FakeInfo | None = None
+    nearby_ridges: _FakeInfo | None = None
+    nearby_valleys: _FakeInfo | None = None
 
 
 def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
@@ -175,6 +202,91 @@ def test_visible_filter_excludes_a_contact_past_the_observed_window() -> None:
     console = Console(store=store)
     now_sim = OBSERVED_WINDOW_S + 1.0
     assert console.handle_line("contacts visible", now_sim=now_sim) == ["no contacts"]
+
+
+def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
+    """BL-3 enrichment wired against fakes -- `describe_position` returns one
+    named settlement, `project_terrain_aware` is a no-op passthrough of the
+    observer position (`_FAKE_CONN` has no `grid` table for the real
+    `sample_grid` call to read)."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        ),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    return EnrichmentContext(
+        conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+    )
+
+
+def test_show_command_includes_enrichment_fields_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = Console(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    show_output = console.handle_line(f"show {contact_id}", now_sim=0.0)
+
+    assert any("confidence" in line for line in show_output if "position" in line)
+    assert any(line.startswith("  semantic:") for line in show_output)
+    assert any(line.startswith("  relative_now:") for line in show_output)
+
+
+def test_show_command_omits_enrichment_fields_when_not_configured() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = Console(store=store)
+
+    show_output = console.handle_line(f"show {contact_id}", now_sim=0.0)
+
+    assert not any(line.startswith("  semantic:") for line in show_output)
+    assert not any(line.startswith("  relative_now:") for line in show_output)
+
+
+def test_format_event_for_overlay_appends_semantic_fragment_when_enriched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    (event,) = store.events
+
+    line = format_event_for_overlay(
+        store, event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert "Jableh" in line
+
+
+def test_format_event_for_overlay_unchanged_without_enrichment() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    (event,) = store.events
+    contact_id = store.contacts[0].id
+
+    line = format_event_for_overlay(store, event, now_sim=0.0)
+
+    assert (
+        line
+        == f"{contact_id}: CONTACT_DETECTED, Ural truck, observed, currently visible."
+    )
 
 
 def test_format_event_for_overlay_uses_describe_contact_summary() -> None:

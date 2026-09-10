@@ -4,12 +4,15 @@ plan's acceptance criteria ("each `certainty` row is pinned by a test")."""
 
 from __future__ import annotations
 
+import pytest
+
 from belief.contacts import Contact
 from belief.decay import (
     LOST_THRESHOLD_S,
     OBSERVED_WINDOW_S,
     POSITION_HALF_LIFE_S,
     certainty_of,
+    position_confidence,
 )
 from perception.geometry import GeoPosition
 
@@ -70,3 +73,33 @@ def test_negative_elapsed_time_is_clamped_to_observed() -> None:
     a nonsensical negative-elapsed certainty."""
     contact = _contact(last_seen_sim=100.0)
     assert certainty_of(contact, now_sim=0.0) == "observed"
+
+
+def test_position_confidence_is_one_at_zero_elapsed() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    assert position_confidence(contact, now_sim=0.0) == pytest.approx(1.0)
+
+
+def test_position_confidence_is_half_at_the_half_life() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    assert position_confidence(contact, now_sim=POSITION_HALF_LIFE_S) == pytest.approx(
+        0.5
+    )
+
+
+def test_position_confidence_is_a_quarter_at_two_half_lives() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    confidence = position_confidence(contact, now_sim=POSITION_HALF_LIFE_S * 2.0)
+    assert confidence == pytest.approx(0.25)
+
+
+def test_position_confidence_negative_elapsed_time_is_clamped_to_one() -> None:
+    contact = _contact(last_seen_sim=100.0)
+    assert position_confidence(contact, now_sim=0.0) == pytest.approx(1.0)
+
+
+def test_position_confidence_decays_monotonically() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    earlier = position_confidence(contact, now_sim=10.0)
+    later = position_confidence(contact, now_sim=20.0)
+    assert later < earlier
