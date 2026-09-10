@@ -54,18 +54,17 @@ commands answer correctly end to end, not just against mocked fixtures.
   source files), `pytest body-layer/tests -q` pass (355 passed).
 
 ### Notable Discoveries
-- **A concurrent process committed alongside this work.** The third commit (console.py wiring +
-  its tests) landed in history under commit `176fa2c`, whose message is about an unrelated
-  `/merge` skill rewrite -- another session/process was evidently working in this same checkout
-  at the same time and its `git commit` swept up my already-`git add`-staged `console.py`/
-  `test_console.py` changes alongside its own `.claude/skills/merge.md` edit. Verified via
-  `git show 176fa2c -- body-layer/src/belief/console.py` that the diff content is exactly what
-  was implemented here (62 insertions matching this session's edits) -- nothing was lost or
-  altered, just bundled under a commit message that doesn't describe it. Left as-is per the
-  project's "never rewrite history unless asked" default; flagging here since a future `git log`
-  reader won't find "wire place/situation/position" in that commit's subject line.
-  world-model's two commits and body-layer's `tools.py`/`tool_api.py` commits landed cleanly
-  under this session's own messages, unaffected.
+- **A concurrent process was working in this same checkout.** Mid-implementation, a `git commit`
+  from another session (unrelated `/merge` skill rewrite, `.claude/skills/merge.md`) briefly swept
+  up this session's already-`git add`-staged `console.py`/`test_console.py` changes into its own
+  commit. That session then reset itself back one commit and recommitted with only its own file,
+  which put `console.py`/`test_console.py` back into this session's working tree as unstaged
+  changes (confirmed via `git reflog`: a `reset: moving to HEAD~1` between two commits of the
+  same `/merge` message). No content was lost -- re-verified the diff matched exactly what this
+  session wrote, then committed it fresh under this session's own message (the final `place/
+  situation/position` commit). Worth flagging for anyone running multiple agent sessions against
+  the same working directory without worktree isolation: `git status`/`git log` after every
+  commit, not just before, if another process might be active concurrently.
 - `describe_our_position` reuses `belief.enrichment.semantic_facts_for` directly (with
   `position_conf=1.0`, since ownship telemetry is ground truth, not a decaying belief estimate)
   rather than re-deriving semantic text from a second `describe_position` call -- avoids
