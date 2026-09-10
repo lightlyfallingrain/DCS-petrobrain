@@ -289,6 +289,91 @@ def test_missing_snapshot_resets_visible_set_state() -> None:
     assert len(third) == 1
 
 
+def test_continuity_resolves_across_a_multi_poll_gap_including_a_missing_snapshot() -> (
+    None
+):
+    """`plans/contact-duplication-ambiguity-runaway/plan.md`'s object-
+    permanence mechanism: the same `object_id`, re-emitted after several
+    polls of *not* being in the visible set at all -- including a poll with
+    no `world_objects` snapshot whatsoever -- must still resolve
+    `continues_observation_id` to the last observation emitted before the
+    gap, not `None`. This is what distinguishes the persistent map from the
+    zero-gap design the plan explicitly superseded."""
+    visible = {"objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]}
+    empty: dict[str, Any] = {"objects": []}
+    client = FakeAircraftClient(visible)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+    )
+
+    first = source.poll(100.0, _ownship())
+    assert len(first) == 1
+    assert first[0].continues_observation_id is None
+
+    client._world_objects = empty
+    assert source.poll(100.2, _ownship()) == []
+    client._world_objects = None
+    assert source.poll(100.4, _ownship()) == []
+    client._world_objects = empty
+    assert source.poll(100.6, _ownship()) == []
+
+    client._world_objects = visible
+    reacquired = source.poll(100.8, _ownship())
+
+    assert len(reacquired) == 1
+    assert reacquired[0].continues_observation_id == first[0].id
+
+
+def test_continuity_never_cross_tags_two_different_objects() -> None:
+    """Two distinct, simultaneously-visible objects must never have their
+    `continues_observation_id`s cross -- each `object_id`'s map entry is
+    independent."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "Ural-4320", lat_deg=400.0, lon_deg=200.0),
+        ]
+    }
+    empty: dict[str, Any] = {"objects": []}
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+    )
+
+    first = source.poll(100.0, _ownship())
+    assert len(first) == 2
+    assert all(obs.continues_observation_id is None for obs in first)
+
+    # Force both back through the debounce cycle (leave, then re-enter).
+    client._world_objects = empty
+    assert source.poll(100.2, _ownship()) == []
+    client._world_objects = world_objects
+    second = source.poll(100.4, _ownship())
+
+    assert len(second) == 2
+    infantry_first = next(
+        obs for obs in first if obs.classification_raw == "OP_INFANTRY"
+    )
+    truck_first = next(obs for obs in first if obs.classification_raw != "OP_INFANTRY")
+    infantry_second = next(
+        obs for obs in second if obs.classification_raw == "OP_INFANTRY"
+    )
+    truck_second = next(
+        obs for obs in second if obs.classification_raw != "OP_INFANTRY"
+    )
+
+    # Each object's re-emission continues its own earlier observation, and
+    # never the other object's.
+    assert infantry_second.continues_observation_id == infantry_first.id
+    assert truck_second.continues_observation_id == truck_first.id
+    assert infantry_second.continues_observation_id != truck_first.id
+    assert truck_second.continues_observation_id != infantry_first.id
+
+
 def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> None:
     # 5 simultaneously-new infantry candidates (well within the 900 m
     # threshold), cap = NAKED_EYE_MAX_NEW_PER_POLL = 3 -- only the 3
