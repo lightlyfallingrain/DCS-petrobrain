@@ -52,20 +52,46 @@ documented gap, not an oversight: a future milestone that wants to narrate
 "entering a watched area raised attention on C22" adds a template here,
 it does not need to touch this module's structure).
 
-**No contact clustering.** `render_contact_report` reads one contact's
-existing `belief.tools.describe_contact` result and speaks its `summary`
-verbatim -- that field is already certainty-hedged (`belief.tools.
-_contact_summary`) and already appends a clock/range fragment when
-`relative_now` is available, so re-deriving that logic here would duplicate
-it, not improve it. §3.6's multi-contact `contact_group` worked example
-(IFF, composition counts) needs data this codebase does not track yet
+**No contact clustering.** `render_contact_report` reports one contact at a
+time. §3.6's multi-contact `contact_group` worked example (composition
+counts) needs data this codebase does not track yet
 (`docs/concept/PETROBRAIN_RUNTIME.md` line 336: no clustering exists) --
-out of scope per the plan's explicit scope cut, not an oversight."""
+out of scope per the plan's explicit scope cut, not an oversight; the
+report format below has no unit-count/"group of" element for the same
+reason.
+
+**Contact report format (2026-09-10 user decision, superseding the original
+"speak `describe_contact`'s `summary` verbatim" design).**
+`"<COALITION> <unit type>, <clock> o'clock, <range>."` -- own format, built
+from `facts["classification"]`/`facts["relative_now"]` directly rather than
+reusing `belief.tools._contact_summary` (which stays certainty/recency-
+phrased for the console debug tool and lifecycle-event lines; this format
+is for the player-facing spoken/typed contact report only).
+`_unit_type_display` reads the classification lattice's level+value
+straight off `facts["classification"]` -- `"ground contact"`/`"unidentified
+contact"` at the presence/unknown levels, `_OP_CLASS_DISPLAY`'s human word
+for a `class`-level `OP_*` bucket, the value verbatim at `type` level (an
+already-human reporting name/type string). Clock/range are omitted
+entirely (not "unknown") when `relative_now` is absent -- no enrichment
+supplied, same absent-not-null convention `tools.py` itself uses.
+
+**Coalition is always `"UNKNOWN"` -- deliberately deferred, not a bug.**
+No IFF/coalition perception channel exists (`perception.association`'s own
+docstring: "no coalition/IFF filtering"). `LoGetWorldObjects` does carry
+real DCS ground-truth coalition, but reading it directly into `Contact`
+would violate the project's no-omniscience invariant (`percept.py`
+structurally strips DCS truth fields on purpose) -- Petrovich would always
+know true IFF for a target he's never actually identified. **User decision,
+2026-09-10: when this is eventually built, coalition should be *inferred*,
+not read from ground truth** -- from the unit type/vocabulary each
+coalition is known to field, and from which side controls the terrain the
+contact sits in (world-model territory data, not yet built either). Left
+as a body-layer backlog item (`ROADMAP.md`), not built here."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal
 
 from belief.attention import Attention
 from belief.contacts import ContactStore
@@ -129,6 +155,39 @@ def render_readback(attention_level: Attention, contact_id: str) -> OutgoingSpee
     return OutgoingSpeech(text=text, template="readback")
 
 
+#: `class`-level `OP_*` buckets -> a human word, for the contact report's
+#: unit-type field. See module docstring's "Contact report format" note.
+#: Every `OP_*` value `perception.object_model` actually assigns (checked
+#: against its table) has an entry; an unmapped value falls back to itself
+#: verbatim (`_unit_type_display`) rather than raising.
+_OP_CLASS_DISPLAY: Final[dict[str, str]] = {
+    "OP_ARMORED": "armor",
+    "OP_TRUCK": "truck",
+    "OP_INFANTRY": "infantry",
+    "OP_SRSAM": "SAM",
+    "OP_MRSAM": "SAM",
+    "OP_SPAAG": "AAA",
+    "OP_ZU23": "AAA",
+    "OP_SHIP": "ship",
+}
+
+#: See module docstring's "Coalition is always UNKNOWN" note -- deliberately
+#: deferred, not a bug.
+_COALITION_PLACEHOLDER: Final[str] = "UNKNOWN"
+
+
+def _unit_type_display(value: object, level: object) -> str:
+    """The contact report's unit-type field, from `facts["classification"]`'s
+    `value`/`level`. See module docstring's "Contact report format" note."""
+    if level == "type" and isinstance(value, str) and value:
+        return value
+    if level == "class" and isinstance(value, str) and value:
+        return _OP_CLASS_DISPLAY.get(value, value)
+    if level == "presence":
+        return "ground contact"
+    return "unidentified contact"
+
+
 def render_contact_report(
     store: ContactStore,
     contact_id: str,
@@ -136,13 +195,28 @@ def render_contact_report(
     enrichment: EnrichmentContext | None = None,
 ) -> OutgoingSpeech | None:
     """A single-contact report (see module docstring's "No contact
-    clustering" note). `None` if `contact_id` does not exist -- callers must
-    not invent a contact for an unknown id, same convention as `belief.tools.
-    describe_contact` itself."""
+    clustering"/"Contact report format" notes). `None` if `contact_id` does
+    not exist -- callers must not invent a contact for an unknown id, same
+    convention as `belief.tools.describe_contact` itself."""
     result = describe_contact(store, contact_id, now_sim, enrichment=enrichment)
     if result is None:
         return None
-    return OutgoingSpeech(text=str(result["summary"]), template="contact_report")
+    facts = result["facts"]
+    classification = facts["classification"]
+    assert isinstance(classification, dict)
+    unit_type = _unit_type_display(
+        classification.get("value"), classification.get("level")
+    )
+    text = f"{_COALITION_PLACEHOLDER} {unit_type}"
+    relative_now = facts.get("relative_now")
+    if relative_now is not None:
+        assert isinstance(relative_now, dict)
+        clock = relative_now["clock_position"]
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        text += f", {clock} o'clock, {range_m / 1000:.1f} km"
+    text += "."
+    return OutgoingSpeech(text=text, template="contact_report")
 
 
 def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
