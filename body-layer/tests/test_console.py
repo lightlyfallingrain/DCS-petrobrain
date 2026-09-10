@@ -26,6 +26,7 @@ from belief.enrichment import EnrichmentContext
 from belief.events import Event
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
+from query.search import PlaceMatch
 
 _FAKE_CONN = sqlite3.connect(":memory:")
 
@@ -524,6 +525,81 @@ def test_ack_command_reports_unknown_id() -> None:
 def test_events_command_lists_nothing_when_no_events() -> None:
     console = Console(store=ContactStore())
     assert console.handle_line("events", now_sim=0.0) == ["no unacknowledged events"]
+
+
+# --- place / situation / position (BL-5) --------------------------------
+
+
+def test_place_command_requires_enrichment() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("place Jableh", now_sim=0.0) == [
+        "place requires live ownship telemetry (not available yet)"
+    ]
+
+
+def test_place_command_usage_message_with_no_argument() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("place", now_sim=0.0) == ["usage: place <text>"]
+
+
+def test_place_command_reports_no_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tools_module, "find_place_by_name", lambda conn, text: [])
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    output = console.handle_line("place Nowhere", now_sim=0.0)
+    assert output == ["no matches for 'Nowhere'"]
+
+
+def test_place_command_lists_match_summaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_place_by_name",
+        lambda conn, text: [
+            PlaceMatch(
+                name="Jableh",
+                kind="settlement",
+                feature_id=1,
+                x=0.0,
+                z=0.0,
+                confidence=1.0,
+                provenance="dcs",
+            )
+        ],
+    )
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    output = console.handle_line("place Jableh", now_sim=0.0)
+    assert output == ["Jableh (settlement)"]
+
+
+def test_situation_command_requires_enrichment() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("situation", now_sim=0.0) == [
+        "situation requires live ownship telemetry (not available yet)"
+    ]
+
+
+def test_situation_command_reports_a_summary_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    output = console.handle_line("situation", now_sim=0.0)
+    assert len(output) == 1
+    assert "0 contact(s)" in output[0]
+
+
+def test_position_command_requires_enrichment() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("position", now_sim=0.0) == [
+        "position requires live ownship telemetry (not available yet)"
+    ]
+
+
+def test_position_command_reports_ownship_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    output = console.handle_line("position", now_sim=0.0)
+    assert len(output) == 1
+    assert "Jableh" in output[0]
 
 
 def test_console_module_contains_no_belief_logic() -> None:

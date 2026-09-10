@@ -26,6 +26,14 @@ here -- see `tools.py`'s own module docstring on why `set_attention`/
     events                                      -> tools.list_events
     ack <id>                                    -> tools.acknowledge_event
     stats                                       -> tools.get_stats
+    place <text>                                -> tools.find_place
+    situation                                   -> tools.get_situation
+    position                                    -> tools.describe_our_position
+
+`events`/`ack <id>` map to `tools.list_events`/`tools.acknowledge_event`
+directly, which is exactly `tools.poll_events`'s own semantics (BL-5,
+`plans/bl5-tool-api/plan.md` Decision 4) -- documented here, not
+duplicated as a separate command.
 
 `watch <id>`/`unwatch <id>` (BL-2 Stage 4) are kept as aliases over the
 general `attention <id> <level>` command (BL-4, `plans/
@@ -38,7 +46,12 @@ ownship` (`perception.geometry.project_from_bearing_range`) -- it is
 therefore unavailable (returns an error line, not a crash) until `Console.
 enrichment` has been set, same guard shape as every other enrichment-
 dependent field elsewhere in this module. It never resolves a place name
-(`find_place` is BL-5/BL-6 work, see `tools.watch_area`'s own docstring)."""
+(`find_place` is BL-5/BL-6 work, see `tools.watch_area`'s own docstring).
+
+`place`/`situation`/`position` (BL-5) require live ownship telemetry the
+same way `watch-area` does -- `Console.enrichment` must be set, or they
+return an error line rather than crashing, same guard shape as every other
+enrichment-dependent command in this module."""
 
 from __future__ import annotations
 
@@ -52,12 +65,16 @@ from belief.events import CONTACT_CLASSIFICATION_CHANGED, Event
 from belief.tools import (
     ContactFilter,
     ContactResult,
+    ToolResult,
     acknowledge_event,
     describe_contact,
+    describe_our_position,
     find_contact,
+    find_place,
     get_attention_state,
     get_contact_history,
     get_contacts,
+    get_situation,
     get_stats,
     list_areas,
     list_events,
@@ -86,6 +103,9 @@ Petrovich belief console -- commands:
   events                          list unacknowledged events
   ack <id>                        acknowledge an event
   stats                           observation/contact/event counts
+  place <text>                    look up a named place in the world model
+  situation                       aggregate sitrep
+  position                        our own current position
 """
 
 _CONTACT_FILTERS: tuple[ContactFilter, ...] = ("all", "visible", "watched")
@@ -173,6 +193,12 @@ def _dispatch(
         return _handle_ack(store, rest)
     if command == "stats":
         return _handle_stats(store)
+    if command == "place":
+        return _handle_place(rest, enrichment)
+    if command == "situation":
+        return _handle_situation(store, now_sim, enrichment)
+    if command == "position":
+        return _handle_position(enrichment)
     return [f"unknown command: {command}"]
 
 
@@ -369,6 +395,40 @@ def _handle_stats(store: ContactStore) -> list[str]:
             f"events={stats['events']}"
         )
     ]
+
+
+_ENRICHMENT_REQUIRED_MESSAGE = "requires live ownship telemetry (not available yet)"
+
+
+def _handle_place(rest: str, enrichment: EnrichmentContext | None) -> list[str]:
+    if not rest:
+        return ["usage: place <text>"]
+    if enrichment is None:
+        return [f"place {_ENRICHMENT_REQUIRED_MESSAGE}"]
+    results = find_place(enrichment, rest)
+    if not results:
+        return [f"no matches for '{rest}'"]
+    return [_format_tool_result_line(result) for result in results]
+
+
+def _handle_situation(
+    store: ContactStore, now_sim: float, enrichment: EnrichmentContext | None
+) -> list[str]:
+    if enrichment is None:
+        return [f"situation {_ENRICHMENT_REQUIRED_MESSAGE}"]
+    result = get_situation(store, now_sim, enrichment)
+    return [result["summary"]]
+
+
+def _handle_position(enrichment: EnrichmentContext | None) -> list[str]:
+    if enrichment is None:
+        return [f"position {_ENRICHMENT_REQUIRED_MESSAGE}"]
+    result = describe_our_position(enrichment)
+    return [result["summary"]]
+
+
+def _format_tool_result_line(result: ToolResult) -> str:
+    return result["summary"]
 
 
 def _format_contact_line(result: ContactResult) -> str:
