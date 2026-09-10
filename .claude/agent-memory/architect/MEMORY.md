@@ -10,3 +10,4 @@ One line per entry, under ~150 characters: `- [Title](file.md) — one-line hook
 - [BL-2.5 text panel output](project_bl25_text_panel_output.md) — PB-x vs BL-x naming precedent, aircraft-layer's first write path, dxgui source found under install root not Scripts/.
 - [BL-2.6 classification refinement](project_bl26_classification_refinement.md) — specificity lattice, monotone fusion as hysteresis, ED's coarse-class ceiling, offline-executability rule for plans.
 - [BL-4 attention and events](project_bl4_attention_events.md) — 4-state attention (no TRACK), area = center+radius not place-name, ack via ContactStore set, cooldown != classification lockout.
+- [Contact-dup continuity-of-track fix](project_contact_dup_continuity_of_track.md) — gate-widening vs never-guess-merge tradeoff resolved via object_id poll continuity, not gate tuning; boundary precedent.
