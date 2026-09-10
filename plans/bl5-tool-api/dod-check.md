@@ -215,3 +215,10 @@ block on all exit paths. Poll thread's existing Stage 6 behavior untouched — p
 real-thread regression test), but **BL-5's own live acceptance is still incomplete** — the crash
 interrupted the user's original session before `place`/`position`/full tactical sequence were
 exercised. Re-run needed before BL-5's overall merge decision.
+
+---
+
+## Live acceptance re-run, 2026-09-10: PASSED
+
+User re-ran `--console --overlay` on this branch after the thread-safety fix. Confirmed working
+live. BL-5 is done — ready to merge.
