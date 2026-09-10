@@ -182,6 +182,49 @@ classification-change events flow through same `format_event_for_overlay` withou
 Recommendation (plan note, not discovery): BL-2.6 should explicitly update that function to enrich
 mirrored lines with semantic content, keeping in-cockpit display synchronized with console output.
 
+**BL-2.6 (done, merge pending user approval).** `feature/classification-refinement`. Replaces
+BL-2's last-writer-wins classification fusion with a four-level specificity lattice (`unknown` →
+`presence` → `class` → `type`, `belief/classification.py`) and a fold rule
+(`fold_classification`) so identity refines monotonically — `something → OP_ARMORED → T-72` —
+instead of oscillating; fires `CONTACT_CLASSIFICATION_CHANGED` on refinement/contradiction only.
+Full design and the four resolved decisions: `plans/classification-refinement/plan.md`.
+
+**All ten stages complete.** Stages 1–4 (re-home class resolution, lattice + fusion mechanism,
+the event, surfacing in `tools.py`/`console.py`) and Stages 6–7 (tier-derived classification in
+the naked-eye channel, then the `medres`→`lowres` gate move as its own commit) all reviewed and
+approved with zero required fixes. Stage 9 (tuning) is a deliberate no-op — see below. Stage 10
+(docs) closes this entry: `body-layer/CLAUDE.md` Structure section, this plan.md's own BL-2.6
+entry, and the absorbed BL-2 backlog item (see Backlog).
+
+**Live acceptance (Stages 5+8, combined) passed, one live bug found and fixed.** First sortie
+(naked-eye only, no scope) surfaced a real duplicate-contact bug unrelated to the fold mechanism:
+a single real object was producing 8–20 `Contact` records. Root cause was in
+`association_over_time.py`'s spatial gate, not `classification.py` — it budgeted only the
+incoming percept's own position uncertainty and treated `Contact.last_position` as exact, but
+naked-eye's clock-bucket requantisation re-anchors to current ownship heading every poll, so a
+stationary object's implied position can legitimately jump a full bucket-width between polls.
+Fixed with a symmetric gate (`Contact.last_position_uncertainty_m`, budgeted on both sides),
+reviewed and approved — the Reviewer hand-verified the regression test by reverting the fix and
+reproducing the exact failure. Re-flown and confirmed: `CONTACT_1` correctly refined
+`OP_GROUPSOMETHING → OP_TRUCK → Civilian bus` (two `CONTACT_CLASSIFICATION_CHANGED` events, one
+contact, no duplication), `CONTACT_2` stayed a distinct contact for a distinct real object. User
+confirmed "looking good." The classification mechanism itself (Decisions 1/2's whole point) was
+independently confirmed correct by the user mid-investigation, before the duplication fix landed
+— the bug was purely spatial-gate association, never a fold/refinement defect. Watch-item carried
+forward, not a blocker: the wider symmetric gate roughly doubles the close-range floor, raising
+false-merge risk for two distinct real objects at ~300–600 m separation — no fixture exercises
+that band yet.
+
+**Stage 9 (tuning) — no changes requested.** User's live feedback was "looking good," no
+complaints about contact volume, overlay chatter, or the three tier ranges/
+`NAKED_EYE_RANGE_CAP_M`/`NAKED_EYE_MAX_NEW_PER_POLL`. Constants stay as landed in Stages 6–7,
+documented as a deliberate no-op rather than silently skipped.
+
+**Supersedes part of PB-1.5's published calibration:** the `medres`-default gating tier and its
+worked range table (`plans/pb1.5-naked-eye-detection/plan.md`) are now historical, not current —
+see that plan's own superseded-note and `plans/body-layer/plan.md` §6's BL-2.6 entry for current
+defaults.
+
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
 **PB-1 (done, 2026-09-08):** `feature/pb1-perception-logger` ready to merge. Stages 1–3 (live spike, BL-0 harness, world_objects endpoint) completed earlier; stages 4–9 (hybrid HelperAI perception source + association + text logger) completed with zero Reviewer required fixes across two review passes. Live acceptance test (stage 7) ran end-to-end on real Mi-24P sortie with manually-placed ground targets; two observations logged with plausible bearing/range values in an ambiguous-candidate scenario (4 Ural trucks clustered together). The original architecture (two-tier branching on geometry source) was completely falsified by Session 4's live spike; pivoted to single hybrid implementation (HelperAI text as real detection gate, `LoGetWorldObjects` geometry via association algorithm). Full history: `plans/pb1-perception-logger/plan.md`, `implementation.md`, `review.md`, `dod-check.md`. Key lessons harvested to `NOTES.md`: live spikes resolve DCS architectural unknowns better than desk research; PYTHONPATH/venv gaps only surface in end-to-end deployment; ambiguous-scene live testing essential for association validation.
@@ -203,7 +246,7 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 - [x] **PB-1.5 — Naked-eye visual detection channel.** Done, merged to main 2026-09-09. Live acceptance passed. See Current Focus.
 - [x] **BL-2.5 — In-cockpit text mirror (DCS overlay output channel).** Done, DoD passed 2026-09-09. Interim milestone, scheduled between BL-2 and BL-3 by user decision. Live acceptance sortie passed; refinement restyle rejected and reverted. See Current Focus and `plans/dcs-text-panel-output/dod-check.md`. Pending user approval to merge.
-- [~] **BL-2.6 — Classification refinement.** *In progress: planned 2026-09-09, all four escalated decisions resolved 2026-09-09, Implementer starting on Stages 1–4.* Branch `feature/classification-refinement`; plan `plans/classification-refinement/plan.md`, resume point `plans/classification-refinement/session-state.md`. Label **confirmed BL-2.6** by the architect (contact-memory mechanism, absorbs a BL-2 backlog item, not a new perception tier — which is what earned PB-1.5 its PB- label).
+- [x] **BL-2.6 — Classification refinement.** Done, all ten stages complete, live acceptance passed (bug found and fixed), Stage 9 tuning a deliberate no-op, Stage 10 docs closed. Pending Reviewer/DoD, then user approval to merge. Branch `feature/classification-refinement`; plan `plans/classification-refinement/plan.md`, resume point `plans/classification-refinement/session-state.md`. See Current Focus for the live-acceptance bug/fix and the Stage 9 outcome. Label **confirmed BL-2.6** by the architect (contact-memory mechanism, absorbs a BL-2 backlog item, not a new perception tier — which is what earned PB-1.5 its PB- label).
   *Design:* four totally-ordered levels (`unknown` → `presence` → `class` → `type`) with a shallow value tree, in a new `belief/classification.py` that re-homes `_op_class_of`/`class_compatibility` out of `association_over_time.py`. Specificity is driven by the same angular-radius quantity that already gates detection, so there is one calibration surface rather than two that can disagree. `Contact.classification` is **folded, not overwritten** — higher refines, equal reinforces, lower holds, incompatible collapses to the common ancestor — which is the fix for finding 3's oscillation. Confidence decays on `IDENTITY_HALF_LIFE_S` (declared since BL-2, never consumed); level is sticky. Monotonicity makes hysteresis structurally unnecessary.
   *An investigator pass fed the design, then the user's decision changed one part of it:* ED's ambient-callout fragment bank has **no per-model vocabulary at all**, so the architect recommended capping the naked-eye channel at class — but the user chose the alternative (decision 1 below): naked-eye reaches level 3 (type) at `hires` range via `reporting_name_for(object_type)`, same as the scope channel. Two clean negatives recorded in the Session 6 addendum stay true regardless: `min_angular_radius` has no readable consumer in Lua or any DLL string table, so reading the tiers as specificity is **ours, not ED's** (stays on the risk list), and no dwell mechanism exists, which supports deferring dwell rather than treating its absence as an oversight.
   *Ten stages*, mechanism and calibration never sharing a commit (the BL-2.5 lossy-revert lesson). Stages 1–4, 6, 7, 10 offline; 5, 8 acceptance sorties and 9 tuning need live DCS. Per the user's 2026-09-09 request, every DCS-derived fact needed offline is committed — see the plan's "Offline execution" section.
@@ -400,10 +443,24 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   if so, the fix is to lower the timeout or add a per-line click-dismiss affordance, but those
   changes are speculative and not needed for current use.
 
-- [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.**
-  **Absorbed into BL-2.6 (classification refinement), scheduled next — see Milestones.**
-  It stops being theoretical there: without a specificity ordering, refinement events
-  oscillate. Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
+- [~] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted —
+  classification half resolved by BL-2.6, certainty half still open.**
+  `Contact.classification` is no longer overwritten by whichever observation arrives most
+  recently: `Contact.record` now folds through `belief.classification.fold_classification`
+  (`plans/classification-refinement/plan.md` §3) — higher-level/parent-consistent refines, same
+  level/value reinforces, a lower level holds rather than overwriting (the actual oscillation
+  fix), and only a resolvable, same-or-higher-level disagreement contradicts and collapses.
+  `Contact.last_class_raw` still exists and is still last-writer-wins, deliberately — it is the
+  association gate's own input, not a user-facing claim (see `contacts.py`'s docstring).
+  **The `certainty` half is not resolved by BL-2.6 and stays open**: `decay.certainty_of` is
+  still a pure function of `now_sim - last_seen_sim` with no notion of which contributing
+  observation had tighter position uncertainty or which channel produced it, so a tight
+  naked-eye/binocular observation followed by a wider-uncertainty scope observation still fully
+  resets `certainty` to `"observed"`. Reworking that into a quality-weighted ladder remains a real
+  design question (what "better" means across two channels with different uncertainty models),
+  not a quick patch — revisit once real sortie data shows it actually degrading perceived contact
+  quality. Originally found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation); see
+  `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
 
 ## Deferred
 

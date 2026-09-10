@@ -225,3 +225,75 @@ rejected restyle).
   verbatim as the primary cross-channel and event-ordering test fixture, since it is the
   document's own canonical scenario and made the tests read as a direct check of the design
   section rather than an invented case.
+
+### Update (third session): Stage 10 (docs), no code changes
+
+Pure documentation -- `body-layer/CLAUDE.md`, `plans/body-layer/plan.md` §6, `todo/todo.md`, and
+(one file beyond the named three, see below) `plans/pb1.5-naked-eye-detection/plan.md`. All ten
+stages of the plan are now complete.
+
+**`body-layer/CLAUDE.md` Structure section:**
+- Added a new `src/belief/classification.py` entry: the lattice/fusion mechanism, the re-home of
+  `_op_class_of`/`class_compatibility`, and the confidence-decays/level-never-decays rule.
+- Updated the `contacts.py` entry: `Contact.classification` (folded best claim, what everything
+  user-facing reads) vs. `Contact.last_class_raw` (unchanged meaning, still the association gate's
+  input) called out explicitly as **"a real readability cost, not an oversight"**, per the plan's
+  own instruction that both docstrings must warn about it. Also documented
+  `Contact.last_position_uncertainty_m` (the live-acceptance duplicate-contact fix) in the same
+  entry, since it is the other new field on `Contact` from this milestone and belongs next to the
+  spatial-gating description.
+- Added two new Structure entries that did not exist before this pass at all --
+  `perception/visibility.py` and `perception/naked_eye_source.py` had **no Structure entry
+  pre-BL-2.6** despite existing since PB-1.5 (a pre-existing gap, not something this stage
+  introduced). Added both now, since the task specifically asked for "the naked-eye channel
+  entry" to note the gate move and the tier->level mapping, and there was nowhere to put that note
+  without creating the entries.
+- Updated `events.py`'s inline kind list to include `CONTACT_CLASSIFICATION_CHANGED`, and
+  `console.py`'s `format_event_for_overlay` entry to describe the new transition-line rendering
+  for that kind only.
+
+**`plans/body-layer/plan.md` §6:** added a full BL-2.6 milestone entry (pattern-matched to the
+existing BL-2.5 entry's length/structure) between BL-2.5 and BL-3, covering: the lattice/fold
+mechanism, all four resolved decisions, the live-acceptance duplicate-contact bug and its fix
+(with the watch-item carried forward), the BL-2 backlog item it absorbs, and the required
+PB-1.5-calibration-superseded note the plan's own "Second-Order Effect" section calls out as
+mandatory.
+
+**PB-1.5 calibration supersession note -- placed in two files, not one.** The task named
+`plans/body-layer/plan.md` §6 as where this note belongs, and it is there. But `grep`ing
+`plans/body-layer/plan.md` for `medres`/`PB-1.5`/`calibrat` found **zero matches before this
+session** -- PB-1.5's actual worked range table and its `medres`-default gating-tier rationale
+live in `plans/pb1.5-naked-eye-detection/plan.md` (its own plan file), not in
+`plans/body-layer/plan.md`. Since the goal stated in the plan ("don't let a future reader treat
+PB-1.5's numbers as current") is best served by a marker exactly where a reader would land, added
+a short superseded-note directly after that table in `plans/pb1.5-naked-eye-detection/plan.md`
+pointing forward to `plans/body-layer/plan.md` §6 and `visibility.py`, in addition to the required
+note in `plans/body-layer/plan.md` §6 itself. This is one file beyond Stage 10's named list of
+three, but stayed within "pure documentation, no code changes" and directly serves the named
+requirement rather than expanding scope.
+
+**`todo/todo.md`:**
+- Milestones checklist: `BL-2.6` marker flipped `[~]` -> `[x]`, text updated to "done... pending
+  Reviewer/DoD, then user approval to merge" -- matching how `BL-2.5`'s own line is phrased at this
+  same pre-DoD point, per the task's explicit instruction to match existing style.
+- Current Focus: added a `**BL-2.6 (done, merge pending user approval).**` narrative block
+  (pattern-matched to the `**BL-2.5 (done...)**` block above it) summarizing all ten stages, the
+  live-acceptance bug/fix, and Stage 9's no-op tuning outcome.
+- Backlog: the absorbed last-writer-wins item was **not** marked fully `[x]` done. It bundles two
+  separate claims -- `certainty` fusion and `classification` fusion -- and BL-2.6 only resolved the
+  classification half (`fold_classification`). `decay.certainty_of` is still a pure function of
+  `now_sim - last_seen_sim` with no quality-weighting; that half is unchanged and still open.
+  Marked `[~]` (in progress) with the title and body rewritten to say exactly which half closed
+  and which one didn't, with the pointer the task asked for
+  (`Contact.classification`'s `fold_classification`, `plans/classification-refinement/plan.md`
+  §3). Reported here rather than silently marking the whole item done, since that would have
+  misrepresented the certainty-ladder gap as fixed.
+
+### Checks (Stage 10)
+
+- `ruff format --check body-layer/src body-layer/tests`: pass (42 files already formatted, no
+  source/test files touched this stage)
+- `ruff check body-layer/src body-layer/tests`: pass
+- `mypy body-layer/src` (via `cd body-layer && mypy src`): pass -- 21 source files, no issues
+- `pytest body-layer/tests -q`: pass -- 246 passed (unchanged from the Stage 6-7 checkpoint's
+  245 + Stage 8's live-acceptance-fix regression test; no tests added or removed this stage)

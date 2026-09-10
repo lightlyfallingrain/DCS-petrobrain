@@ -298,6 +298,13 @@ their *combination* into a detectability decision is this project's own derivati
   different tier, a different quantity, or only to the AI's own scan rather than to detection
   range. Treat this as a live question for the tier decision, not a resolved multiplier.
 
+  **Superseded by BL-2.6 (`plans/classification-refinement/plan.md`, 2026-09-09/10):** the gating
+  tier moved `medres` -> `lowres` and the `medres` column above is no longer the gate's own
+  threshold — it is now one rung of a three-tier `lowres`/`medres`/`hires` classification ladder,
+  and `NAKED_EYE_RANGE_CAP_M` is `5000`, not `2500`. This table's numbers are historical (PB-1.5's
+  original calibration); for current defaults and the current worked range table see
+  `plans/body-layer/plan.md` §6's BL-2.6 entry and `body-layer/src/perception/visibility.py`.
+
 ### Implementation Plan
 
 1. **`object_model.py`, then `visibility.py`**: the size/class lookup table first (pure data plus
