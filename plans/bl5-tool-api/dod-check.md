@@ -187,3 +187,31 @@ nothing to commit, working tree clean
 **PASS — All file-level gates clear.**
 
 No live-DCS acceptance testing required (per plan: "intra-repo composition, same posture as BL-3"). Awaiting acceptance testing from user and knowledge harvest (NOTES.md review) before merge.
+
+---
+
+## Update 2026-09-10: bug fix DoD (commit 1c55c6f)
+
+User's live acceptance session crashed `situation` with `sqlite3.ProgrammingError` — cross-thread
+connection reuse (REPL thread reading a `sqlite3.Connection` created on the poll thread, via BL-3's
+`ConsolePerceptionRunner.enrichment`, which Stage 6's original thread-affinity fix predated and
+didn't cover). Debugger → Reviewer → DoD bug-fix sequence run per AGENTS.md.
+
+**Fix:** `_run_console_repl` (`logger.py`) now lazily builds its own REPL-thread-local
+`sqlite3.Connection`/`EnrichmentContext` instead of reading the poll thread's, closed in a `finally`
+block on all exit paths. Poll thread's existing Stage 6 behavior untouched — purely additive.
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| Format/Lint/Type/Test | ✅ PASS | 356 passed (355 + 1 new regression) |
+| Regression test soundness | ✅ PASS | Real poll+REPL threads, real sqlite connection; reproduces the exact pre-fix crash, passes post-fix |
+| Reviewer findings | ✅ PASS | Approved, zero required fixes |
+| Dual-cache consequence | ✅ Sound | Two independent `WorldEnrichmentCache`s (poll/REPL) — duplicated recompute only, no divergence risk |
+| `check_same_thread=False` considered and rejected | ✅ Sound | Genuine concurrent access between poll/REPL threads is possible; would silently corrupt rather than crash loudly |
+| Git status | ✅ PASS | Clean, all staged |
+| NOTES.md harvest | ✅ Added | sqlite3 thread-affinity as a recurring defect class in this codebase's polling/REPL architecture — flag on any future field added to `ConsolePerceptionRunner` holding a thread-affine resource |
+
+**Result: PASS.** Does not require a fresh live-DCS test to close (correctness proven via the
+real-thread regression test), but **BL-5's own live acceptance is still incomplete** — the crash
+interrupted the user's original session before `place`/`position`/full tactical sequence were
+exercised. Re-run needed before BL-5's overall merge decision.
