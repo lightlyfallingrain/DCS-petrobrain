@@ -38,10 +38,15 @@ directory?**
 5. Run the affected subproject(s)' full verification suite (format, lint, type check, test — see
    that subproject's CLAUDE.md) before finalizing, even if the branch passed its own checks before
    merging — the merge itself can introduce breakage neither branch's own tests would catch.
-6. `git push origin main`.
-7. `git branch -d <branch>` if the user wants the local branch cleaned up (ask, or infer from
+6. **Update the backlog before pushing.** Read `todo/todo.md` and any relevant subproject
+   `ROADMAP.md`, mark the merged branch's items done/merged (status, branch, merge commit hash),
+   and fix any other entry the merge makes stale (e.g. a sibling item that said "pending merge").
+   Commit this (a separate commit from the merge commit is fine — do not amend the merge commit).
+   A merge is not finished until the backlog reflects it, and it must go out in the *same push* as
+   the merge itself, not a later, easy-to-forget follow-up.
+7. `git push origin main`.
+8. `git branch -d <branch>` if the user wants the local branch cleaned up (ask, or infer from
    context — don't delete without at least implicit consent).
-8. Read `todo/todo.md` and mark the relevant `[~]`/checkbox items for this branch as done/merged.
 9. Show the user the updated relevant section of `todo.md`.
 
 ## Worktree merge (any other case)
@@ -59,10 +64,14 @@ directory?**
 7. **On conflict:** same as above.
 8. Run the affected subproject(s)' full verification suite **inside the worktree** before finalizing.
 9. `git commit` (if the merge didn't auto-commit, e.g. after manual conflict resolution).
-10. `git push origin main`.
-11. `git worktree remove ../<repo-name>-merge-<short-branch-name>`.
-12. `git branch -d feature/<name>` if the user wants the local branch cleaned up.
-13. Read `todo/todo.md` and mark the relevant items done/merged.
+10. **Update the backlog before pushing, inside the same worktree.** Read `todo/todo.md` and any
+    relevant subproject `ROADMAP.md`, mark the merged branch's items done/merged (status, branch,
+    merge commit hash), and fix any other entry the merge makes stale. Commit this (separate
+    commit from the merge commit is fine). A merge is not finished until the backlog reflects it,
+    and it must go out in the *same push* as the merge — not a later, easy-to-forget follow-up.
+11. `git push origin main`.
+12. `git worktree remove ../<repo-name>-merge-<short-branch-name>`.
+13. `git branch -d feature/<name>` if the user wants the local branch cleaned up.
 14. Show the user the updated relevant section of `todo.md`.
 
 Rules:
