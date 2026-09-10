@@ -16,6 +16,11 @@ default to `world-model` (preserves prior single-subproject behavior).
 - `body-layer`: `cd body-layer && mypy src` (mypy config discovery is CWD-only for this
   subproject — see `body-layer/CLAUDE.md` — `mypy --config-file` alone does not fix it)
 
+**Tool resolution:** if the bare `mypy` command isn't found on PATH, fall back to
+`<subproject>/.venv/bin/mypy` (e.g. `body-layer/.venv/bin/mypy`) before concluding the check
+can't run — each subproject keeps its own venv (see root CLAUDE.md "Module independence"), which
+isn't always activated in the current shell.
+
 For each subproject checked:
 - If it exits 0: print **PASS** — no errors
 - If it exits non-zero: print **FAIL** and show all error output

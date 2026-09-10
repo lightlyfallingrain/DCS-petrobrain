@@ -21,3 +21,6 @@ recurring false positives are not re-litigated every merge.
 - 2026-09-09 `test-and-commit-cycle` — **rejected**, already covered by `/check`, `/compile`,
   `/test`, `/stage-commit`, `/dod-check` and `/done`. The detector missed them because it only
   counts `Skill`-tool invocations and cannot see the `.md` slash commands in `.claude/skills/`.
+- 2026-09-10 `venv-qualified-tool-fallback` — **fixed in place** rather than a new skill: `/check`
+  and `/dod-check` now fall back to `<subproject>/.venv/bin/<tool>` when the bare `ruff`/`mypy`/
+  `pytest` isn't on PATH, instead of every DoD run rediscovering the venv path itself.
