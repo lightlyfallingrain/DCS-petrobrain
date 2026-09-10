@@ -406,8 +406,28 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   folded into a milestone that is flying anyway than run as its own. Do not start without the
   user's instruction.
 
-- [ ] **`association.py` matches across two different DCS name namespaces and scores 0 on most real
-  units** — *priority raised 2026-09-09: the user confirmed the scope channel is needed for later
+- [x] **`association.py` matches across two different DCS name namespaces and scores 0 on most real
+  units.** **Stale entry — already fixed under BL-2/PB-2 Stage 0** (`todo/todo.md`'s own Current
+  Focus entry, line 57, documents the Stage 0 fix; this standalone item was never marked done at
+  the time). Debugger pass 2026-09-10 (`plans/association-namespace-mismatch/debug.md`) confirmed:
+  `association._type_match_score` already resolves `object_type` through
+  `reporting_names.reporting_name_for` and scores against both the raw type and the resolved
+  reporting name (commit `23f7157`, 2026-09-09), and `hybrid_source.py` already reads all five
+  `LIST_TEXT_FIELDS` leaves rather than only `middle_list_text` (closing the related multi-contact
+  gap in the same pass, as this item's own note asked for). Re-measured the four real pairs cited
+  below directly against current code: `Slava cruiser`/`MOSCOW` -> 2, `SA-3 launcher`/
+  `5p73 s-125 ln` -> 3, `Tarantul III corvette`/`MOLNIYA` -> 3, `SA-3 Low Blow radar`/
+  `snr s-125 tr` -> 5 (all nonzero; the originally-reported 0/0/0/0 does not reproduce).
+  `body-layer/tests/test_association.py`'s "PB-2 Stage 0a" section and
+  `body-layer/tests/test_hybrid_source.py`'s SA-3/Slava-cruiser multi-leaf tests already cover
+  this as regression tests. No code change was needed this pass. **Still outstanding**: a live
+  DCS re-test against ship/SAM-site contacts specifically (not just Ural trucks, per PB-1's
+  original acceptance test) — not performed here, out of this pass's execution boundary; see the
+  debug report's Verification section.
+
+  <details><summary>Original 2026-09-09 finding (kept for audit trail)</summary>
+
+  *priority raised 2026-09-09: the user confirmed the scope channel is needed for later
   gameplay (commanding Petrovich to acquire/lock/fire), so this is on the path to a wanted feature
   rather than dead code.* — found 2026-09-09 while validating PB-1.5's `object_model.py`. `HybridPerceptionSource`
   matches HelperAI's detection text against `LoGetWorldObjects` candidates via
@@ -435,6 +455,8 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   gap flagged in `plans/pb1.5-naked-eye-detection/plan.md` Risks (`hybrid_source.py` reads only
   `middle_list_text` and may be discarding real simultaneous rows). Both are worth doing in one
   pass over `hybrid_source.py`/`association.py`.
+
+  </details>
 
 - [ ] **Incremental per-layer pipeline builds** — `build_region` currently deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. User-requested capability: run individual pipeline sections (e.g., roads only, elevation only, validation only) and *add* that data into an existing store, allowing staged builds and partial re-runs when debugging a single layer. Deferred post-M7 (raised during M7 DoD acceptance testing, explicitly not blocking). Considered for M8 and **explicitly dropped** from it (2026-09-06) to keep that milestone scoped to the probe store — this remains open and unscheduled for a later milestone. M9 (OSM) would benefit from it; see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` for context and `world-model/src/build/pipeline.py`'s `build_region` implementation.
 
