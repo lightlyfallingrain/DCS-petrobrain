@@ -416,7 +416,7 @@ def test_contact_summary_with_relative_now_appends_clock_and_range() -> None:
         "relative_alt_m": 0.0,
     }
     summary = _contact_summary(contact, now_sim=0.0, relative_now=relative_now)
-    assert summary == "Ural truck, observed, currently visible., 11 o'clock, 3.0 km."
+    assert summary == "Ural truck, observed, currently visible, 11 o'clock, 3.0 km."
 
 
 def test_contact_summary_appends_fragment_after_being_watched_suffix() -> None:
@@ -431,7 +431,7 @@ def test_contact_summary_appends_fragment_after_being_watched_suffix() -> None:
     }
     summary = _contact_summary(contact, now_sim=0.0, relative_now=relative_now)
     assert summary == (
-        "Ural truck, observed, currently visible. Being watched., 12 o'clock, 0.5 km."
+        "Ural truck, observed, currently visible. Being watched, 12 o'clock, 0.5 km."
     )
 
 

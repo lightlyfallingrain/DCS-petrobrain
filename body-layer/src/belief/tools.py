@@ -202,6 +202,7 @@ def _contact_summary(
         clock_position = relative_now["clock_position"]
         range_m = relative_now["range_m"]
         assert isinstance(range_m, float)
+        summary = summary.rstrip(".")
         summary += f", {clock_position} o'clock, {_format_range_km(range_m)}."
     return summary
 
