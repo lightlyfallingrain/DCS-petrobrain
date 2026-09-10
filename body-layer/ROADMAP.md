@@ -200,14 +200,18 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   the user re-ran live acceptance against the same repro scenario post-merge — passed, no more
   duplicate spawning. Full history: `plans/bl5a-text-mode-crew-interaction/`.
 
-- [ ] **BL-6 — Mission phase and relevance (≈ PB-9's deterministic half).** Not started. Gated on
-  the Mission Interpreter existing, or a hand-written Mission Understanding fixture (fine to use,
-  should not wait on the Interpreter). Adds `get_mission_phase` to the tool API.
+- [ ] **BL-6 — Commands and inspect-and-adapt (swapped with BL-7, 2026-09-10 — user decision,
+  no reason recorded beyond preferring this order; BL-7's Mission-Interpreter/fixture gate wasn't
+  the blocker, this one has its own gate below).** Not started. `PendingIntent` lifecycle,
+  aircraft-layer command issuance, outcome verification, retry/escalation. Sensors/detection only —
+  flight control stays deferred. Gated on the aircraft layer's command channel, which needs its own
+  Security plan review. Adds `scan_area`/`get_task_status`/`cancel_task`; this is the tool-set
+  freeze point.
 
-- [ ] **BL-7 — Commands and inspect-and-adapt.** Not started. `PendingIntent` lifecycle, aircraft-layer
-  command issuance, outcome verification, retry/escalation. Sensors/detection only — flight control
-  stays deferred. Gated on the aircraft layer's command channel, which needs its own Security plan
-  review. Adds `scan_area`/`get_task_status`/`cancel_task`; this is the tool-set freeze point.
+- [ ] **BL-7 — Mission phase and relevance (≈ PB-9's deterministic half; swapped with BL-6,
+  2026-09-10).** Not started. Gated on the Mission Interpreter existing, or a hand-written Mission
+  Understanding fixture (fine to use, should not wait on the Interpreter). Adds `get_mission_phase`
+  to the tool API.
 
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
