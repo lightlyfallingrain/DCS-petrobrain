@@ -12,29 +12,49 @@ gates, and `ContactStore.ingest`'s deliberate "two-or-more candidates → always
 never guess-merge" policy (`plans/pb2-contact-memory/plan.md` Stage 1) has no self-limiting
 mechanism once that fires — runaway one-contact-per-poll duplication.
 
-**Chosen fix: continuity-of-track**, not gate re-tuning, not relaxing the ambiguity policy. Add
-a `continues_observation_id: str | None` field on `Observation`/`Percept` — populated only by
-`naked_eye_source.py`'s `_acquire_every_poll` when the same `object_id` (perception-internal
-only, never serialized onward) appears in both the previous and current poll's visible set, with
-no gap. `ContactStore.ingest` uses it to skip `passes_gate` entirely for that percept, merging
-directly via an `observation_id -> contact` index — but only after a defense-in-depth
-`class_compatibility` check (an incompatible class on a same-id claim falls back to the normal
-gate path rather than trusting continuity blindly, since raw `object_id` stability is
-high-confidence desk research, not a project-run live probe — see
-`aircraft-layer/research/2026-09-10-worldobjects-object-id-stability-tacview-confirmation.md`).
+**Revised 2026-09-10 (same day, second pass): scope widened from zero-gap continuity to full
+object permanence**, per explicit user direction — "sensor(y) data should be treated as
+factual... even if I close my eyes for a minute... I make the logical conclusion it is the same
+unit." A `continues_observation_id: str | None` field on `Observation`/`Percept`, unchanged in
+*shape* from the first pass, now gets populated from a **persistent** (never-cleared,
+session-lifetime) `object_id -> last Observation.id` map inside each `PerceptionSource`, not a
+previous-poll-only comparison. `ContactStore.ingest` needed **no change** to support this — its
+`observation_id -> contact_id` index was already gap-agnostic; only `perception/`'s own map
+needed to remember longer. Key insight: the broader "object permanence" reading does not need a
+bigger `belief/` boundary crossing than the zero-gap reading already had — `perception/` just
+remembers longer, `belief/` doesn't need to know more.
 
-**Boundary precedent set**: "never crossing into belief/" (the backlog item's phrasing,
-`todo/todo.md`) cannot be taken literally — `belief/contacts.py` and `belief/percept.py` do
-change. What actually stays true: `object_id` itself never leaves `perception/`; only an
-already-legitimate field shape (`observation_id`, which `Percept` already carries as
-bookkeeping, not a truth field) crosses. This is now the template for any future
-perception-continuity work (e.g. extending continuity to `hybrid_source.py`, explicitly out of
-scope for this fix since it has no per-object cross-poll state today).
+**Boundary precedent, reaffirmed and unchanged**: `object_id` itself never leaves `perception/`;
+only the already-legitimate `observation_id`-shaped field crosses, same as the first pass. This
+still holds even for correlation across a multi-minute gap.
 
-**Residual, accepted risk**: two real nearby objects that both experience a genuine
-*simultaneous* gap (masked then reappear same poll) still hit the untouched gate/ambiguity path
-on reacquisition and could still reproduce the runaway shape. Deliberately not fixed — doing so
-would mean touching the Stage 1 invariant. Revisit only if observed live.
+**Scope change: `hybrid_source.py` is now IN scope**, reversing the first pass's exclusion. The
+first pass excluded it worrying about "matching leaf text across polls" — a real problem. But
+correlation keyed on `object_id` (which `associate()` already resolves via `AssociationResult.
+candidate.object_id`) sidesteps that problem entirely; no leaf-text matching is needed. Lesson:
+re-examine an early scope exclusion when its stated reason turns out to be avoidable by keying
+on a different join column than the one that made the problem hard.
+
+**The "different unit moved into the same spot" edge case (explicitly waived by the user, not to
+be specially handled) turned out to be structurally self-excluding**: a genuinely different real
+object always has a genuinely different `object_id`, so it can never produce a false continuity
+match — it always falls through to the untouched gate path, same as any first sighting. Nothing
+needed to be built to decline handling it. This is a reusable architecture pattern worth
+remembering: sometimes a waived edge case doesn't need a guard because the correlation key you
+already chose (a real, unique identifier) naturally excludes it.
+
+**Residual, accepted risk — now materially more exposed, not new**: `object_id` *reuse* by DCS
+itself (kill/respawn or similar) during a real gap is the risk that still matters (distinct from
+the waived "different unit" case above, which needs no id reuse to occur). The class-
+compatibility defense-in-depth check is unchanged in mechanism but now does far more real work,
+since gap-spanning correlation is the common case, not a rare edge case. `hybrid_source.py`'s
+class-compatibility is documented as weaker than naked-eye's (free text often fails to resolve
+to an `OP_*` bucket) — so this channel's safety margin is thinner than naked-eye's for the same
+risk. Also newly flagged: `Contact._extend_or_open_span` (`belief/contacts.py`) has never been
+gap-aware (splits spans only on source change, never on a time gap) — a pre-existing
+simplification that is now exercised far more often, since gap-spanning merges are the norm, not
+the exception. Not fixed (matches the user's own "hairy details, not worth it now" framing), but
+will surprise a future reader of `sighting_spans` if not remembered.
 
 See also [[project_bl2_contact_memory_design]] (the original Stage 1 invariant) and
 [[project_bl26_classification_refinement]] (the 7581928 gate-widening fix this resolves the
