@@ -17,9 +17,12 @@ You run last — after the Reviewer (and Performance Reviewer if applicable) has
 A feature is done when **all** of the following are true:
 
 **Code Quality**
-- [ ] `ruff format --check world-model/src world-model/tests` passes (no formatting changes needed)
-- [ ] `ruff check world-model/src world-model/tests` passes (zero warnings)
-- [ ] `pytest world-model/tests -q` passes (all tests green)
+- [ ] For every subproject the branch touches (`world-model/`, `aircraft-layer/`, `body-layer/` —
+      check `git diff --name-only` against the branch's fork point, same detection logic as
+      `.claude/scripts/commit-quality-gate.sh`), that subproject's own format/lint/type/test
+      commands pass, per its own `CLAUDE.md` "Commands" section. Do not assume world-model is the
+      only subproject in scope — most milestones since BL-2 touch `body-layer/` (and some touch
+      `world-model/` too, e.g. BL-5's `find_place`), not `world-model/` alone.
 - [ ] No unhandled errors or panics in data paths
 - [ ] No debug output left in committed code
 - [ ] No leftover debug code or TODO comments introduced by this feature
@@ -89,7 +92,7 @@ Present the user with an **Acceptance Testing Plan**. The plan must be concrete 
 **Goal:** [One sentence — what the user is verifying]
 
 **Prerequisites**
-- [ ] Type-checked and importable (`mypy --strict world-model/src`)
+- [ ] Type-checked and importable (`mypy --strict <touched-subproject>/src`, e.g. `world-model/src`, `aircraft-layer/src`, or `body-layer/src`)
 - [ ] [Any specific setup steps]
 
 **Test Cases**
@@ -129,11 +132,9 @@ The feature is done. Perform knowledge harvest, then commit and merge:
 **Commit and merge:**
 7. Run `git status` to confirm what is staged
 8. Commit all staged changes with a message summarizing the feature
-9. Determine the current branch name with `git branch --show-current`
-10. Switch to main: `git checkout main`
-11. Merge the feature branch: `git merge --no-ff <featurebranch> -m "Merge <featurebranch>: <one-line feature summary>"`
-12. Verify the merge succeeded with `git log --oneline -5`
-13. Update `todo/todo.md`: mark the merged feature's task(s) `[x]`, update any stale in-progress status text describing it, and reassess whether a new milestone/next-step should be surfaced. Stage and commit this update (separate commit from the merge, or amend into the merge-summary commit — either is fine).
+9. **Merge via the `/merge` skill's disposable-worktree pattern (`.claude/skills/merge.md`), never `git checkout main` in the current directory.** Background Architect/Implementer/Reviewer/DoD agents run without worktree isolation by default, so switching branches in the active checkout risks racing whatever else is running there — the worktree merge happens without touching it at all. Steps: `git fetch origin main`, `git worktree add ../<repo>-merge-<name> main`, `cd` into it, `git merge --no-ff <featurebranch> -m "Merge <featurebranch>: <one-line feature summary>"`, re-run the touched subproject(s)' verification inside the worktree, then `git worktree remove` when done.
+10. Verify the merge succeeded with `git log --oneline -5` (in the worktree, before removing it).
+11. Update `todo/todo.md`: mark the merged feature's task(s) `[x]`, update any stale in-progress status text describing it, and reassess whether a new milestone/next-step should be surfaced. Stage and commit this update (separate commit from the merge, or amend into the merge-summary commit — either is fine).
 
 Report to the user:
 - DoD: PASSED
@@ -168,6 +169,8 @@ Report to the user:
 ## Persistent Agent Memory
 
 You have a persistent, file-based memory system at `.claude/agent-memory/dod/` (relative to the repo root). This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
+
+**This path is always repo-root-relative, never subproject-relative — even when your cwd or the task's code is scoped to `world-model/`, `aircraft-layer/`, or `body-layer/`.** Writing to e.g. `world-model/.claude/agent-memory/dod/` instead of the path above is a recurring mistake class across roles (caught in the implementer role multiple times, and again in the debugger role in a different subproject directory) and is now also rejected by the commit-time quality gate — but check the path yourself before writing rather than relying on that gate to catch it.
 
 Save memories about:
 - Recurring DoD failures (which criteria are most often missed)

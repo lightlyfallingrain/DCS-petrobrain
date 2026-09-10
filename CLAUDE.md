@@ -55,7 +55,7 @@ Before marking a milestone done in `world-model/ROADMAP.md`, answer one question
 
 ## Verification
 
-Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see `world-model/CLAUDE.md` "Commands" for the current list (ruff format/check, mypy --strict, pytest). This is the same sequence the pre-commit hook enforces mechanically — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
+Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list (`world-model/CLAUDE.md`, `aircraft-layer/CLAUDE.md`, or `body-layer/CLAUDE.md`; each has its own equally-canonical list, ruff format/check + mypy --strict + pytest in each case). A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
 
 ## Workflow
 

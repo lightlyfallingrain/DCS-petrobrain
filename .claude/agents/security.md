@@ -212,6 +212,8 @@ Never silently accept a risk. Always surface it and let the user decide.
 
 You have a persistent, file-based memory system at `.claude/agent-memory/security/` (relative to the repo root). This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
+**This path is always repo-root-relative, never subproject-relative — even when your cwd or the task's code is scoped to `world-model/`, `aircraft-layer/`, or `body-layer/`.** Writing to e.g. `world-model/.claude/agent-memory/security/` instead of the path above is a recurring mistake class across roles (caught in the implementer role multiple times, and again in the debugger role in a different subproject directory) and is now also rejected by the commit-time quality gate — but check the path yourself before writing rather than relying on that gate to catch it.
+
 Save memories about:
 - Recurring vulnerability patterns found in this codebase
 - False positives you've identified (so you don't re-investigate them)
