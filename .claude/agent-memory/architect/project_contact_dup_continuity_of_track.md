@@ -18,11 +18,43 @@ factual... even if I close my eyes for a minute... I make the logical conclusion
 unit." A `continues_observation_id: str | None` field on `Observation`/`Percept`, unchanged in
 *shape* from the first pass, now gets populated from a **persistent** (never-cleared,
 session-lifetime) `object_id -> last Observation.id` map inside each `PerceptionSource`, not a
-previous-poll-only comparison. `ContactStore.ingest` needed **no change** to support this — its
-`observation_id -> contact_id` index was already gap-agnostic; only `perception/`'s own map
-needed to remember longer. Key insight: the broader "object permanence" reading does not need a
-bigger `belief/` boundary crossing than the zero-gap reading already had — `perception/` just
-remembers longer, `belief/` doesn't need to know more.
+previous-poll-only comparison. `ContactStore.ingest`'s `observation_id -> contact_id` index
+needed **no change** to support arbitrary-age lookups — it was already gap-agnostic; only
+`perception/`'s own map needed to remember longer. Key insight: the broader "object permanence"
+reading does not need a bigger `belief/` boundary crossing than the zero-gap reading already
+had — `perception/` just remembers longer, `belief/` doesn't need to know more. (`ingest` *does*
+gain one more condition in the third pass below — decay — so "no change" applied only to this
+second pass, not to the final state.)
+
+**Revised 2026-09-10 (third pass, same day): object_id correlation must itself decay/expire**,
+per explicit user direction ("when enough time passes... the contact could be 'forgotten',
+object_id nullified") plus an explicit instruction to align with existing decay mechanisms rather
+than bolt on a new timeout. Checked against `belief/decay.py`'s existing table
+(`IDENTITY_HALF_LIFE_S`=600s slowest/identity, `POSITION_HALF_LIFE_S`=30s fastest/position,
+`LOST_THRESHOLD_S`=120s = 4x position half-life). **Chosen: reuse `IDENTITY_HALF_LIFE_S` directly**
+as a new `OBJECT_ID_MEMORY_S` constant (`= IDENTITY_HALF_LIFE_S`, not an independently-chosen
+number) plus a new `object_id_continuity_valid(contact, now_sim)` predicate in `decay.py`,
+checked in `ContactStore.ingest` alongside the existing index/class-compat checks. Reasoning
+chain worth remembering:
+- **Not `LOST_THRESHOLD_S`** — that governs the position/tracking narrative ("I lost him"),
+  while object_id correlation is an *identity* claim, and `decay.py`'s own docstring already
+  states identity is the slowest-decaying attribute of the three. Tying to the fast/position
+  clock would contradict the module's own stated design principle.
+- **The check lives in `belief/contacts.py`, not `perception/`** — `perception/` must never
+  depend on `belief/` (layering only runs the other way), and `Contact.last_seen_sim` (only
+  visible in `belief/`) is the *correct* anchor anyway since it reflects the most recent sighting
+  from *any* channel, not just the channel whose stale map entry is in question.
+- **`OBJECT_ID_MEMORY_S` (600s) > `LOST_THRESHOLD_S` (120s) is intentional**: it lets a contact
+  go through the full certainty ladder into "lost" and still be validly reacquired via continuity
+  in the 120-600s window — exactly the "I lost him... it's the same guy" story the user described.
+  Past 600s, both mechanisms agree: re-derive from scratch via the gate. This is a clean example
+  of two decay clocks on the same `Contact` deliberately disagreeing about what's still true,
+  keyed to different questions ("do I still know where" vs. "do I still know it's the same one").
+- **Expiry never deletes the `Contact`** — `ContactStore` has no contact-deletion mechanism at
+  all; only the correlation *shortcut* stops firing, falling through to the ordinary gate exactly
+  like an unresolved/no-object_id percept. No active nullification needed in `perception/`'s
+  map either — a stale entry just fails the `belief/`-side freshness check until genuinely
+  re-observed, which self-heals it.
 
 **Boundary precedent, reaffirmed and unchanged**: `object_id` itself never leaves `perception/`;
 only the already-legitimate `observation_id`-shaped field crosses, same as the first pass. This

@@ -19,6 +19,14 @@ Design/Affected-Modules/Risks sections below accordingly; the Goal, Decision fra
 `observation_id`-not-`object_id` boundary principle from the original plan still hold and are
 carried forward, generalized rather than replaced.
 
+**Revision 2026-09-10 (second pass, same day)**: object permanence must itself decay — trusting
+an `object_id` match forever, no matter how much time has passed, is not what the user asked for
+("when enough time passes that location becomes uncertain, the contact could be 'forgotten',
+object_id nullified"). This pass adds that expiry, worked out against `belief/decay.py`'s
+existing half-life table rather than as a new ad hoc timeout — see the new "Decay: object_id
+continuity must expire" subsection below, and the corresponding Affected Modules / Implementation
+Plan / Risks updates.
+
 ### Decision
 
 **Primary fix, generalized: object-permanence correlation via `object_id`, for both perception
@@ -103,6 +111,80 @@ where object permanence matters most, not least — it is now in scope for this 
 Modules). Flagged as a genuine scope addition beyond the original naked-eye-only plan, not a
 quiet extension — see Risks for what's untested about it.
 
+**Decay: object_id continuity must expire, not persist indefinitely — a genuine addition, not a
+restatement of the persistent-map design above.** The persistent `object_id -> last Observation.
+id` map inside each `PerceptionSource` (see above) has no size or time bound on its own — that's
+fine for *memory* (it's small, bounded by the count of distinct objects ever seen this session),
+but wrong for *trust*: nothing should keep treating a same-`object_id` percept from an hour ago as
+automatically the same contact forever. Checked against `belief/decay.py`'s existing "one table"
+of half-lives (`IDENTITY_HALF_LIFE_S` = 600s, `POSITION_HALF_LIFE_S` = 30s, `MOTION_HALF_LIFE_S` =
+60s / `GENERAL_AREA_HALF_LIFE_S` = 180s declared-not-yet-consumed, `LOST_THRESHOLD_S` = 120s
+derived as 4x `POSITION_HALF_LIFE_S`) rather than a fourth parallel mechanism, per that module's
+own stated intent ("what matters structurally is that they live in one table").
+
+- **Not `LOST_THRESHOLD_S`.** That threshold governs `certainty_of`'s position/tracking
+  narrative — when the crew would say "I lost him," 120s after `last_seen_sim`. Object_id
+  correlation is an *identity* claim ("I still believe this is the same vehicle"), not a position
+  claim — and `decay.py`'s own docstring names identity as the slowest-decaying attribute,
+  explicitly *because* "a crew member does not forget 'that was a BMP' on the timescale it takes
+  the BMP to drive out of sight." Tying object_id memory to `LOST_THRESHOLD_S` would nullify the
+  identity claim at exactly the moment the concept doc says it should still be trusted most.
+- **Recommendation: anchor to `IDENTITY_HALF_LIFE_S` (600s), reused directly, not multiplied.**
+  Add `OBJECT_ID_MEMORY_S: Final[float] = IDENTITY_HALF_LIFE_S` to `belief/decay.py`'s existing
+  table — declared in terms of the existing constant, not a new independently-chosen number, so
+  the two cannot silently drift apart — plus one pure function,
+  `object_id_continuity_valid(contact: Contact, now_sim: float) -> bool`
+  (`now_sim - contact.last_seen_sim <= OBJECT_ID_MEMORY_S`), in the same style as `certainty_of`/
+  `position_confidence`/`classification_confidence_at`. Reused as a straight equality rather than
+  a derived multiple (unlike `LOST_THRESHOLD_S`'s 4x) because this is a binary trust/no-trust
+  gate, not a ladder needing room for an intermediate state the way `certainty_of` does — the
+  point at which `classification_confidence_at` would already call *this same contact's*
+  identity claim "50% decayed" is the natural place to also stop trusting a second identity claim
+  (object_id continuity) built on the same premise.
+- **Where the check lives, and why not in `perception/`.** In `belief/contacts.py`, not inside
+  each `PerceptionSource`'s own persistent map. Two reasons: (1) `perception/` must not depend on
+  `belief/` — the existing layering only ever runs the other way (`belief/association_over_time.
+  py` already imports from `perception/`, never the reverse) — so a decay check reading `belief.
+  decay.IDENTITY_HALF_LIFE_S` cannot live in `naked_eye_source.py`/`hybrid_source.py` without
+  inverting that dependency. (2) `Contact.last_seen_sim` is the *right* anchor anyway, and only
+  `belief/` has it: it reflects the most recent observation from *any* channel, not just the
+  channel whose map entry is being checked — a contact kept fresh by the hybrid channel while
+  naked-eye lost sight of the object for 550s should still honor naked-eye's own stale-looking map
+  entry, because the contact's identity was never actually in doubt. Anchoring in `perception/`
+  against each channel's own last-touched time would get this case wrong; anchoring in `belief/`
+  against `contact.last_seen_sim` gets it right for free.
+- **`ContactStore.ingest`'s consumption changes accordingly.** Resolving `continues_observation_
+  id` through the `observation_id -> contact_id` index is necessary but no longer sufficient —
+  `object_id_continuity_valid(contact, now_sim)` must also hold. Failing either check (unresolved
+  id, or resolved-but-expired) falls through to the ordinary gate/ambiguity path identically —
+  there is no third code path, only "continuity trusted" vs. "continuity not available for this
+  percept, use the gate."
+- **The persistent per-channel map itself needs no pruning or active nullification.** It stays
+  exactly as designed above (never cleared, bounded by distinct-object count). A stale entry that
+  fails the `belief/`-side freshness check simply isn't honored this poll; the moment the same
+  `object_id` is genuinely re-observed, that channel's map entry is overwritten with a fresh
+  `Observation.id` and (if still within the window) resumes working normally. No feedback channel
+  from `belief/` back into `perception/` is needed to "nullify" anything.
+- **Consequence, traced explicitly** (per the user's request, not left implicit): once a
+  contact's identity claim has expired (`now_sim - contact.last_seen_sim > OBJECT_ID_MEMORY_S`),
+  the *next* percept carrying that same DCS `object_id` — which the aircraft itself still
+  considers the same object — does **not** silently reattach to the old contact. It is treated
+  exactly like a percept with no `object_id` match at all: it goes through `passes_gate` against
+  every existing contact, and merges, ambiguously spawns a duplicate, or founds a new contact
+  under the Stage 1 policy, same as any other reacquisition. This is the correct behavior, not an
+  accepted gap — "forgotten" should mean genuinely re-derived from scratch via the gate, not a
+  silent reattachment the crew has no way to have independently verified after that much elapsed
+  time. This does **not** delete or replace the `Contact` record itself — `ContactStore` has no
+  contact-deletion mechanism at all, lost or not; what expires is only the *shortcut*, never the
+  record.
+- **Interaction with `LOST_THRESHOLD_S` is intentional, not coincidental.** `OBJECT_ID_MEMORY_S`
+  (600s) is deliberately larger than `LOST_THRESHOLD_S` (120s), so a contact can pass through the
+  full "observed → tracked → estimated → lost" ladder and still be validly reacquired via
+  object_id continuity any time in the 120s-600s window after `last_seen_sim` — exactly the
+  "I lost him... it's the same guy" scenario the user's own framing describes. Past 600s, the
+  crew's `CONTACT_LOST` narrative and the object_id continuity mechanism agree: re-derive from
+  scratch.
+
 **Whether the gate's own tuning still matters.** Yes, materially, just less frequently. Every
 contact's *founding* percept (first-ever sighting of an `object_id`, by either channel) still
 goes through the gate/ambiguity path unchanged — correlation has nothing to found onto yet. So
@@ -166,12 +248,16 @@ were evaluated against the zero-gap case and neither is improved by broadening t
   from an arbitrary number of polls ago, not necessarily the immediately preceding one."
 - `body-layer/src/belief/percept.py` — thread the field through unchanged, as originally
   planned. No further change needed for the broadened scope (see Boundary reading).
-- `body-layer/src/belief/contacts.py` — as originally planned:
-  `_observation_id_to_contact_id: dict[str, str]` index; `ingest` skips `passes_gate` on a
-  resolved `continues_observation_id`, with the class-compatibility fallback. **No additional
-  change needed for gaps** — the index was always going to be gap-agnostic; only the
-  Implementation Plan's test coverage needs to actually exercise that (see below), since the
-  original plan's tests only exercised the zero-gap case.
+- `body-layer/src/belief/decay.py` — **new**, per the "Decay" subsection above: add
+  `OBJECT_ID_MEMORY_S: Final[float] = IDENTITY_HALF_LIFE_S` to the existing constant table, and a
+  pure `object_id_continuity_valid(contact: Contact, now_sim: float) -> bool` function alongside
+  `certainty_of`/`position_confidence`/`classification_confidence_at`.
+- `body-layer/src/belief/contacts.py` — `_observation_id_to_contact_id: dict[str, str]` index, as
+  originally planned (still gap-agnostic, no change needed there). `ingest`'s consumption does
+  change from the original plan: skipping `passes_gate` on a resolved `continues_observation_id`
+  now additionally requires `decay.object_id_continuity_valid(contact, now_sim)` to hold, not just
+  index resolution — an expired-but-resolved id falls through to the gate identically to an
+  unresolved one. The class-compatibility fallback is unchanged.
 - `body-layer/src/belief/association_over_time.py` — no formula change, as originally planned.
   Docstring update: state plainly that the gate is now the *exception* path (founding
   observations, and reacquisitions where `object_id` correlation didn't resolve), not merely the
@@ -196,6 +282,15 @@ were evaluated against the zero-gap case and neither is improved by broadening t
     coded, per the Decision section above.
   - Keep the existing class-incompatible-continuity-claim fallback test from the original plan,
     unchanged.
+  - `body-layer/tests/test_decay.py` — new: `object_id_continuity_valid` true at exactly
+    `OBJECT_ID_MEMORY_S` elapsed (boundary inclusive, matching `certainty_of`'s own `<=`
+    convention), false just past it.
+  - `body-layer/tests/test_contacts.py` — new: a resolved `continues_observation_id` whose
+    contact's `last_seen_sim` is more than `OBJECT_ID_MEMORY_S` in the past falls through to the
+    gate/ambiguity path (not a forced merge) — the expiry case. A second test confirms the
+    120s-600s window: a contact well past `LOST_THRESHOLD_S` (so `certainty_of` already returns
+    `"lost"`) but still within `OBJECT_ID_MEMORY_S` still merges via continuity, skipping the
+    gate — the "I lost him, but it's the same guy" case the decay ordering is meant to preserve.
 
 **No longer out of scope**: `hybrid_source.py` is now included (see above) — this is the one
 substantive scope change from the original plan's Affected Modules list, beyond the gap-handling
@@ -221,9 +316,12 @@ itself.
    design's previous-poll-only comparison before it's ever built, since the persistent version
    subsumes it — no need to implement the narrower version first). Test in isolation, including
    the multi-poll-gap and `world_objects is None`-survives-the-gap cases.
-4. **`ContactStore.ingest` consumption, with defense-in-depth class check.** Exactly as the
-   original plan specified — this stage does not change for the broadened scope, only its test
-   coverage does (gap scenarios added, per Affected Modules).
+4. **`decay.py` addition, then `ContactStore.ingest` consumption, with defense-in-depth class
+   check and the expiry check.** Add `OBJECT_ID_MEMORY_S`/`object_id_continuity_valid` to
+   `decay.py` first (small, independently testable — Stage 4's own test in `test_decay.py`), then
+   wire `ingest` to require both index resolution and `object_id_continuity_valid` before skipping
+   `passes_gate`. This differs from the original plan, which specified only index resolution —
+   the expiry check is this revision's addition.
 5. **Hybrid-channel correlation.** New stage, not in the original plan: same persistent-map
    mechanism in `hybrid_source.py`, keyed on `AssociationResult.candidate.object_id`. Test in
    isolation before relying on it in any `ContactStore`-level test.
@@ -236,9 +334,12 @@ itself.
    any real gap would have fallen back to the (still-widened) gate, which is exactly the
    overlapping-gate condition that caused the original bug; under the broadened design,
    correlation applies on *every* poll, gap or not, so the gate is never re-exercised for either
-   object after its founding poll. Verify this explicitly with the added test (Stage 4's
-   extension), not by assumption — the reasoning above is the hypothesis the test needs to
-   confirm, not a substitute for running it.
+   object after its founding poll. Verify this explicitly with the added `test_contacts.py`
+   extension (Affected Modules), not by assumption — the reasoning above is the hypothesis the
+   test needs to confirm, not a substitute for running it. The gap inserted for this scenario
+   should stay well inside `OBJECT_ID_MEMORY_S` (e.g. a few tens of seconds, not minutes) — this
+   stage is re-tracing the debugger's own reproduction, not re-testing the expiry boundary, which
+   Stage 4's tests already cover separately.
 7. **Refine — docstring/module-boundary write-up.** Update `naked_eye_source.py`'s,
    `hybrid_source.py`'s, `association_over_time.py`'s, and `contacts.py`'s module docstrings to
    state the new division of labor: `object_id` correlation (both channels) is the primary
@@ -295,6 +396,16 @@ itself.
   often than it would have under the original narrower plan. Out of scope to fix here (matches
   the user's own "hairy details, not worth it at this stage" framing for the adjacent edge case),
   but flagged explicitly so it isn't rediscovered as a surprise later.
+- **`OBJECT_ID_MEMORY_S` (600s, reused from `IDENTITY_HALF_LIFE_S`) is a placeholder-by-inheritance,
+  not a newly-calibrated figure.** It's principled relative to the existing table (identity
+  outlives position, per the module's own stated ordering) but `IDENTITY_HALF_LIFE_S` itself is
+  already documented as "a placeholder judgment call... revisit" — this reuse inherits that
+  uncertainty rather than resolving it. If live sessions show object_id continuity being trusted
+  too long (a stale reattachment) or not long enough (unnecessary duplicate spawning inside a
+  window that should still have worked), revisit `OBJECT_ID_MEMORY_S` specifically rather than
+  `IDENTITY_HALF_LIFE_S` itself first — the two now share a value but are conceptually distinct
+  claims (classification confidence vs. correlation trust) and could legitimately decouple later
+  if evidence points that way; this plan does not decouple them now for lack of any such evidence.
 - **Gate tuning still matters, just less frequently** — see Decision section. Not a risk to fix
   now, but a risk to *remember*: do not read this plan as license to stop caring about
   `spatial_gate_radius_m`'s correctness.
