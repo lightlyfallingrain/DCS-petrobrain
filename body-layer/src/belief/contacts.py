@@ -1,7 +1,12 @@
 """`Contact`, `SightingSpan`, `ContactStore` -- `plans/pb2-contact-memory/
 plan.md` Stage 1's persistent belief record and its append-only observation
 log, extended by Stage 2 with decay-driven certainty and lifecycle events
-(`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`).
+(`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`). BL-4 (`plans/
+bl4-attention-events/plan.md`) adds `ContactStore`'s `AttentionArea`
+registry and unacknowledged-event queue, and extends `tick` with a third
+event kind (`CONTACT_ATTENTION_CHANGED`) plus a per-contact-per-kind
+emission cooldown applied to all three kinds -- see `tick`'s own docstring
+and `belief.events`'s module docstring for the cooldown's full rationale.
 
 Everything a `Contact` knows comes from a `belief.percept.Percept` --
 `ContactStore.ingest` never reads `perception.source.Observation`'s DCS
@@ -23,13 +28,13 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 from belief.association_over_time import (
     implied_position,
     passes_gate,
     uncertainty_radius_m,
 )
+from belief.attention import Attention, AttentionArea, Sector, effective_attention
 from belief.classification import (
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
@@ -39,22 +44,18 @@ from belief.classification import (
 )
 from belief.decay import Certainty, certainty_of
 from belief.events import (
+    CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
+    EVENT_COOLDOWN_S,
     Event,
+    EventKind,
+    attention_event_kind,
     classification_event,
     lifecycle_event_kind,
 )
 from belief.percept import Percept, percept_of
 from perception.geometry import GeoPosition
 from perception.source import Observation
-
-#: `Contact.attention`'s closed set -- Stage 4's "bare attention enum", per
-#: the plan: no policy, cooldown, or relevance scoring lives here (that is
-#: BL-4). `belief.console`'s `watch`/`unwatch` commands are the only mutator
-#: (via `belief.tools.watch_contact`/`unwatch_contact`); nothing in Stage 0-3
-#: sets this field, so it stays `"normal"` for every contact until Stage 4's
-#: console marks one.
-Attention = Literal["normal", "watch"]
 
 #: `ContactStore`-minted contact id prefix. Distinct in shape from the
 #: per-source `Observation.id` prefixes (`perception.source.
@@ -66,6 +67,10 @@ _CONTACT_ID_PREFIX = "CONTACT"
 #: spaces above for the same reason -- an event id never collides with a
 #: contact id or an observation id.
 _EVENT_ID_PREFIX = "EVENT"
+
+#: `ContactStore`-minted `AttentionArea.id` prefix, distinct in shape from
+#: every id space above for the same reason (BL-4).
+_AREA_ID_PREFIX = "AREA"
 
 
 @dataclass
@@ -131,7 +136,27 @@ class Contact:
     knowledge's freshness* has crossed a lifecycle boundary. Kept on
     `Contact` rather than in a side table because it is exactly the
     "last-emitted state" `events.lifecycle_event_kind` needs compared
-    against, per contact."""
+    against, per contact.
+
+    `last_emitted_attention` is BL-4's twin of `last_emitted_certainty`/
+    `last_emitted_classification` (`plans/bl4-attention-events/plan.md`):
+    the *effective* attention (`belief.attention.effective_attention`'s
+    result -- direct mark folded with area membership) this contact held
+    the last time `tick` computed one, `None` until the first `tick()`
+    call. Storing the effective value (not just the direct mark) means a
+    contact walking into or out of a watched area, with no change to its
+    own direct mark, is exactly the kind of transition this comparison
+    catches.
+
+    `last_event_emitted_sim` is BL-4's per-contact-per-kind emission
+    cooldown state (`belief.events.EVENT_COOLDOWN_S`): the `t_sim` at which
+    an event of each `EventKind` was last actually appended to the log for
+    this contact. Deliberately separate from the three `last_emitted_*`
+    snapshots above -- those are compared every tick to decide *whether*
+    something changed and are always kept current; this dict only gates
+    whether a detected change is *allowed to emit* right now. See `belief.
+    events`'s module docstring for why this is not the same mechanism as
+    `classification.py`'s `CLASSIFICATION_CONTRADICTION_LOCKOUT_S`."""
 
     id: str
     last_position: GeoPosition
@@ -150,6 +175,8 @@ class Contact:
     last_emitted_classification: ClassificationBelief | None = None
     attention: Attention = "normal"
     attention_source: str | None = None
+    last_emitted_attention: Attention | None = None
+    last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
 
     def record(self, percept: Percept) -> None:
         """Fold `percept` into this contact's last-known state. Called only
@@ -226,8 +253,11 @@ class ContactStore:
         self._contacts: dict[str, Contact] = {}
         self._observations: dict[str, Observation] = {}
         self._events: list[Event] = []
+        self._areas: dict[str, AttentionArea] = {}
+        self._acknowledged_event_ids: set[str] = set()
         self._next_contact_number = 0
         self._next_event_number = 0
+        self._next_area_number = 0
 
     @property
     def contacts(self) -> list[Contact]:
@@ -246,6 +276,68 @@ class ContactStore:
         it was emitted. A read-only view -- callers must not mutate the
         returned list."""
         return list(self._events)
+
+    @property
+    def areas(self) -> list[AttentionArea]:
+        """Every registered `AttentionArea`, insertion order (BL-4). A
+        read-only view -- callers must not mutate the returned list."""
+        return list(self._areas.values())
+
+    @property
+    def unacknowledged_events(self) -> list[Event]:
+        """Every materialised event whose `id` has not been passed to
+        `acknowledge_event` yet, in emission order (BL-4's event queue).
+        Acknowledged ids are tracked in a plain `set[str]`, not a mutable
+        field on the frozen `Event` dataclass -- keeps every existing
+        `Event` construction site and test untouched (`plans/
+        bl4-attention-events/plan.md`'s explicit design choice)."""
+        return [
+            event
+            for event in self._events
+            if event.id not in self._acknowledged_event_ids
+        ]
+
+    def acknowledge_event(self, event_id: str) -> bool:
+        """Mark `event_id` acknowledged. Returns whether an event with that
+        id actually exists in the log -- acknowledging an unknown id is not
+        silently accepted, mirroring `ingest`/`tick`'s own "unknown id
+        returns `False`" convention elsewhere in this module's siblings
+        (`tools.py`'s `watch`/`unwatch`)."""
+        if not any(event.id == event_id for event in self._events):
+            return False
+        self._acknowledged_event_ids.add(event_id)
+        return True
+
+    def add_area(
+        self,
+        center: GeoPosition,
+        radius_m: float,
+        level: Attention,
+        source: str,
+        sector: Sector | None = None,
+    ) -> AttentionArea:
+        """Register a new `AttentionArea`, minting its `id` the same way
+        `_new_contact_id`/`_new_event_id` mint theirs. Returns the stored
+        `AttentionArea` (with its minted `id`) so a caller (`tools.
+        watch_area`) can report it back."""
+        area = AttentionArea(
+            id=self._new_area_id(),
+            center=center,
+            radius_m=radius_m,
+            level=level,
+            source=source,
+            sector=sector,
+        )
+        self._areas[area.id] = area
+        return area
+
+    def remove_area(self, area_id: str) -> bool:
+        """Unregister an `AttentionArea`. Returns whether `area_id` was
+        found."""
+        if area_id not in self._areas:
+            return False
+        del self._areas[area_id]
+        return True
 
     def ingest(self, observations: list[Observation], now_sim: float) -> list[Contact]:
         """Run each of `observations` through the percept->contact gate
@@ -284,18 +376,24 @@ class ContactStore:
         return touched
 
     def tick(self, now_sim: float) -> None:
-        """Materialise lifecycle *and* classification events for every
-        known contact as of `now_sim`. For each contact, per event kind:
-        compute its current state, compare against the contact's own
+        """Materialise lifecycle, classification, *and* attention events
+        for every known contact as of `now_sim`. For each contact, per event
+        kind: compute its current state, compare against the contact's own
         last-emitted snapshot of that state, append the resulting `Event`
-        (if any) to the log, then update the snapshot regardless of
-        whether an event fired -- the comparison on the *next* `tick()` call
-        must be against this call's result, not the last event.
+        (if any, and if `belief.events.EVENT_COOLDOWN_S` has elapsed since
+        this contact last actually emitted that kind -- BL-4's chatter
+        suppression) to the log, then update the snapshot regardless of
+        whether an event fired or was suppressed by cooldown -- the
+        comparison on the *next* `tick()` call must be against this call's
+        result, not the last emitted event (see `Contact.last_event_emitted_
+        sim`'s docstring for why the cooldown check and the snapshot update
+        are deliberately independent).
 
-        **Ordering, per contact: lifecycle event first, then classification
-        event** (`plans/classification-refinement/plan.md` Stage 3) -- a
+        **Ordering, per contact: lifecycle event first, then classification,
+        then attention** (`plans/classification-refinement/plan.md` Stage 3,
+        extended by `plans/bl4-attention-events/plan.md`) -- a
         `CONTACT_DETECTED` must precede that same contact's first
-        classification refinement, never follow it.
+        classification refinement or attention change, never follow it.
 
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
@@ -308,7 +406,7 @@ class ContactStore:
             kind = lifecycle_event_kind(
                 contact.last_emitted_certainty, current_certainty
             )
-            if kind is not None:
+            if kind is not None and self._cooldown_elapsed(contact, kind, now_sim):
                 self._events.append(
                     Event(
                         id=self._new_event_id(),
@@ -318,12 +416,15 @@ class ContactStore:
                         certainty=current_certainty,
                     )
                 )
+                contact.last_event_emitted_sim[kind] = now_sim
             contact.last_emitted_certainty = current_certainty
 
             direction = classification_event(
                 contact.last_emitted_classification, contact.classification
             )
-            if direction is not None:
+            if direction is not None and self._cooldown_elapsed(
+                contact, CONTACT_CLASSIFICATION_CHANGED, now_sim
+            ):
                 self._events.append(
                     Event(
                         id=self._new_event_id(),
@@ -340,7 +441,40 @@ class ContactStore:
                         direction=direction,
                     )
                 )
+                contact.last_event_emitted_sim[CONTACT_CLASSIFICATION_CHANGED] = now_sim
             contact.last_emitted_classification = contact.classification
+
+            current_attention, _area_id = effective_attention(
+                contact.attention, contact.last_position, self.areas
+            )
+            attention_kind = attention_event_kind(
+                contact.last_emitted_attention, current_attention
+            )
+            if attention_kind is not None and self._cooldown_elapsed(
+                contact, CONTACT_ATTENTION_CHANGED, now_sim
+            ):
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=CONTACT_ATTENTION_CHANGED,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                        previous_attention=contact.last_emitted_attention,
+                        attention=current_attention,
+                    )
+                )
+                contact.last_event_emitted_sim[CONTACT_ATTENTION_CHANGED] = now_sim
+            contact.last_emitted_attention = current_attention
+
+    @staticmethod
+    def _cooldown_elapsed(contact: Contact, kind: EventKind, now_sim: float) -> bool:
+        """Whether `EVENT_COOLDOWN_S` has elapsed since `contact` last
+        actually emitted an event of `kind` -- `True` (no suppression) if it
+        never has. Gates emission only; never gates the state-snapshot
+        comparison that decided a change occurred (see `tick`'s docstring)."""
+        last_emitted = contact.last_event_emitted_sim.get(kind)
+        return last_emitted is None or (now_sim - last_emitted) >= EVENT_COOLDOWN_S
 
     def _new_contact_id(self) -> str:
         self._next_contact_number += 1
@@ -349,3 +483,7 @@ class ContactStore:
     def _new_event_id(self) -> str:
         self._next_event_number += 1
         return f"{_EVENT_ID_PREFIX}_{self._next_event_number}"
+
+    def _new_area_id(self) -> str:
+        self._next_area_number += 1
+        return f"{_AREA_ID_PREFIX}_{self._next_area_number}"

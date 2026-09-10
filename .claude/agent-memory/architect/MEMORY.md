@@ -9,3 +9,4 @@ One line per entry, under ~150 characters: `- [Title](file.md) — one-line hook
 - [BL-2 contact memory design](project_bl2_contact_memory_design.md) — belief/ package, Percept truth-quarantine, emit_mode debounce fix, 3 latent defects in merged PB-1/1.5 code.
 - [BL-2.5 text panel output](project_bl25_text_panel_output.md) — PB-x vs BL-x naming precedent, aircraft-layer's first write path, dxgui source found under install root not Scripts/.
 - [BL-2.6 classification refinement](project_bl26_classification_refinement.md) — specificity lattice, monotone fusion as hysteresis, ED's coarse-class ceiling, offline-executability rule for plans.
+- [BL-4 attention and events](project_bl4_attention_events.md) — 4-state attention (no TRACK), area = center+radius not place-name, ack via ContactStore set, cooldown != classification lockout.

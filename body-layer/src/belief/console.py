@@ -8,42 +8,69 @@ function; this module's job is only to split an input line into a command +
 argument, call the matching tool, and format whatever it returns as text.
 If a future command needs new belief-state logic, that logic belongs in
 `tools.py` (or a `belief/` module `tools.py` itself calls), never inline
-here -- see `tools.py`'s own module docstring on why `watch`/`unwatch`/
-`stats` have tool functions despite not being one of §3.3's four.
+here -- see `tools.py`'s own module docstring on why `set_attention`/
+`stats`/`list_areas` have tool functions despite not all being one of
+§3.3's original four.
 
-    contacts [all|visible|watched]  -> tools.get_contacts
-    show <id>                       -> tools.describe_contact
-    history <id>                    -> tools.get_contact_history
-    find <text>                     -> tools.find_contact
-    watch <id>                      -> tools.watch_contact
-    unwatch <id>                    -> tools.unwatch_contact
-    stats                           -> tools.get_stats
-"""
+    contacts [all|visible|watched]              -> tools.get_contacts
+    show <id>                                   -> tools.describe_contact
+    history <id>                                -> tools.get_contact_history
+    find <text>                                 -> tools.find_contact
+    watch <id>                                  -> tools.set_attention
+    unwatch <id>                                 -> tools.set_attention
+    attention <id>                               -> tools.get_attention_state
+    attention <id> <level>                      -> tools.set_attention
+    watch-area <bearing> <range_m> <radius_m> [sector] -> tools.watch_area
+    unwatch-area <id>                           -> tools.unwatch_area
+    areas                                       -> tools.list_areas
+    events                                      -> tools.list_events
+    ack <id>                                    -> tools.acknowledge_event
+    stats                                       -> tools.get_stats
+
+`watch <id>`/`unwatch <id>` (BL-2 Stage 4) are kept as aliases over the
+general `attention <id> <level>` command (BL-4, `plans/
+bl4-attention-events/plan.md`) -- both call `tools.set_attention` with
+`level="watch"`/`"normal"` respectively, so their output is byte-for-byte
+unchanged from before BL-4.
+
+`watch-area` resolves its bearing/range argument against `enrichment.
+ownship` (`perception.geometry.project_from_bearing_range`) -- it is
+therefore unavailable (returns an error line, not a crash) until `Console.
+enrichment` has been set, same guard shape as every other enrichment-
+dependent field elsewhere in this module. It never resolves a place name
+(`find_place` is BL-5/BL-6 work, see `tools.watch_area`'s own docstring)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TextIO
 
+from belief.attention import SECTORS, Attention, AttentionArea, Sector
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import CONTACT_CLASSIFICATION_CHANGED, Event
 from belief.tools import (
     ContactFilter,
     ContactResult,
+    acknowledge_event,
     describe_contact,
     find_contact,
+    get_attention_state,
     get_contact_history,
     get_contacts,
     get_stats,
-    unwatch_contact,
-    watch_contact,
+    list_areas,
+    list_events,
+    set_attention,
+    unwatch_area,
+    watch_area,
 )
+from perception.geometry import GeoPosition, project_from_bearing_range
 
 #: Printed once at REPL startup (`logger.py`'s `main()`) -- kept in sync with
 #: the module docstring's command table above by hand; both list the same
-#: seven commands because `handle_line`'s dispatch is the single source of
-#: truth for what actually exists.
+#: commands because `handle_line`'s dispatch is the single source of truth
+#: for what actually exists.
 HELP_TEXT = """\
 Petrovich belief console -- commands:
   contacts [all|visible|watched]  list contacts (default: all)
@@ -52,10 +79,17 @@ Petrovich belief console -- commands:
   find <text>                     search contacts by classification text
   watch <id>                      mark a contact watched
   unwatch <id>                    clear a contact's watched mark
+  attention <id> [<level>]        show, or set, a contact's attention (ignore/normal/watch/priority)
+  watch-area <bearing_deg> <range_m> <radius_m> [sector]  watch an area
+  unwatch-area <id>                clear a watched area
+  areas                           list watched areas
+  events                          list unacknowledged events
+  ack <id>                        acknowledge an event
   stats                           observation/contact/event counts
 """
 
 _CONTACT_FILTERS: tuple[ContactFilter, ...] = ("all", "visible", "watched")
+_ATTENTION_LEVELS: tuple[Attention, ...] = ("ignore", "normal", "watch", "priority")
 
 #: `_contact_result`'s `facts` keys, in display order, for `show <id>`'s
 #: multi-line block -- listed explicitly (rather than iterating the dict)
@@ -125,6 +159,18 @@ def _dispatch(
         return _handle_watch(store, rest)
     if command == "unwatch":
         return _handle_unwatch(store, rest)
+    if command == "attention":
+        return _handle_attention(store, rest)
+    if command == "watch-area":
+        return _handle_watch_area(store, rest, enrichment)
+    if command == "unwatch-area":
+        return _handle_unwatch_area(store, rest)
+    if command == "areas":
+        return _handle_areas(store)
+    if command == "events":
+        return _handle_events(store)
+    if command == "ack":
+        return _handle_ack(store, rest)
     if command == "stats":
         return _handle_stats(store)
     return [f"unknown command: {command}"]
@@ -195,15 +241,123 @@ def _handle_find(
 def _handle_watch(store: ContactStore, rest: str) -> list[str]:
     if not rest:
         return ["usage: watch <id>"]
-    found = watch_contact(store, rest)
+    found = set_attention(store, rest, "watch")
     return [f"watching {rest}" if found else f"no such contact: {rest}"]
 
 
 def _handle_unwatch(store: ContactStore, rest: str) -> list[str]:
     if not rest:
         return ["usage: unwatch <id>"]
-    found = unwatch_contact(store, rest)
+    found = set_attention(store, rest, "normal")
     return [f"no longer watching {rest}" if found else f"no such contact: {rest}"]
+
+
+def _handle_attention(store: ContactStore, rest: str) -> list[str]:
+    """`attention <id>` (no level) queries `tools.get_attention_state`;
+    `attention <id> <level>` sets the contact's direct mark via `tools.
+    set_attention` -- the same command name doubles as read and write,
+    distinguished only by argument count, since both operate on the same
+    "one contact's attention" concept."""
+    parts = rest.split(maxsplit=1)
+    if not parts:
+        return ["usage: attention <id> [<level>]"]
+    if len(parts) == 1:
+        contact_id = parts[0]
+        state = get_attention_state(store, contact_id)
+        if state is None:
+            return [f"no such contact: {contact_id}"]
+        return [_format_attention_state(state)]
+    contact_id, level_arg = parts
+    level_arg = level_arg.strip().lower()
+    if level_arg not in _ATTENTION_LEVELS:
+        levels = ", ".join(_ATTENTION_LEVELS)
+        return [f"unknown attention level: {level_arg} (expected one of {levels})"]
+    found = set_attention(store, contact_id, level_arg)
+    if found:
+        return [f"{contact_id}: attention = {level_arg}"]
+    return [f"no such contact: {contact_id}"]
+
+
+def _format_attention_state(state: dict[str, object]) -> str:
+    line = f"{state['contact_id']}: direct={state['direct']} effective={state['effective']}"
+    if "direct_source" in state:
+        line += f" direct_source={state['direct_source']}"
+    if "area_id" in state:
+        line += f" area_id={state['area_id']}"
+    return line
+
+
+def _handle_watch_area(
+    store: ContactStore, rest: str, enrichment: EnrichmentContext | None
+) -> list[str]:
+    usage = ["usage: watch-area <bearing_deg> <range_m> <radius_m> [sector]"]
+    parts = rest.split()
+    if len(parts) not in (3, 4):
+        return usage
+    if enrichment is None:
+        return ["watch-area requires live ownship telemetry (not available yet)"]
+    try:
+        bearing_deg = float(parts[0])
+        range_m = float(parts[1])
+        radius_m = float(parts[2])
+    except ValueError:
+        return usage
+    sector: Sector | None = None
+    if len(parts) == 4:
+        sector_arg = parts[3].upper()
+        if sector_arg not in SECTORS:
+            return [
+                f"unknown sector: {parts[3]} (expected one of {', '.join(SECTORS)})"
+            ]
+        sector = sector_arg
+    ownship = enrichment.ownship
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    center = project_from_bearing_range(observer, bearing_deg, range_m)
+    area = watch_area(store, center, radius_m, sector=sector)
+    return [f"watching area {area.id}"]
+
+
+def _handle_unwatch_area(store: ContactStore, rest: str) -> list[str]:
+    if not rest:
+        return ["usage: unwatch-area <id>"]
+    found = unwatch_area(store, rest)
+    return [f"no longer watching area {rest}" if found else f"no such area: {rest}"]
+
+
+def _handle_areas(store: ContactStore) -> list[str]:
+    areas = list_areas(store)
+    if not areas:
+        return ["no areas"]
+    return [_format_area_line(area) for area in areas]
+
+
+def _format_area_line(area: AttentionArea) -> str:
+    sector_part = f" sector={area.sector}" if area.sector is not None else ""
+    return (
+        f"{area.id}: level={area.level} radius_m={area.radius_m:.0f}"
+        f"{sector_part} source={area.source}"
+    )
+
+
+def _handle_events(store: ContactStore) -> list[str]:
+    events = list_events(store)
+    if not events:
+        return ["no unacknowledged events"]
+    return [_format_event_line(event) for event in events]
+
+
+def _format_event_line(event: dict[str, object]) -> str:
+    return (
+        f"{event['id']}: {event['kind']} contact={event['contact_id']} "
+        f"t_sim={event['t_sim']}"
+    )
+
+
+def _handle_ack(store: ContactStore, rest: str) -> list[str]:
+    if not rest:
+        return ["usage: ack <id>"]
+    found = acknowledge_event(store, rest)
+    return [f"acknowledged {rest}" if found else f"no such event: {rest}"]
 
 
 def _handle_stats(store: ContactStore) -> list[str]:

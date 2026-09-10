@@ -29,13 +29,49 @@ event. `previous is None` (a contact's first tick) deliberately produces no
 event -- `CONTACT_DETECTED` already reports "this contact now exists" once;
 a same-tick classification event would be a synthetic, redundant pair with
 no real prior state to have changed *from*, mirroring `lifecycle_event_kind`'s
-own reasoning for why an already-`"lost"` first tick emits nothing."""
+own reasoning for why an already-`"lost"` first tick emits nothing.
+
+`attention_event_kind` is BL-4's twin comparison (`plans/
+bl4-attention-events/plan.md`), over `belief.attention.Attention` instead of
+`Certainty`/`ClassificationBelief`: given a contact's last-emitted
+*effective* attention and its current one, does that transition warrant a
+`CONTACT_ATTENTION_CHANGED` event? Any change fires (there is no
+refined/contradicted direction to distinguish, unlike classification --
+attention is a flat rank, not a specificity lattice); `previous is None`
+produces no event, the same first-tick convention as the other two kinds.
+
+`EVENT_COOLDOWN_S` is BL-4's emission-suppression mechanism, applied
+uniformly by `ContactStore.tick` to all three event kinds above (`belief.
+contacts.Contact.last_event_emitted_sim`, a plain per-contact-per-kind
+timestamp dict): a kind whose comparison function reports a real change is
+still only *appended to the log* if at least `EVENT_COOLDOWN_S` seconds have
+elapsed since that contact last actually emitted that kind. It never
+suppresses the comparison itself -- `Contact.last_emitted_certainty`/
+`last_emitted_classification`/`last_emitted_attention` are updated on every
+tick regardless of whether the cooldown blocked emission, so a transition
+that fires while on cooldown is not silently lost: the *next* tick compares
+against the true current state, not a stale pre-cooldown one, and will emit
+if the state is still different from what was last actually reported.
+
+**This is a distinct mechanism from `classification.py`'s
+`CLASSIFICATION_CONTRADICTION_LOCKOUT_S`, not a reuse of it** -- easy to
+conflate since both are "seconds of suppression" constants living near
+event-adjacent code, but they operate on different things. The lockout
+suppresses a *belief-state promotion* (`fold_classification` refusing to
+re-promote a contact's held classification after a fresh contradiction,
+before any event exists to suppress); this cooldown suppresses *event
+emission* for an already-computed, already-applied state change. A contact
+could have its classification promoted and demoted freely from `record`'s
+point of view while this module's cooldown merely throttles how often that
+shows up in the event log -- swapping one constant in for the other would
+be a real behavior change, not a cleanup."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal
 
+from belief.attention import Attention
 from belief.decay import Certainty
 
 if TYPE_CHECKING:
@@ -46,14 +82,24 @@ EventKind = Literal[
     "CONTACT_LOST",
     "CONTACT_REACQUIRED",
     "CONTACT_CLASSIFICATION_CHANGED",
+    "CONTACT_ATTENTION_CHANGED",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
 CONTACT_LOST: Final[EventKind] = "CONTACT_LOST"
 CONTACT_REACQUIRED: Final[EventKind] = "CONTACT_REACQUIRED"
 CONTACT_CLASSIFICATION_CHANGED: Final[EventKind] = "CONTACT_CLASSIFICATION_CHANGED"
+CONTACT_ATTENTION_CHANGED: Final[EventKind] = "CONTACT_ATTENTION_CHANGED"
 
 ClassificationDirection = Literal["refined", "contradicted"]
+
+#: BL-4's emission-suppression cooldown -- see module docstring for the full
+#: rationale and how it differs from `classification.py`'s
+#: `CLASSIFICATION_CONTRADICTION_LOCKOUT_S`. An unverified guess, same
+#: provisional status as `IDENTITY_HALF_LIFE_S`/`NAKED_EYE_RANGE_CAP_M`
+#: before live tuning (`plans/bl4-attention-events/plan.md`'s Risks &
+#: Unknowns) -- picked conservative rather than tuned.
+EVENT_COOLDOWN_S: Final[float] = 15.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +116,13 @@ class Event:
     `previous_classification`/`classification`/`direction` are Stage 3's
     addition, all defaulting to `None` so every existing construction site
     and test (all three lifecycle kinds) is untouched -- only a
-    `CONTACT_CLASSIFICATION_CHANGED` event populates them."""
+    `CONTACT_CLASSIFICATION_CHANGED` event populates them.
+
+    `previous_attention`/`attention` are BL-4's twin addition, same
+    default-`None`-everywhere-else shape -- only a `CONTACT_ATTENTION_
+    CHANGED` event populates them, both holding *effective* attention
+    values (`belief.attention.effective_attention`'s result), not
+    necessarily a contact's raw direct mark."""
 
     id: str
     contact_id: str
@@ -80,6 +132,8 @@ class Event:
     previous_classification: str | None = None
     classification: str | None = None
     direction: ClassificationDirection | None = None
+    previous_attention: Attention | None = None
+    attention: Attention | None = None
 
 
 def lifecycle_event_kind(
@@ -137,3 +191,23 @@ def classification_event(
     if current.level > previous.level:
         return "refined"
     return "contradicted"
+
+
+def attention_event_kind(
+    previous: Attention | None, current: Attention
+) -> EventKind | None:
+    """What attention transition, if any, `previous -> current` implies --
+    both effective attention values (`belief.attention.effective_attention`'s
+    result), not raw direct marks (see module docstring). `previous is None`
+    (a contact's first tick) produces no event, mirroring `lifecycle_event_
+    kind`/`classification_event`'s own first-tick convention. Any change
+    otherwise fires `CONTACT_ATTENTION_CHANGED` -- unlike `classification_
+    event`, there is no direction to distinguish; attention is a flat rank,
+    not a specificity lattice, so "raised" vs. "lowered" is fully recoverable
+    from comparing `previous`/`current` on the resulting `Event` without a
+    separate field."""
+    if previous is None:
+        return None
+    if previous == current:
+        return None
+    return CONTACT_ATTENTION_CHANGED

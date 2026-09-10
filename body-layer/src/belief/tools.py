@@ -9,8 +9,12 @@ this module; it does not rewrite it.
 actually knows about a `belief.contacts.Contact`: its id, its last perceived
 classification, its `belief.decay.Certainty`, how long ago it was last
 observed, its last *implied* (belief-derived, not ground-truth) position,
-which source(s) contributed to it, and its bare attention state (this
-stage's addition). §3.4's full response shape also has `position.confidence`,
+which source(s) contributed to it, and its attention state (BL-2 Stage 4
+added the bare mark; BL-4 makes `facts.attention` the *effective* value --
+direct mark folded with area membership via `belief.attention.
+effective_attention` -- and `facts.attention_source` distinguishes a direct
+mark from an area-derived one). §3.4's full response shape also has
+`position.confidence`,
 `semantic` (world-model place references), a clock-bearing `relative_now`,
 and `motion_when_seen` -- BL-3 (`plans/bl3-world-enrichment/plan.md`) adds
 all four, but only when the optional `enrichment: belief.enrichment.
@@ -23,7 +27,8 @@ must be able to tell "BL-2/BL-3 doesn't know this yet" from "checked and
 found nothing," and a present-but-null key collapses that distinction. The
 same absent-not-empty rule is why `phrasing_hints` never carries an
 `urgency` key here: urgency is a threat-assessment judgment this module has
-no basis to compute (BL-4).
+no basis to compute (BL-6, per `plans/bl4-attention-events/plan.md`'s
+"Narrows BL-6" second-order-effect note -- attention is not threat).
 
 **Identity invariant.** Every function here reads only `Contact` fields,
 which are themselves derived exclusively from `belief.percept.Percept`
@@ -39,21 +44,33 @@ and the `certainty` ladder. Real templating (structured wording rules,
 per-attribute phrasing) is `plans/body-layer/plan.md` §6 BL-5a's job; this
 is deliberately plain enough that it cannot be mistaken for that.
 
-**`watch_contact`/`unwatch_contact`/`get_stats`.** Not part of §3.3's four
-read tools (their eventual brain-facing equivalents -- `set_attention`,
-`get_attention_state` -- are BL-4/BL-5 work this stage does not build), but
+**`set_attention`/`get_stats`.** Not part of §3.3's four read tools, but
 `belief.console`'s Stage 4 task constraint is that it "owns no belief logic
 itself, just parses commands and formats `tools.py`'s output" -- so the
-`watch <id>`/`unwatch <id>`/`stats` console commands' actual state mutation
-and counting live here, in the same plain-function shape as the four §3.3
-tools, rather than in the console's command dispatch.
-"""
+`stats` console command's actual counting lives here, in the same
+plain-function shape as the four §3.3 tools, rather than in the console's
+command dispatch. `set_attention` *is* named directly in §3.3 (BL-4, `plans/
+bl4-attention-events/plan.md`) -- it replaces BL-2 Stage 4's `watch_contact`/
+`unwatch_contact` with the general four-level form; `console.py`'s `watch`/
+`unwatch` commands now call it with `level="watch"`/`"normal"` rather than
+having their own tool functions, so existing console output is unchanged.
+
+**`watch_area`/`unwatch_area`/`list_areas`, `get_attention_state`,
+`list_events`/`acknowledge_event`.** BL-4's remaining additions. `watch_area`/
+`unwatch_area` mirror `set_attention`'s console-facing shape but for
+`belief.attention.AttentionArea` registration rather than a single contact's
+direct mark; `list_areas` is not one of §3.3's named tools (same "console
+needs it, so it lives here, not in console.py" reasoning as `stats`).
+`list_events`/`acknowledge_event` are BL-4's event-queue mechanism this
+stage builds in full -- BL-5 only adds the transport and the `{facts,
+summary, phrasing_hints}` wrapping around them (plan's Q2 decision)."""
 
 from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Literal, TypedDict
 
+from belief.attention import Attention, AttentionArea, Sector, effective_attention
 from belief.contacts import Contact, ContactStore
 from belief.decay import (
     Certainty,
@@ -62,6 +79,8 @@ from belief.decay import (
     position_confidence,
 )
 from belief.enrichment import EnrichmentContext, motion_when_seen, relative_geometry
+from belief.events import Event
+from perception.geometry import GeoPosition
 
 #: `phrasing_hints.certainty`'s vocabulary -- deliberately distinct wording
 #: from the internal `belief.decay.Certainty` ladder (`"observed"` etc.),
@@ -123,6 +142,8 @@ def _contact_facts(
     contact: Contact,
     now_sim: float,
     store: ContactStore,
+    attention_level: Attention,
+    attention_area_id: str | None,
     enrichment: EnrichmentContext | None = None,
 ) -> dict[str, object]:
     certainty = certainty_of(contact, now_sim)
@@ -136,9 +157,11 @@ def _contact_facts(
             "dcs": {"x": contact.last_position.x, "z": contact.last_position.z}
         },
         "sources": sorted({span.source for span in contact.sighting_spans}),
-        "attention": contact.attention,
+        "attention": attention_level,
     }
-    if contact.attention_source is not None:
+    if attention_area_id is not None:
+        facts["attention_source"] = f"area:{attention_area_id}"
+    elif contact.attention_source is not None:
         facts["attention_source"] = contact.attention_source
     if enrichment is not None:
         _add_enrichment_facts(facts, contact, now_sim, store, enrichment)
@@ -186,6 +209,7 @@ def _format_range_km(range_m: float) -> str:
 def _contact_summary(
     contact: Contact,
     now_sim: float,
+    attention_level: Attention,
     relative_now: dict[str, object] | None = None,
 ) -> str:
     certainty = certainty_of(contact, now_sim)
@@ -196,8 +220,10 @@ def _contact_summary(
         recency = f"last seen {ago_s:.0f}s ago"
     classification_value = contact.classification.value or "unknown"
     summary = f"{classification_value}, {certainty}, {recency}."
-    if contact.attention == "watch":
+    if attention_level == "watch":
         summary += " Being watched."
+    elif attention_level == "priority":
+        summary += " Priority attention."
     if relative_now is not None:
         clock_position = relative_now["clock_position"]
         range_m = relative_now["range_m"]
@@ -218,12 +244,17 @@ def _contact_result(
     store: ContactStore,
     enrichment: EnrichmentContext | None = None,
 ) -> ContactResult:
-    facts = _contact_facts(contact, now_sim, store, enrichment)
+    attention_level, attention_area_id = effective_attention(
+        contact.attention, contact.last_position, store.areas
+    )
+    facts = _contact_facts(
+        contact, now_sim, store, attention_level, attention_area_id, enrichment
+    )
     relative_now = facts.get("relative_now")
     assert relative_now is None or isinstance(relative_now, dict)
     return ContactResult(
         facts=facts,
-        summary=_contact_summary(contact, now_sim, relative_now),
+        summary=_contact_summary(contact, now_sim, attention_level, relative_now),
         phrasing_hints=_contact_phrasing_hints(contact, now_sim),
     )
 
@@ -236,15 +267,24 @@ def get_contacts(
 ) -> list[ContactResult]:
     """List current contacts, most-recently-seen first. `filter` is
     deliberately minimal -- `"visible"` (currently `certainty == "observed"`)
-    and `"watched"` (`attention == "watch"`) are the only two BL-2 has real
-    machinery for; §3.3's `"threats"`/`"near_aircraft"` still need threat
-    assessment (BL-4), so they are not offered rather than faked. `enrichment`
-    (BL-3, optional) is threaded into every returned result the same way."""
+    and `"watched"` are the only two with real machinery; §3.3's
+    `"threats"`/`"near_aircraft"` still need threat assessment (BL-6), so
+    they are not offered rather than faked. `"watched"` (BL-4) is now
+    `effective_attention in ("watch", "priority")` -- a contact inside a
+    watched/priority `AttentionArea` shows up here even with an unmarked
+    direct attention, matching what `facts.attention` reports for it via
+    `describe_contact`. `enrichment` (BL-3, optional) is threaded into every
+    returned result the same way."""
     contacts = store.contacts
     if filter == "visible":
         contacts = [c for c in contacts if certainty_of(c, now_sim) == "observed"]
     elif filter == "watched":
-        contacts = [c for c in contacts if c.attention == "watch"]
+        contacts = [
+            c
+            for c in contacts
+            if effective_attention(c.attention, c.last_position, store.areas)[0]
+            in ("watch", "priority")
+        ]
     contacts = sorted(contacts, key=lambda c: c.last_seen_sim, reverse=True)
     return [
         _contact_result(contact, now_sim, store, enrichment) for contact in contacts
@@ -346,29 +386,130 @@ def find_contact(
     return [_contact_result(contact, now_sim, store, enrichment) for contact in matches]
 
 
-def watch_contact(
-    store: ContactStore, contact_id: str, source: str = "console"
+def set_attention(
+    store: ContactStore, contact_id: str, level: Attention, source: str = "console"
 ) -> bool:
-    """Mark a contact watched -- a bare attention enum + source field, no
-    policy/cooldown/relevance scoring (that is BL-4). Returns whether
-    `contact_id` was found."""
+    """Mark a contact's *direct* attention (BL-4, `plans/
+    bl4-attention-events/plan.md`'s §3.3 `set_attention` signature) --
+    replaces BL-2 Stage 4's `watch_contact`/`unwatch_contact` with the
+    general four-level form. `level == "normal"` clears `attention_source`
+    to `None` (the neutral default carries no source, matching
+    `unwatch_contact`'s old behavior exactly); every other level records
+    `source`. Returns whether `contact_id` was found. Note this sets the
+    contact's own *direct* mark only -- `facts.attention`/`get_contacts`'s
+    `"watched"` filter both report the *effective* value (`belief.attention.
+    effective_attention`), which an `AttentionArea` can raise above what
+    this function alone sets."""
     contact = _find_contact(store, contact_id)
     if contact is None:
         return False
-    contact.attention = "watch"
-    contact.attention_source = source
+    contact.attention = level
+    contact.attention_source = source if level != "normal" else None
     return True
 
 
-def unwatch_contact(store: ContactStore, contact_id: str) -> bool:
-    """Clear a contact's watched state. Returns whether `contact_id` was
-    found."""
+def watch_area(
+    store: ContactStore,
+    center: GeoPosition,
+    radius_m: float,
+    level: Attention = "watch",
+    sector: Sector | None = None,
+    source: str = "console",
+) -> AttentionArea:
+    """Register a new `belief.attention.AttentionArea` (BL-4). `center` is
+    an already-resolved `GeoPosition` -- turning a bearing/range pair (or,
+    later, a place name via `find_place`) into that position is the
+    caller's job, not this function's (`console.py`'s `watch-area` command
+    does the bearing/range resolution via `perception.geometry.
+    project_from_bearing_range`; see the plan's "watch_area's place-name
+    gap" risk for why `find_place` resolution is explicitly out of scope
+    here). Returns the stored `AttentionArea`, including its store-minted
+    `id`, so the caller can report it back to the user."""
+    return store.add_area(
+        center=center, radius_m=radius_m, level=level, source=source, sector=sector
+    )
+
+
+def unwatch_area(store: ContactStore, area_id: str) -> bool:
+    """Unregister an `AttentionArea`. Returns whether `area_id` was found."""
+    return store.remove_area(area_id)
+
+
+def list_areas(store: ContactStore) -> list[AttentionArea]:
+    """Every registered `AttentionArea`, for `console.py`'s `areas`
+    command -- not one of §3.3's named tools, same "console needs it, so it
+    lives here" reasoning as `get_stats`."""
+    return store.areas
+
+
+def get_attention_state(
+    store: ContactStore, contact_id: str
+) -> dict[str, object] | None:
+    """A contact's direct mark alongside its effective attention (BL-4,
+    §3.3) -- `None` if `contact_id` does not exist. `direct_source`/`area_id`
+    are omitted (not `None`) when there is no direct source or no area
+    contributed the effective value, the same absent-not-empty convention
+    as `facts` elsewhere in this module."""
     contact = _find_contact(store, contact_id)
     if contact is None:
-        return False
-    contact.attention = "normal"
-    contact.attention_source = None
-    return True
+        return None
+    effective, area_id = effective_attention(
+        contact.attention, contact.last_position, store.areas
+    )
+    state: dict[str, object] = {
+        "contact_id": contact.id,
+        "direct": contact.attention,
+        "effective": effective,
+    }
+    if contact.attention_source is not None:
+        state["direct_source"] = contact.attention_source
+    if area_id is not None:
+        state["area_id"] = area_id
+    return state
+
+
+def _event_to_dict(event: Event) -> dict[str, object]:
+    """One `belief.events.Event` flattened to a plain dict for `list_events`
+    -- mirrors `get_contact_history`'s existing event-entry shape (`type`
+    omitted here since every element of `list_events`'s result is an event,
+    unlike `get_contact_history`'s mixed sighting/event list), extended
+    with the id an `acknowledge_event` call needs and the classification/
+    attention transition fields when the event's kind populates them."""
+    entry: dict[str, object] = {
+        "id": event.id,
+        "contact_id": event.contact_id,
+        "kind": event.kind,
+        "t_sim": event.t_sim,
+        "certainty": event.certainty,
+    }
+    if event.previous_classification is not None:
+        entry["previous_classification"] = event.previous_classification
+    if event.classification is not None:
+        entry["classification"] = event.classification
+    if event.direction is not None:
+        entry["direction"] = event.direction
+    if event.previous_attention is not None:
+        entry["previous_attention"] = event.previous_attention
+    if event.attention is not None:
+        entry["attention"] = event.attention
+    return entry
+
+
+def list_events(
+    store: ContactStore, unacknowledged_only: bool = True
+) -> list[dict[str, object]]:
+    """BL-4's event-queue read (`plans/bl4-attention-events/plan.md`'s Q2
+    decision -- this milestone builds the full mechanism, BL-5 only wraps
+    it). `unacknowledged_only=True` (the default) is `store.
+    unacknowledged_events`; `False` returns the complete log, oldest
+    first (matching `store.events`'s own emission order)."""
+    events = store.unacknowledged_events if unacknowledged_only else store.events
+    return [_event_to_dict(event) for event in events]
+
+
+def acknowledge_event(store: ContactStore, event_id: str) -> bool:
+    """Mark one event acknowledged. Returns whether `event_id` was found."""
+    return store.acknowledge_event(event_id)
 
 
 def get_stats(store: ContactStore) -> dict[str, int]:
