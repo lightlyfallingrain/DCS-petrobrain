@@ -514,3 +514,22 @@ def test_add_area_and_remove_area_round_trip() -> None:
 def test_remove_area_returns_false_for_unknown_id() -> None:
     store = ContactStore()
     assert store.remove_area("AREA_999") is False
+
+
+def test_unacknowledged_events_and_acknowledge_event_round_trip() -> None:
+    store = ContactStore()
+    obs = _observation(obs_id="OBS_1", t_sim=0.0)
+    store.ingest([obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    assert len(store.unacknowledged_events) == 1
+    event_id = store.events[0].id
+
+    assert store.acknowledge_event(event_id) is True
+    assert store.unacknowledged_events == []
+    # The log itself is unaffected by acknowledgement.
+    assert len(store.events) == 1
+
+
+def test_acknowledge_event_returns_false_for_unknown_id() -> None:
+    store = ContactStore()
+    assert store.acknowledge_event("EVENT_999") is False

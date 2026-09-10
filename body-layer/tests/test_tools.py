@@ -17,6 +17,7 @@ from belief.enrichment import EnrichmentContext
 from belief.tools import (
     _contact_summary,
     _format_range_km,
+    acknowledge_event,
     describe_contact,
     find_contact,
     get_attention_state,
@@ -24,6 +25,7 @@ from belief.tools import (
     get_contacts,
     get_stats,
     list_areas,
+    list_events,
     set_attention,
     unwatch_area,
     watch_area,
@@ -475,7 +477,8 @@ def test_describe_contact_summary_includes_clock_range_when_enriched(
     )
 
 
-# --- BL-4: watch_area/unwatch_area/list_areas, get_attention_state -------
+# --- BL-4: watch_area/unwatch_area/list_areas, get_attention_state,
+# list_events/acknowledge_event ------------------------------------------
 
 
 def test_watch_area_returns_a_minted_area_and_list_areas_sees_it() -> None:
@@ -535,3 +538,21 @@ def test_get_contacts_watched_filter_includes_area_derived_contacts() -> None:
     watch_area(store, contact.last_position, radius_m=500.0, level="priority")
     watched = get_contacts(store, now_sim=0.0, filter="watched")
     assert [r["facts"]["id"] for r in watched] == [contact.id]
+
+
+def test_list_events_defaults_to_unacknowledged_only() -> None:
+    store = _store_with_one_contact()
+    store.tick(now_sim=0.0)
+    events = list_events(store)
+    assert len(events) == 1
+    event_id = events[0]["id"]
+    assert events[0]["kind"] == "CONTACT_DETECTED"
+
+    assert acknowledge_event(store, event_id) is True
+    assert list_events(store) == []
+    assert len(list_events(store, unacknowledged_only=False)) == 1
+
+
+def test_acknowledge_event_returns_false_for_unknown_id() -> None:
+    store = ContactStore()
+    assert acknowledge_event(store, "EVENT_999") is False

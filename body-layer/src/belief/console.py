@@ -23,6 +23,8 @@ here -- see `tools.py`'s own module docstring on why `set_attention`/
     watch-area <bearing> <range_m> <radius_m> [sector] -> tools.watch_area
     unwatch-area <id>                           -> tools.unwatch_area
     areas                                       -> tools.list_areas
+    events                                      -> tools.list_events
+    ack <id>                                    -> tools.acknowledge_event
     stats                                       -> tools.get_stats
 
 `watch <id>`/`unwatch <id>` (BL-2 Stage 4) are kept as aliases over the
@@ -50,6 +52,7 @@ from belief.events import CONTACT_CLASSIFICATION_CHANGED, Event
 from belief.tools import (
     ContactFilter,
     ContactResult,
+    acknowledge_event,
     describe_contact,
     find_contact,
     get_attention_state,
@@ -57,6 +60,7 @@ from belief.tools import (
     get_contacts,
     get_stats,
     list_areas,
+    list_events,
     set_attention,
     unwatch_area,
     watch_area,
@@ -79,6 +83,8 @@ Petrovich belief console -- commands:
   watch-area <bearing_deg> <range_m> <radius_m> [sector]  watch an area
   unwatch-area <id>                clear a watched area
   areas                           list watched areas
+  events                          list unacknowledged events
+  ack <id>                        acknowledge an event
   stats                           observation/contact/event counts
 """
 
@@ -161,6 +167,10 @@ def _dispatch(
         return _handle_unwatch_area(store, rest)
     if command == "areas":
         return _handle_areas(store)
+    if command == "events":
+        return _handle_events(store)
+    if command == "ack":
+        return _handle_ack(store, rest)
     if command == "stats":
         return _handle_stats(store)
     return [f"unknown command: {command}"]
@@ -327,6 +337,27 @@ def _format_area_line(area: AttentionArea) -> str:
         f"{area.id}: level={area.level} radius_m={area.radius_m:.0f}"
         f"{sector_part} source={area.source}"
     )
+
+
+def _handle_events(store: ContactStore) -> list[str]:
+    events = list_events(store)
+    if not events:
+        return ["no unacknowledged events"]
+    return [_format_event_line(event) for event in events]
+
+
+def _format_event_line(event: dict[str, object]) -> str:
+    return (
+        f"{event['id']}: {event['kind']} contact={event['contact_id']} "
+        f"t_sim={event['t_sim']}"
+    )
+
+
+def _handle_ack(store: ContactStore, rest: str) -> list[str]:
+    if not rest:
+        return ["usage: ack <id>"]
+    found = acknowledge_event(store, rest)
+    return [f"acknowledged {rest}" if found else f"no such event: {rest}"]
 
 
 def _handle_stats(store: ContactStore) -> list[str]:

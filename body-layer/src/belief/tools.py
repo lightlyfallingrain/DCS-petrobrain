@@ -55,14 +55,15 @@ bl4-attention-events/plan.md`) -- it replaces BL-2 Stage 4's `watch_contact`/
 `unwatch` commands now call it with `level="watch"`/`"normal"` rather than
 having their own tool functions, so existing console output is unchanged.
 
-**`watch_area`/`unwatch_area`/`list_areas`, `get_attention_state`.** BL-4's
-area-attention additions. `watch_area`/`unwatch_area` mirror
-`set_attention`'s console-facing shape but for `belief.attention.
-AttentionArea` registration rather than a single contact's direct mark;
-`list_areas` is not one of §3.3's named tools (same "console needs it, so
-it lives here, not in console.py" reasoning as `stats`). `list_events`/
-`acknowledge_event` (the event-queue mechanism, plan's Q2 decision) land
-in a follow-up commit."""
+**`watch_area`/`unwatch_area`/`list_areas`, `get_attention_state`,
+`list_events`/`acknowledge_event`.** BL-4's remaining additions. `watch_area`/
+`unwatch_area` mirror `set_attention`'s console-facing shape but for
+`belief.attention.AttentionArea` registration rather than a single contact's
+direct mark; `list_areas` is not one of §3.3's named tools (same "console
+needs it, so it lives here, not in console.py" reasoning as `stats`).
+`list_events`/`acknowledge_event` are BL-4's event-queue mechanism this
+stage builds in full -- BL-5 only adds the transport and the `{facts,
+summary, phrasing_hints}` wrapping around them (plan's Q2 decision)."""
 
 from __future__ import annotations
 
@@ -78,6 +79,7 @@ from belief.decay import (
     position_confidence,
 )
 from belief.enrichment import EnrichmentContext, motion_when_seen, relative_geometry
+from belief.events import Event
 from perception.geometry import GeoPosition
 
 #: `phrasing_hints.certainty`'s vocabulary -- deliberately distinct wording
@@ -464,6 +466,50 @@ def get_attention_state(
     if area_id is not None:
         state["area_id"] = area_id
     return state
+
+
+def _event_to_dict(event: Event) -> dict[str, object]:
+    """One `belief.events.Event` flattened to a plain dict for `list_events`
+    -- mirrors `get_contact_history`'s existing event-entry shape (`type`
+    omitted here since every element of `list_events`'s result is an event,
+    unlike `get_contact_history`'s mixed sighting/event list), extended
+    with the id an `acknowledge_event` call needs and the classification/
+    attention transition fields when the event's kind populates them."""
+    entry: dict[str, object] = {
+        "id": event.id,
+        "contact_id": event.contact_id,
+        "kind": event.kind,
+        "t_sim": event.t_sim,
+        "certainty": event.certainty,
+    }
+    if event.previous_classification is not None:
+        entry["previous_classification"] = event.previous_classification
+    if event.classification is not None:
+        entry["classification"] = event.classification
+    if event.direction is not None:
+        entry["direction"] = event.direction
+    if event.previous_attention is not None:
+        entry["previous_attention"] = event.previous_attention
+    if event.attention is not None:
+        entry["attention"] = event.attention
+    return entry
+
+
+def list_events(
+    store: ContactStore, unacknowledged_only: bool = True
+) -> list[dict[str, object]]:
+    """BL-4's event-queue read (`plans/bl4-attention-events/plan.md`'s Q2
+    decision -- this milestone builds the full mechanism, BL-5 only wraps
+    it). `unacknowledged_only=True` (the default) is `store.
+    unacknowledged_events`; `False` returns the complete log, oldest
+    first (matching `store.events`'s own emission order)."""
+    events = store.unacknowledged_events if unacknowledged_only else store.events
+    return [_event_to_dict(event) for event in events]
+
+
+def acknowledge_event(store: ContactStore, event_id: str) -> bool:
+    """Mark one event acknowledged. Returns whether `event_id` was found."""
+    return store.acknowledge_event(event_id)
 
 
 def get_stats(store: ContactStore) -> dict[str, int]:

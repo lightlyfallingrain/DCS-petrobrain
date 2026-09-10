@@ -497,6 +497,35 @@ def test_areas_command_lists_nothing_on_an_empty_store() -> None:
     assert console.handle_line("areas", now_sim=0.0) == ["no areas"]
 
 
+def test_events_and_ack_commands_round_trip() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    console = Console(store=store)
+
+    events_output = console.handle_line("events", now_sim=0.0)
+    assert len(events_output) == 1
+    assert "CONTACT_DETECTED" in events_output[0]
+    event_id = events_output[0].split(":", 1)[0]
+
+    ack_output = console.handle_line(f"ack {event_id}", now_sim=0.0)
+    assert ack_output == [f"acknowledged {event_id}"]
+
+    assert console.handle_line("events", now_sim=0.0) == ["no unacknowledged events"]
+
+
+def test_ack_command_reports_unknown_id() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("ack EVENT_999", now_sim=0.0) == [
+        "no such event: EVENT_999"
+    ]
+
+
+def test_events_command_lists_nothing_when_no_events() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("events", now_sim=0.0) == ["no unacknowledged events"]
+
+
 def test_console_module_contains_no_belief_logic() -> None:
     """Structural check mirroring `test_contacts.
     test_belief_source_never_references_derived_world_position`'s grep

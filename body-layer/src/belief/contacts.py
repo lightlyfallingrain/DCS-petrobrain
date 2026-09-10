@@ -3,11 +3,10 @@ plan.md` Stage 1's persistent belief record and its append-only observation
 log, extended by Stage 2 with decay-driven certainty and lifecycle events
 (`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`). BL-4 (`plans/
 bl4-attention-events/plan.md`) adds `ContactStore`'s `AttentionArea`
-registry, and extends `tick` with a third event kind (`CONTACT_ATTENTION_
-CHANGED`) plus a per-contact-per-kind emission cooldown applied to all
-three kinds -- see `tick`'s own docstring and `belief.events`'s module
-docstring for the cooldown's full rationale. A follow-up commit adds the
-unacknowledged-event queue (`unacknowledged_events`/`acknowledge_event`).
+registry and unacknowledged-event queue, and extends `tick` with a third
+event kind (`CONTACT_ATTENTION_CHANGED`) plus a per-contact-per-kind
+emission cooldown applied to all three kinds -- see `tick`'s own docstring
+and `belief.events`'s module docstring for the cooldown's full rationale.
 
 Everything a `Contact` knows comes from a `belief.percept.Percept` --
 `ContactStore.ingest` never reads `perception.source.Observation`'s DCS
@@ -255,6 +254,7 @@ class ContactStore:
         self._observations: dict[str, Observation] = {}
         self._events: list[Event] = []
         self._areas: dict[str, AttentionArea] = {}
+        self._acknowledged_event_ids: set[str] = set()
         self._next_contact_number = 0
         self._next_event_number = 0
         self._next_area_number = 0
@@ -282,6 +282,31 @@ class ContactStore:
         """Every registered `AttentionArea`, insertion order (BL-4). A
         read-only view -- callers must not mutate the returned list."""
         return list(self._areas.values())
+
+    @property
+    def unacknowledged_events(self) -> list[Event]:
+        """Every materialised event whose `id` has not been passed to
+        `acknowledge_event` yet, in emission order (BL-4's event queue).
+        Acknowledged ids are tracked in a plain `set[str]`, not a mutable
+        field on the frozen `Event` dataclass -- keeps every existing
+        `Event` construction site and test untouched (`plans/
+        bl4-attention-events/plan.md`'s explicit design choice)."""
+        return [
+            event
+            for event in self._events
+            if event.id not in self._acknowledged_event_ids
+        ]
+
+    def acknowledge_event(self, event_id: str) -> bool:
+        """Mark `event_id` acknowledged. Returns whether an event with that
+        id actually exists in the log -- acknowledging an unknown id is not
+        silently accepted, mirroring `ingest`/`tick`'s own "unknown id
+        returns `False`" convention elsewhere in this module's siblings
+        (`tools.py`'s `watch`/`unwatch`)."""
+        if not any(event.id == event_id for event in self._events):
+            return False
+        self._acknowledged_event_ids.add(event_id)
+        return True
 
     def add_area(
         self,
