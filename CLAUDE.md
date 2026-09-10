@@ -63,6 +63,7 @@ Run the active subproject's format/lint/type/test commands after every code chan
 - **Always create and checkout a feature branch before starting any implementation task.** Name the branch after the feature using kebab-case (e.g., `feature/hyg-data-pipeline`, `fix/floating-origin-precision`). Never implement directly on `main`. **Always branch from local `main`** — checkout `main` first, then create the branch. Do not use `origin/main` as the branch point.
 - Do not merge without user approval.
 - Before starting, surface any ambiguous, contradicting, or missing information and ask for clarification.
+- **Non-code, cross-cutting updates that aren't part of the current milestone** (skill/config edits, backlog notes, cross-milestone bookkeeping) belong in a disposable `git worktree` on `main`, not in the active feature branch's working directory — see `.claude/skills/merge.md` for the worktree pattern. This avoids two problems at once: bundling unrelated history into a feature branch's commits, and racing a background Architect/Implementer/Reviewer/DoD agent that may still be working in that same checkout (those agents run without worktree isolation by default).
 
 ## Definition of Done
 
