@@ -1,66 +1,55 @@
-## Review: BL-2.6 Stages 1-4 (classification-refinement)
-
-Commits reviewed: `381e745` (Stage 1), `8a3c343` (Stage 2), `06b3ea8` (Stage 3), `0e305ea` (Stage 4).
-Scope: mechanism only (lattice, fusion, event, surfacing) — no calibration (Stages 6/7/9 out of
-scope for this pass, confirmed not touched).
+## Review: duplicate-contact spatial-gate fix (commit 7581928)
 
 ### Review Summary
 
-This is a clean, well-scoped implementation. Each commit does exactly what its stage promises,
-docstrings are precise about *why* (not just what), and the plan's explicit decisions (naked-eye
-reaching type at Stage 6, not this pass; `last_class_raw` staying the gate's input; events minted
-in `tick` not `ingest`) are all honored correctly in code, not just in prose.
+Reviewed the bug fix at `7581928` against `plans/classification-refinement/debug.md`'s
+report. The fix is minimal, correctly scoped, and lands in the right module
+(`belief/association_over_time.py`'s gate formula, plus the `Contact.last_position_uncertainty_m`
+field needed to feed it). It does not touch `ContactStore.ingest`'s anti-guessing invariant or
+the classification fold/compatibility machinery, matching the debugger's own claim of what was
+and wasn't in scope.
 
-Verified directly against the code (not just the implementer's log):
+Verified directly, not just read:
 
-- **Fold table matches plan §3 exactly.** Traced `fold_classification`/`_fold_higher`/
-  `_fold_same_level`/`_collapse` by hand against refine/reinforce/hold/contradict, including the
-  edge cases: unresolvable-parent always refines (never contradicts), same-class-different-type
-  collapses to class, different-class collapses to presence, lower incoming level is a pure hold
-  (held survives untouched, no confidence/established_sim mutation).
-- **`last_class_raw` untouched in meaning** — still set unconditionally in `record()`/
-  `from_percept()` from the raw percept string, still the sole input to
-  `association_over_time`'s gate. `Contact.classification` is the new, separate folded field.
-  `tools.py`/`console.py` read `classification`, never `last_class_raw`, per plan.
-- **`classification_level` defaults preserve every existing construction site.**
-  `Observation.classification_level: int = 2` and `Percept.classification_level: int = 2` both
-  default to `SpecificityLevel.CLASS`'s value; `mypy --strict` and the full suite confirm nothing
-  broke.
-- **No `perception/` → `belief/` import introduced.** Grepped `src/perception/` for `from belief`/
-  `import belief` — zero hits. `classification_level` is a bare `int` on `Observation`/`Percept`,
-  exactly as the plan requires; the enum only appears once the value crosses into `belief/`.
-- **Event minted in `tick()`, not `ingest()`, after the lifecycle event** — read `ContactStore.tick`
-  directly: lifecycle event appended and `last_emitted_certainty` updated first, *then*
-  `classification_event()` compared and appended, per contact. Matches plan §4's ordering
-  requirement.
-- **`Event` fields default to `None`** — `previous_classification`, `classification`, `direction`
-  are all `X | None = None` on the frozen dataclass; every pre-existing `Event(...)` construction
-  site in the three lifecycle-event tests still compiles unchanged.
-- **`format_event_for_overlay` only branches on the new kind** — the `if event.kind ==
-  CONTACT_CLASSIFICATION_CHANGED:` branch is additive; the fallthrough line for every other kind is
-  byte-for-byte what it was before this branch, confirmed by reading the diff (no lines touched
-  outside the new `if`).
-- **Stage 6 boundary respected.** `naked_eye_source.py` declares `classification_level=2`
-  unconditionally (one call site, no tier branching); `perception/visibility.py`,
-  `tests/test_visibility.py`, and `tests/test_naked_eye_source.py` all show a zero-line diff across
-  the whole Stage 1-4 range (`git diff --stat 1dd2d54..0e305ea` on those three paths is empty).
-  Tier thresholds are genuinely untouched, as the plan's "mechanism and calibration never share a
-  commit" rule requires.
-- **Test coverage matches the plan's Affected Modules list** — `test_classification.py` (new,
-  19 tests: lattice ordering, `parent_class_of`, fold table including lockout),
-  `test_contacts.py`, `test_events.py`, `test_tools.py`, `test_console.py`,
-  `test_cross_channel_fusion.py`, `test_decay.py` all extended as listed; nothing extra, nothing
-  missing from that list.
-
-### Verification commands (run directly, body-layer venv)
-
-- `ruff format --check src tests` — pass (42 files already formatted)
-- `ruff check src tests` — pass, no findings
-- `mypy src --strict` — pass, no issues in 21 source files
-- `pytest tests -q` — **238 passed**, matching the implementer's reported count exactly
-- `git status --short` — clean; all Stage 1-4 files are committed, nothing left unstaged
-- No debug prints or TODO/FIXME/XXX markers introduced in the changed files (one pre-existing
-  legitimate `print()` in `console.py`'s own output-writing path, unrelated to this change)
+- **Diff is real and minimal.** `spatial_gate_radius_m` now sums `uncertainty_radius_m(percept)
+  + contact.last_position_uncertainty_m + GATE_GROWTH_RATE_MPS * elapsed_s` — genuinely
+  symmetric, not a one-sided pad. `Contact.last_position_uncertainty_m` is set from
+  `uncertainty_radius_m(percept)` in both `from_percept` (founding) and `record` (every merge),
+  so it never goes stale — checked both call sites in `contacts.py`.
+- **`ContactStore.ingest` untouched.** The commit's diff does not touch `contacts.py`'s `ingest`
+  method at all (confirmed via `git show --stat` and reading the method directly); the
+  "exactly-one-pass -> merge, zero-or-two-or-more -> new contact, never a tiebreak" rule and its
+  docstring are byte-identical to before the fix.
+- **`class_compatibility("T-90A", "OP_ARMORED")` claim checked against the real code**
+  (`belief/classification.py`'s `_op_class_of`/`class_compatibility`), not trusted from the
+  report: `"OP_ARMORED"` short-circuits as an already-bucketed `OP_*` string, `"T-90A"` resolves
+  via `object_model.profile_for`'s keyword table to the same `OP_ARMORED` bucket, both non-`None`
+  and equal -> `"compatible"`. Confirms the debugger correctly ruled out the classification-gate
+  hypothesis.
+- **Regression test genuinely reproduces the bug, traced by hand.** Reverted
+  `association_over_time.py` and `contacts.py` to their pre-fix state (`7581928^`) in the working
+  tree and re-ran `test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` alone:
+  it fails, producing exactly 39 contacts for one simulated real object over 40 polls (matching
+  the report's own before/after figures). Restored the fixed files and re-ran the full suite —
+  246 pass, tree clean except the pre-existing, out-of-scope `run-body.sh` local edit (confirmed
+  it's an unrelated `--overlay` flag addition, not part of this commit).
+- **Fixture updates in `test_decay.py`/`test_contacts.py` are real updates, not loosening.**
+  `test_decay.py`'s `_contact()` helper just adds the new required field at `0.0` (irrelevant to
+  that module). `test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`'s distances
+  (400m->800m separation, percept moved to the new midpoint) are recomputed correctly against the
+  new formula's actual doubled floor (SCOPE_UNCERTAINTY_M=300 on each side = 600 total at t=0);
+  the assertion itself (ambiguity -> new contact, never a merge) is unchanged.
+- **All checks pass**, run directly against `body-layer/.venv`: `ruff format --check` (42 files
+  already formatted), `ruff check` (all checks passed), `mypy src --strict`-equivalent config (no
+  issues, 21 files), `pytest -q` — 246 passed.
+- **Cross-checked against BL-2's own prior art on this exact risk class.**
+  `plans/pb2-contact-memory/plan.md` Stage 5's acceptance criterion is literally "two genuinely
+  distinct nearby objects stay two contacts," implemented as
+  `tests/test_cross_channel_fusion.py::test_two_distinct_nearby_objects_stay_two_contacts` (two
+  real objects ~1414m apart, one per channel, same poll). This test is untouched by the commit and
+  still passes — at t=0 the new gate's radius tops out around ~577m (naked-eye ~277m +
+  scope-channel-founded contact's stored 300m), nowhere near 1414m, so this specific case's margin
+  is unaffected by the widening.
 
 ### Required Fixes
 
@@ -68,141 +57,47 @@ None.
 
 ### Optional Refinements
 
-- `implementation.md`'s "Notable Discoveries" note that `FoldOutcome.contradicted` is used only for
-  the lockout timestamp, and `classification_event` re-derives direction independently from
-  before/after level+value. This is a reasonable simplification (confirmed correct by hand-tracing
-  `_collapse`'s guarantee that a genuine same-level disagreement always produces a strictly lower
-  level), but it does mean two different code paths encode "was this a contradiction" using two
-  different definitions that happen to agree by construction rather than by shared logic. Worth a
-  one-line comment cross-referencing the other, if a future stage ever changes `_collapse`'s
-  collapse target — not blocking now, since both are separately tested.
-- `_classification_facts` in `tools.py` renders `level` via `classification.level.name.lower()`
-  (`"unknown"`/`"presence"`/`"class"`/`"type"`). Fine as-is; just flagging that this string is now
-  part of the brought-forward-toward-§3.4 tool surface, so a future rename of `SpecificityLevel`'s
-  members would be a silent API break for any brain-facing consumer — not this pass's concern, but
-  worth a note when BL-5 freezes the surface.
+- **The gate is now roughly ~2x wider at the close end than before (both sides' uncertainty
+  budgeted instead of one), which is the correct fix for the bug at hand but also raises the
+  false-merge risk for two genuinely distinct real objects separated by roughly
+  300-600m** (previously only objects within ~300m of each other risked a spurious merge on the
+  scope channel's fixed 300m budget; now it's ~600m, before the elapsed-time growth term is even
+  added). This is an inherent, correctly-accepted tradeoff of the fix — not a bug — but it's the
+  opposite failure mode from the one just fixed (under-merge -> duplicate contacts vs.
+  over-merge -> lost distinctness), and BL-2's plan flags "weak cross-channel class
+  compatibility" as a known under-merge risk but has no equivalent prior note about this specific
+  over-merge risk at the new, wider radius. Worth an explicit line of attention during the Stage 8
+  re-flight below (e.g. two infantry/vehicle contacts near each other unexpectedly folding into
+  one) rather than assuming the existing `test_two_distinct_nearby_objects_stay_two_contacts`
+  fixture (1414m separation) is representative of the closest realistic case. (optional — watch
+  during acceptance, no code change needed now)
+- `GATE_GROWTH_RATE_MPS`/`SCOPE_UNCERTAINTY_M` remain placeholders, as documented; this fix
+  doesn't change that status and doesn't need to. (optional, no action)
 
 ### Verdict
 
-**APPROVED**
-
-Ready to proceed to Stage 5 (live acceptance) — this needs the user in the cockpit, not another
-Implementer pass. No required fixes; the two optional notes above are forward-looking and do not
-block.
+APPROVED
 
 ### Review Confidence
 
-Full read. Read the plan and implementation log in full; read every Stage 1-4 diff hunk directly
-(not just the implementer's summary); hand-traced the fold table's edge cases against the code;
-independently ran and confirmed all four verification commands and the "Stage 6 boundary" claim via
-`git diff --stat`.
+Full read — read the actual diff (not just the debug report), read and hand-traced the
+regression test both with the fix reverted (fails, 39 contacts) and applied (246 total pass),
+read `class_compatibility`/`_op_class_of` directly rather than trusting the report's claim, read
+`ContactStore.ingest` directly to confirm it's untouched, and cross-referenced
+`plans/pb2-contact-memory/plan.md`'s own prior Stage 5 risk note against the still-passing
+`test_two_distinct_nearby_objects_stay_two_contacts` fixture. Ran all four verification commands
+myself from `body-layer/.venv`.
 
----
+### Note for DoD: Stage 8 live acceptance still outstanding
 
-## Review: BL-2.6 Stages 6-7 (classification-refinement)
-
-Commits reviewed: `6bea387` (Stage 6, mechanism), `479067a` (Stage 7, calibration).
-Scope: naked-eye achieved-tier classification (mechanism) + moving the gating tier medres→lowres
-(calibration), kept in separate commits per the plan's "mechanism and calibration never share a
-commit" rule. Stages 8-10 (live acceptance #2, tuning, docs) explicitly out of scope for this pass.
-
-### Review Summary
-
-Both commits do exactly what their stage promises, and the mechanism/calibration split is real,
-not just claimed in prose — verified directly against the diffs, not the implementer's log.
-
-Verified directly against the code:
-
-- **Stage 6 is pure mechanism.** `6bea387`'s diff touches only `perception/naked_eye_source.py`,
-  `perception/visibility.py`, and their tests. `NAKED_EYE_GATING_ANGULAR_RADIUS_RAD` and
-  `NAKED_EYE_GATING_TIER_NAME` are byte-for-byte unchanged in that commit (confirmed by reading the
-  full diff hunk) — the gate stays `medres`, so `_achieved_tier`'s `"lowres"` branch is genuinely
-  dead code this commit, as both the plan and implementation.md claim. The Stage 6 test suite (5 new
-  tests) passes with no rewrite of any pre-existing assertion, consistent with "the only new
-  behaviour is close targets sometimes resolving to type instead of a confidence bump."
-- **Stage 7 is pure calibration, cleanly separable and revertible.** `479067a`'s diff to
-  `visibility.py` is exactly the two-constant reassignment
-  (`MEDRES_ANGULAR_RADIUS_RAD`/`"medres"` → `LOWRES_ANGULAR_RADIUS_RAD`/`"lowres"`) plus its comment;
-  no other production line changed. The commit is a one-line semantic revert (as its own comment
-  states), matching the plan's Stage 7 description. Test changes are the necessary consequence of
-  the moved boundary, not scope creep.
-- **`_classification_for_tier`'s hires→type fallback is real, not just claimed.** Confirmed directly
-  against `dcs_type_to_reporting_name.tsv`: bare `"Infantry"` has no exact row, only compound entries
-  (`Infantry AK`, `Infantry AK Ins`, `Infantry AK ver2/3`), so `reporting_name_for("Infantry")`
-  returns `None` and the code falls back to `op_class` at level 2. This exact path is exercised by
-  `test_hires_range_candidate_with_no_reporting_name_falls_back_to_class`, which asserts
-  `classification_raw == "OP_INFANTRY"` and `classification_level == 2` at hires range (300 m) — a
-  real fallback, not an unreached branch.
-- **`NAKED_EYE_TYPE_CONFIDENCE = 0.55 < association.CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6`**
-  confirmed by direct grep of `perception/association.py`. The invariant ("no naked-eye tier, however
-  close, reaches real-detection confidence") holds at the type tier, the closest/highest one, so it
-  holds at all three.
-- **Presence-tier reachability is genuinely end-to-end.** `test_lowres_range_candidate_reaches_presence_level`
-  builds a full `NakedEyePerceptionSource` via `_source(world_objects)` and calls `.poll(...)` — this
-  exercises `naked_eye_source.py`'s `poll` → `_build_observation` → `_classification_for_tier` path
-  and `visibility.check_visibility`'s gate together, not `visibility.py` in isolation. It asserts
-  `classification_raw == object_model.DEFAULT_OP_CLASS` and `classification_level == 1`, genuinely
-  proving level-1/PRESENCE_CLASS is emitted through the real pipeline.
-- **Worked-table numbers cross-checked against the plan by hand, not trusted from the diff.** Infantry
-  (size 1.8 m): hires threshold `1.8/0.02*4.0 = 360 m`, medres `1.8/0.008*4.0 = 900 m`, lowres
-  `1.8/0.0043*4.0 = 1674.42 m` — all three match the plan's worked table and the test boundaries
-  (1674/1675 m). Ural truck (size 6 m): lowres threshold `6/0.0043*4.0 = 5581.4 m`, which exceeds
-  `NAKED_EYE_RANGE_CAP_M = 5000 m` — confirming the premise inversion the rewritten
-  `test_ural_truck_gate_now_binds_at_the_range_cap_under_lowres` asserts (cap binds, not the size
-  curve) is correct, matching the plan's own Risks section on the flattened size curve at the cap.
-- **Nothing in Stages 6-7 touched `belief/`.** `git diff --stat 4ed2526..7160ecc -- body-layer/src/belief/
-  body-layer/src/perception/` shows changes confined to `perception/naked_eye_source.py` and
-  `perception/visibility.py` only (plus their tests, checked separately) — no BL-2.6 Stage 1-4
-  mechanism (`contacts.py`, `classification.py`, `events.py`) was touched.
-
-### Verification commands (run directly, body-layer venv)
-
-- `ruff format --check src tests` — pass (42 files already formatted)
-- `ruff check src tests` — pass, no findings
-- `mypy src --strict` — pass, no issues in 21 source files
-- `pytest tests -q` — **245 passed**. Reconciled independently: 238 baseline (Stages 1-4) → 243 after
-  Stage 6 (+5 new tests, no rewrites, gate unchanged) → 245 after Stage 7 (net +2: one pre-existing
-  test — the old "infantry just outside medres" boundary test — replaced by two new boundary tests
-  (just-inside/just-outside-lowres), plus one new end-to-end presence-tier test in
-  `test_naked_eye_source.py`; the Ural-truck and ship-cap tests were rewritten in place, not added).
-  Matches the implementer's reported delta exactly.
-- `git status --short` — clean; both stages' files (plus the implementation-log and agent-memory
-  commits that followed) are committed, nothing left unstaged.
-
-### Required Fixes
-
-None.
-
-### Optional Refinements
-
-- `_CLASSIFICATION_LEVEL_CLASS`/`_CLASSIFICATION_LEVEL_TYPE` in `naked_eye_source.py` are bare-int
-  mirrors of `belief.classification.SpecificityLevel`, correctly kept as bare ints per the
-  `perception/`-must-not-import-`belief/` boundary. `_classification_for_tier`'s final `return
-  object_model.DEFAULT_OP_CLASS, 1` uses a literal `1` instead of a named constant the way the other
-  two branches use `_CLASSIFICATION_LEVEL_CLASS`/`_CLASSIFICATION_LEVEL_TYPE` — the docstring above it
-  explains why `_CLASSIFICATION_LEVEL_PRESENCE` isn't declared yet (unreachable until Stage 7), but
-  Stage 7 has now landed and made it reachable without adding the constant. Purely cosmetic
-  inconsistency (the value is correct and tested); worth a one-line follow-up naming it, not blocking.
-- The Stage 6/7 split leaves `_achieved_tier`'s `"lowres"` branch and `NAKED_EYE_PRESENCE_CONFIDENCE`
-  declared a full commit before they're reachable, which is exactly what the plan asked for
-  (independently revertible, mechanism-first) — noting only that a future `git bisect` landing exactly
-  on `6bea387` will see unreachable code with no test covering it, which is expected and already
-  called out in `implementation.md`, not a gap to fix.
-
-### Verdict
-
-**APPROVED**
-
-Stages 6-7 are correctly scoped, correctly separated (mechanism vs. calibration), and match the
-plan's worked table exactly. Per the plan and the task's own instruction, **do not proceed to DoD**
-— Stage 8 (live acceptance #2) is required and needs the user in the cockpit, which is unavailable
-right now (Windows box down). Stages 9-10 (tuning, docs) also remain outstanding and depend on
-Stage 8's feedback. The branch should stop here and wait.
-
-### Review Confidence
-
-Full read. Read both commits' full diffs directly (not just implementation.md's summary); verified
-the mechanism/calibration separation by inspecting exactly which lines each commit touches;
-hand-computed all worked-table thresholds independently against the plan's numbers rather than
-trusting the diff's comments; confirmed the reporting-name fallback against the actual TSV data file;
-independently ran and reconciled the full verification suite and test-count delta.
+This fix addresses the *mechanism* (duplicate-contact runaway) with a fixture-based regression
+test that does not require live DCS. It does not and cannot re-validate BL-2.6's Stage 8
+live-acceptance judgment (calibration feel, contact volume, chatter rate) — that judgment was
+made on a session whose contact count was inflated 3-4x by this bug, so its conclusions about
+"does this feel right" are not trustworthy as-is. Recommend: DoD can proceed on the mechanism/
+bugfix alone (checks pass, regression test proven, invariants intact), but Stage 8's live
+acceptance should be explicitly re-flown before BL-2.6 as a whole is marked done — both to
+confirm the duplication is actually gone in a live session (fixtures are a faithful but not
+100%-identical stand-in for real `naked_eye_source` behavior) and to re-form the calibration
+judgment (including the optional refinement above: watch for any *new* under-differentiation
+between close, genuinely distinct real objects) on a now-trustworthy contact count.
