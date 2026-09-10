@@ -14,3 +14,4 @@
 - [Concurrent-session race verification](project_concurrent_session_race_verification.md) — reflog + empty-diff-across-sweep + recommit-stat check to verify "no content lost" claims; confirmed clean on BL-5.
 - [BL-5 REPL-thread sqlite fix](project_bl5_repl_thread_sqlite_fix.md) — Stage 6 thread-affinity bug class recurred in BL-3's `.enrichment` field; grep any new ConsolePerceptionRunner field for REPL-thread reads of a sqlite3.Connection.
 - [Object-permanence continuity review](project_object_permanence_continuity_review.md) — APPROVED; persistent per-channel object_id maps are load-bearing (never-clear invariant); always check which plan.md revision governs when a plan has multiple dated revisions.
+- [Mock-flight fixture review](project_mock_flight_fixture_review.md) — APPROVED; read fold_classification/frame-advance code directly rather than trusting implementer's "correct existing behavior" claim, both checked out.
