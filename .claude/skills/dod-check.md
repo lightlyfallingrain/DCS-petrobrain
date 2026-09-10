@@ -34,6 +34,25 @@ fi
 SRC="$SUBPROJECT/src"
 TESTS="$SUBPROJECT/tests"
 
+# Tool resolution: each subproject keeps its own venv (root CLAUDE.md "Module independence"),
+# which isn't always activated in the current shell. Fall back to the venv-qualified binary
+# before giving up on a bare name.
+REPO_ROOT="$(pwd)"
+VENV_BIN="$REPO_ROOT/$SUBPROJECT/.venv/bin"
+resolve_tool() {
+  local name="$1"
+  if command -v "$name" >/dev/null 2>&1; then
+    echo "$name"
+  elif [ -x "$VENV_BIN/$name" ]; then
+    echo "$VENV_BIN/$name"
+  else
+    echo "$name"  # let it fail with its own "command not found" rather than masking the error
+  fi
+}
+RUFF="$(resolve_tool ruff)"
+MYPY="$(resolve_tool mypy)"
+PYTEST="$(resolve_tool pytest)"
+
 result() {
   local label="$1" status="$2" detail="$3"
   if [ "$status" = "PASS" ]; then
@@ -55,7 +74,7 @@ echo "| Check | Status | Notes |"
 echo "|-------|--------|-------|"
 
 # Format check
-FMT_OUT=$(ruff format --check "$SRC" "$TESTS" 2>&1 || true)
+FMT_OUT=$("$RUFF" format --check "$SRC" "$TESTS" 2>&1 || true)
 if echo "$FMT_OUT" | grep -q "would be reformatted\|would reformat"; then
   result "Format" "FAIL" "Run \`ruff format $SRC $TESTS\` to fix"
 else
@@ -63,7 +82,7 @@ else
 fi
 
 # Lint check
-LINT_OUT=$(ruff check "$SRC" "$TESTS" 2>&1 || true)
+LINT_OUT=$("$RUFF" check "$SRC" "$TESTS" 2>&1 || true)
 if echo "$LINT_OUT" | grep -q "^All checks passed"; then
   result "Lint" "PASS" "0 errors/warnings"
 else
@@ -74,9 +93,9 @@ fi
 # Type check — body-layer's mypy config discovery is CWD-only (see body-layer/CLAUDE.md);
 # `mypy --config-file` alone does not fix it, so it must be invoked from within the subproject.
 if [ "$SUBPROJECT" = "body-layer" ]; then
-  MYPY_OUT=$(cd body-layer && mypy src 2>&1 || true)
+  MYPY_OUT=$(cd body-layer && "$MYPY" src 2>&1 || true)
 else
-  MYPY_OUT=$(mypy "$SRC" 2>&1 || true)
+  MYPY_OUT=$("$MYPY" "$SRC" 2>&1 || true)
 fi
 if echo "$MYPY_OUT" | grep -q "^Success: no issues found"; then
   result "Types (mypy --strict)" "PASS" "no issues found"
@@ -85,7 +104,7 @@ else
 fi
 
 # Test suite
-TEST_OUT=$(pytest "$TESTS" -q 2>&1 || true)
+TEST_OUT=$("$PYTEST" "$TESTS" -q 2>&1 || true)
 if echo "$TEST_OUT" | grep -qE "^[0-9]+ passed"; then
   SUMMARY=$(echo "$TEST_OUT" | grep -E "^[0-9]+ (passed|failed)" | tail -1 || echo "passed")
   result "Tests" "PASS" "$SUMMARY"

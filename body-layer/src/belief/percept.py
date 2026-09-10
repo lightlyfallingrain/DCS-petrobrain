@@ -42,7 +42,15 @@ class Percept:
     field through unchanged (see that field's docstring) -- perceived
     metadata about how specific the claim is, not a truth field, so it
     belongs on this side of the boundary same as `classification_raw`
-    itself."""
+    itself.
+
+    `continues_observation_id` carries `Observation`'s own field of the same
+    name through unchanged, for the same reason `classification_level`
+    does: it is perceived-report bookkeeping (an `observation_id`-shaped
+    reference to an earlier report), never a DCS truth field -- see that
+    field's docstring (`perception/source.py`) and `plans/
+    contact-duplication-ambiguity-runaway/plan.md`'s Boundary reading
+    section."""
 
     t_sim: float
     source: str
@@ -52,6 +60,7 @@ class Percept:
     ownship_at_observation: OwnshipState
     observation_id: str
     classification_level: int = 2
+    continues_observation_id: str | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -69,4 +78,5 @@ def percept_of(observation: Observation) -> Percept:
         ownship_at_observation=observation.ownship_at_observation,
         observation_id=observation.id,
         classification_level=observation.classification_level,
+        continues_observation_id=observation.continues_observation_id,
     )

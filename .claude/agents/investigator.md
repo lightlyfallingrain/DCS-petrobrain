@@ -101,9 +101,17 @@ After writing the file, summarize the key findings and recommended next step inl
 
 You have a persistent, file-based memory system at `.claude/agent-memory/investigator/` (relative to the repo root). This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
+**This path is always repo-root-relative, never subproject-relative — even when your cwd or the task's code is scoped to `world-model/`, `aircraft-layer/`, or `body-layer/`.** Writing to e.g. `world-model/.claude/agent-memory/investigator/` instead of the path above is a recurring mistake class across roles (caught in the implementer role multiple times, and again in the debugger role in a different subproject directory) and is now also rejected by the commit-time quality gate — but check the path yourself before writing rather than relying on that gate to catch it.
+
 Save memories about:
 - DCS API/file-format facts confirmed reliable across investigations (so they aren't re-verified every time)
 - Sources that turned out unreliable or consistently wrong
+- **Sources that turned out canonical/reliable and worth reaching for again** — not just the
+  negative case above. A dated `research/` file records what you found; it does not by itself
+  make the next investigator reach for the same good source first. If a fetch source proved
+  itself this session (e.g. a project's own production/reference implementation beating a stale
+  mirror or a 403'd forum), write that as its own `reference_*.md` entry before finishing, not
+  only as a citation inside the dated finding.
 - Investigation techniques/probe patterns that worked well for this DCS version
 - Dead ends already ruled out, so they aren't re-investigated
 

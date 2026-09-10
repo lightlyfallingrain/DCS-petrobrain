@@ -46,6 +46,24 @@ momentarily-empty leaf set resetting the debounce state). This mirrors PB-1's
 single-`middle_list_text`-value debounce exactly when only one leaf is ever
 populated, which is why every existing on_change test still passes
 unmodified.
+
+5. **Object-permanence correlation** (`plans/contact-duplication-
+   ambiguity-runaway/plan.md`, a scope addition reversing the original plan's
+   exclusion of this channel -- see that plan's Decision section for why the
+   "which leaf refers to which of last poll's leaves" problem the original
+   exclusion worried about isn't actually the problem this needs to solve):
+   a persistent `_object_id_to_last_observation_id: dict[int, str]` map,
+   keyed on `AssociationResult.candidate.object_id`, structurally identical
+   to `naked_eye_source.py`'s own mechanism -- never cleared, independent of
+   `emit_mode`, and independent of this channel's own text-equality debounce
+   state above (`_last_emitted_texts`). Populated after every successful
+   `associate()` call, confident or ambiguous alike (the existing
+   class-compatibility check downstream in `belief.contacts.ContactStore` is
+   the guard against an ambiguous association's `object_id` being wrong,
+   same as it already guards confident ones): the emitted `Observation.
+   continues_observation_id` is set to the object_id's prior emission, if
+   any, then the map entry is overwritten with this poll's new
+   `Observation.id`.
 """
 
 from __future__ import annotations
@@ -118,6 +136,11 @@ class HybridPerceptionSource:
     _last_emitted_texts: tuple[str, ...] | None = field(
         default=None, init=False, repr=False
     )
+    #: Object-permanence correlation state (module docstring point 5) --
+    #: never cleared, independent of `_last_emitted_texts`'s debounce reset.
+    _object_id_to_last_observation_id: dict[int, str] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _observation_count: int = field(default=0, init=False, repr=False)
     _dropped_count: int = field(default=0, init=False, repr=False)
 
@@ -168,9 +191,16 @@ class HybridPerceptionSource:
             ]
 
             self._observation_count += 1
+            observation_id = f"{OBSERVATION_ID_PREFIX_HYBRID}_{self._observation_count}"
+            continues_observation_id = self._object_id_to_last_observation_id.get(
+                result.candidate.object_id
+            )
+            self._object_id_to_last_observation_id[result.candidate.object_id] = (
+                observation_id
+            )
             observations.append(
                 Observation(
-                    id=f"{OBSERVATION_ID_PREFIX_HYBRID}_{self._observation_count}",
+                    id=observation_id,
                     contact_id=None,
                     t_sim=now_sim,
                     t_wall=time.time(),
@@ -197,6 +227,7 @@ class HybridPerceptionSource:
                     # section on why this channel is level 3 by channel, not
                     # by parsing the string.
                     classification_level=3,
+                    continues_observation_id=continues_observation_id,
                 )
             )
 

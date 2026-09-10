@@ -26,8 +26,12 @@ confirmed, not from when the contact itself was last observed at all.
 `GENERAL_AREA_HALF_LIFE_S` remain unconsumed -- `Contact` does not yet track
 a separate motion estimate or general-area field to decay independently
 (that is BL-3/BL-4 territory: world enrichment adds `general_area`,
-attention adds a motion estimate). Both constants are declared now so the
-*one table* this module's docstring promises is complete from the start,
+attention adds a motion estimate). `OBJECT_ID_MEMORY_S` (`plans/
+contact-duplication-ambiguity-runaway/plan.md`) is not a fifth independent
+half-life but a reuse of `IDENTITY_HALF_LIFE_S` under a second name, drawn
+straight from this same table rather than an ad hoc timeout -- see its own
+docstring below. Both `MOTION_HALF_LIFE_S`/`GENERAL_AREA_HALF_LIFE_S`
+constants are declared now so the *one table* this module's docstring promises is complete from the start,
 and so BL-3/BL-4 extend this table rather than starting a second one
 elsewhere (the plan's "Complicates BL-4" second-order-effect note).
 
@@ -88,6 +92,28 @@ OBSERVED_WINDOW_S: Final[float] = 5.0
 #: linger indefinitely as "estimated" once the crew has plainly lost it.
 LOST_THRESHOLD_S: Final[float] = 120.0
 
+#: `plans/contact-duplication-ambiguity-runaway/plan.md`'s object-permanence
+#: expiry window: how long a resolved `Observation.continues_observation_id`
+#: match is still trusted as "the same real object," keyed off `contact.
+#: last_seen_sim` (see `object_id_continuity_valid` below). Reused directly
+#: from `IDENTITY_HALF_LIFE_S`, not an independently-chosen number -- object
+#: id continuity is itself an identity claim ("I still believe this is the
+#: same vehicle"), and this module's own docstring already names identity as
+#: the slowest-decaying attribute. Deliberately *not* `LOST_THRESHOLD_S`:
+#: that threshold governs the position/tracking narrative
+#: (`certainty_of` below), and tying object_id memory to it would nullify
+#: the identity claim at exactly the moment ("I lost him") the crew should
+#: still trust it most. Deliberately larger than `LOST_THRESHOLD_S` (600s
+#: > 120s) so a contact can pass all the way through "observed -> tracked ->
+#: estimated -> lost" and still be validly reacquired via continuity in the
+#: 120-600s window -- the "I lost him... it's the same guy" case. Inherits
+#: `IDENTITY_HALF_LIFE_S`'s own placeholder-judgment-call status (see that
+#: constant's docstring) -- revisit this constant specifically, not that one
+#: first, if live sessions show continuity trusted too long or not long
+#: enough; the two are conceptually distinct claims that happen to share a
+#: value for now, not permanently coupled.
+OBJECT_ID_MEMORY_S: Final[float] = IDENTITY_HALF_LIFE_S
+
 #: The certainty lifecycle ladder. Four levels, evaluated top-down in
 #: `certainty_of` (first match wins) rather than as independent predicates:
 #:
@@ -147,3 +173,22 @@ def classification_confidence_at(contact: Contact, now_sim: float) -> float:
     return contact.classification.confidence * math.pow(
         0.5, elapsed_s / IDENTITY_HALF_LIFE_S
     )
+
+
+def object_id_continuity_valid(contact: Contact, now_sim: float) -> bool:
+    """Whether a resolved `continues_observation_id` match onto `contact` is
+    still trusted, per `OBJECT_ID_MEMORY_S`'s docstring above -- `True`
+    (boundary inclusive, matching `certainty_of`'s own `<=` convention) at
+    exactly `OBJECT_ID_MEMORY_S` elapsed since `contact.last_seen_sim`,
+    `False` just past it. Anchored to `contact.last_seen_sim` (the most
+    recent observation from *any* channel), not any one `PerceptionSource`'s
+    own persistent map's last-touched time -- a contact kept fresh by one
+    channel while another lost sight of the object should still honor that
+    other channel's own stale-looking map entry, since the contact's
+    identity was never actually in doubt. `belief.contacts.ContactStore.
+    ingest` is the only caller: a resolved-but-expired match falls through
+    to the ordinary gate/ambiguity path identically to an unresolved one --
+    see that module's docstring. Pure, like every other function in this
+    module -- no ticker, no mutation, no wall-clock."""
+    elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
+    return elapsed_s <= OBJECT_ID_MEMORY_S

@@ -59,7 +59,7 @@ Follow this sequence. Do not skip steps.
 5. **Form a hypothesis** — one specific, falsifiable claim about the cause
 6. **Test the hypothesis** — read the relevant code, run tests, or add a targeted assertion
 7. **Apply the fix** — smallest change that addresses the root cause
-8. **Verify** — confirm the symptom is gone and no regression introduced (`ruff format --check world-model/src world-model/tests`, `ruff check world-model/src world-model/tests`, `pytest world-model/tests -q`)
+8. **Verify** — confirm the symptom is gone and no regression introduced, running each touched subproject's own `ruff format --check`, `ruff check`, and `pytest -q` (per its own `CLAUDE.md` "Commands" section) — not just world-model's if the bug is in `aircraft-layer/` or `body-layer/`
 9. **Remove debug code** — no diagnostic logging left in the commit
 
 ---
@@ -116,6 +116,8 @@ If the feature name is not clear from context, use a short slug describing the b
 ## Persistent Agent Memory
 
 You have a persistent, file-based memory system at `.claude/agent-memory/debugger/` (relative to the repo root). This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
+
+**This path is always repo-root-relative, never subproject-relative — even when your cwd or the task's code is scoped to `world-model/`, `aircraft-layer/`, or `body-layer/`.** Writing to e.g. `world-model/.claude/agent-memory/debugger/` instead of the path above is a recurring mistake class across roles (caught in the implementer role multiple times, and again in the debugger role in a different subproject directory) and is now also rejected by the commit-time quality gate — but check the path yourself before writing rather than relying on that gate to catch it.
 
 Save memories about:
 - Bug classes that recur in specific modules

@@ -50,7 +50,7 @@ Mission Interpreter and Petrobrain Runtime modules do not exist yet — do not c
 1. **Get plan context** — run `/plan-summary <featurename>` for a quick overview (goal, modules, stages, open decisions), then read `plans/<featurename>/plan.md` in full
 2. **Build the minimal working version first** — get it compiling and logically correct before adding polish
 3. **Add or update tests** — cover core logic; do not test infrastructure or external dependencies directly
-4. **Run quality checks** — `ruff format --check world-model/src world-model/tests`, `ruff check world-model/src world-model/tests`, `pytest world-model/tests -q` must all pass before you consider the task done
+4. **Run quality checks** — for each subproject touched (`world-model/`, `aircraft-layer/`, `body-layer/`), that subproject's own `ruff format --check`, `ruff check`, and `pytest -q` (per its own `CLAUDE.md` "Commands" section) must all pass before you consider the task done
 5. **Stage new files** — `git add` every new source file or asset immediately after creating it; never add build artifacts
 6. **Report** — summarize what was changed, tests added, checks run, and anything notable discovered
 
@@ -93,9 +93,10 @@ Use this structure:
 - [test name] — what it covers
 
 ### Checks
-- ruff format --check world-model/src world-model/tests: pass/fail
-- ruff check world-model/src world-model/tests: pass/fail
-- pytest world-model/tests -q: pass/fail
+(for each touched subproject — world-model/, aircraft-layer/, body-layer/)
+- ruff format --check: pass/fail
+- ruff check: pass/fail
+- pytest -q: pass/fail
 
 ### Notable Discoveries
 - [anything unexpected found during implementation relevant to future work]
