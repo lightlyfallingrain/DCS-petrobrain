@@ -190,6 +190,87 @@ def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> 
     assert len(store.contacts) == 1
 
 
+def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_gap() -> (
+    None
+):
+    """Re-trace of the debugger's live reproduction
+    (`plans/contact-duplication-ambiguity-runaway/debug.md`): two distinct,
+    real objects close enough that their spatial gates legitimately overlap
+    at typical naked-eye ranges -- pre-fix, once two such contacts existed,
+    every subsequent re-observation of either one saw 2+ passing candidates
+    and `ContactStore.ingest`'s anti-guessing rule spawned a new contact
+    every single poll, forever (120 contacts for 2 real objects over 60
+    polls in the debugger's own random-sweep reproduction).
+
+    Reuses `test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`'s
+    own already-verified overlapping-gate geometry (A at bearing 0 range
+    1000, B at bearing 0 range 1800, 800m apart -- a percept at range 1400
+    falls within both gates) rather than re-deriving new numbers, since that
+    test already proves the overlap is real. Every re-observation of A or B
+    below is placed at that same ambiguous midpoint (bearing 0, range 1400)
+    -- if continuity were not skipping the gate, *every one* of these would
+    be genuinely ambiguous between the two existing contacts, reproducing
+    the runaway exactly. Object-permanence correlation is expected to
+    prevent it entirely, not merely reduce it, because it applies on every
+    poll a real `object_id` keeps resolving -- the gate is only ever reached
+    on each object's own founding poll.
+
+    Also inserts a deliberate mid-session gap in object B's visibility (a
+    handful of consecutive missed polls, well inside `OBJECT_ID_MEMORY_S`)
+    -- the scenario the original zero-gap design could not have handled:
+    any real gap there fell back to the still-widened, still-overlapping
+    gate, reproducing the bug on the very next reacquisition."""
+    store = ContactStore()
+
+    contact_a_obs = _observation(
+        obs_id="OBS_A0", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
+    )
+    contact_b_obs = _observation(
+        obs_id="OBS_B0", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
+    )
+    store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
+    assert len(store.contacts) == 2
+
+    # Confirm the gate really is overlapping at this geometry: an unrelated
+    # percept (no continuity reference) at the shared midpoint is still
+    # genuinely ambiguous, per the reused test above.
+    probe = _observation(obs_id="OBS_PROBE", t_sim=0.0, bearing_deg=0.0, range_m=1400.0)
+    store.ingest([probe], now_sim=0.0)
+    assert len(store.contacts) == 3
+    probe_contact_id = store.contacts[-1].id
+
+    last_observation_id = {"A": "OBS_A0", "B": "OBS_B0"}
+    observation_count = 0
+    # Object B is masked (no observation emitted) for 5 consecutive polls
+    # mid-session -- a real gap, not a single skipped poll.
+    gapped_polls = set(range(20, 25))
+
+    for poll in range(1, 60):
+        t_sim = float(poll)
+        for label in ("A", "B"):
+            if label == "B" and poll in gapped_polls:
+                continue
+
+            observation_count += 1
+            observation_id = f"OBS_{label}{observation_count}"
+            obs = _observation(
+                obs_id=observation_id,
+                t_sim=t_sim,
+                bearing_deg=0.0,
+                range_m=1400.0,  # the same genuinely-ambiguous midpoint
+                continues_observation_id=last_observation_id[label],
+            )
+            last_observation_id[label] = observation_id
+            store.ingest([obs], now_sim=t_sim)
+
+    # Still exactly 3: the two founding contacts, plus the one probe
+    # contact from the ambiguity check above -- no runaway growth despite
+    # 116 further re-observations at the genuinely-ambiguous midpoint and a
+    # real mid-session gap for one object.
+    assert len(store.contacts) == 3
+    assert probe_contact_id in {contact.id for contact in store.contacts}
+
+
 def test_continuity_merges_directly_even_when_the_gate_would_have_failed() -> None:
     """`plans/contact-duplication-ambiguity-runaway/plan.md`'s object-
     permanence shortcut: a percept whose `continues_observation_id` resolves
