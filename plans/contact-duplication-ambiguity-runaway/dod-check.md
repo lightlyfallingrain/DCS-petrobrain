@@ -149,3 +149,31 @@ All mechanical criteria met:
 File-level gate complete. Ready for user acceptance testing, then merge.
 
 **Live-DCS acceptance note** (per plan and Reviewer): This fix has no live acceptance test mandated by the plan (fixture verification is the bar). However, the plan recommends running a live probe with a multi-minute masked/out-of-FOV gap before calling the fix fully validated, given how much live testing surfaced the original bug and its complications (BL-2.6's bug, then this one). This is a near-term follow-up, not a DoD blocker — flagged here so it stays visible after merge.
+
+---
+
+## Live acceptance, 2026-09-10: PASSED
+
+User re-flew the mixed-unit-type scenario plus a masked-gap reacquisition. Verdict: pass on this
+fix — no duplicate-contact runaway for closely-spaced units, and object permanence across a real
+gap confirmed live (`CONTACT_2`'s history shows `CONTACT_DETECTED` at t_sim=0.4,
+`CONTACT_LOST` at t_sim=168.1, `CONTACT_REACQUIRED` at t_sim=244.8 on the *same* contact id —
+exactly the intended behavior, a 76s gap correctly bridged by continuity rather than spawning a
+new contact).
+
+**New finding, out of scope for this fix, logged for future investigation, not fixed now (user
+decision):** the same real object can still duplicate **across channels**. In the session log,
+one real civilian bus was tracked by naked-eye as `CONTACT_2` (detected t_sim=0.4, lost t_sim=168,
+never reacquired by naked-eye again in this window) and independently by the scope/HelperAI
+channel as `CONTACT_5` (detected t_sim=246.8, `petrovich_detection_associated` source only) —
+two `Contact` records for one real bus. Root cause: this fix's persistent `object_id ->
+observation_id` continuity map lives *inside each `PerceptionSource` instance separately*
+(`naked_eye_source.py`'s own map, `hybrid_source.py`'s own map), not a shared cross-channel store
+— even though the underlying DCS `object_id` namespace is global and identical across channels.
+Since the scope channel had never itself resolved that `object_id` before, its own map had no
+entry, continuity didn't fire, and the fallback spatial/class gate also didn't merge the two
+(different channels carry different uncertainty models, per `plans/pb2-contact-memory/plan.md`'s
+own documented cross-channel-fusion caveats). Logged as a backlog item (`todo/todo.md`) for a
+future investigation pass — not blocking this fix's merge, since it's a narrower, pre-existing
+class of gap (cross-channel fusion was already documented as last-writer-wins/imperfect before
+this fix) rather than something this fix regressed.
