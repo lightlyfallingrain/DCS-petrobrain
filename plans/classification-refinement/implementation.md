@@ -5,6 +5,34 @@ per stage per the plan's "mechanism and calibration never share a commit" rule. 
 (live acceptance, tier-derived confidence, gate calibration, tuning, docs) are not started --
 out of scope for this pass.
 
+**Update (second session): Stages 6-7 done, also offline, also one commit per stage.** Stage 5
+(live acceptance #1) was not run this session -- it needs a live DCS sortie and was explicitly
+out of scope for this pass, same posture as Stages 8-9 below. Stages 8-10 remain outstanding.
+
+**Stage 6** (`6bea387`): `visibility.check_visibility` now computes the *achieved* recognition
+tier via a new `_achieved_tier(range_m, size_m)` helper, instead of always returning the flat
+`"medres"` constant it returned before. Three confidence constants replace the old single flat
+one: `NAKED_EYE_PRESENCE_CONFIDENCE` (0.2), `NAKED_EYE_VISIBILITY_CONFIDENCE` (0.4, kept under its
+original name -- it is still the `medres`/class-tier value, and every existing caller/test already
+refers to it that way), `NAKED_EYE_TYPE_CONFIDENCE` (0.55, still below `association.
+CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6` per the module's existing "weaker evidence than a real
+HelperAI detection" invariant). `naked_eye_source._classification_for_tier(tier, object_type,
+op_class)` maps the achieved tier to `(classification_raw, classification_level)`: `hires` tries
+`reporting_names.reporting_name_for(object_type)` first (level 3, type), falling back to `op_class`
+at level 2 when the reporting-name table has no exact entry for that `object_type` (Petrovich can't
+speak a name he doesn't have, even from a close look); `medres` stays at `op_class`/level 2,
+unchanged from before. The gating tier itself stayed `medres`
+(`NAKED_EYE_GATING_ANGULAR_RADIUS_RAD`/`NAKED_EYE_GATING_TIER_NAME` untouched this commit), so the
+`_achieved_tier` helper's `"lowres"` branch was unreachable code this stage -- verified by running
+the full suite and confirming no test could reach it, exactly as the plan predicted.
+
+**Stage 7** (`479067a`): one-line calibration change -- `NAKED_EYE_GATING_ANGULAR_RADIUS_RAD` moved
+from `MEDRES_ANGULAR_RADIUS_RAD` to `LOWRES_ANGULAR_RADIUS_RAD`, `NAKED_EYE_GATING_TIER_NAME` from
+`"medres"` to `"lowres"`. This alone made Stage 6's already-built `_achieved_tier` `"lowres"` branch
+reachable for the first time -- no other code changed. Rewrote the two `test_visibility.py`
+assertions whose boundary was the old `medres` gate (see "Notable Discoveries" for exactly which
+and why), and added a new end-to-end presence-tier test in `test_naked_eye_source.py`.
+
 **Stage 1** (`381e745`): moved `_op_class_of`/`class_compatibility` out of
 `association_over_time.py` into a new `belief/classification.py`, pure move, zero behaviour
 change. `association_over_time.py` imports both names so `test_association_over_time.py`'s
@@ -77,6 +105,32 @@ rejected restyle).
 - `body-layer/tests/test_console.py` -- Stage 4: updated `show <id>` assertion for the new
   shape; added the classification-transition overlay-rendering test.
 
+### Files Changed (Stages 6-7)
+
+- `body-layer/src/perception/visibility.py` -- Stage 6: `VisibilityResult.tier`/`.confidence` now
+  computed per-candidate by `_achieved_tier` instead of the flat `NAKED_EYE_GATING_TIER_NAME`/
+  `NAKED_EYE_VISIBILITY_CONFIDENCE` constants; added `NAKED_EYE_PRESENCE_CONFIDENCE`,
+  `NAKED_EYE_TYPE_CONFIDENCE`. Stage 7: `NAKED_EYE_GATING_ANGULAR_RADIUS_RAD`/
+  `NAKED_EYE_GATING_TIER_NAME` moved from medres to lowres.
+- `body-layer/src/perception/naked_eye_source.py` -- Stage 6: new `_classification_for_tier`
+  helper and `_CLASSIFICATION_LEVEL_CLASS`/`_CLASSIFICATION_LEVEL_TYPE` constants (bare ints
+  mirroring `belief.classification.SpecificityLevel`, not imported -- `perception/` must not
+  import `belief/`); `_build_observation` now calls it instead of hardcoding `profile.op_class`/
+  level 2. Imports `reporting_names.reporting_name_for`. No changes needed in Stage 7 -- the
+  mapping already handled `"lowres"` via its `else` branch.
+- `body-layer/tests/test_visibility.py` -- Stage 6: two new tests for the `hires` achieved-tier
+  branch (`test_infantry_well_inside_hires_tier_range_achieves_hires_tier`,
+  `test_infantry_just_outside_hires_tier_range_achieves_medres_tier`). Stage 7 (rewrite, see
+  Notable Discoveries): `test_infantry_just_outside_medres_tier_range_is_not_visible` replaced by
+  `test_infantry_just_inside_lowres_tier_range_is_visible` +
+  `test_infantry_just_outside_lowres_tier_range_is_not_visible`;
+  `test_ural_truck_size_curve_binds_below_the_range_cap` renamed/rewritten to
+  `test_ural_truck_gate_now_binds_at_the_range_cap_under_lowres`; the ship-cap test's docstring
+  comment updated (assertions unchanged).
+- `body-layer/tests/test_naked_eye_source.py` -- Stage 6: three new end-to-end tests for the
+  hires-reaches-type path, the medres-stays-class path, and the hires-with-no-reporting-name
+  fallback path. Stage 7: one new end-to-end presence-tier test.
+
 ### Tests Added
 
 - `test_classification.py` (19 tests) -- `SpecificityLevel` ordering; `parent_class_of` for
@@ -109,7 +163,47 @@ rejected restyle).
 - `mypy body-layer/src` (run as `cd body-layer && mypy src`, per `body-layer/CLAUDE.md`'s CWD note): pass
 - `pytest body-layer/tests -q`: pass -- 238 passed (baseline before this branch was 210; net +28)
 
-### Notable Discoveries
+**Update (Stages 6-7)**: same three checks, run after each stage.
+- After Stage 6: 243 passed (238 + 5 new tests; no rewrites -- the gate stayed `medres` so nothing
+  existing changed behaviour).
+- After Stage 7: 245 passed (243 + 2 net new -- one `test_visibility.py` test split into two
+  boundary tests, plus one new end-to-end presence-tier test in `test_naked_eye_source.py`).
+
+### Notable Discoveries (Stages 6-7)
+
+- **Stage 7's gate move changed which of two things binds a truck-sized object's range threshold.**
+  Under the old `medres` gate, Ural's threshold (3000 m) sat comfortably below
+  `NAKED_EYE_RANGE_CAP_M` (5000 m) -- the size curve did the discriminating, which is what the old
+  test's name asserted. Under `lowres`, Ural's threshold is `6 / 0.0043 * 4.0 = 5581.4` m, which now
+  *exceeds* the cap -- so the cap itself becomes the binding constraint, exactly the "flattened size
+  curve at the cap" risk the plan's Risks section names for truck-sized-and-up objects. This is why
+  that test's premise, not just its numbers, needed rewriting (renamed to
+  `test_ural_truck_gate_now_binds_at_the_range_cap_under_lowres`), and why the ship-cap test's
+  comment ("This is now the cap's only job") needed correcting -- it was already wrong the moment
+  the gate moved, since the cap now binds two classes of object, not one.
+- **The `_achieved_tier` helper's `"lowres"` branch was written in Stage 6 but provably dead code
+  until Stage 7** -- confirmed by running the full suite after Stage 6 and finding no test (old or
+  new) could reach it, since every candidate that got that far had already been dropped by the
+  `medres` gate. This is the intended shape from the plan ("mechanism first, unreachable; gate
+  second, reachable") rather than an oversight -- noted here so a future reader doesn't mistake the
+  one-line diff in Stage 7 for "also adding the lowres logic."
+- **`NAKED_EYE_TYPE_CONFIDENCE` was picked at 0.55, not higher**, specifically to preserve the
+  existing invariant (stated in `visibility.py`'s own module docstring before this change) that
+  *any* naked-eye visibility-filter pass, even the closest/most-confident one, stays below
+  `association.CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6` -- a naked-eye pass is still not a real
+  HelperAI detection-existence signal, however close the range.
+- **The `hires`-tier reporting-name fallback (to class, not to `None`) was an implementation
+  decision not spelled out numerically in the plan's worked table**, inferred from the plan's own
+  stated invariant ("Petrovich can never mis-identify, only fail to identify") -- since not every
+  `object_type` has an exact entry in the 595-row reporting-name table (confirmed directly: the
+  bare `"Infantry"` string used throughout the existing fixtures has no exact match, only compound
+  entries like `"Infantry AK"` do), silently emitting `classification_raw=None` at `hires` range
+  would have been a soft crash for observation-formatting/belief code downstream, not a coarser-but-
+  valid claim. Falling back to `op_class` (class level) for an unresolved `hires`-tier candidate
+  keeps every emitted `Observation` a valid claim at *some* level, consistent with the lattice's own
+  "unresolvable parent yields unknown comparability, never contradiction" rule from Stage 1-4.
+
+### Notable Discoveries (Stages 1-4)
 
 - **`Contact.classification` is a new required dataclass field** (no default, since every
   contact must have *some* classification belief from the moment it's founded). This broke the
