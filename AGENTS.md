@@ -1,6 +1,17 @@
 ## General Rules
 
 - Follow `CLAUDE.md` as the primary project contract.
+- **"Side quests"** — a non-code or cross-cutting update that is not part of the milestone
+  currently in progress on the active feature branch (skill/config edits, backlog notes,
+  cross-milestone bookkeeping, workflow-doc fixes like this one) — go through a disposable
+  `git worktree` checked out on `main`, commit and push there, then remove the worktree. Do not
+  make them in the active feature branch's working directory. Two independent reasons converge on
+  this: (1) it keeps a feature branch's history to that feature's own work, not bundled with
+  unrelated bookkeeping; (2) role-sequence agents (Architect/Implementer/Reviewer/DoD) run in that
+  same working directory without worktree isolation by default, so any `git` operation there while
+  one is active risks racing it — a stray commit can sweep up another agent's staged-but-uncommitted
+  work. See `.claude/skills/merge.md` for the same worktree pattern applied to merging a finished
+  branch into `main`.
 - Prefer the simplest solution that satisfies correctness, performance, and architectural clarity.
 - Do not switch roles unnecessarily mid-task.
 - For small features, one role may handle the whole task.
