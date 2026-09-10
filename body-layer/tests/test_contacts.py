@@ -13,11 +13,14 @@ from belief.classification import SpecificityLevel
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.events import (
+    CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_LOST,
     CONTACT_REACQUIRED,
+    EVENT_COOLDOWN_S,
 )
+from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
@@ -350,3 +353,164 @@ def test_identical_replay_twice_produces_byte_identical_events() -> None:
 
     assert store_a.events == store_b.events
     assert len(store_a.events) == 3
+
+
+# --- BL-4: attention events, cooldown, area registry, event queue --------
+
+
+def test_tick_emits_contact_attention_changed_on_direct_mark_change() -> None:
+    store = ContactStore()
+    obs = _observation(obs_id="OBS_1", t_sim=0.0)
+    store.ingest([obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    assert [event.kind for event in store.events] == [CONTACT_DETECTED]
+
+    contact = store.contacts[0]
+    contact.attention = "watch"
+    store.tick(now_sim=1.0)
+
+    kinds = [event.kind for event in store.events]
+    assert kinds == [CONTACT_DETECTED, CONTACT_ATTENTION_CHANGED]
+    change_event = store.events[-1]
+    assert change_event.previous_attention == "normal"
+    assert change_event.attention == "watch"
+
+    # Idempotent, same as the other two kinds.
+    store.tick(now_sim=1.0)
+    assert len(store.events) == 2
+
+
+def test_area_membership_raises_effective_attention_without_a_direct_mark() -> None:
+    """A contact walking into a watched area must fire `CONTACT_ATTENTION_
+    CHANGED` even though its own direct mark never changes -- `tick`
+    compares *effective* attention, not the raw mark (see `Contact.
+    last_emitted_attention`'s docstring)."""
+    store = ContactStore()
+    obs = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    store.ingest([obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    assert contact.attention == "normal"
+    assert contact.last_emitted_attention == "normal"
+
+    store.add_area(
+        center=contact.last_position,
+        radius_m=50.0,
+        level="priority",
+        source="console",
+    )
+    store.tick(now_sim=1.0)
+
+    kinds = [event.kind for event in store.events]
+    assert kinds == [CONTACT_DETECTED, CONTACT_ATTENTION_CHANGED]
+    change_event = store.events[-1]
+    assert change_event.previous_attention == "normal"
+    assert change_event.attention == "priority"
+    # The contact's own direct mark is untouched by area membership.
+    assert contact.attention == "normal"
+
+
+def test_explicit_ignore_wins_over_a_priority_area() -> None:
+    store = ContactStore()
+    obs = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    store.ingest([obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    contact.attention = "ignore"
+    store.add_area(
+        center=contact.last_position,
+        radius_m=50.0,
+        level="priority",
+        source="console",
+    )
+    store.tick(now_sim=1.0)
+
+    change_event = store.events[-1]
+    assert change_event.kind == CONTACT_ATTENTION_CHANGED
+    assert change_event.attention == "ignore"
+
+
+def test_event_cooldown_suppresses_rapid_reemission_but_not_after_it_elapses() -> None:
+    store = ContactStore()
+    obs = _observation(obs_id="OBS_1", t_sim=0.0)
+    store.ingest([obs], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+
+    contact.attention = "watch"
+    store.tick(now_sim=1.0)
+    assert [event.kind for event in store.events] == [
+        CONTACT_DETECTED,
+        CONTACT_ATTENTION_CHANGED,
+    ]
+
+    # Flip back within the cooldown window: the state comparison still
+    # notices the change (the snapshot updates), but emission is suppressed.
+    contact.attention = "normal"
+    store.tick(now_sim=1.0 + EVENT_COOLDOWN_S - 1.0)
+    assert contact.last_emitted_attention == "normal"
+    assert [event.kind for event in store.events] == [
+        CONTACT_DETECTED,
+        CONTACT_ATTENTION_CHANGED,
+    ]
+
+    # Once the cooldown has elapsed, the next real change emits normally,
+    # comparing against the true (already-updated) last-emitted state.
+    contact.attention = "watch"
+    store.tick(now_sim=1.0 + EVENT_COOLDOWN_S + 1.0)
+    kinds = [event.kind for event in store.events]
+    assert kinds == [
+        CONTACT_DETECTED,
+        CONTACT_ATTENTION_CHANGED,
+        CONTACT_ATTENTION_CHANGED,
+    ]
+    assert store.events[-1].previous_attention == "normal"
+    assert store.events[-1].attention == "watch"
+
+
+def test_tick_orders_classification_before_attention() -> None:
+    """Extends `test_tick_mints_classification_changed_after_the_lifecycle_
+    event`'s ordering guarantee to the third kind: within one tick,
+    classification is minted before attention."""
+    store = ContactStore()
+    founding = _observation(
+        obs_id="OBS_1",
+        t_sim=0.0,
+        classification_raw="OP_ARMORED",
+        classification_level=2,
+    )
+    store.ingest([founding], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    contact.attention = "watch"
+
+    refining = _observation(
+        obs_id="OBS_2", t_sim=1.0, classification_raw="T-72", classification_level=3
+    )
+    store.ingest([refining], now_sim=1.0)
+    store.tick(now_sim=1.0)
+
+    kinds = [event.kind for event in store.events]
+    assert kinds == [
+        CONTACT_DETECTED,
+        CONTACT_CLASSIFICATION_CHANGED,
+        CONTACT_ATTENTION_CHANGED,
+    ]
+
+
+def test_add_area_and_remove_area_round_trip() -> None:
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    area = store.add_area(
+        center=center, radius_m=500.0, level="watch", source="console"
+    )
+    assert area.id.startswith("AREA_")
+    assert store.areas == [area]
+
+    assert store.remove_area(area.id) is True
+    assert store.areas == []
+
+
+def test_remove_area_returns_false_for_unknown_id() -> None:
+    store = ContactStore()
+    assert store.remove_area("AREA_999") is False

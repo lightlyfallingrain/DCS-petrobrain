@@ -174,6 +174,10 @@ def test_scripted_console_session_over_a_replayed_stream() -> None:
     assert any("sighting source=" in line for line in history_output)
     assert any("kind=CONTACT_DETECTED" in line for line in history_output)
     assert any("kind=CONTACT_LOST" in line for line in history_output)
+    # BL-4: the second tick also observes the contact's direct mark went
+    # normal -> watch since the first tick (the `watch` command above),
+    # materialising a third event kind.
+    assert any("kind=CONTACT_ATTENTION_CHANGED" in line for line in history_output)
 
     find_output = console.handle_line("find ural", now_sim=lost_at)
     assert find_output == [
@@ -184,7 +188,9 @@ def test_scripted_console_session_over_a_replayed_stream() -> None:
     assert unwatch_output == [f"no longer watching {contact_id}"]
 
     stats_output = console.handle_line("stats", now_sim=lost_at)
-    assert stats_output == ["contacts=1 observations=1 events=2"]
+    # BL-4: CONTACT_DETECTED, CONTACT_LOST, and the CONTACT_ATTENTION_CHANGED
+    # noted above -- three events, up from Stage 2/3's two.
+    assert stats_output == ["contacts=1 observations=1 events=3"]
 
 
 def test_console_prints_to_its_configured_output() -> None:
@@ -397,6 +403,98 @@ def test_format_event_for_overlay_falls_back_when_contact_not_found() -> None:
     line = format_event_for_overlay(store, event, now_sim=0.0)
 
     assert line == "CONTACT_missing: CONTACT_DETECTED"
+
+
+def test_attention_command_sets_and_queries_a_contacts_level() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = Console(store=store)
+
+    set_output = console.handle_line(f"attention {contact_id} priority", now_sim=0.0)
+    assert set_output == [f"{contact_id}: attention = priority"]
+
+    query_output = console.handle_line(f"attention {contact_id}", now_sim=0.0)
+    assert query_output == [
+        f"{contact_id}: direct=priority effective=priority direct_source=console"
+    ]
+
+
+def test_attention_command_rejects_an_unknown_level() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = Console(store=store)
+
+    output = console.handle_line(f"attention {contact_id} bogus", now_sim=0.0)
+    assert len(output) == 1
+    assert "unknown attention level" in output[0]
+
+
+def test_attention_command_reports_unknown_contact() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("attention CONTACT_999", now_sim=0.0) == [
+        "no such contact: CONTACT_999"
+    ]
+    assert console.handle_line("attention CONTACT_999 watch", now_sim=0.0) == [
+        "no such contact: CONTACT_999"
+    ]
+
+
+def test_watch_area_command_requires_enrichment() -> None:
+    console = Console(store=ContactStore())
+    output = console.handle_line("watch-area 0 1000 500", now_sim=0.0)
+    assert output == ["watch-area requires live ownship telemetry (not available yet)"]
+
+
+def test_watch_area_command_registers_an_area_visible_via_areas_and_unwatch_area(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    console = Console(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    watch_output = console.handle_line("watch-area 0 1000 500 N", now_sim=0.0)
+    assert len(watch_output) == 1
+    assert watch_output[0].startswith("watching area ")
+    area_id = watch_output[0].removeprefix("watching area ")
+
+    areas_output = console.handle_line("areas", now_sim=0.0)
+    assert areas_output == [
+        f"{area_id}: level=watch radius_m=500 sector=N source=console"
+    ]
+
+    unwatch_output = console.handle_line(f"unwatch-area {area_id}", now_sim=0.0)
+    assert unwatch_output == [f"no longer watching area {area_id}"]
+    assert console.handle_line("areas", now_sim=0.0) == ["no areas"]
+
+
+def test_watch_area_command_rejects_bad_arguments() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("watch-area 0 1000", now_sim=0.0) == [
+        "usage: watch-area <bearing_deg> <range_m> <radius_m> [sector]"
+    ]
+
+
+def test_watch_area_command_rejects_an_unknown_sector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    console = Console(store=store, enrichment=_enrichment_context(monkeypatch))
+    output = console.handle_line("watch-area 0 1000 500 BOGUS", now_sim=0.0)
+    assert len(output) == 1
+    assert "unknown sector" in output[0]
+
+
+def test_unwatch_area_command_reports_unknown_id() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("unwatch-area AREA_999", now_sim=0.0) == [
+        "no such area: AREA_999"
+    ]
+
+
+def test_areas_command_lists_nothing_on_an_empty_store() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("areas", now_sim=0.0) == ["no areas"]
 
 
 def test_console_module_contains_no_belief_logic() -> None:

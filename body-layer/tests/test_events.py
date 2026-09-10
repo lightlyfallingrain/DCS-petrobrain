@@ -1,15 +1,18 @@
 """Tests for `belief.events` -- `lifecycle_event_kind` (`plans/pb2-contact-
-memory/plan.md` Stage 2) and `classification_event` (`plans/
-classification-refinement/plan.md` Stage 3). Each transition case gets its
+memory/plan.md` Stage 2), `classification_event` (`plans/
+classification-refinement/plan.md` Stage 3), and `attention_event_kind`
+(`plans/bl4-attention-events/plan.md`, BL-4). Each transition case gets its
 own test."""
 
 from __future__ import annotations
 
 from belief.classification import ClassificationBelief, SpecificityLevel
 from belief.events import (
+    CONTACT_ATTENTION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_LOST,
     CONTACT_REACQUIRED,
+    attention_event_kind,
     classification_event,
     lifecycle_event_kind,
 )
@@ -89,3 +92,25 @@ def test_same_level_same_value_emits_nothing() -> None:
     previous = _belief("OP_ARMORED", SpecificityLevel.CLASS)
     current = _belief("OP_ARMORED", SpecificityLevel.CLASS)
     assert classification_event(previous, current) is None
+
+
+# --- attention_event_kind ------------------------------------------------
+
+
+def test_first_tick_with_no_previous_attention_emits_nothing() -> None:
+    assert attention_event_kind(None, "normal") is None
+    assert attention_event_kind(None, "watch") is None
+
+
+def test_unchanged_attention_emits_nothing() -> None:
+    assert attention_event_kind("normal", "normal") is None
+    assert attention_event_kind("watch", "watch") is None
+    assert attention_event_kind("priority", "priority") is None
+    assert attention_event_kind("ignore", "ignore") is None
+
+
+def test_any_real_change_emits_contact_attention_changed() -> None:
+    assert attention_event_kind("normal", "watch") == CONTACT_ATTENTION_CHANGED
+    assert attention_event_kind("watch", "normal") == CONTACT_ATTENTION_CHANGED
+    assert attention_event_kind("watch", "priority") == CONTACT_ATTENTION_CHANGED
+    assert attention_event_kind("priority", "ignore") == CONTACT_ATTENTION_CHANGED

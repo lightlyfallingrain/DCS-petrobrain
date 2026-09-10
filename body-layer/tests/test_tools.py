@@ -19,12 +19,16 @@ from belief.tools import (
     _format_range_km,
     describe_contact,
     find_contact,
+    get_attention_state,
     get_contact_history,
     get_contacts,
     get_stats,
-    unwatch_contact,
-    watch_contact,
+    list_areas,
+    set_attention,
+    unwatch_area,
+    watch_area,
 )
+from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -133,7 +137,7 @@ def test_get_contacts_watched_filter_excludes_unwatched_contacts() -> None:
     store = _store_with_one_contact()
     contact_id = store.contacts[0].id
     assert get_contacts(store, now_sim=0.0, filter="watched") == []
-    watch_contact(store, contact_id)
+    set_attention(store, contact_id, "watch")
     watched = get_contacts(store, now_sim=0.0, filter="watched")
     assert [r["facts"]["id"] for r in watched] == [contact_id]
 
@@ -223,7 +227,7 @@ def test_describe_contact_facts_omit_attention_source_when_unwatched() -> None:
 def test_describe_contact_facts_include_attention_source_when_watched() -> None:
     store = _store_with_one_contact()
     contact_id = store.contacts[0].id
-    watch_contact(store, contact_id, source="console")
+    set_attention(store, contact_id, "watch", source="console")
     result = describe_contact(store, contact_id, now_sim=0.0)
     assert result is not None
     assert result["facts"]["attention"] == "watch"
@@ -285,29 +289,39 @@ def test_find_contact_returns_nothing_when_no_classification_matches() -> None:
     assert find_contact(store, "shilka", now_sim=0.0) == []
 
 
-def test_watch_contact_returns_false_for_unknown_id() -> None:
+def test_set_attention_returns_false_for_unknown_id() -> None:
     store = ContactStore()
-    assert watch_contact(store, "CONTACT_999") is False
+    assert set_attention(store, "CONTACT_999", "watch") is False
 
 
-def test_watch_and_unwatch_round_trip() -> None:
+def test_set_attention_watch_and_normal_round_trip() -> None:
     store = _store_with_one_contact()
     contact_id = store.contacts[0].id
 
-    assert watch_contact(store, contact_id, source="console") is True
+    assert set_attention(store, contact_id, "watch", source="console") is True
     watched_contact = store.contacts[0]
     assert watched_contact.attention == "watch"
     assert watched_contact.attention_source == "console"
 
-    assert unwatch_contact(store, contact_id) is True
+    assert set_attention(store, contact_id, "normal") is True
     unwatched_contact = store.contacts[0]
     assert unwatched_contact.attention == "normal"
     assert unwatched_contact.attention_source is None
 
 
-def test_unwatch_contact_returns_false_for_unknown_id() -> None:
-    store = ContactStore()
-    assert unwatch_contact(store, "CONTACT_999") is False
+def test_set_attention_ignore_and_priority_set_source() -> None:
+    store = _store_with_one_contact()
+    contact_id = store.contacts[0].id
+
+    assert set_attention(store, contact_id, "priority", source="console") is True
+    contact = store.contacts[0]
+    assert contact.attention == "priority"
+    assert contact.attention_source == "console"
+
+    assert set_attention(store, contact_id, "ignore", source="console") is True
+    contact = store.contacts[0]
+    assert contact.attention == "ignore"
+    assert contact.attention_source == "console"
 
 
 def test_get_stats_counts_observations_contacts_and_events() -> None:
@@ -401,7 +415,7 @@ def test_contact_summary_without_relative_now_is_unchanged() -> None:
     store = _store_with_one_contact()
     contact = store.contacts[0]
     assert (
-        _contact_summary(contact, now_sim=0.0)
+        _contact_summary(contact, now_sim=0.0, attention_level="normal")
         == "Ural truck, observed, currently visible."
     )
 
@@ -415,7 +429,9 @@ def test_contact_summary_with_relative_now_appends_clock_and_range() -> None:
         "clock_position": 11,
         "relative_alt_m": 0.0,
     }
-    summary = _contact_summary(contact, now_sim=0.0, relative_now=relative_now)
+    summary = _contact_summary(
+        contact, now_sim=0.0, attention_level="normal", relative_now=relative_now
+    )
     assert summary == "Ural truck, observed, currently visible, 11 o'clock, 3.0 km."
 
 
@@ -429,7 +445,9 @@ def test_contact_summary_appends_fragment_after_being_watched_suffix() -> None:
         "clock_position": 12,
         "relative_alt_m": 0.0,
     }
-    summary = _contact_summary(contact, now_sim=0.0, relative_now=relative_now)
+    summary = _contact_summary(
+        contact, now_sim=0.0, attention_level="watch", relative_now=relative_now
+    )
     assert summary == (
         "Ural truck, observed, currently visible. Being watched, 12 o'clock, 0.5 km."
     )
@@ -455,3 +473,65 @@ def test_describe_contact_summary_includes_clock_range_when_enriched(
     assert result["summary"].endswith(
         f", {clock_position} o'clock, {_format_range_km(range_m)}."
     )
+
+
+# --- BL-4: watch_area/unwatch_area/list_areas, get_attention_state -------
+
+
+def test_watch_area_returns_a_minted_area_and_list_areas_sees_it() -> None:
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    area = watch_area(store, center, radius_m=500.0, level="priority")
+    assert area.id
+    assert list_areas(store) == [area]
+
+
+def test_unwatch_area_removes_it() -> None:
+    store = ContactStore()
+    area = watch_area(store, GeoPosition(x=0.0, z=0.0, alt_m=0.0), radius_m=500.0)
+    assert unwatch_area(store, area.id) is True
+    assert list_areas(store) == []
+
+
+def test_unwatch_area_returns_false_for_unknown_id() -> None:
+    store = ContactStore()
+    assert unwatch_area(store, "AREA_999") is False
+
+
+def test_get_attention_state_returns_none_for_unknown_id() -> None:
+    store = ContactStore()
+    assert get_attention_state(store, "CONTACT_999") is None
+
+
+def test_get_attention_state_reports_direct_and_effective() -> None:
+    store = _store_with_one_contact()
+    contact_id = store.contacts[0].id
+    state = get_attention_state(store, contact_id)
+    assert state == {
+        "contact_id": contact_id,
+        "direct": "normal",
+        "effective": "normal",
+    }
+
+
+def test_get_attention_state_reports_area_derived_effective_value() -> None:
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    area = watch_area(store, contact.last_position, radius_m=500.0, level="priority")
+    state = get_attention_state(store, contact.id)
+    assert state is not None
+    assert state["direct"] == "normal"
+    assert state["effective"] == "priority"
+    assert state["area_id"] == area.id
+    assert "direct_source" not in state
+
+
+def test_get_contacts_watched_filter_includes_area_derived_contacts() -> None:
+    """`get_contacts(filter="watched")` must broaden to *effective*
+    attention (BL-4) -- a contact inside a priority area shows up even
+    though its own direct mark is still `"normal"`."""
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    watch_area(store, contact.last_position, radius_m=500.0, level="priority")
+    watched = get_contacts(store, now_sim=0.0, filter="watched")
+    assert [r["facts"]["id"] for r in watched] == [contact.id]
