@@ -273,7 +273,13 @@ def format_event_for_overlay(
     `facts["semantic"]`, if any -- to the mirrored line, whichever kind it
     is. `None` (the default) is a true no-op: the line is byte-for-byte
     BL-2.5's original, same overlay-restraint invariant as the rest of this
-    module's optional fields."""
+    module's optional fields.
+
+    `result["summary"]` itself (read verbatim here, no separate handling
+    needed) now also carries a clock-position/range fragment whenever
+    `relative_now` is present in `facts` -- `belief.tools._contact_summary`'s
+    addition (`plans/overlay-clock-range-summary/plan.md`), not something
+    this function computes."""
     result = describe_contact(store, event.contact_id, now_sim, enrichment=enrichment)
     if result is None:
         return f"{event.contact_id}: {event.kind}"

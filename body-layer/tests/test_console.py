@@ -276,6 +276,29 @@ def test_format_event_for_overlay_appends_semantic_fragment_when_enriched(
     assert "Jableh" in line
 
 
+def test_format_event_for_overlay_includes_clock_range_when_enriched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overlay-clock-range-summary feature: the fragment
+    `belief.tools._contact_summary` now appends must show up in the
+    mirrored overlay line "for free" -- `format_event_for_overlay` reads
+    `result["summary"]` verbatim and needs no code change of its own."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    (event,) = store.events
+
+    line = format_event_for_overlay(
+        store, event, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert " o'clock, " in line
+    assert " km." in line
+
+
 def test_format_event_for_overlay_unchanged_without_enrichment() -> None:
     store = ContactStore()
     store.ingest(
