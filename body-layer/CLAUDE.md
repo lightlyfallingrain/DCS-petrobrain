@@ -294,7 +294,61 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   in this file a defensive try/except is load-bearing rather than cosmetic, since a failed push
   must degrade to "no overlay line for this event," never stop the poll loop or skip the rest of
   the batch. `PerceptionLogger`'s plain per-`Observation` stream does not get this wiring
-  (line-noise vs. signal tradeoff).
+  (line-noise vs. signal tradeoff). BL-5a adds `--crew-text` (mutually exclusive with
+  `--console`/`--overlay` this milestone) and `--brain-client debug|null`: `_run_crew_text_poll_loop`/
+  `_run_crew_text_repl` mirror `_run_console_poll_loop`/`_run_console_repl` exactly, reusing the same
+  `ConsolePerceptionRunner`, except the poll loop also calls `belief.crew_console.CrewConsole.
+  drain_events` after each `run_once()` — the same post-`tick()` hook point `--overlay` uses — and
+  the REPL dispatches into `CrewConsole.handle_line` instead of `belief.console.Console.handle_line`.
+- `src/belief/utterance.py` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`) — the
+  deterministic intent parser: `PlayerUtterance`/`PartialParse` (§5/§3.5's shapes, trimmed to what
+  this milestone populates) and `parse_utterance`, a small ordered table of `(regex, intent)` pairs
+  evaluated top-down, first match wins — the same evaluation shape `belief.classification`'s lattice
+  and `belief.attention.effective_attention` already use elsewhere. A verb match alone never yields
+  a `"handled"` disposition — only a verb match *and* exactly one resolved reference candidate do;
+  zero or several always escalate with `reason_escalated` (`unmatched`/`ambiguous_reference`) rather
+  than guessing. Reference resolution is a literal `CONTACT_<n>` id, or `belief.tools.find_contact`
+  after stripping leading filler words (`that`/`the`/`a`/`an`) — place-name phrasing (`find_place`)
+  stays unmatched until BL-5 merges (documented gap, not a bug). No fabricated per-candidate score —
+  `find_contact` (BL-2) has no ranking to carry through.
+- `src/belief/speech.py` (BL-5a) — `OutgoingSpeech` (§5's record, trimmed), the three body-written
+  templated classes (§2.1/§3.6): `render_readback`, `render_contact_report` (single-contact only —
+  no clustering exists yet, `docs/concept/PETROBRAIN_RUNTIME.md` line 336), and `route_event`, the
+  outbound routing gate. `route_event` accepts `belief.events.Event | UrgentCall` and checks which
+  one it got *before* anything else — an `UrgentCall` (Stage 5's manual bypass-gate test harness,
+  constructed only by `crew_console.py`'s `!inject-urgent` command; no real threat-detection channel
+  exists) speaks immediately with `bypass_gate=True`, no ack/cooldown touched; a `belief.events.Event`
+  renders through a per-kind template (`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`/
+  `CONTACT_CLASSIFICATION_CHANGED` — the runtime doc's literal "C17 BMP"/"C17 lost"/"C17 reacquired"
+  lines, adapted to this store's own `CONTACT_<n>` id shape) and auto-acknowledges
+  (`belief.tools.acknowledge_event`) the moment it is spoken, so a future brain's `poll_events` never
+  re-surfaces it. `CONTACT_ATTENTION_CHANGED` deliberately has no template (returns `None`, not
+  acknowledged) — the player's own command already got a readback, and area-driven attention changes
+  are not yet narrated proactively (a real, documented gap). `UrgentCall` is a separate small type
+  rather than a `bypass_gate` field grafted onto the shared BL-4 `Event` dataclass — `events.py` is
+  out of this milestone's Affected Modules.
+- `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
+  point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
+  transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
+  `BrainClient` (a two-method `Protocol` for a later `ask_player` round trip). `situational_header`
+  is a documented stand-in (`{contact_counts, our_position}`, `our_position` present only when an
+  `EnrichmentContext` is supplied) — §3.5's "D2 header" is a design discussion, not a data-model
+  entry, and no code builds the real header yet. `NullBrainClient` does nothing (the honest "no
+  brain yet" behaviour — §3.5: "if the brain does nothing, body says nothing"); `DebugPrintBrainClient`
+  additionally prints the payload to stderr for session visibility, still producing no spoken output.
+- `src/belief/crew_console.py` (BL-5a) — `CrewConsole`, the typed-input/printed-output player-facing
+  session, deliberately **not** an extension of `belief.console.Console` (that module is an explicit
+  developer debug tool; `CrewConsole` runs typed sentences through `parse_utterance`'s grammar and
+  speaks proactively, neither of which `Console` does — see the plan's "Module boundary" decision).
+  `handle_line` dispatches a `"handled"` parse to `belief.tools.set_attention`/`describe_contact` +
+  a `belief.speech` template, and an `"escalated"` one to `handle_player_utterance` (silent, since
+  neither stand-in `BrainClient` speaks). `drain_events` (called from `logger.py`'s `--crew-text`
+  poll loop after each `tick()`) runs `store.unacknowledged_events` through `route_event` — reading
+  the unacknowledged queue directly rather than tracking a separate high-water mark works because
+  `route_event` itself acknowledges any event it renders, so a handled kind drops out on the next
+  call and an unrendered kind (`CONTACT_ATTENTION_CHANGED`) is harmlessly re-skipped every poll.
+  `!inject-urgent <contact_id> <text>` is Stage 5's clearly-labelled test harness for the
+  bypass-gate/urgent-call path — not a production intent or a real detector.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a

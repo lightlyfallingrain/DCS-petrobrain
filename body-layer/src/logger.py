@@ -92,6 +92,23 @@ plain (non-`--console`) per-`Observation` stream deliberately does not get
 this wiring (line-noise vs. signal tradeoff, see the plan's "Deliberately
 not modified" section) -- only `ConsolePerceptionRunner`'s contact-event
 rate is mirrored.
+
+**`--crew-text` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`)**:
+runs `belief.crew_console.CrewConsole` -- the player-facing text channel --
+instead of `--console`'s developer debug REPL. Reuses the exact same
+`ConsolePerceptionRunner` poll-loop machinery Stage 4/6 already built
+(`_run_crew_text_poll_loop` mirrors `_run_console_poll_loop` byte-for-byte
+except for one extra call: after each `runner.run_once()`, it calls
+`crew_console.drain_events(runner.last_t_sim)` so newly ticked lifecycle
+events get spoken through `belief.speech.route_event`, the same hook point
+`--overlay` uses for its own mirroring). **Mutually exclusive with
+`--console`/`--overlay` this milestone** (the plan's accepted decision) --
+running the debug console and the crew session against the same
+`ContactStore` concurrently is not a validated interaction. `--brain-client
+debug|null` selects which `belief.escalation.BrainClient` stand-in handles
+escalated utterances (`debug`, the default, prints escalations to stderr for
+session visibility; `null` is silent) -- neither produces spoken output,
+since no real brain exists yet.
 """
 
 from __future__ import annotations
@@ -109,7 +126,10 @@ from typing import Literal, TextIO
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
+from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
+from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
+from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from perception.geometry import open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -425,6 +445,54 @@ def _run_console_repl(
             repl_conn.close()
 
 
+def _run_crew_text_poll_loop(
+    runner: ConsolePerceptionRunner,
+    crew_console: CrewConsole,
+    aircraft_client: AircraftLayerClient,
+    theatre: str,
+    world_model_db: Path,
+    poll_interval_s: float,
+    stop_event: threading.Event,
+) -> None:
+    """`--crew-text`'s background poll thread -- identical to
+    `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
+    Connection`, see that function's docstring / module docstring's "Stage 6
+    fix"), plus one extra call per poll: `crew_console.drain_events` speaks
+    whatever lifecycle events this poll's `tick()` newly surfaced, the same
+    hook point `--overlay`'s mirroring uses in `ConsolePerceptionRunner.
+    run_once` itself."""
+    world_model_conn = open_world_model(world_model_db)
+    try:
+        runner.sources = _build_sources(
+            aircraft_client, theatre, world_model_conn, emit_mode="every_poll"
+        )
+        runner.world_model_conn = world_model_conn
+        runner.theatre = theatre
+        while not stop_event.is_set():
+            runner.run_once()
+            if runner.last_t_sim is not None:
+                crew_console.enrichment = runner.enrichment
+                crew_console.drain_events(runner.last_t_sim)
+            stop_event.wait(poll_interval_s)
+    finally:
+        world_model_conn.close()
+
+
+def _run_crew_text_repl(
+    runner: ConsolePerceptionRunner, crew_console: CrewConsole
+) -> None:
+    """`--crew-text`'s foreground REPL -- identical shape to
+    `_run_console_repl`, dispatching into `CrewConsole.handle_line` instead
+    of `belief.console.Console.handle_line`."""
+    try:
+        for line in sys.stdin:
+            now_sim = runner.last_t_sim if runner.last_t_sim is not None else 0.0
+            crew_console.enrichment = runner.enrichment
+            crew_console.handle_line(line, now_sim=now_sim)
+    except KeyboardInterrupt:
+        pass
+
+
 def main() -> None:
     """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
     ... --world-model-db ...` -- polls `PerceptionLogger.run_once()` on a
@@ -483,11 +551,68 @@ def main() -> None:
             "same --aircraft-layer-url instance, no separate URL needed."
         ),
     )
+    parser.add_argument(
+        "--crew-text",
+        action="store_true",
+        help=(
+            "run the player-facing crew session (belief.crew_console."
+            "CrewConsole) instead of the plain on_change text logger -- "
+            "BL-5a. Mutually exclusive with --console/--overlay this "
+            "milestone."
+        ),
+    )
+    parser.add_argument(
+        "--brain-client",
+        choices=("debug", "null"),
+        default="debug",
+        help=(
+            "which belief.escalation.BrainClient stand-in handles escalated "
+            "utterances under --crew-text -- 'debug' (default) prints "
+            "escalations to stderr, 'null' is silent. Neither speaks, since "
+            "no real brain exists yet."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.crew_text and (args.console or args.overlay):
+        parser.error("--crew-text is mutually exclusive with --console/--overlay")
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
-    if args.console:
+    if args.crew_text:
+        brain_client: BrainClient = (
+            DebugPrintBrainClient()
+            if args.brain_client == "debug"
+            else NullBrainClient()
+        )
+        crew_runner = ConsolePerceptionRunner(
+            aircraft_client=aircraft_client, output=None
+        )
+        crew_console = CrewConsole(
+            store=crew_runner.store, brain_client=brain_client, output=sys.stdout
+        )
+        stop_event = threading.Event()
+        poll_thread = threading.Thread(
+            target=_run_crew_text_poll_loop,
+            args=(
+                crew_runner,
+                crew_console,
+                aircraft_client,
+                args.theatre,
+                args.world_model_db,
+                args.poll_interval_s,
+                stop_event,
+            ),
+            daemon=True,
+        )
+        poll_thread.start()
+        print(CREW_TEXT_HELP_TEXT, file=sys.stdout)
+        try:
+            _run_crew_text_repl(crew_runner, crew_console)
+        finally:
+            stop_event.set()
+            poll_thread.join()
+    elif args.console:
         # Stage 6 fix: no world_model_conn opened here -- the poll thread
         # opens its own (see _run_console_poll_loop / module docstring's
         # "Stage 6 fix"), since sqlite3 connections are thread-affine and
