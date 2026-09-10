@@ -11,7 +11,7 @@ from belief import contacts as contacts_module
 from belief import percept as percept_module
 from belief.classification import SpecificityLevel
 from belief.contacts import ContactStore
-from belief.decay import LOST_THRESHOLD_S
+from belief.decay import LOST_THRESHOLD_S, OBJECT_ID_MEMORY_S
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
@@ -44,6 +44,7 @@ def _observation(
     source: str = SOURCE_PETROVICH_DETECTION_ASSOCIATED,
     ownship: OwnshipState | None = None,
     classification_level: int = 2,
+    continues_observation_id: str | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -60,6 +61,7 @@ def _observation(
         ),
         provenance="test_fixture",
         classification_level=classification_level,
+        continues_observation_id=continues_observation_id,
     )
 
 
@@ -186,6 +188,172 @@ def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> 
         store.ingest([obs], now_sim=t_sim)
 
     assert len(store.contacts) == 1
+
+
+def test_continuity_merges_directly_even_when_the_gate_would_have_failed() -> None:
+    """`plans/contact-duplication-ambiguity-runaway/plan.md`'s object-
+    permanence shortcut: a percept whose `continues_observation_id` resolves
+    to a contact merges into it directly, `passes_gate` never consulted --
+    proven here by placing the second percept far enough away that the
+    ordinary spatial gate would reject it outright."""
+    store = ContactStore()
+    founding = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    store.ingest([founding], now_sim=0.0)
+    assert len(store.contacts) == 1
+
+    far_but_continuing = _observation(
+        obs_id="OBS_2",
+        t_sim=1.0,
+        bearing_deg=180.0,
+        range_m=5000.0,
+        continues_observation_id="OBS_1",
+    )
+    store.ingest([far_but_continuing], now_sim=1.0)
+
+    assert len(store.contacts) == 1
+    contact = store.contacts[0]
+    assert contact.contributing_observation_ids == ["OBS_1", "OBS_2"]
+
+
+def test_continuity_resolves_across_an_observation_id_chain() -> None:
+    """A third percept continuing the *second* observation (not the founding
+    one) must still resolve to the same contact -- the index is keyed by
+    every observation ever ingested, not only founding ones."""
+    store = ContactStore()
+    first = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    store.ingest([first], now_sim=0.0)
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=1.0,
+        bearing_deg=180.0,
+        range_m=5000.0,
+        continues_observation_id="OBS_1",
+    )
+    store.ingest([second], now_sim=1.0)
+    third = _observation(
+        obs_id="OBS_3",
+        t_sim=2.0,
+        bearing_deg=90.0,
+        range_m=9000.0,
+        continues_observation_id="OBS_2",
+    )
+    store.ingest([third], now_sim=2.0)
+
+    assert len(store.contacts) == 1
+    assert store.contacts[0].contributing_observation_ids == [
+        "OBS_1",
+        "OBS_2",
+        "OBS_3",
+    ]
+
+
+def test_expired_continuity_falls_through_to_the_gate() -> None:
+    """Past `OBJECT_ID_MEMORY_S` since the contact's `last_seen_sim`, a
+    resolved `continues_observation_id` is *not* trusted -- the percept goes
+    through the ordinary gate exactly as if it had no continuity reference
+    at all. A class-incompatible claim (a hard gate failure regardless of
+    distance or the gate's own elapsed-time growth term) proves this
+    deterministically: if the expired continuity reference were still being
+    honored, it would merge anyway."""
+    store = ContactStore()
+    founding = _observation(
+        obs_id="OBS_1",
+        t_sim=0.0,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        classification_raw="OP_TRUCK",
+    )
+    store.ingest([founding], now_sim=0.0)
+
+    expired = _observation(
+        obs_id="OBS_2",
+        t_sim=OBJECT_ID_MEMORY_S + 0.1,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        classification_raw="OP_ARMORED",
+        continues_observation_id="OBS_1",
+    )
+    store.ingest([expired], now_sim=OBJECT_ID_MEMORY_S + 0.1)
+
+    assert len(store.contacts) == 2
+
+
+def test_continuity_still_trusted_between_lost_threshold_and_memory_window() -> None:
+    """The "I lost him... it's the same guy" case: a contact well past
+    `LOST_THRESHOLD_S` (already narratively "lost") but still within
+    `OBJECT_ID_MEMORY_S` must still merge via continuity, skipping the gate
+    -- proven the same way, with a percept far outside the gate's radius."""
+    store = ContactStore()
+    founding = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    store.ingest([founding], now_sim=0.0)
+
+    now_sim = LOST_THRESHOLD_S + 50.0
+    assert now_sim < OBJECT_ID_MEMORY_S
+    reacquired = _observation(
+        obs_id="OBS_2",
+        t_sim=now_sim,
+        bearing_deg=180.0,
+        range_m=9000.0,
+        continues_observation_id="OBS_1",
+    )
+    store.ingest([reacquired], now_sim=now_sim)
+
+    assert len(store.contacts) == 1
+
+
+def test_class_incompatible_continuity_claim_falls_through_to_the_gate() -> None:
+    """Defense-in-depth: a resolved, unexpired `continues_observation_id`
+    whose incoming class is incompatible with the contact's `last_class_raw`
+    is not trusted either -- falls through to the gate exactly like an
+    unresolved or expired match, never a forced merge."""
+    store = ContactStore()
+    founding = _observation(
+        obs_id="OBS_1",
+        t_sim=0.0,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        classification_raw="OP_TRUCK",
+    )
+    store.ingest([founding], now_sim=0.0)
+
+    incompatible = _observation(
+        obs_id="OBS_2",
+        t_sim=1.0,
+        bearing_deg=180.0,
+        range_m=9000.0,
+        classification_raw="OP_ARMORED",
+        continues_observation_id="OBS_1",
+    )
+    store.ingest([incompatible], now_sim=1.0)
+
+    assert len(store.contacts) == 2
+
+
+def test_reused_object_id_at_a_since_gapped_contacts_old_position_falls_to_the_gate() -> (
+    None
+):
+    """The waived "different unit occupies the same spot" edge case is
+    structurally excluded from the correlation path, not specially handled:
+    a percept with *no* continuity reference, arriving near a contact's
+    last-known position with a compatible class, goes through the ordinary
+    gate/ambiguity policy exactly as any first sighting would -- it is never
+    force-merged just because it happens to land where an older contact once
+    was."""
+    store = ContactStore()
+    founding = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    store.ingest([founding], now_sim=0.0)
+
+    different_object_same_spot = _observation(
+        obs_id="OBS_2", t_sim=1.0, bearing_deg=0.0, range_m=1010.0
+    )
+    touched = store.ingest([different_object_same_spot], now_sim=1.0)
+
+    # No continuity reference -> ordinary gate -> within range of OBS_1's
+    # contact, compatible class -> merges via the gate (not via continuity,
+    # and not force-created either) -- the gate's own existing behaviour,
+    # untouched by this fix.
+    assert len(store.contacts) == 1
+    assert touched[0] is store.contacts[0]
 
 
 def test_founding_percept_seeds_classification_at_its_own_level() -> None:
