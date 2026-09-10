@@ -379,6 +379,77 @@ def test_detection_clearing_then_reappearing_with_same_text_re_emits() -> None:
     assert len(third) == 1
 
 
+def test_continuity_resolves_across_a_leaf_gap_for_the_same_object_id() -> None:
+    """`plans/contact-duplication-ambiguity-runaway/plan.md`'s object-
+    permanence mechanism, newly in scope for this channel: the same
+    resolved `object_id`, re-associated after several polls where the leaf
+    text was entirely absent, must still resolve `continues_observation_id`
+    to the last observation emitted before the gap."""
+    world_objects = {
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication({"middle_list_text": "Ural truck"}),
+            _indication(None),
+            _indication(None),
+            _indication({"middle_list_text": "Ural truck"}),
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    first = source.poll(100.0, _ownship())
+    assert len(first) == 1
+    assert first[0].continues_observation_id is None
+
+    assert source.poll(100.2, _ownship()) == []
+    assert source.poll(100.4, _ownship()) == []
+    reacquired = source.poll(100.6, _ownship())
+
+    assert len(reacquired) == 1
+    assert reacquired[0].continues_observation_id == first[0].id
+
+
+def test_continuity_never_cross_tags_two_different_leaves() -> None:
+    """Two simultaneous leaves resolving to two distinct `object_id`s must
+    never have their `continues_observation_id`s cross, even after both
+    leaves go through a debounce cycle."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0),
+            _world_object(2, "BMP-2", lat_deg=2000.0, lon_deg=500.0),
+        ]
+    }
+    client = FakeAircraftClient(
+        [
+            _indication({"middle_list_text": "Ural truck", "lower_list_text": "BMP"}),
+            _indication(None),
+            _indication({"middle_list_text": "Ural truck", "lower_list_text": "BMP"}),
+        ],
+        world_objects=world_objects,
+    )
+    source = HybridPerceptionSource(aircraft_client=client, theatre=_THEATRE)  # type: ignore[arg-type]
+
+    first = source.poll(100.0, _ownship())
+    assert len(first) == 2
+    assert all(obs.continues_observation_id is None for obs in first)
+
+    assert source.poll(100.2, _ownship()) == []
+    second = source.poll(100.4, _ownship())
+
+    assert len(second) == 2
+    truck_first = next(obs for obs in first if obs.classification_raw == "Ural truck")
+    bmp_first = next(obs for obs in first if obs.classification_raw == "BMP")
+    truck_second = next(obs for obs in second if obs.classification_raw == "Ural truck")
+    bmp_second = next(obs for obs in second if obs.classification_raw == "BMP")
+
+    assert truck_second.continues_observation_id == truck_first.id
+    assert bmp_second.continues_observation_id == bmp_first.id
+    assert truck_second.continues_observation_id != bmp_first.id
+    assert bmp_second.continues_observation_id != truck_first.id
+
+
 def test_every_poll_mode_re_emits_an_unchanged_detection_set() -> None:
     # Stage 3 (plans/pb2-contact-memory/plan.md Interface confirmation gap
     # 2): under emit_mode="every_poll", a statically visible detection must

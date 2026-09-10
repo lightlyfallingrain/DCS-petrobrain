@@ -93,6 +93,22 @@ Each `poll()`:
    retrying a not-yet-acquired object every poll until the throttle admits
    it. The two sets happen to evolve identically except in that overflow
    case.
+6. **Object-permanence correlation** (`plans/contact-duplication-
+   ambiguity-runaway/plan.md`): a third, independent, **persistent**
+   `_object_id_to_last_observation_id: dict[int, str]` map, keyed by DCS
+   `object_id`, holding the most recently emitted `Observation.id` for that
+   object -- never cleared, including across a `world_objects is None` gap
+   (a collector hiccup is not evidence the real object stopped existing;
+   only the `on_change`/`every_poll` debounce state above resets on that
+   gap). Consulted and updated in `_build_observation` for every object
+   actually emitted this poll: if the object's `object_id` has a prior
+   entry, the new `Observation.continues_observation_id` is set to it,
+   however many polls old that entry is; the entry is then overwritten with
+   this poll's new `Observation.id` either way. `belief.contacts.
+   ContactStore` is the consumer that decides whether to trust this
+   reference (subject to its own expiry check, `belief.decay.
+   object_id_continuity_valid`) -- this module only ever reports "I have
+   seen this object_id emit before, here is that report's id."
 """
 
 from __future__ import annotations
@@ -217,6 +233,13 @@ class NakedEyePerceptionSource:
     _acquired_ids: frozenset[int] = field(
         default_factory=frozenset, init=False, repr=False
     )
+    #: Object-permanence correlation state (module docstring point 6) --
+    #: deliberately a third, independent piece of state from
+    #: `_previously_visible_ids`/`_acquired_ids` above: never cleared,
+    #: including on a `world_objects is None` gap.
+    _object_id_to_last_observation_id: dict[int, str] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _observation_count: int = field(default=0, init=False, repr=False)
 
     def poll(self, now_sim: float, ownship_state: OwnshipState) -> list[Observation]:
@@ -329,8 +352,13 @@ class NakedEyePerceptionSource:
         )
 
         self._observation_count += 1
+        observation_id = f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}"
+        continues_observation_id = self._object_id_to_last_observation_id.get(
+            candidate.object_id
+        )
+        self._object_id_to_last_observation_id[candidate.object_id] = observation_id
         return Observation(
-            id=f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}",
+            id=observation_id,
             contact_id=None,
             t_sim=now_sim,
             t_wall=time.time(),
@@ -347,6 +375,7 @@ class NakedEyePerceptionSource:
             ),
             provenance=PROVENANCE_VISIBILITY_FILTER_ONLY,
             classification_level=classification_level,
+            continues_observation_id=continues_observation_id,
         )
 
 

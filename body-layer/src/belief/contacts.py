@@ -14,6 +14,15 @@ ground-truth position field or its object id (see `percept.py`'s module
 docstring for why that boundary is structural, not a convention to
 remember).
 
+`ingest`'s primary contact-identity mechanism, for any re-observation of a
+previously-seen object on either perception channel, is now object-
+permanence correlation via `Percept.continues_observation_id`
+(`plans/contact-duplication-ambiguity-runaway/plan.md`) -- the
+spatial/class gate in `belief.association_over_time` is the *exception*
+path: founding observations, and reacquisitions where correlation didn't
+resolve or has expired (`belief.decay.object_id_continuity_valid`), not the
+common case. See `ingest`'s own docstring for the exact decision order.
+
 `ContactStore.tick` is Stage 2's addition: it materialises lifecycle events
 purely from `now_sim` (never wall clock, preserving BL-0's replay
 determinism) by comparing each contact's freshly computed `belief.decay.
@@ -39,10 +48,11 @@ from belief.classification import (
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
     SpecificityLevel,
+    class_compatibility,
     fold_classification,
     new_classification_belief,
 )
-from belief.decay import Certainty, certainty_of
+from belief.decay import Certainty, certainty_of, object_id_continuity_valid
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
@@ -255,6 +265,18 @@ class ContactStore:
         self._events: list[Event] = []
         self._areas: dict[str, AttentionArea] = {}
         self._acknowledged_event_ids: set[str] = set()
+        #: `plans/contact-duplication-ambiguity-runaway/plan.md`'s
+        #: object-permanence index: every `Observation.id` ever ingested,
+        #: mapped to the contact it was folded into. Populated for *every*
+        #: observation regardless of which path (continuity, gate merge, or
+        #: founding) produced that contact -- a later percept's
+        #: `continues_observation_id` may name an observation from a
+        #: gate-merge poll, not only a prior continuity hit, so this index
+        #: must cover all three. Never pruned or re-keyed -- an id minted 50
+        #: polls ago still resolves, which is what makes gap-length
+        #: irrelevant to whether continuity *can* resolve (see `ingest`'s
+        #: docstring for the separate question of whether it is *trusted*).
+        self._observation_id_to_contact_id: dict[str, str] = {}
         self._next_contact_number = 0
         self._next_event_number = 0
         self._next_area_number = 0
@@ -343,11 +365,30 @@ class ContactStore:
         """Run each of `observations` through the percept->contact gate
         against every existing contact and create/update accordingly.
 
-        Decision rule (`plans/pb2-contact-memory/plan.md` Stage 1): exactly
-        one existing contact passes both gates -> merge into it; zero, or
-        two-or-more, -> create a new contact. Ambiguity between two-or-more
-        candidates is deliberately never resolved by a best-match tiebreak
-        -- see `association_over_time`'s module docstring.
+        **Object-permanence shortcut, checked first**
+        (`plans/contact-duplication-ambiguity-runaway/plan.md`): if the
+        percept's `continues_observation_id` resolves (via
+        `_observation_id_to_contact_id`) to a contact, and `belief.decay.
+        object_id_continuity_valid` still trusts that contact's identity as
+        of `now_sim`, the percept is folded directly onto it -- the
+        spatial/class gate is skipped entirely. The class-compatibility
+        check (`belief.classification.class_compatibility`) is still applied
+        as defense-in-depth against the one residual risk this shortcut
+        cannot rule out (DCS reusing an `object_id` across a real
+        kill/respawn boundary, see the plan's Risks section): an
+        incompatible class falls through to the gate identically to an
+        unresolved or expired match, never a forced merge. There is no third
+        code path -- only "continuity trusted" vs. "continuity not
+        available, use the gate."
+
+        **Gate/ambiguity decision rule** (`plans/pb2-contact-memory/plan.md`
+        Stage 1), reached whenever continuity does not apply -- a founding
+        observation, a non-correlating reacquisition, or an expired/
+        incompatible continuity match: exactly one existing contact passes
+        both gates -> merge into it; zero, or two-or-more, -> create a new
+        contact. Ambiguity between two-or-more candidates is deliberately
+        never resolved by a best-match tiebreak -- see
+        `association_over_time`'s module docstring.
 
         Returns the list of `Contact`s touched by this call, one per
         observation processed, in the same order -- a contact may appear
@@ -359,21 +400,51 @@ class ContactStore:
             self._observations[observation.id] = observation
             percept = percept_of(observation)
 
-            passing = [
-                contact
-                for contact in self._contacts.values()
-                if passes_gate(percept, contact, now_sim)
-            ]
-
-            if len(passing) == 1:
-                contact = passing[0]
+            contact = self._resolve_continuity(percept, now_sim)
+            if contact is not None:
                 contact.record(percept)
             else:
-                contact = Contact.from_percept(self._new_contact_id(), percept)
-                self._contacts[contact.id] = contact
+                passing = [
+                    candidate
+                    for candidate in self._contacts.values()
+                    if passes_gate(percept, candidate, now_sim)
+                ]
 
+                if len(passing) == 1:
+                    contact = passing[0]
+                    contact.record(percept)
+                else:
+                    contact = Contact.from_percept(self._new_contact_id(), percept)
+                    self._contacts[contact.id] = contact
+
+            self._observation_id_to_contact_id[observation.id] = contact.id
             touched.append(contact)
         return touched
+
+    def _resolve_continuity(self, percept: Percept, now_sim: float) -> Contact | None:
+        """The object-permanence shortcut lookup for one percept -- `None`
+        whenever continuity does not apply, in which case `ingest` falls
+        through to the ordinary gate. See `ingest`'s docstring for the full
+        decision (unresolved index lookup, expired `object_id_continuity_
+        valid`, and incompatible class are all treated identically here)."""
+        if percept.continues_observation_id is None:
+            return None
+        contact_id = self._observation_id_to_contact_id.get(
+            percept.continues_observation_id
+        )
+        if contact_id is None:
+            return None
+        contact = self._contacts.get(contact_id)
+        if contact is None:
+            return None
+        if not object_id_continuity_valid(contact, now_sim):
+            return None
+        if (
+            class_compatibility(percept.classification_raw, contact.last_class_raw)
+            == "incompatible"
+        ):
+            return None
+        return contact
 
     def tick(self, now_sim: float) -> None:
         """Materialise lifecycle, classification, *and* attention events

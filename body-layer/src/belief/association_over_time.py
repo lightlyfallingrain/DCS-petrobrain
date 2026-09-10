@@ -15,6 +15,16 @@ more -> new contact** (ambiguity must produce a visible duplicate, never a
 guessed merge -- no best-match/highest-score tiebreak exists in this module,
 by design).
 
+**This gate is now the exception path, not the common case**
+(`plans/contact-duplication-ambiguity-runaway/plan.md`): `ContactStore.
+ingest`'s primary contact-identity mechanism, for any re-observation of a
+previously-seen object on either perception channel, is object-permanence
+correlation via `Percept.continues_observation_id` -- this module's gate is
+only ever reached for a founding observation, or a reacquisition where that
+correlation didn't resolve or has expired (`belief.decay.
+object_id_continuity_valid`). Nothing in this module's own formulas
+changed for that fix; only how often they get called did.
+
 **Spatial gate.** The percept's implied position is `geometry.
 project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)`,
 using the percept's own `ownship_at_observation` as the observer -- flat, no

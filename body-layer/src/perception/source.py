@@ -130,7 +130,23 @@ class Observation:
     `classification_level` is the producing channel's own statement of how
     specific `classification_raw` is (see `_CLASSIFICATION_LEVEL_CLASS_
     DEFAULT` above) -- belief code trusts this rather than re-deriving it by
-    parsing `classification_raw`."""
+    parsing `classification_raw`.
+
+    `continues_observation_id` is `plans/contact-duplication-ambiguity-
+    runaway/plan.md`'s object-permanence mechanism: when a concrete source
+    resolves a DCS `object_id` this poll that it has *ever* previously
+    resolved (however long ago, subject to `belief.decay.
+    object_id_continuity_valid`'s expiry check on the consuming side), it
+    sets this to that prior emission's `Observation.id`. May reference an
+    observation from an arbitrary number of polls ago, not necessarily the
+    immediately preceding one -- each source's own persistent per-object-id
+    map is never cleared mid-session (see `naked_eye_source.py`/
+    `hybrid_source.py`). Still not a DCS truth field crossing the
+    `perception`/`belief` boundary in a new shape: it is exactly the kind of
+    `observation_id`-shaped bookkeeping reference `belief.percept.Percept.
+    observation_id` already legitimately carries -- `object_id` itself never
+    leaves `perception/`. `None` when the source resolved no `object_id`
+    this poll, or resolved one it has never seen before."""
 
     id: str
     contact_id: str | None
@@ -144,6 +160,7 @@ class Observation:
     derived_world_position: DerivedWorldPosition | None
     provenance: str
     classification_level: int = _CLASSIFICATION_LEVEL_CLASS_DEFAULT
+    continues_observation_id: str | None = None
 
 
 @runtime_checkable

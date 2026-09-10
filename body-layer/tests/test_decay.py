@@ -11,10 +11,12 @@ from belief.contacts import Contact
 from belief.decay import (
     IDENTITY_HALF_LIFE_S,
     LOST_THRESHOLD_S,
+    OBJECT_ID_MEMORY_S,
     OBSERVED_WINDOW_S,
     POSITION_HALF_LIFE_S,
     certainty_of,
     classification_confidence_at,
+    object_id_continuity_valid,
     position_confidence,
 )
 from perception.geometry import GeoPosition
@@ -159,3 +161,32 @@ def test_classification_confidence_negative_elapsed_time_is_clamped() -> None:
     assert classification_confidence_at(contact, now_sim=0.0) == (
         contact.classification.confidence
     )
+
+
+def test_object_id_continuity_is_valid_at_exactly_the_memory_window_boundary() -> None:
+    """Boundary inclusive, matching `certainty_of`'s own `<=` convention --
+    `plans/contact-duplication-ambiguity-runaway/plan.md`'s Decay section."""
+    contact = _contact(last_seen_sim=0.0)
+    assert object_id_continuity_valid(contact, now_sim=OBJECT_ID_MEMORY_S) is True
+
+
+def test_object_id_continuity_is_invalid_just_past_the_memory_window() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    assert (
+        object_id_continuity_valid(contact, now_sim=OBJECT_ID_MEMORY_S + 0.1) is False
+    )
+
+
+def test_object_id_continuity_is_valid_between_lost_threshold_and_memory_window() -> (
+    None
+):
+    """`OBJECT_ID_MEMORY_S` (600s) is deliberately larger than
+    `LOST_THRESHOLD_S` (120s): a contact well past `LOST_THRESHOLD_S` --
+    `certainty_of` already returns `"lost"` -- must still be a valid
+    continuity target, matching the "I lost him... it's the same guy"
+    scenario the decay ordering is meant to preserve."""
+    contact = _contact(last_seen_sim=0.0)
+    now_sim = LOST_THRESHOLD_S + 50.0
+    assert now_sim < OBJECT_ID_MEMORY_S
+    assert certainty_of(contact, now_sim) == "lost"
+    assert object_id_continuity_valid(contact, now_sim) is True
