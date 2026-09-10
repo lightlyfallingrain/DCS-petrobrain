@@ -234,15 +234,10 @@ given §5 already specified them, but worth naming as a real constraint on those
 - Module independence: no new cross-subproject imports; `crew_console.py` stays inside
   `body-layer`, consuming only `belief.tools`/`belief.contacts`/`belief.events`.
 
-### Decisions Requiring User Input
+### Decisions — resolved by the user, 2026-09-10
 
-- **Is manual/console injection of a `bypass_gate: true` event acceptable as this milestone's
-  "urgent call" proof**, given no real threat-detection channel exists yet? The alternative is
-  deferring the urgent-call deliverable entirely until a threat-perception source exists — which
-  would leave `route_event()`'s `bypass_gate` branch unexercised and push a known-risky mechanism
-  (pre-emption, gate-ordering) untested further downstream. Recommend proceeding with injection
-  (Stage 5) since it tests the mechanism honestly and is clearly labelled as a test harness, not a
-  detector — but this is a product-shape call, not a purely technical one.
-- **`--crew-text` mutually exclusive with `--console`/`--overlay` for this milestone** (Stage 4) —
-  confirm this is acceptable scope-narrowing rather than something the acceptance session needs
-  both of at once.
+- **Manual/console injection of a `bypass_gate: true` event is accepted** as this milestone's
+  "urgent call" proof, given no real threat-detection channel exists yet. Proceed with injection
+  (Stage 5) as a clearly-labelled test harness, not a detector.
+- **`--crew-text` mutually exclusive with `--console`/`--overlay` for this milestone is accepted**
+  (Stage 4) — acceptable scope-narrowing.
