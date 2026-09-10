@@ -12,3 +12,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [REPL thread sqlite reuse](project_repl_thread_sqlite_reuse.md) — logger.py's REPL thread must build its own sqlite3.Connection/EnrichmentContext, never reuse the poll thread's; recurred once after Stage 6's fix (BL-3's `enrichment` field, same bug class).
 - [Association gate fragility](project_association_gate_fragility.md) — spatial gate sizing vs. ContactStore ambiguity policy: fixing one duplicate-contact failure mode reopens another.
 - [Escalate gate policy changes](feedback_escalate_gate_policy_changes.md) — don't patch association_over_time.py gate sizing or ContactStore ambiguity rule as Debugger; escalate to Architect.
+- [Stale backlog already fixed](project_stale_backlog_already_fixed.md) — reproduce against current code first; a milestone Stage fix can leave the standalone backlog entry stale/open.
