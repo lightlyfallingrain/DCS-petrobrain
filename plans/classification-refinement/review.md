@@ -199,3 +199,107 @@ files, cross-checked every accuracy claim in the task against the live source (`
 `naked_eye_source.py`, `contacts.py`, `decay.py`, `tools.py`), checked `git log`/`git diff` across
 the entire BL-2.6 commit range for `decay.py` and `test_decay.py`, and ran the full verification
 suite (ruff format, ruff check, mypy --strict, pytest) myself.
+
+## Stage 11 (bug fix) review — commit `faa5372`
+
+Scope: closes the one required fix from the Stage 10 review above — implements
+`decay.classification_confidence_at`, the function that CLAUDE.md/plan.md §6 had documented as
+already working but that no code across BL-2.6's Stages 1-9 actually built. Reviewed against the
+Stage 10 review section, `plans/classification-refinement/plan.md`'s "Does classification decay?"
+design section, and `plans/classification-refinement/implementation.md`'s Stage 11 log.
+
+### Review Summary
+
+`git show faa5372 --stat` confirms the diff touches exactly `decay.py`, `classification.py`,
+`tools.py`, `run-body.sh`, two test files, and the two plan-log markdown files — no scope drift.
+
+- **`established_sim` vs `last_seen_sim` is the correct key.** Read `classification.py`'s fold
+  helpers directly: `_fold_same_level`'s reinforce branch (line 252) and `_collapse` (both call
+  sites, lines 289/295, covering both the refine-then-disagree and same-level-disagree
+  contradiction paths) all stamp `established_sim=now_sim`. The `hold` branch in
+  `fold_classification` (line 216, `return FoldOutcome(classification=held, ...)`) returns `held`
+  untouched — `established_sim` stays frozen while `Contact.last_seen_sim` keeps advancing on
+  every poll. This is exactly the scenario the plan's design section describes ("a crew member who
+  identified a T-72 two minutes ago... becomes less sure") and exactly what the implementer's
+  reasoning claims. Reinforcement correctly resets the decay clock (a fresh confirmation makes the
+  claim fresher, not just higher-confidence); hold correctly does not (a coarser re-observation is
+  not a new confirmation of the specific claim). `classification_confidence_at` reads
+  `contact.classification.established_sim`, matching this.
+- **Decay formula is standard and correctly composed.** `contact.classification.confidence *
+  math.pow(0.5, elapsed_s / IDENTITY_HALF_LIFE_S)`, `elapsed_s = max(0.0, now_sim -
+  established_sim)`. Verified via the five new `test_decay.py` cases: unchanged at zero elapsed,
+  exactly halves at one half-life, `held/16` at four half-lives (asymptotic toward but never
+  reaching zero, confirmed structurally — the function can only return exactly 0 if the stored
+  confidence itself is 0, which no fold path produces), and the `established_sim`-vs-`last_seen_sim`
+  distinction test (`last_seen_sim=1000`, `established_sim=0`, decay measured from 0 — correct).
+  The "negative-clamp" test (`established_sim=100`, `now_sim=0`) guards a `now_sim` that lands
+  before the claim's own `established_sim` — an edge case that shouldn't arise in the live poll
+  loop (sim time is monotone) but mirrors the exact same clamp `certainty_of` already applies for
+  the identical reason; real guard, not decorative, and consistent with the module's existing
+  pattern rather than a new one.
+- **`level`/`value` genuinely stay raw.** `tools.py`'s `_classification_facts` reads
+  `classification.value` and `classification.level.name.lower()` straight off the held claim
+  (unchanged lines) and only routes `confidence` through `classification_confidence_at`. The new
+  `test_describe_contact_classification_confidence_decays_with_elapsed_time` integration test
+  confirms this end-to-end through `describe_contact`: confidence halves at one half-life while
+  `level`/`value` are asserted equal between the fresh and elapsed reads. Matches the plan's "level
+  stays sticky, only confidence decays" invariant exactly.
+- **`console.py` needed no change — confirmed directly, not taken on faith.** Grepped
+  `console.py` for `classification`: the only hits are `Event.classification`/
+  `Event.previous_classification` (the `CONTACT_CLASSIFICATION_CHANGED` transition-rendering
+  fields, an unrelated `belief.events.Event` attribute pair) and the `find <text>` help string.
+  Nothing in `console.py` reads `Contact.classification.confidence` or
+  `ClassificationBelief.confidence` directly — every render goes through `tools.py`'s
+  already-decayed `facts.classification`. The implementer's claim holds.
+- **CLAUDE.md / plan.md §6 "no edits needed" claim verified against current text, not taken on
+  faith.** `body-layer/CLAUDE.md`'s `decay.py` and `classification.py` entries (read in full)
+  both now correctly describe `classification_confidence_at` as the consumer of
+  `IDENTITY_HALF_LIFE_S`, decaying only `.confidence`, keyed off `established_sim` — text that was
+  false at Stage 10 review time and is true now that the function exists. `plans/body-layer/
+  plan.md` §6 Decision 4 (line ~824) reads the same way. Since the Stage 10 review's fix was
+  "make the docs true," and the docs' existing wording was already accurate once the function is
+  real, no second edit was needed — confirmed by direct comparison, not by trusting the log entry.
+- **`run-body.sh`'s `--overlay` addition is a simple flag pass-through** — one line, adds
+  `--overlay` to the existing `python -m logger --console ...` invocation. `--overlay` is an
+  existing, tested `main()` flag (BL-2.5) that mirrors belief events to the DCS text overlay;
+  nothing new or unreviewed is introduced by wiring it into the launch script. Correctly separated
+  from this commit's actual fix in the commit message.
+- **Verification suite reproduced independently**: `ruff format --check`, `ruff check`, `mypy
+  src --strict` (21 source files, from `body-layer/`), and `pytest -q` all pass clean —
+  252/252, matching the implementation log's count exactly.
+- Working tree has only unrelated pre-existing reviewer/implementer agent-memory changes staged
+  (from prior sessions, not this commit) — nothing from `faa5372` itself is left uncommitted.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None. The negative-elapsed clamp and the asymptotic-never-zero property are both structural
+rather than tested at the boundary (e.g. no test drives `elapsed_s` to a very large multiple to
+confirm it doesn't underflow to exactly 0.0 in floating point) — not worth a test given
+`math.pow(0.5, x)` never reaches exactly zero for finite `x` and the existing four-half-life test
+already establishes the shape. Not blocking.
+
+### Verdict
+
+**APPROVED.**
+
+### Review Confidence
+
+Full read. Read the Stage 10 review section, the plan's full "Does classification decay?" design
+section, and the Stage 11 implementation log before starting. Read the actual `faa5372` diff for
+every changed file (`decay.py`, `classification.py`, `tools.py`, `run-body.sh`, both test files),
+traced `established_sim` through every `fold_classification` branch in `classification.py`
+directly (reinforce, both collapse call sites, and the hold branch) rather than trusting the
+implementation log's description, grepped `console.py` for any direct `classification.confidence`
+read, diffed `body-layer/CLAUDE.md` and `plans/body-layer/plan.md` §6 against the Stage 10
+review's exact complaint to confirm it's actually resolved, and ran the full verification suite
+myself (ruff format, ruff check, mypy --strict, pytest — 252/252).
+
+---
+
+**BL-2.6 status: all ten stages plus the live-acceptance duplicate-contact fix (commit `7581928`)
+plus this Stage 11 confidence-decay fix (`faa5372`) are reviewed and approved. No open required
+fixes remain on this branch. Ready for a full-milestone DoD pass.**

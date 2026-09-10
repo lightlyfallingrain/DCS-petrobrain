@@ -8,3 +8,4 @@
 - [DCS Lua static review technique](project_dcs_lua_static_review_technique.md) — diff unverified Hook/.dlg artifacts against real installed SRS/DCS reference files under $DCS_INSTALL_PATH before calling something "unreviewable."
 - [BL-2.6 dual-field pattern](project_bl26_dual_field_pattern.md) — Contact.last_class_raw (gate input) vs Contact.classification (folded, user-facing) is intentional, not drift; flag if a future stage crosses the two.
 - [PB-2 symmetric gate fix](project_pb2_symmetric_gate_fix.md) — 7581928's widened gate verified by revert-and-rerun; watch for new 300-600m distinct-object over-merge risk in future sessions.
+- [BL-2.6 Stage 10 docs gap](project_bl26_stage10_docs_confidence_decay_gap.md) — docs claimed classification_confidence_at exists/decays; never built. Grep doc claims against source even in docs-only stages. CLOSED by faa5372, function now real, BL-2.6 has zero open findings.
