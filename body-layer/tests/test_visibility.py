@@ -25,6 +25,7 @@ from perception.association import WorldObjectCandidate
 from perception.source import OwnshipState
 from perception.visibility import (
     NAKED_EYE_RANGE_CAP_M,
+    NAKED_EYE_TYPE_CONFIDENCE,
     NAKED_EYE_VISIBILITY_CONFIDENCE,
     check_visibility,
 )
@@ -63,6 +64,32 @@ def test_infantry_just_inside_medres_tier_range_is_visible() -> None:
     assert result is not None
     assert result.range_m == pytest.approx(899.0)
     assert result.bearing_deg == pytest.approx(0.0)
+    assert result.tier == "medres"
+    assert result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
+
+
+def test_infantry_well_inside_hires_tier_range_achieves_hires_tier() -> None:
+    # infantry: size 1.8 m, hires threshold = 1.8 / 0.02 * 4.0 = 360 m
+    # (`plans/classification-refinement/plan.md` Stage 6 worked table). The
+    # gate itself stays at `medres` this stage, but a candidate this close
+    # now resolves to the tighter achieved tier.
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=350.0, z=0.0)
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+
+    assert result is not None
+    assert result.tier == "hires"
+    assert result.confidence == NAKED_EYE_TYPE_CONFIDENCE
+
+
+def test_infantry_just_outside_hires_tier_range_achieves_medres_tier() -> None:
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("Infantry", x=361.0, z=0.0)
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+
+    assert result is not None
     assert result.tier == "medres"
     assert result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
 
