@@ -5,7 +5,8 @@ Full architecture/design (scope boundaries, tool-set design, data model, open qu
 `plans/body-layer/plan.md` — that doc's §6 "Milestones (BL-x)" describes what each milestone below
 *is*; this file tracks what's actually *done*. PB-x in the descriptions below cross-references
 `docs/concept/PETROBRAIN_RUNTIME.md`'s runtime milestone numbering — BL-x is the body-owned slice
-of it.
+of it. Update this file (not `../todo/todo.md`) whenever a body-layer branch merges — see
+`../.claude/skills/merge.md`.
 
 ## Status
 
@@ -146,6 +147,31 @@ of it.
   intended final shape, delivered incrementally; a brain-layer prototype can start against the BL-5
   subset now but should expect the surface to grow. Full history: `plans/bl5-tool-api/`.
 
+- [x] **Scope-channel type-namespace mismatch, re-verified (closed as a stale backlog item, not
+  new work; `fix/association-namespace-mismatch`).** The fix was already in `main` under BL-2/PB-2
+  Stage 0 (`association._type_match_score` resolves DCS type names through `reporting_names`
+  before scoring); this item had just never been checked off. A 2026-09-10 debugger pass
+  re-measured the four originally-0-scoring real pairs (Slava cruiser, SA-3 launcher, Tarantul III
+  corvette, SA-3 radar) directly against current code — all score nonzero, regression-tested in
+  `test_association.py`/`test_hybrid_source.py`. Still open, not tracked separately: a live re-test
+  against ship/SAM-site contacts specifically (the original PB-1 acceptance test used only Ural
+  trucks, the one case where the two naming vocabularies happen to coincide).
+
+- [x] **Deterministic mock-flight test fixture for the whole aircraft+body+world chain (excluding
+  the brain/LLM). Done, merged 2026-09-10.** Raised after two live-only bugs (the duplicate-contact
+  runaway, the cross-thread sqlite REPL crash) that per-layer fixture/unit tests didn't catch
+  because they only exercise one layer at a time. Built: `tests/support/mock_aircraft_layer.py` (a
+  real loopback HTTP server standing in for aircraft-layer's `/telemetry`, `/world_objects`,
+  `/petrovich_indication` endpoints) + `mock_world_model.py` (synthetic world-model store) +
+  `tests/fixtures/mock_flight_canonical.json` (a canonical 20-frame flight) +
+  `test_mock_flight_chain.py` (4 tests: mock-server frame semantics, LOS-gate wiring,
+  single-threaded full-chain determinism, threaded console/REPL smoke test). Test-only, no `src/`
+  changes; 374/374 passing. **Notable finding:** the harness did not reproduce either bug that
+  originally prompted it — both were already fixed on `main` — so it stands as the regression gate
+  for that bug class going forward, not a repro of a live incident. Generalizes `replay.py`'s
+  narrower single-source pattern up to the aircraft-layer HTTP boundary. Plan:
+  `plans/mock-flight-fixture/`.
+
 - [~] **BL-5a — Text-mode crew interaction (precursor to PB-7/PB-8; blocked, not merged).**
   `feature/bl5a-text-mode-crew-interaction`, cut from `main` before BL-5 merged. Deterministic
   intent parser, readback/contact-report/urgent-call templates, `handle_player_utterance`, a
@@ -184,58 +210,19 @@ of it.
   debounce, silence gate, STT, TTS) is not body-layer work and needs its own plan and Investigator
   pass on SRS's interface.
 
-- [x] **Scope-channel type-namespace mismatch, re-verified (closed as a stale backlog item, not
-  new work).** `fix/association-namespace-mismatch`. The fix was already in `main` under BL-2/PB-2
-  Stage 0 (`association._type_match_score` resolves DCS type names through `reporting_names`
-  before scoring); this item had just never been checked off. A 2026-09-10 debugger pass
-  re-measured the four originally-0-scoring real pairs (Slava cruiser, SA-3 launcher, Tarantul III
-  corvette, SA-3 radar) directly against current code — all score nonzero, regression-tested in
-  `test_association.py`/`test_hybrid_source.py`. Still open, not tracked separately: a live re-test
-  against ship/SAM-site contacts specifically (the original PB-1 acceptance test used only Ural
-  trucks, the one case where the two naming vocabularies happen to coincide).
-
-- [x] **Deterministic mock-flight test fixture for the whole aircraft+body+world chain (excluding
-  the brain/LLM). Done, merged 2026-09-10.** Raised after two live-only bugs (the duplicate-contact
-  runaway, the cross-thread sqlite REPL crash) that per-layer fixture/unit tests didn't catch
-  because they only exercise one layer at a time. Built: `tests/support/mock_aircraft_layer.py` (a
-  real loopback HTTP server standing in for aircraft-layer's `/telemetry`, `/world_objects`,
-  `/petrovich_indication` endpoints) + `mock_world_model.py` (synthetic world-model store) +
-  `tests/fixtures/mock_flight_canonical.json` (a canonical 20-frame flight) +
-  `test_mock_flight_chain.py` (4 tests: mock-server frame semantics, LOS-gate wiring,
-  single-threaded full-chain determinism, threaded console/REPL smoke test). Test-only, no `src/`
-  changes; 374/374 passing. **Notable finding:** the harness did not reproduce either bug that
-  originally prompted it — both were already fixed on `main` — so it stands as the regression gate
-  for that bug class going forward, not a repro of a live incident. Generalizes `replay.py`'s
-  narrower single-source pattern up to the aircraft-layer HTTP boundary. Plan: `plans/mock-flight-fixture/`.
-
-## Testing infrastructure
-
-- [x] **Deterministic mock-flight test fixture for the whole aircraft+body+world chain (excluding
-  the brain/LLM) — done, merged 2026-09-10.** Raised by the user, prompted by live-only bugs
-  (duplicate-contact runaway, cross-thread sqlite REPL crash) that fixture/unit tests didn't catch
-  because they only exercised one layer at a time. `body-layer/tests/support/mock_aircraft_layer.py`
-  (a real loopback HTTP server standing in for aircraft-layer's telemetry/world_objects/indication
-  endpoints) + `mock_world_model.py` (synthetic world-model store) +
-  `tests/fixtures/mock_flight_canonical.json` (20-frame canonical flight) +
-  `test_mock_flight_chain.py` (4 tests: server semantics, LOS-gate wiring, single-threaded
-  full-chain determinism, threaded console/REPL smoke test). Test-only, no `src/` changes; 374/374
-  tests pass. **Notable finding**: the harness did not reproduce either bug that prompted it — both
-  were already fixed on `main` by the time it landed — so it stands as the regression gate for that
-  bug class going forward. Generalizes `replay.py` (BL-0)'s narrower pattern up to the aircraft-layer
-  HTTP boundary itself. Full history: `plans/mock-flight-fixture/`.
-
 ## Backlog (body-layer)
 
 - [>] **Parked: stop consuming DCS's ambient detection at all, own perception end-to-end.** Raised
-  2026-09-09 after the PB-1.5 live probe showed DCS's ambient callout is unreadable/late/sight-coupled.
-  All four open questions were answered by the user 2026-09-09 (scope channel stays — needed for
-  future acquire/lock/fire gameplay; suppressing DCS's own radio callout text is low-priority,
-  investigate only if resumed; BL-2 is barely affected either way). What's left, once those
-  deferrals are subtracted, is not architectural: reclassify `visibility.py`'s naked-eye filter from
-  "fallback" to "primary mechanism" in the docs, and calibrate its tier/range constants against
-  "if the player can see a unit, Petrovich should too." Calibration needs live sorties, so it's
-  meant to ride along with a milestone that's flying anyway rather than run standalone. **Do not
-  start without the user's instruction.**
+  2026-09-09 after the PB-1.5 live probe showed DCS's ambient callout is unreadable/late/
+  sight-coupled. All four open questions were answered by the user 2026-09-09 (scope channel
+  stays — needed for future acquire/lock/fire gameplay, which is why the association-namespace-
+  mismatch fix above mattered; suppressing DCS's own radio callout text is low-priority,
+  investigate only if resumed; BL-2 is barely affected since it already consumes `Observation`s
+  channel-agnostically). What's left, once those deferrals are subtracted, is not architectural:
+  reclassify `visibility.py`'s naked-eye filter from "fallback" to "primary mechanism" in the
+  docs, and calibrate its tier/range constants against "if the player can see a unit, Petrovich
+  should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
+  flying anyway rather than run standalone. **Do not start without the user's instruction.**
 
 - [ ] **Cross-channel contact duplication — continuity maps are per-channel, not shared.** Found
   2026-09-10 during the object-permanence fix's live acceptance: a real civilian bus was tracked as
@@ -269,22 +256,6 @@ of it.
   interrupted periodically by a full-area sweep. Would change what feeds `Percept`/`Observation` in
   the first place, upstream of everything BL-2 built — a future perception-layer milestone, likely
   well after BL-4.
-
-## Deferred
-
-- **Stop consuming DCS's own detection at all; own perception end-to-end.** Raised 2026-09-09
-  after the PB-1.5 live probe found DCS's ambient callout channel unreadable, late, and
-  sight-coupled — pushing toward treating the naked-eye/`visibility.py` filter as the primary
-  detection mechanism rather than a fallback. All four open questions were answered by the user
-  2026-09-09: callout suppression is a "nice if possible, not a priority" investigation, never
-  done; the scope/HelperAI channel **stays** (needed for future acquire/lock/fire gameplay, which
-  is *why* the association-namespace-mismatch fix mattered); BL-2 was barely affected since it
-  already consumes `Observation`s channel-agnostically. **Parked 2026-09-09, going straight to
-  BL-2 instead** — no architectural decision remained once the four questions were answered, so no
-  Architect pass is needed; what's left is a framing/documentation pass (reclassify `visibility.py`
-  from fallback to primary) plus calibrating tier/range constants against live sorties, better
-  folded into a milestone that's flying anyway than run standalone. Do not start without the
-  user's instruction.
 
 ## Rejected
 
