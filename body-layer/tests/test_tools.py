@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import pytest
 
 from belief import enrichment as enrichment_module
+from belief import tools as tools_module
 from belief.contacts import ContactStore
 from belief.decay import IDENTITY_HALF_LIFE_S, LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
@@ -19,13 +20,17 @@ from belief.tools import (
     _format_range_km,
     acknowledge_event,
     describe_contact,
+    describe_our_position,
     find_contact,
+    find_place,
     get_attention_state,
     get_contact_history,
     get_contacts,
+    get_situation,
     get_stats,
     list_areas,
     list_events,
+    poll_events,
     set_attention,
     unwatch_area,
     watch_area,
@@ -33,6 +38,7 @@ from belief.tools import (
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
+from query.search import PlaceMatch
 
 _FAKE_CONN = sqlite3.connect(":memory:")
 
@@ -556,3 +562,174 @@ def test_list_events_defaults_to_unacknowledged_only() -> None:
 def test_acknowledge_event_returns_false_for_unknown_id() -> None:
     store = ContactStore()
     assert acknowledge_event(store, "EVENT_999") is False
+
+
+# --- find_place ----------------------------------------------------------
+
+
+def test_find_place_wraps_matches_in_the_tool_result_triple(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_place_by_name",
+        lambda conn, text: [
+            PlaceMatch(
+                name="Jableh",
+                kind="settlement",
+                feature_id=1,
+                x=1000.0,
+                z=2000.0,
+                confidence=1.0,
+                provenance="dcs",
+            )
+        ],
+    )
+    context = _enrichment_context(monkeypatch)
+    results = find_place(context, "Jableh")
+    assert len(results) == 1
+    facts = results[0]["facts"]
+    assert facts["name"] == "Jableh"
+    assert facts["kind"] == "settlement"
+    assert facts["position"] == {"dcs": {"x": 1000.0, "z": 2000.0}}
+    assert results[0]["summary"] == "Jableh (settlement)"
+    assert results[0]["phrasing_hints"] == {"confidence": "exact"}
+
+
+def test_find_place_approximate_confidence_below_exact_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tools_module,
+        "find_place_by_name",
+        lambda conn, text: [
+            PlaceMatch(
+                name="Latakia",
+                kind="airfield",
+                feature_id=2,
+                x=0.0,
+                z=0.0,
+                confidence=0.6,
+                provenance="dcs",
+            )
+        ],
+    )
+    context = _enrichment_context(monkeypatch)
+    results = find_place(context, "latak")
+    assert results[0]["phrasing_hints"] == {"confidence": "approximate"}
+
+
+def test_find_place_returns_empty_list_for_no_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tools_module, "find_place_by_name", lambda conn, text: [])
+    context = _enrichment_context(monkeypatch)
+    assert find_place(context, "nowhere") == []
+
+
+# --- describe_our_position -------------------------------------------------
+
+
+def test_describe_our_position_includes_ownship_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _enrichment_context(monkeypatch)
+    result = describe_our_position(context)
+    facts = result["facts"]
+    assert facts["position"] == {"dcs": {"x": 0.0, "z": 0.0}}
+    assert facts["alt_m"] == 500.0
+    assert facts["heading_true_deg"] == 0.0
+    assert isinstance(facts["semantic"], list)
+    assert len(facts["semantic"]) == 1
+    assert facts["semantic"][0]["text"] == "near Jableh (100m)"
+    assert "Jableh" in result["summary"]
+    assert result["phrasing_hints"] == {}
+
+
+def test_describe_our_position_falls_back_when_no_semantic_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    context = EnrichmentContext(
+        conn=_FAKE_CONN,
+        theatre="Syria",
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+        ),
+    )
+    result = describe_our_position(context)
+    assert result["facts"]["semantic"] == []
+    assert "an unknown location" in result["summary"]
+
+
+# --- get_situation ----------------------------------------------------------
+
+
+def test_get_situation_counts_and_position_summary_with_no_contacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _enrichment_context(monkeypatch)
+    store = ContactStore()
+    result = get_situation(store, now_sim=0.0, enrichment=context)
+    facts = result["facts"]
+    assert facts["contact_counts"] == {"total": 0, "visible": 0, "watched": 0}
+    assert facts["unacknowledged_events"] == 0
+    assert "highest_attention_contact" not in facts
+    assert isinstance(facts["our_position_summary"], str)
+    assert "0 contact(s)" in result["summary"]
+
+
+def test_get_situation_reports_priority_contact_over_watched_and_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _enrichment_context(monkeypatch)
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [_observation(obs_id="OBS_2", t_sim=1.0, classification_raw="BMP-2")],
+        now_sim=1.0,
+    )
+    watched_id = store.contacts[0].id
+    priority_id = store.contacts[1].id
+    set_attention(store, watched_id, "watch")
+    set_attention(store, priority_id, "priority")
+
+    result = get_situation(store, now_sim=1.0, enrichment=context)
+    facts = result["facts"]
+    assert facts["contact_counts"] == {"total": 2, "visible": 2, "watched": 2}
+    highest = facts["highest_attention_contact"]
+    assert isinstance(highest, dict)
+    assert highest["facts"]["id"] == priority_id
+    assert "Highest attention" in result["summary"]
+
+
+def test_get_situation_includes_unacknowledged_event_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _enrichment_context(monkeypatch)
+    store = _store_with_one_contact()
+    store.tick(now_sim=0.0)
+    result = get_situation(store, now_sim=0.0, enrichment=context)
+    assert result["facts"]["unacknowledged_events"] == 1
+    assert "unacknowledged event" in result["summary"]
+
+
+# --- poll_events -------------------------------------------------------
+
+
+def test_poll_events_matches_list_events_unacknowledged_only() -> None:
+    store = _store_with_one_contact()
+    store.tick(now_sim=0.0)
+    assert poll_events(store) == list_events(store, unacknowledged_only=True)

@@ -22,11 +22,13 @@ from typing import Any
 import pytest
 
 from aircraft_client import AircraftLayerError
+from belief.console import Console
 from belief.contacts import ContactStore
 from logger import (
     ConsolePerceptionRunner,
     PerceptionLogger,
     _run_console_poll_loop,
+    _run_console_repl,
     format_observation_line,
 )
 from perception import association
@@ -487,3 +489,61 @@ def test_console_poll_loop_uses_a_thread_local_world_model_connection(
     assert len(runner.store.observations) == 1
     (observation,) = runner.store.observations.values()
     assert observation.source == "naked_eye_visual_filtered"
+
+
+# --- BL-5 live acceptance regression: the REPL thread must not read
+# enrichment through the poll thread's `sqlite3.Connection` -----------------
+#
+# `ConsolePerceptionRunner.enrichment` (BL-3) is built on the poll thread and
+# holds that thread's `world_model_conn`. Before the fix, `_run_console_repl`
+# copied it straight into `Console.enrichment`, so any enrichment-aware
+# command (`situation`/`position`/`place`/`show`/`contacts`/`find`) run from
+# the REPL thread queried the poll thread's connection and raised
+# `sqlite3.ProgrammingError` -- the exact live-sortie crash
+# (`plans/bl5-tool-api/debug.md`). This drives the real
+# `_run_console_poll_loop` on a background thread (same as the Stage 6 test
+# above) and `_run_console_repl` on the calling thread (a *different* real
+# thread than the poll loop, via pytest's own test thread), feeding it a
+# `situation` command through a monkeypatched `sys.stdin` -- exactly the
+# "situation" command the user typed live.
+
+
+def test_repl_thread_builds_its_own_enrichment_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": [_t72_world_object()]}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_run_console_poll_loop,
+        args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_ownship_state is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert runner.last_ownship_state is not None  # poll completed once
+
+        output = io.StringIO()
+        console = Console(store=runner.store, output=output)
+        monkeypatch.setattr("sys.stdin", io.StringIO("situation\nposition\n"))
+
+        # Before the fix, this raised sqlite3.ProgrammingError -- the poll
+        # thread's connection was read from this (different) thread.
+        _run_console_repl(runner, console, db_path, "Syria")
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    lines = output.getvalue().strip().splitlines()
+    assert len(lines) == 2
+    for line in lines:
+        assert "requires live ownship telemetry" not in line

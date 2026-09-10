@@ -66,6 +66,20 @@ constructs `ConsolePerceptionRunner` up front with an empty `sources` list
 threads (Stage 4 reviewer-confirmed), only `sources` (and the connection it
 holds) needed to move.
 
+**REPL-thread enrichment fix (BL-5 live acceptance testing finding,
+`plans/bl5-tool-api/debug.md`)**: BL-3 re-introduced the same thread-affinity
+bug Stage 6 fixed above, in a second field Stage 6 didn't cover.
+`ConsolePerceptionRunner.enrichment` is built on the poll thread and holds
+*that thread's* `world_model_conn`; `_run_console_repl` used to copy it
+straight into `console.enrichment`, so any enrichment-aware command
+(`situation`/`position`/`place`/`show`/`contacts`/`find`) run from the REPL
+thread queried the poll thread's connection and raised
+`sqlite3.ProgrammingError`. `_run_console_repl` now lazily builds its own
+REPL-thread-local `sqlite3.Connection`/`EnrichmentContext` (mirroring Stage
+6's "build it on the thread that uses it" precedent) instead of reading
+`runner.enrichment` at all -- see that function's own docstring for the
+full reasoning, including the accepted cost of a second connection/cache.
+
 **`--overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`)**: only
 meaningful alongside `--console`. When set, `main()` passes the same
 `AircraftLayerClient` instance as `ConsolePerceptionRunner.overlay_client`,
@@ -337,7 +351,12 @@ def _run_console_poll_loop(
         world_model_conn.close()
 
 
-def _run_console_repl(runner: ConsolePerceptionRunner, console: Console) -> None:
+def _run_console_repl(
+    runner: ConsolePerceptionRunner,
+    console: Console,
+    world_model_db: Path,
+    theatre: str,
+) -> None:
     """Stage 4's foreground REPL: reads one command per line from stdin and
     dispatches it into `console`, using `runner.last_t_sim` (set by the
     background poll thread) as `now_sim`. Before the first successful poll,
@@ -345,21 +364,65 @@ def _run_console_repl(runner: ConsolePerceptionRunner, console: Console) -> None
     empty store either way, so this only affects how an immediately-typed
     command's (nonexistent) elapsed-time fields would read, not correctness.
 
-    Also syncs `console.enrichment` from `runner.enrichment` before every
-    command (BL-3) -- `runner.enrichment` is built lazily on the poll
-    thread's first successful poll (`ConsolePerceptionRunner.run_once`), so
-    it is still `None` for any command typed before that, same
-    "byte-for-byte BL-2" degradation `belief.tools`'/`belief.console`'s own
-    `enrichment=None` default already guarantees.
+    **BL-5 live-acceptance fix**: this used to sync `console.enrichment`
+    straight from `runner.enrichment` (BL-3's field, built by the poll
+    thread and holding *that thread's* `sqlite3.Connection`). Any
+    enrichment-aware command (`situation`/`position`/`place`, or `show`/
+    `contacts`/`find` once BL-3 landed) then ran a query against that
+    connection from this thread -- `sqlite3.Connection` is thread-affine
+    (see the module docstring's "Stage 6 fix" for the same bug class on
+    `sources`), so this raised `sqlite3.ProgrammingError` the first time a
+    user actually typed one of those commands. BL-3 shipped after Stage 6's
+    fix and re-introduced the same class of bug in a second field the
+    Stage 6 fix didn't cover.
 
-    Exits on EOF (e.g. Ctrl-D) or `KeyboardInterrupt`."""
+    The fix mirrors Stage 6's own precedent exactly: build the resource on
+    the thread that uses it. This function now opens its own
+    `sqlite3.Connection` (`repl_conn`) and `EnrichmentContext`
+    (`repl_enrichment`), lazily, the first time `runner.last_ownship_state`
+    is available (mirroring `ConsolePerceptionRunner.run_once`'s own lazy
+    build of `runner.enrichment`) -- `console.enrichment` is populated from
+    this REPL-thread-local context, never from `runner.enrichment`.
+    `repl_enrichment.ownship` is refreshed from `runner.last_ownship_state`
+    before every command, the same "read a plain attribute across the
+    thread boundary" pattern `last_t_sim` above already uses safely (only
+    `sqlite3.Connection`s are thread-affine, not ordinary attribute reads).
+
+    This does mean two separate `sqlite3.Connection`s and two separate
+    `belief.enrichment.WorldEnrichmentCache`s (poll thread's and REPL
+    thread's) rather than one shared connection/cache -- a real but
+    accepted cost: each cache recomputes independently on its own thread's
+    first touch of a given contact, never produces incorrect results.
+    Routing REPL-thread enrichment reads through the poll thread instead
+    (a single shared connection/cache) was considered and rejected as
+    disproportionate complexity (a lock/queue-based cross-thread call) for
+    a single-user debug console.
+
+    Exits on EOF (e.g. Ctrl-D) or `KeyboardInterrupt`. Closes `repl_conn`
+    (if ever opened) on exit."""
+    repl_conn: sqlite3.Connection | None = None
+    repl_enrichment: EnrichmentContext | None = None
     try:
         for line in sys.stdin:
             now_sim = runner.last_t_sim if runner.last_t_sim is not None else 0.0
-            console.enrichment = runner.enrichment
+            if runner.last_ownship_state is not None:
+                if repl_conn is None:
+                    repl_conn = open_world_model(world_model_db)
+                if repl_enrichment is None:
+                    repl_enrichment = EnrichmentContext(
+                        conn=repl_conn,
+                        theatre=theatre,
+                        ownship=runner.last_ownship_state,
+                    )
+                else:
+                    repl_enrichment.ownship = runner.last_ownship_state
+            console.enrichment = repl_enrichment
             console.handle_line(line, now_sim=now_sim)
     except KeyboardInterrupt:
         pass
+    finally:
+        if repl_conn is not None:
+            repl_conn.close()
 
 
 def main() -> None:
@@ -451,7 +514,9 @@ def main() -> None:
         console = Console(store=console_runner.store, output=sys.stdout)
         print(HELP_TEXT, file=sys.stdout)
         try:
-            _run_console_repl(console_runner, console)
+            _run_console_repl(
+                console_runner, console, args.world_model_db, args.theatre
+            )
         finally:
             stop_event.set()
             poll_thread.join()
