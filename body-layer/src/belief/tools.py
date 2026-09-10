@@ -78,9 +78,17 @@ from belief.decay import (
     classification_confidence_at,
     position_confidence,
 )
-from belief.enrichment import EnrichmentContext, motion_when_seen, relative_geometry
+from belief.enrichment import (
+    EnrichmentContext,
+    SemanticFact,
+    motion_when_seen,
+    relative_geometry,
+    semantic_facts_for,
+)
 from belief.events import Event
 from perception.geometry import GeoPosition
+from perception.source import OwnshipState
+from query.search import PlaceMatch, find_place_by_name
 
 #: `phrasing_hints.certainty`'s vocabulary -- deliberately distinct wording
 #: from the internal `belief.decay.Certainty` ladder (`"observed"` etc.),
@@ -101,6 +109,19 @@ class ContactResult(TypedDict):
     """The §3.4 `{facts, summary, phrasing_hints}` triple, returned by every
     contact-facing tool below (`get_contacts`'s list elements,
     `describe_contact`, `find_contact`'s list elements)."""
+
+    facts: dict[str, object]
+    summary: str
+    phrasing_hints: dict[str, object]
+
+
+class ToolResult(TypedDict):
+    """The same `{facts, summary, phrasing_hints}` triple as `ContactResult`
+    (§3.4), for BL-5's three new tools whose subject isn't a single
+    contact: `find_place`'s per-match results, `describe_our_position`,
+    `get_situation`. Kept as a separate TypedDict rather than reusing
+    `ContactResult` so a reader isn't misled into thinking these results
+    carry contact-shaped `facts`."""
 
     facts: dict[str, object]
     summary: str
@@ -522,3 +543,146 @@ def get_stats(store: ContactStore) -> dict[str, int]:
         "contacts": len(store.contacts),
         "events": len(store.events),
     }
+
+
+def find_place(enrichment: EnrichmentContext, text: str) -> list[ToolResult]:
+    """`plans/bl5-tool-api/plan.md`'s net-new name->position tool --
+    wraps world-model's `query.search.find_place_by_name` (the world-model
+    in-process seam, same seam `belief.enrichment` already uses via
+    `query.describe.describe_position`) in the `{facts, summary,
+    phrasing_hints}` triple every other tool in this module returns.
+    Deliberately naive substring matching, same caveat as `find_place_by_
+    name`'s own docstring: "the LZ" or "the ridge to the west" will not
+    resolve here, only names literally close to a stored feature's `name`
+    field."""
+    matches = find_place_by_name(enrichment.conn, text)
+    return [_place_result(match) for match in matches]
+
+
+def _place_result(match: PlaceMatch) -> ToolResult:
+    facts: dict[str, object] = {
+        "name": match.name,
+        "kind": match.kind,
+        "feature_id": match.feature_id,
+        "position": {"dcs": {"x": match.x, "z": match.z}},
+        "confidence": match.confidence,
+        "provenance": match.provenance,
+    }
+    summary = f"{match.name} ({match.kind})"
+    phrasing_hints: dict[str, object] = {
+        "confidence": "exact" if match.confidence >= 1.0 else "approximate"
+    }
+    return ToolResult(facts=facts, summary=summary, phrasing_hints=phrasing_hints)
+
+
+def _our_position_summary(
+    ownship: OwnshipState, semantic_facts: list[SemanticFact]
+) -> str:
+    if semantic_facts:
+        location = max(semantic_facts, key=lambda fact: fact.confidence).text
+    else:
+        location = "an unknown location"
+    return (
+        f"Currently {location}, heading {ownship.heading_true_deg:.0f} deg, "
+        f"{ownship.alt_m:.0f}m altitude."
+    )
+
+
+def describe_our_position(enrichment: EnrichmentContext) -> ToolResult:
+    """Ownship position + world-model semantic facts (`plans/
+    bl5-tool-api/plan.md`'s Decision 3: `enrichment` is required, not
+    optional -- there is no smaller "BL-2-shape" fallback this tool can
+    degrade to, unlike the contact-facing tools' optional `enrichment`).
+    Reuses `belief.enrichment.semantic_facts_for` (the same mapping
+    `_add_enrichment_facts` uses for a contact's position) with
+    `position_conf=1.0`, since ownship's own telemetry position is ground
+    truth, not a belief-derived, decaying estimate -- there is no
+    `position_confidence` to fold in here."""
+    ownship = enrichment.ownship
+    position = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    semantic_facts = semantic_facts_for(
+        enrichment.conn, enrichment.theatre, position, 1.0
+    )
+    facts: dict[str, object] = {
+        "position": {"dcs": {"x": ownship.x, "z": ownship.z}},
+        "alt_m": ownship.alt_m,
+        "heading_true_deg": ownship.heading_true_deg,
+        "semantic": [asdict(fact) for fact in semantic_facts],
+    }
+    summary = _our_position_summary(ownship, semantic_facts)
+    return ToolResult(facts=facts, summary=summary, phrasing_hints={})
+
+
+def _highest_attention_contact(store: ContactStore, now_sim: float) -> Contact | None:
+    """Deterministic stand-in for a real relevance score (BL-6 hasn't built
+    one yet, per `plans/bl5-tool-api/plan.md`'s Risks & Unknowns):
+    `priority` > `watch` > most-recently-observed `visible`, in that order.
+    Ties within a tier break on `last_seen_sim`, most recent first."""
+    priority: list[Contact] = []
+    watch: list[Contact] = []
+    for contact in store.contacts:
+        effective, _ = effective_attention(
+            contact.attention, contact.last_position, store.areas
+        )
+        if effective == "priority":
+            priority.append(contact)
+        elif effective == "watch":
+            watch.append(contact)
+    if priority:
+        return max(priority, key=lambda contact: contact.last_seen_sim)
+    if watch:
+        return max(watch, key=lambda contact: contact.last_seen_sim)
+    visible = [c for c in store.contacts if certainty_of(c, now_sim) == "observed"]
+    if visible:
+        return max(visible, key=lambda contact: contact.last_seen_sim)
+    return None
+
+
+def get_situation(
+    store: ContactStore, now_sim: float, enrichment: EnrichmentContext
+) -> ToolResult:
+    """Aggregate sitrep (`plans/bl5-tool-api/plan.md`): contact counts
+    (total/visible/watched), the highest-attention contact (see
+    `_highest_attention_contact`), the unacknowledged event count, and
+    `describe_our_position`'s own summary line, folded into one `{facts,
+    summary, phrasing_hints}` result. `enrichment` is required for the same
+    reason as `describe_our_position`'s -- this tool has no meaning without
+    ownship/world-model access."""
+    total = len(store.contacts)
+    visible = sum(1 for c in store.contacts if certainty_of(c, now_sim) == "observed")
+    watched = sum(
+        1
+        for c in store.contacts
+        if effective_attention(c.attention, c.last_position, store.areas)[0]
+        in ("watch", "priority")
+    )
+    unacknowledged = len(store.unacknowledged_events)
+    our_position = describe_our_position(enrichment)
+
+    facts: dict[str, object] = {
+        "contact_counts": {"total": total, "visible": visible, "watched": watched},
+        "unacknowledged_events": unacknowledged,
+        "our_position_summary": our_position["summary"],
+    }
+
+    highest = _highest_attention_contact(store, now_sim)
+    summary_parts = [f"{total} contact(s) ({visible} visible, {watched} watched)."]
+    if highest is not None:
+        highest_result = _contact_result(highest, now_sim, store, enrichment)
+        facts["highest_attention_contact"] = highest_result
+        summary_parts.append(f"Highest attention: {highest_result['summary']}")
+    if unacknowledged:
+        summary_parts.append(f"{unacknowledged} unacknowledged event(s).")
+    summary_parts.append(our_position["summary"])
+
+    return ToolResult(facts=facts, summary=" ".join(summary_parts), phrasing_hints={})
+
+
+def poll_events(store: ContactStore) -> list[dict[str, object]]:
+    """`plans/bl5-tool-api/plan.md`'s Decision 4: the exact name §3.3's
+    tool list uses for BL-4's already-built unacknowledged-events read
+    (`list_events(store, unacknowledged_only=True)`) -- a one-line wrapper,
+    not a rewrite. `console.py`'s `events` command keeps calling
+    `list_events` directly (unchanged); this is the name the tool registry
+    (`tool_api.py`) exposes."""
+    return list_events(store, unacknowledged_only=True)
