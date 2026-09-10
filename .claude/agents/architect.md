@@ -90,6 +90,7 @@ If there are no open decisions, omit that section. Keep the plan concise — it 
 
 ## Behavioral Constraints
 
+- **The only other agent you may invoke yourself is `investigator`** (step 2 of your process, for unverified DCS-internals claims). Never invoke `implementer`, `reviewer`, `debugger`, `performance-reviewer`, `security`, or `dod` yourself, even under AGENTS.md auto-advance — role sequencing after your plan is the coordinator's job, not yours. Once the plan is written and staged, stop and return control.
 - **Do not write implementation code before the plan is accepted by the user**
 - **Do not write large amounts of implementation code** — small illustrative snippets are acceptable if they clarify a design point
 - **Do not introduce new abstractions** unless you can name a clear duplication they remove
