@@ -96,3 +96,113 @@ Full read. Read the plan and implementation log in full; read every Stage 1-4 di
 (not just the implementer's summary); hand-traced the fold table's edge cases against the code;
 independently ran and confirmed all four verification commands and the "Stage 6 boundary" claim via
 `git diff --stat`.
+
+---
+
+## Review: BL-2.6 Stages 6-7 (classification-refinement)
+
+Commits reviewed: `6bea387` (Stage 6, mechanism), `479067a` (Stage 7, calibration).
+Scope: naked-eye achieved-tier classification (mechanism) + moving the gating tier medres→lowres
+(calibration), kept in separate commits per the plan's "mechanism and calibration never share a
+commit" rule. Stages 8-10 (live acceptance #2, tuning, docs) explicitly out of scope for this pass.
+
+### Review Summary
+
+Both commits do exactly what their stage promises, and the mechanism/calibration split is real,
+not just claimed in prose — verified directly against the diffs, not the implementer's log.
+
+Verified directly against the code:
+
+- **Stage 6 is pure mechanism.** `6bea387`'s diff touches only `perception/naked_eye_source.py`,
+  `perception/visibility.py`, and their tests. `NAKED_EYE_GATING_ANGULAR_RADIUS_RAD` and
+  `NAKED_EYE_GATING_TIER_NAME` are byte-for-byte unchanged in that commit (confirmed by reading the
+  full diff hunk) — the gate stays `medres`, so `_achieved_tier`'s `"lowres"` branch is genuinely
+  dead code this commit, as both the plan and implementation.md claim. The Stage 6 test suite (5 new
+  tests) passes with no rewrite of any pre-existing assertion, consistent with "the only new
+  behaviour is close targets sometimes resolving to type instead of a confidence bump."
+- **Stage 7 is pure calibration, cleanly separable and revertible.** `479067a`'s diff to
+  `visibility.py` is exactly the two-constant reassignment
+  (`MEDRES_ANGULAR_RADIUS_RAD`/`"medres"` → `LOWRES_ANGULAR_RADIUS_RAD`/`"lowres"`) plus its comment;
+  no other production line changed. The commit is a one-line semantic revert (as its own comment
+  states), matching the plan's Stage 7 description. Test changes are the necessary consequence of
+  the moved boundary, not scope creep.
+- **`_classification_for_tier`'s hires→type fallback is real, not just claimed.** Confirmed directly
+  against `dcs_type_to_reporting_name.tsv`: bare `"Infantry"` has no exact row, only compound entries
+  (`Infantry AK`, `Infantry AK Ins`, `Infantry AK ver2/3`), so `reporting_name_for("Infantry")`
+  returns `None` and the code falls back to `op_class` at level 2. This exact path is exercised by
+  `test_hires_range_candidate_with_no_reporting_name_falls_back_to_class`, which asserts
+  `classification_raw == "OP_INFANTRY"` and `classification_level == 2` at hires range (300 m) — a
+  real fallback, not an unreached branch.
+- **`NAKED_EYE_TYPE_CONFIDENCE = 0.55 < association.CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6`**
+  confirmed by direct grep of `perception/association.py`. The invariant ("no naked-eye tier, however
+  close, reaches real-detection confidence") holds at the type tier, the closest/highest one, so it
+  holds at all three.
+- **Presence-tier reachability is genuinely end-to-end.** `test_lowres_range_candidate_reaches_presence_level`
+  builds a full `NakedEyePerceptionSource` via `_source(world_objects)` and calls `.poll(...)` — this
+  exercises `naked_eye_source.py`'s `poll` → `_build_observation` → `_classification_for_tier` path
+  and `visibility.check_visibility`'s gate together, not `visibility.py` in isolation. It asserts
+  `classification_raw == object_model.DEFAULT_OP_CLASS` and `classification_level == 1`, genuinely
+  proving level-1/PRESENCE_CLASS is emitted through the real pipeline.
+- **Worked-table numbers cross-checked against the plan by hand, not trusted from the diff.** Infantry
+  (size 1.8 m): hires threshold `1.8/0.02*4.0 = 360 m`, medres `1.8/0.008*4.0 = 900 m`, lowres
+  `1.8/0.0043*4.0 = 1674.42 m` — all three match the plan's worked table and the test boundaries
+  (1674/1675 m). Ural truck (size 6 m): lowres threshold `6/0.0043*4.0 = 5581.4 m`, which exceeds
+  `NAKED_EYE_RANGE_CAP_M = 5000 m` — confirming the premise inversion the rewritten
+  `test_ural_truck_gate_now_binds_at_the_range_cap_under_lowres` asserts (cap binds, not the size
+  curve) is correct, matching the plan's own Risks section on the flattened size curve at the cap.
+- **Nothing in Stages 6-7 touched `belief/`.** `git diff --stat 4ed2526..7160ecc -- body-layer/src/belief/
+  body-layer/src/perception/` shows changes confined to `perception/naked_eye_source.py` and
+  `perception/visibility.py` only (plus their tests, checked separately) — no BL-2.6 Stage 1-4
+  mechanism (`contacts.py`, `classification.py`, `events.py`) was touched.
+
+### Verification commands (run directly, body-layer venv)
+
+- `ruff format --check src tests` — pass (42 files already formatted)
+- `ruff check src tests` — pass, no findings
+- `mypy src --strict` — pass, no issues in 21 source files
+- `pytest tests -q` — **245 passed**. Reconciled independently: 238 baseline (Stages 1-4) → 243 after
+  Stage 6 (+5 new tests, no rewrites, gate unchanged) → 245 after Stage 7 (net +2: one pre-existing
+  test — the old "infantry just outside medres" boundary test — replaced by two new boundary tests
+  (just-inside/just-outside-lowres), plus one new end-to-end presence-tier test in
+  `test_naked_eye_source.py`; the Ural-truck and ship-cap tests were rewritten in place, not added).
+  Matches the implementer's reported delta exactly.
+- `git status --short` — clean; both stages' files (plus the implementation-log and agent-memory
+  commits that followed) are committed, nothing left unstaged.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- `_CLASSIFICATION_LEVEL_CLASS`/`_CLASSIFICATION_LEVEL_TYPE` in `naked_eye_source.py` are bare-int
+  mirrors of `belief.classification.SpecificityLevel`, correctly kept as bare ints per the
+  `perception/`-must-not-import-`belief/` boundary. `_classification_for_tier`'s final `return
+  object_model.DEFAULT_OP_CLASS, 1` uses a literal `1` instead of a named constant the way the other
+  two branches use `_CLASSIFICATION_LEVEL_CLASS`/`_CLASSIFICATION_LEVEL_TYPE` — the docstring above it
+  explains why `_CLASSIFICATION_LEVEL_PRESENCE` isn't declared yet (unreachable until Stage 7), but
+  Stage 7 has now landed and made it reachable without adding the constant. Purely cosmetic
+  inconsistency (the value is correct and tested); worth a one-line follow-up naming it, not blocking.
+- The Stage 6/7 split leaves `_achieved_tier`'s `"lowres"` branch and `NAKED_EYE_PRESENCE_CONFIDENCE`
+  declared a full commit before they're reachable, which is exactly what the plan asked for
+  (independently revertible, mechanism-first) — noting only that a future `git bisect` landing exactly
+  on `6bea387` will see unreachable code with no test covering it, which is expected and already
+  called out in `implementation.md`, not a gap to fix.
+
+### Verdict
+
+**APPROVED**
+
+Stages 6-7 are correctly scoped, correctly separated (mechanism vs. calibration), and match the
+plan's worked table exactly. Per the plan and the task's own instruction, **do not proceed to DoD**
+— Stage 8 (live acceptance #2) is required and needs the user in the cockpit, which is unavailable
+right now (Windows box down). Stages 9-10 (tuning, docs) also remain outstanding and depend on
+Stage 8's feedback. The branch should stop here and wait.
+
+### Review Confidence
+
+Full read. Read both commits' full diffs directly (not just implementation.md's summary); verified
+the mechanism/calibration separation by inspecting exactly which lines each commit touches;
+hand-computed all worked-table thresholds independently against the plan's numbers rather than
+trusting the diff's comments; confirmed the reporting-name fallback against the actual TSV data file;
+independently ran and reconciled the full verification suite and test-count delta.
