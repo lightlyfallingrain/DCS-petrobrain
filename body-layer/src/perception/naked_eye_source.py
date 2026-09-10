@@ -30,10 +30,13 @@ Each `poll()`:
    back as a true bearing so `Observation.bearing_deg`'s existing
    true-bearing convention, per `geometry.py`'s module docstring, is
    preserved), range snapped to the nearest of the 24 `OP_D...` buckets, and
-   `object_model.py`'s class bucket in place of a free-text classification
-   guess in `classification_raw`. This is the plan's anti-omniscience
-   mechanism at the *output* layer, distinct from and additional to
-   `visibility.py`'s gate at the *input* layer.
+   `classification_raw` set from `_classification_for_tier` against the
+   achieved `VisibilityResult.tier`
+   (`plans/classification-refinement/plan.md` Stage 6) -- `object_model.py`'s
+   class bucket at `medres`, a specific reporting name (falling back to
+   class) at `hires`. This is the plan's anti-omniscience mechanism at the
+   *output* layer, distinct from and additional to `visibility.py`'s gate at
+   the *input* layer.
 
    **Scope limit** (plan Decision #5, proceeding on the stated
    recommendation): only bearing/range/class are quantised per object here.
@@ -103,6 +106,7 @@ from typing import Final, Literal
 from aircraft_client import AircraftLayerClient
 from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
+from perception.reporting_names import reporting_name_for
 from perception.source import (
     OBSERVATION_ID_PREFIX_NAKED_EYE,
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
@@ -320,6 +324,9 @@ class NakedEyePerceptionSource:
         )[0]
         quantised_range_m = _quantise_range_m(result.range_m)[0]
         profile = object_model.profile_for(candidate.object_type)
+        classification_raw, classification_level = _classification_for_tier(
+            result.tier, candidate.object_type, profile.op_class
+        )
 
         self._observation_count += 1
         return Observation(
@@ -328,7 +335,7 @@ class NakedEyePerceptionSource:
             t_sim=now_sim,
             t_wall=time.time(),
             source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
-            classification_raw=profile.op_class,
+            classification_raw=classification_raw,
             bearing_deg=quantised_bearing_deg,
             range_m=quantised_range_m,
             ownship_at_observation=ownship_state,
@@ -339,7 +346,50 @@ class NakedEyePerceptionSource:
                 method=_DERIVED_POSITION_METHOD,
             ),
             provenance=PROVENANCE_VISIBILITY_FILTER_ONLY,
+            classification_level=classification_level,
         )
+
+
+#: Bare `int` mirrors of `belief.classification.SpecificityLevel`'s `CLASS`
+#: (2) and `TYPE` (3) values -- `perception/` must not import `belief/`
+#: (`source.py`'s module docstring), so this module states the same two
+#: integers directly rather than importing the enum. `PRESENCE` (1) is not
+#: named here: it is unreachable until Stage 7 moves the gating tier to
+#: `lowres`, at which point `visibility.VisibilityResult.tier` can actually
+#: be `"lowres"`.
+_CLASSIFICATION_LEVEL_CLASS: Final[int] = 2
+_CLASSIFICATION_LEVEL_TYPE: Final[int] = 3
+
+
+def _classification_for_tier(
+    tier: str, object_type: str, op_class: str
+) -> tuple[str, int]:
+    """Map `visibility.check_visibility`'s achieved `tier` to
+    `(classification_raw, classification_level)`, per
+    `plans/classification-refinement/plan.md` Stage 6's worked table:
+
+    - `hires` -> `reporting_names.reporting_name_for(object_type)` at level
+      3 (type) -- ground truth, exactly as the scope channel already emits
+      (`hybrid_source.py`). Falls back to `op_class` at level 2 when the
+      lookup misses (an `object_type` this DCS version's reporting-name
+      table doesn't cover, `reporting_name_for`'s own docstring): Petrovich
+      cannot speak a name he does not have, even from a close, clear look,
+      so the claim degrades to class rather than emitting `None`.
+    - `medres` -> `op_class` at level 2 (class) -- today's behaviour,
+      unchanged.
+    - `lowres` -> `object_model.DEFAULT_OP_CLASS` at level 1 (presence) --
+      "something is there," ED's only catch-all
+      (`belief.classification.PRESENCE_CLASS`, same value, not imported per
+      the `perception`/`belief` boundary above). Unreachable until Stage 7.
+    """
+    if tier == "hires":
+        reporting_name = reporting_name_for(object_type)
+        if reporting_name is not None:
+            return reporting_name, _CLASSIFICATION_LEVEL_TYPE
+        return op_class, _CLASSIFICATION_LEVEL_CLASS
+    if tier == "medres":
+        return op_class, _CLASSIFICATION_LEVEL_CLASS
+    return object_model.DEFAULT_OP_CLASS, 1
 
 
 def _quantise_bearing(

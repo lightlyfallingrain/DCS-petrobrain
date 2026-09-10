@@ -140,6 +140,32 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   `aircraft_client.get_petrovich_indication_latest()`), debounces on text change, and calls
   `association.py` + `geometry.py` to resolve geometry against a `world_objects` candidate.
   `source: "petrovich_detection_associated"` on every emitted `Observation`.
+- `src/perception/visibility.py` (PB-1.5, retuned BL-2.6) — `check_visibility`, the naked-eye
+  channel's three composed plausibility gates (range cap, angular-radius recognition tier, terrain
+  LOS via `geometry.py`). `VisibilityResult.tier` is a **computed achieved tier**
+  (`"lowres"`/`"medres"`/`"hires"`, BL-2.6 Stage 6) rather than the constant `"medres"` PB-1.5
+  originally returned — a candidate that clears the gate can resolve closer-in to a tighter tier
+  than the gate itself requires. `NAKED_EYE_GATING_TIER_NAME` is the gate's own threshold and
+  **moved `"medres"` -> `"lowres"` at BL-2.6 Stage 7** (its own commit, separate from Stage 6's
+  tier-computation mechanism, per this plan's "mechanism and calibration never share a commit"
+  rule) — this widened the detection envelope ~1.86x (~3.5x area) so the presence tier became
+  reachable at all. The tier -> "existence/class/class/IFF" semantics reading is this project's own
+  modeling choice, not verified against ED internals (investigator finding, `plans/
+  classification-refinement/plan.md` Session 6 addendum Q1) — documented here so a future reader
+  does not "correct" it toward an ED semantics that was never established.
+- `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6) — `NakedEyePerceptionSource`, the
+  naked-eye/binocular channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s
+  gates and `geometry.py`'s bearing/range, emitting one `Observation` per still-visible candidate
+  per poll. `_classification_for_tier` (BL-2.6 Stage 6) maps `VisibilityResult`'s achieved tier to
+  `(classification_raw, classification_level)` on the classification lattice
+  (`belief.classification.SpecificityLevel`): `hires` -> `reporting_names.reporting_name_for
+  (object_type)` at level `TYPE` (Decision 1, 2026-09-09 — the naked-eye channel's own path to a
+  specific type via ground truth, departing from the architect's original cap-at-class
+  recommendation); `medres` -> the `OP_*` class at level `CLASS` (today's pre-BL-2.6 behaviour);
+  `lowres` -> `classification.PRESENCE_CLASS` at level `PRESENCE` ("something is there," reachable
+  only since Stage 7 moved the gate). Because `hires` values come from ground truth rather than a
+  vocabulary match, "Petrovich can never mis-identify, only fail to identify" now applies to this
+  channel's `hires` tier too, not only to the scope/HelperAI channel.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API
   (`GET /telemetry/latest`, `GET /world_objects/latest`, `GET /petrovich_indication/latest`). A
   real network call, unlike the world-model seam. `push_text_line` (BL-2.5,
@@ -154,28 +180,89 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   *production*): `percept.py` (`Percept`/`percept_of`, the structural no-omniscience boundary —
   belief code never sees `Observation.derived_world_position` or a DCS object id),
   `contacts.py` (`Contact`/`SightingSpan`/`ContactStore` — append-only observation log,
-  `ingest`/`tick`), `association_over_time.py` (percept→contact spatial + class-compatibility
+  `ingest`/`tick`). `Contact.classification` (BL-2.6) is the folded, monotone-non-decreasing best
+  claim (`belief.classification.ClassificationBelief`, via `fold_classification`) and is what
+  every user-facing surface reads. `Contact.last_class_raw` is kept **with its exact original
+  meaning unchanged** — the most recent percept's raw classification string — because it, not
+  `classification`, is `association_over_time.py`'s spatial-gate input; feeding the gate the
+  folded best claim would make it monotonically stricter over a contact's life and start
+  rejecting genuine re-observations of something already refined once. **This dual field is a
+  real readability cost, not an oversight — read the two docstrings before touching either one.**
+  `Contact.last_position_uncertainty_m` (a live-acceptance bug fix, 2026-09-09/10,
+  `plans/classification-refinement/plan.md`) is `last_position`'s own error budget, fed
+  symmetrically into `association_over_time.py`'s spatial gate alongside the incoming percept's —
+  fixing a real duplicate-contact bug where the gate budgeted only the incoming percept's
+  uncertainty and treated `last_position` as exact, so a stationary object's re-quantised implied
+  position could jump a full bucket-width between polls and fail the gate.
+
+  `association_over_time.py` (percept→contact spatial + class-compatibility
   gating, distinct from `perception/association.py`'s within-one-poll detection→world-object
   resolution), `decay.py` (per-attribute half-lives, the `certainty` lifecycle ladder —
-  `observed`/`tracked`/`estimated`/`lost`), `events.py` (`CONTACT_DETECTED`/`CONTACT_LOST`/
-  `CONTACT_REACQUIRED` derivation). `tools.py` (BL-2 Stage 4) — the brain-facing query API's
-  body, minus a transport: `get_contacts`/`describe_contact`/`get_contact_history`/`find_contact`
-  return `plans/body-layer/plan.md` §3.4's `{facts, summary, phrasing_hints}` triple, plus
-  `watch_contact`/`unwatch_contact`/`get_stats` (a bare attention enum + source field on `Contact`,
-  no policy/cooldown — that is BL-4). `console.py` (BL-2 Stage 4) — a line parser + pretty-printer
-  over `tools.py`, owning no belief logic of its own; every command (`contacts`, `show <id>`,
-  `history <id>`, `find <text>`, `watch <id>`/`unwatch <id>`, `stats`) dispatches 1:1 into a
-  `tools.py` function. `format_event_for_overlay` (BL-2.5,
-  `plans/dcs-text-panel-output/plan.md`) — `"<contact id>: <kind>, <summary>"`
-  for one `belief.events.Event`, reusing `tools.describe_contact`'s existing
-  `summary` field rather than new belief-reading logic, and reusing the
-  `"<id>: ..."` convention `console.py`'s own `contacts`/`show <id>`
-  rendering already uses rather than inventing a second one; the leading id
-  is what lets the overlay tell six distinct contacts apart from repeated
-  events on one (a live-acceptance follow-up fix, 2026-09-09 — the original
-  `"<kind>: <summary>"` line carried no contact id at all). Consumed by
-  `logger.ConsolePerceptionRunner`'s `--overlay` mirror, not by the console
-  REPL itself.
+  `observed`/`tracked`/`estimated`/`lost`; `position_confidence` (BL-3) is the numeric,
+  continuously-decaying counterpart to that ladder, keyed off `POSITION_HALF_LIFE_S`;
+  `classification_confidence_at` (BL-2.6) finally consumes `IDENTITY_HALF_LIFE_S`, which had been
+  declared since BL-2 and never read — decays `Contact.classification.confidence` only, never
+  `.level`, which stays sticky by design — see `classification.py`'s entry below),
+  `events.py` (`CONTACT_DETECTED`/`CONTACT_LOST`/
+  `CONTACT_REACQUIRED`/`CONTACT_CLASSIFICATION_CHANGED` derivation). `tools.py` (BL-2 Stage 4) —
+  the brain-facing query API's body, minus a transport: `get_contacts`/`describe_contact`/
+  `get_contact_history`/`find_contact` return `plans/body-layer/plan.md` §3.4's
+  `{facts, summary, phrasing_hints}` triple, plus `watch_contact`/`unwatch_contact`/`get_stats`
+  (a bare attention enum + source field on `Contact`, no policy/cooldown — that is BL-4). All four
+  contact-facing functions take an optional `enrichment: belief.enrichment.EnrichmentContext |
+  None = None` (BL-3, see `enrichment.py`'s entry below) — `None` (the default) leaves `facts` in
+  exactly its pre-BL-3 shape, so existing callers/tests are unaffected; supplied, it adds
+  `position.confidence`, `semantic`, `relative_now`, and (where derivable) `motion_when_seen`.
+  `console.py` (BL-2 Stage 4) — a line parser + pretty-printer over `tools.py`, owning no belief
+  logic of its own; every command (`contacts`, `show <id>`, `history <id>`, `find <text>`,
+  `watch <id>`/`unwatch <id>`, `stats`) dispatches 1:1 into a `tools.py` function. `Console` carries
+  the same optional `enrichment` field (BL-3), threaded into every dispatch, with the identical
+  no-enrichment-means-no-change guard.
+  `format_event_for_overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`) —
+  `"<contact id>: <kind>, <summary>"` for one `belief.events.Event`, reusing
+  `tools.describe_contact`'s existing `summary` field rather than new belief-reading logic, and
+  reusing the `"<id>: ..."` convention `console.py`'s own `contacts`/`show <id>` rendering already
+  uses rather than inventing a second one; the leading id is what lets the overlay tell six
+  distinct contacts apart from repeated events on one (a live-acceptance follow-up fix,
+  2026-09-09 — the original `"<kind>: <summary>"` line carried no contact id at all).
+  `CONTACT_CLASSIFICATION_CHANGED` gets its own transition rendering (BL-2.6, `plans/
+  classification-refinement/plan.md` Stage 4): `"<id>: CONTACT_CLASSIFICATION_CHANGED, <previous>
+  -> <classification>, <summary>"` — only that kind, every other kind's line is untouched (BL-2.5's
+  overlay restyle was flown and rejected once already; this is not a reopening of that question).
+  An optional `enrichment` (BL-3) appends one short semantic fragment — the highest-confidence
+  `SemanticFact.text` among `facts["semantic"]`, if any — to whichever line results, lifecycle or
+  classification-transition alike. Consumed by `logger.ConsolePerceptionRunner`'s `--overlay`
+  mirror, not by the console REPL itself.
+- `src/belief/enrichment.py` (BL-3, `plans/bl3-world-enrichment/plan.md`) — the world-enrichment
+  orchestration: `SemanticFact` (`{text, confidence, provenance, feature_id}`), `semantic_facts_for`
+  (calls world-model's `query.describe_position` once per contact, maps the result into that flat
+  list, combining each feature's confidence with `position_confidence` above), `WorldEnrichmentCache`
+  (keyed by `contact_id`, recomputes only when a contact's `last_position` actually changed —
+  deliberately outside `belief.contacts.Contact` to keep zero shared surface with BL-2.6's
+  concurrent work on that file), `relative_geometry` (bearing/clock/range/relative-altitude from a
+  *current* ownship position — never cached, since ownship moves every poll), `motion_when_seen`
+  (direction derived from a contact's two most recent distinct implied positions, `None` when fewer
+  exist). `EnrichmentContext` bundles `conn`/`theatre`/`ownship`/the cache and is the one object
+  threaded through `tools.py`/`console.py`/`logger.py` above.
+- `src/belief/classification.py` (BL-2.6, `plans/classification-refinement/plan.md` Stages 1-2) —
+  the classification specificity lattice: `SpecificityLevel` (`UNKNOWN`/`PRESENCE`/`CLASS`/`TYPE`,
+  a total order 0-3) over a shallow tree of *values* (a `TYPE` value's parent is its `CLASS`
+  value). `ClassificationBelief` is one contact's held claim (`value`, `level`, `confidence`,
+  `established_sim`). `fold_classification` is the fusion rule `Contact.record` calls instead of
+  overwriting: higher level + parent-consistent (or unresolvable) refines; same level + same value
+  reinforces; **lower level holds — the held claim survives untouched, which is the fix for the
+  last-writer-wins oscillation this milestone replaces**; same-or-higher level + resolvable +
+  incompatible contradicts, collapsing to the deepest common ancestor and starting a
+  `CLASSIFICATION_CONTRADICTION_LOCKOUT_S` (30 s) lockout against re-promotion. Also re-homes
+  `_op_class_of`/`class_compatibility` from `association_over_time.py` (a pure move, Stage 1 — that
+  module still imports both names so its own callers are unaffected) since `parent_class_of` needs
+  the identical ED-vocabulary resolver. An unresolvable parent (scope free text `object_model.
+  profile_for` can't match) always yields `unknown` comparability, on both the association gate's
+  check and this lattice's — one vocabulary bridge serving both, not two. Confidence is an
+  explicitly-placeholder per-level constant (not calibrated), decayed over time by
+  `decay.classification_confidence_at` (`IDENTITY_HALF_LIFE_S`) — **the level itself never decays**,
+  only confidence does; a contact identified as a T-72 two minutes ago does not revert to
+  "something," he becomes less sure of it.
 - `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
   `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete

@@ -27,7 +27,7 @@ from typing import TextIO
 
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
-from belief.events import Event
+from belief.events import CONTACT_CLASSIFICATION_CHANGED, Event
 from belief.tools import (
     ContactFilter,
     ContactResult,
@@ -254,6 +254,14 @@ def format_event_for_overlay(
     follow-up, live-acceptance screenshot finding, 2026-09-09) -- both render
     as identical `CONTACT_DETECTED: ...` lines.
 
+    **`CONTACT_CLASSIFICATION_CHANGED` gets its own transition rendering**
+    (`plans/classification-refinement/plan.md` Stage 4), and only that kind
+    -- every other kind's line is left byte-for-byte alone, per BL-2.5's
+    rejected restyle: `"<id>: CONTACT_CLASSIFICATION_CHANGED, <previous> ->
+    <classification>, <summary>"`. This discharges BL-2.5's DoD "enrich
+    mirrored lines" recommendation for this one new kind; it does not
+    reopen the styling question for the three lifecycle kinds.
+
     Falls back to `"<contact_id>: <kind>"` if the contact is no longer found
     -- should not normally happen, since events are only ever derived from a
     contact that exists at tick time (`belief.contacts.ContactStore.tick`),
@@ -262,14 +270,21 @@ def format_event_for_overlay(
 
     `enrichment` (BL-3, optional) appends one short semantic fragment --
     the highest-confidence `belief.enrichment.SemanticFact.text` among
-    `facts["semantic"]`, if any -- to the mirrored line. `None` (the
-    default) is a true no-op: the line is byte-for-byte BL-2.5's original,
-    same overlay-restraint invariant as the rest of this module's optional
-    fields."""
+    `facts["semantic"]`, if any -- to the mirrored line, whichever kind it
+    is. `None` (the default) is a true no-op: the line is byte-for-byte
+    BL-2.5's original, same overlay-restraint invariant as the rest of this
+    module's optional fields."""
     result = describe_contact(store, event.contact_id, now_sim, enrichment=enrichment)
     if result is None:
         return f"{event.contact_id}: {event.kind}"
-    line = f"{event.contact_id}: {event.kind}, {result['summary']}"
+    if event.kind == CONTACT_CLASSIFICATION_CHANGED:
+        line = (
+            f"{event.contact_id}: {event.kind}, "
+            f"{event.previous_classification} -> {event.classification}, "
+            f"{result['summary']}"
+        )
+    else:
+        line = f"{event.contact_id}: {event.kind}, {result['summary']}"
     if enrichment is not None:
         semantic = result["facts"].get("semantic")
         if isinstance(semantic, list) and semantic:

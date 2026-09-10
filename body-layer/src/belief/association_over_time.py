@@ -22,7 +22,30 @@ terrain, per that function's own documented limitation. A candidate contact
 passes the spatial gate when this implied position is within `gate_radius_m`
 of the contact's last-known perceived position:
 
-    gate_radius_m = uncertainty_radius_m(percept) + GATE_GROWTH_RATE_MPS * elapsed_s
+    gate_radius_m = uncertainty_radius_m(percept)
+        + contact.last_position_uncertainty_m
+        + GATE_GROWTH_RATE_MPS * elapsed_s
+
+Both sides' uncertainty are summed -- `contact.last_position` is itself only
+known to within *its own* founding/most-recent percept's uncertainty, not
+exactly, so gating on the incoming percept's uncertainty alone silently
+assumes the stored position is exact. It is not: naked-eye's bucket
+quantisation in particular re-derives a fresh (bearing, range) pair from
+scratch every poll (the buckets are anchored to the *current* heading -- see
+`naked_eye_source._quantise_bearing`), so two consecutive, genuinely
+identical real positions can legitimately quantise to different buckets and
+imply positions up to roughly a full bucket-width apart, not just the
+half-bucket-width `uncertainty_radius_m` models for a single reading. Only
+budgeting the incoming side under-sizes the gate by up to 2x for exactly
+this case -- confirmed live 2026-09-09: a single missed match from this
+under-sizing spawns a duplicate contact, and because that duplicate itself
+then counts as a second candidate for every subsequent percept near the same
+real object, the two-or-more-candidates ambiguity rule above turns one
+missed match into a permanent one-new-contact-per-poll runaway for the rest
+of the contact's session (see `plans/classification-refinement/debug.md`).
+Summing both sides' uncertainty is the minimal correction: it restores the
+gate to the symmetric, standard-radar-fusion shape (both estimates carry
+error, not just the newer one) without touching the ambiguity policy itself.
 
 `elapsed_s` is the time since *that contact's* last observation (not the
 percept's own age), so a contact that has not been seen in a while gets a
@@ -79,18 +102,16 @@ never a bad merge) rather than building a second keyword table here.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final
 
+from belief.classification import class_compatibility
 from belief.percept import Percept
-from perception import object_model
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.naked_eye_source import _CLOCK_BUCKET_DEG, _RANGE_BUCKETS_M
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
-
-ClassCompatibility = Literal["compatible", "unknown", "incompatible"]
 
 #: Placeholder fixed uncertainty for the scope/hybrid channel -- see module
 #: docstring. Not range-derived: this channel has no bucket structure to
@@ -167,35 +188,17 @@ def implied_position(percept: Percept) -> GeoPosition:
     return project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)
 
 
-def _op_class_of(classification_raw: str) -> str | None:
-    """Resolve `classification_raw` (either an already-bucketed naked-eye
-    `OP_*` string, or scope/hybrid free text) to an `OP_*` bucket, or `None`
-    if unknown. See module docstring."""
-    if classification_raw.startswith("OP_") and (
-        classification_raw != object_model.DEFAULT_OP_CLASS
-    ):
-        return classification_raw
-    profile = object_model.profile_for(classification_raw)
-    if profile.op_class == object_model.DEFAULT_OP_CLASS:
-        return None
-    return profile.op_class
-
-
-def class_compatibility(a_raw: str, b_raw: str) -> ClassCompatibility:
-    """Three-valued class compatibility between two `classification_raw`
-    strings. See module docstring."""
-    a_class = _op_class_of(a_raw)
-    b_class = _op_class_of(b_raw)
-    if a_class is None or b_class is None:
-        return "unknown"
-    return "compatible" if a_class == b_class else "incompatible"
-
-
 def spatial_gate_radius_m(percept: Percept, contact: Contact, now_sim: float) -> float:
     """The spatial gate radius for `percept` against `contact` at `now_sim`.
-    See module docstring's formula."""
+    See module docstring's formula -- both the incoming percept's own
+    uncertainty and the contact's stored `last_position_uncertainty_m` are
+    budgeted, not just the former."""
     elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
-    return uncertainty_radius_m(percept) + GATE_GROWTH_RATE_MPS * elapsed_s
+    return (
+        uncertainty_radius_m(percept)
+        + contact.last_position_uncertainty_m
+        + GATE_GROWTH_RATE_MPS * elapsed_s
+    )
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:

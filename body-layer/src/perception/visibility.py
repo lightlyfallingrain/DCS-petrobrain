@@ -86,12 +86,19 @@ HIRES_ANGULAR_RADIUS_RAD: Final[float] = 0.02
 #: `min_angular_radius` table is visible in one place.
 IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
 
-#: The tier this filter gates on. `medres` over bare `lowres`: this
-#: channel's output includes a coarse class (`object_model.py`'s `op_class`),
-#: which `lowres` alone (bare existence, no class implied) would not
-#: honestly support -- plan's Proposed Defaults section.
-NAKED_EYE_GATING_ANGULAR_RADIUS_RAD: Final[float] = MEDRES_ANGULAR_RADIUS_RAD
-NAKED_EYE_GATING_TIER_NAME: Final[str] = "medres"
+#: The tier this filter gates on. `lowres` over `medres`
+#: (`plans/classification-refinement/plan.md` Stage 7, Decision 2, the
+#: user-approved calibration change): the channel's *output* no longer
+#: needs to honestly support a class claim at the gate itself, because
+#: Stage 6 made classification a computed function of the achieved tier --
+#: a `lowres`-only detection now emits `object_model.DEFAULT_OP_CLASS` at
+#: level 1 (presence, "something is there"), not a fabricated class guess.
+#: This widens the detection envelope ~1.86x range (~3.5x area) and is the
+#: anti-omniscience calibration move: Petrovich now notices more, further
+#: out, and says less about it until it closes. One-line revert: restore
+#: `MEDRES_ANGULAR_RADIUS_RAD` / `"medres"` here.
+NAKED_EYE_GATING_ANGULAR_RADIUS_RAD: Final[float] = LOWRES_ANGULAR_RADIUS_RAD
+NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
 
 #: See the module docstring's binocular premise. Same numeric value as
 #: `HelperAI.lua`'s `extra_eyesight_ratio`, reinterpreted and owned by this
@@ -126,8 +133,28 @@ NAKED_EYE_RANGE_CAP_M: Final[float] = 5000.0
 #: detection (`association.CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6`) -- there
 #: is no real detection-existence signal behind this channel at all, only an
 #: ED-model-grounded plausibility filter (plan Invariant Check). Deliberately
-#: capped below that value.
+#: capped below that value, at every achieved tier (see the three constants
+#: below) -- even a `hires`-tier naked-eye pass is still just a visibility
+#: filter, never a real detection-existence signal.
+#:
+#: `plans/classification-refinement/plan.md` Stage 6's worked confidence
+#: table: presence (low) / class (medium) / type (high). This constant is
+#: the `medres`/class-tier value, kept under its original name since every
+#: existing caller and test already refers to it that way; the other two
+#: tiers get their own constants immediately below.
 NAKED_EYE_VISIBILITY_CONFIDENCE: Final[float] = 0.4
+
+#: Level-1 (presence) tier confidence -- "something is there," the weakest
+#: claim in the lattice. Unreachable until Stage 7 moves the gating tier to
+#: `lowres`; declared now because Stage 6's tier-computation mechanism
+#: already produces this branch, only the gate keeps it from being returned.
+NAKED_EYE_PRESENCE_CONFIDENCE: Final[float] = 0.2
+
+#: Level-3 (type) tier confidence -- the closest, most specific achieved
+#: tier. Still below `association.CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6`
+#: (see above): a close, clear naked-eye look is still not a real HelperAI
+#: detection-existence signal.
+NAKED_EYE_TYPE_CONFIDENCE: Final[float] = 0.55
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,12 +164,49 @@ class VisibilityResult:
     `None` instead of this type when any gate fails (see module docstring).
     Output quantisation to ED's ambient-callout vocabulary is
     `naked_eye_source.py`'s job, not this module's -- see that module's
-    docstring."""
+    docstring.
+
+    `tier` and `confidence` are the *achieved* recognition tier
+    (`plans/classification-refinement/plan.md` Stage 6), not the flat
+    `NAKED_EYE_GATING_TIER_NAME` constant this always returned before: a
+    candidate that clears the gate can still resolve closer-in to `hires`
+    (and its higher confidence) if it is near enough, independent of what
+    tier the gate itself is set to. `naked_eye_source.py` maps `tier` onto a
+    lattice level/value; this module only computes the geometry."""
 
     bearing_deg: float
     range_m: float
     tier: str
     confidence: float
+
+
+def _achieved_tier(range_m: float, size_m: float) -> tuple[str, float]:
+    """The tightest recognition tier `range_m` still satisfies for an object
+    of characteristic size `size_m`, and that tier's confidence
+    (Stage 6's worked table: presence low / class medium / type high). Each
+    tier's threshold is independently capped at `NAKED_EYE_RANGE_CAP_M`, the
+    same sanity bound `check_visibility`'s gate applies (module docstring
+    gate #2) -- a very large object's `hires`/`medres` thresholds can both
+    collapse onto the cap, which is expected, not a bug.
+
+    The `lowres` branch is unreachable while `NAKED_EYE_GATING_ANGULAR_
+    RADIUS_RAD` gates at `medres` (Stage 6) -- `check_visibility` already
+    drops anything beyond the gating threshold before this function is ever
+    called on it. It becomes reachable once Stage 7 moves the gate to
+    `lowres`."""
+    hires_threshold_m = min(
+        NAKED_EYE_RANGE_CAP_M,
+        (size_m / HIRES_ANGULAR_RADIUS_RAD) * BINOCULAR_RANGE_MULTIPLIER,
+    )
+    medres_threshold_m = min(
+        NAKED_EYE_RANGE_CAP_M,
+        (size_m / MEDRES_ANGULAR_RADIUS_RAD) * BINOCULAR_RANGE_MULTIPLIER,
+    )
+    if range_m <= hires_threshold_m:
+        return "hires", NAKED_EYE_TYPE_CONFIDENCE
+    if range_m <= medres_threshold_m:
+        return "medres", NAKED_EYE_VISIBILITY_CONFIDENCE
+    return "lowres", NAKED_EYE_PRESENCE_CONFIDENCE
 
 
 def check_visibility(
@@ -176,11 +240,14 @@ def check_visibility(
     if not line_of_sight_clear(conn, theatre, observer, target):
         return None
 
+    achieved_tier, achieved_confidence = _achieved_tier(
+        candidate_range_m, profile.size_m
+    )
     return VisibilityResult(
         bearing_deg=candidate_bearing_deg,
         range_m=candidate_range_m,
-        tier=NAKED_EYE_GATING_TIER_NAME,
-        confidence=NAKED_EYE_VISIBILITY_CONFIDENCE,
+        tier=achieved_tier,
+        confidence=achieved_confidence,
     )
 
 

@@ -1,14 +1,24 @@
 """Tests for `belief.events` -- `lifecycle_event_kind` (`plans/pb2-contact-
-memory/plan.md` Stage 2). Each transition case gets its own test."""
+memory/plan.md` Stage 2) and `classification_event` (`plans/
+classification-refinement/plan.md` Stage 3). Each transition case gets its
+own test."""
 
 from __future__ import annotations
 
+from belief.classification import ClassificationBelief, SpecificityLevel
 from belief.events import (
     CONTACT_DETECTED,
     CONTACT_LOST,
     CONTACT_REACQUIRED,
+    classification_event,
     lifecycle_event_kind,
 )
+
+
+def _belief(value: str, level: SpecificityLevel) -> ClassificationBelief:
+    return ClassificationBelief(
+        value=value, level=level, confidence=0.5, established_sim=0.0
+    )
 
 
 def test_new_contact_first_tick_not_lost_is_detected() -> None:
@@ -44,3 +54,38 @@ def test_certainty_sub_level_changes_while_alive_emit_nothing() -> None:
     assert lifecycle_event_kind("tracked", "estimated") is None
     assert lifecycle_event_kind("estimated", "observed") is None
     assert lifecycle_event_kind("tracked", "tracked") is None
+
+
+# --- classification_event ----------------------------------------------
+
+
+def test_first_tick_with_no_previous_classification_emits_nothing() -> None:
+    current = _belief("OP_ARMORED", SpecificityLevel.CLASS)
+    assert classification_event(None, current) is None
+
+
+def test_higher_level_is_refined() -> None:
+    previous = _belief("OP_ARMORED", SpecificityLevel.CLASS)
+    current = _belief("T-72", SpecificityLevel.TYPE)
+    assert classification_event(previous, current) == "refined"
+
+
+def test_lower_level_is_contradicted() -> None:
+    previous = _belief("T-72", SpecificityLevel.TYPE)
+    current = _belief("OP_ARMORED", SpecificityLevel.CLASS)
+    assert classification_event(previous, current) == "contradicted"
+
+
+def test_same_level_different_value_is_contradicted() -> None:
+    previous = _belief("OP_ARMORED", SpecificityLevel.CLASS)
+    current = _belief("OP_TRUCK", SpecificityLevel.CLASS)
+    assert classification_event(previous, current) == "contradicted"
+
+
+def test_same_level_same_value_emits_nothing() -> None:
+    """Reinforcement (and a hold, which never changes the held claim at
+    all) must not fire an event even though confidence/established_sim may
+    have changed -- the comparison deliberately ignores both."""
+    previous = _belief("OP_ARMORED", SpecificityLevel.CLASS)
+    current = _belief("OP_ARMORED", SpecificityLevel.CLASS)
+    assert classification_event(previous, current) is None

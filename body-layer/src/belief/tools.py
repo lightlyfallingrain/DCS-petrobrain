@@ -55,7 +55,12 @@ from dataclasses import asdict
 from typing import Literal, TypedDict
 
 from belief.contacts import Contact, ContactStore
-from belief.decay import Certainty, certainty_of, position_confidence
+from belief.decay import (
+    Certainty,
+    certainty_of,
+    classification_confidence_at,
+    position_confidence,
+)
 from belief.enrichment import EnrichmentContext, motion_when_seen, relative_geometry
 
 #: `phrasing_hints.certainty`'s vocabulary -- deliberately distinct wording
@@ -93,6 +98,27 @@ def _find_contact(store: ContactStore, contact_id: str) -> Contact | None:
     return None
 
 
+def _classification_facts(contact: Contact, now_sim: float) -> dict[str, object]:
+    """`facts.classification`'s shape, moved *toward* `plans/body-layer/
+    plan.md` §3.4's specified `{value, confidence}` (this stage adds
+    `level` too, since the lattice level is exactly what makes the
+    `CONTACT_CLASSIFICATION_CHANGED` transition legible) -- reads
+    `Contact.classification` (the folded best claim), not
+    `last_class_raw` (`plans/classification-refinement/plan.md`'s design
+    section: "everything user-facing ... reads `Contact.classification`
+    instead"). `confidence` is read through `belief.decay.
+    classification_confidence_at`, not `classification.confidence` raw --
+    the design section's "confidence is free to fall" invariant, decaying
+    over `IDENTITY_HALF_LIFE_S` since the claim's `established_sim`. `level`
+    is read straight off the held claim -- it never decays, by design."""
+    classification = contact.classification
+    return {
+        "value": classification.value,
+        "level": classification.level.name.lower(),
+        "confidence": classification_confidence_at(contact, now_sim),
+    }
+
+
 def _contact_facts(
     contact: Contact,
     now_sim: float,
@@ -102,7 +128,7 @@ def _contact_facts(
     certainty = certainty_of(contact, now_sim)
     facts: dict[str, object] = {
         "id": contact.id,
-        "classification": {"value": contact.last_class_raw},
+        "classification": _classification_facts(contact, now_sim),
         "certainty": certainty,
         "visible": certainty == "observed",
         "last_seen_ago_s": round(max(0.0, now_sim - contact.last_seen_sim), 1),
@@ -155,7 +181,8 @@ def _contact_summary(contact: Contact, now_sim: float) -> str:
     else:
         ago_s = max(0.0, now_sim - contact.last_seen_sim)
         recency = f"last seen {ago_s:.0f}s ago"
-    summary = f"{contact.last_class_raw}, {certainty}, {recency}."
+    classification_value = contact.classification.value or "unknown"
+    summary = f"{classification_value}, {certainty}, {recency}."
     if contact.attention == "watch":
         summary += " Being watched."
     return summary
@@ -269,20 +296,30 @@ def find_contact(
     now_sim: float,
     enrichment: EnrichmentContext | None = None,
 ) -> list[ContactResult]:
-    """Text search over contacts' *perceived* classification
-    (`Contact.last_class_raw`) -- never a truth field. Case-insensitive
-    substring match; empty/whitespace-only `text` matches nothing rather
-    than returning every contact. Most-recently-seen first, mirroring
-    `get_contacts`. `enrichment` (BL-3, optional, not named in the plan's
-    explicit function list but threaded here too for consistency with
-    `get_contacts`/`describe_contact` -- both build the same `ContactResult`
-    via `_contact_result`, so leaving this one unenriched would be a
-    surprising, undocumented gap) is threaded into every returned result the
-    same way."""
+    """Text search over contacts' *perceived* classification -- never a
+    truth field. Searches the held best claim (`Contact.classification.
+    value`), not `last_class_raw` (`plans/classification-refinement/
+    plan.md`'s design section: everything user-facing reads `classification`
+    instead), so a contact refined to `"T-72"` is still found by `"T-72"`
+    even if the most recent contributing percept was a coarser re-sighting.
+    Case-insensitive substring match; empty/whitespace-only `text` matches
+    nothing rather than returning every contact; a contact whose
+    classification is still unresolved (`value is None`) never matches.
+    Most-recently-seen first, mirroring `get_contacts`. `enrichment` (BL-3,
+    optional, not named in the plan's explicit function list but threaded
+    here too for consistency with `get_contacts`/`describe_contact` -- both
+    build the same `ContactResult` via `_contact_result`, so leaving this
+    one unenriched would be a surprising, undocumented gap) is threaded
+    into every returned result the same way."""
     needle = text.strip().lower()
     if not needle:
         return []
-    matches = [c for c in store.contacts if needle in c.last_class_raw.lower()]
+    matches = [
+        c
+        for c in store.contacts
+        if c.classification.value is not None
+        and needle in c.classification.value.lower()
+    ]
     matches.sort(key=lambda c: c.last_seen_sim, reverse=True)
     return [_contact_result(contact, now_sim, store, enrichment) for contact in matches]
 

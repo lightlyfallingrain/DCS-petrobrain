@@ -12,15 +12,24 @@ table"; Stage 1's `SCOPE_UNCERTAINTY_M`/`GATE_GROWTH_RATE_MPS` in
 `association_over_time.py` are the precedent for this kind of documented,
 revisitable constant).
 
-Only two of the four half-lives (`POSITION_HALF_LIFE_S`, and
-`LOST_THRESHOLD_S` derived from it) are actually consumed by `certainty_of`
-below -- `Contact` does not yet track a separate identity/general-area/
-motion attribute to decay independently (that is BL-3/BL-4 territory: world
-enrichment adds `general_area`, attention adds a motion estimate). The other
-three constants are declared now so the *one table* this module's docstring
-promises is complete from the start, and so BL-3/BL-4 extend this table
-rather than starting a second one elsewhere (the plan's "Complicates BL-4"
-second-order-effect note).
+Three of the four half-lives are consumed. `POSITION_HALF_LIFE_S` (and
+`LOST_THRESHOLD_S` derived from it) drives `certainty_of` below.
+`IDENTITY_HALF_LIFE_S` drives `classification_confidence_at`
+(`plans/classification-refinement/plan.md` Stage 10's follow-up fix, once
+`Contact.classification` existed for it to decay) -- the folded
+`belief.classification.ClassificationBelief.confidence` this module's own
+first paragraph promised identity would eventually key off, keyed off
+`ClassificationBelief.established_sim` rather than `contact.last_seen_sim`
+-- identity confidence decays from when the classification claim was last
+confirmed, not from when the contact itself was last observed at all.
+`MOTION_HALF_LIFE_S` and
+`GENERAL_AREA_HALF_LIFE_S` remain unconsumed -- `Contact` does not yet track
+a separate motion estimate or general-area field to decay independently
+(that is BL-3/BL-4 territory: world enrichment adds `general_area`,
+attention adds a motion estimate). Both constants are declared now so the
+*one table* this module's docstring promises is complete from the start,
+and so BL-3/BL-4 extend this table rather than starting a second one
+elsewhere (the plan's "Complicates BL-4" second-order-effect note).
 
 All functions here are pure functions of `(contact, now_sim)` -- no ticker,
 no mutation, no wall-clock. `ContactStore.tick` (`contacts.py`) is the only
@@ -37,10 +46,11 @@ if TYPE_CHECKING:
 
 #: Slowest-decaying attribute: what a contact *is*. A crew member does not
 #: forget "that was a BMP" on the timescale it takes the BMP to drive out of
-#: sight -- identity should long outlive position confidence. Not yet
-#: consumed (no per-attribute identity confidence field exists on `Contact`
-#: yet); declared for BL-3/BL-4 to extend this table into, per the plan's
-#: "one table, nowhere else" rule for the certainty/decay constants.
+#: sight -- identity should long outlive position confidence. Consumed by
+#: `classification_confidence_at` below, which decays `Contact.
+#: classification.confidence` (never `.level`, which stays sticky by
+#: design -- see `belief.classification`'s module docstring) since this
+#: claim's `established_sim`.
 IDENTITY_HALF_LIFE_S: Final[float] = 600.0
 
 #: Fastest-decaying attribute: the exact perceived position. Chosen as the
@@ -120,3 +130,20 @@ def position_confidence(contact: Contact, now_sim: float) -> float:
     mutation, no wall-clock."""
     elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
     return math.pow(0.5, elapsed_s / POSITION_HALF_LIFE_S)
+
+
+def classification_confidence_at(contact: Contact, now_sim: float) -> float:
+    """Numeric classification confidence, `(0, 1]`, exponentially decaying
+    with a half-life of `IDENTITY_HALF_LIFE_S` since `contact.classification.
+    established_sim` -- the identity-attribute counterpart to `certainty_of`'s
+    position-keyed ladder above, per this module's docstring. Decays only the
+    *number*; `contact.classification.level` never decays (stays sticky by
+    design, `belief.classification`'s module docstring) and this function
+    does not touch it -- callers that need the folded claim's value/level
+    still read `contact.classification` directly, only its `confidence` is
+    read through here. Pure, like every other function in this module -- no
+    ticker, no mutation, no wall-clock."""
+    elapsed_s = max(0.0, now_sim - contact.classification.established_sim)
+    return contact.classification.confidence * math.pow(
+        0.5, elapsed_s / IDENTITY_HALF_LIFE_S
+    )

@@ -182,6 +182,49 @@ classification-change events flow through same `format_event_for_overlay` withou
 Recommendation (plan note, not discovery): BL-2.6 should explicitly update that function to enrich
 mirrored lines with semantic content, keeping in-cockpit display synchronized with console output.
 
+**BL-2.6 (done, merged to main).** `feature/classification-refinement`. Replaces
+BL-2's last-writer-wins classification fusion with a four-level specificity lattice (`unknown` →
+`presence` → `class` → `type`, `belief/classification.py`) and a fold rule
+(`fold_classification`) so identity refines monotonically — `something → OP_ARMORED → T-72` —
+instead of oscillating; fires `CONTACT_CLASSIFICATION_CHANGED` on refinement/contradiction only.
+Full design and the four resolved decisions: `plans/classification-refinement/plan.md`.
+
+**All ten stages complete.** Stages 1–4 (re-home class resolution, lattice + fusion mechanism,
+the event, surfacing in `tools.py`/`console.py`) and Stages 6–7 (tier-derived classification in
+the naked-eye channel, then the `medres`→`lowres` gate move as its own commit) all reviewed and
+approved with zero required fixes. Stage 9 (tuning) is a deliberate no-op — see below. Stage 10
+(docs) closes this entry: `body-layer/CLAUDE.md` Structure section, this plan.md's own BL-2.6
+entry, and the absorbed BL-2 backlog item (see Backlog).
+
+**Live acceptance (Stages 5+8, combined) passed, one live bug found and fixed.** First sortie
+(naked-eye only, no scope) surfaced a real duplicate-contact bug unrelated to the fold mechanism:
+a single real object was producing 8–20 `Contact` records. Root cause was in
+`association_over_time.py`'s spatial gate, not `classification.py` — it budgeted only the
+incoming percept's own position uncertainty and treated `Contact.last_position` as exact, but
+naked-eye's clock-bucket requantisation re-anchors to current ownship heading every poll, so a
+stationary object's implied position can legitimately jump a full bucket-width between polls.
+Fixed with a symmetric gate (`Contact.last_position_uncertainty_m`, budgeted on both sides),
+reviewed and approved — the Reviewer hand-verified the regression test by reverting the fix and
+reproducing the exact failure. Re-flown and confirmed: `CONTACT_1` correctly refined
+`OP_GROUPSOMETHING → OP_TRUCK → Civilian bus` (two `CONTACT_CLASSIFICATION_CHANGED` events, one
+contact, no duplication), `CONTACT_2` stayed a distinct contact for a distinct real object. User
+confirmed "looking good." The classification mechanism itself (Decisions 1/2's whole point) was
+independently confirmed correct by the user mid-investigation, before the duplication fix landed
+— the bug was purely spatial-gate association, never a fold/refinement defect. Watch-item carried
+forward, not a blocker: the wider symmetric gate roughly doubles the close-range floor, raising
+false-merge risk for two distinct real objects at ~300–600 m separation — no fixture exercises
+that band yet.
+
+**Stage 9 (tuning) — no changes requested.** User's live feedback was "looking good," no
+complaints about contact volume, overlay chatter, or the three tier ranges/
+`NAKED_EYE_RANGE_CAP_M`/`NAKED_EYE_MAX_NEW_PER_POLL`. Constants stay as landed in Stages 6–7,
+documented as a deliberate no-op rather than silently skipped.
+
+**Supersedes part of PB-1.5's published calibration:** the `medres`-default gating tier and its
+worked range table (`plans/pb1.5-naked-eye-detection/plan.md`) are now historical, not current —
+see that plan's own superseded-note and `plans/body-layer/plan.md` §6's BL-2.6 entry for current
+defaults.
+
 **Aircraft layer (done, 2026-09-07):** `feature/aircraft-layer-telemetry` merged to main. Export.lua → Windows collector → LAN `/telemetry/latest` API, live-tested against cockpit instruments (bank/IAS/heading/alt all match), 5 Hz export-rate bug found+fixed, `altitude_radar_m` stays null (deprioritized — use `altitude_agl_m` instead, confirmed equivalent), `/telemetry/since` dropped as unneeded scope. `aircraft-layer/CLAUDE.md` + `WORKFLOW.md` document the subproject. Full history: `plans/aircraft-layer/implementation.md`.
 
 **PB-1 (done, 2026-09-08):** `feature/pb1-perception-logger` ready to merge. Stages 1–3 (live spike, BL-0 harness, world_objects endpoint) completed earlier; stages 4–9 (hybrid HelperAI perception source + association + text logger) completed with zero Reviewer required fixes across two review passes. Live acceptance test (stage 7) ran end-to-end on real Mi-24P sortie with manually-placed ground targets; two observations logged with plausible bearing/range values in an ambiguous-candidate scenario (4 Ural trucks clustered together). The original architecture (two-tier branching on geometry source) was completely falsified by Session 4's live spike; pivoted to single hybrid implementation (HelperAI text as real detection gate, `LoGetWorldObjects` geometry via association algorithm). Full history: `plans/pb1-perception-logger/plan.md`, `implementation.md`, `review.md`, `dod-check.md`. Key lessons harvested to `NOTES.md`: live spikes resolve DCS architectural unknowns better than desk research; PYTHONPATH/venv gaps only surface in end-to-end deployment; ambiguous-scene live testing essential for association validation.
@@ -203,7 +246,12 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 
 - [x] **PB-1.5 — Naked-eye visual detection channel.** Done, merged to main 2026-09-09. Live acceptance passed. See Current Focus.
 - [x] **BL-2.5 — In-cockpit text mirror (DCS overlay output channel).** Done, DoD passed 2026-09-09. Interim milestone, scheduled between BL-2 and BL-3 by user decision. Live acceptance sortie passed; refinement restyle rejected and reverted. See Current Focus and `plans/dcs-text-panel-output/dod-check.md`. Pending user approval to merge.
-- [ ] **BL-2.6 (label provisional) — Classification refinement.** *Scheduled next, after BL-2.5 and before BL-3 (user decision, 2026-09-09).* Fire an event when a contact's identification becomes more specific — `something → tank → T-72`, `unknown group → SAM site → SA-6`. User's framing: these transitions are exactly the information DCS internals do not give, and they make the system useful for gameplay rather than only for observing it.
+- [x] **BL-2.6 — Classification refinement.** Done, merged to main. All ten stages complete, live acceptance passed (bug found and fixed), Stage 9 tuning a deliberate no-op, Stage 10 docs closed, Reviewer/DoD passed. Plan `plans/classification-refinement/plan.md`, resume point `plans/classification-refinement/session-state.md`. See Current Focus for the live-acceptance bug/fix and the Stage 9 outcome. Label **confirmed BL-2.6** by the architect (contact-memory mechanism, absorbs a BL-2 backlog item, not a new perception tier — which is what earned PB-1.5 its PB- label).
+  *Design:* four totally-ordered levels (`unknown` → `presence` → `class` → `type`) with a shallow value tree, in a new `belief/classification.py` that re-homes `_op_class_of`/`class_compatibility` out of `association_over_time.py`. Specificity is driven by the same angular-radius quantity that already gates detection, so there is one calibration surface rather than two that can disagree. `Contact.classification` is **folded, not overwritten** — higher refines, equal reinforces, lower holds, incompatible collapses to the common ancestor — which is the fix for finding 3's oscillation. Confidence decays on `IDENTITY_HALF_LIFE_S` (declared since BL-2, never consumed); level is sticky. Monotonicity makes hysteresis structurally unnecessary.
+  *An investigator pass fed the design, then the user's decision changed one part of it:* ED's ambient-callout fragment bank has **no per-model vocabulary at all**, so the architect recommended capping the naked-eye channel at class — but the user chose the alternative (decision 1 below): naked-eye reaches level 3 (type) at `hires` range via `reporting_name_for(object_type)`, same as the scope channel. Two clean negatives recorded in the Session 6 addendum stay true regardless: `min_angular_radius` has no readable consumer in Lua or any DLL string table, so reading the tiers as specificity is **ours, not ED's** (stays on the risk list), and no dwell mechanism exists, which supports deferring dwell rather than treating its absence as an oversight.
+  *Ten stages*, mechanism and calibration never sharing a commit (the BL-2.5 lossy-revert lesson). Stages 1–4, 6, 7, 10 offline; 5, 8 acceptance sorties and 9 tuning need live DCS. Per the user's 2026-09-09 request, every DCS-derived fact needed offline is committed — see the plan's "Offline execution" section.
+  **Four decisions, resolved 2026-09-09** (full text/rationale in the plan's "Decisions" section): (1) naked-eye reaches type at close range, not just class — **departs from architect's cap recommendation**; (2) gating tier moves `medres`→`lowres` — accepted, Petrovich notices more at range; (3) `NAKED_EYE_RANGE_CAP_M = 5000` — accepted as-is, deferred to post-Stage-8 tuning; (4) classification level stays sticky, only confidence decays — accepted. Original investigation follows.
+  **Original 2026-09-09 investigation (label was provisional at the time):** *Scheduled next, after BL-2.5 and before BL-3 (user decision, 2026-09-09).* Fire an event when a contact's identification becomes more specific — `something → tank → T-72`, `unknown group → SAM site → SA-6`. User's framing: these transitions are exactly the information DCS internals do not give, and they make the system useful for gameplay rather than only for observing it.
   Not just an event. Investigation 2026-09-09 found the data can't currently support it:
   1. **Naked-eye classification is range-independent.** `perception/naked_eye_source.py` emits
      `object_model.profile_for(...).op_class` — a fixed bucket per DCS type, from a table of
@@ -236,6 +284,18 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
 (World Model M9 moved to Deferred below, 2026-09-06)
 
 ## Backlog
+
+- [ ] **Continuity-of-track association, using `object_id` within `perception/` only (never crossing into `belief/`).** Raised 2026-09-10 by the user, in reaction to BL-2.6's live-acceptance duplicate-contact bug (see Current Focus BL-2.6 entry) and its fix (a symmetric spatial-gate uncertainty budget in `belief/association_over_time.py`). The user's stated preference: prefer this over tuning a range/uncertainty gate further, since any single range constant is structurally wrong for *some* unit — too generous for a slow-moving truck, too tight for a fast jet or a target near a tier boundary. `association_over_time`'s spatial+class gate is not going away (it is the load-bearing mechanism for genuine re-acquisition after a real gap in observation, where no ground truth should leak through — see below), but the specific failure class this bug exposed — *losing track of a target that was continuously, unbroken in view* — has a cheaper and more honest fix available.
+
+  **The idea.** `LoGetWorldObjects`'s per-object key (`object_id`) already exists and `perception/association.py` already uses it for *within-one-poll* detection↔world-object resolution (see the closed 2026-09-09 backlog item below on its stability). The proposal: also use it *across consecutive polls, within `perception/` only*, as a same-blob continuity check — "is the object I'm resolving this poll the same `object_id` I resolved for this contact-candidate last poll, with no gap in between" — and if so, skip the spatial/class gate entirely for that pairing rather than re-deriving identity from geometry each time. This is not the same claim as exposing DCS's persistent ground-truth identity to belief: it only asserts "no discontinuity since the last poll," which is what a human visually tracking a target with their eyes also has for free, continuously, without needing to re-identify it from scratch — matching the project's anti-omniscience principle rather than violating it (the model gains no information beyond what real continuous observation would give).
+
+  **Why this is architecturally distinct from the rejected omniscient-mission-memory idea (2026-09-10, see Deferred below).** That idea proposed a *persistent* ground-truth object store, crossing subproject and epoch boundaries, motivated by a performance question that turned out to rest on a false premise. This idea is narrower and different in kind: no persistence beyond one poll-to-poll step, no store, stays entirely inside `perception/` (never crosses the `belief/percept.py` boundary that structurally drops DCS truth fields), and is motivated by correctness (avoiding a range-gate false negative/positive tradeoff that has no single right answer), not performance.
+
+  **What must NOT change:** `belief/association_over_time.py`'s spatial+class gate must stay the mechanism for cross-gap re-acquisition — after a real loss of sight (target goes behind terrain, out of FOV, sight/scope moved away and back), re-establishing "is this the same contact" from geometry/class alone, with genuine ambiguity and occasional merge/split, is precisely the fuzzy, non-omniscient behavior BL-2's design intends. Continuity-of-track should only ever *skip* the gate for the zero-gap case, never *replace* the gate's fuzzy logic for the has-a-gap case.
+
+  **Open design questions, not yet resolved:** (1) what "continuous" means operationally for the naked-eye channel specifically, since it isn't polled every DCS frame — is "detected in the immediately preceding poll, same `object_id`" a strict enough continuity bar, or does it need a stricter recency check too; (2) whether this lives in `perception/association.py` (within-poll, per-source) or needs a small per-`PerceptionSource`-instance last-poll memory (a new kind of state that doesn't exist in that module today); (3) interaction with the debounced/`emit_mode` sources (`hybrid_source.py`'s HelperAI-text debounce) where "no gap" may mean something different than for the naked-eye channel's raw per-poll geometry gate; (4) whether `object_id` reset-on-kill/respawn (moderate-high confidence, not live-confirmed — `aircraft-layer/research/2026-09-09-worldobjects-object-id-stability.md`, from the rejected omniscient-mission-memory investigation) matters at all here, since continuity-of-track never holds an id across a gap, only checks equality poll-to-poll.
+
+  Not scoped or sequenced — needs an Architect pass before implementation, including the open questions above. Natural candidate for a BL-2.x refinement or folded into whatever milestone next touches `association_over_time.py`/`naked_eye_source.py`'s poll loop; revisit once the current gate's watch-item (the wider symmetric budget's own false-merge risk at ~300-600m for distinct nearby objects, noted in BL-2.6's review) shows up as a real problem, or on its own merits whenever picked up.
 
 - [x] **Aircraft layer should flag the ownship; body layer filters it out in detection logic.**
   *(User decision, 2026-09-09 — supersedes the earlier "omit or flag" framing recorded here.)*
@@ -395,10 +455,24 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   if so, the fix is to lower the timeout or add a per-line click-dismiss affordance, but those
   changes are speculative and not needed for current use.
 
-- [ ] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted.**
-  **Absorbed into BL-2.6 (classification refinement), scheduled next — see Milestones.**
-  It stops being theoretical there: without a specificity ordering, refinement events
-  oscillate. Found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation), reported as an expected consequence of Stage 2's design rather than a bug — `decay.certainty_of` is a pure function of `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position uncertainty or which channel produced it, and `Contact.last_class_raw` is likewise overwritten by whichever observation arrives most recently. Concrete failure mode: a tight naked-eye/binocular observation followed by a wider-uncertainty scope observation of the same contact fully resets `certainty` to `"observed"` and overwrites the classification, even though the earlier observation was better. Not fixed under PB-2 — Stage 2's certainty ladder is explicitly a placeholder pure-recency design (per its own review), and reworking it to be quality-weighted is a real design question (what "better" means across two channels with different uncertainty models) rather than a quick patch. Worth revisiting once real sortie data shows whether this actually degrades perceived contact quality in practice, or stays theoretical. See `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
+- [~] **BL-2's `certainty`/classification fusion is last-writer-wins, not quality-weighted —
+  classification half resolved by BL-2.6, certainty half still open.**
+  `Contact.classification` is no longer overwritten by whichever observation arrives most
+  recently: `Contact.record` now folds through `belief.classification.fold_classification`
+  (`plans/classification-refinement/plan.md` §3) — higher-level/parent-consistent refines, same
+  level/value reinforces, a lower level holds rather than overwriting (the actual oscillation
+  fix), and only a resolvable, same-or-higher-level disagreement contradicts and collapses.
+  `Contact.last_class_raw` still exists and is still last-writer-wins, deliberately — it is the
+  association gate's own input, not a user-facing claim (see `contacts.py`'s docstring).
+  **The `certainty` half is not resolved by BL-2.6 and stays open**: `decay.certainty_of` is
+  still a pure function of `now_sim - last_seen_sim` with no notion of which contributing
+  observation had tighter position uncertainty or which channel produced it, so a tight
+  naked-eye/binocular observation followed by a wider-uncertainty scope observation still fully
+  resets `certainty` to `"observed"`. Reworking that into a quality-weighted ladder remains a real
+  design question (what "better" means across two channels with different uncertainty models),
+  not a quick patch — revisit once real sortie data shows it actually degrading perceived contact
+  quality. Originally found 2026-09-09 during PB-2 Stage 5 (cross-channel fusion validation); see
+  `body-layer/tests/test_cross_channel_fusion.py` for the fixture that surfaced this.
 
 ## Deferred
 
@@ -414,3 +488,8 @@ Full sequence lives in `world-model/ROADMAP.md` (M0 through M9, World Model side
   - **Attention/scan state**: focus can be on a specific target, a specific direction/sector, or a full-visibility scan; state needs to persist and drive which optical mode is "active" for perception-source gating.
   - **Scanning loop logic**, e.g.: wide peripheral scan → focus on something interesting → classify → binoculars for ID/detail → classify → return to wide scan; interrupted periodically by a full-area sweep for emergent threats even while working a directed search (pilot-requested sector, or mission brief expected-threat direction/clock bearing) — loop back to the priority sector afterward.
   - Why this matters for what's already built: `NakedEyePerceptionSource`'s FOV/angular-size/LOS gating (PB-1.5) and BL-2's belief layer both currently treat "can Petrovich see it" as a single binary gate, not as a function of current attention mode/direction — this milestone would change what feeds `Percept`/`Observation` in the first place, upstream of everything BL-2 built. Not a BL-2 change; a future perception-layer milestone, likely well after BL-4 (attention/relevance policy, which currently only has the bare `watch`/`unwatch` enum from PB-2 Stage 4 to build on).
+
+- **Persistent omniscient mission-memory store, upstream of perception filtering — REJECTED 2026-09-10, user decision.** Raised 2026-09-09 during BL-2.6 work; planned on `feature/omniscient-mission-memory` (Architect recommended defer — no concrete downstream consumer through BL-7 needs ground-truth continuity, and `object_id` stability across polls is not live-confirmed — see `plans/omniscient-mission-memory/plan.md`, never merged). User rejected outright rather than deferring, after a follow-up performance angle (avoid DCS LOS queries via a coarse world-model precheck) turned out to rest on a false premise: `line_of_sight_clear` (`body-layer/src/perception/geometry.py`) already samples world-model's *local* elevation grid, not a live DCS call, so there is no DCS-query cost to save. Do not revive without a new concrete trigger. Proposed pipeline (for the record): `all world objects (LoGetWorldObjects poll) → omniscient mission memory (persistent, diffed over time) → distance/LOS filtering → detection logic → body-layer belief (non-omniscient)`.
+  - **What's new vs. today.** Today's shape is already close: aircraft-layer's `/world_objects/latest` *is* the omniscient-truth poll, and `naked_eye_source.py`/`hybrid_source.py` *are* the distance/LOS filter feeding non-omniscient `belief/contacts.py`. What's missing is **persistence of the omniscient side** — today each poll is a stateless snapshot, re-filtered from scratch every tick, with no memory of what changed since last poll or where an object was before. A store that tracks all real objects over time (not just current snapshot) enables cheap change-detection (diff instead of full re-filter), continuity questions ("did this object move/die since I last had ground truth on it"), and any future feature needing DCS-ground-truth history rather than an instantaneous cross-section.
+  - **Architectural placement: aircraft-layer, not body-layer.** This store holds ground truth, not perceived/interpreted belief — it must not live inside `body-layer/src/belief/`, whose whole definition is Petrovich's *non-omniscient* belief state (see root CLAUDE.md's "code owns truth, models own interpretation" principle and body-layer's own CLAUDE.md). aircraft-layer already owns the DCS I/O pipeline (Export.lua → Windows collector → LAN API) and is where the poll originates, so the natural home is an extension of that pipeline: aircraft-layer maintains the persistent/diffed object store and exposes it (e.g. a richer endpoint alongside or replacing `/world_objects/latest`), while body-layer's perception sources keep consuming it exactly as they consume the poll today. This preserves the existing aircraft-layer ↔ body-layer HTTP/JSON boundary (see root CLAUDE.md "Module independence" — no new in-process coupling) and keeps body-layer's filter/detection logic itself unchanged; only what it reads from upstream gets richer.
+  - Not scoped or sequenced yet — no dependency check against BL-3/BL-4/BL-5 done. Revisit once a concrete downstream need (performance under `NAKED_EYE_MAX_NEW_PER_POLL`-style volume, or a continuity/history feature) makes the current stateless-poll shape a real bottleneck rather than a theoretical one — user decides when, per the M9-deferral precedent above.

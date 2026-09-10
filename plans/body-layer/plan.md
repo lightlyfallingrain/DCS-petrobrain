@@ -799,6 +799,58 @@ aircraft-layer and Mission-Interpreter work, not body's.
   tier — dev/test instrumentation that also lays the transport BL-10's SRS text fallback reuses.
   See `plans/dcs-text-panel-output/plan.md`.
 
+- **BL-2.6 — Classification refinement** *(interim, no PB- equivalent)*
+  Inserted between BL-2.5 and BL-3 by user decision, 2026-09-09. Replaces BL-2's last-writer-wins
+  classification with a four-level specificity lattice (`unknown` -> `presence` -> `class` -> `type`,
+  `belief.classification.SpecificityLevel`) and a fold rule (`fold_classification`) that makes
+  identity refine monotonically instead of oscillating: a higher-level, parent-consistent claim
+  refines; the same level/value reinforces; a **lower level holds** rather than overwriting (the
+  actual oscillation fix); a same-or-higher-level, resolvable, incompatible claim contradicts,
+  collapsing to the deepest common ancestor and starting a 30 s re-promotion lockout. Fires
+  `CONTACT_CLASSIFICATION_CHANGED` on refinement/contradiction only. Full design:
+  `plans/classification-refinement/plan.md`.
+
+  Four decisions were resolved by the user (2026-09-09), all departing from or confirming the
+  architect's recommendation:
+  1. **Naked-eye reaches `type` at `hires` range, not just `class`** — departs from the architect's
+     cap-at-class recommendation; the `hires` tier now emits `reporting_name_for(object_type)`
+     directly (ground truth), so "Petrovich can never mis-identify, only fail to identify" now
+     applies to the naked-eye channel too, not only the scope channel.
+  2. **The naked-eye gating tier moved `medres` -> `lowres`** (its own commit, separate from the
+     tier-computation mechanism) — widens the detection envelope ~1.86x (~3.5x area) and makes the
+     `presence` level reachable at all.
+  3. **`NAKED_EYE_RANGE_CAP_M` stays `5000`** — accepted as-is, deferred to live tuning data.
+  4. **Classification level stays sticky; only confidence decays**, via `decay.
+     classification_confidence_at` finally consuming `IDENTITY_HALF_LIFE_S` (declared since BL-2,
+     unused until now) — a contact identified as a T-72 two minutes ago becomes less sure of it, he
+     does not revert to "something."
+
+  **Live-acceptance-found bug and fix.** The first live sortie against this milestone (naked-eye
+  only, no scope) surfaced a real duplicate-contact bug unrelated to the fold mechanism itself: a
+  single real object was producing 8-20 `Contact` records. Root cause was in `association_over_
+  time.py`'s spatial gate, not in `classification.py` — the gate budgeted only the incoming
+  percept's own position uncertainty and treated `Contact.last_position` as exact, but naked-eye's
+  clock-bucket requantisation re-anchors to current ownship heading every poll, so a stationary
+  object's implied position can legitimately jump up to a full bucket-width between polls. Fixed by
+  making the gate symmetric (`Contact.last_position_uncertainty_m`, budgeted on both sides). Re-flown
+  and confirmed: correct `something -> class -> type` refinement, one contact per real object, no
+  duplication. Watch-item carried forward, not a blocker: the wider symmetric gate roughly doubles
+  the close-range floor, raising false-merge risk for two distinct real objects at ~300-600 m
+  separation — no fixture exercises that band yet.
+
+  **Absorbs an open BL-2 backlog item**: last-writer-wins certainty/classification fusion (see
+  Backlog in `todo/todo.md`) is resolved by `Contact.classification`'s fold mechanism
+  (`fold_classification`, `plans/classification-refinement/plan.md` §3) — closed as part of this
+  milestone rather than tracked separately.
+
+  **Supersedes part of PB-1.5's published calibration.** PB-1.5's worked range table and its
+  `medres`-default gating tier (`plans/pb1.5-naked-eye-detection/plan.md`, "Angular-radius
+  recognition tier" section) are **historical, not current** as of this milestone — the gate moved
+  to `lowres`, and the naked-eye channel's tier -> classification-level mapping (`hires` -> `type`,
+  `medres` -> `class`, `lowres` -> `presence`) is new. Current defaults and the current worked range
+  table live in `body-layer/src/perception/visibility.py` and this entry. A note pointing here was
+  added at PB-1.5's table itself so a future reader does not treat its numbers as current.
+
 - **BL-3 — World enrichment** *(= PB-3)*
   World-position estimation from bearing/range + terrain, world-model semantic queries, current
   relative geometry recomputation, semantic caching.

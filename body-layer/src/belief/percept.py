@@ -32,10 +32,17 @@ from perception.source import Observation, OwnshipState
 class Percept:
     """One perceived report, stripped of every DCS truth field. Everything
     here is either what a crew member could plausibly have perceived
-    (`classification_raw`, `bearing_deg`, `range_m`) or bookkeeping about
-    the report itself (`t_sim`, `source`, `ownship_at_observation`,
-    `observation_id`) -- never a ground-truth position, object id, or
-    coalition/type field lifted from `LoGetWorldObjects`."""
+    (`classification_raw`, `classification_level`, `bearing_deg`,
+    `range_m`) or bookkeeping about the report itself (`t_sim`, `source`,
+    `ownship_at_observation`, `observation_id`) -- never a ground-truth
+    position, object id, or coalition/type field lifted from
+    `LoGetWorldObjects`.
+
+    `classification_level` carries `perception.source.Observation`'s own
+    field through unchanged (see that field's docstring) -- perceived
+    metadata about how specific the claim is, not a truth field, so it
+    belongs on this side of the boundary same as `classification_raw`
+    itself."""
 
     t_sim: float
     source: str
@@ -44,6 +51,7 @@ class Percept:
     range_m: float
     ownship_at_observation: OwnshipState
     observation_id: str
+    classification_level: int = 2
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -60,4 +68,5 @@ def percept_of(observation: Observation) -> Percept:
         range_m=observation.range_m,
         ownship_at_observation=observation.ownship_at_observation,
         observation_id=observation.id,
+        classification_level=observation.classification_level,
     )

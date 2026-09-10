@@ -25,9 +25,25 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from belief.association_over_time import implied_position, passes_gate
+from belief.association_over_time import (
+    implied_position,
+    passes_gate,
+    uncertainty_radius_m,
+)
+from belief.classification import (
+    CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
+    ClassificationBelief,
+    SpecificityLevel,
+    fold_classification,
+    new_classification_belief,
+)
 from belief.decay import Certainty, certainty_of
-from belief.events import Event, lifecycle_event_kind
+from belief.events import (
+    CONTACT_CLASSIFICATION_CHANGED,
+    Event,
+    classification_event,
+    lifecycle_event_kind,
+)
 from belief.percept import Percept, percept_of
 from perception.geometry import GeoPosition
 from perception.source import Observation
@@ -73,24 +89,65 @@ class Contact:
     contact, never from any earlier one -- there is no fusion or averaging
     across observations.
 
-    `last_emitted_certainty` is Stage 2's addition: the `belief.decay.
-    Certainty` this contact held the last time `ContactStore.tick` computed
-    one for it, `None` until the first `tick()` call after creation. It is
-    written only by `ContactStore.tick` (never by `record`/`ingest`) --
-    `record` updates *what* is known about the contact; `tick` is solely
-    responsible for noticing *when that knowledge's freshness* has crossed a
-    lifecycle boundary. Kept on `Contact` rather than in a side table because
-    it is exactly the "last-emitted state" `events.lifecycle_event_kind`
-    needs compared against, per contact."""
+    `last_position_uncertainty_m` is `last_position`'s own error budget --
+    `belief.association_over_time.uncertainty_radius_m` of whichever percept
+    most recently set `last_position` (the founding percept, or the most
+    recent `record()` call). `association_over_time.spatial_gate_radius_m`
+    sums this with the *incoming* percept's uncertainty; gating on the
+    incoming side alone silently treated `last_position` as exact, which it
+    is not -- see that module's docstring for the live duplication bug this
+    fixes (2026-09-09).
+
+    `classification` is `plans/classification-refinement/plan.md` Stage 2's
+    addition: the contact's *folded* best classification claim (`belief.
+    classification.ClassificationBelief`), monotone non-decreasing in
+    specificity except on contradiction -- see that module's docstring for
+    the fold rule. Unlike `last_position`/`last_class_raw`, `record` does
+    not simply overwrite this with the incoming percept's claim.
+
+    `last_class_raw` is kept anyway, with its exact original meaning (the
+    most recent percept's raw classification string), because it -- not
+    `classification` -- is `belief.association_over_time`'s gate input: the
+    gate asks "is this new percept compatible with what I last *saw*,"
+    and feeding it the folded best claim would make the gate progressively
+    stricter over a contact's life, eventually rejecting genuine
+    re-observations of a contact whose type was refined once. Everything
+    user-facing (`tools.py`, `console.py`, events) reads `classification`
+    instead. This dual field is a real readability cost, called out here and
+    in `classification.py`'s own docstring.
+
+    `classification_lockout_until_sim` is `fold_classification`'s one piece
+    of per-contact state: set (or refreshed) only when a fold reports a
+    fresh contradiction (`belief.classification.FoldOutcome.contradicted`),
+    read back on every subsequent fold to enforce `belief.classification.
+    CLASSIFICATION_CONTRADICTION_LOCKOUT_S`.
+
+    `last_emitted_certainty` is Stage 2 (of `plans/pb2-contact-memory/
+    plan.md`)'s addition: the `belief.decay.Certainty` this contact held the
+    last time `ContactStore.tick` computed one for it, `None` until the
+    first `tick()` call after creation. It is written only by `ContactStore.
+    tick` (never by `record`/`ingest`) -- `record` updates *what* is known
+    about the contact; `tick` is solely responsible for noticing *when that
+    knowledge's freshness* has crossed a lifecycle boundary. Kept on
+    `Contact` rather than in a side table because it is exactly the
+    "last-emitted state" `events.lifecycle_event_kind` needs compared
+    against, per contact."""
 
     id: str
     last_position: GeoPosition
+    last_position_uncertainty_m: float
     last_class_raw: str
+    classification: ClassificationBelief
     contributing_observation_ids: list[str] = field(default_factory=list)
     first_seen_sim: float = 0.0
     last_seen_sim: float = 0.0
     sighting_spans: list[SightingSpan] = field(default_factory=list)
+    classification_lockout_until_sim: float | None = None
     last_emitted_certainty: Certainty | None = None
+    #: Stage 3's twin of `last_emitted_certainty`, for `belief.events.
+    #: classification_event`'s comparison -- written only by `ContactStore.
+    #: tick`, never by `record`.
+    last_emitted_classification: ClassificationBelief | None = None
     attention: Attention = "normal"
     attention_source: str | None = None
 
@@ -100,7 +157,24 @@ class Contact:
         belongs to this contact (via the gate in `belief.
         association_over_time`, or as this contact's founding observation)."""
         self.last_position = implied_position(percept)
+        self.last_position_uncertainty_m = uncertainty_radius_m(percept)
         self.last_class_raw = percept.classification_raw
+        incoming = new_classification_belief(
+            value=percept.classification_raw,
+            level=SpecificityLevel(percept.classification_level),
+            established_sim=percept.t_sim,
+        )
+        outcome = fold_classification(
+            self.classification,
+            incoming,
+            percept.t_sim,
+            self.classification_lockout_until_sim,
+        )
+        self.classification = outcome.classification
+        if outcome.contradicted:
+            self.classification_lockout_until_sim = (
+                percept.t_sim + CLASSIFICATION_CONTRADICTION_LOCKOUT_S
+            )
         self.contributing_observation_ids.append(percept.observation_id)
         self.last_seen_sim = percept.t_sim
         self._extend_or_open_span(percept)
@@ -123,7 +197,13 @@ class Contact:
         contact = Contact(
             id=contact_id,
             last_position=implied_position(percept),
+            last_position_uncertainty_m=uncertainty_radius_m(percept),
             last_class_raw=percept.classification_raw,
+            classification=new_classification_belief(
+                value=percept.classification_raw,
+                level=SpecificityLevel(percept.classification_level),
+                established_sim=percept.t_sim,
+            ),
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
         )
@@ -204,20 +284,25 @@ class ContactStore:
         return touched
 
     def tick(self, now_sim: float) -> None:
-        """Materialise lifecycle events for every known contact as of
-        `now_sim`. For each contact: compute its current `belief.decay.
-        Certainty`, compare against `last_emitted_certainty` via `belief.
-        events.lifecycle_event_kind`, append the resulting `Event` (if any)
-        to the log, then update `last_emitted_certainty` regardless of
+        """Materialise lifecycle *and* classification events for every
+        known contact as of `now_sim`. For each contact, per event kind:
+        compute its current state, compare against the contact's own
+        last-emitted snapshot of that state, append the resulting `Event`
+        (if any) to the log, then update the snapshot regardless of
         whether an event fired -- the comparison on the *next* `tick()` call
         must be against this call's result, not the last event.
 
+        **Ordering, per contact: lifecycle event first, then classification
+        event** (`plans/classification-refinement/plan.md` Stage 3) -- a
+        `CONTACT_DETECTED` must precede that same contact's first
+        classification refinement, never follow it.
+
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
-        call (no repeated events), since `last_emitted_certainty` is already
-        up to date by then. This is what preserves BL-0's replay
-        determinism: the same recorded stream, ticked at the same sim-times,
-        always produces the same event log."""
+        call (no repeated events), since both snapshots are already up to
+        date by then. This is what preserves BL-0's replay determinism: the
+        same recorded stream, ticked at the same sim-times, always produces
+        the same event log."""
         for contact in self._contacts.values():
             current_certainty = certainty_of(contact, now_sim)
             kind = lifecycle_event_kind(
@@ -234,6 +319,28 @@ class ContactStore:
                     )
                 )
             contact.last_emitted_certainty = current_certainty
+
+            direction = classification_event(
+                contact.last_emitted_classification, contact.classification
+            )
+            if direction is not None:
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=CONTACT_CLASSIFICATION_CHANGED,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                        previous_classification=(
+                            contact.last_emitted_classification.value
+                            if contact.last_emitted_classification is not None
+                            else None
+                        ),
+                        classification=contact.classification.value,
+                        direction=direction,
+                    )
+                )
+            contact.last_emitted_classification = contact.classification
 
     def _new_contact_id(self) -> str:
         self._next_contact_number += 1

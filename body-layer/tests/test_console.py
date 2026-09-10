@@ -61,6 +61,7 @@ def _observation(
     bearing_deg: float = 0.0,
     range_m: float = 1000.0,
     source: str = SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    classification_level: int = 2,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -76,6 +77,7 @@ def _observation(
             x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
         ),
         provenance="test_fixture",
+        classification_level=classification_level,
     )
 
 
@@ -145,7 +147,10 @@ def test_scripted_console_session_over_a_replayed_stream() -> None:
 
     show_output = console.handle_line(f"show {contact_id}", now_sim=0.0)
     assert show_output[0] == contact_id
-    assert "  classification: {'value': 'Ural truck'}" in show_output
+    assert (
+        "  classification: {'value': 'Ural truck', 'level': 'class', 'confidence': 0.6}"
+        in show_output
+    )
     assert "  certainty: observed" in show_output
     assert show_output[-1] == "summary: Ural truck, observed, currently visible."
 
@@ -305,6 +310,51 @@ def test_format_event_for_overlay_uses_describe_contact_summary() -> None:
     assert (
         line
         == f"{contact_id}: CONTACT_DETECTED, Ural truck, observed, currently visible."
+    )
+
+
+def test_format_event_for_overlay_renders_classification_transition() -> None:
+    """`plans/classification-refinement/plan.md` Stage 4: a
+    `CONTACT_CLASSIFICATION_CHANGED` event gets its own transition line,
+    `"<id>: CONTACT_CLASSIFICATION_CHANGED, <previous> -> <current>,
+    <summary>"` -- distinct from the plain `"<id>: <kind>, <summary>"`
+    rendering every other event kind still gets (asserted immediately
+    above)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="T-72",
+                classification_level=3,
+            )
+        ],
+        now_sim=1.0,
+    )
+    store.tick(now_sim=1.0)
+
+    change_event = store.events[-1]
+    assert change_event.kind == "CONTACT_CLASSIFICATION_CHANGED"
+
+    line = format_event_for_overlay(store, change_event, now_sim=1.0)
+
+    contact_id = store.contacts[0].id
+    assert (
+        line == f"{contact_id}: CONTACT_CLASSIFICATION_CHANGED, OP_ARMORED -> T-72, "
+        f"T-72, observed, currently visible."
     )
 
 

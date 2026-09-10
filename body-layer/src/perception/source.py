@@ -110,11 +110,27 @@ class DerivedWorldPosition:
     method: str
 
 
+#: `classification_raw`'s specificity, on `belief.classification.
+#: SpecificityLevel`'s 0-3 scale -- stated here as a bare `int`, not that
+#: enum, because `perception/` must not import `belief/` (production stays
+#: upstream of consumption, per this project's module boundary). `2` is that
+#: enum's `CLASS` value: every existing `Observation` construction site
+#: predates this field and emits a class-level (`OP_*` bucket) claim, so
+#: defaulting here keeps every one of them compiling and behaving exactly as
+#: before (`plans/classification-refinement/plan.md` Stage 2).
+_CLASSIFICATION_LEVEL_CLASS_DEFAULT = 2
+
+
 @dataclass(frozen=True, slots=True)
 class Observation:
     """One tier-independent perception observation -- the return type of
     `PerceptionSource.poll()`. See the module docstring for `contact_id` and
-    `source`'s scope at this stage."""
+    `source`'s scope at this stage.
+
+    `classification_level` is the producing channel's own statement of how
+    specific `classification_raw` is (see `_CLASSIFICATION_LEVEL_CLASS_
+    DEFAULT` above) -- belief code trusts this rather than re-deriving it by
+    parsing `classification_raw`."""
 
     id: str
     contact_id: str | None
@@ -127,6 +143,7 @@ class Observation:
     ownship_at_observation: OwnshipState
     derived_world_position: DerivedWorldPosition | None
     provenance: str
+    classification_level: int = _CLASSIFICATION_LEVEL_CLASS_DEFAULT
 
 
 @runtime_checkable

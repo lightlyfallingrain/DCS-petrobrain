@@ -15,6 +15,7 @@ class-compatibility-is-weak note.
 
 from __future__ import annotations
 
+from belief.classification import SpecificityLevel
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S, POSITION_HALF_LIFE_S, certainty_of
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
@@ -39,6 +40,7 @@ def _observation(
     bearing_deg: float = 0.0,
     range_m: float = 1000.0,
     ownship: OwnshipState | None = None,
+    classification_level: int = 2,
 ) -> Observation:
     """Mirrors `test_contacts.py`'s `_observation` helper. `source` and
     `classification_raw` are the two fields that actually distinguish a
@@ -64,6 +66,7 @@ def _observation(
             x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
         ),
         provenance="test_fixture",
+        classification_level=classification_level,
     )
 
 
@@ -311,6 +314,50 @@ def test_unresolvable_scope_class_text_does_not_block_spatially_close_merge() ->
         SOURCE_PETROVICH_DETECTION_ASSOCIATED,
         SOURCE_NAKED_EYE_VISUAL_FILTERED,
     }
+
+
+# --- 6. Cross-channel classification refinement (BL-2.6 Stage 2) -----------
+
+
+def test_naked_eye_class_then_scope_type_refines_the_contact_classification() -> None:
+    """A real cross-channel refinement sequence
+    (`plans/classification-refinement/plan.md`'s worked example): naked-eye
+    observes a class-level `OP_ARMORED` contact, then the scope channel
+    observes the same spatial contact at type level (`"T-72"`, which
+    `object_model.profile_for` resolves back to `OP_ARMORED`) -- the folded
+    `Contact.classification` must refine to type, not just overwrite
+    `last_class_raw` (which, per `Contact.record`'s own docstring, still
+    just reflects the most recent contributor regardless of the fold)."""
+    store = ContactStore()
+    naked_eye_obs = _observation(
+        obs_id="NAKEDEYE_OBS_1",
+        t_sim=0.0,
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        classification_raw="OP_ARMORED",
+        classification_level=2,
+        bearing_deg=0.0,
+        range_m=1000.0,
+    )
+    scope_obs = _observation(
+        obs_id="HYBRID_OBS_1",
+        t_sim=1.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw="T-72",
+        classification_level=3,
+        bearing_deg=0.0,
+        range_m=1000.0,
+    )
+
+    store.ingest([naked_eye_obs], now_sim=0.0)
+    store.ingest([scope_obs], now_sim=1.0)
+
+    assert len(store.contacts) == 1
+    contact = store.contacts[0]
+    assert contact.classification.level == SpecificityLevel.TYPE
+    assert contact.classification.value == "T-72"
+    # last_class_raw keeps its original meaning -- the most recent
+    # contributor's raw string, not the folded best claim.
+    assert contact.last_class_raw == "T-72"
 
 
 def test_lost_threshold_sanity_bound_for_certainty_fixture() -> None:

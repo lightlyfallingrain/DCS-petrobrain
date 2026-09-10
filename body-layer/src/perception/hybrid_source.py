@@ -190,6 +190,13 @@ class HybridPerceptionSource:
                         if result.ambiguous
                         else "petrovich_indication+world_objects"
                     ),
+                    # Type level (3): HelperAI's indication text is
+                    # type-specific by construction (`"Ural truck"`,
+                    # `"SA-3 launcher"`), never a coarser class guess --
+                    # see `plans/classification-refinement/plan.md`'s design
+                    # section on why this channel is level 3 by channel, not
+                    # by parsing the string.
+                    classification_level=3,
                 )
             )
 

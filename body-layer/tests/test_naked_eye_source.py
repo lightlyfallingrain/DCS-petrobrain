@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from perception import association, visibility
+from perception import association, object_model, visibility
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_PER_POLL,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
@@ -131,6 +131,79 @@ def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
 
     assert len(observations) == 1
     assert observations[0].classification_raw == "OP_INFANTRY"
+
+
+def test_hires_range_candidate_with_a_known_reporting_name_reaches_type_level() -> None:
+    # T-72B: size 7 m, hires threshold = 7 / 0.02 * 4.0 = 1400 m
+    # (`plans/classification-refinement/plan.md` Stage 6). "T-72B" is an
+    # exact entry in the reporting-name table, so this resolves to level 3.
+    world_objects = {
+        "objects": [_world_object(1, "T-72B", lat_deg=1000.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.classification_raw == "T-72B"
+    assert obs.classification_level == 3
+
+
+def test_medres_range_candidate_stays_at_class_level() -> None:
+    # T-72B at 3000 m: beyond the 1400 m hires threshold, still inside the
+    # 3500 m medres threshold and the medres gate -- resolves to class,
+    # unchanged from pre-Stage-6 behaviour.
+    world_objects = {
+        "objects": [_world_object(1, "T-72B", lat_deg=3000.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.classification_raw == "OP_ARMORED"
+    assert obs.classification_level == 2
+
+
+def test_hires_range_candidate_with_no_reporting_name_falls_back_to_class() -> None:
+    # "Infantry" (the bare, generic type used throughout this file's other
+    # fixtures) has no exact entry in the reporting-name table -- only
+    # compound entries like "Infantry AK" do. A close-range look still can't
+    # produce a name Petrovich doesn't have, so this stays at class level
+    # even though the achieved geometric tier is `hires`.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=300.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.classification_raw == "OP_INFANTRY"
+    assert obs.classification_level == 2
+
+
+def test_lowres_range_candidate_reaches_presence_level() -> None:
+    # `plans/classification-refinement/plan.md` Stage 7: the gate moved to
+    # `lowres`, making the presence tier reachable for the first time.
+    # Infantry: medres threshold = 900 m, lowres threshold = 1674.42 m. At
+    # 1600 m the target clears the (now wider) gate but only achieves
+    # `lowres` -- "something is there," ED's only catch-all class, not a
+    # fabricated class guess.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=1600.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.classification_raw == object_model.DEFAULT_OP_CLASS
+    assert obs.classification_level == 1
 
 
 def test_no_visible_candidates_returns_empty() -> None:
