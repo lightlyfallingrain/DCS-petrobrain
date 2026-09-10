@@ -906,6 +906,13 @@ aircraft-layer and Mission-Interpreter work, not body's.
 - **BL-8 — Memory layer interfaces** *(no PB equivalent)*
   Mission-end memory export, campaign/world/player/aircraft memory store interfaces. Deliberately
   last — the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real.
+  **Not pulled forward** (user decision, 2026-09-10) — but every milestone touching the in-mission
+  memory model (`belief/contacts.py`'s `Contact`/`ContactStore`, and anything with a similar shape,
+  e.g. BL-4's `AttentionArea` registry) should keep BL-8's eventual export/persistence boundary in
+  mind: does this field/structure look like something a campaign/world/player/aircraft store would
+  need to read back later, and if so, is it named/shaped in a way that won't need a rewrite for
+  export. Not a design constraint yet, just a standing awareness check — BL-8 itself still waits
+  until BL-2..BL-7 have run for real, per the reasoning above.
 
 - **BL-9 — Debug visualization** *(from the runtime doc's "Debugging and inspectability")*
   Belief-vs-DCS-truth debug view. Arguably should be pulled earlier if BL-2/BL-3 turn out hard to
