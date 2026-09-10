@@ -95,6 +95,7 @@ from typing import Literal, TextIO
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
+from belief.enrichment import EnrichmentContext
 from perception.geometry import open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -189,6 +190,27 @@ class ConsolePerceptionRunner:
     #: no separate URL/CLI argument, `POST /text/push` lives on the exact
     #: aircraft-layer instance `--aircraft-layer-url` already points at.
     overlay_client: AircraftLayerClient | None = None
+    #: BL-3's world-model connection/theatre (`plans/bl3-world-enrichment/
+    #: plan.md` step 6), set once by `_run_console_poll_loop` at the same
+    #: point it already builds `sources` -- both need the same thread-local
+    #: `sqlite3.Connection` (see the Stage 6 fix above), so `enrichment`
+    #: cannot be constructed by `main()` on the main thread either.
+    world_model_conn: sqlite3.Connection | None = None
+    theatre: str | None = None
+    #: Updated every poll (mirrors `last_t_sim`) -- not otherwise consumed
+    #: by this class (`enrichment.ownship` below is the field
+    #: `belief.enrichment.relative_geometry` actually reads), kept for
+    #: parity with `last_t_sim`'s "latest telemetry snapshot" role and any
+    #: future non-enrichment consumer.
+    last_ownship_state: OwnshipState | None = None
+    #: Built lazily on the first poll that has both real telemetry and a
+    #: `world_model_conn`/`theatre` (i.e. always, once `_run_console_poll_
+    #: loop` has set those two), then updated in place every poll after --
+    #: `EnrichmentContext.ownship` is mutable specifically so the same
+    #: `WorldEnrichmentCache` persists across polls (see that dataclass's
+    #: own docstring). `_run_console_repl` reads this field fresh before
+    #: every console command.
+    enrichment: EnrichmentContext | None = None
 
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -217,6 +239,14 @@ class ConsolePerceptionRunner:
         if telemetry is None:
             return []
         ownship = OwnshipState.from_telemetry_dict(telemetry)
+        self.last_ownship_state = ownship
+        if self.world_model_conn is not None and self.theatre is not None:
+            if self.enrichment is None:
+                self.enrichment = EnrichmentContext(
+                    conn=self.world_model_conn, theatre=self.theatre, ownship=ownship
+                )
+            else:
+                self.enrichment.ownship = ownship
         observations = [
             observation
             for source in self.sources
@@ -229,7 +259,9 @@ class ConsolePerceptionRunner:
         if self.overlay_client is not None:
             new_events = self.store.events[events_before:]
             for event in new_events:
-                text = format_event_for_overlay(self.store, event, ownship.t_sim)
+                text = format_event_for_overlay(
+                    self.store, event, ownship.t_sim, self.enrichment
+                )
                 try:
                     self.overlay_client.push_text_line(text)
                 except AircraftLayerError:
@@ -293,6 +325,11 @@ def _run_console_poll_loop(
         runner.sources = _build_sources(
             aircraft_client, theatre, world_model_conn, emit_mode="every_poll"
         )
+        # BL-3: same thread-affinity reasoning as `sources` above -- the
+        # `EnrichmentContext` `run_once` lazily builds needs this same
+        # connection, so it must be handed the connection, not build its own.
+        runner.world_model_conn = world_model_conn
+        runner.theatre = theatre
         while not stop_event.is_set():
             runner.run_once()
             stop_event.wait(poll_interval_s)
@@ -307,10 +344,19 @@ def _run_console_repl(runner: ConsolePerceptionRunner, console: Console) -> None
     `last_t_sim` is `None` and commands run against `now_sim=0.0` -- an
     empty store either way, so this only affects how an immediately-typed
     command's (nonexistent) elapsed-time fields would read, not correctness.
+
+    Also syncs `console.enrichment` from `runner.enrichment` before every
+    command (BL-3) -- `runner.enrichment` is built lazily on the poll
+    thread's first successful poll (`ConsolePerceptionRunner.run_once`), so
+    it is still `None` for any command typed before that, same
+    "byte-for-byte BL-2" degradation `belief.tools`'/`belief.console`'s own
+    `enrichment=None` default already guarantees.
+
     Exits on EOF (e.g. Ctrl-D) or `KeyboardInterrupt`."""
     try:
         for line in sys.stdin:
             now_sim = runner.last_t_sim if runner.last_t_sim is not None else 0.0
+            console.enrichment = runner.enrichment
             console.handle_line(line, now_sim=now_sim)
     except KeyboardInterrupt:
         pass

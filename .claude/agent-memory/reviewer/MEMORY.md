@@ -6,3 +6,4 @@
 - [PB-2 Stage 5 fusion finding](project_pb2_stage5_fusion_finding.md) — certainty/classification confirmed last-writer-wins, tracked in todo.md backlog; PB-2/BL-2 fixture-testable work now complete.
 - [PB-2 review log append-only](project_pb2_review_log_append_only.md) — review.md accumulates per-stage sections; always append (Edit), never Write-overwrite — did this wrong once, recovered via git.
 - [DCS Lua static review technique](project_dcs_lua_static_review_technique.md) — diff unverified Hook/.dlg artifacts against real installed SRS/DCS reference files under $DCS_INSTALL_PATH before calling something "unreviewable."
+- [BL-3 gating placement](project_bl3_gating_placement.md) — belief-side policy knobs must arrive at perception/ functions as plain scalars; grep the perception file for belief imports to check.

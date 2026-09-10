@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import TextIO
 
 from belief.contacts import ContactStore
+from belief.enrichment import EnrichmentContext
 from belief.events import Event
 from belief.tools import (
     ContactFilter,
@@ -65,6 +66,9 @@ _SHOW_FACT_KEYS: tuple[str, ...] = (
     "visible",
     "last_seen_ago_s",
     "position",
+    "relative_now",
+    "semantic",
+    "motion_when_seen",
     "sources",
     "attention",
     "attention_source",
@@ -80,16 +84,28 @@ class Console:
 
     store: ContactStore
     output: TextIO | None = None
+    #: BL-3's addition (`plans/bl3-world-enrichment/plan.md`) -- optional,
+    #: `None` (the default) leaves every command's output byte-for-byte
+    #: BL-2's original, same guard as `belief.tools`' own `enrichment`
+    #: parameter. `logger.ConsolePerceptionRunner` updates this in place
+    #: each poll (`_run_console_repl`), since it is built lazily once
+    #: `run_once` has real ownship telemetry.
+    enrichment: EnrichmentContext | None = None
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
-        lines = _dispatch(self.store, line, now_sim)
+        lines = _dispatch(self.store, line, now_sim, self.enrichment)
         if self.output is not None:
             for formatted in lines:
                 print(formatted, file=self.output)
         return lines
 
 
-def _dispatch(store: ContactStore, line: str, now_sim: float) -> list[str]:
+def _dispatch(
+    store: ContactStore,
+    line: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> list[str]:
     stripped = line.strip()
     if not stripped:
         return []
@@ -98,13 +114,13 @@ def _dispatch(store: ContactStore, line: str, now_sim: float) -> list[str]:
     rest = rest.strip()
 
     if command == "contacts":
-        return _handle_contacts(store, rest, now_sim)
+        return _handle_contacts(store, rest, now_sim, enrichment)
     if command == "show":
-        return _handle_show(store, rest, now_sim)
+        return _handle_show(store, rest, now_sim, enrichment)
     if command == "history":
         return _handle_history(store, rest)
     if command == "find":
-        return _handle_find(store, rest, now_sim)
+        return _handle_find(store, rest, now_sim, enrichment)
     if command == "watch":
         return _handle_watch(store, rest)
     if command == "unwatch":
@@ -114,7 +130,12 @@ def _dispatch(store: ContactStore, line: str, now_sim: float) -> list[str]:
     return [f"unknown command: {command}"]
 
 
-def _handle_contacts(store: ContactStore, rest: str, now_sim: float) -> list[str]:
+def _handle_contacts(
+    store: ContactStore,
+    rest: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None,
+) -> list[str]:
     filter_arg: ContactFilter | None
     if not rest:
         filter_arg = None
@@ -128,16 +149,21 @@ def _handle_contacts(store: ContactStore, rest: str, now_sim: float) -> list[str
         return [
             f"unknown filter: {rest} (expected one of {', '.join(_CONTACT_FILTERS)})"
         ]
-    results = get_contacts(store, now_sim, filter=filter_arg)
+    results = get_contacts(store, now_sim, filter=filter_arg, enrichment=enrichment)
     if not results:
         return ["no contacts"]
     return [_format_contact_line(result) for result in results]
 
 
-def _handle_show(store: ContactStore, rest: str, now_sim: float) -> list[str]:
+def _handle_show(
+    store: ContactStore,
+    rest: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None,
+) -> list[str]:
     if not rest:
         return ["usage: show <id>"]
-    result = describe_contact(store, rest, now_sim)
+    result = describe_contact(store, rest, now_sim, enrichment=enrichment)
     if result is None:
         return [f"no such contact: {rest}"]
     return _format_contact_block(result)
@@ -152,10 +178,15 @@ def _handle_history(store: ContactStore, rest: str) -> list[str]:
     return [_format_history_entry(entry) for entry in entries]
 
 
-def _handle_find(store: ContactStore, rest: str, now_sim: float) -> list[str]:
+def _handle_find(
+    store: ContactStore,
+    rest: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None,
+) -> list[str]:
     if not rest:
         return ["usage: find <text>"]
-    results = find_contact(store, rest, now_sim)
+    results = find_contact(store, rest, now_sim, enrichment=enrichment)
     if not results:
         return [f"no matches for '{rest}'"]
     return [_format_contact_line(result) for result in results]
@@ -201,7 +232,12 @@ def _format_contact_block(result: ContactResult) -> list[str]:
     return lines
 
 
-def format_event_for_overlay(store: ContactStore, event: Event, now_sim: float) -> str:
+def format_event_for_overlay(
+    store: ContactStore,
+    event: Event,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> str:
     """One line for BL-2.5's in-cockpit overlay mirror
     (`logger.ConsolePerceptionRunner`, `plans/dcs-text-panel-output/plan.md`):
     `"<id>: <kind>, <summary>"` for the event's contact, reusing
@@ -222,11 +258,24 @@ def format_event_for_overlay(store: ContactStore, event: Event, now_sim: float) 
     -- should not normally happen, since events are only ever derived from a
     contact that exists at tick time (`belief.contacts.ContactStore.tick`),
     but kept as a defensive fallback rather than an assumption this function
-    bakes in."""
-    result = describe_contact(store, event.contact_id, now_sim)
+    bakes in.
+
+    `enrichment` (BL-3, optional) appends one short semantic fragment --
+    the highest-confidence `belief.enrichment.SemanticFact.text` among
+    `facts["semantic"]`, if any -- to the mirrored line. `None` (the
+    default) is a true no-op: the line is byte-for-byte BL-2.5's original,
+    same overlay-restraint invariant as the rest of this module's optional
+    fields."""
+    result = describe_contact(store, event.contact_id, now_sim, enrichment=enrichment)
     if result is None:
         return f"{event.contact_id}: {event.kind}"
-    return f"{event.contact_id}: {event.kind}, {result['summary']}"
+    line = f"{event.contact_id}: {event.kind}, {result['summary']}"
+    if enrichment is not None:
+        semantic = result["facts"].get("semantic")
+        if isinstance(semantic, list) and semantic:
+            best = max(semantic, key=lambda fact: fact["confidence"])
+            line += f" -- {best['text']}"
+    return line
 
 
 def _format_history_entry(entry: dict[str, object]) -> str:

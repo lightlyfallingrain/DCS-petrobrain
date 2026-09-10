@@ -108,9 +108,13 @@ def project_from_bearing_range(
     percept<->contact matching, not to populate `Observation.
     derived_world_position` (which stays real ground truth from a
     concrete source's own candidate lookup, never this projection).
-    BL-3 replaces this with a terrain-aware estimate once world-model's
-    elevation grid can adjudicate target altitude from range; that
-    correction is out of scope here.
+
+    **Does not change for BL-3** (`plans/bl3-world-enrichment/plan.md`) --
+    `belief.association_over_time`'s gating depends on this function's exact
+    flat behavior and tuned radius constants, so BL-3's terrain-aware
+    estimate lives alongside it instead, as `project_terrain_aware` below,
+    used only for the `position`/`relative_now`/`semantic` fields shown to
+    the brain, never for percept<->contact gating.
     """
     bearing_rad = math.radians(bearing_deg)
     delta_x = range_m * math.cos(bearing_rad)
@@ -118,6 +122,69 @@ def project_from_bearing_range(
     return GeoPosition(
         x=observer.x + delta_x, z=observer.z + delta_z, alt_m=observer.alt_m
     )
+
+
+def project_terrain_aware(
+    conn: sqlite3.Connection,
+    theatre: str,
+    observer: GeoPosition,
+    bearing_deg: float,
+    range_m: float,
+    *,
+    max_iterations: int,
+) -> GeoPosition:
+    """Terrain-aware counterpart to `project_from_bearing_range` above --
+    BL-3 (`plans/bl3-world-enrichment/plan.md` step 1), used only to
+    populate the `position`/`relative_now`/`semantic` fields
+    `belief.enrichment` shows the brain, never for `belief.
+    association_over_time`'s percept<->contact gating (see that function's
+    own docstring for why the two must stay separate).
+
+    A bearing/slant-range pair alone cannot say how much of the range is
+    horizontal vs. vertical -- that split depends on the target's altitude,
+    which this function resolves by treating it as a fixed-point problem:
+    target altitude depends on terrain elevation at the target's horizontal
+    position, which depends on the horizontal/vertical split of the slant
+    range, which depends on target altitude. Starting from the flat
+    assumption (target at observer altitude), each iteration re-derives the
+    horizontal position from the current altitude estimate, samples terrain
+    elevation there (`store.reader.sample_grid`, the same primitive
+    `line_of_sight_clear` above uses, not `describe_position` -- avoids
+    repeating its road/settlement/navaid joins every iteration), and adopts
+    that as the next altitude estimate.
+
+    `max_iterations` is a caller-supplied policy knob, not a module
+    constant -- `belief.enrichment` decides it per contact (single-shot by
+    default, more iterations when the contact is close or watched); this
+    function stays ignorant of that policy, same posture as
+    `perception.object_model`'s `classification_level` on `Observation`.
+
+    Falls back to the flat `project_from_bearing_range` result if
+    `sample_grid` ever returns `None` (elevation data unavailable at the
+    sampled point) -- absence of data must never be papered over with a
+    guessed altitude.
+    """
+    bearing_rad = math.radians(bearing_deg)
+    cos_bearing = math.cos(bearing_rad)
+    sin_bearing = math.sin(bearing_rad)
+
+    target_alt_m = observer.alt_m
+    horizontal_x = observer.x
+    horizontal_z = observer.z
+
+    for _ in range(max(1, max_iterations)):
+        delta_alt_m = target_alt_m - observer.alt_m
+        horizontal_range_m = math.sqrt(
+            max(0.0, range_m * range_m - delta_alt_m * delta_alt_m)
+        )
+        horizontal_x = observer.x + horizontal_range_m * cos_bearing
+        horizontal_z = observer.z + horizontal_range_m * sin_bearing
+        terrain_m = sample_grid(conn, "elevation", horizontal_x, horizontal_z)
+        if terrain_m is None:
+            return project_from_bearing_range(observer, bearing_deg, range_m)
+        target_alt_m = terrain_m
+
+    return GeoPosition(x=horizontal_x, z=horizontal_z, alt_m=target_alt_m)
 
 
 def elevation_at(
