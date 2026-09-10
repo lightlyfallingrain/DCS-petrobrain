@@ -75,12 +75,38 @@ Stage 8's observations).
 
 ## Next steps, in order
 
-1. **Get the user's answers to the four escalated decisions** — at minimum #1 and #2 before
-   Stage 2. #3 and #4 can be deferred until after Stage 8 if the user prefers.
-2. Implementer on Stages 1–4, then Reviewer per AGENTS.md Auto-Advance.
-3. Live acceptance #1 (Stage 5) — needs the user.
-4. Stages 6–7, then live acceptance #2 (Stage 8, required), then 9–10, Reviewer, DoD.
-5. Merge on user approval.
+1. ~~Get the user's answers to the four escalated decisions~~ **Done 2026-09-09** — all four
+   resolved, see above.
+2. ~~Implementer on Stages 1–4, then Reviewer~~ **Done** — approved, zero required fixes.
+3. ~~Stages 6–7~~ **Done** — approved, zero required fixes.
+4. **Live acceptance (Stages 5+8 combined) — done, passed, live bug found and fixed.** First
+   live session (naked-eye only, no scope) surfaced a real duplicate-contact bug: a single real
+   T-90A (plus five other real objects — BMD-1, BTR-60, and infantry/civilian units) produced
+   8–20 `Contact` records instead of one. Root cause: `association_over_time.py`'s spatial gate
+   budgeted only the incoming percept's own uncertainty, treating `Contact.last_position` as
+   exact — `naked_eye_source`'s clock-bucket requantisation re-anchors to current ownship heading
+   each poll, so a stationary real object's implied position can legitimately jump up to a full
+   bucket-width between polls. Fixed (`7581928`, symmetric two-sided uncertainty budget,
+   `Contact.last_position_uncertainty_m`), reviewed and approved (`3e57e90`) — regression test
+   hand-verified by the Reviewer reverting the fix and reproducing the exact failure. **Re-flown
+   after the fix, confirmed working**: `CONTACT_1` correctly refined
+   `OP_GROUPSOMETHING → OP_TRUCK → Civilian bus` as range closed (two
+   `CONTACT_CLASSIFICATION_CHANGED` events, one contact, no duplication), `CONTACT_2` stayed a
+   distinct separate contact for a distinct real object. User confirmed "looking good" on this
+   session. The classification refinement mechanism itself (Decisions 1/2's whole point) was
+   independently confirmed correct by the user mid-investigation, before the duplication fix
+   landed — the bug was purely spatial-gate association, never a fold/refinement defect.
+   One live-acceptance item carried forward as a watch-item, not a blocker: the wider symmetric
+   gate roughly doubles the close-range floor, raising false-merge risk for two *distinct* real
+   objects at ~300–600m separation (the inverse failure mode) — no fixture exercises that band
+   yet; watch for it if it comes up again live, not a required fix now.
+5. **Stage 9 (tuning) — no changes requested.** User's live feedback was "looking good," no
+   complaints about contact volume, overlay chatter, or the three tier ranges/
+   `NAKED_EYE_RANGE_CAP_M`/`NAKED_EYE_MAX_NEW_PER_POLL`. Treating Stage 9 as a no-op: constants
+   stay as landed in Stages 6–7, documented as such rather than silently skipped.
+6. **Stage 10 (docs) — next.** `body-layer/CLAUDE.md` Structure section, `plans/body-layer/
+   plan.md` §6 (BL-2.6 entry + the PB-1.5-calibration-superseded note), `todo/todo.md` — then
+   Reviewer, then DoD, then merge on user approval.
 
 ## Carry-over from BL-2.5 (merged `a7733f5`)
 
