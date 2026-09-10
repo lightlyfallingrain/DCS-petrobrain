@@ -1,0 +1,295 @@
+# Body Layer — Roadmap
+
+Petrovich's belief-state process: contacts, attention, perception ingestion, the brain-facing API.
+Full architecture/design (scope boundaries, tool-set design, data model, open questions, decisions):
+`plans/body-layer/plan.md` — that doc's §6 "Milestones (BL-x)" describes what each milestone below
+*is*; this file tracks what's actually *done*. PB-x in the descriptions below cross-references
+`docs/concept/PETROBRAIN_RUNTIME.md`'s runtime milestone numbering — BL-x is the body-owned slice
+of it.
+
+## Status
+
+- [x] **BL-0 — Harness and replay.** Body process skeleton, aircraft-layer HTTP client, world-model
+  query client, recorded-stream replay harness (`body-layer/src/replay.py`). Landed as part of PB-1.
+
+- [x] **BL-1 — Observation ingestion (≈ PB-1, done 2026-09-08).** `feature/pb1-perception-logger`.
+  Hybrid HelperAI perception source + association + text logger. Live acceptance on a real Mi-24P
+  sortie with manually-placed ground targets; plausible bearing/range in an ambiguous-candidate
+  scenario (4 clustered Ural trucks). Original two-tier architecture falsified by a live spike and
+  pivoted to a single hybrid implementation (HelperAI text as detection gate, `LoGetWorldObjects`
+  geometry via association). Full history: `plans/pb1-perception-logger/`.
+
+- [x] **PB-1.5 — Naked-eye visual detection channel (done 2026-09-09, no direct BL- number —
+  a perception-tier addition, not contact-memory work).** `feature/pb1.5-naked-eye-detection`. A
+  second, independent perception channel (`NakedEyePerceptionSource`) reporting plausibly-visible
+  ground objects from `LoGetWorldObjects`, gated by FOV + angular-size + terrain-LOS, quantised to
+  ED's own callout vocabulary. A live A/B probe established DCS's ambient contact callout has no
+  Lua-readable companion — the synthetic filter is not a fallback, it's the only implementation.
+  Findings: `aircraft-layer/research/2026-09-09-pb15-ambient-callout-live-probe.md`. One live bug
+  fixed: `LoGetWorldObjects` included the player's own aircraft as a contact
+  (`association.exclude_ownship`, later replaced — see BL-2 Stage -1 below).
+
+- [x] **BL-2 — Contact memory and association (= PB-2, done, merged 2026-09-09).** Persistent
+  contact identities, detected/lost/reacquired, observation-vs-belief split, decay/certainty ladder,
+  cross-channel fusion, a debug console (`belief/console.py`). Stages: **-1** aircraft-layer
+  `is_ownship` flag (replacing the proximity-heuristic exclusion); **0** scope-channel type-namespace
+  repair (`association._type_match_score` resolves DCS type names through `reporting_names` before
+  scoring); **1** belief core (`belief/percept.py`'s `Percept` structurally drops DCS truth fields,
+  `belief/contacts.py`'s `ContactStore`, `belief/association_over_time.py`'s gating); **2**
+  decay/certainty ladder + lifecycle events; **3** `emit_mode` + `--console` wiring; **4**
+  `belief/tools.py`'s `get_contacts`/`describe_contact`/`get_contact_history`/`find_contact`; **5**
+  cross-channel fusion (fixture-validated); **6** live acceptance (a real sortie against
+  `--console`; one real bug found and fixed — `--console`'s poll thread crashed on a
+  main-thread-opened `sqlite3.Connection`, since `sqlite3.Connection` is thread-affine). Core design
+  decision: contact identity is geometric, from perceived attributes only — never `object_id` or any
+  truth field, so Petrovich can confuse two identical trucks (the omniscience CLAUDE.md forbids).
+  Full history: `plans/pb2-contact-memory/`.
+
+- [x] **BL-2.5 — In-cockpit text mirror (interim, no PB- equivalent; done, merged 2026-09-09).**
+  `feature/dcs-text-panel-output`. Mirrors belief lifecycle events into a DCS Hook-state overlay
+  window (`Saved Games/DCS/Scripts/Hooks/`, `AutoScrollText` widget, SRS-pattern loopback UDP),
+  fed via new `POST /text/push` on aircraft-layer, so live sortie testing is readable in-cockpit.
+  Live-verified on a real sortie. Refinement pass: a restyle matching DCS's own `gameMessages.dlg`
+  values was live-tested and **rejected by the user** — "reads worse in cockpit than the titled
+  window despite being factually grounded" — reverted, keeping only the contact-id fix. Lesson:
+  grounding a design in authoritative source values does not guarantee visual acceptance; keep
+  cosmetic and correctness changes in separate commits so a rejected restyle doesn't collateral
+  damage an unrelated fix. Full history: `plans/dcs-text-panel-output/`.
+
+- [x] **BL-2.6 — Classification refinement (interim, no PB- equivalent; done, merged 2026-09-09).**
+  `feature/classification-refinement`. Replaces BL-2's last-writer-wins classification fusion with a
+  four-level specificity lattice (`unknown → presence → class → type`, `belief/classification.py`)
+  and a fold rule so identity refines monotonically instead of oscillating; fires
+  `CONTACT_CLASSIFICATION_CHANGED` on refinement/contradiction only. User decisions departing from
+  the architect's recommendation: naked-eye reaches `type` at close range (not capped at `class`),
+  gating tier moved `medres → lowres`. **Live-acceptance-found bug, fixed**: a single real object
+  was producing 8–20 `Contact` records — the spatial gate budgeted only the incoming percept's own
+  position uncertainty and treated `Contact.last_position` as exact; naked-eye's clock-bucket
+  requantisation re-anchors to current heading every poll, so a stationary object's implied position
+  can jump a full bucket-width between polls. Fixed with a symmetric gate
+  (`Contact.last_position_uncertainty_m`, budgeted both sides). Watch-item carried forward: the
+  wider symmetric gate roughly doubles the close-range floor, raising false-merge risk for two
+  distinct objects at ~300–600 m — this is exactly what the object-permanence fix below closed.
+  Full history: `plans/classification-refinement/`.
+
+- [x] **Object-permanence continuity (no BL- number — a contact-memory refinement in the BL-2/2.6
+  lineage; done, merged 2026-09-10, `c1af0e0`).** `fix/association-gate-ambiguity-runaway`. BL-2.6's
+  symmetric-gate fix reopened a different bug: the wider gate now overlaps between genuinely
+  distinct nearby real objects, and `ContactStore.ingest`'s "never guess-merge" rule had no bound on
+  runaway spawning once that overlap fired (reproduced: 2 stationary objects ~874 m apart, 60 polls
+  → 120 duplicate contacts). Scope grew mid-plan from "zero-gap continuity only" to full object
+  *permanence*, per the user's framing: correlation now fires on any `object_id` match regardless of
+  gap length, subject to a 600 s decay (`OBJECT_ID_MEMORY_S` = `IDENTITY_HALF_LIFE_S`,
+  `object_id_continuity_valid`) — an expired match falls through to the ordinary spatial/class gate
+  exactly like an unresolved one. `association_over_time`'s gate is now the *exception* path
+  (founding observations, non-correlating reacquisitions, expired continuity), not the common case.
+  Both perception sources are in scope (the scope/hybrid channel's earlier exclusion from `object_id`
+  correlation no longer applies). **Live-verified**: masked-gap reacquisition (76 s behind terrain,
+  correctly reacquired under the same contact id) and the original duplication scenario (mixed-unit
+  cluster) no longer runs away. Full history: `plans/contact-duplication-ambiguity-runaway/`.
+
+- [x] **BL-3 — World enrichment (= PB-3, done, merged 2026-09-10, `8df2791`).**
+  `feature/bl3-world-enrichment`. Filled the four still-empty `describe_contact` fields
+  (`position.confidence`, `relative_now`, `semantic`, `motion_when_seen`) without touching BL-2's
+  contact/classification logic. New `belief/enrichment.py`: `SemanticFact` + a placeholder
+  string→numeric confidence table, `semantic_facts_for` (one `query.describe_position` call per
+  contact), `WorldEnrichmentCache` (keyed by `contact_id`, recomputes only when `last_position`
+  changes), `relative_geometry`, `motion_when_seen` (direction from the two most recent distinct
+  implied positions, unsmoothed). `geometry.py` gained `project_terrain_aware` (iterative
+  fixed-point terrain-fit) alongside the existing `project_from_bearing_range`; gating is single-shot
+  by default, iterative only when `range_m ≤ PROJECTION_ITERATIVE_RANGE_M` (placeholder `2000`) or
+  `contact.attention == "watch"`. Fixture-tested only; no live sortie required by plan scope. DoD
+  passed, zero required fixes. **Load-bearing placeholders inherited by BL-4**: the confidence
+  table, unsmoothed motion derivation, position-keyed (not time-keyed) semantic cache staleness —
+  first-guess constants, not tuned. Full history: `plans/bl3-world-enrichment/`.
+
+- [x] **Overlay clock/range summary (small feature riding on BL-3 + BL-2.5; done, merged 2026-09-10,
+  `4ef08bd`).** `feature/overlay-clock-range-summary`. Appends a clock-position/range fragment
+  (`"11 o'clock, 3.0 km."`) to `Contact` summaries via `tools.py`'s `_contact_summary`, rendered
+  whenever `relative_now` is present regardless of visibility. No `console.py` change needed —
+  `format_event_for_overlay` already reads `summary` verbatim, so overlay and console both picked it
+  up automatically. One Reviewer-required fix: a double-punctuation defect from appending onto a
+  string already ending in `.`. No live acceptance needed — judged a pure formatting change over an
+  already-verified field. Full history: `plans/overlay-clock-range-summary/`.
+
+- [x] **BL-4 — Attention and events (= PB-4, done, merged 2026-09-10, `546fa93`).**
+  `feature/bl4-attention-events`. Four-state `Attention` (`ignore`/`normal`/`watch`/`priority`,
+  `belief/attention.py`), `AttentionArea` (center + radius + optional sector) with `area_contains`,
+  `effective_attention` (direct mark vs. area membership, `ignore` always wins), a
+  `CONTACT_ATTENTION_CHANGED` event wired into `ContactStore.tick` with a 15 s per-contact-per-kind
+  cooldown independent of classification's own contradiction lockout. New tools:
+  `set_attention`/`watch_area`/`unwatch_area`/`get_attention_state`/`list_events`
+  (aliases `poll_events`)/`acknowledge_event`; seven new console commands. 333 tests (291→333),
+  Reviewer approved zero required fixes across six independently cross-checked design claims.
+  Console/replay-only scope — live-DCS acceptance deliberately deferred, bundled with BL-5's
+  transport layer per the plan. Design note worth knowing: `effective_attention` stores *effective*
+  (not direct) attention in `last_emitted_attention`, so a contact walking into/out of a watched
+  area fires an event even with no change to its own direct mark — deliberate, flagged as
+  reversible in the plan. Full history: `plans/bl4-attention-events/`.
+
+- [x] **BL-5 — Deterministic tool API (= PB-5, done, merged to main, `288e31d`).**
+  `feature/bl5-tool-api`. Formalizes `belief/tools.py`'s functions into a named, documented,
+  fixed twelve-tool surface (`belief/tool_api.py`'s `TOOL_SET: list[ToolSpec]`) a human can hold a
+  full tactical conversation against by hand, no LLM involved. Nine tools already existed; three
+  net-new: `find_place` (new `world-model/src/query/search.py`'s `find_place_by_name`,
+  case-insensitive substring match over settlements/named places/airfields/navaids,
+  confidence-ranked), `describe_our_position`, `get_situation` (aggregates contact counts,
+  highest-attention contact, unacknowledged event count, position summary — deterministic, no
+  relevance scoring since BL-6 hasn't built one). Three new console commands (`place`, `situation`,
+  `position`). 252 world-model tests (+8), 356 body-layer tests (+23). **One live bug found and
+  fixed**: `situation` crashed on first live run — `sqlite3.ProgrammingError` from BL-3's
+  `ConsolePerceptionRunner.enrichment` holding a poll-thread `sqlite3.Connection` the REPL thread
+  then read (same defect class as BL-2 Stage 6, in a field that fix didn't cover). Fixed: the REPL
+  now lazily builds its own thread-local connection/`EnrichmentContext`. Harvested to NOTES.md:
+  sqlite3 thread-affinity is a recurring defect class in this codebase's polling/REPL architecture.
+  **The tool-set freeze point is the end of BL-7, not BL-5** — §3.3's tool list is the API's
+  intended final shape, delivered incrementally; a brain-layer prototype can start against the BL-5
+  subset now but should expect the surface to grow. Full history: `plans/bl5-tool-api/`.
+
+- [~] **BL-5a — Text-mode crew interaction (precursor to PB-7/PB-8; blocked, not merged).**
+  `feature/bl5a-text-mode-crew-interaction`, cut from `main` before BL-5 merged. Deterministic
+  intent parser, readback/contact-report/urgent-call templates, `handle_player_utterance`, a
+  `crew_console.py` REPL (`--crew-text`). Implemented, tested (367 tests), Reviewer approved zero
+  required fixes, DoD passed (4/4 acceptance criteria demonstrated) — **then** live acceptance
+  testing surfaced a duplicate-contact bug (2 stationary objects ~874 m apart, 60 polls → 120
+  contacts) that the Debugger declined to patch (both mechanisms involved are deliberately-designed
+  invariants) and escalated to Architect, unresolved (`6d7a8d8`, 2026-09-10 18:48). **This is very
+  likely already fixed on `main`**: the object-permanence fix above (`c1af0e0`, merged 20:00 the
+  same day — after BL-5a's bug was found) targets exactly this failure mode and reproduction. BL-5a's
+  branch predates that merge. **Next step: rebase/merge `main` into the branch and re-run live
+  acceptance before re-escalating to Architect** — treat this as re-verification, not a fresh
+  unresolved bug, unless it reproduces again after the merge. Full history:
+  `plans/bl5a-text-mode-crew-interaction/`.
+
+- [ ] **BL-6 — Mission phase and relevance (≈ PB-9's deterministic half).** Not started. Gated on
+  the Mission Interpreter existing, or a hand-written Mission Understanding fixture (fine to use,
+  should not wait on the Interpreter). Adds `get_mission_phase` to the tool API.
+
+- [ ] **BL-7 — Commands and inspect-and-adapt.** Not started. `PendingIntent` lifecycle, aircraft-layer
+  command issuance, outcome verification, retry/escalation. Sensors/detection only — flight control
+  stays deferred. Gated on the aircraft layer's command channel, which needs its own Security plan
+  review. Adds `scan_area`/`get_task_status`/`cancel_task`; this is the tool-set freeze point.
+
+- [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
+  "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
+  Standing awareness note while BL-2..BL-7 touch in-mission memory shapes (`Contact`/`ContactStore`,
+  BL-4's `AttentionArea` registry): keep BL-8's eventual mission-end export/persistence boundary in
+  mind, not as a design constraint yet, just don't shape something in a way that obviously fights it.
+
+- [ ] **BL-9 — Debug visualization.** Not started. Belief-vs-DCS-truth debug view. Arguably worth
+  pulling earlier if BL-2/BL-3 turn out hard to reason about textually.
+
+- [ ] **BL-10 — SRS transport wiring (= PB-7 + PB-8, body's half only).** Not started. Swaps BL-5a's
+  typed/printed stand-ins for the real SRS adapter. The adapter itself (SRS client, ICS channel, PTT
+  debounce, silence gate, STT, TTS) is not body-layer work and needs its own plan and Investigator
+  pass on SRS's interface.
+
+- [x] **Scope-channel type-namespace mismatch, re-verified (closed as a stale backlog item, not
+  new work).** `fix/association-namespace-mismatch`. The fix was already in `main` under BL-2/PB-2
+  Stage 0 (`association._type_match_score` resolves DCS type names through `reporting_names`
+  before scoring); this item had just never been checked off. A 2026-09-10 debugger pass
+  re-measured the four originally-0-scoring real pairs (Slava cruiser, SA-3 launcher, Tarantul III
+  corvette, SA-3 radar) directly against current code — all score nonzero, regression-tested in
+  `test_association.py`/`test_hybrid_source.py`. Still open, not tracked separately: a live re-test
+  against ship/SAM-site contacts specifically (the original PB-1 acceptance test used only Ural
+  trucks, the one case where the two naming vocabularies happen to coincide).
+
+- [x] **Deterministic mock-flight test fixture for the whole aircraft+body+world chain (excluding
+  the brain/LLM). Done, merged 2026-09-10.** Raised after two live-only bugs (the duplicate-contact
+  runaway, the cross-thread sqlite REPL crash) that per-layer fixture/unit tests didn't catch
+  because they only exercise one layer at a time. Built: `tests/support/mock_aircraft_layer.py` (a
+  real loopback HTTP server standing in for aircraft-layer's `/telemetry`, `/world_objects`,
+  `/petrovich_indication` endpoints) + `mock_world_model.py` (synthetic world-model store) +
+  `tests/fixtures/mock_flight_canonical.json` (a canonical 20-frame flight) +
+  `test_mock_flight_chain.py` (4 tests: mock-server frame semantics, LOS-gate wiring,
+  single-threaded full-chain determinism, threaded console/REPL smoke test). Test-only, no `src/`
+  changes; 374/374 passing. **Notable finding:** the harness did not reproduce either bug that
+  originally prompted it — both were already fixed on `main` — so it stands as the regression gate
+  for that bug class going forward, not a repro of a live incident. Generalizes `replay.py`'s
+  narrower single-source pattern up to the aircraft-layer HTTP boundary. Plan: `plans/mock-flight-fixture/`.
+
+## Testing infrastructure
+
+- [x] **Deterministic mock-flight test fixture for the whole aircraft+body+world chain (excluding
+  the brain/LLM) — done, merged 2026-09-10.** Raised by the user, prompted by live-only bugs
+  (duplicate-contact runaway, cross-thread sqlite REPL crash) that fixture/unit tests didn't catch
+  because they only exercised one layer at a time. `body-layer/tests/support/mock_aircraft_layer.py`
+  (a real loopback HTTP server standing in for aircraft-layer's telemetry/world_objects/indication
+  endpoints) + `mock_world_model.py` (synthetic world-model store) +
+  `tests/fixtures/mock_flight_canonical.json` (20-frame canonical flight) +
+  `test_mock_flight_chain.py` (4 tests: server semantics, LOS-gate wiring, single-threaded
+  full-chain determinism, threaded console/REPL smoke test). Test-only, no `src/` changes; 374/374
+  tests pass. **Notable finding**: the harness did not reproduce either bug that prompted it — both
+  were already fixed on `main` by the time it landed — so it stands as the regression gate for that
+  bug class going forward. Generalizes `replay.py` (BL-0)'s narrower pattern up to the aircraft-layer
+  HTTP boundary itself. Full history: `plans/mock-flight-fixture/`.
+
+## Backlog (body-layer)
+
+- [>] **Parked: stop consuming DCS's ambient detection at all, own perception end-to-end.** Raised
+  2026-09-09 after the PB-1.5 live probe showed DCS's ambient callout is unreadable/late/sight-coupled.
+  All four open questions were answered by the user 2026-09-09 (scope channel stays — needed for
+  future acquire/lock/fire gameplay; suppressing DCS's own radio callout text is low-priority,
+  investigate only if resumed; BL-2 is barely affected either way). What's left, once those
+  deferrals are subtracted, is not architectural: reclassify `visibility.py`'s naked-eye filter from
+  "fallback" to "primary mechanism" in the docs, and calibrate its tier/range constants against
+  "if the player can see a unit, Petrovich should too." Calibration needs live sorties, so it's
+  meant to ride along with a milestone that's flying anyway rather than run standalone. **Do not
+  start without the user's instruction.**
+
+- [ ] **Cross-channel contact duplication — continuity maps are per-channel, not shared.** Found
+  2026-09-10 during the object-permanence fix's live acceptance: a real civilian bus was tracked as
+  two separate contacts, one per channel (naked-eye and scope/HelperAI), because each
+  `PerceptionSource` instance keeps its own `object_id → observation_id` continuity map, not a
+  shared cross-channel store, even though the underlying DCS `object_id` namespace is global.
+  Candidate fix: a shared, cross-channel map (owned where — `belief/`? a new shared perception-layer
+  component?). Not investigated or scoped yet.
+
+- [~] **`certainty`/classification fusion is last-writer-wins — classification half resolved by
+  BL-2.6, certainty half still open.** `Contact.classification` no longer overwrites on last-write
+  (BL-2.6's `fold_classification`). `decay.certainty_of` is still a pure function of
+  `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position
+  uncertainty or which channel produced it — a tight naked-eye observation followed by a
+  wider-uncertainty scope observation still fully resets `certainty` to `"observed"`. Reworking into
+  a quality-weighted ladder is a real design question (what "better" means across channels with
+  different uncertainty models), not a quick patch — revisit once real sortie data shows it actually
+  degrading perceived contact quality.
+
+- [ ] **BL-2.5 overlay clips its last line at 420×200.** Root cause: the dynamic-sizing fix was
+  bundled with a since-reverted restyle commit and reverted with it. Candidate fix: re-implement
+  dynamic sizing as an independent commit, separate from any cosmetic change.
+
+- [ ] **BL-2.5 overlay has no dismiss affordance.** Moot while the titled window (with its close
+  button) is in effect. Would matter again if the borderless restyle is ever revisited.
+
+- **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
+  started. Today's channels implicitly assume Petrovich is looking everywhere at once within
+  range/FOV gates. Future design: distinct optical modes (peripheral/naked-eye/binoculars/APS-17,
+  each its own FOV/acuity/movement-tradeoff), an attention/scan state machine, a scanning loop
+  interrupted periodically by a full-area sweep. Would change what feeds `Percept`/`Observation` in
+  the first place, upstream of everything BL-2 built — a future perception-layer milestone, likely
+  well after BL-4.
+
+## Deferred
+
+- **Stop consuming DCS's own detection at all; own perception end-to-end.** Raised 2026-09-09
+  after the PB-1.5 live probe found DCS's ambient callout channel unreadable, late, and
+  sight-coupled — pushing toward treating the naked-eye/`visibility.py` filter as the primary
+  detection mechanism rather than a fallback. All four open questions were answered by the user
+  2026-09-09: callout suppression is a "nice if possible, not a priority" investigation, never
+  done; the scope/HelperAI channel **stays** (needed for future acquire/lock/fire gameplay, which
+  is *why* the association-namespace-mismatch fix mattered); BL-2 was barely affected since it
+  already consumes `Observation`s channel-agnostically. **Parked 2026-09-09, going straight to
+  BL-2 instead** — no architectural decision remained once the four questions were answered, so no
+  Architect pass is needed; what's left is a framing/documentation pass (reclassify `visibility.py`
+  from fallback to primary) plus calibrating tier/range constants against live sorties, better
+  folded into a milestone that's flying anyway than run standalone. Do not start without the
+  user's instruction.
+
+## Rejected
+
+- **Persistent omniscient mission-memory store, upstream of perception filtering — REJECTED
+  2026-09-10.** A performance angle (avoid DCS LOS queries via a coarse world-model precheck) rested
+  on a false premise: `line_of_sight_clear` already samples world-model's *local* elevation grid, not
+  a live DCS call. Do not revive without a new concrete trigger. `plans/omniscient-mission-memory/plan.md`
+  (never merged) has the proposed pipeline for the record.

@@ -20,10 +20,15 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 
 ## Current priority
 
-`todo/todo.md`'s "Current Focus" is the single source of truth for what's done and what's
-next — read it, don't infer status from this file. (Deliberately not restated here: two copies
-of the same fact drift out of sync as milestones complete. Per-subproject backlogs, e.g.
-World Model's own M9/incremental-build backlog, live in that subproject's own ROADMAP.md.)
+Root `ROADMAP.md` is the entry point for what's done and what's next: it gives the cross-subproject
+status and links to each subproject's own `ROADMAP.md` (`world-model/ROADMAP.md`,
+`aircraft-layer/ROADMAP.md`, `body-layer/ROADMAP.md`), which is that subproject's source of truth
+for milestone status, decisions, and backlog — read those, don't infer status from this file.
+`todo/todo.md` no longer duplicates milestone narrative; it only holds items not yet assigned to
+one subproject's roadmap (cross-cutting backlog, session-scoped notes) and User priority tasks.
+(Deliberately not restated here: two copies of the same fact drift out of sync as milestones
+complete — see the roadmap files' own "Keeping this current" note for how that's enforced at merge
+time.)
 
 ## Subprojects
 
@@ -44,14 +49,21 @@ Each major component under this repo may carry its own `<subproject>/CLAUDE.md` 
 
 ## Session Start
 
-1. Read `todo/todo.md`
-2. Identify the next actionable milestone (first non-completed, non-deferred section with open items)
-3. Show that milestone and its subitems to the user
-4. Ask what they want to work on
+1. Read root `ROADMAP.md` for the cross-subproject picture, then the `ROADMAP.md` of whichever
+   subproject looks most active (its Status table row is the pointer).
+2. Read `todo/todo.md` for any User priority tasks and cross-cutting/unscoped backlog items.
+3. Identify the next actionable milestone (first non-done, non-deferred/blocked item in the
+   relevant subproject's roadmap).
+4. Show that milestone and its subitems to the user.
+5. Ask what they want to work on.
 
 ## Milestone Completion
 
-Before marking a milestone done in `world-model/ROADMAP.md`, answer one question in the DoD report or todo.md update: does this milestone's completion change what the next milestone should be, or invalidate an assumption downstream milestones rely on? One line is enough — this is the project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than a calendar.
+Before marking a milestone done in a subproject's `ROADMAP.md` (`world-model/ROADMAP.md`,
+`aircraft-layer/ROADMAP.md`, `body-layer/ROADMAP.md`), answer one question in the DoD report or the
+roadmap update itself: does this milestone's completion change what the next milestone should be,
+or invalidate an assumption downstream milestones rely on? One line is enough — this is the
+project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than a calendar.
 
 ## Verification
 
