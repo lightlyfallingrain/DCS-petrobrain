@@ -15,6 +15,8 @@ from belief.contacts import ContactStore
 from belief.decay import IDENTITY_HALF_LIFE_S, LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
 from belief.tools import (
+    _contact_summary,
+    _format_range_km,
     describe_contact,
     find_contact,
     get_contact_history,
@@ -381,3 +383,75 @@ def test_find_contact_threads_enrichment_through_every_result(
     )
     assert len(results) == 1
     assert "semantic" in results[0]["facts"]
+
+
+# --- overlay clock/range summary fragment ---------------------------------
+
+
+def test_format_range_km_rounds_to_one_decimal() -> None:
+    assert _format_range_km(3000.0) == "3.0 km"
+    assert _format_range_km(400.0) == "0.4 km"
+    assert _format_range_km(3040.0) == "3.0 km"
+    assert _format_range_km(3060.0) == "3.1 km"
+
+
+def test_contact_summary_without_relative_now_is_unchanged() -> None:
+    """`relative_now=None` (the default) must produce byte-for-byte the
+    pre-existing summary shape -- no-enrichment-means-no-change."""
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    assert (
+        _contact_summary(contact, now_sim=0.0)
+        == "Ural truck, observed, currently visible."
+    )
+
+
+def test_contact_summary_with_relative_now_appends_clock_and_range() -> None:
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    relative_now: dict[str, object] = {
+        "bearing_deg": 30.0,
+        "range_m": 3000.0,
+        "clock_position": 11,
+        "relative_alt_m": 0.0,
+    }
+    summary = _contact_summary(contact, now_sim=0.0, relative_now=relative_now)
+    assert summary == "Ural truck, observed, currently visible., 11 o'clock, 3.0 km."
+
+
+def test_contact_summary_appends_fragment_after_being_watched_suffix() -> None:
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    contact.attention = "watch"
+    relative_now: dict[str, object] = {
+        "bearing_deg": 0.0,
+        "range_m": 500.0,
+        "clock_position": 12,
+        "relative_alt_m": 0.0,
+    }
+    summary = _contact_summary(contact, now_sim=0.0, relative_now=relative_now)
+    assert summary == (
+        "Ural truck, observed, currently visible. Being watched., 12 o'clock, 0.5 km."
+    )
+
+
+def test_describe_contact_summary_includes_clock_range_when_enriched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Integration: `describe_contact` threads `facts["relative_now"]`
+    (already computed for `facts` by `_add_enrichment_facts`) into
+    `_contact_summary` without a second `relative_geometry` call."""
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    result = describe_contact(
+        store, contact.id, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+    assert result is not None
+    relative_now = result["facts"]["relative_now"]
+    assert isinstance(relative_now, dict)
+    clock_position = relative_now["clock_position"]
+    range_m = relative_now["range_m"]
+    assert isinstance(range_m, float)
+    assert result["summary"].endswith(
+        f", {clock_position} o'clock, {_format_range_km(range_m)}."
+    )

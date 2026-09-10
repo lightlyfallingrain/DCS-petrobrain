@@ -174,7 +174,20 @@ def _add_enrichment_facts(
         facts["motion_when_seen"] = motion
 
 
-def _contact_summary(contact: Contact, now_sim: float) -> str:
+def _format_range_km(range_m: float) -> str:
+    """`range_m`, formatted for `_contact_summary`'s appended fragment --
+    1 decimal place of kilometres (e.g. `"3.0 km"`, `"0.4 km"`). No existing
+    km-rounding helper exists elsewhere in the codebase to reuse (checked
+    `naked_eye_source.py`'s `_quantise_range_m`, a classification-bucket
+    helper, not a display formatter)."""
+    return f"{range_m / 1000:.1f} km"
+
+
+def _contact_summary(
+    contact: Contact,
+    now_sim: float,
+    relative_now: dict[str, object] | None = None,
+) -> str:
     certainty = certainty_of(contact, now_sim)
     if certainty == "observed":
         recency = "currently visible"
@@ -185,6 +198,11 @@ def _contact_summary(contact: Contact, now_sim: float) -> str:
     summary = f"{classification_value}, {certainty}, {recency}."
     if contact.attention == "watch":
         summary += " Being watched."
+    if relative_now is not None:
+        clock_position = relative_now["clock_position"]
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        summary += f", {clock_position} o'clock, {_format_range_km(range_m)}."
     return summary
 
 
@@ -199,9 +217,12 @@ def _contact_result(
     store: ContactStore,
     enrichment: EnrichmentContext | None = None,
 ) -> ContactResult:
+    facts = _contact_facts(contact, now_sim, store, enrichment)
+    relative_now = facts.get("relative_now")
+    assert relative_now is None or isinstance(relative_now, dict)
     return ContactResult(
-        facts=_contact_facts(contact, now_sim, store, enrichment),
-        summary=_contact_summary(contact, now_sim),
+        facts=facts,
+        summary=_contact_summary(contact, now_sim, relative_now),
         phrasing_hints=_contact_phrasing_hints(contact, now_sim),
     )
 
