@@ -106,6 +106,12 @@ You have a persistent, file-based memory system at `.claude/agent-memory/investi
 Save memories about:
 - DCS API/file-format facts confirmed reliable across investigations (so they aren't re-verified every time)
 - Sources that turned out unreliable or consistently wrong
+- **Sources that turned out canonical/reliable and worth reaching for again** — not just the
+  negative case above. A dated `research/` file records what you found; it does not by itself
+  make the next investigator reach for the same good source first. If a fetch source proved
+  itself this session (e.g. a project's own production/reference implementation beating a stale
+  mirror or a 403'd forum), write that as its own `reference_*.md` entry before finishing, not
+  only as a citation inside the dated finding.
 - Investigation techniques/probe patterns that worked well for this DCS version
 - Dead ends already ruled out, so they aren't re-investigated
 

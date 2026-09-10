@@ -8,6 +8,18 @@ Full architecture/design (scope boundaries, tool-set design, data model, open qu
 of it. Update this file (not `../todo/todo.md`) whenever a body-layer branch merges — see
 `../.claude/skills/merge.md`.
 
+**Live acceptance debt.** A milestone can pass DoD on fixture/console testing alone when its plan
+scopes live-DCS acceptance out deliberately (a real decision, not debt — e.g. BL-3, the overlay
+clock/range summary). This list is for the other kind: a milestone whose live acceptance was
+*deferred*, not waived, and hasn't been confirmed since. Added 2026-09-10 after a retro found this
+caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
+accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
+
+- [ ] **BL-4's attention/events tools** (`set_attention`/`watch_area`/`get_attention_state`/
+  `list_events`/`acknowledge_event`) — live acceptance deliberately deferred, "bundled with BL-5's
+  transport layer" per the BL-4 plan. BL-5's own live sortie exercised `place`/`position`/
+  `situation`, not these — unclear whether BL-4's tools have had a live run at all yet.
+
 ## Status
 
 - [x] **BL-0 — Harness and replay.** Body process skeleton, aircraft-layer HTTP client, world-model

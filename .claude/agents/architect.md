@@ -44,6 +44,18 @@ When asked to plan a feature or resolve a design question:
 1. **Understand the goal** — restate it in one sentence to confirm your understanding
 2. **Identify unverified DCS-internals dependencies** — if the plan depends on DCS file formats, coordinate/projection behavior, scripting-API availability, or any other claim not already confirmed in `world-model/research/`, invoke the `investigator` agent to resolve it **before** finalizing the plan. Do this proactively — do not wait for the user to ask, and do not plan around an assumption you could instead verify. Skip this step only when the relevant fact is already recorded in `world-model/research/` or `docs/concept/`.
 3. **Identify affected modules** — list every module/file that will change or be created
+3a. **Before designing new behavior, systematically investigate existing mechanisms governing
+    the same concept.** Read the module(s) the plan touches for constants, fields, or logic that
+    already govern the thing being designed — don't rely on what the plan's own framing assumes
+    is missing. This is not limited to decay/expiry: object-permanence (2026-09-10) needed three
+    same-day plan revisions because `IDENTITY_HALF_LIFE_S` — sitting in the same file the plan was
+    editing — wasn't checked in pass one; the same root cause (trusting an assumption instead of
+    reading current state) separately cost the Implementer a wasted pass when a doc claimed a
+    function was "already implemented" and a branch was assumed merged when it wasn't. The
+    concrete, most common case: if the plan edits temporal/decayed belief state (anything shaped
+    like `Contact`, a decay ladder, a confidence/certainty field, an expiry or continuity window),
+    grep the relevant module's existing half-life/expiry/cooldown constants (e.g.
+    `body-layer/src/belief/decay.py`) before finalizing the plan, not after the user raises it.
 4. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
 5. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
 6. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
