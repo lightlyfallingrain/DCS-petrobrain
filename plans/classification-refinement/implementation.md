@@ -297,3 +297,86 @@ requirement rather than expanding scope.
 - `mypy body-layer/src` (via `cd body-layer && mypy src`): pass -- 21 source files, no issues
 - `pytest body-layer/tests -q`: pass -- 246 passed (unchanged from the Stage 6-7 checkpoint's
   245 + Stage 8's live-acceptance-fix regression test; no tests added or removed this stage)
+
+---
+
+## Stage 11 (bug fix): implement the missing `classification_confidence_at`
+
+Fixes Stage 10 review's one required finding (`plans/classification-refinement/review.md`,
+Stage 10 review section): `body-layer/CLAUDE.md` and `plans/body-layer/plan.md` §6 both
+described `decay.classification_confidence_at` as consuming `IDENTITY_HALF_LIFE_S` and decaying
+`Contact.classification.confidence`, but across Stages 1-9 no such function was ever written --
+the docs described intended-but-unbuilt behavior as done. Rather than walking the docs back to
+"not built," implemented the missing helper so the docs' existing claims become true, per the
+task's framing ("this was meant to exist and simply fell through the cracks").
+
+**`body-layer/src/belief/decay.py`.** Added `classification_confidence_at(contact, now_sim) ->
+float`, mirroring `certainty_of`'s existing pure-function shape in this module (no ticker, no
+mutation) and the exponential-decay pattern BL-3's `position_confidence` already established on
+`main` (`contact.classification.confidence * 0.5 ** (elapsed_s / IDENTITY_HALF_LIFE_S)`) --
+`main`'s `position_confidence` is not yet on this branch (`feature/classification-refinement`
+branched before BL-3 merged), so it was read directly off `main` via `git show` rather than
+assumed present here. Keys off `contact.classification.established_sim`, not
+`contact.last_seen_sim` -- identity confidence decays from when the classification claim was
+last confirmed (refine/reinforce/collapse), not from when the contact was last observed at all,
+since a `hold` outcome leaves `established_sim` untouched while `last_seen_sim` keeps advancing.
+Elapsed time is clamped to `>= 0`, same as every other function in this module. Updated the
+module docstring's "only two of four half-lives consumed" claim (now three) and
+`IDENTITY_HALF_LIFE_S`'s own doc-comment (removed "not yet consumed").
+
+**`body-layer/src/belief/tools.py`.** `_classification_facts` now takes `now_sim` and returns
+`classification_confidence_at(contact, now_sim)` for `confidence`, instead of reading
+`contact.classification.confidence` raw. `level`/`value` are unchanged -- read straight off the
+held claim, since only confidence decays by design (the plan's Decision 4). `_contact_facts`
+passes `now_sim` through to the (now two-argument) helper. `console.py` needed no change -- it
+never reads `Contact.classification.confidence` directly, only `tools.py`'s already-decayed
+`facts.classification.confidence` via the `show <id>` command's dict rendering.
+
+**`body-layer/src/belief/classification.py`.** Updated the module docstring's closing paragraph,
+which still said decay was "later work this stage does not build" -- now says the stored
+`ClassificationBelief.confidence` is the fold-time placeholder value, and
+`decay.classification_confidence_at` is what decays it for every user-facing reader; this module
+itself still never re-derives or mutates the stored number.
+
+**Docs (`body-layer/CLAUDE.md`, `plans/body-layer/plan.md` §6).** No edits needed -- both files'
+existing text (the thing Stage 10's review flagged as false) already accurately describes the
+now-real function once it exists, so implementing it made the docs true rather than requiring a
+second edit to them.
+
+**`body-layer/run-body.sh`.** Had an uncommitted local `--overlay` flag addition (confirmed via
+`git diff`, matches the review's description exactly). Committed as-is -- it is a legitimate
+small addition (enabling the already-built, tested `--overlay` mirror for live runs), not scratch
+to discard.
+
+### Tests Added
+
+- `tests/test_decay.py`: `test_classification_confidence_is_unchanged_at_zero_elapsed`,
+  `test_classification_confidence_halves_at_the_identity_half_life`,
+  `test_classification_confidence_keeps_falling_well_past_the_half_life`,
+  `test_classification_confidence_keys_off_established_sim_not_last_seen_sim` (the
+  `established_sim`-vs-`last_seen_sim` distinction, using a contact whose `last_seen_sim` is far
+  ahead of its stale classification `established_sim`), `test_classification_confidence_negative_
+  elapsed_time_is_clamped`. `_contact()`'s helper gained an optional
+  `classification_established_sim` parameter (defaults to `last_seen_sim`, matching every
+  existing caller) to support the established_sim-vs-last_seen_sim test without touching any
+  existing test's fixture call.
+- `tests/test_tools.py`:
+  `test_describe_contact_classification_confidence_decays_with_elapsed_time` -- the integration
+  path through `describe_contact`, confirming `facts.classification.confidence` is the decayed
+  number while `level`/`value` are unchanged at the same elapsed time.
+
+### Checks (Stage 11)
+
+- `ruff format --check body-layer/src body-layer/tests`: pass (after `ruff format` reformatted
+  the two edited test files' new multi-line function signatures)
+- `ruff check body-layer/src body-layer/tests`: pass
+- `mypy body-layer/src --strict` (via `cd body-layer && mypy src --strict`): pass, 21 source files
+- `pytest body-layer/tests -q`: pass -- 252 passed (246 baseline + 6 new)
+
+### Notable Discoveries
+
+- `position_confidence` (referenced by this task's brief as "already merged to main") is **not**
+  present on `feature/classification-refinement` -- this branch's merge-base with `main` predates
+  BL-3's merge. Read the real implementation directly off `main` via `git show
+  main:body-layer/src/belief/decay.py` rather than trusting the branch's own state, since the
+  function this task asked to mirror didn't exist locally to read.

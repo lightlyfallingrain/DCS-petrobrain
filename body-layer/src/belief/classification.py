@@ -45,9 +45,14 @@ calibrated figure (the same posture as `association_over_time.py`'s
 `SCOPE_UNCERTAINTY_M`/`GATE_GROWTH_RATE_MPS`): a fixed value per level for a
 newly-observed claim (`_DEFAULT_CONFIDENCE_BY_LEVEL`), nudged toward a
 ceiling on reinforcement, and floored to the lower of the two claims'
-confidences on a collapse. Real calibration (and `belief.decay.
-IDENTITY_HALF_LIFE_S`-driven decay of this confidence over time) is later
-work this stage does not build -- see `decay.py`'s own docstring.
+confidences on a collapse. The number stored here (`ClassificationBelief.
+confidence`) is that placeholder starting/folded value, fixed at fold time
+-- `belief.decay.classification_confidence_at` (`IDENTITY_HALF_LIFE_S`) is
+what decays it over elapsed time for every user-facing reader (`tools.py`'s
+`facts.classification`); this module itself never re-derives or mutates the
+stored value once folded. Real calibration of the constants below remains
+future work -- see `decay.py`'s own docstring for the decay half-life
+itself.
 """
 
 from __future__ import annotations

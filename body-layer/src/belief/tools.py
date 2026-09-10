@@ -49,7 +49,7 @@ from __future__ import annotations
 from typing import Literal, TypedDict
 
 from belief.contacts import Contact, ContactStore
-from belief.decay import Certainty, certainty_of
+from belief.decay import Certainty, certainty_of, classification_confidence_at
 
 #: `phrasing_hints.certainty`'s vocabulary -- deliberately distinct wording
 #: from the internal `belief.decay.Certainty` ladder (`"observed"` etc.),
@@ -86,7 +86,7 @@ def _find_contact(store: ContactStore, contact_id: str) -> Contact | None:
     return None
 
 
-def _classification_facts(contact: Contact) -> dict[str, object]:
+def _classification_facts(contact: Contact, now_sim: float) -> dict[str, object]:
     """`facts.classification`'s shape, moved *toward* `plans/body-layer/
     plan.md` §3.4's specified `{value, confidence}` (this stage adds
     `level` too, since the lattice level is exactly what makes the
@@ -94,12 +94,16 @@ def _classification_facts(contact: Contact) -> dict[str, object]:
     `Contact.classification` (the folded best claim), not
     `last_class_raw` (`plans/classification-refinement/plan.md`'s design
     section: "everything user-facing ... reads `Contact.classification`
-    instead")."""
+    instead"). `confidence` is read through `belief.decay.
+    classification_confidence_at`, not `classification.confidence` raw --
+    the design section's "confidence is free to fall" invariant, decaying
+    over `IDENTITY_HALF_LIFE_S` since the claim's `established_sim`. `level`
+    is read straight off the held claim -- it never decays, by design."""
     classification = contact.classification
     return {
         "value": classification.value,
         "level": classification.level.name.lower(),
-        "confidence": classification.confidence,
+        "confidence": classification_confidence_at(contact, now_sim),
     }
 
 
@@ -107,7 +111,7 @@ def _contact_facts(contact: Contact, now_sim: float) -> dict[str, object]:
     certainty = certainty_of(contact, now_sim)
     facts: dict[str, object] = {
         "id": contact.id,
-        "classification": _classification_facts(contact),
+        "classification": _classification_facts(contact, now_sim),
         "certainty": certainty,
         "visible": certainty == "observed",
         "last_seen_ago_s": round(max(0.0, now_sim - contact.last_seen_sim), 1),

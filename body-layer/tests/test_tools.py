@@ -5,8 +5,10 @@ the plan's absent-not-empty constraint on `facts`."""
 
 from __future__ import annotations
 
+import pytest
+
 from belief.contacts import ContactStore
-from belief.decay import LOST_THRESHOLD_S, OBSERVED_WINDOW_S
+from belief.decay import IDENTITY_HALF_LIFE_S, LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.tools import (
     describe_contact,
     find_contact,
@@ -125,6 +127,28 @@ def test_describe_contact_facts_shape() -> None:
     assert facts["attention"] == "normal"
     assert isinstance(result["summary"], str) and result["summary"]
     assert result["phrasing_hints"] == {"certainty": "current"}
+
+
+def test_describe_contact_classification_confidence_decays_with_elapsed_time() -> None:
+    """`facts.classification.confidence` must be the decayed number
+    (`belief.decay.classification_confidence_at`), not `Contact.
+    classification.confidence` read raw -- the design's "confidence is free
+    to fall" invariant."""
+    store = _store_with_one_contact()
+    contact = store.contacts[0]
+    held_confidence = contact.classification.confidence
+    fresh = describe_contact(store, contact.id, now_sim=0.0)
+    later = describe_contact(store, contact.id, now_sim=IDENTITY_HALF_LIFE_S)
+    assert fresh is not None and later is not None
+    fresh_classification = fresh["facts"]["classification"]
+    later_classification = later["facts"]["classification"]
+    assert isinstance(fresh_classification, dict)
+    assert isinstance(later_classification, dict)
+    assert fresh_classification["confidence"] == held_confidence
+    assert later_classification["confidence"] == pytest.approx(held_confidence / 2.0)
+    # `level`/`value` never decay -- only the confidence number does.
+    assert later_classification["level"] == fresh_classification["level"]
+    assert later_classification["value"] == fresh_classification["value"]
 
 
 def test_describe_contact_facts_never_carry_bl3_scope_keys() -> None:

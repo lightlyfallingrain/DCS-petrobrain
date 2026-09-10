@@ -101,3 +101,101 @@ confirm the duplication is actually gone in a live session (fixtures are a faith
 100%-identical stand-in for real `naked_eye_source` behavior) and to re-form the calibration
 judgment (including the optional refinement above: watch for any *new* under-differentiation
 between close, genuinely distinct real objects) on a now-trustworthy contact count.
+
+---
+
+## Stage 10 (docs) review — commit `168c136`
+
+Scope: documentation only, final stage of BL-2.6 before DoD. Reviewed against
+`plans/classification-refinement/plan.md`, `plans/classification-refinement/session-state.md`,
+and the actual source in `body-layer/src/`.
+
+### Review Summary
+
+Stage 10 touches exactly the four files it should (`body-layer/CLAUDE.md`,
+`plans/body-layer/plan.md` §6, `plans/pb1.5-naked-eye-detection/plan.md`, `todo/todo.md`), plus
+`plans/classification-refinement/implementation.md` (the stage's own log — expected, not scope
+drift). `git show 168c136 --stat` confirms zero `src`/`tests` changes in this commit. Format,
+lint, `mypy --strict`, and `pytest` all pass clean (246/246, matching the branch's expected
+count).
+
+Spot-checked every accuracy claim in the task against the real source:
+
+- `belief/classification.py`'s module docstring, `SpecificityLevel`, `fold_classification`,
+  `PRESENCE_CLASS`, and the re-homed `_op_class_of`/`class_compatibility` all match what
+  `body-layer/CLAUDE.md`'s new entry claims.
+- `naked_eye_source._classification_for_tier` matches the CLAUDE.md description exactly,
+  including the `hires`-miss-falls-back-to-class nuance CLAUDE.md calls out.
+- The `Contact.classification` vs `Contact.last_class_raw` dual-field warning is not a passing
+  mention — CLAUDE.md explains what each field means, why `last_class_raw` must stay the
+  association gate's input (feeding it the folded claim would make the gate monotonically
+  stricter), and flags it in bold as "a real readability cost, not an oversight." This matches
+  the plan's own instruction that both docstrings carry the warning, and `contacts.py`'s
+  in-source docstring (lines ~92, ~119) says the same thing independently.
+  `Contact.last_position_uncertainty_m` is documented in the same entry, correctly attributed to
+  the live-acceptance bug fix rather than folded silently into the classification narrative.
+- PB-1.5 supersession note: placed immediately after PB-1.5's own worked range table (verified —
+  no duplicate of that table exists anywhere in `plans/body-layer/plan.md`, confirmed by grep;
+  §6's BL-2.6 entry has its own prose summary of current tier semantics, not a second copy of
+  PB-1.5's numbers). The note names what superseded it (BL-2.6, gate `medres`->`lowres`,
+  `NAKED_EYE_RANGE_CAP_M`) and where current numbers live (`plans/body-layer/plan.md` §6 and
+  `perception/visibility.py`) — a future reader lands in the right place either way.
+- `todo/todo.md`'s backlog split is honest on the certainty half: `git log`/`git diff` across the
+  whole BL-2.6 commit range (`a7733f5..168c136`) touches `decay.py` in **zero** commits, and
+  `decay.certainty_of` is untouched — confirmed by reading the function directly. The
+  classification half of the claim is also accurate: `Contact.record` now calls
+  `fold_classification` instead of overwriting (`contacts.py`).
+
+### Required Fixes
+
+- **`body-layer/CLAUDE.md`'s `classification.py`/`contacts.py` entries and `plans/body-layer/plan.md`
+  §6's Decision 4 both assert that `decay.classification_confidence_at` now "finally consumes
+  `IDENTITY_HALF_LIFE_S`" and decays `Contact.classification.confidence` over time. This is not
+  true of the shipped code.** `IDENTITY_HALF_LIFE_S` is declared in `decay.py` but its own
+  docstring still says "Not yet consumed (no per-attribute identity confidence field exists on
+  `Contact` yet)" — unchanged by this branch. There is no `classification_confidence_at` function
+  anywhere in `body-layer/src/`, no caller of `IDENTITY_HALF_LIFE_S` outside its own declaration,
+  and no decay-over-time test for `classification.confidence` (`test_decay.py`'s only BL-2.6-era
+  edit is a fixture update to keep `Contact` construction valid, not a new decay test). What
+  actually ships: `ClassificationBelief.confidence` is set once per fold (`_DEFAULT_CONFIDENCE_BY_LEVEL`
+  on refine, nudged toward a ceiling on reinforcement, floored on collapse) and never revisited by
+  elapsed time — `classification.py`'s own module docstring is honest about this ("Real
+  calibration (and `belief.decay.IDENTITY_HALF_LIFE_S`-driven decay of this confidence over time)
+  is later work this stage does not build"). The plan's Affected Modules section scoped this
+  exact helper into `decay.py`, and it silently never landed across Stages 1–9; Stage 10 then
+  documented it as done. This is a documentation-accuracy bug in the file whose entire job is
+  accuracy, and it directly contradicts the in-source docstring next to it — a future reader who
+  trusts CLAUDE.md over the source will believe confidence decay is calibrated and working when it
+  is static. Fix: correct both `body-layer/CLAUDE.md` (the `contacts.py` entry's decay clause and
+  the `classification.py` entry's closing sentence) and `plans/body-layer/plan.md` §6 Decision 4
+  to state that only the *level*-sticky/no-decay half of Decision 4 shipped — confidence is set at
+  fold time and does not currently decay with elapsed time, `IDENTITY_HALF_LIFE_S` remains declared
+  but unconsumed, same status as before this milestone. Either fix the docs to match the code, or
+  (if the omission itself is judged worth closing before DoD) implement the helper — that's a
+  scope decision for the user/architect, not something Reviewer should silently pick.
+
+### Optional Refinements
+
+- `body-layer/run-body.sh` has an uncommitted local change (`+--overlay`) sitting in the working
+  tree, unrelated to Stage 10. Not a docs-accuracy issue and not blocking this review, but worth
+  clearing (commit or discard) before DoD's clean-working-tree check, since it isn't part of any
+  reviewed commit.
+
+### Verdict
+
+**NEEDS REVISION** — one required fix, confined to two documentation files
+(`body-layer/CLAUDE.md`, `plans/body-layer/plan.md` §6). No code changes needed unless the user
+elects to implement the missing decay helper instead of correcting the docs. Everything else in
+Stage 10 — file scope, the dual-field warning, the PB-1.5 supersession placement, the todo.md
+backlog split, and all four verification commands — is accurate and passes clean. Once the
+confidence-decay claim is corrected (or the helper is implemented and then accurately described),
+this stage is ready to re-review and the whole BL-2.6 milestone (Stages 1–10 plus the
+live-acceptance bug fix) is otherwise ready for a full DoD pass.
+
+### Review Confidence
+
+Full read. Read the plan and session-state in full, read the actual diff for all four Stage 10
+files, cross-checked every accuracy claim in the task against the live source (`classification.py`,
+`naked_eye_source.py`, `contacts.py`, `decay.py`, `tools.py`), checked `git log`/`git diff` across
+the entire BL-2.6 commit range for `decay.py` and `test_decay.py`, and ran the full verification
+suite (ruff format, ruff check, mypy --strict, pytest) myself.
