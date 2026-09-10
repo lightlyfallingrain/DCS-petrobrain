@@ -53,3 +53,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [BL-4 attention/events milestone](project_bl4_attention_events.md) — 3-commit split via git stash push --keep-index; effective_attention takes primitives not Contact (circular import); last_emitted_attention stores effective not direct value.
 - [BL-5 tool API stages](project_bl5_tool_api_stages.md) — find_place_by_name + find_place/get_situation/describe_our_position/poll_events + TOOL_SET registry + console wiring, 4 commits.
 - [Verify git log after commit](feedback_verify_git_log_after_commit.md) — a concurrent session in the same checkout can sweep staged files into its own commit or reset the branch; re-check log/status after committing too.
+- [BL-5a text-mode crew interaction](project_bl5a_text_mode_crew.md) — bypass_gate couldn't touch events.py so got its own UrgentCall type; no candidate score (find_contact has no ranking); ATTENTION_CHANGED deliberately silent.

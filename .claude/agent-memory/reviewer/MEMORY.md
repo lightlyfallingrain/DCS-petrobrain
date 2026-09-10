@@ -13,3 +13,4 @@
 - [BL-4 effective attention + worktree recon](project_bl4_effective_attention_and_worktree_recon.md) — last_emitted_attention stores effective not direct (deliberate); belief.attention can't take Contact (circular import); disposable-worktree technique for per-commit test-count reconciliation.
 - [Concurrent-session race verification](project_concurrent_session_race_verification.md) — reflog + empty-diff-across-sweep + recommit-stat check to verify "no content lost" claims; confirmed clean on BL-5.
 - [BL-5 REPL-thread sqlite fix](project_bl5_repl_thread_sqlite_fix.md) — Stage 6 thread-affinity bug class recurred in BL-3's `.enrichment` field; grep any new ConsolePerceptionRunner field for REPL-thread reads of a sqlite3.Connection.
+- [BL-5a UrgentCall pattern](project_bl5a_urgentcall_pattern.md) — UrgentCall separate from Event (closed EventKind Literal); clean at one producer/one dispatch; re-check if BL-7 adds a second producer.
