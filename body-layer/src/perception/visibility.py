@@ -86,12 +86,19 @@ HIRES_ANGULAR_RADIUS_RAD: Final[float] = 0.02
 #: `min_angular_radius` table is visible in one place.
 IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
 
-#: The tier this filter gates on. `medres` over bare `lowres`: this
-#: channel's output includes a coarse class (`object_model.py`'s `op_class`),
-#: which `lowres` alone (bare existence, no class implied) would not
-#: honestly support -- plan's Proposed Defaults section.
-NAKED_EYE_GATING_ANGULAR_RADIUS_RAD: Final[float] = MEDRES_ANGULAR_RADIUS_RAD
-NAKED_EYE_GATING_TIER_NAME: Final[str] = "medres"
+#: The tier this filter gates on. `lowres` over `medres`
+#: (`plans/classification-refinement/plan.md` Stage 7, Decision 2, the
+#: user-approved calibration change): the channel's *output* no longer
+#: needs to honestly support a class claim at the gate itself, because
+#: Stage 6 made classification a computed function of the achieved tier --
+#: a `lowres`-only detection now emits `object_model.DEFAULT_OP_CLASS` at
+#: level 1 (presence, "something is there"), not a fabricated class guess.
+#: This widens the detection envelope ~1.86x range (~3.5x area) and is the
+#: anti-omniscience calibration move: Petrovich now notices more, further
+#: out, and says less about it until it closes. One-line revert: restore
+#: `MEDRES_ANGULAR_RADIUS_RAD` / `"medres"` here.
+NAKED_EYE_GATING_ANGULAR_RADIUS_RAD: Final[float] = LOWRES_ANGULAR_RADIUS_RAD
+NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
 
 #: See the module docstring's binocular premise. Same numeric value as
 #: `HelperAI.lua`'s `extra_eyesight_ratio`, reinterpreted and owned by this

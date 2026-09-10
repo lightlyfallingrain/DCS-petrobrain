@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from perception import association, visibility
+from perception import association, object_model, visibility
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_PER_POLL,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
@@ -184,6 +184,26 @@ def test_hires_range_candidate_with_no_reporting_name_falls_back_to_class() -> N
     obs = observations[0]
     assert obs.classification_raw == "OP_INFANTRY"
     assert obs.classification_level == 2
+
+
+def test_lowres_range_candidate_reaches_presence_level() -> None:
+    # `plans/classification-refinement/plan.md` Stage 7: the gate moved to
+    # `lowres`, making the presence tier reachable for the first time.
+    # Infantry: medres threshold = 900 m, lowres threshold = 1674.42 m. At
+    # 1600 m the target clears the (now wider) gate but only achieves
+    # `lowres` -- "something is there," ED's only catch-all class, not a
+    # fabricated class guess.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=1600.0, lon_deg=0.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    obs = observations[0]
+    assert obs.classification_raw == object_model.DEFAULT_OP_CLASS
+    assert obs.classification_level == 1
 
 
 def test_no_visible_candidates_returns_empty() -> None:
