@@ -347,45 +347,45 @@ end
 local K113_ARG_DOORS = 775   -- STVORKI
 local stage_d_fired = false
 
--- v4: CALIBRATION SWEEP + a fair test of the AI axis.
+-- v5: CHARACTERISE THE CONTROL LAW.
 --
--- Run 3 succeeded and changed the picture:
---   * SetCommand is the verb. performClickableAction is for clickable
---     elements only (it moved ASP-17 Brightness_PM, which has arg 564; the
---     sight axes have no clickable entry at all).
---   * The axes are POSITIONAL, not velocity. SetCommand(3026, 1.0) drove
---     azimuth to its stop in under 0.3s; at the declared h_axis_velocity of
---     rad(20)/s a 60 deg slew would take 3s. So "look at bearing X" is one
---     write, not a closed loop.
---   * The stops are exactly the declared gauge extremes: azimuth reached
---     0.44, elevation -0.75. Run 1's 0.396 was just where manual slewing had
---     got to, not a mechanical limit.
+-- Run 4 settled the big questions and overturned one of my conclusions:
+--   * BOTH the player axes (3025/3026) and the AI axes (3060/3061) move the
+--     sight, bidirectionally, via SetCommand. The AI channel works.
+--   * Full gauge range is reachable: azimuth -0.44..+0.44, elevation
+--     -0.75..+1.0.
+--   * Sign conventions differ: the PLAYER elevation axis is inverted
+--     (cmd -1.0 -> arg +1.0) while the AI elevation axis is not
+--     (cmd +1.0 -> arg +1.0). Azimuth is same-sign on both.
+--   * It is NOT positional. I claimed after run 3 that SetCommand set a
+--     position; run 4 disproves that -- commanded +-0.5 reached ~99% of full
+--     deflection, and covered the range at the same ~50 deg/s as +-1.0. Run
+--     3's instant 0 -> 0.44 was a fast slew into the stop, sampled too
+--     coarsely to see.
 --
--- Run 3's flaw, which was mine: every test commanded 1.0 and nothing reset
--- between tests, so tests 2-5 started already pinned at 0.44 and test 7 at
--- -0.75. They had no room to move, so their "no change" says nothing about
--- the AI axis. v4 fixes that by recentring before each test and by sweeping a
--- range of values rather than one.
+-- So the open question is the control law: given a small command, does the
+-- sight SETTLE at a proportional angle (position, with a slow approach) or
+-- keep moving until it hits a stop (rate)? That decides whether "look at
+-- bearing X" is one write or a closed loop, which is the thing BL-6's
+-- effector design actually hinges on.
 --
--- What v4 produces:
---   1. A value -> argument table for azimuth and elevation, which gives the
---      full mapping and shows whether it is linear.
---   2. A fair AI-axis test, recentred first, in both directions.
+-- Method: from centre, command a SMALL value and sample EVERY FRAME for
+-- several seconds. A trace that ramps then flattens short of the stop is
+-- positional. A trace that keeps climbing to the stop is a rate.
 
-local HOLD = 1.2                       -- seconds to hold each commanded value
-local VALUES = {-1.0, -0.5, 0.0, 0.5, 1.0}
+local HOLD    = 4.0
+local SMALL   = {0.02, 0.05, 0.10, 0.25, -0.10}
+local AX_CMD  = K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS  -- preferred effector
+local AX_ARG  = K113_ARG_AZIMUTH
+local CENTRE_CMD = K113.Command_SIGHT_LEFT_RIGHT_AXIS
 
-local cal = {
+local ch = {
     phase = "setup",
     t_phase = 0,
     step = 0,
-    rows = {},
-    ai = {},
+    samples = {},
+    start_val = nil,
 }
-
-local function k113_angles()
-    return read_arg(K113_ARG_AZIMUTH), read_arg(K113_ARG_ELEVATION)
-end
 
 local function k113_setcmd(cmd, value)
     local dev = try("GetDevice(I9K113)", GetDevice, DEV_I9K113)
@@ -421,38 +421,11 @@ local function k113_set_verified(label, cmd, value, arg, want)
     return ok
 end
 
--- The full script: sweep azimuth values, sweep elevation values, then the
--- recentred AI-axis tests. Each entry is {label, cmd, arg, value}.
-local PLAN = {}
-local function build_plan()
-    for _, v in ipairs(VALUES) do
-        PLAN[#PLAN + 1] = {"AZ", K113.Command_SIGHT_LEFT_RIGHT_AXIS,
-                           K113_ARG_AZIMUTH, v}
-    end
-    for _, v in ipairs(VALUES) do
-        PLAN[#PLAN + 1] = {"EL", K113.Command_SIGHT_UP_DOWN_AXIS,
-                           K113_ARG_ELEVATION, v}
-    end
-    -- AI axis, each preceded by an explicit recentre so it has room to move
-    PLAN[#PLAN + 1] = {"AI_AZ_recentre", K113.Command_SIGHT_LEFT_RIGHT_AXIS,
-                       K113_ARG_AZIMUTH, 0.0}
-    PLAN[#PLAN + 1] = {"AI_AZ+", K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS,
-                       K113_ARG_AZIMUTH, 1.0}
-    PLAN[#PLAN + 1] = {"AI_AZ_recentre2", K113.Command_SIGHT_LEFT_RIGHT_AXIS,
-                       K113_ARG_AZIMUTH, 0.0}
-    PLAN[#PLAN + 1] = {"AI_AZ-", K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS,
-                       K113_ARG_AZIMUTH, -1.0}
-    PLAN[#PLAN + 1] = {"AI_EL_recentre", K113.Command_SIGHT_UP_DOWN_AXIS,
-                       K113_ARG_ELEVATION, 0.0}
-    PLAN[#PLAN + 1] = {"AI_EL+", K113.Command_Intern_SIGHT_UP_DOWN_AI_AXIS,
-                       K113_ARG_ELEVATION, 1.0}
-end
-
 local function stage_e_sight_slew(t)
     if not caps.performClickableAction then return end
 
-    if cal.phase == "setup" then
-        log("--- stage E v4: preparing the 9K113 ---")
+    if ch.phase == "setup" then
+        log("--- stage E v5: preparing the 9K113 ---")
         log("    POWER_PN (885) = " .. tostring(read_arg(885)))
         local doors_ok = k113_set_verified("open sight doors",
                                            K113.Command_STVORKI, 1,
@@ -460,8 +433,8 @@ local function stage_e_sight_slew(t)
         k113_set_verified("observation (NABL)", K113.Command_NABL, 1, 886, 1)
         if not doors_ok then
             log("    !! sight doors shut -- open them in the cockpit. Retrying.")
-            cal.phase = "wait_retry"
-            cal.t_phase = t
+            ch.phase = "wait_retry"
+            ch.t_phase = t
             return
         end
         log("    sight ready. *** DO NOT TOUCH THE SIGHT FROM HERE ON ***")
@@ -470,80 +443,74 @@ local function stage_e_sight_slew(t)
             stage_d_fired = true
             stage_d_petrovich()
         end
-        build_plan()
-        cal.phase = "gyro_wait"
-        cal.t_phase = t
+        ch.phase = "gyro_wait"
+        ch.t_phase = t
 
-    elseif cal.phase == "wait_retry" then
-        if (t - cal.t_phase) > 5.0 then cal.phase = "setup" end
+    elseif ch.phase == "wait_retry" then
+        if (t - ch.t_phase) > 5.0 then ch.phase = "setup" end
 
-    elseif cal.phase == "gyro_wait" then
-        if (t - cal.t_phase) > GYRO_WAIT then
-            log(string.format("--- calibration sweep: %d steps, %.1fs each ---",
-                              #PLAN, HOLD))
-            cal.phase = "next"
-            cal.t_phase = t
+    elseif ch.phase == "gyro_wait" then
+        if (t - ch.t_phase) > GYRO_WAIT then
+            log(string.format(
+                "--- control-law test: %d small commands on cmd %d, %.0fs each ---",
+                #SMALL, AX_CMD, HOLD))
+            log("    ramp-then-flat short of the stop = POSITION")
+            log("    keeps climbing to the stop        = RATE")
+            ch.phase = "centre"
+            ch.t_phase = t
         end
 
-    elseif cal.phase == "next" then
-        cal.step = cal.step + 1
-        local p = PLAN[cal.step]
-        if p == nil then
-            cal.phase = "report"
-            return
-        end
-        cal.start_val = read_arg(p[3])
-        k113_setcmd(p[2], p[4])
-        cal.phase = "holding"
-        cal.t_phase = t
-
-    elseif cal.phase == "holding" then
-        local p = PLAN[cal.step]
-        k113_setcmd(p[2], p[4])           -- re-issue each frame, harmless
-        if (t - cal.t_phase) > HOLD then
-            local v = read_arg(p[3])
-            local moved = (type(v) == "number" and type(cal.start_val) == "number"
-                           and math.abs(v - cal.start_val) > 1e-4)
-            log(string.format("  %-16s cmd %-4d val %+0.2f : arg %d  %s -> %s  %s",
-                p[1], p[2], p[4], p[3], tostring(cal.start_val), tostring(v),
-                moved and "moved" or "-"))
-            cal.rows[#cal.rows + 1] = {p[1], p[4], v, moved}
-            cal.phase = "next"
-            cal.t_phase = t
-        end
-
-    elseif cal.phase == "report" then
-        log("=========================================================")
-        log("CALIBRATION TABLE  (commanded value -> cockpit argument)")
-        for _, r in ipairs(cal.rows) do
-            log(string.format("  %-16s val %+0.2f -> %s%s",
-                r[1], r[2], tostring(r[3]), r[4] and "" or "   (no movement)"))
-        end
-        log("")
-        log("Azimuth stops are +/-60 deg (known), so if the sweep is linear")
-        log("across -0.44..+0.44 then azimuth_deg = arg_874 * 136.36.")
-        log("Elevation stops in DEGREES remain unknown -- this table gives the")
-        log("gauge extremes only; someone must correlate them to real angles.")
-        log("")
-        local ai_moved = false
-        for _, r in ipairs(cal.rows) do
-            if string.sub(r[1], 1, 3) == "AI_" and r[4]
-               and string.find(r[1], "recentre") == nil then
-                ai_moved = true
+    elseif ch.phase == "centre" then
+        k113_setcmd(CENTRE_CMD, 0.0)
+        if (t - ch.t_phase) > 1.5 then
+            ch.step = ch.step + 1
+            if SMALL[ch.step] == nil then
+                ch.phase = "report"
+                return
             end
+            ch.start_val = read_arg(AX_ARG)
+            ch.samples = {}
+            log(string.format("--- command %+0.2f, from arg %s ---",
+                              SMALL[ch.step], tostring(ch.start_val)))
+            ch.phase = "holding"
+            ch.t_phase = t
         end
-        if ai_moved then
-            log("AI AXIS (3060/3061): MOVED the sight when given room.")
-            log("  Prefer it over the player axes as the effector -- it is the")
-            log("  channel the AI itself uses.")
-        else
-            log("AI AXIS (3060/3061): did NOT move the sight even when recentred")
-            log("  first. The player axes (3025/3026) are the working effector.")
-        end
-        log("=========================================================")
-        cal.phase = "done"
 
-    elseif cal.phase == "done" then
+    elseif ch.phase == "holding" then
+        k113_setcmd(AX_CMD, SMALL[ch.step])
+        local v = read_arg(AX_ARG)
+        if type(v) == "number" then
+            ch.samples[#ch.samples + 1] =
+                string.format("%.2f:%+.4f", t - ch.t_phase, v)
+        end
+        if (t - ch.t_phase) > HOLD then
+            k113_setcmd(AX_CMD, 0.0)
+            local final = read_arg(AX_ARG)
+            local n = #ch.samples
+            log(string.format("    ended at %s after %.1fs (%d samples)%s",
+                tostring(final), t - ch.t_phase, n,
+                (type(final) == "number" and math.abs(math.abs(final) - 0.44) < 0.005)
+                    and "   <- AT THE STOP" or ""))
+            local line, step = {}, math.max(1, math.floor(n / 16))
+            for i = 1, n, step do line[#line + 1] = ch.samples[i] end
+            log("      traj: " .. table.concat(line, " "))
+            ch.phase = "centre"
+            ch.t_phase = t
+        end
+
+    elseif ch.phase == "report" then
+        log("=========================================================")
+        log("Read the traces above:")
+        log("  If a small command flattened out part-way, the axis is a")
+        log("  POSITION target and look_at(bearing) is a single write.")
+        log("  If every command ran to +-0.44, it is a RATE and look_at needs")
+        log("  a closed loop against arg 874 -- which is cheap, since the read")
+        log("  side is confirmed working.")
+        log("Either way the effector exists: AI axes 3060/3061 via SetCommand.")
+        log("=========================================================")
+        ch.phase = "done"
+
+    elseif ch.phase == "done" then
     end
 end
 

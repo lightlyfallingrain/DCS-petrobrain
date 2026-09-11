@@ -390,3 +390,88 @@ failure.
 
 Requires **no manual sight input during the sweep** — that is the one thing
 that invalidated run 1.
+
+---
+
+## Live probe runs 3-4 — 2026-09-11 10:13 and 10:19
+
+### CONFIRMED: the 9K113 sight can be slewed from Export.lua
+
+**`SetCommand` is the verb, not `performClickableAction`.** The latter works only
+on controls that have a *clickable element* — it moved ASP-17 `Brightness_PM`
+because that has arg 564, and it does nothing for the sight axes, which appear
+in no `clickabledata.lua` entry and in no `axisCommands` binding.
+
+```lua
+GetDevice(7):SetCommand(3026, 1.0)   -- player azimuth
+GetDevice(7):SetCommand(3061, 1.0)   -- AI azimuth  <- preferred
+```
+
+**Both channels work, bidirectionally** (run 4):
+
+| command | id | result |
+|---|---|---|
+| player azimuth | 3026 | `val -1 → arg -0.44`, `val +1 → arg +0.44` |
+| player elevation | 3025 | `val -1 → arg +1.0`, `val +1 → arg -0.75` — **inverted** |
+| AI azimuth | 3061 | `val +1 → +0.44`, `val -1 → -0.44` |
+| AI elevation | 3060 | `val +1 → arg +1.0` — **not inverted** |
+
+So the **`_AI_AXIS` pair is usable**, and it is the channel the AI itself uses —
+the better effector for this project than driving the player's own axes. Note
+the sign asymmetry: player elevation is inverted relative to the argument, the
+AI elevation axis is not. — **evidence: reproduced-locally, live.**
+
+**Full gauge range is reachable and matches the declared extremes exactly:**
+azimuth `-0.44 .. +0.44`, elevation `-0.75 .. +1.0`. Run 1's `0.396` was simply
+where manual slewing had stopped, not a mechanical limit.
+
+### CORRECTION: the axes are NOT positional
+
+After run 3 this file's author concluded `SetCommand` set a *position*, because
+`SetCommand(3026, 1.0)` reached the stop in under 0.3 s. **Run 4 disproves it:**
+
+```
+val -1.00 -> -0.44000   (linear position map would give -0.44000)  match
+val -0.50 -> -0.41096   (linear position map would give -0.22000)  MISMATCH
+val +0.50 -> +0.43516   (linear position map would give +0.22000)  MISMATCH
+```
+
+Commanded ±0.5 reaches ~99 % of full deflection, and covers the range at the
+same ~50 °/s as ±1.0. Run 3's apparently instant jump was a fast slew into the
+stop, sampled too coarsely (11 thinned points over 3 s) to see the transit.
+
+**Consequence for BL-6:** `look_at(bearing)` is most likely a **closed loop** —
+command a rate, watch arg 874, stop on arrival — not a single write. That is
+cheap to build because the read side is confirmed working, but it is a real
+design constraint and the opposite of what run 3 suggested. Run 5 settles
+position-vs-rate directly with per-frame traces under small commands.
+
+### Calibration status
+
+- **Azimuth: solved.** Gauge `±0.44` ↔ `±60°` (limits user-supplied), so
+  `azimuth_deg = arg_874 × 136.36`. Linearity of the *argument* against real
+  angle is still assumed rather than measured — only the endpoints are pinned.
+- **Elevation: gauge extremes known** (`-0.75 .. +1.0`), **degrees still
+  unknown.** The asymmetry matches the piecewise gauge declaration.
+
+### Method faults worth remembering
+
+Three probe versions produced no usable data, none of them DCS's fault:
+
+1. **v2** aborted each sweep after 0.2 s — a settle detector that fired before
+   motion began.
+2. **v2/v3** used `performClickableAction`, the wrong verb for a non-clickable
+   axis.
+3. **v3** commanded `1.0` in every test and never reset between them, so after
+   test 1 pinned the axis at `0.44`, tests 2-5 had nowhere to move and their
+   "no change" was meaningless — which is what made the AI axis look dead when
+   it was simply already at the commanded extreme.
+
+Plus one environmental precondition supplied by the pilot: the sight needs
+**~10 s of gyro spin-up after the doors open** before it will slew at all, and
+there is no Lua-readable readiness signal to gate on (`Ready_9k113` is a mesh
+element with no value; `av9K113::isGyroReady()` is native-only).
+
+**General lesson for live probes here: never conclude "no effect" from a test
+that had no room to produce one, and always sample the trajectory, not just the
+endpoints.**
