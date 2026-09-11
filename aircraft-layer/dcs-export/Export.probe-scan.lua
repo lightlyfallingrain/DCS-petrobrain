@@ -243,6 +243,43 @@ local function slot_offers(slot, expect)
     return (l ~= nil) and (l:find(expect, 1, true) ~= nil)
 end
 
+-- ---------------------------------------------------- page identification
+-- The pilot's observation, which explains run 3's loop: when the contact list
+-- is displayed, Up/Down SCROLL THE LIST instead of operating the wheel. So the
+-- same key means different things depending on the page, and any press must
+-- know which page is up.
+--   search page : centre shows SRCH...   Up/Down are wheel actions
+--   target page : centre shows MARK TGT  Up/Down are PREV/NEXT TGT (scroll)
+local function page_kind()
+    local v = wheel_slots()
+    if v == nil then return "closed" end
+    local c = (v["wheel_text_center"] or ""):upper()
+    if c:find("SRCH", 1, true) then return "search" end
+    if c:find("MARK", 1, true) then return "target" end
+    local d = (v["wheel_text_down"] or ""):upper()
+    if d:find("NEXT TGT", 1, true) then return "target" end
+    if d:find("CM ", 1, true) or (v["wheel_text_left"] or ""):upper():find("CLOSE CM", 1, true) then
+        return "cm"
+    end
+    return "other"
+end
+
+-- Dump indicator 6 RAW whenever it changes. The scan probes only ever ran the
+-- parser over it and reported "no contacts", which was indistinguishable from
+-- "the parser does not match this layout". The parser has since been verified
+-- correct against the working detection-run text, so an empty result now means
+-- the indicator really is empty -- but only a raw dump proves that, so dump it.
+local last_ind6 = nil
+local function dump_ind6_if_changed(t)
+    local raw = tostring(try("li6raw", list_indication, IND_HAI))
+    if raw == last_ind6 then return end
+    last_ind6 = raw
+    log(string.format("  ### t=%.0f indicator 6 RAW changed [%d bytes] page=%s",
+                      t, #raw, page_kind()))
+    if #raw > 2500 then raw = raw:sub(1, 2500) .. "\n...<truncated>" end
+    log(raw)
+end
+
 local function contacts()
     local s = tostring(try("li6", list_indication, IND_HAI))
     local names, cur = {}, nil
@@ -334,26 +371,6 @@ end
 -- Make sure we are on the root/search page: if a SRCH option is visible we are.
 local function on_search_page() return (on_search_page_v()) end
 
--- ---------------------------------------------------- page identification
--- The pilot's observation, which explains run 3's loop: when the contact list
--- is displayed, Up/Down SCROLL THE LIST instead of operating the wheel. So the
--- same key means different things depending on the page, and any press must
--- know which page is up.
---   search page : centre shows SRCH...   Up/Down are wheel actions
---   target page : centre shows MARK TGT  Up/Down are PREV/NEXT TGT (scroll)
-local function page_kind()
-    local v = wheel_slots()
-    if v == nil then return "closed" end
-    local c = (v["wheel_text_center"] or ""):upper()
-    if c:find("SRCH", 1, true) then return "search" end
-    if c:find("MARK", 1, true) then return "target" end
-    local d = (v["wheel_text_down"] or ""):upper()
-    if d:find("NEXT TGT", 1, true) then return "target" end
-    if d:find("CM ", 1, true) or (v["wheel_text_left"] or ""):upper():find("CLOSE CM", 1, true) then
-        return "cm"
-    end
-    return "other"
-end
 
 -- ======================================================= LIST ENUMERATION
 -- Requested 2026-09-11: when a group is bigger than the five visible rows, can
@@ -363,7 +380,8 @@ end
 local SLOT_NEXT_TGT = "wheel_text_down"    -- on the TARGET page
 local SLOT_PREV_TGT = "wheel_text_up"
 
-local L = {phase="idle", t=0, steps=0, seen={}, order={}, last_rows=nil, done=false}
+local L = {phase="idle", t=0, steps=0, seen={}, order={}, last_rows=nil,
+           rowsets={}, done=false}
 
 local function record_rows(why)
     local c = contacts()
@@ -389,9 +407,10 @@ local function list_enumerate(t)
         if page_kind() ~= "target" then return true end   -- nothing to do
         log("")
         log("========== LIST ENUMERATION (target page is up) ==========")
-        L.steps, L.seen, L.order = 0, {}, {}
+        L.steps, L.seen, L.order, L.rowsets = 0, {}, {}, {}
         record_rows("initial")
         L.last_rows = contacts()
+        if L.last_rows then L.rowsets[L.last_rows] = true end
         L.phase = "scroll" ; L.t = t
 
     elseif L.phase == "scroll" then
@@ -405,6 +424,11 @@ local function list_enumerate(t)
             L.phase = "report" ; return false
         end
         L.steps = L.steps + 1
+        -- NEXT TGT's own label never changes when it scrolls, so the generic
+        -- "did the slot label change" effect test reports NO EFFECT every time
+        -- and the attempt cap kills the walk after 3 steps. Reset the counter
+        -- for this press and judge its effect by whether the ROWS moved.
+        attempts[attempt_key(SLOT_NEXT_TGT, "NEXT TGT")] = 0
         if not press_start(SLOT_NEXT_TGT, "NEXT TGT", "scrolling the list") then
             L.phase = "report" ; return false
         end
@@ -415,10 +439,19 @@ local function list_enumerate(t)
         if t - L.t > 0.6 then
             local rows = contacts()
             record_rows("after step " .. L.steps)
-            if rows == L.last_rows then
-                log("    rows unchanged -> end of list (it terminates, does not wrap)")
+            -- CORRECTION (pilot, 2026-09-11): the DISPLAY does not wrap, but
+            -- TRAVERSAL DOES -- pressing down on the last item jumps back to
+            -- the first. So "rows stopped changing" is the wrong terminator;
+            -- it would either never fire or fire on a coincidence. Terminate on
+            -- a REPEAT of a previously seen row-set instead.
+            if rows == nil then
+                log("    no rows readable; stopping")
+                L.phase = "report"
+            elseif L.rowsets[rows] then
+                log("    row-set already seen -> traversal has wrapped; full circle")
                 L.phase = "report"
             else
+                L.rowsets[rows] = true
                 L.last_rows = rows
                 L.phase = "scroll"
             end
@@ -428,7 +461,8 @@ local function list_enumerate(t)
         log(string.format("    ==> enumerated %d distinct entries in %d scroll steps:",
                           #L.order, L.steps))
         for i, v in ipairs(L.order) do log(string.format("        %2d. %s", i, v)) end
-        log("    NOTE: scrolling moved the selection; it is parked at the last entry.")
+        log("    NOTE: scrolling moved the selection. Traversal wraps, so the")
+        log("          selection is wherever the walk stopped, not necessarily home.")
         L.done = true
         L.phase = "idle"
         return true
@@ -568,6 +602,28 @@ local function part_b(t)
         B.phase = "observ" ; B.t = t
 
     elseif B.phase == "observ" then
+        -- The observation toggle repeatedly reported NO EFFECT last run, while
+        -- a CENTRE short press moved OBSERV. OFF -> WAITING cleanly. So prefer
+        -- the centre press to get Petrovich searching, and treat the D-slot
+        -- toggle as a fallback only.
+        if press.active then
+            if press_update(t) then B.phase = "round" ; B.t = t end
+            return
+        end
+        if page_kind() == "search" and slot_offers(SLOT_OBSERV, "OBSERV. OFF")
+           and not slot_offers(SLOT_SEARCH_LOS, "SRCH 9K113") then
+            log("  observation is off; using the centre press to start a search")
+            dev(DEV_HAI, "performClickableAction", CMD.Centre, 1)
+            press.active, press.phase, press.t = true, "hold", t
+            press.cmd, press.hold = CMD.Centre, SHORT_HOLD
+            press.slot, press.label = "wheel_text_center", "CENTRE"
+            press.before_label = slot_label("wheel_text_center")
+            press.took = nil
+            return
+        end
+        B.phase = "observ_old" ; B.t = t
+
+    elseif B.phase == "observ_old" then
         -- run 2 established SRCH 9K113 LOS is only offered once observation is ON.
         -- run 3 then hammered OBSERV. OFF forever because nothing verified the
         -- press; press_start now caps attempts and press_took() reports effect.
@@ -688,6 +744,9 @@ function LuaExportAfterNextFrame()
         log(string.format("  ~ t=%.0f contacts: %s  (state=%s az=%s)",
             t, tostring(c), petro_state(), az_deg()))
     end
+    -- and the raw tree, so an empty parse is never again indistinguishable
+    -- from a parser that does not match the current layout
+    dump_ind6_if_changed(t)
 
     -- the contact list being up is itself an opportunity: enumerate it once
     if page_kind() == "target" and not L.done and not press.active then

@@ -319,13 +319,18 @@ Enumerating the list is therefore not a read-only operation — an important
 constraint for any body-layer code that wants a full picture without
 disturbing the crew.
 
-**Termination is solved: the list is terminated and does not wrap** (pilot,
-2026-09-11). So a scroll loop ends naturally — press `NEXT TGT` until the rows
-stop advancing — rather than needing wrap detection or a visit-set to avoid
-looping forever. It also means the selection ends up parked at the last entry
-rather than back where it started, so anything that scrolls to enumerate should
-either scroll back with `PREV TGT` or accept that it has moved the crew's
-selection.
+**CORRECTED 2026-09-11 (pilot):** the *display* does not wrap, but **traversal
+does** — pressing down on the last item jumps back to the first. An earlier
+version of this note read the pilot's "the list does not wrap" as applying to
+traversal and concluded a scroll loop could terminate on "rows stopped
+changing". That is wrong: with wrapping traversal it would either never fire or
+fire by coincidence.
+
+**The correct terminator is cycle detection**: remember each row-set seen and
+stop when one repeats, meaning the walk has come full circle. The selection
+then sits wherever the walk stopped, not back at the start, so anything that
+enumerates must either walk deliberately back with `PREV TGT` or accept that it
+has moved the crew's selection.
 
 **Untested lead:** the target page's far-left slot reads **`ALL TGTS`**. If
 that expands the view rather than scrolling it, it may give the whole list
@@ -524,3 +529,67 @@ Two of these matter beyond the wheel:
 This also finally retires the 2026-09-11 claim that Petrovich's 21 commands
 contain "no scan command". They contain a labelled attack-point designation, a
 sight-heading turn, and a centre wheel action reaching two search modes.
+
+---
+
+## Scan run 3 — 2026-09-11 11:54 — centre press works, list still unread
+
+### CONFIRMED: the centre button works, and starts a search
+
+```
+[1/2] centre SHORT   (state before: OBSERV. OFF)
+      state OBSERV. OFF -> WAITING   <== CHANGED
+```
+
+`GetDevice(30):performClickableAction(3015, 1/0)` — a short press on
+**AI Wheel - Center** fires the centre option (`SRCH BRST`) and moves Petrovich
+from idle straight into a search, enabling observation on the way. It is a
+better way to start a search than toggling the `OBSERV.` slot, which reported
+`NO EFFECT` on every attempt last run.
+
+**Centre LONG is inconclusive, not negative** — it was pressed while the state
+was already `WAITING`, so a state-based check had nothing to show. Same trap
+that made the AI axes look dead in an earlier run: a test with no room to
+produce a change proves nothing.
+
+The two centre options now parse correctly: `C=SRCH BRST | SRCH FWD`.
+
+### CONFIRMED: `SRCH 9K113 LOS` fires and finds things
+
+```
+press FD="SRCH 9K113"  [LONG press]  search along OUR pinned sight line
+  -> C=MARK TGT  U=PREV TGT  R=SELECT TGT  D=NEXT TGT  L=CLOSE LIST  [took effect]
+```
+
+The far-down long press ran the sight-line search and the wheel switched to the
+target page — i.e. it produced targets to browse. **That is the `scan_area`
+primitive working end to end**: point the sight, ask him to search along it, get
+a target list.
+
+### STILL BROKEN: the contact list never reads
+
+`contacts:` appeared **zero** times across the whole flight, while the pilot
+could see a long list on screen.
+
+The parser is **not** the cause — replaying it against the raw text from the
+working detection run extracts `middle_list_text=T-90A` correctly. So
+`list_indication(6)` really was returning nothing during these runs.
+
+What is missing is evidence of *what* it was returning. Every scan probe ran
+only the parser over indicator 6 and reported "no contacts", which is
+indistinguishable from "the parser does not match this layout". **The probe now
+dumps indicator 6 raw on every change**, so the next run distinguishes the two.
+
+A plausible model, untested: the compact list in indicator 6 accompanies the
+*search* page, and opening the *target* page moves the browsing UI into the
+wheel, emptying indicator 6. That would fit every observation so far — the
+detection run saw contacts with the search page up, and the scan runs saw
+nothing once the target page appeared. The raw dump will settle it.
+
+### Two more probe faults fixed
+
+- **`NEXT TGT`'s label never changes when it scrolls**, so the generic
+  "did the slot label change" effect test reported `NO EFFECT` every time and
+  the attempt cap killed the walk after one step. That is why the pilot had to
+  scroll manually. Scroll presses are now judged by whether the *rows* moved.
+- **Termination assumed a non-wrapping traversal** — corrected above.
