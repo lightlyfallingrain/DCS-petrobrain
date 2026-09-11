@@ -148,3 +148,88 @@ The semantic-fragment selection (`max(semantic, key=lambda fact: fact["confidenc
   unit_type_clock_range_format`, `test_render_contact_report_maps_op_class_to_display_word`) needed
   no changes -- confirms the `_contact_report_text` extraction is a pure refactor with identical
   output for the existing no-enrichment call path, as the addendum's design predicted.
+
+---
+
+## Addendum 2 implementation (2026-09-11): terser crew-text vocabulary
+
+### Files Changed
+- `body-layer/src/belief/speech.py` -- removed `_COALITION_PLACEHOLDER` and its use in
+  `_contact_report_text` (unit type is now the first token, no leading placeholder/space);
+  reworded `_unit_type_display`'s presence/unknown fallbacks from `"ground contact"`/
+  `"unidentified contact"` to `"ground"`/`"contact"`; added `_format_range_km` (rounds to the
+  nearest 0.5 km, no trailing `.0`, `f"{range_km:g}"` for the non-integer case) and
+  `_round_enrichment_fragment` (regex `r"\((\d+)m\)$"` against a `SemanticFact.text` fragment,
+  rounds the captured metres to the nearest 100 and rewrites the parenthetical with a `~` prefix;
+  text with no trailing distance passes through unchanged); both are now called from
+  `_contact_report_text`'s range and semantic-fragment append sites. `_render_lifecycle_text`'s
+  `CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches now call `_contact_report_text` directly with
+  no `f"{contact_id}: "` prefix (removed per this addendum, explicitly overriding Addendum 1's own
+  reasoning). `CONTACT_LOST`'s branch now returns `None` (joins `CONTACT_ATTENTION_CHANGED`'s
+  no-template pattern -- `route_event`'s existing `if text is None: return None` ordering already
+  handles leaving it unacknowledged, no structural change needed there). `CONTACT_CLASSIFICATION_
+  CHANGED`'s branch was rewritten to build `"unit at {clock} o'clock, {range} km is {unit type}."`
+  (or `"unit is {unit type}."` with no `relative_now`) from `result["facts"]["classification"]` via
+  `_unit_type_display`, replacing the old raw-enum `event.classification` string. Module docstring's
+  "Which lifecycle kinds get a template" and "Contact report format" sections rewritten to match;
+  the "Coalition is always UNKNOWN" section replaced with a "No coalition token" section describing
+  the removal and the still-deferred inference backlog item.
+- `body-layer/tests/test_speech.py` -- updated every assertion that expected the id prefix, the
+  `"UNKNOWN"` token, or the old `"ground contact"`/`"unidentified contact"` wording. Split the old
+  `test_route_event_contact_lost_and_reacquired` into
+  `test_route_event_contact_lost_has_no_template_and_is_not_acknowledged` (mirrors the existing
+  `CONTACT_ATTENTION_CHANGED` no-template test's shape) and
+  `test_route_event_contact_reacquired_renders_classification_with_no_id`. Added
+  `test_route_event_classification_changed_speaks_position_and_new_type` (enriched) and
+  `..._omits_range_when_not_enriched`, plus `_store_with_a_classification_change` (a small shared
+  builder: ingest at `classification_level=2`, then a refining observation at `level=3`, mirroring
+  `test_console.py`'s existing `test_format_event_for_overlay_renders_classification_transition`
+  fixture shape). Added `test_format_range_km_rounds_to_nearest_half_km_no_trailing_zero`,
+  `test_format_range_km_boundary_cases`, `test_round_enrichment_fragment_rounds_trailing_distance`,
+  and `..._passes_through_text_without_distance` for the two new rounding helpers, importing them
+  directly (`_format_range_km`, `_round_enrichment_fragment`) since they are private module
+  functions with no public wrapper worth adding just for testability. Extended `_observation`'s
+  fixture with an optional `classification_level` parameter (previously hardcoded to `2`) to build
+  the classification-transition fixtures.
+- `body-layer/tests/test_crew_console.py` -- updated the scripted-session acceptance test's
+  detected/reacquired-line assertions (`"BMP-2."` instead of `f"{contact_id}: UNKNOWN BMP-2."`) and
+  its lost-line assertion (now asserts `drain_events` returns `[]` for the lost tick, instead of
+  checking for a `"{id} lost."` line); updated `test_failed_overlay_push_degrades_...`'s
+  `detected_line` fixture the same way.
+- `body-layer/CLAUDE.md` -- rewrote `speech.py`'s Structure entry to describe the id-less,
+  coalition-less format, `CONTACT_LOST`'s new no-template status, `CONTACT_CLASSIFICATION_CHANGED`'s
+  new position-bearing line, and the two rounding helpers.
+
+### Tests Added
+- `test_route_event_contact_lost_has_no_template_and_is_not_acknowledged` -- `CONTACT_LOST` speaks
+  nothing and stays unacknowledged.
+- `test_route_event_classification_changed_speaks_position_and_new_type` /
+  `..._omits_range_when_not_enriched` -- the new position-bearing classification-changed line, with
+  and without an `EnrichmentContext`.
+- `test_format_range_km_rounds_to_nearest_half_km_no_trailing_zero` /
+  `test_format_range_km_boundary_cases` -- `_format_range_km`'s rounding, including the two exact
+  0.5 km tie-boundary inputs (`1250.0`, `1750.0`) pinned to Python's actual `round()` (ties-to-even)
+  output (`"1"`, `"2"`) rather than a guessed convention.
+- `test_round_enrichment_fragment_rounds_trailing_distance` /
+  `..._passes_through_text_without_distance` -- `_round_enrichment_fragment`'s rounding (including
+  the `450m` tie-boundary, pinned to `"~400m"`) and its no-op pass-through for distance-free text.
+
+### Checks
+(body-layer/)
+- ruff format --check: pass
+- ruff check: pass
+- mypy src (via `cd body-layer && mypy src`): pass, no issues in 29 source files
+- pytest -q: pass, 453 passed
+
+### Notable Discoveries
+- `_format_range_km`/`_round_enrichment_fragment`'s exact tie-boundary values (1250 m, 1750 m,
+  450 m) all land on Python's `round()` ties-to-even behaviour rather than the more intuitive
+  round-half-up; the plan's own risk note flagged this as unspecified, so the boundary tests assert
+  the actual computed values (documented inline) rather than a guessed convention -- worth
+  revisiting if a live-acceptance session finds the tie behaviour surprising in practice (e.g. a
+  contact at exactly 1750 m reads "2 km" while one at exactly 1250 m reads "1 km", not obviously
+  symmetric to a listener).
+- `CONTACT_CLASSIFICATION_CHANGED`'s new line reads `result["facts"]["relative_now"]` for
+  clock/range, which (per `tools.py`'s existing behaviour) is only present when an
+  `EnrichmentContext` is supplied to `route_event` -- confirmed by writing both an enriched and an
+  unenriched test rather than assuming the enriched case always applies live.
