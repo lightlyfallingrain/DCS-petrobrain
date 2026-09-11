@@ -3,8 +3,25 @@ SIGHT-DRIVEN DETECTION PROBE -- not the production export script.
 Log: Logs\aircraft_layer_probe_sightdetect.log
 Deploy to Saved Games\DCS\Scripts\Export.lua
 
-THE ONE QUESTION
-  Does pointing the 9K113 ourselves cause Petrovich to DETECT what is there?
+THE QUESTION (v2)
+  Run 1 answered half of it and exposed a probe bug. The sight slewed exactly
+  as commanded (-45.0, -25.0, +0.0) and NOTHING was ever detected -- but the
+  probe never pressed ShowMenu, so the wheel was never open, the centre press
+  had nothing to act on, and no search was ever running. The log shows it:
+  "state=?" means petro_state() found no wheel slots at all.
+
+  So run 1 is consistent with the pilot's reading -- the 9K113 can be slewed
+  with the helper inactive, but with nobody looking through it, nothing is
+  seen -- while not isolating it from "the probe never started a search".
+
+  v2 asks the sharper question the pilot posed:
+    WITH a search actively running, what happens when we slew by code?
+  Does the swept bearing produce detections, or does Petrovich fight us for
+  the sight / carry on with his own pattern?
+
+  Sequence: open the wheel, VERIFY it is open, start SRCH FWD, VERIFY the state
+  actually moved to WAITING/SEARCHING, wait out the gyro, take a baseline, then
+  sweep -- logging contacts, state, and whether our commanded azimuth HOLDS.
 
   We know we can aim it: SetCommand(3061, deg/60) moves the real optics (the
   pilot confirms the HUD crosshair moves in missile mode), and the position
@@ -69,7 +86,7 @@ local function safe_index(o, k)
 end
 
 local DEV_MAIN, DEV_SIGHT, DEV_HAI = 0, 7, 30
-local CMD_CENTRE, SIGHT_AI_AZ = 3015, 3061
+local CMD_CENTRE, CMD_SHOWMENU, SIGHT_AI_AZ = 3015, 3001, 3061
 local ARG_AZ, ARG_NABL = 874, 886
 local IND_HAI, IND_WHEEL = 6, 10
 local SHORT_HOLD, LONG_HOLD = 0.20, 0.80
@@ -181,6 +198,33 @@ function LuaExportAfterNextFrame()
     end
 
     if P.phase == "grace" then
+        -- run 1's bug: it pressed the centre without ever opening the wheel.
+        if wheel_slots() ~= nil then
+            log("  wheel already open: " .. tostring(petro_state()))
+            P.phase = "search" ; P.t = t
+            return
+        end
+        log("  opening the AI wheel (ShowMenu)")
+        dev(DEV_HAI, "performClickableAction", CMD_SHOWMENU, 1)
+        P.phase = "open_rel" ; P.t = t
+
+    elseif P.phase == "open_rel" then
+        if t - P.t > SHORT_HOLD then
+            dev(DEV_HAI, "performClickableAction", CMD_SHOWMENU, 0)
+            P.phase = "open_check" ; P.t = t
+        end
+
+    elseif P.phase == "open_check" then
+        if t - P.t < 1.5 then return end
+        if wheel_slots() == nil then
+            log("  !! wheel did not open -- cannot run a search; aborting")
+            log("     (without the helper UI there is nobody looking through the sight)")
+            P.phase = "done" ; return
+        end
+        log("  wheel open, state=" .. tostring(petro_state()))
+        P.phase = "search" ; P.t = t
+
+    elseif P.phase == "search" then
         log("  starting a forward search (centre LONG = SRCH FWD)")
         press_centre(LONG_HOLD, t)
         P.phase = "rel" ; P.t = t
@@ -188,9 +232,21 @@ function LuaExportAfterNextFrame()
     elseif P.phase == "rel" then
         if t - P.t > LONG_HOLD then
             dev(DEV_HAI, "performClickableAction", CMD_CENTRE, 0)
-            log(string.format("  waiting %.0fs for gyro alignment", GYRO_WAIT))
-            P.phase = "gyro" ; P.t = t
+            P.phase = "search_check" ; P.t = t
         end
+
+    elseif P.phase == "search_check" then
+        if t - P.t < 2.0 then return end
+        local st = tostring(petro_state())
+        if st:find("WAITING", 1, true) or st:find("SEARCHING", 1, true)
+           or st:find("TRACKING", 1, true) then
+            log("  search running, state=" .. st)
+        else
+            log("  !! state is " .. st .. " -- the search may not have started.")
+            log("     Continuing anyway; the sweep results will say.")
+        end
+        log(string.format("  waiting %.0fs for gyro alignment", GYRO_WAIT))
+        P.phase = "gyro" ; P.t = t
 
     elseif P.phase == "gyro" then
         if t - P.t > GYRO_WAIT then
@@ -231,7 +287,12 @@ function LuaExportAfterNextFrame()
             end
         end
         if t - P.t > DWELL_S then
-            log(string.format("    settled az=%s (commanded %+d)", az_deg(), BEARINGS[P.i]))
+            local actual = tonumber(az_deg()) or 0
+            local held = math.abs(actual - BEARINGS[P.i]) < 2.0
+            log(string.format("    settled az=%s (commanded %+d) %s  state=%s  list=%s",
+                az_deg(), BEARINGS[P.i],
+                held and "HELD" or "<== PETROVICH TOOK THE SIGHT BACK",
+                petro_state(), tostring(contacts())))
             P.phase = "next" ; P.t = t
         end
 

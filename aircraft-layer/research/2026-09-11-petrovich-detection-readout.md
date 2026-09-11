@@ -939,3 +939,71 @@ If pointing the sight does drive detection, BL-6 gets `scan_area(bearing)` with
 no wheel interaction at all: one `SetCommand`, then read the list. If it does
 not, the directed-scan capability rests entirely on `DesignateAttackPoint`
 (3020), still untested under good conditions.
+
+---
+
+## Sight-detection run 1 — 2026-09-11 13:07 — slew works, nobody is looking
+
+### What happened
+
+```
+starting a forward search (centre LONG = SRCH FWD)
+BASELINE contacts: nil
+state=?                          <- petro_state() found no wheel slots at all
+--- bearing -45 deg ---   settled az=-45.0 (commanded -45)
+--- bearing -25 deg ---   settled az=-25.0 (commanded -25)
+--- bearing +0  deg ---   settled az=+0.0  (commanded +0)
+```
+
+Zero contact lines for the entire run. The sight tracked **every** commanded
+bearing exactly, with the AI helper UI inactive, and nothing was ever detected.
+
+### Pilot's reading, and what the log can and cannot support
+
+**Pilot:** the AI helper UI was not active; the HUD crosshair moved but there
+were no detections and no list — so the 9K113 can be slewed, but with the
+helper inactive *there is nobody looking through it*.
+
+**The log is consistent with that in every respect.** It also shows *why* the
+helper was inactive, and it is a probe bug: **the probe never pressed
+`ShowMenu`.** `grep` for `3001` in the probe source returns zero. The wheel was
+never opened, so the centre press had no wheel to act on and no search ever
+started — which `state=?` reports directly, since `petro_state()` could not find
+a single wheel slot.
+
+**So the run cannot isolate the two explanations**, because they coincide here:
+
+- detection requires the helper/search to be active, **or**
+- this probe simply never started a search
+
+Both predict exactly what was logged. The pilot's reading is the more likely of
+the two and fits everything else known — Petrovich is the one who perceives, and
+the sight is his instrument, not an independent sensor — but this run is not
+evidence *for* it over the alternative.
+
+### What it does establish, cleanly
+
+**Slewing is completely independent of Petrovich's state.** The sight went to
+−45.0, −25.0 and +0.0 with no helper, no search, no observation mode, no gyro
+alignment — exactly on command, every time. So `SetCommand(3061, …)` drives the
+optics mechanically, and none of the helper machinery gates it.
+
+That is worth stating plainly because it bounds what the effector is: **we move
+the glass; we do not thereby cause anyone to look through it.**
+
+### Next test — the pilot's question
+
+**With a search actively running, what happens when we slew by code?** Either
+the swept bearing yields detections, or Petrovich reasserts his own search
+pattern and takes the sight back.
+
+v2 of the probe now opens the wheel and **verifies** it opened, starts
+`SRCH FWD` and **verifies** the state actually moved to `WAITING`/`SEARCHING`,
+waits out the gyro, takes a baseline, and only then sweeps — logging at each
+bearing whether our commanded azimuth **held** or whether Petrovich took the
+sight back, alongside the contact list.
+
+If the sweep produces detections at the bearings we choose, that is
+`scan_area(bearing)` — search once, then aim. If he takes the sight back
+instead, the directed scan rests on `DesignateAttackPoint` (3020), still
+untested under good conditions.

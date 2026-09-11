@@ -1,0 +1,24 @@
+13:07:28 
+13:07:28 #########################################################
+13:07:28 SIGHT-DRIVEN DETECTION PROBE
+13:07:28   does aiming the 9K113 ourselves make Petrovich detect?
+13:07:28 #########################################################
+13:07:52   20s grace -- get level and steady
+13:08:13   starting a forward search (centre LONG = SRCH FWD)
+13:08:14   waiting 20s for gyro alignment
+13:08:34 
+13:08:34   BASELINE contacts: nil
+13:08:34   state=?  now sweeping the sight across 6 bearings
+13:08:34   (never scrolling, never selecting -- either hands the sight back)
+13:08:34 
+13:08:34 --- bearing -45 deg ---
+13:08:46     settled az=-45.0 (commanded -45)
+13:08:46 
+13:08:46 --- bearing -25 deg ---
+13:08:58     settled az=-25.0 (commanded -25)
+13:08:58 
+13:08:58 --- bearing +0 deg ---
+13:09:10     settled az=+0.0 (commanded +0)
+13:09:10 
+13:09:10 --- bearing +25 deg ---
+13:09:20 sightdetect probe: stopped.
