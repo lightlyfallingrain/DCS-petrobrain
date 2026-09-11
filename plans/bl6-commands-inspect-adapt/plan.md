@@ -1,356 +1,283 @@
 ### Goal
 
-Give body-layer a mechanism-agnostic `PendingIntent` command lifecycle (`scan_area` /
-`get_task_status` / `cancel_task`) that biases perception toward a named area and reports task
-outcome from belief state, while leaving the actual DCS-side effector (whether Petrovich's
-scan behavior can be driven at all) as a pluggable, separately-gated piece whose feasibility is
-still unresolved.
+Give body-layer a `PendingIntent` command lifecycle (`scan_area` / `get_task_status` /
+`cancel_task`) that triggers a real Petrovich search, biases outcome-checking toward a named
+area via the existing `AttentionArea` machinery, and reports task outcome from belief state —
+plus a matching aircraft-layer effector, since the live investigation (2026-09-11) fully solved
+the mechanism this plan was previously blocked on.
 
-### Investigator findings this plan depends on
+### Why this plan was rewritten, in one paragraph
 
-Invoked before finalizing this plan, per the process — `plans/body-layer/plan.md` §7 flags
-"whether Petrovich's scan behavior can be influenced at all" as BL-6's entire premise and
-blocking. Findings written to
-`aircraft-layer/research/2026-09-10-bl6-petrovich-command-feasibility.md`:
+The prior version of this plan was built on two premises a day of live DCS probing
+(`aircraft-layer/research/2026-09-11-SUMMARY-petrovich-control.md` and its two detail notes)
+proved false: that Petrovich has no scan command, and that no outcome signal exists. Both are
+wrong — he has several search verbs and his state/contact list are directly readable. But the
+investigation also closed the two routes that would have let us *aim* him at a chosen bearing
+(`SRCH 9K113 LOS` is broken; `DesignateAttackPoint` doesn't aim him either — see the RU manual
+cross-check confirming the real 9K113 has no search/designation concept at all, only manual
+optical acquisition) and explicitly rejected a third (puppeting the player's view) on design
+grounds. So the achievable design is narrower than "point him and scan" but wider than the old
+plan's fallback: we can trigger a real, un-aimed Petrovich search and verify its outcome for
+real, instead of inferring everything from belief-state timeout. This revision reflects that,
+supersedes all three prior addenda in the git history, and stands alone.
 
-- `Export.LoSetCommand(commandID[, value])` is a real, historically-documented command-injection
-  API callable directly from `Export.lua`'s own state (no new Hook script needed) — but
-  forum-claim-unverified, and one ED thread title itself asks "deprecated?" for modern modules.
-- A shipped, first-class in-cockpit command UI exists and is literally namespaced `Petrovich`:
-  `Cockpit/Scripts/HelperAI/AI_Wheel/*` (+ a dedicated `Input/Mi_24P_AI_Menu/` keybind profile),
-  and a second candidate `Cockpit/Scripts/AI/ControlPanel/g_panel*.lua` / `AI_Gunners.lua`.
-  File **paths** confirmed to exist in the installed tree; file **contents** — i.e. whether the
-  wheel offers anything resembling "scan this area/bearing" versus only combat-mode commands
-  (attack/hold-fire/cover) — are unread. This is the single biggest open question.
-- No confirmed read-side signal exists for "Petrovich is scanning" vs "found N" vs "idle".
-  `list_indication(6)`'s target list is gated by weapon-selection/attack mode per prior research,
-  not an ambient scan-state flag; `HelperAI_sound.lua`'s aptly-named events
-  (`observ_on`/`target_acq`/`still_searching`) are audio-trigger-only with no confirmed
-  Lua-readable mirror.
-- A concrete, cheap live-DCS probe is specified in the findings file (read ~7 named Lua files,
-  then try `LoSetCommand` candidate IDs against a live mission and watch for visible
-  sight-slew/behavior change and any `list_indication`/callout change). **Not yet run** — per this
-  project's execution-boundary rule, the user runs it, not an agent.
+### What's now established (ground truth for this plan)
 
-**Consequence for this plan:** whether DCS-side commanding is possible, and what it would look
-like, is a genuine two/three-way fork (`LoSetCommand`, keypress/joystick-injection fallback, or
-"no real lever exists") that only the live probe resolves. The design below is deliberately built
-so the parts buildable *now* do not depend on that answer, and the parts that do are isolated,
-optional, and explicitly gated.
+- **Effector, sight**: `GetDevice(7):SetCommand(3061, azimuth_deg / 60.0)` points the 9K113
+  optics — positional, linear, single write, settles < 0.25 s. Read back via
+  `GetDevice(0):get_argument_value(874) * 136.36`. Confirmed not to drive detection on its own
+  (five flights) — a solved primitive with no proven use inside this milestone (see Decision 2).
+- **Effector, wheel**: `GetDevice(30):performClickableAction(cmd, 1/0)` drives Petrovich's AI
+  Wheel (a *different* verb than the sight's `SetCommand`). The centre button (3015) starts a
+  search: short press = `SRCH BRST` (boresight), long press (> 0.5 s hold) = `SRCH FWD` (forward
+  sweep). Both are real, triggerable, **not aimable** — Petrovich decides where to look.
+- **No directed scan exists.** `SRCH PILOT LOS` follows the human's head (TrackIR), disqualified
+  as a programmatic primitive by design, not just by difficulty. `SRCH 9K113 LOS` appears
+  non-functional — with one still-open, deliberately deferred re-test: whether the ПУВЛ
+  weapon-selector must be in УРС (missile) mode for it to work, per the real manual's §5.3.8 step
+  2.2 (`2026-09-11-quickstart-ru-9k113-manual.md`). `DesignateAttackPoint` (3020) does not aim
+  him — tested directly, stops a search instead. Aiming the sight ourselves does not cause
+  detection either — verified across five flights, with and without a concurrent search running.
+- **Outcome is directly observable.** `list_indication(10)` gives Petrovich's own state
+  (`OBSERV. OFF` -> `WAITING` -> `SEARCHING` -> `TRACKING`) when the wheel's search page is
+  open. `list_indication(6)` gives his classified contact list (5-row sliding window, real unit
+  types), already the channel `perception/hybrid_source.py` ingests today.
+- **Two hard constraints for any design touching this surface:**
+  1. **Observation and engagement are different acts.** `SELECT TGT` commits Petrovich to
+     tracking (and, weapons free, firing). Nothing this milestone builds may select or mark a
+     target as a side effect of reading state.
+  2. **Enumerating the contact list is not read-only.** `NEXT TGT` moves his selection and hands
+     the sight back to him if he had it; toggling `OBSERV.` costs ~10 s of gyro alignment, and
+     Petrovich turns it off himself under hard manoeuvring — it is state to observe, not state we
+     own.
 
-### Architectural note
+### What this plan does NOT attempt
 
-This milestone designs a new DCS write channel and forks on an unresolved DCS-internals question
-inside a live-sim domain (async task lifecycles that must tolerate real-world timing, a new
-inbound path into a system that's been read-mostly since project start). Per this role's own
-guidance, I'd recommend re-invoking Architect with an opus model override if the user wants this
-plan re-derived at higher reasoning depth before Security's plan review — I judged the design
-below tractable at default depth because the mechanism-agnostic split (below) keeps the genuinely
-uncertain part small and isolated, but flagging per instruction rather than silently proceeding.
+A directed scan (`look_at(bearing)` causing Petrovich to search *there*) is not achievable with
+what's confirmed today. `scan_area` in this plan means **"ask Petrovich to search, and tell me
+if he finds something relevant to this area"** — a trigger + a scoped outcome check, not an aim
+command. If the deferred ПУВЛ-switch re-test later confirms `SRCH 9K113 LOS` works, `scan_area`
+gains a genuine aim step without changing its name, signature, or callers (see Decision 1) — that
+is intentionally future work, not blocking this plan.
 
 ### Affected Modules / Files
 
-**body-layer (buildable now, independent of probe outcome):**
+**body-layer (unchanged in shape from the original plan — see "What stayed the same" below):**
 
-- `body-layer/src/belief/tasks.py` *(new)* — `PendingIntent` dataclass (`task_id`, `kind`
-  currently only `"scan_area"`, `area: AttentionArea`, `deadline_sim: float`,
-  `status: Literal["pending", "succeeded", "failed", "cancelled"]`, `created_sim: float`,
-  `reason: str`, `result_contact_ids: list[str]`), a `TaskStore` (mint ids the same way
-  `ContactStore._new_event_id`/`_areas` do — sequential, store-owned, not caller-supplied) and
-  `tick(now_sim)` — the supervisor step: for each `pending` task, check `ContactStore` for any
-  contact whose `last_position` falls inside `task.area` and whose most recent observation
-  arrived *after* `task.created_sim`; if found, mark `succeeded` and record the contact id(s); if
-  `now_sim >= task.deadline_sim` with nothing found, mark `failed` (timeout, not "confirmed
-  nothing there" — see Risks). No DCS I/O in this module at all.
-- `body-layer/src/belief/tools.py` — add `scan_area(store, tasks, center, radius_m, reason,
-  deadline_s=DEFAULT_SCAN_DEADLINE_S, sector=None)` (registers a `belief.attention.AttentionArea`
-  via the existing `store.add_area` at `level="watch"`, then a `PendingIntent` in `tasks` over the
-  same area — reuses BL-4's area machinery rather than inventing a second area concept),
-  `get_task_status(tasks, task_id)`, `cancel_task(tasks, task_id)` (marks `cancelled`, and — see
-  Decision below — also calls `store.remove_area` for the area it registered, since an
-  abandoned scan should stop biasing attention).
-- `body-layer/src/belief/tool_api.py` — three new `ToolSpec` entries wired to the above,
-  descriptions adapted verbatim from `plans/body-layer/plan.md` §3.3.
+- `body-layer/src/belief/tasks.py` *(new)* — `PendingIntent` (`task_id`, `kind` currently only
+  `"scan_area"`, `area: AttentionArea`, `deadline_sim`, `status: Literal["pending", "succeeded",
+  "failed", "cancelled"]`, `created_sim`, `reason`, `result_contact_ids: list[str]`), `TaskStore`
+  (store-minted ids, mirroring `ContactStore`'s own id minting) and `tick(now_sim)`: for each
+  `pending` task, check `ContactStore` for a contact inside `task.area` whose most recent
+  observation arrived after `task.created_sim`; mark `succeeded` (recording the contact id(s)) or,
+  past `deadline_sim` with nothing found, `failed` (timeout — see Risks for what this can and
+  cannot mean now). No DCS I/O in this module.
+- `body-layer/src/belief/tools.py` — `scan_area(store, tasks, center, radius_m, reason,
+  deadline_s=DEFAULT_SCAN_DEADLINE_S, sector=None)` (registers a `watch`-level `AttentionArea` via
+  `store.add_area`, then a `PendingIntent` over the same area — reuses BL-4's area machinery,
+  same pattern as `watch_area`), `get_task_status(tasks, task_id)`, `cancel_task(tasks, task_id)`
+  (marks `cancelled`; see Decision 3 on whether it also removes the area). **Stays pure/DCS-I/O
+  free**, per body-layer's hard testability requirement — the live trigger is wired one layer up
+  (see below), the same place BL-2.5 wired the overlay push rather than inside `tools.py`.
 - `body-layer/src/belief/console.py` — `scan-area <bearing> <range_m> <radius_m> <reason>
-  [sector]`, `task-status <id>`, `cancel-task <id>` commands, mirroring the existing
-  `watch-area`/`unwatch-area` pattern.
+  [sector]`, `task-status <id>`, `cancel-task <id>`. `scan-area`'s handler is where the live
+  trigger lives: after calling `tools.scan_area` (always), if `Console.aircraft_client` is set
+  (new optional field, mirroring the existing `enrichment` field's None-means-unchanged pattern),
+  it also calls `aircraft_client.trigger_petrovich_search("forward")` in a `try`/`except
+  AircraftLayerError` (mirroring BL-2.5's per-push guard in `logger.py`) — a failed trigger
+  degrades to "the belief-state task was still registered, no live command fired," never raises
+  through to the caller. `task-status <id>`'s handler may additionally fetch
+  `aircraft_client.get_petrovich_wheel_latest()` (if configured) to print Petrovich's live
+  state as a diagnostic line — display-only, never stored on `PendingIntent`, never changes
+  `get_task_status`'s return contract.
+- `body-layer/src/belief/tool_api.py` — three new `ToolSpec` entries. `scan_area`'s description
+  must state plainly that it triggers a real search but cannot aim it, so the eventual brain layer
+  never over-claims "I directed Petrovich to look there."
 - `body-layer/src/logger.py` — wire `TaskStore.tick()` into the same poll-loop hook point
-  `ContactStore.tick()` already runs from (`--console`/`--crew-text`/`--overlay` all drive it).
-- `body-layer/tests/test_tasks.py` *(new)* — fixture/replay-style tests: task succeeds when a
-  contact appears in-area post-creation, times out when none does, cancel stops future
-  succeed-checks and removes the area, ordering/idempotence under repeated `tick(same now_sim)`
-  matching `ContactStore.tick`'s own convention.
+  `ContactStore.tick()` already runs from; wire a real `AircraftLayerClient` into
+  `Console.aircraft_client` (or `CrewConsole`'s equivalent) in `main()`'s `--console`/`--crew-text`
+  branches, same wiring pattern as `--overlay`'s client.
+- `body-layer/src/aircraft_client.py` — two new methods: `trigger_petrovich_search(mode:
+  Literal["forward", "boresight"]) -> None` (`POST /command/petrovich_search`, raises
+  `AircraftLayerError` on failure, mirrors `push_text_line`) and
+  `get_petrovich_wheel_latest() -> PetrovichWheelSample | None` (`GET /petrovich_wheel/latest`,
+  mirrors `get_petrovich_indication_latest`).
+- `body-layer/tests/test_tasks.py` *(new)* — fixture/replay-style: task succeeds when a matching
+  contact appears post-creation, times out when none does, cancel stops future checks (and, per
+  Decision 3's resolution, removes or keeps the area), idempotence under repeated
+  `tick(same now_sim)`.
+- `body-layer/tests/test_tools.py` / `test_console.py` — extend for `scan_area`/`get_task_status`/
+  `cancel_task`, exercising the `aircraft_client=None` (pure/virtual) path as the default case and
+  a recording-double `aircraft_client` for the trigger-call path, mirroring how `test_text_push_api
+  .py`'s recording double works on the aircraft-layer side.
 
-**aircraft-layer (gated on the live probe; do not implement until the probe resolves which fork
-applies — see Decisions):**
+**aircraft-layer (new work this revision unblocks — the effector is solved, not gated on a probe
+anymore):**
 
-- *If `LoSetCommand` + a real wheel/panel command ID is confirmed*: a new `POST
-  /command/scan_area` endpoint in `src/api/`, mirroring `POST /text/push`'s existing shape
-  (validate body, forward to a new `collector/command_sender.py`), which calls
-  `Export.LoSetCommand(<id>[, value])` from `Export.lua`'s own state — no new Hook script needed,
-  same loopback-TCP channel as the rest of the collector. Returns `200 {"ok": true}` on "attempted
-  the call" only, same fire-and-forget posture as `/text/push` — this endpoint cannot itself
-  confirm Petrovich reacted, only that the call was made.
-- *If `LoSetCommand` is dead but the AI Wheel keybind is real*: a Windows-side keypress-injection
-  helper (stdlib `ctypes`-based `SendInput` equivalent — no new dependency, consistent with
-  aircraft-layer's stdlib-only policy) is a materially larger architectural surface (new process
-  or new responsibility in the collector, simulating player input rather than calling an export
-  function) and needs its own Architect pass, not a subsection of this one, if it comes to that.
-- *If neither pans out*: no aircraft-layer change at all. `scan_area` still runs — see below.
+- `aircraft-layer/dcs-export/Export.lua` — two additions on the existing loopback channels:
+  1. A new UDP command listener (parallel to the existing text-overlay UDP sender's channel, but
+     inbound) that accepts a small JSON command and dispatches it: `{"op": "petrovich_search",
+     "mode": "forward"|"boresight"}` drives the wheel sequence (`GetDevice(30):
+     performClickableAction(3001, 1); (3001, 0)` to ensure the menu is open if not already, then
+     `performClickableAction(3015, 1)` held for > 0.5 s for `"forward"` or released immediately for
+     `"boresight"`, then `(3015, 0)`). The hold requires tracking a pending-release deadline across
+     frames in `LuaExportAfterNextFrame`, the same per-frame-state pattern the existing 5 Hz export
+     throttle already uses (`last_export_t`) — not a new architectural idea, just a second timer.
+  2. Push `list_indication(10)` alongside the existing `list_indication(HELPERAI_DEVICE_ID)` (=6)
+     push, on the same cadence, as a new sample type.
+- `aircraft-layer/src/schema/petrovich_wheel.py` *(new)* — `PetrovichWheelSample`, reusing
+  `petrovich_indication.py`'s existing `parse_indication_text` recursive-descent parser against
+  the indicator-10 dump (same recursive tree shape, different top-level fields) rather than
+  writing a second parser.
+- `aircraft-layer/src/collector/cache.py` — `PetrovichWheelCache`, mirroring
+  `PetrovichIndicationCache`.
+- `aircraft-layer/src/collector/command_sender.py` *(new)* — the command-issuing mirror of
+  `text_sender.py`'s `TextOverlaySender`: fire-and-forget UDP JSON sender to `Export.lua`'s new
+  listener. Same "never raises on a missing listener" posture is **not** appropriate here —
+  unlike `/text/push`'s opaque display string, a dropped command silently not reaching Petrovich
+  is a real behavioral gap the caller needs to know about, so `send_command` should raise on a
+  clearly-failed send the way `push_text_line` does, not swallow it like `TextOverlaySender.
+  send_line`. Flagged explicitly since it's an intentional asymmetry from the existing sender.
+- `aircraft-layer/src/api/server.py` — `POST /command/petrovich_search` (validates `mode`,
+  forwards to `command_sender.py`, mirrors `/text/push`'s shape: `200 {"ok": true}` means
+  "attempted the call" only) and `GET /petrovich_wheel/latest`.
+- `aircraft-layer/tests/` — `test_command_sender.py` (mirrors `test_text_sender.py`),
+  `test_petrovich_search_api.py` (mirrors `test_text_push_api.py`), schema/cache unit tests for
+  `petrovich_wheel.py`. The live Export.lua-side press-hold sequencing has no automated test, per
+  this subproject's existing posture on live-DCS-only correctness — validated manually against a
+  running mission, cross-checked against `list_indication(10)`'s own state transition.
 
-### Why the fallback ("virtual scan") is the default behavior, not a degraded afterthought
+### What stayed the same from the original plan, and why
 
-Whether or not any DCS-side effector ever gets built, `scan_area`'s body-layer half (register an
-`AttentionArea` + a `PendingIntent`, verify via belief state) already does something real: it
-biases which of the perception pipeline's naturally-arriving detections get treated as "the
-answer to this task," and it gives the brain a task-status answer without inventing a fact DCS
-never confirmed. This mirrors the investigator's Q4 fallback framing but treats it as the floor
-the design stands on, not a contingency bolted on if the probe comes back negative — because the
-probe *can't* come back fully positive (no confirmed outcome-verification signal exists either
-way, per findings), body always needs this belief-state-driven success check regardless of
-whether a real command also fires. Adding a confirmed DCS-side effector later is strictly
-additive: it raises the odds a scan actually succeeds, it does not change `PendingIntent`'s shape,
-`tools.py`'s signature, or the tool API.
+The body-layer half's core shape — `PendingIntent`/`TaskStore`, success verified by checking
+`ContactStore` for a matching post-task contact, timeout on deadline — is **unchanged**, not
+because nothing was learned but because what was learned confirms it was already the right
+design. `HybridPerceptionSource` already gates on `list_indication(6)` (the same contacts channel
+this investigation used), so a real Petrovich search triggered by this milestone's effector
+produces real detections that already flow into `ContactStore` through the existing perception
+pipeline — `tick()`'s job (did something relevant appear in the task's area after it was created)
+is exactly as correct now as it was under the old "virtual scan" framing, just backed by a real
+trigger instead of no trigger at all. The investigator's own conclusion agrees: "the belief-state
+success check is still required either way."
 
 ### Implementation Plan
 
-1. **`PendingIntent` + `TaskStore` + `tick()`** (`tasks.py`), pure and DCS-I/O-free, tested against
-   synthetic `ContactStore` fixtures the same way `test_contacts.py`/`test_attention.py` already
-   do. This is the whole async task-lifecycle machinery D3 (plan.md) already decided on — no new
-   design decision here, just building what D3 specified.
-2. **`scan_area`/`get_task_status`/`cancel_task` in `tools.py` + `tool_api.py` + `console.py`**,
-   composing `TaskStore` with the existing `AttentionArea`/`ContactStore` surface. Console-testable
-   end to end with no live DCS, same as every prior BL-x milestone's console-first acceptance
-   path.
-3. **`logger.py` wiring** — `TaskStore.tick()` alongside `ContactStore.tick()`.
-4. **Tests + fixture/replay acceptance.** Deterministic: a scripted `ContactStore` populated via
-   `replay.py`-style ingestion, `scan_area` issued, then either a matching contact injected before
-   or after the deadline. No live DCS needed for this milestone's DoD — consistent with BL-3/BL-4's
-   console/replay-only precedent.
-5. **Live probe (user, not this plan's Implementer)** — the seven-file read + `LoSetCommand`
-   candidate-ID live test specified in `aircraft-layer/research/
-   2026-09-10-bl6-petrovich-command-feasibility.md`'s "Reproducible Test" section. This can happen
-   in parallel with Stages 1–4, since nothing in body-layer's implementation blocks on it.
-6. **Conditional aircraft-layer stage** — only if Stage 5 confirms a working command mechanism.
-   Runs through this milestone's own required Security plan review (root `ROADMAP.md`/`CLAUDE.md`
-   gate) before any code lands, since it is a new inbound write path into a live DCS process. If
-   Stage 5 is negative or still inconclusive when body-layer work is otherwise done, ship Stages
-   1–4 alone as BL-6's full scope and record the aircraft-layer half as future work, not as an
-   incomplete milestone — the milestone's stated deliverables (`scan_area`/`get_task_status`/
-   `cancel_task`, tool-set freeze) are satisfied by the body-layer half alone under the "virtual
-   scan" framing above.
+1. **`PendingIntent` + `TaskStore` + `tick()`** (`tasks.py`), pure, tested against synthetic
+   `ContactStore` fixtures — same as `test_contacts.py`/`test_attention.py`. Unchanged from the
+   original plan's design.
+2. **`scan_area`/`get_task_status`/`cancel_task` in `tools.py` + `tool_api.py`**, composing
+   `TaskStore` with the existing `AttentionArea`/`ContactStore` surface, no DCS I/O.
+3. **`Console`/`CrewConsole` wiring**: optional `aircraft_client` field, `scan-area`'s handler
+   calling `tools.scan_area` then (if configured) the live trigger; `task-status`'s handler
+   optionally appending the live wheel-state diagnostic. `logger.py`'s `TaskStore.tick()` wiring
+   alongside `ContactStore.tick()`.
+4. **Console/replay tests for the body-layer half**, `aircraft_client=None` as the default,
+   tested path — this milestone's DoD does not require a live DCS session to pass, consistent
+   with every prior BL-x milestone.
+5. **aircraft-layer effector**: `command_sender.py`, the `Export.lua` wheel-press + long-hold
+   sequencing, the new indicator-10 push/schema/cache, the two new endpoints, their tests. This is
+   new write-path code into a live DCS process — build and unit-test it, but live-validate against
+   a running mission before calling this stage done (the user runs the live check, per this
+   project's execution-boundary rule).
+6. **End-to-end live acceptance**: with a real `AircraftLayerClient` wired into `Console`, issue
+   `scan-area` against a mission with contacts present, confirm `SRCH FWD` actually fires
+   (visible in `list_indication(10)`'s state transition and, ideally, the cockpit), and confirm
+   `get_task_status` eventually reports `succeeded` from a real detection. This is the milestone's
+   real acceptance test, not the console/replay tests in Stage 4 alone.
 
 ### Risks & Unknowns
 
-- **Outcome verification is inherently ambiguous.** A `failed` (timeout) task cannot distinguish
-  "Petrovich looked and found nothing" from "nothing was ever attempted" from "something was there
-  but outside detection range/LOS." This is not a bug to fix later — it's the same epistemic limit
-  a real crew has, and `tools.get_task_status`'s description should say so plainly (`"failed" means
-  "nothing confirmed by the deadline," not "confirmed empty"`) so the brain never over-claims
-  certainty from it. Flag prominently in the tool description, per the no-omniscience invariant.
-  If a stronger DCS-side signal is later found, this can be refined without an API break — the
-  status enum can grow a distinguishing value, not change shape.
-  This is the same "quality-weighted ladder" shape as the still-open certainty-fusion backlog item
-  in `body-layer/ROADMAP.md` — worth a cross-reference if that item is ever picked up, not
-  something to solve here.
-- **`DEFAULT_SCAN_DEADLINE_S` is a placeholder constant**, like BL-3's confidence table and BL-4's
-  cooldown before it — needs live-sortie calibration, not a principled derivation, once any live
-  acceptance is run.
-- **`scan_area`'s area-registration reuses `watch_area`'s bearing/range-only resolution** (no
-  `find_place` integration) — same scope cut BL-5a made for the identical reason; a place-name
-  `scan_area("the village")` stays unmatched until `find_place` (BL-5, already merged) is wired
-  into whichever grammar calls this tool. Cheap to add later, flagged so it isn't mistaken for
-  this milestone's scope.
-- **AI_Wheel vs. `g_panel`/`AI_Gunners` relationship is unread and unresolved** — if the probe
-  finds the wheel has no scan-equivalent option, the milestone's "scan_area" framing may need
-  renaming around whatever real command exists (e.g. "attack area" is the closest real lever) —
-  a naming/semantics question for a future revision, not a blocker to Stages 1–4.
-- **`cancel_task` removing the task's `AttentionArea` is a judgment call**, not obviously right:
-  the player may want the area still watched after cancelling the *task* (e.g. "never mind
-  finding something new there, but still tell me if anything shows up"). Flagged below as a
-  decision, not silently resolved.
-- **If Stage 6 does happen, its new inbound write path is a materially different risk class**
-  than `/text/push` (opaque display string) — it can, if `LoSetCommand`'s command-ID space is
-  wider than the one scan command wired up, potentially reach unrelated cockpit/AI behavior if a
-  wrong ID is ever passed. This is exactly why the milestone's own gate requires Security plan
-  review before that stage, not just before merge.
+- **Outcome verification is still ambiguous, for a different reason than before.** A `failed`
+  (timeout) task now cannot distinguish "nothing was there," "something was there but Petrovich's
+  own uncommanded sweep never looked that way," and "the search never actually started" (a
+  trigger failure or a wheel-page mismatch). This is a *harder* epistemic gap than the old plan's,
+  which only had to explain "nothing was there" vs. "nothing was ever attempted" against an
+  inferred signal — now there's a real signal but still no aim, so a real search can genuinely
+  miss a real target through no fault of the pipeline. `get_task_status`'s description must state
+  this plainly (`"failed" means "nothing confirmed by the deadline," never "confirmed empty," and
+  a real search still may not have looked toward the requested area`), per the no-omniscience
+  invariant.
+- **The wheel is stateful and page-aware, and the investigation logged real probe failures from
+  assuming otherwise** (pressing a direction by position instead of by verified label, holding a
+  stale page context, `NEXT TGT`'s label never changing so a generic "did it work" check silently
+  no-ops). `command_sender.py`'s Export.lua-side sequence must open the menu and verify the search
+  page's centre slot reads a `SRCH` option before pressing, not press blindly by position — this
+  is a concrete lesson from the research, not a hypothetical risk.
+- **The long-press timing lives in `Export.lua`, a component with no automated test.** A wrong
+  hold duration silently fires `SRCH BRST` (short) instead of `SRCH FWD` (long) or vice versa —
+  cosmetically harmless (both are real, triggerable searches) but means the `mode` parameter
+  doesn't do what it says. Must be live-verified against `list_indication(10)`'s own reported
+  search kind, not assumed from timing alone.
+- **`DEFAULT_SCAN_DEADLINE_S` is still a placeholder** needing live-sortie calibration, same as
+  before.
+- **`scan_area` reuses `watch_area`'s bearing/range-only resolution** — no `find_place`
+  integration, same scope cut as BL-5a made and BL-5's `find_place` (already merged) has not yet
+  been wired into whichever grammar calls this tool.
+- **`command_sender.py`'s raise-on-failure posture is new surface area** — it's the first
+  aircraft-layer write path where a silent failure is unacceptable (unlike `/text/push`'s opaque
+  display string), so its error handling needs real live-failure testing (DCS not running, wrong
+  mission state), not just the happy path.
+- **The still-open ПУВЛ-switch lead is explicitly out of this plan's scope.** If a future re-test
+  confirms `SRCH 9K113 LOS` works in УРС mode, `scan_area` can gain a genuine aim-then-search step
+  without an API break — additive, matching the "strictly additive effector" framing the original
+  plan used for its own Stage 6. Recorded here as an enhancement path, not a blocker.
 
 ### Decisions Requiring User Input
 
-- **Should `cancel_task` also remove the `AttentionArea` it registered, or leave the area watched
-  and only stop the task's own success/timeout bookkeeping?** Both are reasonable; picked no
-  default — needs a call before Stage 2 lands the function signature.
-- **Is shipping BL-6 as "body-layer half only" (Stages 1–4), with the aircraft-layer effector as
-  explicitly deferred future work, acceptable** if the live probe (Stage 5) doesn't resolve in
-  time, or should the milestone be held open until Stage 5's answer is in? Leaning toward "ship
-  the body-layer half, defer the rest" given the "virtual scan" framing above already makes that
-  half a complete, useful deliverable — but this changes what "BL-6 done" means in
-  `body-layer/ROADMAP.md`, so flagging rather than deciding unilaterally.
-- **Naming**: if the live probe finds no scan-specific AI Wheel/panel command, should the tool
-  stay named `scan_area` (documented as "best-effort, may only bias perception") or be renamed to
-  something that doesn't imply a command is actually issued? Deferred until Stage 5's answer is
-  known — raised here so it isn't forgotten.
+1. **Naming: keep `scan_area`, or rename now that no aim exists?** I'm keeping `scan_area` for
+   this revision — `center`/`radius_m` still meaningfully scope *which* of Petrovich's own
+   findings count as satisfying the request ("focus on that area" is a legitimate ask even without
+   a search-the-bearing mechanism, and matches how the real crew's operator actually works per the
+   manual — visually scanning, not being aimed), and keeping the name avoids reopening the
+   `body-layer/ROADMAP.md` tool-freeze wording three times in one day. The tool's description will
+   carry a prominent "does not aim Petrovich" caveat. This is a low-cost, reversible lexical choice
+   — flagging so the call is visible, not asking you to re-derive it from scratch.
+2. **Is `look_at`/sight-pointing in scope for this milestone?** My recommendation: **no** — it's
+   a solved, cheap primitive (a single `SetCommand` write) but confirmed *not* to influence
+   detection on its own, and nothing in `scan_area`/`get_task_status`/`cancel_task` needs it. I'd
+   leave it out of both the body-layer tool surface and the Stage 6 endpoint set, and record it as
+   solved-but-unused for a future "where is Petrovich looking" narration tool or a future directed
+   scan if the ПУВЛ-switch lead pans out. This narrows Stage 6's scope noticeably (no
+   `/command/point_sight` endpoint, no `look_at` tool). Flagging because it's a real scope
+   boundary you may want drawn differently — it's cheap to add later either way.
+3. **Does `cancel_task` also remove the `AttentionArea` it registered?** Resolved 2026-09-11 (user
+   decision): **yes, `cancel_task` removes the area.** Cancelling a scan stops watching that area
+   entirely, not just its own success/timeout bookkeeping.
 
 ### Second-Order Effects
 
-**Unblocks:** this is BL-6's tool-set freeze point per `body-layer/ROADMAP.md` — once
-`scan_area`/`get_task_status`/`cancel_task` land, the brain-facing tool API (`docs/concept/
-PETROBRAIN_RUNTIME.md` §3.3's full list) is complete, and a brain-layer prototype (PB-6) can be
-built against a stable surface for the first time. **Narrows:** if Stage 6 (real DCS effector)
-never lands, every future "have Petrovich actually do X" idea (not just scanning) inherits the
-same ambiguous-outcome-verification ceiling this plan designs around — worth remembering before
-BL-8's memory layer decides how much confidence to persist about task outcomes. **Complicates
-none identified beyond what's already flagged above** — the mechanism-agnostic split is
-specifically meant to avoid this milestone complicating BL-7 (mission phase) or BL-8 (memory).
+**Unblocks:** this is still BL-6's tool-set freeze point per `body-layer/ROADMAP.md` — once
+`scan_area`/`get_task_status`/`cancel_task` land, `docs/concept/PETROBRAIN_RUNTIME.md` §3.3's tool
+list is complete and a brain-layer prototype (PB-6) can build against a stable, and now
+*honestly-scoped*, surface. **Narrows:** every future "have Petrovich actually do X" idea inherits
+the same un-aimable-trigger ceiling this plan designs around, until/unless the ПУВЛ-switch lead
+resolves it — worth remembering before BL-8's memory layer decides how much confidence to persist
+about task outcomes, and before any future mission-interpreter work assumes Petrovich can be
+directed rather than merely asked. **Complicates none identified** beyond what's already flagged
+— the design stays additive with respect to a future real aim mechanism.
 
 ### Invariant Check
 
-- **Code owns facts, models interpret:** `get_task_status`'s `"failed"` is never overstated as
-  "confirmed empty" — see Risks. The brain gets a status and a fact set, never a claim body can't
-  back.
-- **DCS authoritative, read-only install:** unaffected in Stages 1–4 (no DCS I/O). Stage 6, if it
-  happens, still never modifies the DCS install — it calls an already-existing exported Lua
-  function from a script this project already deploys and controls, the same posture as every
-  other aircraft-layer write (`/text/push`).
-- **Provenance/uncertainty/timestamps:** `PendingIntent` carries `created_sim`/`deadline_sim`
-  explicitly; a task's `succeeded` result links back to the contact id(s) that satisfied it, so
-  the causal chain (task → belief-state check → outcome) is inspectable, not opaque.
-- **Module independence:** no new cross-subproject import; body-layer's Stages 1–4 depend only on
-  `belief.attention`/`belief.contacts`, already in-module. Stage 6 (if built) stays inside
-  aircraft-layer's existing HTTP boundary to body-layer — no in-process coupling introduced.
+- **Code owns facts, models interpret:** `get_task_status`'s `"failed"`/`"succeeded"` never
+  overstate certainty — see Risks. `scan_area`'s description never claims Petrovich was aimed.
+- **DCS authoritative, read-only install:** unaffected — Stage 5/6's new write path calls only
+  already-existing, already-deployed `Export.lua` functionality (`GetDevice`,
+  `performClickableAction`), the same posture as every other aircraft-layer write. No DCS install
+  file is modified.
+- **Provenance/uncertainty/timestamps:** `PendingIntent` carries `created_sim`/`deadline_sim`;
+  `succeeded` links back to the satisfying contact id(s), so the causal chain is inspectable.
+- **Module independence:** no new cross-subproject import. `Console.aircraft_client` reuses the
+  existing HTTP-boundary pattern `--overlay` already established — aircraft-layer stays reachable
+  only over HTTP from body-layer, same as every other seam.
 
----
+### Note on this project's role sequence for this plan
 
-## Update 2026-09-11 — live install read, probe written
-
-The DCS install became available, so the "unread" half of this plan's dependency is now read.
-Full results: `aircraft-layer/research/2026-09-11-command-injection-surface.md`; enumerated
-command/indication catalogue: `aircraft-layer/research/mi24p-command-surface.md`.
-
-**Resolved:**
-
-- *"AI_Wheel vs `g_panel`/`AI_Gunners` relationship is unread"* — answered. They are different
-  devices, not successor/predecessor: `g_panel` is indicator 8 owned by `devices.WEAP_SYS` (6);
-  the wheel is indicator 10 owned by `HELPER_AI` (30).
-- *"the single biggest open question: does the wheel offer anything resembling scan this
-  area?"* — answered: **no**, not as a named command. Petrovich has 21 commands
-  (3001-3021) and the wheel is navigated (`ShowMenu`/`Up`/`Down`/`Left`/`Right`), with dynamic
-  contents rendered from compiled code, not declared in Lua.
-- *"whether `LoSetCommand` still functions for modern modules"* — documented in this install
-  (`Scripts/Export.lua:854`, `API/Sim_ControlAPI.md:538`), so not deprecated as far as shipped
-  docs go. But it is the **global** channel; cockpit device commands need a device object, since
-  every device's command table restarts at 3001 and an ID alone cannot name a device.
-
-**Changed for Stage 6:** the plan's `POST /command/scan_area` shape survives, but the body should
-carry `(device_id, command_id, value)` rather than a single `LoSetCommand` ID, and the call is
-`GetDevice(dev):performClickableAction(cmd, val)`. The keypress/`SendInput` fallback is only
-needed if the probe's stage C fails.
-
-**New lead, strongest one BL-6 has:** `helperai_commands.DesignateAttackPoint` (3020) may be a
-scan-area primitive under an attack-flavoured name — `HelperAI.lua` defines
-`scan_rad_around_point = 2500`, a constant that only makes sense if some command designates a
-point to scan around. Unverified; stage D of the probe tests it.
-
-**Bearing on this plan's three flagged decisions:**
-
-- *Naming (`scan_area` vs something not implying a command is issued)* — if
-  `DesignateAttackPoint` does drive a 2.5 km scan, `scan_area` is an honest name after all.
-  Still blocked on the probe.
-- *"Is body-layer-only acceptable as BL-6 done?"* — unchanged, still a user call. Nothing found
-  weakens the "virtual scan" framing; the belief-state success check is still required either
-  way, because no read-side "Petrovich is scanning" signal was found (that conclusion stands).
-- *`cancel_task`'s `AttentionArea` handling* — untouched by these findings, still open.
-
-**Stages 1-4 (body-layer) remain unaffected and unblocked**, as designed. The mechanism-agnostic
-split held up: nothing learned this session changes `PendingIntent`'s shape, `tools.py`'s
-signatures, or the tool API.
-
-**Still blocking Stage 6:** whether `GetDevice`/`performClickableAction` exist in Export.lua's
-state. Not documented anywhere in the install; probe written
-(`aircraft-layer/dcs-export/Export.probe-commands.lua`) and ready for the user to run.
-
-### Addendum 2026-09-11b — the 9K113 is the better effector than the AI Wheel
-
-User redirected from the ASP-17 to the 9K113 Raduga-Sh operator sight (device 7). That changes
-BL-6's Stage 6 options for the better:
-
-- **It has a real read channel** — cockpit draw args **874** (azimuth) / **876** (elevation),
-  declared as gauges in `mainpanel_init.lua:1575-1585`. No other optic in the module has one; the
-  ASP-17's equivalents were closed out as dead ends in the 2026-09-08 spike. This matters because
-  it is the first candidate for *observing* where the crew's optics are actually pointing, rather
-  than inferring it.
-- **Slew axes are velocity, not position** (`axis_use_velocity = true`), so "point at bearing X"
-  is a closed loop against 874/876, not a single write. That is a real design constraint on any
-  future `look_at` tool and should be recorded before BL-7/BL-8 assume otherwise.
-- **A dedicated AI slew channel exists** — `Command_Intern_SIGHT_{UP_DOWN,LEFT_RIGHT}_AI_AXIS`
-  (3060/3061), bound to no input in any `Input/` profile. If Petrovich slews through it, it is a
-  more honest effector than driving the player's own axes.
-- **Caveat raised by the user:** the 9K113 is its own gameplay mode with its own viewport, and
-  player slew commands may not work outside it. Consistent with `SightWithCockpitView = false`
-  and the sight's `dedicated_viewport`. Unresolved from files; probe stage E tests player vs. AI
-  axis, in and out of the mode.
-
-Nothing here changes Stages 1-4. It changes which effector Stage 6 should target if the probe
-comes back positive: **`(device 7, 3060/3061)` with a closed loop on args 874/876**, rather than
-the AI Wheel, which has no scan command at all.
-
----
-
-## Update 2026-09-11c — investigation complete; this plan needs revising
-
-A day of live probing on the DCS box settled every mechanism question this plan
-was gated on. **Read
-`aircraft-layer/research/2026-09-11-SUMMARY-petrovich-control.md` first** — it
-consolidates the findings, with detail in the two dated notes beside it and raw
-evidence in `aircraft-layer/research/logs/2026-09-11/`.
-
-**Both premises this plan was built on are now false:**
-
-1. *"Petrovich has no scan command"* — he has `SRCH BRST`, `SRCH FWD`,
-   `SRCH PILOT LOS`, plus `DesignateAttackPoint` ("Designate custom AI attack
-   point") and `LineUp_EXT` ("Turn to sight heading"). The wheel is fully
-   drivable from code.
-2. *"There is no outcome signal, so success must be inferred from belief
-   state"* — his state machine (`WAITING`/`SEARCHING`/`TRACKING`), his gaze in
-   degrees, and his classified contact list are all directly readable, and a
-   list longer than the five-row window is fully enumerable.
-
-So the **"virtual scan" framing solves a problem that no longer exists.** The
-body-layer half (`PendingIntent`/`TaskStore`, console/replay testing) remains
-sound and is unaffected; what needs rethinking is Stage 6 and the success
-criteria, which can now be real rather than inferred.
-
-**What an Architect revision should take as input:**
-
-- **Effector:** `GetDevice(7):SetCommand(3061, deg/60)` points the optics —
-  positional, linear, single write, settles in 0.25 s. Read back from arg 874.
-- **Outcome signal:** `list_indication(10)` for state, `list_indication(6)` for
-  classified contacts. Both real; neither needs belief-state inference.
-- **The one remaining gap:** there is no confirmed way to make him search a
-  *bearing we choose*. `SRCH PILOT LOS` follows the human's head, `SRCH 9K113
-  LOS` appears broken, `SRCH FWD`/`BRST` are not aimable. Two candidate routes
-  remain — sight-driven detection (probe deployed, result pending) and
-  `DesignateAttackPoint` (untested under good conditions). **The shape of
-  `scan_area` depends on which, if either, works**, so the revision should wait
-  for that answer or branch on it explicitly.
-
-**Two design constraints the investigation surfaced, which the revision must
-carry:**
-
-- **Observation and engagement are different acts.** `SELECT TGT` commits
-  Petrovich to tracking and, weapons free, to firing. A read-only
-  `list_contacts()` must not select or mark.
-- **Enumerating the list is not read-only** — it moves his selection, and
-  scrolling hands the sight back to him. Also, observation state is *his*:
-  he turns it off under hard manoeuvring, and every re-enable costs ~10 s of
-  gyro alignment.
-
-**Decisions from the original plan that are now moot or changed:**
-
-- *Naming (`scan_area`)* — depends on which directed-scan route survives.
-- *"Is body-layer-only acceptable as BL-6 done?"* — still a user call, but the
-  calculus has changed: a real effector and a real outcome signal now exist, so
-  shipping the body-layer half alone is a smaller fraction of the achievable
-  milestone than it was.
-- *`cancel_task`'s `AttentionArea` handling* — untouched by these findings,
-  still open.
+`CLAUDE.md`'s "Agents" section currently exempts Security and Performance Reviewer for this
+project phase ("this phase is an offline single-user local pipeline with no hot path and no
+untrusted-input surface yet... only run either when the user explicitly asks"). `body-layer/
+ROADMAP.md`'s existing BL-6 entry says this milestone is "gated on the aircraft layer's command
+channel, which needs its own Security plan review" — that line predates the later project-wide
+exemption decision and is now stale; per `CLAUDE.md`'s current, more specific instruction, this
+plan does not route through Security unless the user asks for it. Flagging the stale ROADMAP
+wording here rather than silently overriding it — worth a one-line ROADMAP fix when this milestone
+closes.
