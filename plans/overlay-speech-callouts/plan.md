@@ -238,3 +238,233 @@ actually spoke, which was the last place `belief.speech` had two divergent phras
 "describe this contact's position." Any future BL-10 SRS/TTS work, or a brain-authored speech
 class, now has exactly one place (`_contact_report_text`) that defines what a positional contact
 callout sounds like, rather than needing to keep two templates in sync by hand.
+
+---
+
+## Addendum 2 (2026-09-11): terser crew-text vocabulary; drop ids/coalition; two lifecycle formats
+
+**Trigger.** Live-flown a third time. The routing mechanism and the detected/reacquired content
+fix (Addendum 1) both hold, but the user now wants the crew-text *wording itself* pared down --
+verbatim before/after examples:
+
+```
+CONTACT_5: UNKNOWN ground contact, 1 o'clock, 5.0 km near a road (439m).
+  -> GROUND, 1 o'clock, 5 km, near road (~400m)
+CONTACT_4 lost.
+  -> <do not report contact lost>
+CONTACT_26 identified as OP_INFANTRY.
+  -> unit at <o'clock> <distance> is infantry
+```
+
+Stated principle: "The pilot needs terse and informative messages, no contact id's (can't keep
+track of them). iff (not yet implemented though, so skip now), unit type (or group of if can tell
+that yet), *where it is*."
+
+### Scope confirmation: `belief.console.Console` is untouched
+
+Re-read `belief.console.Console`/`format_event_for_overlay` (`body-layer/src/belief/console.py`)
+against this feedback. `format_event_for_overlay` builds its line from `tools.describe_contact`'s
+`summary` field and does **not** call `speech._unit_type_display`, `speech._contact_report_text`,
+or any other symbol this addendum touches -- it is a fully separate rendering path, consumed only
+by `logger.py`'s `--overlay` mirror when running with `--console` (not `--crew-text`). The user's
+own framing confirms this split is intentional: "Console without --crew-text can print all the
+data, but with --crew-text [it should be terser]." **This addendum's entire diff is scoped to
+`belief/speech.py` (plus its tests and the `CLAUDE.md` Structure entry) -- `console.py` is not
+touched and its debug output is unaffected.**
+
+### What already exists (read before designing, per this role's step 3a)
+
+- `_unit_type_display` (speech.py) is already private to this module -- `console.py`/
+  `format_event_for_overlay` never import or call it, confirmed above. Its presence/unknown-level
+  return strings can be reworded directly with zero effect on the debug console.
+- `_contact_report_text` (added in Addendum 1) is already the single shared formatter behind both
+  `render_contact_report` (player-initiated `status`/`where is <id>`, already id-less) and the two
+  lifecycle branches that prepend an id. No second formatter exists yet for a "terser" variant --
+  see the architecture-fork resolution below for whether one is needed.
+- `SemanticFact` (`enrichment.py`) has no raw `distance_m` field -- only a pre-formatted `text`
+  string (e.g. `"near a road (439m)"`, `"inside Anapa"`, built by `semantic_facts_for`). Rounding
+  the embedded distance for crew-text without also rounding it in the (unaffected, per above)
+  console/debug path means this addendum cannot change `enrichment.py`'s `text` construction --
+  that field is shared state read by both `speech.py` and `console.py`.
+
+### Design
+
+**1. Drop the contact id from every spoken lifecycle/contact-report line.**
+Addendum 1's `f"{contact_id}: "` prefix on `CONTACT_DETECTED`/`CONTACT_REACQUIRED` is removed --
+that addendum's own reasoning ("the crew still needs a way to refer back to this specific
+contact... when the player has not yet named it themselves") is explicitly overridden by this
+feedback: the pilot cannot track `CONTACT_<n>` ids by ear, so speaking one is net noise, not help.
+`_render_lifecycle_text`'s detected/reacquired branches call `_contact_report_text` directly, with
+no prefix -- the same shape `render_contact_report` already uses. (The id still exists internally
+and in the typed/console surfaces -- `watch <id>`, `status <id>`, the debug console -- this only
+changes what is *spoken*. How a player refers back to an unnamed just-detected contact by voice
+alone is a real BL-5-adjacent usability gap this addendum does not solve; noted under Risks, not
+blocking.)
+
+**2. `CONTACT_LOST` gets no template at all.**
+`_render_lifecycle_text` returns `None` for `CONTACT_LOST`, exactly the existing
+`CONTACT_ATTENTION_CHANGED` pattern the module docstring already documents ("returns `None`, not
+acknowledged"). `route_event`'s structure already handles this correctly with no change needed:
+`text = _render_lifecycle_text(...); if text is None: return None` runs *before*
+`acknowledge_event` is called, so an unspoken `CONTACT_LOST` is also left unacknowledged --
+consistent with "body only acknowledges what it actually spoke," not a special case.
+
+**3. `CONTACT_CLASSIFICATION_CHANGED` gains a position, drops the raw enum.**
+New format: `"unit at {clock} o'clock, {range} km is {unit type}."` (range clause omitted, same
+absent-not-null convention, when `facts["relative_now"]` is absent -> `"unit is {unit type}."`).
+Built from `facts["classification"]` via the *same* `_unit_type_display` helper
+`_contact_report_text` already uses, replacing today's raw `event.classification` enum string
+(`OP_INFANTRY` -> `infantry`, matching the user's own example). No semantic-fragment clause on
+this line -- the user's example has none, and a classification update is about identity, not a
+fresh scan of the surroundings; `_contact_report_text` (detected/reacquired, contact reports)
+keeps the semantic fragment, this new classification-changed line does not.
+
+**4. Drop the `"UNKNOWN"` coalition placeholder from `_contact_report_text` entirely.**
+`_COALITION_PLACEHOLDER` is removed from the format string (`text = f"{_COALITION_PLACEHOLDER}
+{unit_type}"` -> `text = unit_type`) -- no leading space, no orphaned punctuation, since
+`unit_type` is simply the new first token. The constant itself is deleted (dead code once
+unused) rather than kept around unused; when coalition inference is eventually built (existing
+backlog item, module docstring's "Coalition is always UNKNOWN" note, unaffected by this addendum
+otherwise), that work reintroduces a coalition token at that point, conditioned on actually having
+one to say.
+
+**5. Range and enrichment-distance rounding -- concrete rules (a local, reversible call per
+AGENTS.md, not escalated).**
+- **Range** (`facts["relative_now"]["range_m"]`, used by `_contact_report_text` and the new
+  classification-changed line): round to the nearest 0.5 km, format without a trailing `.0`
+  (`5.0 -> "5"`, `1.5 -> "1.5"`, matching the user's own `5.0 km -> 5 km` example while keeping
+  useful precision at close range, where 500 m matters tactically and 1 km does not). New helper
+  `_format_range_km(range_m: float) -> str`.
+- **Enrichment distance** (the trailing `"(NNNm)"` inside a `SemanticFact.text`, e.g. `"near a
+  road (439m)"`): round to the nearest 100 m, prefix with `~` (`439 -> "~400m"`, matching the
+  user's example exactly). Since `SemanticFact.text` is pre-formatted and shared with the
+  unaffected console path (see "What already exists" above), this is done by a small regex-based
+  post-process in `speech.py` itself -- `_round_enrichment_fragment(text: str) -> str` matches a
+  trailing `r"\((\d+)m\)$"`, rounds the captured number, and rewrites just that parenthetical (a
+  `"near {name}"` fact with no trailing distance, e.g. `"inside Anapa"`, does not match and passes
+  through unchanged). This keeps `enrichment.py`/`SemanticFact` completely untouched -- the
+  regex is scoped to `speech.py`'s own consumption of an already-built string, not a new shared
+  field. Documented as a real tradeoff under Risks: a future change to `semantic_facts_for`'s
+  phrasing that alters the trailing-distance format would silently stop matching rather than error.
+
+**6. Unit-type wording: normalize to lowercase, not the user's literal `"GROUND"` capitalization.**
+Resolved directly (flagged here rather than left silent, since it is a visible cosmetic choice):
+the user's own third example keeps `"infantry"` lowercase, and `_OP_CLASS_DISPLAY`'s existing
+vocabulary (`"armor"`, `"truck"`, `"SAM"`... wait, `"SAM"`/`"AAA"` are already uppercase
+initialisms) is mixed-case by necessity for acronyms but lowercase for words. Treating the user's
+`"GROUND"` as emphasis in their own typed note rather than a deliberate spec, `_unit_type_display`'s
+presence-level word becomes `"ground"` (was `"ground contact"`) and the level-unknown fallback
+becomes `"contact"` (was `"unidentified contact"`) -- both lowercase, consistent with
+`infantry`/`truck`/`armor` and with the initialism entries staying as-is (`SAM`/`AAA` are acronyms,
+not a casing style choice). If the user actually wants presence-level contacts shouted in caps for
+salience, that is a one-line revert, flagged here for confirmation rather than blocking.
+
+**7. "Group of" / composition counts stay out of scope.**
+Matches the module's existing, already-documented "No contact clustering" cut
+(`docs/concept/PETROBRAIN_RUNTIME.md` line 336) -- the user's own phrasing ("if can tell that yet")
+anticipates this is not yet buildable. No change needed to reconfirm this; noted so a future reader
+sees it was checked again, not missed.
+
+**8. Where the new terse formatting lives -- resolved: change the shared `_contact_report_text`
+itself, not a second formatter.**
+This is the addendum's one real architectural fork. Two options: (a) a second, lifecycle-only
+"terse" builder, leaving `render_contact_report` (the player-typed `status <id>`/`where is <id>`
+response) exactly as it was -- `"UNKNOWN ground contact, 1 o'clock, 5.0 km near a road (439m)."`;
+or (b) apply items 1/4/5/6 to `_contact_report_text` itself, so every caller (both lifecycle kinds
+*and* `render_contact_report`) gets the terser wording.
+
+Chosen: **(b)**. Reasoning:
+- The user's stated principle ("the pilot needs terse and informative messages") is general, not
+  qualified to proactive narration only -- all three of their examples happen to be lifecycle
+  lines, but nothing in the feedback singles out player-command responses as a case that should
+  stay verbose, and a pilot who types `status CONTACT_5` mid-flight wants the terse answer just as
+  much as one who hears it announced.
+- Addendum 1 deliberately extracted `_contact_report_text` specifically to stop `render_
+  contact_report` and the lifecycle branches from carrying two hand-synced phrasings of the same
+  thing. Forking a second "terse" formatter now would reopen exactly that duplication one addendum
+  later, for a distinction (proactive vs. player-queried) the user's feedback never draws.
+- Item 1 (drop the id) already only affects the lifecycle branches structurally, since
+  `render_contact_report` never spoke an id to begin with -- so choosing (b) does not make the two
+  call sites *more* different in the id department, only more *alike* in wording (coalition,
+  casing, rounding), which is a consistency improvement either way.
+
+Flagged rather than silently assumed, per this role's step 8 instruction, since it does change the
+previously-approved `render_contact_report` format for a case (`status <id>`) not covered by the
+user's live examples -- easy to split back into two formatters later if the user finds the
+player-queried response should stay more verbose.
+
+### Affected Modules / Files (in addition to the two lists above)
+- `body-layer/src/belief/speech.py` -- remove `_COALITION_PLACEHOLDER` and its use in
+  `_contact_report_text`; reword `_unit_type_display`'s presence/fallback strings; add
+  `_format_range_km` and `_round_enrichment_fragment`, and call both from `_contact_report_text`;
+  remove the `f"{contact_id}: "` prefix from `_render_lifecycle_text`'s detected/reacquired
+  branches; change `CONTACT_LOST`'s branch to `return None`; rewrite `CONTACT_CLASSIFICATION_
+  CHANGED`'s branch to build the new `"unit at ... is ..."` line via `_unit_type_display` instead
+  of `event.classification`. Update the module docstring's "Contact report format," "Which
+  lifecycle kinds get a template," and "Coalition is always UNKNOWN" notes to describe the new
+  id-less/coalition-less/rounded format and the `CONTACT_LOST`-has-no-template change.
+- `body-layer/tests/test_speech.py` -- update every existing assertion that currently expects an
+  id prefix, the `"UNKNOWN"` token, `"ground contact"`/`"unidentified contact"`, or an unrounded
+  `X.0 km`/`(NNNm)` fragment; add a `CONTACT_LOST` case asserting `route_event` returns `None` and
+  does **not** call `acknowledge_event` (mirroring however the existing `CONTACT_ATTENTION_CHANGED`
+  test already asserts this, if one exists); replace the `CONTACT_CLASSIFICATION_CHANGED` test with
+  one asserting the new `"unit at {clock} o'clock, {range} km is {type}."` shape, plus a no-
+  `relative_now` case asserting the range clause is omitted; add rounding-boundary cases for
+  `_format_range_km` (e.g. an exact `.25`/`.75` km input) and `_round_enrichment_fragment` (a
+  distance-free fact text passes through unchanged).
+- `body-layer/CLAUDE.md` -- update `speech.py`'s Structure entry: replace the coalition/`_unit_
+  type_display` description with the id-less, coalition-less, rounded format; note `CONTACT_LOST`
+  now has no template (joins `CONTACT_ATTENTION_CHANGED`); note `CONTACT_CLASSIFICATION_CHANGED`'s
+  new position-bearing format; note that `render_contact_report`'s player-command-response format
+  changed identically (Design point 8's resolved fork), not just the lifecycle lines.
+
+### Implementation Plan (addendum 2)
+1. Remove `_COALITION_PLACEHOLDER` and its use; reword `_unit_type_display`'s two generic-word
+   returns.
+2. Add `_format_range_km` and `_round_enrichment_fragment`; wire both into `_contact_report_text`
+   (range formatting call site, and the semantic-fragment append call site).
+3. Strip the id prefix from `_render_lifecycle_text`'s detected/reacquired branches; change
+   `CONTACT_LOST` to `return None`; rewrite `CONTACT_CLASSIFICATION_CHANGED` to the new
+   position-bearing line via `_unit_type_display`.
+4. Update `test_speech.py` per the Affected Modules note above.
+5. Update `speech.py`'s module docstring and `body-layer/CLAUDE.md`'s `speech.py` Structure entry.
+6. Run body-layer's format/lint/type/test commands (`ruff format`, `ruff check`,
+   `cd body-layer && mypy src`, `pytest body-layer/tests -q`).
+7. Live acceptance (user): trigger a detection, a loss, and a classification change in one session;
+   confirm no id/coalition is spoken, ranges/distances read as rounded, the lost event produces no
+   line at all, and the classification line reads as `"unit at <clock> o'clock, <range> km is
+   <type>."`.
+
+### Risks & Unknowns (addendum 2)
+- **How a player refers back to a just-announced, now-unnamed contact by voice** is a real gap
+  this addendum opens (item 1) and does not close -- typed/console reference by id still works,
+  spoken natural reference (`"watch that"`) depends on `utterance.py`'s existing filler-stripping +
+  `find_contact` resolution already covering "the thing just mentioned," which has not been
+  verified against this exact new no-id-spoken scenario. Flag for live testing, not a blocker for
+  this addendum's own scope.
+- **`_round_enrichment_fragment`'s regex is coupled to `semantic_facts_for`'s current trailing-
+  distance phrasing** (`"(NNNm)"`) -- a future rewording of that text (still allowed, since
+  `enrichment.py` itself is untouched by this addendum) would silently stop matching rather than
+  raise, degrading to the unrounded original text. Acceptable now; worth a shared-field revisit
+  (`SemanticFact.distance_m`) if `enrichment.py` phrasing churns later.
+- **`render_contact_report`'s format change (Design point 8)** affects the player-typed
+  `status`/`where is` response the same way it affects lifecycle lines -- flagged as a resolved-
+  but-overridable call, not silently assumed; easy to revert to a two-formatter split if the user
+  wants the player-queried response to stay more verbose than proactive narration.
+- **Casing convention (Design point 6)** is a resolved-but-flagged cosmetic call (lowercase
+  `"ground"`/`"contact"`, not the user's literal `"GROUND"`) -- one-line revert if wrong.
+
+### Decisions Requiring User Input (addendum 2, resolved-but-flagged, not blocking)
+- Item 6: lowercase `"ground"`/`"contact"` vocabulary vs. the user's literal `"GROUND"` caps --
+  resolved toward lowercase for cross-vocabulary consistency; flagged for override.
+- Item 8: applying the terser format to `render_contact_report` (player `status`/`where is`
+  responses) as well as lifecycle lines, not just the three lifecycle examples given -- resolved
+  toward applying it everywhere `_contact_report_text` is used; flagged since the live examples
+  did not cover this call site.
+
+### Second-Order Effects (addendum 2)
+Removing the id from spoken lifecycle lines widens the gap between "what body can say" and "what a
+player can say back" -- BL-5's natural-reference resolution (pronoun/last-mentioned-contact
+handling in `utterance.py`) goes from a nice-to-have to something the crew-text loop actually
+depends on for a normal conversational flow ("what's that... watch it"), which the current
+`find_contact`-after-filler-stripping mechanism was not explicitly designed against this scenario.
