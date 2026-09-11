@@ -103,6 +103,13 @@ separate URL/flag needed. Defaults off; without it, behavior is unchanged. See
 `aircraft-layer/WORKFLOW.md`'s "Deploy the overlay Hook script" section for the DCS-side half of
 this channel — UNVERIFIED against a live DCS session as of authorship.
 
+`--overlay` also combines with `--crew-text` (`plans/overlay-speech-callouts/plan.md`): instead of
+the lifecycle-event mirror above, it pushes every line `CrewConsole` speaks — readbacks, contact
+reports, drained lifecycle events, and injected urgent calls (prefixed `"!! "` on the pushed
+overlay copy only, never on the printed/stdout copy) — verbatim, i.e. exactly what a crew member
+would actually say, a radio-callout feed rather than a debug mirror. `--console` and `--crew-text`
+stay mutually exclusive with each other; `--overlay` is valid alongside either.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
@@ -295,7 +302,8 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   must degrade to "no overlay line for this event," never stop the poll loop or skip the rest of
   the batch. `PerceptionLogger`'s plain per-`Observation` stream does not get this wiring
   (line-noise vs. signal tradeoff). BL-5a adds `--crew-text` (mutually exclusive with
-  `--console`/`--overlay` this milestone) and `--brain-client debug|null`: `_run_crew_text_poll_loop`/
+  `--console`; `--overlay` combines with either, see below) and `--brain-client debug|null`:
+  `_run_crew_text_poll_loop`/
   `_run_crew_text_repl` mirror `_run_console_poll_loop`/`_run_console_repl` exactly, reusing the same
   `ConsolePerceptionRunner`, except the poll loop also calls `belief.crew_console.CrewConsole.
   drain_events` after each `run_once()` — the same post-`tick()` hook point `--overlay` uses — and
@@ -358,6 +366,20 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   call and an unrendered kind (`CONTACT_ATTENTION_CHANGED`) is harmlessly re-skipped every poll.
   `!inject-urgent <contact_id> <text>` is Stage 5's clearly-labelled test harness for the
   bypass-gate/urgent-call path — not a production intent or a real detector.
+  `overlay_client: AircraftLayerClient | None` (`plans/overlay-speech-callouts/plan.md`) is a
+  second, deliberately separate optional-sink field from `aircraft_client` above — `aircraft_client`
+  is BL-6's reserved-for-a-different-purpose field (live search-trigger commands, no reader today),
+  while `overlay_client` is read every time `_print` runs. `_print` (the single funnel point both
+  `handle_line` and `drain_events` already call for every line of spoken text) is where the overlay
+  push lives: after printing a line to `output` it also pushes the same text to
+  `overlay_client.push_text_line`, wrapped in its own `try`/`except AircraftLayerError`
+  (log-and-continue), the same per-push isolation shape `logger.ConsolePerceptionRunner.run_once`'s
+  BL-2.5 push loop uses. A line whose source `OutgoingSpeech` carried `bypass_gate=True` (i.e. only
+  an injected urgent call, never a routine readback/contact report/lifecycle line) gets a `"!! "`
+  prefix on the *pushed* overlay copy only — `output`'s printed copy stays exactly the text
+  `belief.speech` produced, since the prefix is an overlay-display concern, not a change to what
+  was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
+  `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a

@@ -10,12 +10,31 @@ explicitly."""
 
 from __future__ import annotations
 
+from aircraft_client import AircraftLayerError
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.decay import LOST_THRESHOLD_S
 from belief.escalation import EscalationPayload
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
+
+
+class FakeOverlayClient:
+    """A `push_text_line`-only double, mirroring `tests/test_logger.py`'s
+    own `FakeOverlayClient` (BL-2.5) -- kept as a small local copy rather
+    than a shared helper module, per this project's per-test-file fixture
+    convention. `fail_on` names texts that raise `AircraftLayerError`
+    instead of recording, used to exercise `CrewConsole._print`'s per-push
+    isolation."""
+
+    def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
+        self.pushed: list[str] = []
+        self._fail_on = fail_on
+
+    def push_text_line(self, text: str) -> None:
+        if text in self._fail_on:
+            raise AircraftLayerError("simulated push failure")
+        self.pushed.append(text)
 
 
 class _CapturingBrainClient:
@@ -172,3 +191,128 @@ def test_console_prints_to_its_configured_output() -> None:
     console = CrewConsole(store=store, output=output)
     console.handle_line("!inject-urgent CONTACT_1 test call", now_sim=0.0)
     assert output.getvalue() == "test call\n"
+
+
+def test_no_overlay_push_when_overlay_client_is_unset() -> None:
+    # overlay_client defaults to None: a true no-op, no AttributeError, no
+    # push attempted -- existing no-op default, asserted explicitly here.
+    store = ContactStore()
+    console = CrewConsole(store=store)
+    lines = console.handle_line("!inject-urgent CONTACT_1 test call", now_sim=0.0)
+    assert lines == ["test call"]
+
+
+def test_readback_pushes_to_overlay() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
+
+    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
+
+    assert lines == [f"Watching {contact_id}."]
+    assert overlay_client.pushed == [f"Watching {contact_id}."]
+
+
+def test_contact_report_pushes_to_overlay() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
+
+    lines = console.handle_line(f"status {contact_id}", now_sim=0.0)
+
+    assert len(lines) == 1
+    assert overlay_client.pushed == lines
+
+
+def test_drained_lifecycle_event_pushes_to_overlay() -> None:
+    store = ContactStore()
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
+
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+
+    spoken = console.drain_events(now_sim=0.0)
+
+    assert len(spoken) == 1
+    assert overlay_client.pushed == spoken
+
+
+def test_urgent_call_pushes_to_overlay_with_prefix_but_prints_unprefixed() -> None:
+    import io
+
+    store = ContactStore()
+    overlay_client = FakeOverlayClient()
+    output = io.StringIO()
+    console = CrewConsole(
+        store=store,
+        output=output,
+        overlay_client=overlay_client,  # type: ignore[arg-type]
+    )
+
+    lines = console.handle_line(
+        "!inject-urgent CONTACT_1 Missile launch, 9 o'clock! Break right!",
+        now_sim=0.0,
+    )
+
+    assert lines == ["Missile launch, 9 o'clock! Break right!"]
+    assert output.getvalue() == "Missile launch, 9 o'clock! Break right!\n"
+    assert overlay_client.pushed == ["!! Missile launch, 9 o'clock! Break right!"]
+
+
+def test_inject_urgent_usage_message_is_not_prefixed_when_pushed() -> None:
+    store = ContactStore()
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
+
+    lines = console.handle_line("!inject-urgent CONTACT_1", now_sim=0.0)
+
+    assert lines == ["usage: !inject-urgent <contact_id> <text>"]
+    assert overlay_client.pushed == ["usage: !inject-urgent <contact_id> <text>"]
+
+
+def test_failed_overlay_push_degrades_without_raising_and_does_not_block_remaining_lines() -> (
+    None
+):
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2"),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    detected_line = f"{contact_id} BMP-2."
+
+    overlay_client = FakeOverlayClient(fail_on=frozenset({detected_line}))
+    console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
+
+    # drain_events would normally push one line for the CONTACT_DETECTED
+    # event above; make that push fail and confirm it degrades silently.
+    spoken = console.drain_events(now_sim=0.0)
+    assert spoken == [detected_line]
+    assert overlay_client.pushed == []  # the one push failed, nothing recorded
+
+    # A second, unrelated push in a later call must still go through --
+    # one failed push must not disable the sink for subsequent lines.
+    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
+    assert overlay_client.pushed == [f"Watching {contact_id}."]
+    assert lines == [f"Watching {contact_id}."]
