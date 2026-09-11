@@ -293,3 +293,64 @@ BL-6's Stage 6 options for the better:
 Nothing here changes Stages 1-4. It changes which effector Stage 6 should target if the probe
 comes back positive: **`(device 7, 3060/3061)` with a closed loop on args 874/876**, rather than
 the AI Wheel, which has no scan command at all.
+
+---
+
+## Update 2026-09-11c — investigation complete; this plan needs revising
+
+A day of live probing on the DCS box settled every mechanism question this plan
+was gated on. **Read
+`aircraft-layer/research/2026-09-11-SUMMARY-petrovich-control.md` first** — it
+consolidates the findings, with detail in the two dated notes beside it and raw
+evidence in `aircraft-layer/research/logs/2026-09-11/`.
+
+**Both premises this plan was built on are now false:**
+
+1. *"Petrovich has no scan command"* — he has `SRCH BRST`, `SRCH FWD`,
+   `SRCH PILOT LOS`, plus `DesignateAttackPoint` ("Designate custom AI attack
+   point") and `LineUp_EXT` ("Turn to sight heading"). The wheel is fully
+   drivable from code.
+2. *"There is no outcome signal, so success must be inferred from belief
+   state"* — his state machine (`WAITING`/`SEARCHING`/`TRACKING`), his gaze in
+   degrees, and his classified contact list are all directly readable, and a
+   list longer than the five-row window is fully enumerable.
+
+So the **"virtual scan" framing solves a problem that no longer exists.** The
+body-layer half (`PendingIntent`/`TaskStore`, console/replay testing) remains
+sound and is unaffected; what needs rethinking is Stage 6 and the success
+criteria, which can now be real rather than inferred.
+
+**What an Architect revision should take as input:**
+
+- **Effector:** `GetDevice(7):SetCommand(3061, deg/60)` points the optics —
+  positional, linear, single write, settles in 0.25 s. Read back from arg 874.
+- **Outcome signal:** `list_indication(10)` for state, `list_indication(6)` for
+  classified contacts. Both real; neither needs belief-state inference.
+- **The one remaining gap:** there is no confirmed way to make him search a
+  *bearing we choose*. `SRCH PILOT LOS` follows the human's head, `SRCH 9K113
+  LOS` appears broken, `SRCH FWD`/`BRST` are not aimable. Two candidate routes
+  remain — sight-driven detection (probe deployed, result pending) and
+  `DesignateAttackPoint` (untested under good conditions). **The shape of
+  `scan_area` depends on which, if either, works**, so the revision should wait
+  for that answer or branch on it explicitly.
+
+**Two design constraints the investigation surfaced, which the revision must
+carry:**
+
+- **Observation and engagement are different acts.** `SELECT TGT` commits
+  Petrovich to tracking and, weapons free, to firing. A read-only
+  `list_contacts()` must not select or mark.
+- **Enumerating the list is not read-only** — it moves his selection, and
+  scrolling hands the sight back to him. Also, observation state is *his*:
+  he turns it off under hard manoeuvring, and every re-enable costs ~10 s of
+  gyro alignment.
+
+**Decisions from the original plan that are now moot or changed:**
+
+- *Naming (`scan_area`)* — depends on which directed-scan route survives.
+- *"Is body-layer-only acceptable as BL-6 done?"* — still a user call, but the
+  calculus has changed: a real effector and a real outcome signal now exist, so
+  shipping the body-layer half alone is a smaller fraction of the achievable
+  milestone than it was.
+- *`cancel_task`'s `AttentionArea` handling* — untouched by these findings,
+  still open.
