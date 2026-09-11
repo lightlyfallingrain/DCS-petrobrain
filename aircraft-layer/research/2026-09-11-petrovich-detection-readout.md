@@ -1276,3 +1276,86 @@ sight is **released** and his azimuth watched for 20 s. The log reports, per
 candidate, whether the sight **STAYED near our aim** or **MOVED AWAY**, and
 whether new contacts appeared — which is what separates "the point came from
 the sight" from "the point came from the pilot's view".
+
+---
+
+## DesignateAttackPoint probe — 2026-09-11 20:02 — hypothesis NOT supported
+
+All five candidates ran to completion.
+
+| candidate | id | aimed | sight ended | state transition |
+|---|---|---|---|---|
+| `DesignateAttackPoint` | 3020 | −30 | **+0.0** | `SEARCHING` → `OBSERV. ON` |
+| `Deprecated2` | 3007 | +30 | **+0.0** | `OBSERV. ON` → `OBSERV. ON` |
+| `SelectTarget` | 3009 | −30 | **−60.0** | `OBSERV. ON` → `SEARCHING` |
+| `UnselectTarget` | 3010 | +30 | **+0.0** | `SEARCHING` → `OBSERV. OFF` |
+| `DesignateAttackPoint` | 3020 | +30 | **+0.0** | `OBSERV. OFF` → `OBSERV. ON` |
+
+**None stayed near our aim. None produced detections.** So the hypothesis that
+`DesignateAttackPoint` takes its point from the 9K113's ground intersection —
+and is therefore the callable form of the broken `SRCH 9K113 LOS` — **is not
+supported.**
+
+But none of them is a no-op either; every one moved the state machine:
+
+- **`DesignateAttackPoint` (3020) *stops* the search** (`SEARCHING` →
+  `OBSERV. ON`), which is close to the opposite of starting one at a point.
+- **`SelectTarget` (3009) starts a search** and drove the sight to **both**
+  limits (az −60.0, el −0.75).
+- **`UnselectTarget` (3010) turns observation off.**
+
+So these are live commands with real effects — they are simply not
+"look where the sight points".
+
+**A separate new fact:** the sight returns to **+0.0 with `el_arg` exactly 0**
+whenever we stop commanding (4 of 5 trials). That reads as a **re-centre/cage**,
+not as "Petrovich takes over" — which refines the earlier "authority is
+event-scoped" note: releasing does not hand him a sight still pointed where we
+left it.
+
+### Where that leaves directed scanning
+
+Every route through Petrovich's own commands is now closed:
+
+- `SRCH 9K113 LOS` — broken (down-press only toggles `OBSERV.`)
+- `SRCH FWD` / `SRCH BRST` — work, but not aimable
+- `DesignateAttackPoint` and the three unbound commands — do not aim him
+- no command exists for a search mode at all (checked: none of the 21 is named
+  for one; the four `SRCH` options are wheel-menu entries only)
+- aiming the sight ourselves — does not cause anyone to look through it
+
+**`SRCH PILOT LOS` is the one search that demonstrably finds things** — the
+pilot has used it repeatedly to populate the list — and its only disqualifying
+property was that it follows the *human's* view.
+
+## Next lead: control the view, and `SRCH PILOT LOS` becomes directed
+
+If the pilot's line of sight can be set from code, then the one reliable search
+becomes a directed one. Two documented, first-party routes exist in the shipped
+`Scripts/Export.lua`:
+
+```
+LoGetCameraPosition()   -- line 635: returns the view camera's orientation
+                        --   {x=…, y=…, z=…, p=…} orientation vectors + point
+LoSetCameraPosition(pos)-- line 844: SETS it, same structure
+```
+
+So the camera orientation is both **readable and writable** from the Export
+state, with no undocumented IDs required. The obvious test is:
+
+1. `LoSetCameraPosition` to point the view at a chosen bearing
+2. fire `SRCH PILOT LOS` (near-up on the wheel, already proven pressable)
+3. read `list_indication(6)`
+
+If the search follows the camera we set, that is `scan_area(bearing)` — built
+entirely from documented API and a proven wheel press.
+
+Secondary route if `LoSetCameraPosition` is rejected in-cockpit: the relative
+camera commands are documented for `LoSetCommand` (2007/2008 mouse rotate,
+2010/2011 joystick rotate), which could be driven as a loop against
+`LoGetCameraPosition` until the view points where we want.
+
+**Caveat to check first:** this moves the *player's own view*, which is
+intrusive in a way none of the previous mechanisms were. It would need to be
+weighed for the real design even if it works — but as an investigation step it
+is cheap and decisive.
