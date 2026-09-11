@@ -621,3 +621,84 @@ engagement are different acts: a body-layer `list_contacts()` that merely reads
 must not quietly select or mark, because `SELECT TGT` commits Petrovich to
 tracking and, weapons free, to firing. That is a design requirement for the
 BL-6 revision — model the difference — not a guard to bolt onto a probe.
+
+---
+
+## Scan run 4 — 2026-09-11 12:15 — the raw dump finds the real bug
+
+### CONFIRMED: `SRCH FWD` is the centre LONG press
+
+```
+centre offers: "SRCH BRST"  |  "SRCH FWD"
+[1/2] centre LONG   (state before: OBSERV. OFF)
+      centre LONG : OBSERV. OFF -> WAITING
+starting search: centre LONG press -> "SRCH FWD"
+```
+
+Short press = `SRCH BRST`, **long press = `SRCH FWD`** — now measured, not
+assumed. Testing LONG first worked: it got the clean idle→`WAITING` transition
+that the previous run had spent on the short press.
+
+### REFUTED: the "list moves into the wheel" hypothesis
+
+The previous entry guessed that indicator 6 empties when the target page opens
+and browsing moves into the wheel. **Wrong.** With raw dumping enabled,
+indicator 6 is plainly populated *on the target page*, with multiple rows:
+
+```
+### t=108 indicator 6 RAW changed [630 bytes] page=target
+middle_list_text        Soldier AK
+upper_upper_list_text   (empty)
+LeftCenter              BTR-70          <- row -1
+lower_list_text         Soldier AK
+lower_lower_list_text   Soldier AK
+```
+
+Other dumps this run: `T-55 / T62 / MTLB / T-90A`, and `ZIL heavy truck`. So the
+multi-row list works, the five-row window is real, and `LeftCenter` is row −1
+exactly as established.
+
+### THE ACTUAL BUG: Lua's `gmatch("[^\n]*")` yields empty matches
+
+`contacts()` returned `nil` on every run while the raw dump showed contacts
+plainly. The cause:
+
+```
+Python  "a\nb".split("\n")        -> ['a', 'b']
+Lua     ("a\nb"):gmatch("[^\n]*") -> 'a', '', 'b', ''     <- EMPTY between lines
+```
+
+`contacts()` did `cur = nil` unconditionally in its `elseif` branch, so the
+empty match cleared the pending row name **before its value line arrived**, and
+every value was dropped. Fixed by iterating `"[^\n]+"`.
+
+**My verification of this parser was itself wrong, and that is the lesson.** An
+earlier entry states "the parser is not the cause — replaying it against the raw
+text extracts `middle_list_text=T-90A` correctly". That replay was written in
+Python using `split('\n')`, which does not reproduce Lua's empty matches. It
+therefore validated a parser that never worked. **Simulating Lua string
+iteration in another language only tests the logic, not the semantics** — the
+raw dump, not the simulation, is what found this.
+
+The wheel parser survived the same pattern only by accident: it never resets
+`cur` unconditionally, so empty matches were harmless there. Both now use
+`"[^\n]+"`.
+
+### Cascade: the scroll never ran
+
+Exactly one `NEXT TGT` press occurred all run. With `contacts()` returning nil,
+the walk hit "no rows readable" and aborted immediately — so the pilot's
+"target list did not move" was this same bug, one step downstream.
+
+### `MARK TGT` / `SELECT TGT`: pressed, effects unmeasured
+
+Both were pressed, and both reported `NO EFFECT on that slot` — the same
+label-invariance problem as `NEXT TGT`: their labels do not change, so the
+generic effect test cannot see anything. Their real effects were to be read
+from the rows and the sight azimuth, both of which were compromised by the
+parser bug.
+
+Now fixed: those presses are judged by row and azimuth change, with a settle
+window, and the log calls out `SIGHT MOVED (tracking?)` — which is also an
+independent check that args 874/876 read Petrovich's gaze rather than a control
+position.

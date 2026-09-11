@@ -173,7 +173,7 @@ local function wheel_slots()
     if #s < 70 then return nil end
     local vals, cur, seen_divider = {}, nil, false
     vals2 = {}
-    for line in s:gmatch("[^\n]*") do
+    for line in s:gmatch("[^\n]+") do
         local n = line:match("^(wheel_text_[a-z_]+)%s*$")
         if n then
             cur = n ; seen_divider = false
@@ -288,17 +288,23 @@ end
 local function contacts()
     local s = tostring(try("li6", list_indication, IND_HAI))
     local names, cur = {}, nil
-    for line in s:gmatch("[^\n]*") do
+    -- NB: "[^\n]+" not "[^\n]*". Lua's gmatch with * yields an EMPTY match
+    -- between every line; combined with the `cur = nil` below that cleared the
+    -- pending row name before its value line arrived, which is why every scan
+    -- run reported "no contacts" while the raw dump plainly showed them.
+    for line in s:gmatch("[^\n]+") do
         local n = line:match("^([a-z_]*list_text)%s*$")
         -- row -1 is registered under the name "LeftCenter" (ED naming slip)
         if n == nil and line:match("^LeftCenter%s*$") then n = "upper_list_text" end
-        if n then cur = n
+        if n then
+            cur = n
         elseif cur then
-            if line:match("%S") and not line:match("^%-%-%-") and not line:match("^}")
-               and not line:match("^children") then
+            if line:match("^%-%-%-") or line:match("^}") or line:match("^children") then
+                cur = nil                       -- that row had no value
+            else
                 names[#names+1] = cur .. "=" .. line
+                cur = nil
             end
-            cur = nil
         end
     end
     if #names == 0 then return nil end
@@ -511,11 +517,26 @@ local function list_enumerate(t)
         end
         log(string.format("    -- probing %s --", a[3]))
         log(string.format("       before: az=%s  rows=%s", az_deg(), tostring(contacts())))
+        -- MARK TGT / SELECT TGT labels are invariant, exactly like NEXT TGT, so
+        -- the generic label-change effect test always says NO EFFECT. Reset the
+        -- counter and judge these by the rows and the sight azimuth instead --
+        -- SELECT TGT should start Petrovich tracking, which shows as the sight
+        -- moving on its own.
+        L.pre_az, L.pre_rows = az_deg(), contacts()
         attempts[attempt_key(a[1], a[2])] = 0
         if not press_start(a[1], a[2], a[3]) then
             log("       slot does not offer it; skipping")
         end
-        L.t = t
+        L.phase = "probe_wait" ; L.t = t
+        return false
+
+    elseif L.phase == "probe_wait" then
+        if press.active then press_update(t) return false end
+        if t - L.t < 4.0 then return false end
+        log(string.format("       after : az=%s  rows=%s", az_deg(), tostring(contacts())))
+        log(string.format("       delta : az %s -> %s%s", tostring(L.pre_az), az_deg(),
+            (az_deg() ~= L.pre_az) and "   <== SIGHT MOVED (tracking?)" or ""))
+        L.phase = "probe_actions" ; L.t = t
         return false
 
     elseif L.phase == "report" then
