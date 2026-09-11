@@ -1238,3 +1238,41 @@ fire `DesignateAttackPoint` (3020), then **release the sight** and watch. If he
 slews to *our* designated bearing and works that area, the point came from the
 sight and BL-6 is solved. If he goes somewhere unrelated to it — particularly
 somewhere matching where the pilot was looking — it came from the view.
+
+### Why `DesignateAttackPoint` may be the intent behind the broken `SRCH 9K113 LOS`
+
+**Pilot's reading, 2026-09-11:** if the designated point comes from the 9K113's
+ground intersection, then `DesignateAttackPoint` may be the same underlying
+function the broken `SRCH 9K113 LOS` wheel slot was meant to invoke — meaning
+there *is* a callable command for "look through the 9K113 where it is now
+pointed", even though the menu path to it does not work.
+
+**A check of the command table supports this being the only candidate.** None of
+the 21 `helperai_commands` is named for a search mode — no `Srch`, `Search`,
+`Scan`, `LOS` or `Observ` entry exists. The four search options (`SRCH BRST`,
+`SRCH FWD`, `SRCH PILOT LOS`, `SRCH 9K113 LOS`) exist **only as wheel menu
+entries**, dispatched internally, and their strings are not in Lua at all.
+
+So the search modes have no command IDs of their own, and **`DesignateAttackPoint`
+(3020) is the only named, directly-callable command that designates a point.**
+That is exactly what would make the pilot's reading valuable: it would give a
+command-ID route to sight-directed search that bypasses the broken menu slot —
+*slew the 9K113 where we want, then tell Petrovich to look there* — which is
+precisely BL-6's `scan_area`.
+
+The probe therefore also tries the three commands declared in
+`helperai_commands` but **bound to nothing anywhere in `Input/`**, in case one of
+them is that function under an unhelpful name:
+
+| candidate | id |
+|---|---|
+| `DesignateAttackPoint` | 3020 |
+| `Deprecated2` | 3007 |
+| `SelectTarget` | 3009 |
+| `UnselectTarget` | 3010 |
+
+Each is fired with the sight deliberately aimed at a known bearing, then the
+sight is **released** and his azimuth watched for 20 s. The log reports, per
+candidate, whether the sight **STAYED near our aim** or **MOVED AWAY**, and
+whether new contacts appeared — which is what separates "the point came from
+the sight" from "the point came from the pilot's view".

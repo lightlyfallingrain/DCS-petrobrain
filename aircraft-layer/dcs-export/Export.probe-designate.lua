@@ -45,7 +45,25 @@ HOW TO FLY IT
   looking somewhere AWAY from where the sight is being pointed.
 ]]
 
-local BEARINGS = {-30.0, 0.0, 30.0}   -- where we aim before designating
+-- Candidates for "look through the 9K113 where it is now pointed".
+--
+-- There is NO command named for a search mode: the four SRCH options exist
+-- only as wheel menu entries, dispatched internally, and the strings are not
+-- even in Lua. So DesignateAttackPoint is the ONLY named, directly-callable
+-- command that designates a point -- which is what makes the pilot's reading
+-- compelling: if 3020 takes its point from the sight, it IS the function
+-- behind a working "SRCH 9K113 LOS", reachable by command ID and bypassing the
+-- broken wheel slot entirely.
+--
+-- The other three are declared in helperai_commands but bound to NOTHING
+-- anywhere in Input/, so they are cheap to try while we are here.
+local CANDIDATES = {
+    {"DesignateAttackPoint", 3020, -30.0},
+    {"Deprecated2",          3007,  30.0},
+    {"SelectTarget",         3009, -30.0},
+    {"UnselectTarget",       3010,  30.0},
+    {"DesignateAttackPoint (2nd bearing)", 3020, 30.0},
+}
 local SETTLE_S = 4.0                  -- let the sight arrive before designating
 local DWELL_S  = 20.0                 -- watch this long after releasing
 local START_DELAY, GYRO_WAIT = 20.0, 20.0
@@ -147,8 +165,6 @@ local function press_centre(hold, t) -- caller drives the release via the phase 
 end
 
 -- ============================================================== driver
-local CMD_DESIGNATE = 3020            -- "Designate custom AI attack point"
-
 local P = {phase="grace", t=0, i=0, seen={}, results={}, aimed=nil}
 local t0, last_c = nil, nil
 
@@ -259,30 +275,34 @@ function LuaExportAfterNextFrame()
 
     elseif P.phase == "next" then
         P.i = P.i + 1
-        if BEARINGS[P.i] == nil then P.phase = "report" ; return end
+        local cand = CANDIDATES[P.i]
+        if cand == nil then P.phase = "report" ; return end
         P.seen = {}
         P.base = to_set(contacts())
         log("")
-        log(string.format("========== aiming %+0.0f deg, then designating ==========",
-            BEARINGS[P.i]))
+        log(string.format("========== aim %+0.0f deg, then fire %s (%d) ==========",
+            cand[3], cand[1], cand[2]))
         log("    before: " .. where() .. " state=" .. petro_state())
         P.phase = "aim" ; P.t = t
 
     elseif P.phase == "aim" then
-        dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, BEARINGS[P.i] / 60.0)
+        local cand = CANDIDATES[P.i]
+        dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, cand[3] / 60.0)
         if t - P.t > SETTLE_S then
             P.aimed = az_deg()
-            log("    sight settled at " .. P.aimed .. " -- firing DesignateAttackPoint (3020)")
-            dev(DEV_HAI, "performClickableAction", CMD_DESIGNATE, 1)
+            log(string.format("    sight settled at %s -- firing %s (%d)",
+                P.aimed, cand[1], cand[2]))
+            dev(DEV_HAI, "performClickableAction", cand[2], 1)
             P.phase = "designate_rel" ; P.t = t
         end
 
     elseif P.phase == "designate_rel" then
         -- keep holding the sight until the command is released, so the
         -- designation cannot be attributed to the sight drifting first
-        dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, BEARINGS[P.i] / 60.0)
+        local cand = CANDIDATES[P.i]
+        dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, cand[3] / 60.0)
         if t - P.t > SHORT_HOLD then
-            dev(DEV_HAI, "performClickableAction", CMD_DESIGNATE, 0)
+            dev(DEV_HAI, "performClickableAction", cand[2], 0)
             log("    released the sight; watching where he goes")
             P.phase = "watch" ; P.t = t
         end
@@ -295,14 +315,18 @@ function LuaExportAfterNextFrame()
             P.seen[novel] = true
             log(string.format("    +%.0fs NEW: %s   (%s state=%s)",
                 t - P.t, novel, where(), petro_state()))
-            P.results[#P.results+1] = string.format("aimed %+0.0f -> %s",
-                BEARINGS[P.i], novel)
+            P.results[#P.results+1] = string.format("%s @ %+0.0f -> %s",
+                CANDIDATES[P.i][1], CANDIDATES[P.i][3], novel)
         end
         if t - P.t > DWELL_S then
+            local now = tonumber(az_deg()) or 0
+            local aimed = tonumber(P.aimed) or 0
+            local stayed = math.abs(now - aimed) < 8.0
             log(string.format("    after %.0fs: %s state=%s", DWELL_S, where(), petro_state()))
-            log(string.format("    aimed at %s, sight now at %s%s",
+            log(string.format("    aimed %s, sight now %s  ==> %s%s",
                 tostring(P.aimed), az_deg(),
-                (next(P.seen) == nil) and "   (no new detections)" or ""))
+                stayed and "STAYED near our aim" or "MOVED AWAY from our aim",
+                (next(P.seen) == nil) and ", no new detections" or ", WITH new detections"))
             P.phase = "next" ; P.t = t
         end
 
