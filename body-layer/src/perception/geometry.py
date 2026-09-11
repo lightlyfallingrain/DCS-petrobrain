@@ -15,16 +15,12 @@ mathematical-convention `atan2(dy, dx)`.
 
 World-model seam: `elevation_at` calls `query.describe_position` (the
 `plans/body-layer/plan.md` §1 in-process seam) for a single-point lookup.
-`line_of_sight_clear`'s repeated per-sample elevation reads instead call
-`store.reader.sample_grid` directly -- the same primitive
-`describe_position.elevation.dcs_m` is itself built on (see
-`world-model/src/query/describe.py`'s module docstring), but without also
-computing `describe_position`'s unrelated road/settlement/navaid joins on
-every one of a LOS sample's dozen-plus points. This is a deliberate,
-documented deviation from routing every world-model read through
-`describe_position`, not an oversight -- flagged here so a future reader
-doesn't assume it should be "fixed" without weighing the redundant-work
-cost of the alternative.
+`line_of_sight_clear` below is a thin wrapper around world-model's own
+`query.line_of_sight.line_of_sight_clear`
+(`plans/world-model-los-generalization/plan.md`) -- the algorithm itself,
+including the reasoning for why it samples `store.reader.sample_grid`
+directly instead of going through `describe_position`, now lives in that
+module's docstring, not here.
 """
 
 from __future__ import annotations
@@ -35,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from query.describe import describe_position
+from query.line_of_sight import line_of_sight_clear as _wm_line_of_sight_clear
 from store.reader import sample_grid
 
 #: Default number of interior points sampled along the observer->target
@@ -208,28 +205,17 @@ def line_of_sight_clear(
     """Whether the straight sightline from `observer` to `target` is clear
     of terrain, per world-model's elevation grid.
 
-    Samples `samples` interior points along the observer->target ground
-    track and compares the straight-sightline altitude at that point against
-    the actual terrain elevation there. A sample where world-model has no
-    elevation data (`None`) is skipped rather than treated as blocking or
-    clear -- absence of data must never manufacture a detection outcome
-    either way; it is simply not evidence.
-
-    This is a plain geometric LOS check only -- no earth curvature, no
-    atmospheric refraction, no target-size/optical-plausibility reasoning.
-    Those, along with turning "clear line of sight" into an actual
-    detectability decision, are a concrete tier's job (Tier 3's detectability
-    gate, per `plans/pb1-perception-logger/plan.md`'s Invariant Check) -- not
-    this shared helper's.
+    Thin wrapper around `query.line_of_sight.line_of_sight_clear` -- unpacks
+    this module's own `GeoPosition` observer/target into the bare
+    `(x, z, alt_m)` tuples that primitive takes, and returns its result
+    unchanged. See that function's docstring for the algorithm itself (the
+    sampling loop, absence handling, and why it reads `store.reader.
+    sample_grid` directly rather than through `describe_position`).
     """
-    for i in range(1, samples):
-        t = i / samples
-        sample_x = observer.x + (target.x - observer.x) * t
-        sample_z = observer.z + (target.z - observer.z) * t
-        terrain_m = sample_grid(conn, "elevation", sample_x, sample_z)
-        if terrain_m is None:
-            continue
-        sightline_alt_m = observer.alt_m + (target.alt_m - observer.alt_m) * t
-        if terrain_m > sightline_alt_m:
-            return False
-    return True
+    return _wm_line_of_sight_clear(
+        conn,
+        theatre,
+        (observer.x, observer.z, observer.alt_m),
+        (target.x, target.z, target.alt_m),
+        samples=samples,
+    )
