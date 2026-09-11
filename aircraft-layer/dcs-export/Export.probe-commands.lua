@@ -148,6 +148,14 @@ local ASP_ARGS = {
     [762] = "USR_check",
 }
 
+-- Give the pilot time to settle into level flight before anything runs.
+local START_DELAY = 20.0
+-- The Mi-24's 9K113 needs ~10s of gyro spin-up after the sight doors open
+-- before it can be slewed at all (pilot, 2026-09-11). There is no Lua-readable
+-- readiness signal: Ready_9k113 is a mesh element with no value and
+-- av9K113::isGyroReady() is native-only. So wait generously.
+local GYRO_WAIT   = 20.0
+
 local IND_9K113   = 0   -- cc9K113; has real TEXT elements (Zoom_Val, filters,
                         -- BackLight, ArrowHelper_Val, tips) unlike the ASP-17
 local IND_ASP17   = 2   -- list_indication index, 0-based per device_init.lua
@@ -339,78 +347,62 @@ end
 local K113_ARG_DOORS = 775   -- STVORKI
 local stage_d_fired = false
 
--- v3: TEST MATRIX, because v2 proved nothing due to two faults of mine.
+-- v4: CALIBRATION SWEEP + a fair test of the AI axis.
 --
--- v2 fault 1: the settle detector (25 unchanged frames) fired after 0.2s --
---   before the sight had begun moving at all -- so every sweep reported
---   "NEVER MOVED" from rest. That was a probe bug, not a DCS result.
--- v2 fault 2: wrong verb, probably. performClickableAction is for CLICKABLE
---   cockpit elements; it worked on ASP-17 Brightness_PM because that has a
---   clickable element (arg 564). The 9K113 slew axes appear in NO clickable
---   entry and in NO axisCommands binding -- the player slews via native mouse
---   handling inside the sight view. So the right verb is probably SetCommand,
---   which the device object also exposes.
+-- Run 3 succeeded and changed the picture:
+--   * SetCommand is the verb. performClickableAction is for clickable
+--     elements only (it moved ASP-17 Brightness_PM, which has arg 564; the
+--     sight axes have no clickable entry at all).
+--   * The axes are POSITIONAL, not velocity. SetCommand(3026, 1.0) drove
+--     azimuth to its stop in under 0.3s; at the declared h_axis_velocity of
+--     rad(20)/s a 60 deg slew would take 3s. So "look at bearing X" is one
+--     write, not a closed loop.
+--   * The stops are exactly the declared gauge extremes: azimuth reached
+--     0.44, elevation -0.75. Run 1's 0.396 was just where manual slewing had
+--     got to, not a mechanical limit.
 --
--- Rather than guess again, try every plausible combination and report which
--- (if any) moves the sight. Each test: re-issue the command EVERY FRAME for
--- TEST_SECS (velocity axes generally need sustained input, and v1's single
--- shots may be why motion looked quantised), sampling the angle each frame.
-
-local TEST_SECS = 3.0
-
--- The Mi-24 9K113 needs roughly 10s of gyro spin-up after the sight doors open
--- before it can be slewed at all (pilot, 2026-09-11). Run 2 opened the doors at
--- 10:06:02 and began sweeping at 10:06:09 -- 7s -- so the gyro was still
--- spinning and "NEVER MOVED" was guaranteed regardless of verb.
+-- Run 3's flaw, which was mine: every test commanded 1.0 and nothing reset
+-- between tests, so tests 2-5 started already pinned at 0.44 and test 7 at
+-- -0.75. They had no room to move, so their "no change" says nothing about
+-- the AI axis. v4 fixes that by recentring before each test and by sweeping a
+-- range of values rather than one.
 --
--- There is no Lua-readable readiness signal to gate on: `Ready_9k113` appears in
--- list_indication(0) but is a mesh element with no value, and isGyroReady() is
--- native-only. So: wait generously, and run the whole matrix TWICE, so a
--- too-early first pass cannot masquerade as a negative result.
-local GYRO_WAIT   = 20.0
-local PASS_GAP    = 15.0
-local MAX_PASSES  = 2
+-- What v4 produces:
+--   1. A value -> argument table for azimuth and elevation, which gives the
+--      full mapping and shows whether it is linear.
+--   2. A fair AI-axis test, recentred first, in both directions.
 
--- {label, method, command, arg}
-local TESTS = {
-    {"SetCommand  player LR",  "SetCommand",  K113.Command_SIGHT_LEFT_RIGHT_AXIS,           K113_ARG_AZIMUTH},
-    {"clickable   player LR",  "click",       K113.Command_SIGHT_LEFT_RIGHT_AXIS,           K113_ARG_AZIMUTH},
-    {"SetCommand  AI LR",      "SetCommand",  K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS, K113_ARG_AZIMUTH},
-    {"clickable   AI LR",      "click",       K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS, K113_ARG_AZIMUTH},
-    {"SetCommand  HorizPos",   "SetCommand",  K113.Command_HorizPos,                        K113_ARG_AZIMUTH},
-    {"SetCommand  player UD",  "SetCommand",  K113.Command_SIGHT_UP_DOWN_AXIS,              K113_ARG_ELEVATION},
-    {"SetCommand  AI UD",      "SetCommand",  K113.Command_Intern_SIGHT_UP_DOWN_AI_AXIS,    K113_ARG_ELEVATION},
-    {"SetCommand  VertPos",    "SetCommand",  K113.Command_VertPos,                         K113_ARG_ELEVATION},
-}
+local HOLD = 1.2                       -- seconds to hold each commanded value
+local VALUES = {-1.0, -0.5, 0.0, 0.5, 1.0}
 
-local mx = {
+local cal = {
     phase = "setup",
     t_phase = 0,
-    pass = 1,
-    idx = 0,
-    start_val = nil,
-    samples = {},
-    winners = {},
+    step = 0,
+    rows = {},
+    ai = {},
 }
 
 local function k113_angles()
     return read_arg(K113_ARG_AZIMUTH), read_arg(K113_ARG_ELEVATION)
 end
 
--- Send via whichever verb this test wants. Returns false if unavailable.
-local function k113_send_via(method, cmd, value)
+local function k113_setcmd(cmd, value)
     local dev = try("GetDevice(I9K113)", GetDevice, DEV_I9K113)
     if dev == nil then return false end
-    local name = (method == "SetCommand") and "SetCommand"
-                                          or "performClickableAction"
-    local fn = safe_index(dev, name)
+    local fn = safe_index(dev, "SetCommand")
     if type(fn) ~= "function" then return false end
-    try(name, fn, dev, cmd, value)
+    try("SetCommand", fn, dev, cmd, value)
     return true
 end
 
-local function k113_send(cmd, value)
-    return k113_send_via("click", cmd, value)
+local function k113_send(cmd, value)   -- clickable verb, for panel switches
+    local dev = try("GetDevice(I9K113)", GetDevice, DEV_I9K113)
+    if dev == nil then return false end
+    local fn = safe_index(dev, "performClickableAction")
+    if type(fn) ~= "function" then return false end
+    try("performClickableAction", fn, dev, cmd, value)
+    return true
 end
 
 local function k113_set_verified(label, cmd, value, arg, want)
@@ -429,11 +421,38 @@ local function k113_set_verified(label, cmd, value, arg, want)
     return ok
 end
 
+-- The full script: sweep azimuth values, sweep elevation values, then the
+-- recentred AI-axis tests. Each entry is {label, cmd, arg, value}.
+local PLAN = {}
+local function build_plan()
+    for _, v in ipairs(VALUES) do
+        PLAN[#PLAN + 1] = {"AZ", K113.Command_SIGHT_LEFT_RIGHT_AXIS,
+                           K113_ARG_AZIMUTH, v}
+    end
+    for _, v in ipairs(VALUES) do
+        PLAN[#PLAN + 1] = {"EL", K113.Command_SIGHT_UP_DOWN_AXIS,
+                           K113_ARG_ELEVATION, v}
+    end
+    -- AI axis, each preceded by an explicit recentre so it has room to move
+    PLAN[#PLAN + 1] = {"AI_AZ_recentre", K113.Command_SIGHT_LEFT_RIGHT_AXIS,
+                       K113_ARG_AZIMUTH, 0.0}
+    PLAN[#PLAN + 1] = {"AI_AZ+", K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS,
+                       K113_ARG_AZIMUTH, 1.0}
+    PLAN[#PLAN + 1] = {"AI_AZ_recentre2", K113.Command_SIGHT_LEFT_RIGHT_AXIS,
+                       K113_ARG_AZIMUTH, 0.0}
+    PLAN[#PLAN + 1] = {"AI_AZ-", K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS,
+                       K113_ARG_AZIMUTH, -1.0}
+    PLAN[#PLAN + 1] = {"AI_EL_recentre", K113.Command_SIGHT_UP_DOWN_AXIS,
+                       K113_ARG_ELEVATION, 0.0}
+    PLAN[#PLAN + 1] = {"AI_EL+", K113.Command_Intern_SIGHT_UP_DOWN_AI_AXIS,
+                       K113_ARG_ELEVATION, 1.0}
+end
+
 local function stage_e_sight_slew(t)
     if not caps.performClickableAction then return end
 
-    if mx.phase == "setup" then
-        log("--- stage E v3: preparing the 9K113 ---")
+    if cal.phase == "setup" then
+        log("--- stage E v4: preparing the 9K113 ---")
         log("    POWER_PN (885) = " .. tostring(read_arg(885)))
         local doors_ok = k113_set_verified("open sight doors",
                                            K113.Command_STVORKI, 1,
@@ -441,112 +460,90 @@ local function stage_e_sight_slew(t)
         k113_set_verified("observation (NABL)", K113.Command_NABL, 1, 886, 1)
         if not doors_ok then
             log("    !! sight doors shut -- open them in the cockpit. Retrying.")
-            mx.phase = "wait_retry"
-            mx.t_phase = t
+            cal.phase = "wait_retry"
+            cal.t_phase = t
             return
         end
         log("    sight ready. *** DO NOT TOUCH THE SIGHT FROM HERE ON ***")
-        log(string.format("    waiting %.0fs for gyro spin-up before testing",
-                          GYRO_WAIT))
+        log(string.format("    waiting %.0fs for gyro spin-up", GYRO_WAIT))
         if not stage_d_fired then
             stage_d_fired = true
             stage_d_petrovich()
         end
-        mx.phase = "gyro_wait"
-        mx.t_phase = t
+        build_plan()
+        cal.phase = "gyro_wait"
+        cal.t_phase = t
 
-    elseif mx.phase == "gyro_wait" then
-        if (t - mx.t_phase) > GYRO_WAIT then
-            log(string.format(
-                "--- pass %d/%d: %d command/verb combinations, %.0fs each ---",
-                mx.pass, MAX_PASSES, #TESTS, TEST_SECS))
-            mx.idx = 0
-            mx.phase = "next"
-            mx.t_phase = t
+    elseif cal.phase == "wait_retry" then
+        if (t - cal.t_phase) > 5.0 then cal.phase = "setup" end
+
+    elseif cal.phase == "gyro_wait" then
+        if (t - cal.t_phase) > GYRO_WAIT then
+            log(string.format("--- calibration sweep: %d steps, %.1fs each ---",
+                              #PLAN, HOLD))
+            cal.phase = "next"
+            cal.t_phase = t
         end
 
-    elseif mx.phase == "wait_retry" then
-        if (t - mx.t_phase) > 5.0 then mx.phase = "setup" end
-
-    elseif mx.phase == "next" then
-        if (t - mx.t_phase) < 1.5 then return end   -- let the axis settle
-        mx.idx = mx.idx + 1
-        local test = TESTS[mx.idx]
-        if test == nil then
-            if #mx.winners == 0 and mx.pass < MAX_PASSES then
-                mx.pass = mx.pass + 1
-                log(string.format(
-                    "--- pass %d found nothing; waiting %.0fs and repeating in",
-                    mx.pass - 1, PASS_GAP))
-                log("    case the gyro was still spinning up ---")
-                mx.phase = "gyro_wait"
-                mx.t_phase = t - GYRO_WAIT + PASS_GAP
-                return
-            end
-            mx.phase = "report"
+    elseif cal.phase == "next" then
+        cal.step = cal.step + 1
+        local p = PLAN[cal.step]
+        if p == nil then
+            cal.phase = "report"
             return
         end
-        mx.start_val = read_arg(test[4])
-        mx.samples = {}
-        log(string.format("--- test %d/%d: %s  (cmd %d, arg %d) from %s ---",
-            mx.idx, #TESTS, test[1], test[3], test[4], tostring(mx.start_val)))
-        mx.phase = "running"
-        mx.t_phase = t
+        cal.start_val = read_arg(p[3])
+        k113_setcmd(p[2], p[4])
+        cal.phase = "holding"
+        cal.t_phase = t
 
-    elseif mx.phase == "running" then
-        local test = TESTS[mx.idx]
-        -- re-issue EVERY frame: a velocity axis needs sustained input
-        k113_send_via(test[2], test[3], 1.0)
-        local v = read_arg(test[4])
-        if type(v) == "number" then
-            mx.samples[#mx.samples + 1] =
-                string.format("%.2f:%.5f", t - mx.t_phase, v)
+    elseif cal.phase == "holding" then
+        local p = PLAN[cal.step]
+        k113_setcmd(p[2], p[4])           -- re-issue each frame, harmless
+        if (t - cal.t_phase) > HOLD then
+            local v = read_arg(p[3])
+            local moved = (type(v) == "number" and type(cal.start_val) == "number"
+                           and math.abs(v - cal.start_val) > 1e-4)
+            log(string.format("  %-16s cmd %-4d val %+0.2f : arg %d  %s -> %s  %s",
+                p[1], p[2], p[4], p[3], tostring(cal.start_val), tostring(v),
+                moved and "moved" or "-"))
+            cal.rows[#cal.rows + 1] = {p[1], p[4], v, moved}
+            cal.phase = "next"
+            cal.t_phase = t
         end
-        if (t - mx.t_phase) > TEST_SECS then
-            k113_send_via(test[2], test[3], 0.0)
-            local final = read_arg(test[4])
-            local moved = (type(final) == "number"
-                           and type(mx.start_val) == "number"
-                           and math.abs(final - mx.start_val) > 1e-4)
-            log(string.format("    %s -> %s over %.1fs, %d samples  ==> %s",
-                tostring(mx.start_val), tostring(final), t - mx.t_phase,
-                #mx.samples, moved and "*** MOVED ***" or "no change"))
-            local n, line = #mx.samples, {}
-            local step = math.max(1, math.floor(n / 10))
-            for i = 1, n, step do line[#line + 1] = mx.samples[i] end
-            log("      traj: " .. table.concat(line, "  "))
-            if moved then
-                mx.winners[#mx.winners + 1] =
-                    string.format("%s (cmd %d)", test[1], test[3])
+
+    elseif cal.phase == "report" then
+        log("=========================================================")
+        log("CALIBRATION TABLE  (commanded value -> cockpit argument)")
+        for _, r in ipairs(cal.rows) do
+            log(string.format("  %-16s val %+0.2f -> %s%s",
+                r[1], r[2], tostring(r[3]), r[4] and "" or "   (no movement)"))
+        end
+        log("")
+        log("Azimuth stops are +/-60 deg (known), so if the sweep is linear")
+        log("across -0.44..+0.44 then azimuth_deg = arg_874 * 136.36.")
+        log("Elevation stops in DEGREES remain unknown -- this table gives the")
+        log("gauge extremes only; someone must correlate them to real angles.")
+        log("")
+        local ai_moved = false
+        for _, r in ipairs(cal.rows) do
+            if string.sub(r[1], 1, 3) == "AI_" and r[4]
+               and string.find(r[1], "recentre") == nil then
+                ai_moved = true
             end
-            mx.phase = "next"
-            mx.t_phase = t
         end
-
-    elseif mx.phase == "report" then
-        log("=========================================================")
-        if #mx.winners == 0 then
-            log(string.format("NO COMBINATION MOVED THE 9K113 (%d passes).", mx.pass))
-            log("  Checked: SetCommand and performClickableAction, against the")
-            log("  player LR/UD axes, the Intern _AI_AXIS pair, and Horiz/VertPos.")
-            log("  Next hypotheses, in order:")
-            log("   1. slewing is gated on being IN the sight view -- re-run this")
-            log("      probe while sitting in the 9K113 sight view the whole time")
-            log("   2. the axes need a value scale other than 1.0, or a -1..1")
-            log("      sign convention we are not hitting")
-            log("   3. slew is handled natively from mouse input and these")
-            log("      command IDs are vestigial for the player path")
+        if ai_moved then
+            log("AI AXIS (3060/3061): MOVED the sight when given room.")
+            log("  Prefer it over the player axes as the effector -- it is the")
+            log("  channel the AI itself uses.")
         else
-            log("COMBINATIONS THAT MOVED THE SIGHT:")
-            for _, w in ipairs(mx.winners) do log("   " .. w) end
-            log("  Re-run with a limit sweep using the winning combination to")
-            log("  get the mechanical stops and the gauge->degree calibration.")
+            log("AI AXIS (3060/3061): did NOT move the sight even when recentred")
+            log("  first. The player axes (3025/3026) are the working effector.")
         end
         log("=========================================================")
-        mx.phase = "done"
+        cal.phase = "done"
 
-    elseif mx.phase == "done" then
-        -- idle
+    elseif cal.phase == "done" then
     end
 end
 
@@ -618,13 +615,13 @@ function LuaExportAfterNextFrame()
     if t0 == nil then t0 = t end
     local dt = t - t0
 
-    if not stage_b_done and dt > 10.0 then
+    if not stage_b_done and dt > START_DELAY then
         stage_b_done = true
         stage_b_baseline()
-    elseif stage_b_done and not stage_c_done and dt > 20.0 then
+    elseif stage_b_done and not stage_c_done and dt > START_DELAY + 10.0 then
         stage_c_done = true
         stage_c_write_test()
-    elseif stage_c_done and not stage_d_done and dt > 30.0 then
+    elseif stage_c_done and not stage_d_done and dt > START_DELAY + 20.0 then
         stage_d_done = true
         stage_d_petrovich()
         log("--- stage E now runs on a repeating cycle. Fly a few cycles OUTSIDE")
