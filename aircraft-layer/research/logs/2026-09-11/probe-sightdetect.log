@@ -158,3 +158,32 @@
 13:30:45     pinning az=+0 deg, el_cmd=-0.40
 13:30:45     +0s DETECTED: BMD-1, BTR-80, T-72B   (az=-0.7 el=-0.00205796235241 state=NEXT TGT)
 13:31:13 sightdetect probe: stopped.
+13:39:18 
+13:39:18 #########################################################
+13:39:18 SIGHT-DETECTION PROBE v3 -- FREE vs PINNED
+13:39:18   does holding the sight stop Petrovich finding anything?
+13:39:18 #########################################################
+13:39:27   20s grace -- get level and steady
+13:39:47   opening the AI wheel (ShowMenu)
+13:39:49   wheel open, state=OBSERV. OFF
+13:39:49   starting a forward search (centre LONG = SRCH FWD)
+13:39:52   search running, state=WAITING
+13:39:52   waiting 20s for gyro alignment
+13:40:00   ~ t=33 contacts: SA-10 Big Bird radar, T-55, T62  (state=NEXT TGT az=+0.3 el_arg=-0.109 pitch=+2.0 bank=+0.0 (horizon-relative = arg + pitch))
+13:40:12 
+13:40:12   baseline: state=NEXT TGT az=-0.2 el_arg=+0.003 pitch=+2.9 bank=+0.0 (horizon-relative = arg + pitch) list=SA-10 Big Bird radar, T-55, T62
+13:40:12 
+13:40:12 ========== round 1: FREE ==========
+13:40:12     start: state=NEXT TGT az=-0.1 el_arg=+0.003 pitch=+2.9 bank=+0.0 (horizon-relative = arg + pitch) list=SA-10 Big Bird radar, T-55, T62
+13:40:12     not touching the sight -- he aims it himself
+13:40:37     end  : state=NEXT TGT az=+0.3 el_arg=-0.002 pitch=+1.5 bank=+0.0 (horizon-relative = arg + pitch)  NO NEW DETECTIONS
+13:40:37 
+13:40:37 ========== round 2: PINNED ==========
+13:40:37     start: state=NEXT TGT az=+0.3 el_arg=-0.002 pitch=+1.5 bank=+0.0 (horizon-relative = arg + pitch) list=SA-10 Big Bird radar, T-55, T62
+13:40:37     pinning az=+0.0 deg (elevation left to him)
+13:41:02     end  : state=NEXT TGT az=+0.0 el_arg=-0.004 pitch=-2.5 bank=+0.0 (horizon-relative = arg + pitch)  NO NEW DETECTIONS
+13:41:02 
+13:41:02 ========== round 3: FREE ==========
+13:41:02     start: state=NEXT TGT az=+0.0 el_arg=-0.004 pitch=-2.5 bank=+0.0 (horizon-relative = arg + pitch) list=SA-10 Big Bird radar, T-55, T62
+13:41:02     not touching the sight -- he aims it himself
+13:41:14 sightdetect probe: stopped.

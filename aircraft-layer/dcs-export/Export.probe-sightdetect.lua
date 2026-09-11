@@ -47,10 +47,24 @@ local ROUNDS    = 6        -- alternating FREE / PINNED
 -- with nothing on it. Targets are all at much the same vertical level, so
 -- elevation is his to manage; we only take azimuth.
 --
--- And the pin bearing is now ADAPTIVE: pin to the azimuth at which he last
--- actually found something. v3 pinned a fixed +0 deg, which was simply an
--- empty bearing, so "PINNED found nothing" said nothing about suppression.
-local PIN_AZ_DEFAULT = 0.0
+-- v5: PINNED is a SWEEP, not a hold, across the arc where the targets are.
+-- v4 pinned a single bearing derived from a detection -- but no new detection
+-- ever occurred, so it stayed at the +0 default, which was within half a degree
+-- of where the sight already sat. Nothing moved, so nothing was tested.
+-- The pilot's call: sweep 12 -> 10 o'clock, i.e. 0 to -60 degrees.
+local SWEEP_FROM, SWEEP_TO = 0.0, -60.0
+
+-- v5 also RE-ISSUES THE SEARCH each round. v4's rounds all ran with
+-- state=NEXT TGT: after the pilot's SRCH PILOT LOS populated the list, the
+-- wheel sat on the TARGET page and he was not searching at all. Both
+-- conditions were measuring a parked crew.
+local SEARCHING_STATES = {["WAITING"]=true, ["SEARCHING"]=true}
+local function is_searching(st)
+    for k in pairs(SEARCHING_STATES) do
+        if st:find(k, 1, true) then return true end
+    end
+    return false
+end
 local START_DELAY, GYRO_WAIT = 20.0, 20.0
 
 local LOG_PATH = lfs.writedir() .. "Logs\\aircraft_layer_probe_sightdetect.log"
@@ -76,7 +90,7 @@ local function safe_index(o, k)
 end
 
 local DEV_MAIN, DEV_SIGHT, DEV_HAI = 0, 7, 30
-local CMD_CENTRE, CMD_SHOWMENU = 3015, 3001
+local CMD_CENTRE, CMD_SHOWMENU, CMD_LEFT = 3015, 3001, 3003
 local SIGHT_AI_AZ, SIGHT_AI_EL = 3061, 3060   -- Intern_SIGHT_*_AI_AXIS
 local ARG_AZ, ARG_EL, ARG_NABL = 874, 876, 886
 local IND_HAI, IND_WHEEL = 6, 10
@@ -151,7 +165,7 @@ end
 
 -- ============================================================== driver
 local P = {phase="grace", t=0, i=0, pinned=true, seen={}, results={},
-           pin_az = PIN_AZ_DEFAULT, base = {}}
+           base = {}, void = false}
 
 -- Contacts persist across rounds, so a PINNED round inherits whatever the
 -- previous FREE round found and would look like a detection. Count only items
@@ -288,6 +302,57 @@ function LuaExportAfterNextFrame()
     elseif P.phase == "next" then
         P.i = P.i + 1
         if P.i > ROUNDS then P.phase = "report" ; return end
+        -- get him searching again: the previous round may have ended with the
+        -- target page up, in which case he is parked, not scanning.
+        P.phase = "rearm" ; P.t = t
+        return
+
+    elseif P.phase == "rearm" then
+        if t - P.t < 1.0 then return end
+        local st = petro_state()
+        if is_searching(st) then
+            log(string.format("  (already searching: %s)", st))
+            P.phase = "round_start" ; P.t = t ; return
+        end
+        log(string.format("  re-arming search (state was %s)", st))
+        -- close the list first if the target page is up, else the centre press
+        -- lands on MARK TGT instead of a search option
+        local v = wheel_slots()
+        local on_target = v and ((v["wheel_text_center"] or ""):upper():find("MARK", 1, true)
+                                 or (v["wheel_text_down"] or ""):upper():find("NEXT TGT", 1, true))
+        if on_target then
+            dev(DEV_HAI, "performClickableAction", CMD_LEFT, 1)
+            P.phase = "rearm_close" ; P.t = t
+        else
+            dev(DEV_HAI, "performClickableAction", CMD_CENTRE, 1)
+            P.phase = "rearm_search" ; P.t = t
+        end
+
+    elseif P.phase == "rearm_close" then
+        if t - P.t > SHORT_HOLD then
+            dev(DEV_HAI, "performClickableAction", CMD_LEFT, 0)
+            dev(DEV_HAI, "performClickableAction", CMD_CENTRE, 1)
+            P.phase = "rearm_search" ; P.t = t
+        end
+
+    elseif P.phase == "rearm_search" then
+        if t - P.t > LONG_HOLD then
+            dev(DEV_HAI, "performClickableAction", CMD_CENTRE, 0)
+            P.phase = "rearm_check" ; P.t = t
+        end
+
+    elseif P.phase == "rearm_check" then
+        if t - P.t < 2.5 then return end
+        local st = petro_state()
+        if not is_searching(st) then
+            log(string.format("  !! still not searching (state=%s) -- round will be marked void", st))
+            P.void = true
+        else
+            P.void = false
+        end
+        P.phase = "round_start" ; P.t = t
+
+    elseif P.phase == "round_start" then
         P.pinned = not P.pinned
         P.seen = {}
         P.base = to_set(contacts())          -- this round's starting list
@@ -297,7 +362,8 @@ function LuaExportAfterNextFrame()
         log(string.format("    start: state=%s az=%s %s list=%s",
             petro_state(), az_deg(), sight_world_el(), tostring(contacts())))
         if P.pinned then
-            log(string.format("    pinning az=%+.1f deg (elevation left to him)", P.pin_az))
+            log(string.format("    sweeping az %+.0f -> %+.0f deg over %.0fs (elevation left to him)",
+                SWEEP_FROM, SWEEP_TO, DWELL_S))
         else
             log("    not touching the sight -- he aims it himself")
         end
@@ -305,8 +371,11 @@ function LuaExportAfterNextFrame()
 
     elseif P.phase == "dwell" then
         if P.pinned then
-            -- azimuth only; elevation stays his
-            dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, P.pin_az / 60.0)
+            -- azimuth only; elevation stays his. Sweep rather than hold, so we
+            -- actually cover the arc the targets are in.
+            local frac = math.min(1.0, (t - P.t) / DWELL_S)
+            local az = SWEEP_FROM + (SWEEP_TO - SWEEP_FROM) * frac
+            dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, az / 60.0)
         end
         local cur = contacts()
         local novel = novel_against(cur, P.base)
@@ -314,23 +383,16 @@ function LuaExportAfterNextFrame()
             P.seen[novel] = true
             log(string.format("    +%.0fs NEW: %s   (az=%s %s state=%s)",
                 t - P.t, novel, az_deg(), sight_world_el(), petro_state()))
-            P.results[#P.results+1] = string.format("%s round %d: %s",
-                P.pinned and "PINNED" or "FREE", P.i, novel)
-            if not P.pinned then
-                -- remember WHERE he found it, and pin there next time. That is
-                -- the controlled comparison: same bearing, only difference is
-                -- whether he or we are holding the sight.
-                local a = tonumber(az_deg())
-                if a then
-                    P.pin_az = a
-                    log(string.format("    -> next PINNED round will hold az=%+.1f", a))
-                end
-            end
+            P.results[#P.results+1] = string.format("%s round %d: %s%s",
+                P.pinned and "PINNED" or "FREE", P.i, novel,
+                P.void and " [VOID]" or "")
+
         end
         if t - P.t > DWELL_S then
-            log(string.format("    end  : state=%s az=%s %s  %s",
+            log(string.format("    end  : state=%s az=%s %s  %s%s",
                 petro_state(), az_deg(), sight_world_el(),
-                (next(P.seen) == nil) and "NO NEW DETECTIONS" or "(new detections above)"))
+                (next(P.seen) == nil) and "NO NEW DETECTIONS" or "(new detections above)",
+                P.void and "   [VOID -- he was not searching]" or ""))
             P.phase = "next" ; P.t = t
         end
 

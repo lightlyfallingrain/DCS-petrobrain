@@ -1130,3 +1130,46 @@ and was missed.
   only by inheriting round 5's list. Only items absent from the round's own
   starting list now count.
 - **Log attitude** with every sight reading.
+
+---
+
+## Sight-detection run 4 — the rounds never ran under search conditions
+
+```
+~ t=33 contacts: SA-10 Big Bird radar, T-55, T62   (state=NEXT TGT)
+baseline           state=NEXT TGT  list=SA-10 Big Bird radar, T-55, T62
+round 1 FREE       az -0.1 -> +0.3    state=NEXT TGT    NO NEW DETECTIONS
+round 2 PINNED     az +0.3 -> +0.0    state=NEXT TGT    NO NEW DETECTIONS
+```
+
+**`state=NEXT TGT` in every round — he was never searching.** After the pilot's
+`SRCH PILOT LOS` populated the list, the wheel sat on the **target page**, and
+`NEXT TGT` is that page's down-slot label, not a search state. Both conditions
+measured a parked crew sitting on a list.
+
+Compounding it, the adaptive pin never updated: `P.pin_az` only changes on a
+*new* detection in a FREE round, and the contacts were all inherited from before
+the rounds began, so it stayed at its `+0.0` default — within half a degree of
+where the sight already sat. **Nothing moved, so nothing was tested**, which is
+precisely the pilot's read ("PINNED either never activated or the movement was
+so small that it made no difference").
+
+One useful thing did come out of it: the run picked up
+`SA-10 Big Bird radar, T-55, T62` — so classification extends to radar units, not
+just vehicles.
+
+### v5 — three fixes
+
+- **Re-arm the search every round.** Check the state; if he is not
+  `WAITING`/`SEARCHING`, close the list (near-left) if the target page is up,
+  then issue `SRCH FWD` and verify. A round that still is not searching is
+  marked **`[VOID]`** in the log rather than silently counted — no more
+  measuring a parked crew without noticing.
+- **PINNED sweeps rather than holds.** Per the pilot, across **12 → 10 o'clock
+  (0° → −60°)**, linearly over the dwell. A static pin at a bearing he already
+  occupies is not a test; a sweep across the arc the targets are in is.
+- **Elevation still untouched**, and attitude logged alongside.
+
+The comparison this finally makes is the right one: with him genuinely
+searching, does *our* sweep across the target arc produce detections, or only
+*his* own?
