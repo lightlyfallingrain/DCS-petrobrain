@@ -80,20 +80,26 @@ REPL-thread-local `sqlite3.Connection`/`EnrichmentContext` (mirroring Stage
 `runner.enrichment` at all -- see that function's own docstring for the
 full reasoning, including the accepted cost of a second connection/cache.
 
-**`--overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`)**: only
-meaningful alongside `--console`. When set, `main()` passes the same
+**`--overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`; extended by
+`plans/overlay-speech-callouts/plan.md`)**: only meaningful alongside
+`--console` or `--crew-text`. With `--console`, `main()` passes the same
 `AircraftLayerClient` instance as `ConsolePerceptionRunner.overlay_client`,
 so every newly materialised lifecycle event
 (`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`) is mirrored to the
-in-cockpit text overlay via `POST /text/push`. Defaults off -- a true no-op
-when absent, since `overlay_client` stays `None` and `run_once` never
-touches the aircraft-layer client for this purpose. `PerceptionLogger`'s
-plain (non-`--console`) per-`Observation` stream deliberately does not get
-this wiring (line-noise vs. signal tradeoff, see the plan's "Deliberately
-not modified" section) -- only `ConsolePerceptionRunner`'s contact-event
-rate is mirrored.
+in-cockpit text overlay via `POST /text/push`. With `--crew-text`, `main()`
+instead passes it as `CrewConsole.overlay_client`, so every line
+`CrewConsole` speaks (readbacks, contact reports, drained lifecycle events,
+and injected urgent calls prefixed `"!! "`) is pushed verbatim -- a radio-
+callout feed, not the lifecycle-event mirror `--console --overlay` carries.
+Defaults off -- a true no-op when absent, since the relevant
+`overlay_client` field stays `None` and neither path touches the
+aircraft-layer client for this purpose. `PerceptionLogger`'s plain
+(non-`--console`/`--crew-text`) per-`Observation` stream deliberately does
+not get this wiring (line-noise vs. signal tradeoff, see the BL-2.5 plan's
+"Deliberately not modified" section).
 
-**`--crew-text` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`)**:
+**`--crew-text` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`;
+`--overlay` combination added by `plans/overlay-speech-callouts/plan.md`)**:
 runs `belief.crew_console.CrewConsole` -- the player-facing text channel --
 instead of `--console`'s developer debug REPL. Reuses the exact same
 `ConsolePerceptionRunner` poll-loop machinery Stage 4/6 already built
@@ -101,14 +107,14 @@ instead of `--console`'s developer debug REPL. Reuses the exact same
 except for one extra call: after each `runner.run_once()`, it calls
 `crew_console.drain_events(runner.last_t_sim)` so newly ticked lifecycle
 events get spoken through `belief.speech.route_event`, the same hook point
-`--overlay` uses for its own mirroring). **Mutually exclusive with
-`--console`/`--overlay` this milestone** (the plan's accepted decision) --
-running the debug console and the crew session against the same
-`ContactStore` concurrently is not a validated interaction. `--brain-client
-debug|null` selects which `belief.escalation.BrainClient` stand-in handles
-escalated utterances (`debug`, the default, prints escalations to stderr for
-session visibility; `null` is silent) -- neither produces spoken output,
-since no real brain exists yet.
+`--console --overlay` uses for its own mirroring). **Mutually exclusive
+with `--console` only** (`--overlay` is valid alongside either) -- running
+the debug console and the crew session against the same `ContactStore`
+concurrently is not a validated interaction. `--brain-client debug|null`
+selects which `belief.escalation.BrainClient` stand-in handles escalated
+utterances (`debug`, the default, prints escalations to stderr for session
+visibility; `null` is silent) -- neither produces spoken output, since no
+real brain exists yet.
 """
 
 from __future__ import annotations
@@ -559,11 +565,16 @@ def main() -> None:
         "--overlay",
         action="store_true",
         help=(
-            "mirror belief lifecycle events (CONTACT_DETECTED/LOST/"
-            "REACQUIRED) to the in-cockpit text overlay via the aircraft "
-            "layer's POST /text/push -- BL-2.5. Only meaningful with "
-            "--console; defaults off, a true no-op when absent. Reuses the "
-            "same --aircraft-layer-url instance, no separate URL needed."
+            "mirror text to the in-cockpit text overlay via the aircraft "
+            "layer's POST /text/push -- BL-2.5, extended by overlay-speech-"
+            "callouts. With --console, mirrors belief lifecycle events "
+            "(CONTACT_DETECTED/LOST/REACQUIRED). With --crew-text, mirrors "
+            "every line CrewConsole speaks (readbacks, contact reports, "
+            "lifecycle lines, urgent calls prefixed '!! ') -- a radio-"
+            "callout feed, not the lifecycle-event mirror. Meaningless "
+            "without --console or --crew-text; defaults off, a true no-op "
+            "when absent. Reuses the same --aircraft-layer-url instance, "
+            "no separate URL needed."
         ),
     )
     parser.add_argument(
@@ -572,8 +583,9 @@ def main() -> None:
         help=(
             "run the player-facing crew session (belief.crew_console."
             "CrewConsole) instead of the plain on_change text logger -- "
-            "BL-5a. Mutually exclusive with --console/--overlay this "
-            "milestone."
+            "BL-5a. Mutually exclusive with --console; combine with "
+            "--overlay to also mirror spoken crew text to the in-cockpit "
+            "overlay (overlay-speech-callouts)."
         ),
     )
     parser.add_argument(
@@ -589,8 +601,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.crew_text and (args.console or args.overlay):
-        parser.error("--crew-text is mutually exclusive with --console/--overlay")
+    if args.crew_text and args.console:
+        parser.error("--crew-text is mutually exclusive with --console")
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
@@ -608,6 +620,7 @@ def main() -> None:
             brain_client=brain_client,
             output=sys.stdout,
             aircraft_client=aircraft_client,
+            overlay_client=aircraft_client if args.overlay else None,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(
