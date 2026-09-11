@@ -52,14 +52,34 @@ has carried as an assumption since 2026-09-08:
 other, so weapon mode plainly does not gate it. Every populated sample has `NABL = 1.000`.
 — **evidence: reproduced-locally.**
 
-**3. The list tracks where the sight is pointed.** Every populated sample has the sight slewed
-off-centre (|az| = 0.055, 0.010, 0.187, 0.144); every empty sample has it within ~0.003 of centre.
-The pilot was slewing manually onto and off targets. So **what Petrovich reports follows the
-sight's aim** — which, combined with the confirmed ability to command that aim
-(`SetCommand(3061, deg/60)`, see `2026-09-11-command-injection-surface.md`), is the mechanism
-BL-6 needs. **Not yet demonstrated with a *commanded* slew** — that is the next probe, and the
-inference is strong but untested. — **evidence: reproduced-locally** for the correlation,
-**inferred** for the causal claim.
+**3. Arg 874/876 is a readout of WHERE PETROVICH IS LOOKING.** Every populated sample has the
+sight slewed off-centre (|az| = 0.055, 0.010, 0.187, 0.144); every empty sample has it within
+~0.003 of centre.
+
+**Crucially, the pilot was *not* slewing manually.** The sight motion was **Petrovich's own AI
+slewing**, driven by the pilot issuing `SRCH FWD` and `SRCH PILOT LOS` through the AI wheel. So
+what this run captured is the complete Petrovich search cycle, observed end to end from outside:
+
+```
+wheel command (SRCH FWD / SRCH PILOT LOS)
+   -> Petrovich slews the 9K113 himself        (visible in args 874/876)
+   -> Petrovich acquires a contact             (visible in list_indication(6))
+   -> classified type reported                 ("T-90A", "BTR-60")
+   -> sight returns to centre, list empties
+```
+
+Two consequences, both larger than the correlation alone:
+
+- **Args 874/876 are a window into Petrovich's *attention*, not merely into a cockpit control.**
+  When he is driving the sight, reading those arguments tells us where he is looking, at 60 Hz,
+  in degrees. For a project whose whole premise is bounding what Petrovich could actually
+  perceive, that is a first-class perception input, not a control readback.
+- **The search → detect → report loop is already demonstrated working**, via commands the wheel
+  really offers. What is *not* demonstrated is that **we** can issue those wheel commands
+  programmatically — that is now the single remaining gap, and it is a much narrower one than
+  "can detection be influenced at all".
+
+— **evidence: reproduced-locally, live**, with the driving condition supplied by the pilot.
 
 **4. CORRECTION — the AI wheel does have search commands.** This file's sibling
 (`2026-09-11-command-injection-surface.md`) concluded "**There is no `ScanArea` command** … as a
@@ -111,8 +131,15 @@ implementation.**
 
 - **Multi-contact list behaviour** — only single units were in the mission, so only
   `middle_list_text` was ever populated. The pilot is adding a group for the next flight.
-- **Does a *commanded* slew produce the same detection as a manual one?** Strongly implied by
-  finding 3, not demonstrated.
+- **Can we issue a wheel command programmatically?** The one remaining gap. The wheel is driven
+  by device-30 commands we can already send (`ShowMenu` 3001, `Up` 3004, `Down` 3005, `Left` 3003,
+  `Right` 3002), and the menu text is readable, so the selection can be *verified* rather than
+  blind. This is the next probe.
+- **How do our sight commands interact with Petrovich's own control of the sight?** Unknown and
+  important. `av9K113::getHelperIsOn()` exists, so the module models "the helper is driving"
+  explicitly. If Petrovich overrides our `SetCommand(3061, …)` whenever he is searching, then
+  pointing the sight ourselves and *then* triggering `SRCH 9K113 LOS` may not compose the way the
+  obvious design assumes. Must be tested before building on it.
 - **How is a wheel option actually selected?** The wheel is navigated
   (`ShowMenu` + `Up`/`Down`/`Left`/`Right` on device 30), and those are device commands we can
   already issue. Whether a blind navigate-and-select is reliable, or whether the readable wheel
