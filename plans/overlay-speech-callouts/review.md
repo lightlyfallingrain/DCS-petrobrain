@@ -160,3 +160,125 @@ in `console.py` side by side with the new `_contact_report_text` to verify the m
 logic, read the full `test_speech.py` and `test_crew_console.py` diffs (not just the new tests) to
 confirm scope of what changed vs. what didn't, and ran all four body-layer verification commands
 myself.
+
+---
+
+## Addendum 2 review (2026-09-11): terser crew-text vocabulary
+
+Reviewed the third round against Addendum 2 of `plan.md` (locked, `c06c30b`) and the "Addendum 2
+implementation" section of `implementation.md`. Read the full `speech.py`/`test_speech.py` diff
+(`git show 0b280f9`), the `test_crew_console.py` diff (`dacd642`), confirmed `console.py` and
+`crew_console.py` are untouched this round (`git diff main -- src/belief/console.py` empty;
+`crew_console.py`'s last touch predates this round), and read the updated `speech.py` Structure
+entry in `CLAUDE.md` in full.
+
+1. **`CONTACT_LOST` / unspoken-event acknowledgement.** `_render_lifecycle_text`'s `CONTACT_LOST`
+   branch is now `return None`. `route_event` (speech.py:328-352) computes `text =
+   _render_lifecycle_text(...)`, returns `None` immediately if `text is None`, and only calls
+   `acknowledge_event` after that check — so a `CONTACT_LOST` event is left in
+   `store.unacknowledged_events`, exactly mirroring `CONTACT_ATTENTION_CHANGED`'s existing
+   behaviour. Confirmed directly in `route_event`'s source and in
+   `test_route_event_contact_lost_has_no_template_and_is_not_acknowledged`, which asserts
+   `lost in store.unacknowledged_events` both before and after the `route_event` call. Correct —
+   no accidental acknowledge-and-discard.
+2. **No id leak in `CONTACT_DETECTED`/`CONTACT_REACQUIRED`.** Grepped `contact_id` usage across
+   `speech.py`: the only remaining uses are `render_readback`'s existing `"Watching {id}."`
+   template and `describe_contact` call sites (`event.contact_id`, an internal store lookup key,
+   never rendered into text). `_render_lifecycle_text`'s detected/reacquired branches call
+   `_contact_report_text(result["facts"])` with no id concatenation anywhere. Test assertions
+   (`test_route_event_contact_detected_renders_classification_with_no_id`, the reacquired
+   equivalent) pin the exact id-less string. Confirmed.
+3. **`CONTACT_CLASSIFICATION_CHANGED` wiring.** New branch reads `result["facts"]["classification"]`
+   through `_unit_type_display` (not `event.classification`) and `result["facts"].get
+   ("relative_now")` for clock/range, building `"unit at {clock} o'clock, {range} km is {type}."`
+   when enriched, degrading to `"unit is {type}."` when `relative_now` is absent — no malformed
+   trailing comma or dangling clause in either branch. Both paths are exercised by
+   `test_route_event_classification_changed_speaks_position_and_new_type` (enriched) and
+   `..._omits_range_when_not_enriched` (unenriched), both passing. Confirmed correct and matches
+   the addendum's spec exactly.
+4. **`_COALITION_PLACEHOLDER` removal.** Grepped `src/` and `tests/` for `_COALITION_PLACEHOLDER`
+   and a bare `"UNKNOWN"` token — zero hits outside an unrelated docstring reference and an
+   unrelated `classification.py` enum member. `_contact_report_text` now starts `text =
+   _unit_type_display(...)` directly (was `text = f"{_COALITION_PLACEHOLDER} {unit_type}"`) — no
+   leading space, no empty-string prefix artifact; confirmed by
+   `test_render_contact_report_follows_unit_type_clock_range_format`'s `"BMP-2."` (not `" BMP-2."`)
+   and `test_render_contact_report_maps_op_class_to_display_word`'s `"truck."`. Clean removal.
+5. **Rounding helpers.** `_format_range_km` and `_round_enrichment_fragment` are called only from
+   `_contact_report_text` (grepped — no other call sites), which `console.py`/
+   `format_event_for_overlay` never invokes; confirmed `console.py` has a fully empty diff against
+   `main` this round, so the `--console` debug path is untouched as required.
+   `_ENRICHMENT_DISTANCE_RE = re.compile(r"\((\d+)m\)$")` is `$`-anchored to the end of the string,
+   so it only matches a genuine trailing `"(NNNm)"` parenthetical and correctly passes through
+   distance-free fact text (`"inside Anapa"`) unchanged, per
+   `test_round_enrichment_fragment_passes_through_text_without_distance`. On the round-half-to-even
+   characterization: `_format_range_km`'s `round(range_m / 500.0) * 0.5` and
+   `_round_enrichment_fragment`'s `round(int(...) / 100.0) * 100` both call Python's builtin
+   `round()`, whose ties-to-even behaviour on exact `.5` boundaries (`round(2.5) == 2`,
+   `round(3.5) == 4`) is standard library behaviour, not something the wrapping arithmetic
+   introduces or could reasonably special-case away without adding real complexity for an edge case
+   (an exact 1250m/1750m/450m reading) that is rare in practice. The implementer's characterization
+   as "inherent to `round()`, not a bug in the wrapping logic" is fair; boundary tests pin the actual
+   computed values rather than asserting a wished-for symmetry, which is the right call for
+   documenting a known, low-severity quirk rather than hiding it.
+6. **Casing.** `_unit_type_display`'s presence/fallback words are now `"ground"`/`"contact"`
+   (lowercase); `_OP_CLASS_DISPLAY`'s existing entries are unchanged (lowercase words, `"SAM"`/
+   `"AAA"` acronyms intact). Grepped for `"GROUND"`/leftover caps literals in `src/`/`tests/` — none
+   found. Consistent.
+7. **`render_contact_report` shares the terser format.** `render_contact_report` remains a thin
+   wrapper calling `_contact_report_text` (unchanged from Addendum 1's extraction) — the same
+   function that dropped the coalition token and gained rounding, so both the `status`/`watch`
+   player-command-response path and the lifecycle paths picked up the terser format identically.
+   Confirmed by `test_render_contact_report_follows_unit_type_clock_range_format` and
+   `test_render_contact_report_maps_op_class_to_display_word`, both updated to the id-less,
+   coalition-less, unrounded-input-but-correctly-formatted output. Matches the addendum's Design
+   point 8 resolution (apply to both call sites, not fork a second formatter).
+8. **`console.py` untouched.** `git diff main -- body-layer/src/belief/console.py` is empty.
+   `crew_console.py` was not touched this round either (last commit touching it is `f2e2302`, the
+   round-1 reviewer-approval commit, predating this round's `0b280f9`/`dacd642`). The `--console`
+   debug path's independence from `speech.py`'s three rounds of changes holds.
+
+**Scope.** Diff is `speech.py` (implementation + docstring), `test_speech.py`, two mechanically-
+required `test_crew_console.py` assertion updates (string literals only, no behaviour-check
+narrowed), and the `CLAUDE.md` Structure entry — matches the addendum's own Affected Modules list
+exactly, no drift.
+
+**`body-layer/CLAUDE.md`.** Updated `speech.py` entry (lines 322-363) read in full — accurately
+describes the id-less/coalition-less format, `CONTACT_LOST`'s no-template status, the new
+`CONTACT_CLASSIFICATION_CHANGED` line, and both rounding helpers, including their scoping to the
+`--crew-text` path only. No stale claims found.
+
+Ran body-layer's commands myself:
+- `.venv/bin/ruff format --check src tests` — pass (62 files already formatted)
+- `.venv/bin/ruff check src tests` — pass
+- `cd body-layer && .venv/bin/mypy src` — pass, no issues in 29 source files
+- `.venv/bin/pytest tests -q` — pass, 453 passed
+
+Matches the Implementer's reported 453-passed exactly. No leftover debug code, `print()` calls, or
+`TODO`/`FIXME` comments found in `speech.py`. Working tree is otherwise clean except two
+`.claude/agent-memory/implementer/` bookkeeping files (out of this review's code scope).
+
+### Addendum 2: Required Fixes
+None.
+
+### Addendum 2: Optional Refinements
+- The tie-boundary rounding asymmetry (1250m/1750m round to different halves of a km) is already
+  flagged by the implementer as a live-acceptance caveat and confirmed fair above — worth a look
+  only if live testing surfaces it as actually confusing to a listener; not worth pre-emptively
+  switching to round-half-up for a case this rare (optional).
+- `_round_enrichment_fragment`'s coupling to `semantic_facts_for`'s current trailing-`"(NNNm)"`
+  phrasing (documented as a known risk in the plan itself) means a future rewording of that text
+  degrades silently to unrounded output rather than erroring — acceptable for now per the plan's
+  own risk note; a `SemanticFact.distance_m` field would remove the coupling if `enrichment.py`'s
+  phrasing churns later (optional, not blocking, already tracked as a risk in the plan).
+
+### Addendum 2: Verdict
+APPROVED
+
+### Addendum 2: Review Confidence
+Full read — read Addendum 2 of `plan.md` and its "Addendum 2 implementation" notes in full, read
+the complete `speech.py` diff (`0b280f9`) including the full rewritten module docstring, read the
+full `test_speech.py` diff (all new and changed assertions, not just names), read the
+`test_crew_console.py` diff (`dacd642`), confirmed `console.py`'s diff against `main` is empty and
+`crew_console.py` was not touched this round via `git log`, read the updated `CLAUDE.md`
+`speech.py` Structure entry in full, and ran all four body-layer verification commands myself
+rather than trusting the reported 453-passed figure.
