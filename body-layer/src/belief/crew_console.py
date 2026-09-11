@@ -45,6 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TextIO
 
+from aircraft_client import AircraftLayerClient
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
@@ -96,6 +97,18 @@ class CrewConsole:
     #: leaves every command's output byte-for-byte the no-enrichment shape,
     #: same guard as `belief.tools`'/`belief.console`'s own `enrichment`.
     enrichment: EnrichmentContext | None = None
+    #: BL-6's `Console.aircraft_client` equivalent (`plans/
+    #: bl6-commands-inspect-adapt/plan.md`), wired by `logger.py`'s
+    #: `main()` in the `--crew-text` branch for parity with `--console`'s
+    #: own wiring. **Reserved, not yet consumed by any command here** -- no
+    #: player-facing `scan_area`-equivalent utterance exists this
+    #: milestone (`belief.console.Console`'s `scan-area`/`task-status`/
+    #: `cancel-task` are debug-console-only), so this field currently has
+    #: no reader. Kept as a `None`-default optional field anyway, matching
+    #: `enrichment`'s own None-means-unchanged pattern, so a future
+    #: player-facing scan command has a client to reach for without a
+    #: second wiring pass through `logger.py`.
+    aircraft_client: AircraftLayerClient | None = None
     _next_utterance_number: int = field(default=0, repr=False)
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:

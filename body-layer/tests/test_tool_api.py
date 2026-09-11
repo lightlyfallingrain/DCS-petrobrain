@@ -21,10 +21,16 @@ _EXPECTED_TOOL_NAMES = {
     "find_place",
     "get_situation",
     "describe_our_position",
+    # BL-6 (`plans/bl6-commands-inspect-adapt/plan.md`) -- the tool-set
+    # freeze point's final three additions, per `tool_api.py`'s own
+    # docstring ("expected to extend TOOL_SET, not be blocked by it").
+    "scan_area",
+    "get_task_status",
+    "cancel_task",
 }
 
 
-def test_tool_set_contains_exactly_the_twelve_bl5_tools() -> None:
+def test_tool_set_contains_exactly_the_frozen_bl6_tools() -> None:
     names = {spec.name for spec in TOOL_SET}
     assert names == _EXPECTED_TOOL_NAMES
 

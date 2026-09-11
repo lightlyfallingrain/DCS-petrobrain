@@ -1,0 +1,146 @@
+11:09:06 
+11:09:06 #########################################################
+11:09:06 WHEEL-COMMAND + SIGHT-AUTHORITY PROBE
+11:09:06 #########################################################
+11:09:14   waiting 20s for the pilot to settle
+11:09:34   ~ t=20.0 wheel: <wheel closed/empty>
+11:09:34   ~ t=20.0 PETROVICH: <no contacts>   (az=0)
+11:09:34 
+11:09:34 =========================================================
+11:09:34 PART A -- driving the wheel with SetCommand
+11:09:34 =========================================================
+11:09:34   wheel before: <wheel closed/empty>
+11:09:35   [1] press ShowMenu  (cmd 3001) -> no change
+11:09:35         wheel: <wheel closed/empty>
+11:09:35         az=0 el=0 NABL=1 | <no contacts>
+11:09:36   [2] press Down      (cmd 3005) -> no change
+11:09:36         wheel: <wheel closed/empty>
+11:09:36         az=0 el=0 NABL=0 | <no contacts>
+11:09:38   [3] press Down      (cmd 3005) -> no change
+11:09:38         wheel: <wheel closed/empty>
+11:09:38         az=0 el=0 NABL=0 | <no contacts>
+11:09:39   [4] press Up        (cmd 3004) -> no change
+11:09:39         wheel: <wheel closed/empty>
+11:09:39         az=0 el=0 NABL=1 | <no contacts>
+11:09:40   [5] press Left      (cmd 3003) -> no change
+11:09:40         wheel: <wheel closed/empty>
+11:09:40         az=0 el=0 NABL=1 | <no contacts>
+11:09:41   [6] press Right     (cmd 3002) -> no change
+11:09:41         wheel: <wheel closed/empty>
+11:09:41         az=0 el=0 NABL=1 | <no contacts>
+11:09:42   [7] press ShowMenu  (cmd 3001) -> no change
+11:09:42         wheel: <wheel closed/empty>
+11:09:42         az=0 el=0 NABL=1 | <no contacts>
+11:09:42   --> SetCommand: wheel did NOT change across the sequence
+11:09:42 
+11:09:42 =========================================================
+11:09:42 PART A -- driving the wheel with performClickableAction
+11:09:42 =========================================================
+11:09:42   wheel before: <wheel closed/empty>
+11:09:43   ~ t=28.4 wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. ON  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:43   [1] press ShowMenu  (cmd 3001) -> CHANGED
+11:09:43         wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. ON  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:43         az=0 el=0 NABL=1 | <no contacts>
+11:09:44   ~ t=30.2 wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. OFF  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:45   [2] press Down      (cmd 3005) -> CHANGED
+11:09:45         wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. OFF  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:45         az=0 el=0 NABL=0 | <no contacts>
+11:09:46   [3] press Down      (cmd 3005) -> no change
+11:09:46         wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. OFF  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:46         az=0 el=0 NABL=0 | <no contacts>
+11:09:46   ~ t=32.2 wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=WAITING  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:47   [4] press Up        (cmd 3004) -> CHANGED
+11:09:47         wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=WAITING  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:47         az=0 el=0 NABL=1 | <no contacts>
+11:09:48   [5] press Left      (cmd 3003) -> no change
+11:09:48         wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=WAITING  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:48         az=0 el=0 NABL=1 | <no contacts>
+11:09:49   [6] press Right     (cmd 3002) -> no change
+11:09:49         wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=WAITING  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:09:49         az=0 el=0 NABL=1 | <no contacts>
+11:09:49   ~ t=35.0 wheel: <wheel closed/empty>
+11:09:50   [7] press ShowMenu  (cmd 3001) -> CHANGED
+11:09:50         wheel: <wheel closed/empty>
+11:09:50         az=0 el=0 NABL=1 | <no contacts>
+11:09:50   --> performClickableAction: wheel DID change across the sequence
+11:09:50 
+11:09:50 =========================================================
+11:09:50 PART B -- sight authority while Petrovich is active.
+11:09:50   NOW: trigger searches from the wheel yourself (SRCH FWD,
+11:09:50   SRCH PILOT LOS) and let Petrovich run. Each cycle below
+11:09:50   commands the sight to +30 deg and reports whether it held.
+11:09:50 =========================================================
+11:09:54 
+11:09:54 --- PART B cycle 1: commanding sight to +0.50 (expect arg +0.220) ---
+11:09:54     before: az=0 el=0 NABL=1 | <no contacts>
+11:09:54     wheel : <wheel closed/empty>
+11:10:00     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:10:00       traj: 0.0:+0.000 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.1:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 6.0:+0.220
+11:10:00     after : az=0.21999999880791 el=-0.75 NABL=1 | <no contacts>
+11:10:04 
+11:10:04 --- PART B cycle 2: commanding sight to +0.50 (expect arg +0.220) ---
+11:10:04     before: az=0.43999999761581 el=-0.75 NABL=1 | <no contacts>
+11:10:04     wheel : <wheel closed/empty>
+11:10:10     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:10:10       traj: 0.0:+0.440 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 5.9:+0.220
+11:10:10     after : az=0.21999999880791 el=-0.75 NABL=1 | <no contacts>
+11:10:14 
+11:10:14 --- PART B cycle 3: commanding sight to +0.50 (expect arg +0.220) ---
+11:10:14     before: az=0.43999999761581 el=-0.75 NABL=1 | <no contacts>
+11:10:14     wheel : <wheel closed/empty>
+11:10:20     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:10:20       traj: 0.0:+0.440 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 6.0:+0.220
+11:10:20     after : az=0.21999999880791 el=-0.75 NABL=1 | <no contacts>
+11:10:24 
+11:10:24 --- PART B cycle 4: commanding sight to +0.50 (expect arg +0.220) ---
+11:10:24     before: az=0.43999999761581 el=-0.75 NABL=1 | <no contacts>
+11:10:24     wheel : <wheel closed/empty>
+11:10:30     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:10:30       traj: 0.0:+0.440 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 6.0:+0.220
+11:10:30     after : az=0.21999999880791 el=-0.75 NABL=1 | <no contacts>
+11:10:31   ~ t=76.5 wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=SEARCHING  FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+11:10:34 
+11:10:34 --- PART B cycle 5: commanding sight to +0.50 (expect arg +0.220) ---
+11:10:34     before: az=-0.43999999761581 el=1 NABL=1 | <no contacts>
+11:10:34     wheel : C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=SEARCHING  FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+11:10:40     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:10:40       traj: 0.0:-0.440 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 6.0:+0.220
+11:10:40     after : az=0.21999999880791 el=-0.0063467645086348 NABL=1 | <no contacts>
+11:10:44   ~ t=89.7 wheel: C=MARK/TGT  U=PREV TGT  R=SELECT/TGT  D=NEXT TGT  L=CLOSE/LIST  FL=ALL/TGTS
+11:10:44   ~ t=90.0 wheel: C=MARK/TGT  U=PREV TGT  R=SELECT/TGT  D=NEXT TGT  L=CLOSE/LIST
+11:10:44 
+11:10:44 --- PART B cycle 6: commanding sight to +0.50 (expect arg +0.220) ---
+11:10:44     before: az=0.0081865889951587 el=0.0027188376989216 NABL=1 | <no contacts>
+11:10:44     wheel : C=MARK/TGT  U=PREV TGT  R=SELECT/TGT  D=NEXT TGT  L=CLOSE/LIST
+11:10:50     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:10:50       traj: 0.0:+0.008 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 6.0:+0.220
+11:10:50     after : az=0.21999999880791 el=-0.071488715708256 NABL=1 | <no contacts>
+11:10:54 
+11:10:54 --- PART B cycle 7: commanding sight to +0.50 (expect arg +0.220) ---
+11:10:54     before: az=0.0045064897276461 el=-0.01048469543457 NABL=1 | <no contacts>
+11:10:54     wheel : C=MARK/TGT  U=PREV TGT  R=SELECT/TGT  D=NEXT TGT  L=CLOSE/LIST
+11:10:57   ~ t=103.3 wheel: C=FIRE  U=SRCH PILOT LOS  R=NO/MSL  D=TRACKING  FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+11:11:00     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:11:00       traj: 0.0:+0.005 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 6.0:+0.220
+11:11:00     after : az=0.21999999880791 el=0.089769065380096 NABL=1 | <no contacts>
+11:11:04 
+11:11:04 --- PART B cycle 8: commanding sight to +0.50 (expect arg +0.220) ---
+11:11:04     before: az=0.0044268071651459 el=-0.0096317250281572 NABL=1 | <no contacts>
+11:11:04     wheel : C=FIRE  U=SRCH PILOT LOS  R=NO/MSL  D=TRACKING  FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+11:11:10     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:11:10       traj: 0.0:+0.004 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220 6.0:+0.220
+11:11:10     after : az=0.21999999880791 el=-0.058455355465412 NABL=1 | <no contacts>
+11:11:14 
+11:11:14 --- PART B cycle 9: commanding sight to +0.50 (expect arg +0.220) ---
+11:11:14     before: az=0.004082384519279 el=-0.011825675144792 NABL=1 | <no contacts>
+11:11:14     wheel : C=FIRE  U=SRCH PILOT LOS  R=NO/MSL  D=TRACKING  FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+11:11:20     after 6s: arg=0.21999999880791  ==> HELD at the commanded position
+11:11:20       traj: 0.0:+0.004 0.5:+0.220 1.0:+0.220 1.5:+0.220 2.0:+0.220 2.5:+0.220 3.0:+0.220 3.5:+0.220 4.0:+0.220 4.5:+0.220 5.0:+0.220 5.5:+0.220
+11:11:20     after : az=0.21999999880791 el=-0.05392974615097 NABL=1 | <no contacts>
+11:11:24 
+11:11:24 --- PART B cycle 10: commanding sight to +0.50 (expect arg +0.220) ---
+11:11:24     before: az=0.014517308212817 el=-0.0023283804766834 NABL=1 | <no contacts>
+11:11:24     wheel : C=FIRE  U=SRCH PILOT LOS  R=NO/MSL  D=TRACKING  FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+11:11:25   ~ t=131.1 wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. ON  FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+11:11:26   ~ t=131.6 wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. OFF  FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+11:11:29 wheel probe: stopped.

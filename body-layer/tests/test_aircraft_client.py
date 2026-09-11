@@ -24,11 +24,20 @@ _PETROVICH_INDICATION_BODY = {
     "received_wall_clock_s": 1000.0,
     "fields": {"middle_list_text": "Ural truck"},
 }
+_PETROVICH_WHEEL_BODY = {
+    "dcs_model_time_s": 123.5,
+    "received_wall_clock_s": 1000.0,
+    "fields": {"state": "SEARCHING"},
+}
 
 
 def _make_handler(
     pushed_lines: list[str],
+    triggered_searches: list[str] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
+    if triggered_searches is None:
+        triggered_searches = []
+
     class _Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/telemetry/latest":
@@ -37,6 +46,8 @@ def _make_handler(
                 self._respond(200, _WORLD_OBJECTS_BODY)
             elif self.path == "/petrovich_indication/latest":
                 self._respond(200, _PETROVICH_INDICATION_BODY)
+            elif self.path == "/petrovich_wheel/latest":
+                self._respond(200, _PETROVICH_WHEEL_BODY)
             elif self.path == "/telemetry/empty":
                 self._respond(200, None)
             elif self.path == "/not-json":
@@ -53,6 +64,11 @@ def _make_handler(
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 body = json.loads(self.rfile.read(length))
                 pushed_lines.append(body["text"])
+                self._respond(200, {"ok": True})
+            elif self.path == "/command/petrovich_search":
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                body = json.loads(self.rfile.read(length))
+                triggered_searches.append(body["mode"])
                 self._respond(200, {"ok": True})
             else:
                 self._respond(404, {"error": "not found"})
@@ -92,6 +108,20 @@ def server_url_with_pushed_lines() -> Iterator[tuple[str, list[str]]]:
     thread.start()
     try:
         yield f"http://127.0.0.1:{httpd.server_port}", pushed_lines
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.fixture
+def server_url_with_triggered_searches() -> Iterator[tuple[str, list[str]]]:
+    triggered_searches: list[str] = []
+    httpd = HTTPServer(("127.0.0.1", 0), _make_handler([], triggered_searches))
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}", triggered_searches
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -162,3 +192,29 @@ def test_push_text_line_raises_on_unreachable_host() -> None:
 
     with pytest.raises(AircraftLayerError):
         client.push_text_line("hello")
+
+
+def test_get_petrovich_wheel_latest_returns_parsed_dict(server_url: str) -> None:
+    client = AircraftLayerClient(base_url=server_url)
+
+    result = client.get_petrovich_wheel_latest()
+
+    assert result == _PETROVICH_WHEEL_BODY
+
+
+def test_trigger_petrovich_search_posts_to_command_endpoint(
+    server_url_with_triggered_searches: tuple[str, list[str]],
+) -> None:
+    server_url, triggered_searches = server_url_with_triggered_searches
+    client = AircraftLayerClient(base_url=server_url)
+
+    client.trigger_petrovich_search("forward")
+
+    assert triggered_searches == ["forward"]
+
+
+def test_trigger_petrovich_search_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.trigger_petrovich_search("boresight")

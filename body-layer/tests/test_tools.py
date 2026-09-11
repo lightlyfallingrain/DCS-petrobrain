@@ -15,10 +15,13 @@ from belief import tools as tools_module
 from belief.contacts import ContactStore
 from belief.decay import IDENTITY_HALF_LIFE_S, LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
+from belief.tasks import TaskStore
 from belief.tools import (
+    DEFAULT_SCAN_DEADLINE_S,
     _contact_summary,
     _format_range_km,
     acknowledge_event,
+    cancel_task,
     describe_contact,
     describe_our_position,
     find_contact,
@@ -28,9 +31,11 @@ from belief.tools import (
     get_contacts,
     get_situation,
     get_stats,
+    get_task_status,
     list_areas,
     list_events,
     poll_events,
+    scan_area,
     set_attention,
     unwatch_area,
     watch_area,
@@ -733,3 +738,66 @@ def test_poll_events_matches_list_events_unacknowledged_only() -> None:
     store = _store_with_one_contact()
     store.tick(now_sim=0.0)
     assert poll_events(store) == list_events(store, unacknowledged_only=True)
+
+
+# --- BL-6: scan_area/get_task_status/cancel_task -------------------------
+
+
+def test_scan_area_registers_a_watch_area_and_a_pending_task() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    task = scan_area(store, tasks, center, radius_m=500.0, reason="check", now_sim=0.0)
+
+    assert task.status == "pending"
+    assert task.reason == "check"
+    assert task.deadline_sim == DEFAULT_SCAN_DEADLINE_S
+    assert list_areas(store) == [task.area]
+    assert task.area.level == "watch"
+    assert task.area.center == center
+
+
+def test_scan_area_honors_a_custom_deadline() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    task = scan_area(
+        store,
+        tasks,
+        center,
+        radius_m=500.0,
+        reason="check",
+        now_sim=10.0,
+        deadline_s=5.0,
+    )
+    assert task.deadline_sim == 15.0
+
+
+def test_get_task_status_returns_none_for_unknown_id() -> None:
+    tasks = TaskStore()
+    assert get_task_status(tasks, "TASK_999") is None
+
+
+def test_get_task_status_returns_the_task() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    task = scan_area(store, tasks, center, radius_m=500.0, reason="check", now_sim=0.0)
+    assert get_task_status(tasks, task.id) is task
+
+
+def test_cancel_task_cancels_and_removes_the_area() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    task = scan_area(store, tasks, center, radius_m=500.0, reason="check", now_sim=0.0)
+
+    assert cancel_task(store, tasks, task.id) is True
+    assert get_task_status(tasks, task.id).status == "cancelled"  # type: ignore[union-attr]
+    assert list_areas(store) == []
+
+
+def test_cancel_task_returns_false_for_unknown_id() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    assert cancel_task(store, tasks, "TASK_999") is False

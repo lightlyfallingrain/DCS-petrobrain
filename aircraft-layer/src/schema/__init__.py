@@ -39,6 +39,7 @@ from .petrovich_indication import (
     PetrovichIndicationParseError,
     PetrovichIndicationSample,
 )
+from .petrovich_wheel import PetrovichWheelParseError, PetrovichWheelSample
 from .world_objects import (
     WorldObjectParseError,
     WorldObjectSample,
@@ -48,6 +49,8 @@ from .world_objects import (
 __all__ = [
     "PetrovichIndicationParseError",
     "PetrovichIndicationSample",
+    "PetrovichWheelParseError",
+    "PetrovichWheelSample",
     "TelemetryParseError",
     "TelemetrySample",
     "WorldObjectParseError",

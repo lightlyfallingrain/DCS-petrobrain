@@ -63,7 +63,31 @@ direct mark; `list_areas` is not one of §3.3's named tools (same "console
 needs it, so it lives here, not in console.py" reasoning as `stats`).
 `list_events`/`acknowledge_event` are BL-4's event-queue mechanism this
 stage builds in full -- BL-5 only adds the transport and the `{facts,
-summary, phrasing_hints}` wrapping around them (plan's Q2 decision)."""
+summary, phrasing_hints}` wrapping around them (plan's Q2 decision).
+
+**`scan_area`/`get_task_status`/`cancel_task`.** BL-6 (`plans/
+bl6-commands-inspect-adapt/plan.md`), §3.3's tool-set freeze point.
+`scan_area` composes two existing pieces of machinery rather than adding
+new belief logic: it registers a `"watch"`-level `belief.attention.
+AttentionArea` (exactly `watch_area`'s own call into `store.add_area`) and,
+over the same area, a `belief.tasks.PendingIntent` (`belief.tasks.
+TaskStore.create`) -- the same "one command, two existing registries"
+pattern `watch_area` itself already established for areas alone. **This
+function stays pure/DCS-I/O free**, per the project's hard testability
+requirement -- it never triggers a real Petrovich search; that live
+trigger is `console.py`'s `scan-area` handler's job (the same "wire the
+live effect one layer up" split BL-2.5 drew for the overlay push, not
+inside `tools.py`). Every description below must therefore be read
+together with the tool registry's (`tool_api.py`) explicit caveat: this
+tool asks Petrovich to search and reports whether something relevant was
+subsequently observed in the named area -- it never aims him at a bearing,
+and a `"failed"` outcome from `get_task_status` never means "confirmed
+empty" (see `belief.tasks`'s own module docstring for the full epistemic
+caveat, and the plan's "Risks & Unknowns" for why this is a *harder* gap
+than an earlier design's). `cancel_task` also removes the `AttentionArea`
+`scan_area` registered (the plan's Decision 3, user-resolved 2026-09-11):
+cancelling a scan stops watching that area entirely, not just its own
+success/timeout bookkeeping."""
 
 from __future__ import annotations
 
@@ -86,9 +110,19 @@ from belief.enrichment import (
     semantic_facts_for,
 )
 from belief.events import Event
+from belief.tasks import PendingIntent, TaskKind, TaskStore
 from perception.geometry import GeoPosition
 from perception.source import OwnshipState
 from query.search import PlaceMatch, find_place_by_name
+
+#: `scan_area`'s default deadline, in sim-seconds -- BL-6 (`plans/
+#: bl6-commands-inspect-adapt/plan.md`'s Risks & Unknowns: "still a
+#: placeholder needing live-sortie calibration," same status the plan's
+#: original design carried). Long enough to cover one un-aimed `SRCH FWD`
+#: sweep plus a real detection's association latency, short enough that a
+#: console operator gets a `"failed"` answer within one sitting rather than
+#: waiting indefinitely.
+DEFAULT_SCAN_DEADLINE_S: float = 60.0
 
 #: `phrasing_hints.certainty`'s vocabulary -- deliberately distinct wording
 #: from the internal `belief.decay.Certainty` ladder (`"observed"` etc.),
@@ -686,3 +720,78 @@ def poll_events(store: ContactStore) -> list[dict[str, object]]:
     `list_events` directly (unchanged); this is the name the tool registry
     (`tool_api.py`) exposes."""
     return list_events(store, unacknowledged_only=True)
+
+
+def scan_area(
+    store: ContactStore,
+    tasks: TaskStore,
+    center: GeoPosition,
+    radius_m: float,
+    reason: str,
+    now_sim: float,
+    deadline_s: float = DEFAULT_SCAN_DEADLINE_S,
+    sector: Sector | None = None,
+) -> PendingIntent:
+    """Ask Petrovich to search, and register what "found something relevant"
+    would mean for that ask -- BL-6 (`plans/bl6-commands-inspect-adapt/
+    plan.md`). Registers a `"watch"`-level `AttentionArea` (`store.add_area`,
+    the same call `watch_area` makes) and a `belief.tasks.PendingIntent`
+    over that same area (`tasks.create`), whose `deadline_sim` is
+    `now_sim + deadline_s`. `now_sim` -- unlike `watch_area`'s signature --
+    is required here because `PendingIntent.created_sim`/`deadline_sim` are
+    sim-time, never wall clock, the same replay-determinism requirement
+    every other `belief.*` timestamp in this codebase carries; `center` is
+    an already-resolved `GeoPosition`, same division of responsibility as
+    `watch_area`'s own docstring (bearing/range resolution is the caller's
+    job, `console.py`'s `scan-area` handler).
+
+    **Does not trigger a live search.** This function is pure/DCS-I/O free
+    (see this module's own docstring) -- the console command handler that
+    calls this is also responsible for the live effector call, wrapped in
+    its own failure handling, so a failed live trigger never prevents the
+    belief-state task from being registered. Returns the stored
+    `PendingIntent`, including its store-minted `id`, so the caller can
+    report it back."""
+    area = store.add_area(
+        center=center,
+        radius_m=radius_m,
+        level="watch",
+        source="scan_area",
+        sector=sector,
+    )
+    kind: TaskKind = "scan_area"
+    return tasks.create(
+        kind=kind,
+        area=area,
+        created_sim=now_sim,
+        deadline_sim=now_sim + deadline_s,
+        reason=reason,
+    )
+
+
+def get_task_status(tasks: TaskStore, task_id: str) -> PendingIntent | None:
+    """A `scan_area` (or any future task kind's) current status, or `None`
+    if `task_id` does not exist. **`"failed"` never means "confirmed
+    empty"** -- see `belief.tasks`'s module docstring for the full epistemic
+    caveat this function's result must be read with; a future wording layer
+    must not upgrade a timeout into a stronger claim than the task's own
+    status makes."""
+    return tasks.get(task_id)
+
+
+def cancel_task(store: ContactStore, tasks: TaskStore, task_id: str) -> bool:
+    """Cancel a still-pending task and remove the `AttentionArea` it
+    registered (the plan's Decision 3, user-resolved 2026-09-11: cancelling
+    a scan stops watching that area entirely, not just its own
+    success/timeout bookkeeping). Returns whether `task_id` was found --
+    mirrors `unwatch_area`'s/`TaskStore.cancel`'s own "unknown id returns
+    `False`" convention. Reads `task.area.id` off the found task before
+    calling `store.remove_area`, since `TaskStore` itself never holds a
+    `ContactStore` reference (see `belief.tasks.TaskStore.cancel`'s
+    docstring)."""
+    task = tasks.get(task_id)
+    if task is None:
+        return False
+    tasks.cancel(task_id)
+    store.remove_area(task.area.id)
+    return True

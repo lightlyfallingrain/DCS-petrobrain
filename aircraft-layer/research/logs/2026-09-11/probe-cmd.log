@@ -1,0 +1,238 @@
+10:23:47 
+10:23:47 =========================================================
+10:23:47 BL-6 COMMAND PROBE -- stage A: capability census
+10:23:47 =========================================================
+10:23:47   GetDevice              function
+10:23:47   GetIndicator           function
+10:23:47   list_indication        function
+10:23:47   list_cockpit_params    function
+10:23:47   get_param_handle       function
+10:23:47   LoSetCommand           function
+10:23:47   LoGetMechInfo          function
+10:23:47   LoGetSelfData          function
+10:23:47   GetDevice(16) -> table
+10:23:47     :performClickableAction   function
+10:23:47     :SetCommand               function
+10:23:47     :get_argument_value       nil
+10:23:47     :update_arguments         nil
+10:23:47   GetDevice(0) [mainpanel] -> table
+10:23:47     :get_argument_value      function
+10:24:12 --- stage B: baseline reads ---
+10:24:12   ASP-17 switch positions (draw arguments):
+10:24:12     arg 762  USR_check            = 0
+10:24:12     arg 761  USR                  = 1
+10:24:12     arg 552  Range_Value          = 0
+10:24:12     arg 554  Sync_Async           = 0
+10:24:12     arg 556  Elevation_Delta      = 0.55555552244186
+10:24:12     arg 528  Sight_Null           = 0
+10:24:12     arg 515  Range_Auto_Manual    = 1
+10:24:12     arg 569  Backup_Light_NS      = 0
+10:24:12     arg 564  Brightness_PM        = 1
+10:24:12     arg 566  Azimuth_Delta        = 0.5
+10:24:12     arg 553  Manual_Auto          = 1
+10:24:12     arg 570  Control              = 0
+10:24:12     arg 557  Base_Range           = 0
+10:24:12     arg 529  Power                = 1
+10:24:12     arg 568  Backup_Light_PM      = 0
+10:24:12     arg 567  Brightness_NS        = 1
+10:24:12   9K113 sight pointing angle (normalised gauge values, not radians):
+10:24:12     arg 874 azimuth   = 0
+10:24:12     arg 876 elevation = 0
+10:24:12   9K113 panel switch positions:
+10:24:12     arg 911  START_PM             = 0
+10:24:12     arg 912  OTKL_BLOCK_ARU       = 0
+10:24:12     arg 913  SSP_VKL              = 0
+10:24:12     arg 899  VHOD_BVK_KV          = 0
+10:24:12     arg 884  Backlight            = 0
+10:24:12     arg 931  CHECKING             = 0
+10:24:12     arg 885  POWER_PN             = 1
+10:24:12     arg 870  CHECK_LAMPS          = 0
+10:24:12     arg 886  NABL                 = 0
+10:24:12     arg 871  ZOOM                 = 0
+10:24:12     arg 887  DIAFR_OTKR           = 0
+10:24:12     arg 903  WORK_CONTROL         = 0
+10:24:12     arg 873  SES                  = 0
+10:24:12     arg 905  KONTR_T1_B9          = 0
+10:24:12     arg 890  Heat_O               = 0
+10:24:12     arg 875  HIGH_K               = 0
+10:24:12     arg 882  RadiationReset       = 0
+10:24:12     arg 932  TABLO                = 0
+10:24:12     arg 935  COD1_COD2            = 0
+10:24:12     arg 934  SWITCHER_IN_OUT      = 0
+10:24:12     arg 933  0_04                 = 0
+10:24:12     arg 775  STVORKI              = 0
+10:24:12     arg 910  GENER_EMIT           = 0
+10:24:12     arg 872  OS                   = 0
+10:24:12   list_indication(0) [3582 bytes]:
+-----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+baseFrame
+
+-----------------------------------------
+SCENE
+
+children are {
+-----------------------------------------
+BG_9k113_Orange
+
+-----------------------------------------
+BG_9k113_Green
+
+-----------------------------------------
+Grid_9k113
+
+-----------------------------------------
+Grid_10x_9k113_backlight
+
+-----------------------------------------
+Grid_10x_9k113
+
+-----------------------------------------
+Grid_3x_9k113_backlight
+
+-----------------------------------------
+Grid_3x_9k113
+
+-----------------------------------------
+Ready_9k113
+
+-----------------------------------------
+BG_9k113
+
+-----------------------------------------
+SteeringLine
+
+}
+-----------------------------------------
+fr1
+
+children are {
+-----------------------------------------
+txt_NABLTips
+OPEN SIGHT DOORS
+}
+-----------------------------------------
+txt_Tips
+HIDE/SHOW TIPS  [LWIN+H] 
+-----------------------------------------
+#17#
+
+children are {
+-----------------------------------------
+#18#
+ENLARGMENT FACTOR  [LCTRL+X]
+-----------------------------------------
+#19#
+
+-----------------------------------...<truncated>
+10:24:12   list_indication(10) [64 bytes]:
+-----------------------------------------
+#1#
+
+children are {
+}
+
+10:24:12   list_indication(6) [64 bytes]:
+-----------------------------------------
+#1#
+
+children are {
+}
+
+10:24:12   list_indication(2) [717 bytes]:
+-----------------------------------------
+SymbologyBox
+
+-----------------------------------------
+total_field_of_view
+
+-----------------------------------------
+asp17_grid
+
+-----------------------------------------
+FlexCross
+
+children are {
+-----------------------------------------
+RollPointer
+
+-----------------------------------------
+FlexCrossLine1
+
+-----------------------------------------
+FlexCrossLine2
+
+-----------------------------------------
+FlexCrossLine3
+
+-----------------------------------------
+FlexCrossLine4
+
+-----------------------------------------
+distance_border
+
+-----------------------------------------
+Distance_Sector
+
+-----------------------------------------
+effective_distance_sector
+
+}
+
+10:24:12   controlsurfaces: elevator={-0.83299517631531, -0.83299517631531} eleron={0, 0.19132854044437} rudder={-0, 0.28020536899567}
+10:24:22 --- stage C: write-mechanism proof (ASP-17 brightness, reverts) ---
+10:24:22   arg 564 (Brightness_PM) before = 1
+10:24:22   performClickableAction(dev=16, cmd=3011, val=0.75) issued
+10:24:22   arg 564 after = 0.75
+10:24:22   ==> WRITE CONFIRMED: the switch moved. Manipulation works.
+10:24:22   restored arg 564 -> 1
+10:24:32 --- stage D: PETROVICH write test (opt-in flag present) ---
+10:24:32   GetDevice(30) -> table
+10:24:32 --- stage E v5: preparing the 9K113 ---
+10:24:32     POWER_PN (885) = 1
+10:24:32     open sight doors       cmd 3018 val 1.0 : arg 775  0 -> 0  NOT SET
+10:24:32     observation (NABL)     cmd 3002 val 1.0 : arg 886  0 -> 0  NOT SET
+10:24:32     !! sight doors shut -- open them in the cockpit. Retrying.
+10:24:37 --- stage E v5: preparing the 9K113 ---
+10:24:37     POWER_PN (885) = 1
+10:24:37     open sight doors       arg 775 already = 1, leaving alone
+10:24:37     observation (NABL)     arg 886 already = 1, leaving alone
+10:24:37     sight ready. *** DO NOT TOUCH THE SIGHT FROM HERE ON ***
+10:24:37     waiting 20s for gyro spin-up
+10:24:37 --- stage E v5: preparing the 9K113 ---
+10:24:37     POWER_PN (885) = 1
+10:24:37     open sight doors       arg 775 already = 1, leaving alone
+10:24:37     observation (NABL)     arg 886 already = 1, leaving alone
+10:24:37     sight ready. *** DO NOT TOUCH THE SIGHT FROM HERE ON ***
+10:24:37     waiting 20s for gyro spin-up
+10:24:57 --- control-law test: 5 small commands on cmd 3061, 4s each ---
+10:24:57     ramp-then-flat short of the stop = POSITION
+10:24:57     keeps climbing to the stop        = RATE
+10:24:58 --- command +0.02, from arg 0 ---
+10:25:02     ended at 0.0087999999523163 after 4.0s (694 samples)
+10:25:02       traj: 0.01:+0.0000 0.26:+0.0088 0.51:+0.0088 0.75:+0.0088 1.00:+0.0088 1.25:+0.0088 1.50:+0.0088 1.75:+0.0088 1.99:+0.0088 2.24:+0.0088 2.49:+0.0088 2.73:+0.0088 2.98:+0.0088 3.23:+0.0088 3.48:+0.0088 3.72:+0.0088 3.97:+0.0088
+10:25:04 --- command +0.05, from arg 1.2490009027033e-14 ---
+10:25:08     ended at 0.021999999880791 after 4.0s (691 samples)
+10:25:08       traj: 0.01:+0.0000 0.25:+0.0220 0.50:+0.0220 0.75:+0.0220 1.00:+0.0220 1.24:+0.0220 1.49:+0.0220 1.74:+0.0220 1.99:+0.0220 2.24:+0.0220 2.49:+0.0220 2.74:+0.0220 2.99:+0.0220 3.24:+0.0220 3.49:+0.0220 3.74:+0.0220 3.99:+0.0220
+10:25:09 --- command +0.10, from arg 0 ---
+10:25:13     ended at 0.043999999761581 after 4.0s (680 samples)
+10:25:13       traj: 0.01:+0.0000 0.25:+0.0440 0.50:+0.0440 0.75:+0.0440 1.00:+0.0440 1.25:+0.0440 1.50:+0.0440 1.75:+0.0440 1.99:+0.0440 2.24:+0.0440 2.48:+0.0440 2.73:+0.0440 2.98:+0.0440 3.22:+0.0440 3.47:+0.0440 3.72:+0.0440 3.96:+0.0440
+10:25:15 --- command +0.25, from arg 0 ---
+10:25:19     ended at 0.10999999940395 after 4.0s (684 samples)
+10:25:19       traj: 0.01:+0.0000 0.25:+0.1100 0.50:+0.1100 0.75:+0.1100 1.00:+0.1100 1.24:+0.1100 1.48:+0.1100 1.73:+0.1100 1.97:+0.1100 2.22:+0.1100 2.47:+0.1100 2.71:+0.1100 2.96:+0.1100 3.20:+0.1100 3.45:+0.1100 3.69:+0.1100 3.94:+0.1100
+10:25:20 --- command -0.10, from arg 0 ---
+10:25:24     ended at -0.043999999761581 after 4.0s (680 samples)
+10:25:24       traj: 0.01:+0.0000 0.25:-0.0440 0.50:-0.0440 0.75:-0.0440 1.00:-0.0440 1.25:-0.0440 1.49:-0.0440 1.73:-0.0440 1.98:-0.0440 2.23:-0.0440 2.47:-0.0440 2.72:-0.0440 2.97:-0.0440 3.22:-0.0440 3.47:-0.0440 3.72:-0.0440 3.97:-0.0440
+10:25:26 =========================================================
+10:25:26 Read the traces above:
+10:25:26   If a small command flattened out part-way, the axis is a
+10:25:26   POSITION target and look_at(bearing) is a single write.
+10:25:26   If every command ran to +-0.44, it is a RATE and look_at needs
+10:25:26   a closed loop against arg 874 -- which is cheap, since the read
+10:25:26   side is confirmed working.
+10:25:26 Either way the effector exists: AI axes 3060/3061 via SetCommand.
+10:25:26 =========================================================
+10:25:44 BL-6 command probe: stopped.

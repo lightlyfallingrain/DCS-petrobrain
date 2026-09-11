@@ -49,6 +49,25 @@ LuaSocket and an unsanitized `io`/`lfs` environment by default):
     detection-existence gate body-layer's HybridPerceptionSource uses; all
     geometry still comes from LoGetWorldObjects above, per that research
     note's net conclusion.
+  - list_indication(WHEEL_INDICATOR_ID) -- Petrovich's AI-Wheel state
+    (device ID 10), confirmed live per
+    aircraft-layer/research/2026-09-11-SUMMARY-petrovich-control.md: the
+    same recursive tree format as list_indication(HELPERAI_DEVICE_ID)
+    above, carrying his search state (OBSERV. OFF -> WAITING -> SEARCHING
+    -> TRACKING) instead of a classification. Pushed the same way, zero
+    Lua-side tree parsing (parsed server-side by
+    aircraft-layer/src/schema/petrovich_wheel.py, reusing
+    petrovich_indication.py's own parser against a different top-level
+    field set). BL-6 (plans/bl6-commands-inspect-adapt/plan.md) -- a live
+    diagnostic for the scan_area task-status console command, not a
+    detection channel.
+  - GetDevice(30):performClickableAction(cmd, value) -- drives Petrovich's
+    AI Wheel (a *different* verb than the sight's SetCommand). BL-6's
+    effector: the wheel's centre button (WHEEL_CENTER_BUTTON = 3015) opens
+    a short press for SRCH BRST (boresight) or, held past
+    WHEEL_LONG_PRESS_S, SRCH FWD (forward sweep) -- confirmed live per the
+    same research summary above. Petrovich decides where to look; this
+    triggers a real, un-aimed search only.
   - LuaExportActivityNextEvent(t) -- required export callback, but NOT a
     throttle on LuaExportAfterNextFrame despite reading that way in some
     documentation: stage 5 confirmed live that DCS calls this correctly on
@@ -93,6 +112,31 @@ local RECONNECT_INTERVAL_S = 5.0
 -- ccHelperAIIndicator_Mi24's 0-indexed registration position in
 -- indicators_list-grepped.lua.
 local HELPERAI_DEVICE_ID = 6
+
+-- BL-6 (plans/bl6-commands-inspect-adapt/plan.md): Petrovich's AI-Wheel
+-- state indicator, confirmed live per
+-- aircraft-layer/research/2026-09-11-SUMMARY-petrovich-control.md.
+local WHEEL_INDICATOR_ID = 10
+
+-- BL-6's inbound command channel -- a *separate* loopback UDP port from
+-- both PORT above (Export.lua -> collector, TCP push) and the overlay
+-- Hook script's own listener port (collector -> overlay, a different
+-- process entirely): the collector's aircraft_client.CommandSender fires
+-- {"op":"petrovich_search","mode":"forward"|"boresight"} datagrams here.
+local COMMAND_HOST = "127.0.0.1"
+local COMMAND_PORT = 7793
+
+-- Wheel device (GetDevice(30)) button codes -- confirmed live per the
+-- research summary above. 3001 opens/ensures the wheel's search page is
+-- current; 3015 is the centre button that starts a search (short press =
+-- SRCH BRST/boresight, long press = SRCH FWD/forward sweep).
+local WHEEL_MENU_BUTTON = 3001
+local WHEEL_CENTER_BUTTON = 3015
+-- Held past this many seconds, the centre-button press becomes SRCH FWD
+-- rather than SRCH BRST -- confirmed live (> 0.5 s), kept with headroom
+-- above that threshold since the release is only checked once per frame,
+-- not on a dedicated timer.
+local WHEEL_LONG_PRESS_S = 0.6
 
 -- Debug logging, gated so the branch is free when off. DCS internals here
 -- are heavily unverified (field shapes, module load behavior) and this
@@ -294,8 +338,22 @@ local function encode_petrovich_indication_line(t, raw)
     return "{\"t\":" .. tostring(t) .. ",\"indication\":" .. encode_scalar(raw) .. "}\n"
 end
 
+-- Encodes one list_indication(WHEEL_INDICATOR_ID) poll as a single JSON
+-- line: {"t":<model time>,"wheel":"<raw dump string>"}. Mirrors
+-- encode_petrovich_indication_line exactly, just under a different wire
+-- key ("wheel" vs. "indication") so the collector's line router
+-- (collector.server._handle_line) can tell the two feeds apart without
+-- parsing the tree itself.
+local function encode_petrovich_wheel_line(t, raw)
+    return "{\"t\":" .. tostring(t) .. ",\"wheel\":" .. encode_scalar(raw) .. "}\n"
+end
+
 local function get_helperai_indication()
     return list_indication(HELPERAI_DEVICE_ID)
+end
+
+local function get_wheel_indication()
+    return list_indication(WHEEL_INDICATOR_ID)
 end
 
 local function safe_call(fn)
@@ -306,8 +364,109 @@ local function safe_call(fn)
     return a, b, c
 end
 
+-- BL-6's inbound command listener (plans/bl6-commands-inspect-adapt/
+-- plan.md): a UDP socket bound to COMMAND_HOST:COMMAND_PORT, polled
+-- non-blockingly every frame (see LuaExportAfterNextFrame below) --
+-- separate from `client`, which is the *outbound* TCP push to the
+-- collector opened by try_connect().
+local command_socket = nil
+
+local function try_open_command_socket()
+    local sock = socket.udp()
+    if sock == nil then
+        debug_log("failed to create command UDP socket")
+        return nil
+    end
+    local ok, err = sock:setsockname(COMMAND_HOST, COMMAND_PORT)
+    if not ok then
+        debug_log("failed to bind command UDP socket: " .. tostring(err))
+        sock:close()
+        return nil
+    end
+    sock:settimeout(0) -- non-blocking receive, polled every frame
+    debug_log("command listener bound on " .. COMMAND_HOST .. ":" .. tostring(COMMAND_PORT))
+    return sock
+end
+
+-- Minimal, purpose-built extraction of {"op":"...","mode":"..."} out of a
+-- small JSON object string -- not a general JSON parser (this project's
+-- existing "hand-roll only what the fixed wire schema needs" policy, same
+-- as encode_json_line above), since the only inbound command shape this
+-- channel ever carries is exactly that one object.
+local function extract_json_string_field(json_text, field_name)
+    return json_text:match("\"" .. field_name .. "\"%s*:%s*\"([%w_]+)\"")
+end
+
+-- Pending long-press release deadline (DCS model-time seconds), or nil if
+-- no press is currently being held open. Set by handle_command below when
+-- a "forward" search is requested; consumed once per frame in
+-- LuaExportAfterNextFrame -- the same per-frame-state pattern
+-- last_export_t already uses for the 5 Hz export throttle, just a second
+-- timer for a different purpose (release-on-deadline instead of
+-- send-on-interval).
+local pending_release_t = nil
+
+-- Executes one petrovich_search command: opens the wheel's search page
+-- (3001, ensuring a stale page context isn't assumed -- a concrete lesson
+-- from the live investigation, not a hypothetical), then presses the
+-- centre button (3015) down. "boresight" releases immediately (a short
+-- press -> SRCH BRST); "forward" leaves the press open and schedules its
+-- release WHEEL_LONG_PRESS_S later (-> SRCH FWD), tracked via
+-- pending_release_t rather than blocking this frame.
+local function handle_petrovich_search_command(mode, t)
+    if mode ~= "forward" and mode ~= "boresight" then
+        debug_log("ignoring petrovich_search command with unknown mode: " .. tostring(mode))
+        return
+    end
+    debug_log("petrovich_search command received: mode=" .. mode)
+
+    safe_call(function()
+        GetDevice(30):performClickableAction(WHEEL_MENU_BUTTON, 1)
+    end)
+    safe_call(function()
+        GetDevice(30):performClickableAction(WHEEL_MENU_BUTTON, 0)
+    end)
+    safe_call(function()
+        GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 1)
+    end)
+
+    if mode == "boresight" then
+        safe_call(function()
+            GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)
+        end)
+        pending_release_t = nil
+    else -- "forward"
+        pending_release_t = t + WHEEL_LONG_PRESS_S
+    end
+end
+
+-- Drains every command datagram currently waiting on command_socket
+-- (non-blocking -- receivefrom returns nil once none remain) and acts on
+-- each. Called every frame in LuaExportAfterNextFrame, *before* that
+-- function's own 5 Hz export throttle check, so a command is never delayed
+-- behind the telemetry export cadence.
+local function poll_command_socket(t)
+    if command_socket == nil then
+        return
+    end
+    while true do
+        local data, _err = command_socket:receivefrom()
+        if data == nil then
+            return
+        end
+        local op = extract_json_string_field(data, "op")
+        if op == "petrovich_search" then
+            local mode = extract_json_string_field(data, "mode")
+            handle_petrovich_search_command(mode, t)
+        else
+            debug_log("ignoring command with unknown op: " .. tostring(op))
+        end
+    end
+end
+
 function LuaExportStart()
     client = try_connect()
+    command_socket = try_open_command_socket()
 end
 
 function LuaExportStop()
@@ -315,6 +474,11 @@ function LuaExportStop()
         client:close()
         client = nil
     end
+    if command_socket then
+        command_socket:close()
+        command_socket = nil
+    end
+    pending_release_t = nil
 end
 
 -- NOT actually a throttle on LuaExportAfterNextFrame -- research finding 1's
@@ -350,6 +514,17 @@ function LuaExportAfterNextFrame()
     local t = safe_call(LoGetModelTime)
     if t == nil then
         return
+    end
+
+    -- BL-6: command handling runs every frame, ahead of the 5 Hz export
+    -- throttle below -- a queued search command, or a long-press release
+    -- deadline, must not wait behind the telemetry export cadence.
+    poll_command_socket(t)
+    if pending_release_t ~= nil and t >= pending_release_t then
+        safe_call(function()
+            GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)
+        end)
+        pending_release_t = nil
     end
 
     if t - last_export_t < EXPORT_INTERVAL_S then
@@ -475,6 +650,27 @@ function LuaExportAfterNextFrame()
             local pi_ok, pi_err = client:send(indication_line)
             if not pi_ok then
                 debug_log("petrovich-indication send failed: " .. tostring(pi_err))
+                client:close()
+                client = nil
+            end
+        end
+    end
+
+    -- Petrovich AI-Wheel state poll (BL-6), same throttle/socket/
+    -- pcall-guard/one-shot-dump mechanism as the HelperAI poll above --
+    -- only reached if the connection is still alive after that send.
+    if client ~= nil then
+        local wheel = safe_call(get_wheel_indication)
+        if wheel ~= nil then
+            if not DUMPED_PETROVICH_WHEEL then
+                DUMPED_PETROVICH_WHEEL = true
+                debug_log("list_indication(WHEEL_INDICATOR_ID) raw dump:\n" .. tostring(wheel))
+            end
+
+            local wheel_line = encode_petrovich_wheel_line(t, wheel)
+            local pw_ok, pw_err = client:send(wheel_line)
+            if not pw_ok then
+                debug_log("petrovich-wheel send failed: " .. tostring(pw_err))
                 client:close()
                 client = nil
             end
