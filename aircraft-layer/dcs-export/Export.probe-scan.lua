@@ -74,6 +74,11 @@ HOW TO FLY IT
 
 local SCAN_BEARING_DEG = 0.0     -- where to pin the sight; + is right, -60..60
 
+-- Which centre-slot search to use. SRCH BRST (boresight) only finds what the
+-- nose is already pointed at; SRCH FWD sweeps forward and finds targets that
+-- are in view but off-axis, which is what we want for detection testing.
+local CENTRE_SEARCH_OPTION = "SRCH FWD"
+
 local LOG_PATH = lfs.writedir() .. "Logs\\aircraft_layer_probe_scan.log"
 local log_file = nil
 local function log(m)
@@ -327,6 +332,18 @@ local function press_took() return press.took end
 -- list_contacts() must not quietly select or mark while merely reading. That
 -- belongs in the BL-6 design, not in a guard here.
 
+-- Which hold fires which centre option? The centre slot shows two labels,
+-- "<short> | <long>", so resolve it from the text rather than hard-coding.
+-- Returns the hold time, or nil if that option is not currently offered.
+local function centre_hold_for(want)
+    local v = wheel_slots() or {}
+    local short_opt = (v["wheel_text_center"] or ""):upper()
+    local long_opt  = (centre_long_option() or ""):upper()
+    if short_opt:find(want, 1, true) then return SHORT_HOLD, short_opt end
+    if long_opt:find(want, 1, true) then return LONG_HOLD, long_opt end
+    return nil
+end
+
 -- Press an EXACT slot, but only after confirming it currently shows `expect`.
 -- Refuses after MAX_ATTEMPTS so a press that does nothing cannot loop forever.
 local MAX_ATTEMPTS = 3
@@ -527,9 +544,12 @@ end
 -- "SRCH BRST | SRCH FWD". Short press should fire one, long press the other;
 -- which is which is unknown, so this tests both and reports what each did.
 local C = {phase="idle", t=0, i=0, before=nil, results={}}
+-- LONG first: run 3 tested SHORT first, which consumed the idle->WAITING
+-- transition, so the LONG press had no room left to show an effect and came
+-- back inconclusive. Testing from the cleaner state first avoids that.
 local CENTRE_TRIES = {
-    {"centre SHORT", SHORT_HOLD},
     {"centre LONG",  LONG_HOLD},
+    {"centre SHORT", SHORT_HOLD},
 }
 
 local function centre_try(t)
@@ -658,10 +678,21 @@ local function part_b(t)
         end
         if page_kind() == "search" and slot_offers(SLOT_OBSERV, "OBSERV. OFF")
            and not slot_offers(SLOT_SEARCH_LOS, "SRCH 9K113") then
-            log("  observation is off; using the centre press to start a search")
+            -- SRCH FWD, not SRCH BRST (pilot, 2026-09-11): boresight search only
+            -- finds what the nose already points at, so it misses targets that
+            -- are in view but off-axis. Forward search sweeps and finds them.
+            local hold, label = centre_hold_for(CENTRE_SEARCH_OPTION)
+            if hold == nil then
+                log("  centre does not offer " .. CENTRE_SEARCH_OPTION
+                    .. " right now: " .. wheel_str())
+                B.phase = "observ_old" ; B.t = t
+                return
+            end
+            log(string.format("  starting search: centre %s press -> %q",
+                (hold >= LONG_HOLD) and "LONG" or "short", label))
             dev(DEV_HAI, "performClickableAction", CMD.Centre, 1)
             press.active, press.phase, press.t = true, "hold", t
-            press.cmd, press.hold = CMD.Centre, SHORT_HOLD
+            press.cmd, press.hold = CMD.Centre, hold
             press.slot, press.label = "wheel_text_center", "CENTRE"
             press.before_label = slot_label("wheel_text_center")
             press.took = nil
