@@ -280,3 +280,113 @@ absent `GetDevice` logs a clean "ABSENT" line rather than taking down the export
 shifts every later ID in that table; the same is true of device IDs (`devices.lua`) and
 indicator indices (`device_init.lua`). Never hardcode without re-deriving against the installed
 files, and always record the DCS build alongside. The reference doc carries the same warning.
+
+---
+
+## Live probe run 1 — 2026-09-11 09:54, DCS 2.9.29.27278
+
+`Export.probe-commands.lua` v1, log archived from
+`Saved Games\DCS\Logs\aircraft_layer_probe_cmd.log` (331 lines).
+
+### CONFIRMED: cockpit switches and controls can be manipulated from Export.lua
+
+This closes the investigation's central question. Stage A capability census:
+
+```
+GetDevice            function        list_indication      function
+GetIndicator         function        list_cockpit_params  function
+LoSetCommand         function        get_param_handle     function
+GetDevice(16) -> table
+  :performClickableAction   function
+  :SetCommand               function
+  :get_argument_value       nil        <- not on a device, only on mainpanel
+GetDevice(0) [mainpanel] -> table
+  :get_argument_value       function
+```
+
+Stage C then demonstrated an actual write, end to end:
+
+```
+arg 564 (Brightness_PM) before = 1
+performClickableAction(dev=16, cmd=3011, val=0.75) issued
+arg 564 after = 0.75
+==> WRITE CONFIRMED: the switch moved.
+restored arg 564 -> 1
+```
+
+— **evidence: reproduced-locally, live.** Every ID in
+`mi24p-command-surface.md` is therefore actionable, and the "one gap" that
+document and this one both flagged is closed. Note `get_argument_value` lives
+on **device 0 only**, not on the device being written — worth encoding in any
+wrapper.
+
+### CONFIRMED: the read surface works
+
+- **9K113 pointing angle**: args 874/876 both returned live numeric values.
+- **All 16 ASP-17 switch args** returned plausible state (`Power`=1,
+  `Manual_Auto`=1, `Range_Auto_Manual`=1, `Elevation_Delta`=0.827,
+  `Azimuth_Delta`=0.492, …).
+- **All 24 9K113 panel switch args** returned state.
+- **`list_indication(0)` (9K113) prints real text** — as predicted from its
+  `ceStringPoly` elements, and in contrast to the ASP-17:
+  `txt_NABLTips` = `"OPEN SIGHT DOORS"`, `txt_Tips` =
+  `"HIDE/SHOW TIPS [LWIN+H]"`, `"ENLARGMENT FACTOR [LCTRL+X]"`. So the sight
+  exposes a genuine textual state channel, including operator prompts.
+- **`list_indication(2)` (ASP-17)** returned element names with no values,
+  exactly reproducing the 2026-09-08 finding. Unchanged.
+- **`list_indication(6)` (HelperAI) and `(10)` (AI wheel) were both empty**
+  (64 bytes, no children) throughout. The wheel was most likely never opened
+  during the sampling window, so **this is not evidence the wheel channel is
+  dead** — it is untested. Re-test with the wheel held open.
+
+### INCONCLUSIVE: stage D (Petrovich `DesignateAttackPoint`)
+
+Fired at T+30 s. Neither the HelperAI indication (`crosshair`, no children,
+identical before and after) nor the 9K113 angle changed. Not a negative
+result: it fired early in the flight against a sight whose state at the last
+sample was still unconfigured, and HelperAI's indication was empty anyway.
+Re-run once the sight is operational.
+
+### INVALID: stage E (slew test) — confounded, but suggestive
+
+Azimuth moved among three quantised values (0, 0.198, 0.396) and sometimes
+against the commanded direction, which initially read as "not our commands".
+**That reading was wrong**, and so was a first pass at blaming closed sight
+doors — arg 775 was sampled only once at T+10 s, before the pilot opened them,
+so it said nothing about the rest of the flight. Corrected by the pilot: the
+doors were opened and the sight was operational for most of the run, and the
+pilot was **also slewing manually**, including to both horizontal stops.
+
+Re-read in that light, run 1 is **weak positive evidence that the commands do
+drive the sight**: under `+0.6` the azimuth stepped `0 -> 0.198 -> 0.396` and
+then pinned at 0.396 across many cycles, matching the pilot's own report that
+"the sight is just at max angle and does not move anymore". The apparent
+reversals line up with manual slews back. But concurrent human input means
+causation is not established, and no negative saturation (~-0.396) was ever
+observed despite the pilot slewing to the left stop.
+
+**Method fault, not a DCS fault:** sampling only the endpoints of a 1.5 s hold
+cannot distinguish a commanded ramp from someone else's input, and short
+pulses against an already-saturated axis produce "no change" that looks like
+failure.
+
+### Probe v2 — what changed
+
+1. **Limit sweep instead of pulses.** Command full rate at a stop, sample every
+   frame, stop when the value is unchanged for 25 frames. A ramp-then-pin
+   proves causation; the pinned values *are* the mechanical stops.
+2. **Calibration falls out of it.** Azimuth stops are known (±60°), so the
+   swept span yields degrees-per-gauge-unit directly — and cross-checks
+   whether the stop is at the declared gauge extreme (0.44) or ~0.396 as run 1
+   hinted, an 11% difference that matters for any bearing conversion.
+3. **Elevation swept the same way**, which is the only way to get the
+   elevation limits — they are native and appear in no Lua file.
+4. **Preconditions set up and verified by the probe** (power, doors, NABL),
+   now that writes are proven — with a guard against blind-toggling a switch
+   that is already in the wanted state.
+5. **Stage D re-fires** once the sight is confirmed operational.
+6. **Gating switches logged every sweep** (775/886/885), so state is never
+   inferred from a single early sample again.
+
+Requires **no manual sight input during the sweep** — that is the one thing
+that invalidated run 1.

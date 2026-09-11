@@ -113,6 +113,7 @@ local K113 = {
     Command_SIGHT_LEFT_RIGHT_AXIS           = 3026,
     Command_SIGHT_ZOOM                      = 3027,
     Command_Aiming                          = 3028,
+    Command_STVORKI                         = 3018,  -- sight doors
     Command_Intern_SIGHT_UP_DOWN_AI_AXIS    = 3060,
     Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS = 3061,
 }
@@ -316,30 +317,56 @@ local function stage_c_write_test()
 end
 
 -- ------------------------------------------------------------ stage E
--- THE 9K113 TEST. Two things are uncertain and this separates them:
+-- THE 9K113 TEST, v2.
 --
---  1. Is slewing gated on the operator's sight mode? In gameplay the 9K113 is
---     its own mode with its own viewport (Devices_specs sets
---     SightWithCockpitView = false; the indicator renders to a dedicated
---     viewport), so the PLAYER slew axes may simply be ignored outside it.
---  2. Does the AI channel bypass that gate? i9K113_commands carries a separate
---     Command_Intern_SIGHT_*_AI_AXIS pair (3060/3061) bound to no input in any
---     of the module's Input/ profiles -- i.e. the channel the AI itself uses.
---     If anything works outside sight mode, it is most likely this.
+-- v1 (run 2026-09-11 09:54) produced garbage because the sight was never
+-- operational: arg 775 (STVORKI, sight doors) was 0 all flight and the sight's
+-- own hint read "OPEN SIGHT DOORS". Azimuth jumped between three quantised
+-- values (0 / 0.198 / 0.396), sometimes AGAINST the commanded direction --
+-- i.e. we were sampling something other than our own commands.
 --
--- So the stage tries BOTH channels and repeats on a cycle: fly, let it run a
--- few cycles OUTSIDE the sight view, then enter the sight view and let it run
--- a few more. The log then shows directly whether the gate exists and whether
--- the AI axis clears it.
---
--- The axes are VELOCITY (axis_use_velocity = true), so each test commands a
--- rate, samples the angle args across frames, then commands zero.
+-- Three changes:
+--   1. PRECONDITIONS are set up by the probe itself (power, doors, NABL) --
+--      we now know performClickableAction works, so don't depend on the pilot
+--      remembering. Each one is verified by reading its arg back, and the
+--      stage refuses to run if setup fails.
+--   2. PER-FRAME SAMPLING across the hold, not just before/after. A smooth
+--      monotonic ramp is our velocity command; a jump is somebody else.
+--   3. ALTERNATING DIRECTION (+rate, then -rate). If azimuth tracks the sign
+--      of the command, causation is established. If it wanders regardless,
+--      it is not us.
 
-local slew = {
-    cycle = 0,
-    phase = "idle",      -- idle -> player_slew -> player_settle -> ai_slew -> ai_settle
+local K113_ARG_DOORS = 775   -- STVORKI
+local stage_d_fired = false
+
+-- v2 runs a LIMIT SWEEP instead of short pulses. v1's "no change" readings were
+-- almost certainly the sight SATURATED at its stop (user confirmed: "the sight
+-- is just at max angle and does not move anymore"), i.e. our commands were
+-- working all along. A sweep settles that beyond doubt and pays for itself
+-- three times over:
+--   1. If the value ramps then pins, our command is driving it. Causation.
+--   2. The pinned values ARE the mechanical stops -> gauge calibration.
+--   3. Doing it on elevation too yields the elevation limits, which are
+--      unknown and absent from every Lua file.
+--
+-- Azimuth stops are known to be +/-60 deg (user, 2026-09-11), so the azimuth
+-- sweep also cross-checks whether the stop sits at the declared gauge extreme
+-- (0.44) or lower -- v1 suggested ~0.396, an 11% difference that matters for
+-- any bearing conversion.
+
+local SWEEP_RATE  = 1.0     -- full commanded rate, straight at the stop
+local SETTLE_N    = 25      -- frames of no movement before calling it pinned
+local SWEEP_EPS   = 1e-5
+
+local sweep = {
+    phase = "setup",
     t_phase = 0,
-    az0 = nil, el0 = nil,
+    axis = "az",            -- az then el
+    dir = 1,
+    still = 0,
+    last = nil,
+    started = nil,
+    results = {},
 }
 
 local function k113_angles()
@@ -355,55 +382,144 @@ local function k113_send(cmd, value)
     return true
 end
 
-local SLEW_RATE = 0.6        -- commanded axis value, well clear of Slew_dead_zone
-local SLEW_HOLD = 1.5        -- seconds to hold the rate before reading back
+-- Only command if the switch is not already where we want it. STVORKI/NABL
+-- may be toggles, and blind-setting a toggle that is already open would close
+-- it -- which is exactly the state confusion that muddied the v1 run.
+local function k113_set_verified(label, cmd, value, arg, want)
+    local before = read_arg(arg)
+    if type(before) == "number" and math.abs(before - want) < 0.01 then
+        log(string.format("    %-22s arg %d already = %s, leaving alone",
+                          label, arg, tostring(before)))
+        return true
+    end
+    k113_send(cmd, value)
+    local after = read_arg(arg)
+    local ok = (type(after) == "number" and math.abs(after - want) < 0.01)
+    log(string.format("    %-22s cmd %d val %.1f : arg %d  %s -> %s  %s",
+        label, cmd, value, arg, tostring(before), tostring(after),
+        ok and "OK" or "NOT SET"))
+    return ok
+end
+
+local function sweep_cmd_arg()
+    if sweep.axis == "az" then
+        return K113.Command_SIGHT_LEFT_RIGHT_AXIS, K113_ARG_AZIMUTH
+    end
+    return K113.Command_SIGHT_UP_DOWN_AXIS, K113_ARG_ELEVATION
+end
 
 local function stage_e_sight_slew(t)
     if not caps.performClickableAction then return end
 
-    if slew.phase == "idle" then
-        slew.cycle = slew.cycle + 1
-        local az, el = k113_angles()
-        local nabl = read_arg(886)
+    if sweep.phase == "setup" then
+        log("--- stage E v2: preparing the 9K113 ---")
+        local powered = read_arg(885)
+        log("    POWER_PN (885) = " .. tostring(powered))
+        if type(powered) ~= "number" or powered < 0.5 then
+            k113_set_verified("power on", K113.Command_POWER_PN, 1, 885, 1)
+        end
+        local doors_ok = k113_set_verified("open sight doors",
+                                           K113.Command_STVORKI, 1,
+                                           K113_ARG_DOORS, 1)
+        k113_set_verified("observation (NABL)", K113.Command_NABL, 1, 886, 1)
+
+        if not doors_ok then
+            log("    !! sight doors still shut -- open them in the cockpit.")
+            log("       Retrying in a few seconds.")
+            sweep.phase = "wait_retry"
+            sweep.t_phase = t
+            return
+        end
+
+        log("    sight ready. *** DO NOT TOUCH THE SIGHT FROM HERE ON ***")
+        if not stage_d_fired then
+            stage_d_fired = true
+            stage_d_petrovich()
+        end
+        sweep.phase = "begin"
+        sweep.t_phase = t
+
+    elseif sweep.phase == "wait_retry" then
+        if (t - sweep.t_phase) > 5.0 then sweep.phase = "setup" end
+
+    elseif sweep.phase == "begin" then
+        if (t - sweep.t_phase) < 2.0 then return end
+        local cmd, arg = sweep_cmd_arg()
+        sweep.started = read_arg(arg)
+        sweep.last = sweep.started
+        sweep.still = 0
         log(string.format(
-            "--- stage E cycle %d --- NABL(arg886)=%s  az(874)=%s  el(876)=%s",
-            slew.cycle, tostring(nabl), tostring(az), tostring(el)))
-        log("    (note whether you are currently IN the 9K113 sight view)")
-        slew.az0, slew.el0 = az, el
-        slew.phase = "player_slew"
-        slew.t_phase = t
-        k113_send(K113.Command_SIGHT_LEFT_RIGHT_AXIS, SLEW_RATE)
-        log(string.format("    PLAYER axis: cmd %d (SIGHT_LEFT_RIGHT_AXIS) = %.2f",
-                          K113.Command_SIGHT_LEFT_RIGHT_AXIS, SLEW_RATE))
+            "--- SWEEP %s %s  from arg %d = %s   [doors775=%s NABL886=%s pwr885=%s] ---",
+            sweep.axis, (sweep.dir > 0) and "POSITIVE" or "NEGATIVE",
+            arg, tostring(sweep.started), tostring(read_arg(K113_ARG_DOORS)),
+            tostring(read_arg(886)), tostring(read_arg(885))))
+        k113_send(cmd, SWEEP_RATE * sweep.dir)
+        sweep.phase = "sweeping"
+        sweep.t_phase = t
 
-    elseif slew.phase == "player_slew" and (t - slew.t_phase) > SLEW_HOLD then
-        k113_send(K113.Command_SIGHT_LEFT_RIGHT_AXIS, 0.0)
-        local az, el = k113_angles()
-        local moved = (type(az) == "number" and type(slew.az0) == "number"
-                       and math.abs(az - slew.az0) > 0.001)
-        log(string.format("    PLAYER axis result: az %s -> %s  %s",
-            tostring(slew.az0), tostring(az),
-            moved and "==> MOVED" or "==> no change"))
-        slew.az0, slew.el0 = k113_angles()
-        slew.phase = "ai_slew"
-        slew.t_phase = t
-        k113_send(K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS, SLEW_RATE)
-        log(string.format("    AI axis:     cmd %d (Intern_..._AI_AXIS) = %.2f",
-                          K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS, SLEW_RATE))
+    elseif sweep.phase == "sweeping" then
+        local cmd, arg = sweep_cmd_arg()
+        local v = read_arg(arg)
+        if type(v) ~= "number" then return end
 
-    elseif slew.phase == "ai_slew" and (t - slew.t_phase) > SLEW_HOLD then
-        k113_send(K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS, 0.0)
-        local az, el = k113_angles()
-        local moved = (type(az) == "number" and type(slew.az0) == "number"
-                       and math.abs(az - slew.az0) > 0.001)
-        log(string.format("    AI axis result:     az %s -> %s  %s",
-            tostring(slew.az0), tostring(az),
-            moved and "==> MOVED" or "==> no change"))
-        slew.phase = "cooldown"
-        slew.t_phase = t
+        if sweep.last ~= nil and math.abs(v - sweep.last) < SWEEP_EPS then
+            sweep.still = sweep.still + 1
+        else
+            sweep.still = 0
+        end
+        sweep.last = v
 
-    elseif slew.phase == "cooldown" and (t - slew.t_phase) > 8.0 then
-        slew.phase = "idle"
+        local timeout = (t - sweep.t_phase) > 20.0
+        if sweep.still >= SETTLE_N or timeout then
+            k113_send(cmd, 0.0)
+            local moved = (type(sweep.started) == "number")
+                          and math.abs(v - sweep.started) > 1e-4
+            local key = sweep.axis .. ((sweep.dir > 0) and "_max" or "_min")
+            sweep.results[key] = v
+            log(string.format(
+                "    %s: %s -> %s after %.1fs  [%s]%s",
+                key, tostring(sweep.started), tostring(v),
+                t - sweep.t_phase,
+                moved and "MOVED, then pinned" or "NEVER MOVED",
+                timeout and "  (timeout, may not be a true stop)" or ""))
+
+            -- next: flip direction, then switch axis, then report
+            if sweep.dir > 0 then
+                sweep.dir = -1
+                sweep.phase = "begin"
+            elseif sweep.axis == "az" then
+                sweep.axis = "el"
+                sweep.dir = 1
+                sweep.phase = "begin"
+            else
+                sweep.phase = "report"
+            end
+            sweep.t_phase = t
+        end
+
+    elseif sweep.phase == "report" then
+        local r = sweep.results
+        log("=========================================================")
+        log("SWEEP RESULTS -- mechanical stops in gauge units")
+        log(string.format("  azimuth   min=%s  max=%s",
+            tostring(r.az_min), tostring(r.az_max)))
+        log(string.format("  elevation min=%s  max=%s",
+            tostring(r.el_min), tostring(r.el_max)))
+        if type(r.az_max) == "number" and type(r.az_min) == "number" then
+            local span = r.az_max - r.az_min
+            log(string.format(
+                "  azimuth span %.5f gauge units == 120 deg (known +/-60)", span))
+            if math.abs(span) > 1e-6 then
+                log(string.format("  => deg_per_gauge_unit = %.3f", 120.0 / span))
+            end
+        end
+        log("  elevation limits in DEGREES are still unknown -- these gauge")
+        log("  values are the stops; someone must correlate them to real angles.")
+        log("=========================================================")
+        sweep.phase = "done"
+
+    elseif sweep.phase == "done" then
+        -- idle
     end
 end
 
