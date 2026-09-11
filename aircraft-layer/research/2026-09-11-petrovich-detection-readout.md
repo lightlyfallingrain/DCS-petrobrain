@@ -151,3 +151,124 @@ implementation.**
   detected, which does not match the earlier assumption that 775 gates operation. Either 775 is
   not what it was taken for, or doors are not required. Unresolved, and worth care before relying
   on that argument for anything.
+
+---
+
+## Wheel-command + sight-authority probe — 2026-09-11 11:09
+
+### 1. We CAN drive the wheel — and the verb is the opposite of the sight's
+
+`SetCommand` on device 30 did **nothing** across the whole key sequence.
+`performClickableAction` drove it immediately:
+
+```
+[1] press ShowMenu (3001) -> CHANGED
+      wheel: C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=OBSERV. ON
+             FU=HOLD FIRE  FR=TGT/PILOT  FL=CM/MENU
+[2] press Down     (3005) -> CHANGED     NABL 1 -> 0, slot becomes OBSERV. OFF
+[4] press Up       (3004) -> CHANGED     NABL 0 -> 1
+```
+
+So the two channels take **different verbs**, which is worth stating plainly
+because it is counter-intuitive and cost a flight to discover:
+
+| target | verb |
+|---|---|
+| 9K113 sight axes (device 7) | **`SetCommand`** |
+| AI wheel (device 30) | **`performClickableAction`** |
+
+The rule behind it is the clickable-element one: the sight axes have no
+clickable entry, the wheel commands do (device 30 appears in
+`clickabledata.lua`). — **evidence: reproduced-locally, live.**
+
+### 2. The selection model: a direction press EXECUTES that slot
+
+There is no separate cursor-then-commit step. Pressing `Down` while the down
+slot read `OBSERV. ON` toggled observation off (NABL 1 → 0) and the slot
+relabelled to `OBSERV. OFF`. Pressing `Up` on `SRCH PILOT LOS` started a
+search and NABL returned to 1. Pressing a slot that is empty or unavailable
+does nothing. So the command sequence is simply: open the wheel, read the
+slots, press the direction whose slot holds the wanted option.
+— **evidence: reproduced-locally.**
+
+### 3. Our sight command has AUTHORITY over Petrovich
+
+The risk that `SetCommand(3061, …)` would be overridden while Petrovich drives
+the sight **does not materialise**. Nine cycles out of nine held, including
+while the wheel reported `SEARCHING` and `TRACKING`:
+
+```
+cycle 5  wheel D=SEARCHING   before az=-0.440  -> HELD at +0.220 for 6s
+cycle 7  wheel D=TRACKING    before az=+0.005  -> HELD at +0.220 for 6s
+```
+
+Each cycle's trace snaps to the commanded value within 0.5 s and holds flat.
+Between cycles — when we stop commanding — the `before` values wander
+(+0.440, −0.440, +0.008), i.e. **Petrovich resumes control the moment we stop
+asserting.** That is close to ideal: assert to take the sight, release to give
+it back. — **evidence: reproduced-locally, 9/9.**
+
+### 4. There is more than one wheel page
+
+Two distinct pages appeared:
+
+```
+search page : C=SRCH BRST  U=SRCH PILOT LOS  R=NO/MSL  D=<state>
+              FU=HOLD FIRE  FR=TGT/PILOT  FD=SRCH 9K113 LOS  FL=CM/MENU
+target page : C=MARK/TGT  U=PREV TGT  R=SELECT/TGT  D=NEXT TGT
+              L=CLOSE/LIST  FL=ALL/TGTS
+```
+
+The down slot doubles as **state display and action**: it showed
+`OBSERV. ON` / `OBSERV. OFF` / `WAITING` / `SEARCHING` / `TRACKING` at
+different moments. `FD=SRCH 9K113 LOS` is present only in some states (seen
+with `OBSERV. ON`, `SEARCHING`, `TRACKING`; absent with `OBSERV. OFF`,
+`WAITING`).
+
+### 5. How to reach the FAR slots — strong hypothesis, untested
+
+Only four direction keys exist, but each direction has a **near** and a **far**
+slot. None of the far slots was ever executed this run, and every press we
+made was held **0.20 s**.
+
+`HelperAI.lua:13` defines **`long_press_time = 0.5`**. So the model is almost
+certainly **near slot = short press, far slot = press held > 0.5 s**. This
+matters directly: `SRCH 9K113 LOS` — the option this project actually wants —
+sits in the **far down** slot. — **inferred from a primary-source constant,
+not yet tested.**
+
+### NOT TESTED this flight: does pinning the sight block detection?
+
+**Zero contacts appeared in the entire run** (34 samples, all `<no contacts>`),
+so the most important interaction question is still open: if we hold the sight
+at a commanded azimuth, does Petrovich still detect what is there, or does
+taking the sight away from him suppress detection? Cycles 5-9 ran while he was
+`SEARCHING`/`TRACKING` and found nothing, but with no targets in view that is
+uninformative either way.
+
+This is the single thing the next flight must answer, and it needs **targets
+actually present and within the commanded arc.**
+
+### Where BL-6 now stands
+
+Every mechanical piece of `scan_area` exists and is verified:
+
+```lua
+-- 1. point Petrovich's optics at a bearing
+GetDevice(7):SetCommand(3061, azimuth_deg / 60.0)
+
+-- 2. open the wheel and read what is on offer
+GetDevice(30):performClickableAction(3001, 1) ; ... (3001, 0)
+local slots = list_indication(10)          -- verify SRCH 9K113 LOS is present
+
+-- 3. press the matching direction  (far-down => long press, to be confirmed)
+GetDevice(30):performClickableAction(3005, 1) ; ... (3005, 0)
+
+-- 4. observe outcome
+list_indication(10)  -- SEARCHING / TRACKING / WAITING
+list_indication(6)   -- middle_list_text = "T-90A", classified contacts
+GetDevice(0):get_argument_value(874) * 136.36   -- where he is looking, degrees
+```
+
+Two unknowns remain, both narrow: the long-press hypothesis, and whether
+holding the sight suppresses detection.
