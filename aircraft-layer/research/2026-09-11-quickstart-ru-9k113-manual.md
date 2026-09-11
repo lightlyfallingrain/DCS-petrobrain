@@ -129,6 +129,11 @@ QuickStart RU.pdf`: `46-53`, `66-75`, `105-116`, `122-131`.
 
 ### Unresolved
 
+- **User-confirmed from gameplay (2026-09-11c):** the ASP-17-displays-operator's-LOS-only-in-УРС behavior
+  itself is accurate — matches lived DCS experience, not just the manual text.
+  This confirms the *display* fact; it does not confirm whether the switch
+  position affects `SRCH 9K113 LOS`'s command behavior — that's still a
+  separate, untested claim.
 - Whether setting ПУВЛ to УРС changes `SRCH 9K113 LOS`'s observed behavior is
   **not tested** — this is a new live-probe candidate, not a finding.
 - The manual does not cover DCS's specific AI-wheel command IDs (3001–3021
