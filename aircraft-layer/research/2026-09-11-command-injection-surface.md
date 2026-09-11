@@ -102,6 +102,11 @@ so every "unread" item in that file is now read.
   `GetDevice(7):get_LandPoint()` exists. Stage A enumerates what the object actually carries.
   — **evidence: reproduced-locally** (vtable symbols); **inferred/unresolved** for what it means.
 
+- **[SUPERSEDED — see `2026-09-11-petrovich-detection-readout.md`]** The claim below, that no
+  scan command exists, was drawn from the static Lua and is **wrong**. The wheel's options are
+  dynamic text; `list_indication(10)` shows `SRCH 9K113 LOS`, `SRCH PILOT LOS`, `SRCH BRST`,
+  `SRCH FWD` among others. What remains true is the *static* observation about the command table:
+
 - **Petrovich (HELPER_AI, device 30) has 21 commands, and none of them is a scan command.** Full
   list in the reference. The AI Wheel is *navigated*, not addressed: the entire `Mi_24P_AI_Menu`
   input profile binds only five things — `ShowMenu` (LCtrl+V) and `Up`/`Down`/`Left`/`Right`
@@ -265,6 +270,9 @@ absent `GetDevice` logs a clean "ABSENT" line rather than taking down the export
   strongest lead BL-6 has.
 - **Does `list_indication(10)` populate?** Stage B. Would give the real wheel options as text.
 - **Does `LoGetMechInfo().controlsurfaces` populate for a helicopter?** Stage B.
+- **[RESOLVED 2026-09-11 — `SEARCHING`/`TRACKING`/`WAITING` are readable in `list_indication(10)`.
+  See `2026-09-11-petrovich-detection-readout.md`.]** The text below is superseded:
+
 - **Is there any read-side signal for "Petrovich is scanning"?** Still no candidate. The
   2026-09-10 file's conclusion stands: the `observ_on`/`target_acq`/`still_searching` events in
   `HelperAI_sound.lua` remain audio-trigger-only with no confirmed Lua-readable mirror. BL-6's

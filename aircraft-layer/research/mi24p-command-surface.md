@@ -304,7 +304,17 @@ the device object actually carries.
 3014 HeliControlEXT
 ```
 
-**There is no `ScanArea` command.** The command wheel is navigated, not addressed: the entire
+**SUPERSEDED 2026-09-11 — see `2026-09-11-petrovich-detection-readout.md`.** This section
+concluded there is no scan command, from the static Lua. That is **wrong**: the wheel's options
+are dynamic text and `list_indication(10)` prints them. Real options include **`SRCH 9K113 LOS`**
+(search along the sight line — BL-6's `scan_area` primitive, aimed at a line we can command),
+`SRCH PILOT LOS`, `SRCH BRST`, `SRCH FWD`, plus `HOLD FIRE`, `SELECT TGT`, `NEXT/PREV TGT`,
+`OBSERV. ON/OFF`. The wheel's down slot also reports Petrovich's own state — `SEARCHING`,
+`TRACKING`, `WAITING`.
+
+The paragraph below remains true about the *static* files and about how the wheel is driven:
+
+The command wheel is navigated, not addressed: the entire
 `Mi_24P_AI_Menu` input profile (keyboard/joystick/mouse/trackir/headtracker) binds only five
 things — `ShowMenu` (LCtrl+V), `Up`/`Down`/`Left`/`Right` (W/S/A/D). The wheel's *contents* are
 dynamic and contextual, rendered by `AI_Wheel_page_common.lua` as nine text slots driven by a
@@ -346,11 +356,11 @@ use 6 and 2:
 | 3 | `ccControlsIndicator` | |
 | 4 | `ccMapDisplay_Mi24` | |
 | 5 | `ccIndicator` (MapDisplay bake) | |
-| **6** | `ccHelperAIIndicator_Mi24` (noVR) | **Petrovich target list — the channel already in use** |
+| **6** | `ccHelperAIIndicator_Mi24` (noVR) | **Petrovich target list — CONFIRMED 2026-09-11: `middle_list_text` carries classified contacts ("T-90A", "BTR-60"), gated on NABL not weapon mode** |
 | 7 | `ccHelperAIIndicator_Mi24` (VR) | |
 | 8 | `ccGunnersCPanel` | owned by `WEAP_SYS`, not HELPER_AI |
 | 9 | `ccCrewIndicator` | |
-| **10** | `ccAIWheelIndicator_Mi24` (noVR) | **AI command wheel text — never yet read** |
+| **10** | `ccAIWheelIndicator_Mi24` (noVR) | **AI command wheel text — CONFIRMED readable 2026-09-11: prints the live menu options and Petrovich's SEARCHING/TRACKING/WAITING state** |
 | 11 | `ccAIWheelIndicator_Mi24` (VR) | |
 
 **`list_indication(10)` is a new, untried read channel.** Because the wheel is text (nine
