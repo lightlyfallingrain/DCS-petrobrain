@@ -702,3 +702,106 @@ Now fixed: those presses are judged by row and azimuth change, with a settle
 window, and the log calls out `SIGHT MOVED (tracking?)` — which is also an
 independent check that args 874/876 read Petrovich's gaze rather than a control
 position.
+
+---
+
+## Scan run 5 — 2026-09-11 12:22 — FULL LIST ENUMERATION WORKS
+
+### The complete contact list, read from code
+
+Nine `NEXT TGT` presses walked the whole list and cycle detection terminated it
+exactly at the wrap:
+
+```
+step 1  middle=T-55    upper=T62                lower=MTLB    lower_lower=T-90A
+step 2  middle=MTLB    upper_upper=T62 upper=T-55  lower=T-90A  lower_lower=T-72B
+step 3  middle=T-90A   upper_upper=T-55 upper=MTLB lower=T-72B  lower_lower=BTR-80
+step 4  middle=T-72B   upper_upper=MTLB upper=T-90A lower=BTR-80 lower_lower=T-80U
+step 5  middle=BTR-80  upper_upper=T-90A upper=T-72B lower=T-80U lower_lower=BMD-1
+step 6  middle=T-80U   upper_upper=T-72B upper=BTR-80 lower=BMD-1
+step 7  middle=BMD-1   upper_upper=BTR-80 upper=T-80U            <- no rows below
+step 8  middle=T62                        lower=T-55 lower_lower=MTLB  <- none above
+step 9  row-set already seen -> traversal has wrapped; full circle
+```
+
+Reconstructed, the full ordered list is **8 contacts**:
+
+```
+1. T62      <- first (no rows above)
+2. T-55
+3. MTLB
+4. T-90A
+5. T-72B
+6. BTR-80
+7. T-80U
+8. BMD-1    <- last (no rows below)
+```
+
+Three things this establishes:
+
+- **A group larger than the five-row window is fully enumerable from code.**
+  The sliding window plus `NEXT TGT` recovers the complete ordered list.
+- **List position is recoverable.** A missing `upper_*` row means the selection
+  is at the head; a missing `lower_*` row means the tail. So "where am I in the
+  list" is readable, not just "what is on screen".
+- **Cycle detection is the correct terminator**, as the pilot's wrap correction
+  required. It fired on the first repeated row-set, after exactly one full lap.
+
+### `SELECT TGT` works, and is richly observable
+
+```
+before: rows=middle=T-55, upper=T62, lower=MTLB, lower_lower=T-90A
+press R="SELECT"
+  -> wheel: C=FIRE  U=SRCH PILOT LOS  R=NO MSL  D=TRACKING
+            FU=HOLD FIRE  FR=TGT PILOT  FD=SRCH 9K113 LOS  FL=CM MENU
+  -> indicator 6 collapses to a bare crosshair (134 bytes)
+```
+
+Selecting a target moves Petrovich to **`TRACKING`**, closes the list, and
+**turns the centre option into `FIRE`**. So the wheel's own text reports the
+whole engagement state machine: `OBSERV. OFF` → `WAITING` → `SEARCHING` →
+`TRACKING`, with `FIRE` appearing only once a target is held.
+
+Sight azimuth did not move (`+0.2` → `+0.2`), but the selected target was
+already near boresight, so this run says nothing either way about whether
+tracking slews the sight. Untested, not negative.
+
+### `MARK TGT`: no observable effect
+
+Rows unchanged, azimuth unchanged, wheel unchanged. Either it needs a different
+context, or its effect is not externally visible. Unresolved.
+
+### Bug found and fixed: page detection was too narrow
+
+After `SELECT TGT` the centre becomes `FIRE` while the page is still the search
+page — it still offers `SRCH PILOT LOS` and `SRCH 9K113 LOS`. `page_kind()`
+keyed on the centre containing `SRCH`, so it classified that as `other`, and
+the sync loop then hunted for a `CLOSE` slot that was not there and spun.
+
+Fixed: the target page is recognised by `MARK TGT`/`NEXT TGT`, and the search
+page by a `SRCH` option in **any** slot. **Lesson, consistent with the rest of
+this investigation: identify a page by a stable distinguishing feature, not by
+one slot whose label is itself state-dependent.**
+
+### BL-6: every mechanism is now proven
+
+```lua
+-- 1. point Petrovich's optics                     (positional, single write)
+GetDevice(7):SetCommand(3061, azimuth_deg / 60.0)
+
+-- 2. read where he is actually looking            (degrees, his gaze)
+GetDevice(0):get_argument_value(874) * 136.36
+
+-- 3. drive his command wheel                      (note: the OTHER verb)
+GetDevice(30):performClickableAction(3001, 1)      -- open
+GetDevice(30):performClickableAction(3015, 1)      -- centre: short=BRST long=FWD
+GetDevice(30):performClickableAction(3005, 1)      -- down; long press = far slot
+
+-- 4. read his state and his contacts
+list_indication(10)   -- WAITING / SEARCHING / TRACKING, and the live menu
+list_indication(6)    -- classified contacts, 5-row window, fully walkable
+```
+
+What remains is not mechanism but **design**: the BL-6 plan was written assuming
+no effector and no outcome signal, and both assumptions are now false. That
+plan needs an Architect revision before implementation.

@@ -259,10 +259,17 @@ local function page_kind()
     local v = wheel_slots()
     if v == nil then return "closed" end
     local c = (v["wheel_text_center"] or ""):upper()
-    if c:find("SRCH", 1, true) then return "search" end
-    if c:find("MARK", 1, true) then return "target" end
     local d = (v["wheel_text_down"] or ""):upper()
-    if d:find("NEXT TGT", 1, true) then return "target" end
+    -- Target page first: it is the one that owns NEXT/PREV TGT.
+    if c:find("MARK", 1, true) or d:find("NEXT TGT", 1, true) then return "target" end
+    -- Search page: do NOT key on the centre alone. Once Petrovich is tracking,
+    -- the centre becomes FIRE while the page is still the search page (it still
+    -- offers SRCH PILOT LOS / SRCH 9K113 LOS). Keying on the centre classified
+    -- that as "other" and the sync loop then hunted for a CLOSE that was not
+    -- there. Recognise the page by a SRCH option in ANY slot instead.
+    for _, txt in pairs(v) do
+        if txt ~= "" and txt:upper():find("SRCH", 1, true) then return "search" end
+    end
     if d:find("CM ", 1, true) or (v["wheel_text_left"] or ""):upper():find("CLOSE CM", 1, true) then
         return "cm"
     end
