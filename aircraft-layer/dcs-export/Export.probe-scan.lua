@@ -1,6 +1,23 @@
 --[[
-SCAN-AT-BEARING PROBE v2 -- not the production export script.
+SCAN-AT-BEARING PROBE v3 -- not the production export script.
 Log: Logs\aircraft_layer_probe_scan.log   Deploy to Saved Games\DCS\Scripts\Export.lua
+
+WHAT CHANGED IN v3
+  Run 2 was void because of three faults of mine:
+   a. When the exact option was absent the probe fell back to a SUBSTRING
+      search over slots using pairs(), whose order is undefined -- so the
+      PINNED round pressed SRCH PILOT LOS and the FREE round pressed
+      SRCH 9K113 LOS. The two conditions were INVERTED.
+   b. SRCH BRST lives in the CENTRE slot, which has no direction key and so
+      is not pressable at all by the known mapping. How the centre option is
+      selected is still unknown; v3 does not depend on it.
+   c. State was read from the down slot regardless of page -- but that slot is
+      Petrovich's state only on the search page, and "NEXT TGT" on the target
+      page.
+  v3 therefore presses an EXACT NAMED SLOT, having first verified that slot's
+  current label; enables observation before expecting the sight-line search to
+  appear (run 2 established SRCH 9K113 LOS is only offered once OBSERV. is ON);
+  and reads state only when the search page is up.
 
 WHAT CHANGED FROM v1, AND WHY
   v1 produced nothing usable because of my design fault, not DCS's: Part A's
@@ -138,21 +155,35 @@ local function wheel_str()
     end
     return #out > 0 and table.concat(out, "  ") or "<open, empty>"
 end
-local function petro_state()
+-- The down slot carries Petrovich's state ONLY on the search page; on the
+-- target page it is "NEXT TGT". Report it as unknown elsewhere.
+local function on_search_page_v()
     local v = wheel_slots()
-    return (v and v["wheel_text_down"]) or "?"
+    if v == nil then return false, nil end
+    local c = v["wheel_text_center"]
+    return (c ~= nil and c:upper():find("SRCH", 1, true) ~= nil), v
+end
+local function petro_state()
+    local ok, v = on_search_page_v()
+    if not ok then return "<not search page>" end
+    return v["wheel_text_down"] or "?"
 end
 
--- Find a slot whose label contains `needle`. Returns slot, key command, hold.
-local function find_option(needle)
+-- Look up one NAMED slot's current label. Never scans -- run 2's fault was a
+-- substring search over pairs(), whose undefined order inverted the two test
+-- conditions.
+local function slot_label(slot)
     local v = wheel_slots()
     if v == nil then return nil end
-    for slot, txt in pairs(v) do
-        if txt ~= "" and txt:upper():find(needle, 1, true) and SLOT_KEY[slot] then
-            return slot, SLOT_KEY[slot][1], SLOT_KEY[slot][2]
-        end
-    end
-    return nil
+    local t = v[slot]
+    if t == nil or t == "" then return nil end
+    return t:upper()
+end
+
+-- Is `slot` currently offering `expect`? Only then is it safe to press.
+local function slot_offers(slot, expect)
+    local l = slot_label(slot)
+    return (l ~= nil) and (l:find(expect, 1, true) ~= nil)
 end
 
 local function contacts()
@@ -178,16 +209,23 @@ end
 -- ------------------------------------------------------ label-driven press
 -- Press an option by its LABEL, not its position, and report what happened.
 local press = {active=false, phase=nil, t=0, cmd=nil, hold=0, label="", slot="", before=""}
-local function press_start(needle, why)
-    local slot, cmd, hold = find_option(needle)
-    if slot == nil then
-        log(string.format("    !! option %q not on this page: %s", needle, wheel_str()))
+-- Press an EXACT slot, but only after confirming it currently shows `expect`.
+local function press_start(slot, expect, why)
+    local map = SLOT_KEY[slot]
+    if map == nil then
+        log(string.format("    !! slot %s has no direction key (centre?)", tostring(slot)))
         return false
     end
-    log(string.format("    press %q  [%s, %s press]  %s",
-        needle, SLOT_ABBR[slot], (hold >= LONG_HOLD) and "LONG" or "short", why or ""))
+    if not slot_offers(slot, expect) then
+        log(string.format("    !! %s does not offer %q (shows %q) -- not pressing",
+            SLOT_ABBR[slot], expect, tostring(slot_label(slot))))
+        return false
+    end
+    local cmd, hold = map[1], map[2]
+    log(string.format("    press %s=%q  [%s press]  %s",
+        SLOT_ABBR[slot], expect, (hold >= LONG_HOLD) and "LONG" or "short", why or ""))
     press.active, press.phase, press.t = true, "down", 0
-    press.cmd, press.hold, press.label, press.slot = cmd, hold, needle, slot
+    press.cmd, press.hold, press.label, press.slot = cmd, hold, expect, slot
     press.before = wheel_str()
     return true
 end
@@ -212,11 +250,16 @@ local function press_update(t)
 end
 
 -- Make sure we are on the root/search page: if a SRCH option is visible we are.
-local function on_search_page() return find_option("SRCH") ~= nil end
+local function on_search_page() return (on_search_page_v()) end
 
 -- ============================================================== PART B
 local PHASE_S = 25.0
-local B = {phase="init", t=0, round=0, pinned=false, seen={}, n=0}
+local SLOT_SEARCH_LOS  = "wheel_text_far_down"   -- SRCH 9K113 LOS  (long press)
+local SLOT_SEARCH_FREE = "wheel_text_up"         -- SRCH PILOT LOS  (short press)
+local SLOT_OBSERV      = "wheel_text_down"       -- OBSERV. ON/OFF  (short press)
+local SLOT_CLOSE_LIST  = "wheel_text_left"       -- CLOSE LIST      (short press)
+
+local B = {phase="open", t=0, round=0, pinned=false, seen={}, n=0}
 
 local function observe(t, tag)
     local c = contacts()
@@ -230,30 +273,56 @@ end
 local function part_b(t)
     local tag = B.pinned and "PINNED" or "FREE"
 
-    if B.phase == "init" then
-        if not wheel_slots() then
-            if press.active then press_update(t) return end
+    if B.phase == "open" then
+        if press.active then press_update(t) return end
+        if wheel_slots() == nil then
             log("  wheel closed; opening")
             press.active, press.phase, press.cmd, press.hold = true, "down", CMD.ShowMenu, SHORT_HOLD
             press.before = ""
             return
         end
+        B.phase = "sync" ; B.t = t
+
+    elseif B.phase == "sync" then
+        if press.active then press_update(t) return end
         if not on_search_page() then
-            if press.active then press_update(t) return end
-            -- CLOSE gets us out of a submenu; try it, else toggle the wheel
-            if not press_start("CLOSE", "leaving submenu") then
-                press.active, press.phase, press.cmd, press.hold = true, "down", CMD.ShowMenu, SHORT_HOLD
+            log("  not on the search page: " .. wheel_str())
+            if not press_start(SLOT_CLOSE_LIST, "CLOSE", "returning to search page") then
+                -- last resort: toggle the wheel shut and open again
+                press.active, press.phase, press.cmd, press.hold =
+                    true, "down", CMD.ShowMenu, SHORT_HOLD
             end
             return
         end
-        log("")
-        log("  on the search page: " .. wheel_str())
+        log("  search page: " .. wheel_str())
+        B.phase = "observ" ; B.t = t
+
+    elseif B.phase == "observ" then
+        -- run 2 established SRCH 9K113 LOS is only offered once observation is ON
+        if press.active then press_update(t) return end
+        if slot_offers(SLOT_OBSERV, "OBSERV. OFF") then
+            press_start(SLOT_OBSERV, "OBSERV. OFF", "enabling observation")
+            return
+        end
+        if not slot_offers(SLOT_SEARCH_LOS, "SRCH 9K113") then
+            if t - B.t > 15.0 then
+                log("  !! SRCH 9K113 LOS never appeared; state=" .. petro_state())
+                log("     wheel: " .. wheel_str())
+                B.phase = "round" ; B.t = t
+            end
+            return
+        end
+        log("  SRCH 9K113 LOS is available: " .. wheel_str())
         B.phase = "round" ; B.t = t
 
     elseif B.phase == "round" then
-        if press.active then if press_update(t) then B.phase = "running" ; B.t = t end return end
+        if press.active then
+            if press_update(t) then B.phase = "running" ; B.t = t end
+            return
+        end
+        if B.round >= 6 then B.phase = "restore" ; B.t = t return end
+        if not on_search_page() then B.phase = "sync" ; return end
         B.round = B.round + 1
-        if B.round > 6 then B.phase = "restore" ; B.t = t return end
         B.pinned = not B.pinned
         B.seen, B.n = {}, 0
         tag = B.pinned and "PINNED" or "FREE"
@@ -261,19 +330,19 @@ local function part_b(t)
         log(string.format("========== round %d: %s ==========", B.round, tag))
         log("    wheel: " .. wheel_str())
         log(string.format("    state=%s az=%s", petro_state(), az_deg()))
-        if not on_search_page() then
-            log("    !! not on search page, re-syncing")
-            B.phase = "init" ; return
-        end
+
+        local ok
         if B.pinned then
             point_sight(SCAN_BEARING_DEG)
-            if not press_start("SRCH 9K113", "search along OUR pinned sight line") then
-                press_start("SRCH", "fallback: any search")
-            end
+            ok = press_start(SLOT_SEARCH_LOS, "SRCH 9K113",
+                             "search along OUR pinned sight line")
         else
-            if not press_start("SRCH BRST", "his own search, sight free") then
-                press_start("SRCH", "fallback: any search")
-            end
+            ok = press_start(SLOT_SEARCH_FREE, "SRCH PILOT LOS",
+                             "his own search, sight released")
+        end
+        if not ok then
+            log("    round skipped -- option unavailable this cycle")
+            B.phase = "gap" ; B.t = t
         end
 
     elseif B.phase == "running" then
@@ -286,13 +355,17 @@ local function part_b(t)
         end
 
     elseif B.phase == "gap" then
-        if t - B.t > 6.0 then B.phase = "round" ; B.t = t end
+        if t - B.t > 6.0 then B.phase = "sync" ; B.t = t end
 
     elseif B.phase == "restore" then
         if press.active then if press_update(t) then B.phase = "done" end return end
-        log("")
-        log("  restoring HOLD FIRE if it is showing as FREE FIRE")
-        if not press_start("FREE FIRE", "restore weapons-hold") then B.phase = "done" end
+        if slot_offers("wheel_text_far_up", "FREE FIRE") then
+            press_start("wheel_text_far_up", "FREE FIRE", "restoring weapons hold")
+        else
+            log("")
+            log("  done. HOLD FIRE already set.")
+            B.phase = "done"
+        end
 
     elseif B.phase == "done" then
     end
@@ -331,9 +404,5 @@ function LuaExportAfterNextFrame()
             t, tostring(c), petro_state(), az_deg()))
     end
 
-    if press.active and B.phase ~= "round" and B.phase ~= "restore" and B.phase ~= "init" then
-        press_update(t)
-        return
-    end
     part_b(t)
 end
