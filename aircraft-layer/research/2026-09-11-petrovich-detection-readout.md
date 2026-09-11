@@ -593,3 +593,33 @@ nothing once the target page appeared. The raw dump will settle it.
   the attempt cap killed the walk after one step. That is why the pilot had to
   scroll manually. Scroll presses are now judged by whether the *rows* moved.
 - **Termination assumed a non-wrapping traversal** — corrected above.
+
+---
+
+## Target-page semantics — and a safety constraint
+
+Pilot, 2026-09-11. The target page's five inputs:
+
+| input | action | safe to automate? |
+|---|---|---|
+| up / down | scroll the list / change selected target | **yes** — browsing |
+| **right** | **`SELECT TGT`** — Petrovich tracks it, and **if weapons are free he will FIRE when within parameters** | **NO** |
+| left | `CLOSE LIST` | yes |
+| centre | `MARK TGT` — believed to mark multiple targets for engagement (pilot unsure) | **no** — treat as unsafe until known |
+
+**Two of the five inputs can begin a shooting sequence.** That is a real
+constraint on anything that walks the list, and it is sharpened by an earlier
+probe run having left Petrovich on **`FREE FIRE`** — the exact state in which
+`SELECT TGT` becomes a weapons-release action rather than a bookkeeping one.
+
+The probe now **refuses `SELECT TGT` and `MARK TGT` outright whenever the
+target page is up**, as a guard inside the press routine rather than a
+convention every call site has to remember. Enumeration uses only scroll and
+close.
+
+**Design consequence for body-layer**, beyond the probe: reading Petrovich's
+full contact list is not merely "not read-only" — it is adjacent to weapons
+release. A `scan_area` / `list_contacts` implementation must treat the target
+page as a hazardous surface: scroll and close only, never select, and ideally
+assert `HOLD FIRE` before browsing. This belongs in the BL-6 plan revision, not
+just in probe code.

@@ -311,10 +311,30 @@ local press = {active=false, phase=nil, t=0, cmd=nil, hold=0, label="", slot="",
 local attempts = {}
 local function attempt_key(slot, expect) return tostring(slot) .. "|" .. tostring(expect) end
 local function press_took() return press.took end
+-- SAFETY (pilot, 2026-09-11): on the TARGET page the slots are
+--   up/down  = scroll the list          -- safe, read-only browsing
+--   right    = SELECT TGT               -- Petrovich TRACKS it, and if weapons
+--                                          are free he will FIRE when in params
+--   left     = CLOSE LIST               -- safe
+--   centre   = MARK TGT                 -- believed to mark targets for
+--                                          engagement (pilot unsure)
+-- So two of the five inputs can start a shooting sequence. A probe that walks
+-- the list must never touch them. This refuses them outright rather than
+-- relying on every call site to remember.
+local FORBIDDEN_ON_TARGET_PAGE = {
+    wheel_text_right  = "SELECT TGT -- would make Petrovich track and possibly FIRE",
+    wheel_text_center = "MARK TGT -- believed to mark targets for engagement",
+}
+
 -- Press an EXACT slot, but only after confirming it currently shows `expect`.
 -- Refuses after MAX_ATTEMPTS so a press that does nothing cannot loop forever.
 local MAX_ATTEMPTS = 3
 local function press_start(slot, expect, why)
+    if page_kind() == "target" and FORBIDDEN_ON_TARGET_PAGE[slot] then
+        log(string.format("    !! REFUSING %s on the target page: %s",
+            SLOT_ABBR[slot] or tostring(slot), FORBIDDEN_ON_TARGET_PAGE[slot]))
+        return false
+    end
     local k = attempt_key(slot, expect)
     if (attempts[k] or 0) >= MAX_ATTEMPTS then
         log(string.format("    !! giving up on %s=%q after %d attempts",
@@ -407,6 +427,8 @@ local function list_enumerate(t)
         if page_kind() ~= "target" then return true end   -- nothing to do
         log("")
         log("========== LIST ENUMERATION (target page is up) ==========")
+        log("    safety: only scroll (up/down) and close (left) will be pressed;")
+        log("            SELECT TGT and MARK TGT are refused outright.")
         L.steps, L.seen, L.order, L.rowsets = 0, {}, {}, {}
         record_rows("initial")
         L.last_rows = contacts()
