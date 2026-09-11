@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from aircraft_client import AircraftLayerError
 from belief import console as console_module
 from belief import enrichment as enrichment_module
 from belief import tools as tools_module
@@ -600,6 +601,160 @@ def test_position_command_reports_ownship_summary(
     output = console.handle_line("position", now_sim=0.0)
     assert len(output) == 1
     assert "Jableh" in output[0]
+
+
+def test_scan_area_command_requires_enrichment() -> None:
+    console = Console(store=ContactStore())
+    output = console.handle_line("scan-area 0 1000 500 check for armor", now_sim=0.0)
+    assert output == ["scan-area requires live ownship telemetry (not available yet)"]
+
+
+def test_scan_area_command_usage_with_too_few_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    output = console.handle_line("scan-area 0 1000", now_sim=0.0)
+    assert output == [
+        "usage: scan-area <bearing_deg> <range_m> <radius_m> <reason> [sector]"
+    ]
+
+
+def test_scan_area_command_creates_a_task_without_a_live_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    output = console.handle_line("scan-area 0 1000 500 check for armor", now_sim=0.0)
+    assert len(output) == 1
+    assert output[0].startswith("scan task TASK_1 created (area AREA_1)")
+
+    task = console.tasks.get("TASK_1")
+    assert task is not None
+    assert task.reason == "check for armor"
+    assert task.area.id == "AREA_1"
+
+
+def test_scan_area_command_parses_a_trailing_sector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    console.handle_line("scan-area 0 1000 500 check for armor N", now_sim=0.0)
+    task = console.tasks.get("TASK_1")
+    assert task is not None
+    assert task.reason == "check for armor"
+    assert task.area.sector == "N"
+
+
+class _RecordingAircraftClient:
+    """Test double recording `trigger_petrovich_search` calls, never
+    touching a real network socket -- mirrors `aircraft-layer/tests/
+    test_text_push_api.py`'s recording-double pattern for the trigger-call
+    path, per the plan's Stage 4 note."""
+
+    def __init__(self) -> None:
+        self.triggered_modes: list[str] = []
+        self.raise_on_trigger = False
+        self.wheel_fields: dict[str, str] | None = None
+
+    def trigger_petrovich_search(self, mode: str) -> None:
+        if self.raise_on_trigger:
+            raise AircraftLayerError("simulated failure")
+        self.triggered_modes.append(mode)
+
+    def get_petrovich_wheel_latest(self) -> dict[str, object] | None:
+        if self.wheel_fields is None:
+            return None
+        return {"fields": self.wheel_fields}
+
+
+def test_scan_area_command_triggers_a_live_search_when_client_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAircraftClient()
+    console = Console(
+        store=ContactStore(),
+        enrichment=_enrichment_context(monkeypatch),
+        aircraft_client=client,  # type: ignore[arg-type]
+    )
+    output = console.handle_line("scan-area 0 1000 500 check for armor", now_sim=0.0)
+    assert client.triggered_modes == ["forward"]
+    assert any("live Petrovich search triggered" in line for line in output)
+
+
+def test_scan_area_command_degrades_gracefully_on_a_failed_live_trigger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAircraftClient()
+    client.raise_on_trigger = True
+    console = Console(
+        store=ContactStore(),
+        enrichment=_enrichment_context(monkeypatch),
+        aircraft_client=client,  # type: ignore[arg-type]
+    )
+    output = console.handle_line("scan-area 0 1000 500 check for armor", now_sim=0.0)
+    # The task must still be registered even though the live trigger failed.
+    assert console.tasks.get("TASK_1") is not None
+    assert any("live search trigger failed" in line for line in output)
+
+
+def test_task_status_command_reports_unknown_id() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("task-status TASK_999", now_sim=0.0) == [
+        "no such task: TASK_999"
+    ]
+
+
+def test_task_status_command_usage_message_with_no_argument() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("task-status", now_sim=0.0) == [
+        "usage: task-status <id>"
+    ]
+
+
+def test_task_status_command_reports_a_pending_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    console.handle_line("scan-area 0 1000 500 check for armor", now_sim=0.0)
+    output = console.handle_line("task-status TASK_1", now_sim=0.0)
+    assert len(output) == 1
+    assert "status=pending" in output[0]
+
+
+def test_task_status_command_appends_live_wheel_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _RecordingAircraftClient()
+    client.wheel_fields = {"state": "SEARCHING"}
+    console = Console(
+        store=ContactStore(),
+        enrichment=_enrichment_context(monkeypatch),
+        aircraft_client=client,  # type: ignore[arg-type]
+    )
+    console.handle_line("scan-area 0 1000 500 check for armor", now_sim=0.0)
+    output = console.handle_line("task-status TASK_1", now_sim=0.0)
+    assert len(output) == 2
+    assert "petrovich wheel state" in output[1]
+
+
+def test_cancel_task_command_reports_unknown_id() -> None:
+    console = Console(store=ContactStore())
+    assert console.handle_line("cancel-task TASK_999", now_sim=0.0) == [
+        "no such task: TASK_999"
+    ]
+
+
+def test_cancel_task_command_cancels_and_removes_the_area(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = Console(store=ContactStore(), enrichment=_enrichment_context(monkeypatch))
+    console.handle_line("scan-area 0 1000 500 check for armor", now_sim=0.0)
+    output = console.handle_line("cancel-task TASK_1", now_sim=0.0)
+    assert output == ["cancelled task TASK_1"]
+
+    task = console.tasks.get("TASK_1")
+    assert task is not None
+    assert task.status == "cancelled"
+    assert console.store.areas == []
 
 
 def test_console_module_contains_no_belief_logic() -> None:

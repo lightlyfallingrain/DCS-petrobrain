@@ -1,0 +1,57 @@
+20:02:23 
+20:02:23 #########################################################
+20:02:23 DESIGNATE-ATTACK-POINT PROBE
+20:02:23   does the designated point come from the SIGHT or the VIEW?
+20:02:23 #########################################################
+20:02:52   20s grace -- get level, and look AWAY from
+20:02:52   where the sight will be pointed, so the two cases separate
+20:03:12   opening the AI wheel
+20:03:14   wheel open, state=OBSERV. OFF
+20:03:14   starting a forward search to enable observation
+20:03:35   ready: state=SEARCHING az=+12.6 el_arg=-0.056548353284597 pitch=+0.6 bank=+0.0
+20:03:35 
+20:03:35 ========== aim -30 deg, then fire DesignateAttackPoint (3020) ==========
+20:03:35     before: az=+13.2 el_arg=-0.067439153790474 pitch=+0.6 bank=+0.0 state=SEARCHING
+20:03:39     sight settled at -30.0 -- firing DesignateAttackPoint (3020)
+20:03:39     released the sight; watching where he goes
+20:03:59     after 20s: az=+0.0 el_arg=0 pitch=+0.3 bank=+0.0 state=OBSERV. ON
+20:03:59     aimed -30.0, sight now +0.0  ==> MOVED AWAY from our aim, no new detections
+20:03:59 
+20:03:59 ========== aim +30 deg, then fire Deprecated2 (3007) ==========
+20:03:59     before: az=+0.0 el_arg=0 pitch=+0.3 bank=+0.0 state=OBSERV. ON
+20:04:03     sight settled at +30.0 -- firing Deprecated2 (3007)
+20:04:03     released the sight; watching where he goes
+20:04:23     after 20s: az=+0.0 el_arg=0 pitch=+0.2 bank=+0.0 state=OBSERV. ON
+20:04:23     aimed +30.0, sight now +0.0  ==> MOVED AWAY from our aim, no new detections
+20:04:23 
+20:04:23 ========== aim -30 deg, then fire SelectTarget (3009) ==========
+20:04:23     before: az=+0.0 el_arg=0 pitch=+0.2 bank=+0.0 state=OBSERV. ON
+20:04:27     sight settled at -30.0 -- firing SelectTarget (3009)
+20:04:27     released the sight; watching where he goes
+20:04:47     after 20s: az=-60.0 el_arg=-0.75 pitch=+0.2 bank=+0.0 state=SEARCHING
+20:04:47     aimed -30.0, sight now -60.0  ==> MOVED AWAY from our aim, no new detections
+20:04:47 
+20:04:47 ========== aim +30 deg, then fire UnselectTarget (3010) ==========
+20:04:47     before: az=-60.0 el_arg=-0.75 pitch=+0.2 bank=+0.0 state=SEARCHING
+20:04:51     sight settled at +30.0 -- firing UnselectTarget (3010)
+20:04:52     released the sight; watching where he goes
+20:05:12     after 20s: az=+0.0 el_arg=1.7347234759768e-18 pitch=+0.2 bank=+0.0 state=OBSERV. OFF
+20:05:12     aimed +30.0, sight now +0.0  ==> MOVED AWAY from our aim, no new detections
+20:05:12 
+20:05:12 ========== aim +30 deg, then fire DesignateAttackPoint (2nd bearing) (3020) ==========
+20:05:12     before: az=+0.0 el_arg=1.7347234759768e-18 pitch=+0.2 bank=+0.0 state=OBSERV. OFF
+20:05:16     sight settled at +30.0 -- firing DesignateAttackPoint (2nd bearing) (3020)
+20:05:16     released the sight; watching where he goes
+20:05:36     after 20s: az=+0.0 el_arg=1.7347234759768e-18 pitch=+0.2 bank=+0.0 state=OBSERV. ON
+20:05:36     aimed +30.0, sight now +0.0  ==> MOVED AWAY from our aim, no new detections
+20:05:36 
+20:05:36 =========================================================
+20:05:36 No bearing produced new detections after designating.
+20:05:36   Either the designation does not come from the sight, or it
+20:05:36   does nothing observable from here.
+20:05:36   Compare, for each bearing, where we aimed against where the
+20:05:36   sight ended up. Following our aim => the point comes from the
+20:05:36   SIGHT (case b, BL-6 solved). Going elsewhere, especially toward
+20:05:36   where the pilot was looking => it comes from the VIEW (case a).
+20:05:36 =========================================================
+20:06:27 designate probe: stopped.

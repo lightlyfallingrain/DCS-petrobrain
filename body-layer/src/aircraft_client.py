@@ -24,6 +24,20 @@ both expected to be reachable when body-layer runs with `--overlay`, so a
 push failure is meaningful information for the caller
 (`logger.ConsolePerceptionRunner`'s per-push try/except is where that
 meaning gets consumed, so one failed push never stops the poll loop).
+
+`trigger_petrovich_search`/`get_petrovich_wheel_latest` (BL-6, `plans/
+bl6-commands-inspect-adapt/plan.md`) are this milestone's second
+inbound/write path and its matching read. `trigger_petrovich_search`
+follows `push_text_line`'s raise-on-failure posture, not the `get_*`
+methods' swallow-and-return-`None` one -- per the plan's explicit
+asymmetry note on `aircraft-layer/src/collector/command_sender.py`: unlike
+`/text/push`'s opaque display string, a dropped search command is a real
+behavioral gap the caller needs to know about, not an expected "listener
+absent" state. `get_petrovich_wheel_latest` is an ordinary `get_*` read
+(swallows nothing itself, `None` on an empty cache) mirroring
+`get_petrovich_indication_latest`'s shape exactly, just against
+`list_indication(10)`'s wheel-state feed instead of `list_indication(6)`'s
+classification feed.
 """
 
 from __future__ import annotations
@@ -32,7 +46,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 _DEFAULT_TIMEOUT_S = 2.0
 
@@ -104,6 +118,34 @@ class AircraftLayerClient:
         why this call, unlike the `get_*` methods above, does not swallow
         failure."""
         self._post_json("/text/push", {"text": text})
+
+    def get_petrovich_wheel_latest(self) -> dict[str, Any] | None:
+        """`GET /petrovich_wheel/latest` -> the most recent
+        `list_indication(10)` (Petrovich's AI-Wheel state) sample as a dict
+        (see `aircraft-layer/src/schema/petrovich_wheel.py`'s
+        `PetrovichWheelSample.to_dict`, the same
+        `{dcs_model_time_s, received_wall_clock_s, fields}` shape as
+        `get_petrovich_indication_latest`), or `None` if nothing has been
+        received yet."""
+        result = self._get_json("/petrovich_wheel/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /petrovich_wheel/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def trigger_petrovich_search(self, mode: Literal["forward", "boresight"]) -> None:
+        """`POST /command/petrovich_search` -> drives Petrovich's AI Wheel
+        to start a search (`aircraft-layer/src/collector/command_sender.py`,
+        BL-6): `"forward"` for `SRCH FWD` (long press), `"boresight"` for
+        `SRCH BRST` (short press). Raises `AircraftLayerError` on any
+        failure, mirroring `push_text_line` -- **not** the `get_*` methods'
+        swallow-and-return-`None` posture, since a dropped search command is
+        a real behavioral gap the caller needs to know about (see the
+        module docstring)."""
+        self._post_json("/command/petrovich_search", {"mode": mode})
 
     def _get_json(self, path: str) -> Any:
         url = f"{self.base_url}{path}"

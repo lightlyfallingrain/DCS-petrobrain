@@ -29,6 +29,9 @@ here -- see `tools.py`'s own module docstring on why `set_attention`/
     place <text>                                -> tools.find_place
     situation                                   -> tools.get_situation
     position                                    -> tools.describe_our_position
+    scan-area <bearing> <range_m> <radius_m> <reason> [sector] -> tools.scan_area
+    task-status <id>                            -> tools.get_task_status
+    cancel-task <id>                            -> tools.cancel_task
 
 `events`/`ack <id>` map to `tools.list_events`/`tools.acknowledge_event`
 directly, which is exactly `tools.poll_events`'s own semantics (BL-5,
@@ -51,22 +54,43 @@ dependent field elsewhere in this module. It never resolves a place name
 `place`/`situation`/`position` (BL-5) require live ownship telemetry the
 same way `watch-area` does -- `Console.enrichment` must be set, or they
 return an error line rather than crashing, same guard shape as every other
-enrichment-dependent command in this module."""
+enrichment-dependent command in this module.
+
+`scan-area`/`task-status`/`cancel-task` (BL-6, `plans/
+bl6-commands-inspect-adapt/plan.md`) map to `tools.scan_area`/
+`tools.get_task_status`/`tools.cancel_task`, the same 1:1 dispatch rule as
+every other command here -- with one deliberate exception. `scan-area`'s
+handler, after calling `tools.scan_area` (which stays pure, no DCS I/O),
+also calls `Console.aircraft_client.trigger_petrovich_search` if a client
+is configured -- the one place in this module a command does more than
+call a single `belief.tools` function and format the result, mirroring
+where BL-2.5 put its own live side effect (`logger.
+ConsolePerceptionRunner.run_once`'s overlay push), not inside `tools.py`.
+A failed live trigger is caught (`AircraftLayerError`) and degrades to "the
+belief-state task was still registered, no live command fired" -- it never
+raises through to the caller. `task-status`'s handler may additionally
+fetch `Console.aircraft_client.get_petrovich_wheel_latest()` as a
+display-only diagnostic line (Petrovich's live AI-Wheel state); this is
+never stored on the `PendingIntent` returned by `tools.get_task_status`
+and never changes that function's own return contract."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TextIO
 
+from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import SECTORS, Attention, AttentionArea, Sector
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import CONTACT_CLASSIFICATION_CHANGED, Event
+from belief.tasks import PendingIntent, TaskStore
 from belief.tools import (
     ContactFilter,
     ContactResult,
     ToolResult,
     acknowledge_event,
+    cancel_task,
     describe_contact,
     describe_our_position,
     find_contact,
@@ -76,8 +100,10 @@ from belief.tools import (
     get_contacts,
     get_situation,
     get_stats,
+    get_task_status,
     list_areas,
     list_events,
+    scan_area,
     set_attention,
     unwatch_area,
     watch_area,
@@ -106,6 +132,9 @@ Petrovich belief console -- commands:
   place <text>                    look up a named place in the world model
   situation                       aggregate sitrep
   position                        our own current position
+  scan-area <bearing_deg> <range_m> <radius_m> <reason> [sector]  ask Petrovich to search an area
+  task-status <id>                 a scan task's current status
+  cancel-task <id>                 cancel a still-pending scan task
 """
 
 _CONTACT_FILTERS: tuple[ContactFilter, ...] = ("all", "visible", "watched")
@@ -145,9 +174,26 @@ class Console:
     #: each poll (`_run_console_repl`), since it is built lazily once
     #: `run_once` has real ownship telemetry.
     enrichment: EnrichmentContext | None = None
+    #: BL-6's `belief.tasks.TaskStore` -- `scan-area`/`task-status`/
+    #: `cancel-task` all read/mutate this, same "Console holds every store a
+    #: dispatched command needs" shape as `store` above. Defaults to a fresh
+    #: empty store rather than being required, so every existing `Console(
+    #: store=...)` call site (tests included) keeps working unchanged.
+    tasks: TaskStore = field(default_factory=TaskStore)
+    #: Optional live aircraft-layer client (BL-6), mirroring `enrichment`'s
+    #: None-means-unchanged pattern: `None` (the default) is a true no-op --
+    #: `scan-area`'s handler never touches the aircraft layer for the live
+    #: trigger unless this is set, and every other command ignores it
+    #: entirely. `logger.py`'s `main()` wires a real `AircraftLayerClient`
+    #: in here for `--console`, the same instance already used for
+    #: telemetry (no separate URL/flag), mirroring `--overlay`'s own
+    #: wiring of `ConsolePerceptionRunner.overlay_client`.
+    aircraft_client: AircraftLayerClient | None = None
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
-        lines = _dispatch(self.store, line, now_sim, self.enrichment)
+        lines = _dispatch(
+            self.store, self.tasks, line, now_sim, self.enrichment, self.aircraft_client
+        )
         if self.output is not None:
             for formatted in lines:
                 print(formatted, file=self.output)
@@ -156,9 +202,11 @@ class Console:
 
 def _dispatch(
     store: ContactStore,
+    tasks: TaskStore,
     line: str,
     now_sim: float,
     enrichment: EnrichmentContext | None = None,
+    aircraft_client: AircraftLayerClient | None = None,
 ) -> list[str]:
     stripped = line.strip()
     if not stripped:
@@ -199,6 +247,14 @@ def _dispatch(
         return _handle_situation(store, now_sim, enrichment)
     if command == "position":
         return _handle_position(enrichment)
+    if command == "scan-area":
+        return _handle_scan_area(
+            store, tasks, rest, now_sim, enrichment, aircraft_client
+        )
+    if command == "task-status":
+        return _handle_task_status(tasks, rest, aircraft_client)
+    if command == "cancel-task":
+        return _handle_cancel_task(store, tasks, rest)
     return [f"unknown command: {command}"]
 
 
@@ -425,6 +481,96 @@ def _handle_position(enrichment: EnrichmentContext | None) -> list[str]:
         return [f"position {_ENRICHMENT_REQUIRED_MESSAGE}"]
     result = describe_our_position(enrichment)
     return [result["summary"]]
+
+
+def _handle_scan_area(
+    store: ContactStore,
+    tasks: TaskStore,
+    rest: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None,
+    aircraft_client: AircraftLayerClient | None,
+) -> list[str]:
+    usage = ["usage: scan-area <bearing_deg> <range_m> <radius_m> <reason> [sector]"]
+    parts = rest.split()
+    if len(parts) < 4:
+        return usage
+    if enrichment is None:
+        return [f"scan-area {_ENRICHMENT_REQUIRED_MESSAGE}"]
+    try:
+        bearing_deg = float(parts[0])
+        range_m = float(parts[1])
+        radius_m = float(parts[2])
+    except ValueError:
+        return usage
+
+    # `reason` is free text; an optional trailing sector token is popped off
+    # first if the last word matches one of `SECTORS` -- mirrors
+    # `_handle_watch_area`'s sector parsing, just applied to the *last* token
+    # of a variable-length tail instead of a fixed 4th argument, since
+    # `reason` itself has no fixed length.
+    reason_parts = parts[3:]
+    sector: Sector | None = None
+    sector_arg = reason_parts[-1].upper() if len(reason_parts) > 1 else ""
+    if sector_arg in SECTORS:
+        sector = sector_arg
+        reason_parts = reason_parts[:-1]
+    reason = " ".join(reason_parts)
+    if not reason:
+        return usage
+
+    ownship = enrichment.ownship
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    center = project_from_bearing_range(observer, bearing_deg, range_m)
+    task = scan_area(store, tasks, center, radius_m, reason, now_sim, sector=sector)
+    lines = [f"scan task {task.id} created (area {task.area.id})"]
+    if aircraft_client is not None:
+        try:
+            aircraft_client.trigger_petrovich_search("forward")
+            lines.append("live Petrovich search triggered (forward)")
+        except AircraftLayerError:
+            lines.append(
+                "live search trigger failed -- task still registered, no command fired"
+            )
+    return lines
+
+
+def _handle_task_status(
+    tasks: TaskStore, rest: str, aircraft_client: AircraftLayerClient | None
+) -> list[str]:
+    if not rest:
+        return ["usage: task-status <id>"]
+    task = get_task_status(tasks, rest)
+    if task is None:
+        return [f"no such task: {rest}"]
+    lines = [_format_task_line(task)]
+    if aircraft_client is not None:
+        try:
+            wheel = aircraft_client.get_petrovich_wheel_latest()
+            if wheel is not None:
+                lines.append(
+                    f"petrovich wheel state (live, diagnostic only): {wheel['fields']}"
+                )
+        except AircraftLayerError:
+            pass
+    return lines
+
+
+def _format_task_line(task: PendingIntent) -> str:
+    line = (
+        f"{task.id}: status={task.status} area={task.area.id} "
+        f"reason={task.reason!r} deadline_sim={task.deadline_sim}"
+    )
+    if task.result_contact_ids:
+        line += f" result_contact_ids={task.result_contact_ids}"
+    return line
+
+
+def _handle_cancel_task(store: ContactStore, tasks: TaskStore, rest: str) -> list[str]:
+    if not rest:
+        return ["usage: cancel-task <id>"]
+    found = cancel_task(store, tasks, rest)
+    return [f"cancelled task {rest}" if found else f"no such task: {rest}"]
 
 
 def _format_tool_result_line(result: ToolResult) -> str:

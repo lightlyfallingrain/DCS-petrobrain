@@ -1,0 +1,1541 @@
+10:46:32 
+10:46:32 =========================================================
+10:46:32 PETROVICH DETECTION PROBE -- passive, issues no commands
+10:46:32 =========================================================
+10:46:32   GetDevice = function, list_indication = function
+10:46:44   first frame; dumping all indicators once as a baseline
+10:46:44   indicator  0: 3582 bytes  (has content)
+10:46:44   indicator  1: 171 bytes  (has content)
+10:46:44   indicator  2: 717 bytes  (has content)
+10:46:44   indicator  3: 0 bytes  (empty)
+10:46:44   indicator  4: 165 bytes  (has content)
+10:46:44   indicator  5: 0 bytes  (empty)
+10:46:44   indicator  6: 64 bytes  (empty)
+10:46:44   indicator  7: 64 bytes  (empty)
+10:46:44   indicator  8: 0 bytes  (empty)
+10:46:44   indicator  9: 0 bytes  (empty)
+10:46:44   indicator 10: 64 bytes  (empty)
+10:46:44   indicator 11: 64 bytes  (empty)
+10:46:44   state: WeapSelect OFF/GM/URS/NPU=0.500  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:46:55 t=10.0  WeapSelect OFF/GM/URS/NPU=0.500  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:05 t=20.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:10 
+10:47:10 ### t=24.7  PETROVICH (indicator 6) CHANGED  [134 bytes]
+10:47:10     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:10 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+}
+
+10:47:10 
+10:47:10 ### t=24.7  AI WHEEL (indicator 10) CHANGED  [765 bytes]
+10:47:10     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:10 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. OFF
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:47:13 
+10:47:13 ### t=27.7  AI WHEEL (indicator 10) CHANGED  [761 bytes]
+10:47:13     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:13 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+WAITING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:47:15 t=30.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:22 
+10:47:22 ### t=37.3  AI WHEEL (indicator 10) CHANGED  [734 bytes]
+10:47:22     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.063  Sight elevation=-0.107  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.320
+10:47:22 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+MARK
+TGT
+-----------------------------------------
+wheel_text_up
+PREV TGT
+-----------------------------------------
+wheel_text_right
+SELECT
+TGT
+-----------------------------------------
+wheel_text_down
+NEXT TGT
+-----------------------------------------
+wheel_text_left
+CLOSE
+LIST
+-----------------------------------------
+wheel_text_far_up
+
+-----------------------------------------
+wheel_text_far_right
+
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+ALL
+TGTS
+}
+}
+
+10:47:23 
+10:47:23 ### t=37.8  PETROVICH (indicator 6) CHANGED  [599 bytes]
+10:47:23     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.055  Sight elevation=-0.022  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:23 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+-----------------------------------------
+middle_list_holder
+
+children are {
+-----------------------------------------
+middle_list_text
+T-90A
+children are {
+-----------------------------------------
+upper_upper_list_text
+
+-----------------------------------------
+LeftCenter
+
+-----------------------------------------
+lower_list_text
+
+-----------------------------------------
+lower_lower_list_text
+
+}
+-----------------------------------------
+middle_list_arrow
+
+}
+}
+
+10:47:23 
+10:47:23 ### t=37.8  AI WHEEL (indicator 10) CHANGED  [726 bytes]
+10:47:23     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.055  Sight elevation=-0.022  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:23 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+MARK
+TGT
+-----------------------------------------
+wheel_text_up
+PREV TGT
+-----------------------------------------
+wheel_text_right
+SELECT
+TGT
+-----------------------------------------
+wheel_text_down
+NEXT TGT
+-----------------------------------------
+wheel_text_left
+CLOSE
+LIST
+-----------------------------------------
+wheel_text_far_up
+
+-----------------------------------------
+wheel_text_far_right
+
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+
+}
+}
+
+10:47:25 t=40.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.001  Sight elevation=-0.002  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:28 
+10:47:28 ### t=43.1  PETROVICH (indicator 6) CHANGED  [134 bytes]
+10:47:28     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.001  Sight elevation=-0.002  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:28 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+}
+
+10:47:28 
+10:47:28 ### t=43.1  AI WHEEL (indicator 10) CHANGED  [753 bytes]
+10:47:28     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.001  Sight elevation=-0.002  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:28 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+FIRE
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+TRACKING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:47:35 t=50.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.001  Sight elevation=-0.002  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:42 
+10:47:42 ### t=56.9  AI WHEEL (indicator 10) CHANGED  [778 bytes]
+10:47:42     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:42 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. ON
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:47:42 
+10:47:42 ### t=57.4  AI WHEEL (indicator 10) CHANGED  [765 bytes]
+10:47:42     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:42 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. OFF
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:47:45 t=60.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:55 t=70.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:47:56 
+10:47:56 ### t=71.3  AI WHEEL (indicator 10) CHANGED  [761 bytes]
+10:47:56     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:47:56 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+WAITING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:48:05 t=80.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:06 
+10:48:06 ### t=81.2  AI WHEEL (indicator 10) CHANGED  [777 bytes]
+10:48:06     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.285  Sight elevation=-0.750  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:06 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+SEARCHING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:48:06 
+10:48:06 ### t=81.4  AI WHEEL (indicator 10) CHANGED  [734 bytes]
+10:48:06     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.033  Sight elevation=-0.293  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.640
+10:48:06 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+MARK
+TGT
+-----------------------------------------
+wheel_text_up
+PREV TGT
+-----------------------------------------
+wheel_text_right
+SELECT
+TGT
+-----------------------------------------
+wheel_text_down
+NEXT TGT
+-----------------------------------------
+wheel_text_left
+CLOSE
+LIST
+-----------------------------------------
+wheel_text_far_up
+
+-----------------------------------------
+wheel_text_far_right
+
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+ALL
+TGTS
+}
+}
+
+10:48:07 
+10:48:07 ### t=81.9  PETROVICH (indicator 6) CHANGED  [600 bytes]
+10:48:07     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.010  Sight elevation=-0.089  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:07 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+-----------------------------------------
+middle_list_holder
+
+children are {
+-----------------------------------------
+middle_list_text
+BTR-60
+children are {
+-----------------------------------------
+upper_upper_list_text
+
+-----------------------------------------
+LeftCenter
+
+-----------------------------------------
+lower_list_text
+
+-----------------------------------------
+lower_lower_list_text
+
+}
+-----------------------------------------
+middle_list_arrow
+
+}
+}
+
+10:48:07 
+10:48:07 ### t=81.9  AI WHEEL (indicator 10) CHANGED  [726 bytes]
+10:48:07     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.010  Sight elevation=-0.089  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:07 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+MARK
+TGT
+-----------------------------------------
+wheel_text_up
+PREV TGT
+-----------------------------------------
+wheel_text_right
+SELECT
+TGT
+-----------------------------------------
+wheel_text_down
+NEXT TGT
+-----------------------------------------
+wheel_text_left
+CLOSE
+LIST
+-----------------------------------------
+wheel_text_far_up
+
+-----------------------------------------
+wheel_text_far_right
+
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+
+}
+}
+
+10:48:14 
+10:48:14 ### t=89.3  PETROVICH (indicator 6) CHANGED  [134 bytes]
+10:48:14     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.002  Sight elevation=-0.008  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:14 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+}
+
+10:48:14 
+10:48:14 ### t=89.3  AI WHEEL (indicator 10) CHANGED  [753 bytes]
+10:48:14     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.002  Sight elevation=-0.008  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:14 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+FIRE
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+TRACKING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:48:15 t=90.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.003  Sight elevation=-0.008  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:22 
+10:48:22 ### t=96.6  AI WHEEL (indicator 10) CHANGED  [778 bytes]
+10:48:22     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:48:22 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. ON
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:48:22 
+10:48:22 ### t=97.1  AI WHEEL (indicator 10) CHANGED  [765 bytes]
+10:48:22     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:48:22 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. OFF
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:48:25 t=100.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:48:35 t=110.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:48:45 t=120.0  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:48:55 t=130.0  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:48:57 
+10:48:57 ### t=132.0  AI WHEEL (indicator 10) CHANGED  [761 bytes]
+10:48:57     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:48:57 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+WAITING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:49:05 t=140.0  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:49:07 
+10:49:07 ### t=141.6  AI WHEEL (indicator 10) CHANGED  [777 bytes]
+10:49:07     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.111  Sight elevation=-0.086  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:49:07 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+SEARCHING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:49:15 t=150.0  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.001  Sight elevation=-0.002  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:49:20 
+10:49:20 ### t=154.7  AI WHEEL (indicator 10) CHANGED  [778 bytes]
+10:49:20     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:49:20 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. ON
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:49:20 
+10:49:20 ### t=155.2  AI WHEEL (indicator 10) CHANGED  [765 bytes]
+10:49:20     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:49:20 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. OFF
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:49:25 t=160.0  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:49:35 t=170.0  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:49:45 t=180.0  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:49:54 
+10:49:54 ### t=189.2  AI WHEEL (indicator 10) CHANGED  [761 bytes]
+10:49:54     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:49:54 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+WAITING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:49:55 t=190.1  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:04 
+10:50:04 ### t=199.1  PETROVICH (indicator 6) CHANGED  [600 bytes]
+10:50:04     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.187  Sight elevation=-0.223  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:04 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+-----------------------------------------
+middle_list_holder
+
+children are {
+-----------------------------------------
+middle_list_text
+BTR-60
+children are {
+-----------------------------------------
+upper_upper_list_text
+
+-----------------------------------------
+LeftCenter
+
+-----------------------------------------
+lower_list_text
+
+-----------------------------------------
+lower_lower_list_text
+
+}
+-----------------------------------------
+middle_list_arrow
+
+}
+}
+
+10:50:04 
+10:50:04 ### t=199.1  AI WHEEL (indicator 10) CHANGED  [734 bytes]
+10:50:04     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.187  Sight elevation=-0.223  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:04 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+MARK
+TGT
+-----------------------------------------
+wheel_text_up
+PREV TGT
+-----------------------------------------
+wheel_text_right
+SELECT
+TGT
+-----------------------------------------
+wheel_text_down
+NEXT TGT
+-----------------------------------------
+wheel_text_left
+CLOSE
+LIST
+-----------------------------------------
+wheel_text_far_up
+
+-----------------------------------------
+wheel_text_far_right
+
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+ALL
+TGTS
+}
+}
+
+10:50:05 t=200.1  WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.003  Sight elevation=-0.010  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:08 
+10:50:08 ### t=202.8  PETROVICH (indicator 6) CHANGED  [134 bytes]
+10:50:08     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.003  Sight elevation=-0.007  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:08 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+}
+
+10:50:08 
+10:50:08 ### t=202.8  AI WHEEL (indicator 10) CHANGED  [753 bytes]
+10:50:08     state: WeapSelect OFF/GM/URS/NPU=0.600  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.003  Sight elevation=-0.007  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:08 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+FIRE
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+TRACKING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:50:15 
+10:50:15 ### t=209.9  AI WHEEL (indicator 10) CHANGED  [778 bytes]
+10:50:15     state: WeapSelect OFF/GM/URS/NPU=0.500  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=-0.001  Sight doors=0.000  NABL observe=0.680  Sight power=1.000  Sight zoom=0.000
+10:50:15 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. ON
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:50:15 t=210.1  WeapSelect OFF/GM/URS/NPU=0.500  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:50:15 
+10:50:15 ### t=210.4  AI WHEEL (indicator 10) CHANGED  [765 bytes]
+10:50:15     state: WeapSelect OFF/GM/URS/NPU=0.500  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:50:15 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. OFF
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:50:23 
+10:50:23 ### t=217.7  AI WHEEL (indicator 10) CHANGED  [761 bytes]
+10:50:23     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:23 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+WAITING
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:50:25 t=220.1  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:33 
+10:50:33 ### t=227.6  AI WHEEL (indicator 10) CHANGED  [734 bytes]
+10:50:33     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.018  Sight elevation=-0.112  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=1.000
+10:50:33 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+MARK
+TGT
+-----------------------------------------
+wheel_text_up
+PREV TGT
+-----------------------------------------
+wheel_text_right
+SELECT
+TGT
+-----------------------------------------
+wheel_text_down
+NEXT TGT
+-----------------------------------------
+wheel_text_left
+CLOSE
+LIST
+-----------------------------------------
+wheel_text_far_up
+
+-----------------------------------------
+wheel_text_far_right
+
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+ALL
+TGTS
+}
+}
+
+10:50:33 
+10:50:33 ### t=227.8  PETROVICH (indicator 6) CHANGED  [600 bytes]
+10:50:33     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.144  Sight elevation=-0.360  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:33 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+-----------------------------------------
+middle_list_holder
+
+children are {
+-----------------------------------------
+middle_list_text
+BTR-60
+children are {
+-----------------------------------------
+upper_upper_list_text
+
+-----------------------------------------
+LeftCenter
+
+-----------------------------------------
+lower_list_text
+
+-----------------------------------------
+lower_lower_list_text
+
+}
+-----------------------------------------
+middle_list_arrow
+
+}
+}
+
+10:50:33 
+10:50:33 ### t=227.8  AI WHEEL (indicator 10) CHANGED  [726 bytes]
+10:50:33     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.144  Sight elevation=-0.360  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:33 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+MARK
+TGT
+-----------------------------------------
+wheel_text_up
+PREV TGT
+-----------------------------------------
+wheel_text_right
+SELECT
+TGT
+-----------------------------------------
+wheel_text_down
+NEXT TGT
+-----------------------------------------
+wheel_text_left
+CLOSE
+LIST
+-----------------------------------------
+wheel_text_far_up
+
+-----------------------------------------
+wheel_text_far_right
+
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+
+}
+}
+
+10:50:35 t=230.1  WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=0.004  Sight elevation=-0.014  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:37 
+10:50:37 ### t=232.4  PETROVICH (indicator 6) CHANGED  [134 bytes]
+10:50:37     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:37 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+crosshair
+
+children are {
+}
+}
+
+10:50:37 
+10:50:37 ### t=232.4  AI WHEEL (indicator 10) CHANGED  [778 bytes]
+10:50:37     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=1.000  Sight power=1.000  Sight zoom=0.000
+10:50:37 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. ON
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+SRCH 9K113 LOS
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:50:39 
+10:50:39 ### t=233.6  AI WHEEL (indicator 10) CHANGED  [765 bytes]
+10:50:39     state: WeapSelect OFF/GM/URS/NPU=0.000  FireControl on/off=1.000  ArmamentPower=1.000  MissilePower URS=1.000  WeaponType A/B=0.000  PUS arming=0.000  LaunchStation=0.000  Sight azimuth=-0.000  Sight elevation=0.000  Sight doors=0.000  NABL observe=0.000  Sight power=1.000  Sight zoom=0.000
+10:50:39 -----------------------------------------
+#1#
+
+children are {
+-----------------------------------------
+wheel_body
+
+children are {
+-----------------------------------------
+wheel_text_center
+SRCH BRST
+--------
+SRCH FWD
+-----------------------------------------
+wheel_text_up
+SRCH PILOT LOS
+-----------------------------------------
+wheel_text_right
+NO
+MSL
+-----------------------------------------
+wheel_text_down
+OBSERV. OFF
+-----------------------------------------
+wheel_text_left
+
+-----------------------------------------
+wheel_text_far_up
+HOLD FIRE
+-----------------------------------------
+wheel_text_far_right
+TGT
+PILOT
+-----------------------------------------
+wheel_text_far_down
+
+-----------------------------------------
+wheel_text_far_left
+CM
+MENU
+}
+}
+
+10:50:43 detection probe: stopped.
