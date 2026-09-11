@@ -57,3 +57,7 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Object-permanence continuity fix](project_object_permanence_continuity_fix.md) — 2 overlapping-gate objects merge cleanly on founding, don't ambiguously spawn; reused an existing test's geometry instead; verify-by-disabling-the-fix pattern.
 - [Mock-flight fixture harness](project_mock_flight_fixture.md) — real HTTP+world-model chain test found no regression; fold_classification "lower level holds" blocks mid-flight reclassification events when Hybrid founds first.
 - [BL-6 commands inspect/adapt](project_bl6_commands_inspect_adapt.md) — PendingIntent/TaskStore, scan_area missing now_sim in plan text, CommandSender raises unlike TextOverlaySender, Export.lua command listener polls every frame ahead of export throttle.
+- [Overlay speech callouts](project_overlay_speech_callouts.md) — CrewConsole._print second sink, widened private _handle_inject_urgent return type to carry bypass_gate, "!!" prefix at push site not on OutgoingSpeech.text.
+
+- [Overlay speech callouts addendum](project_overlay_speech_callouts_addendum.md) — shared _contact_report_text helper fixes broken lifecycle callout text; facts["semantic"] is list[dict] not list[SemanticFact].
+- [Overlay speech callouts addendum 2](project_overlay_speech_callouts_addendum2.md) — round() ties-to-even on rounding boundaries, CONTACT_LOST no-template needs no route_event change, classification-changed relative_now needs EnrichmentContext.

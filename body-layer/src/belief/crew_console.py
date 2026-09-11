@@ -42,10 +42,11 @@ detector exists."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TextIO
 
-from aircraft_client import AircraftLayerClient
+from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
@@ -81,6 +82,15 @@ Anything else is escalated (there is no brain to answer it yet).
 
 _UTTERANCE_ID_PREFIX = "UTTERANCE"
 
+#: Prepended to the overlay-pushed copy of an urgent (`bypass_gate=True`)
+#: line only -- see `CrewConsole._print`'s docstring and `plans/
+#: overlay-speech-callouts/plan.md`'s resolved "Urgent-call visual
+#: prominence" decision. `TextOverlaySender` has no color/bold mechanism,
+#: so a plain text prefix is the only available distinction.
+_URGENT_OVERLAY_PREFIX = "!! "
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class CrewConsole:
@@ -109,6 +119,18 @@ class CrewConsole:
     #: player-facing scan command has a client to reach for without a
     #: second wiring pass through `logger.py`.
     aircraft_client: AircraftLayerClient | None = None
+    #: In-cockpit text overlay mirror (`plans/overlay-speech-callouts/
+    #: plan.md`), mirroring `logger.ConsolePerceptionRunner.overlay_client`'s
+    #: None-means-no-op pattern exactly. **Deliberately a separate field
+    #: from `aircraft_client` above** -- that field is reserved for a
+    #: different purpose (live search-trigger commands, per its own
+    #: docstring) and has no reader today; this one is read by `_print`
+    #: every time `CrewConsole` produces spoken text. `logger.py`'s
+    #: `--crew-text` branch wires this to the same `AircraftLayerClient`
+    #: instance already used for telemetry when `--overlay` is passed, no
+    #: separate URL/flag needed, matching `--console --overlay`'s own
+    #: wiring.
+    overlay_client: AircraftLayerClient | None = None
     _next_utterance_number: int = field(default=0, repr=False)
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
@@ -116,10 +138,11 @@ class CrewConsole:
         if not stripped:
             return []
         if stripped.startswith("!inject-urgent"):
-            lines = self._handle_inject_urgent(stripped, now_sim)
+            lines, bypass_gate = self._handle_inject_urgent(stripped, now_sim)
         else:
             lines = self._handle_utterance(stripped, now_sim)
-        self._print(lines)
+            bypass_gate = False
+        self._print(lines, bypass_gate=bypass_gate)
         return lines
 
     def drain_events(self, now_sim: float) -> list[str]:
@@ -131,7 +154,10 @@ class CrewConsole:
             speech = route_event(self.store, event, now_sim, self.enrichment)
             if speech is not None:
                 spoken.append(speech.text)
-        self._print(spoken)
+        # A lifecycle/classification `Event` never carries `bypass_gate=True`
+        # (only an injected `UrgentCall`, routed through `handle_line`'s
+        # `!inject-urgent` branch, does) -- see `_print`'s docstring.
+        self._print(spoken, bypass_gate=False)
         return spoken
 
     def _new_utterance_id(self) -> str:
@@ -175,17 +201,54 @@ class CrewConsole:
             return [speech.text]
         return []
 
-    def _handle_inject_urgent(self, line: str, now_sim: float) -> list[str]:
+    def _handle_inject_urgent(
+        self, line: str, now_sim: float
+    ) -> tuple[list[str], bool]:
         parts = line.split(maxsplit=2)
         if len(parts) != 3:
-            return ["usage: !inject-urgent <contact_id> <text>"]
+            return ["usage: !inject-urgent <contact_id> <text>"], False
         _, contact_id, text = parts
         speech = route_event(
             self.store, UrgentCall(contact_id=contact_id, text=text), now_sim
         )
-        return [speech.text] if speech is not None else []
+        if speech is None:
+            return [], False
+        # `route_event` always returns a non-`None` `OutgoingSpeech` for an
+        # `UrgentCall` (see that function's own body), and always with
+        # `bypass_gate=True` -- read straight off the result rather than
+        # re-deriving it, so this stays the single source of truth.
+        return [speech.text], speech.bypass_gate
 
-    def _print(self, lines: list[str]) -> None:
-        if self.output is not None:
-            for line in lines:
+    def _print(self, lines: list[str], bypass_gate: bool = False) -> None:
+        """Prints each line to `output` (unchanged) and, when
+        `overlay_client` is configured, pushes the same line to the
+        in-cockpit text overlay (`AircraftLayerClient.push_text_line`,
+        `POST /text/push`) -- the single funnel point every path that
+        produces spoken text (`handle_line`, `drain_events`) already goes
+        through, so overlay push needs no separate "what to push and when"
+        logic to write or desync from what's printed. Each push is wrapped
+        in its own `try/except AircraftLayerError`, mirroring `logger.
+        ConsolePerceptionRunner.run_once`'s BL-2.5 push loop's degrade-on-
+        failure shape: a failed push must not raise, must not stop the
+        remaining lines in this batch from being printed/pushed.
+
+        `bypass_gate` (True only for an injected urgent call, per `plans/
+        overlay-speech-callouts/plan.md`'s resolved decision) prepends
+        `_URGENT_OVERLAY_PREFIX` to the *pushed* overlay line only -- the
+        `output` print path stays exactly the text `belief.speech`
+        produced, since this is an overlay-display concern, not a change
+        to what was spoken/printed generally."""
+        for line in lines:
+            if self.output is not None:
                 print(line, file=self.output)
+            if self.overlay_client is not None:
+                overlay_line = (
+                    f"{_URGENT_OVERLAY_PREFIX}{line}" if bypass_gate else line
+                )
+                try:
+                    self.overlay_client.push_text_line(overlay_line)
+                except AircraftLayerError:
+                    logger.warning(
+                        "overlay push failed for crew-text line (continuing)",
+                        exc_info=True,
+                    )

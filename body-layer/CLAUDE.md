@@ -103,6 +103,13 @@ separate URL/flag needed. Defaults off; without it, behavior is unchanged. See
 `aircraft-layer/WORKFLOW.md`'s "Deploy the overlay Hook script" section for the DCS-side half of
 this channel — UNVERIFIED against a live DCS session as of authorship.
 
+`--overlay` also combines with `--crew-text` (`plans/overlay-speech-callouts/plan.md`): instead of
+the lifecycle-event mirror above, it pushes every line `CrewConsole` speaks — readbacks, contact
+reports, drained lifecycle events, and injected urgent calls (prefixed `"!! "` on the pushed
+overlay copy only, never on the printed/stdout copy) — verbatim, i.e. exactly what a crew member
+would actually say, a radio-callout feed rather than a debug mirror. `--console` and `--crew-text`
+stay mutually exclusive with each other; `--overlay` is valid alongside either.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
@@ -295,7 +302,8 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   must degrade to "no overlay line for this event," never stop the poll loop or skip the rest of
   the batch. `PerceptionLogger`'s plain per-`Observation` stream does not get this wiring
   (line-noise vs. signal tradeoff). BL-5a adds `--crew-text` (mutually exclusive with
-  `--console`/`--overlay` this milestone) and `--brain-client debug|null`: `_run_crew_text_poll_loop`/
+  `--console`; `--overlay` combines with either, see below) and `--brain-client debug|null`:
+  `_run_crew_text_poll_loop`/
   `_run_crew_text_repl` mirror `_run_console_poll_loop`/`_run_console_repl` exactly, reusing the same
   `ConsolePerceptionRunner`, except the poll loop also calls `belief.crew_console.CrewConsole.
   drain_events` after each `run_once()` — the same post-`tick()` hook point `--overlay` uses — and
@@ -311,31 +319,48 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   after stripping leading filler words (`that`/`the`/`a`/`an`) — place-name phrasing (`find_place`)
   stays unmatched until BL-5 merges (documented gap, not a bug). No fabricated per-candidate score —
   `find_contact` (BL-2) has no ranking to carry through.
-- `src/belief/speech.py` (BL-5a) — `OutgoingSpeech` (§5's record, trimmed), the three body-written
-  templated classes (§2.1/§3.6): `render_readback`, `render_contact_report` (single-contact only —
-  no clustering exists yet, `docs/concept/PETROBRAIN_RUNTIME.md` line 336), and `route_event`, the
-  outbound routing gate. **`render_contact_report`'s format (2026-09-10 user decision):**
-  `"<COALITION> <unit type>, <clock> o'clock, <range>."`, no longer a verbatim echo of
-  `tools.describe_contact`'s `summary`. Coalition is always `"UNKNOWN"` — no IFF/coalition
-  perception channel exists, and reading `LoGetWorldObjects`'s real coalition into `Contact` would
-  break the no-omniscience invariant `percept.py` enforces; a real implementation should *infer*
-  coalition from unit-type vocabulary + which side's terrain the contact sits in, not ground truth
-  (`ROADMAP.md` backlog, deferred). Unit type reads the classification lattice's level+value
-  (`_unit_type_display`/`_OP_CLASS_DISPLAY`): `"ground contact"`/`"unidentified contact"` at
+- `src/belief/speech.py` (BL-5a, extended twice by `plans/overlay-speech-callouts/plan.md`'s two
+  addenda) — `OutgoingSpeech` (§5's record, trimmed), the three body-written templated classes
+  (§2.1/§3.6): `render_readback`, `render_contact_report` (single-contact only — no clustering
+  exists yet, `docs/concept/PETROBRAIN_RUNTIME.md` line 336), and `route_event`, the outbound
+  routing gate. **Contact-report format (2026-09-10 user decision, extended 2026-09-11 twice —
+  terser crew-text is the current, live behaviour):**
+  `"<unit type>[, <clock> o'clock, <range> km][ <best semantic fact text>]."`, built by a shared,
+  id-less, coalition-less `_contact_report_text(facts)` helper — no longer a verbatim echo of
+  `tools.describe_contact`'s `summary`. `render_contact_report` and `_render_lifecycle_text`'s
+  `CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches both call this one helper directly, with **no id
+  spoken anywhere** (a pilot cannot track `CONTACT_<n>` ids by ear; the id still exists on
+  typed/console surfaces, only what is *spoken* changed) and **no coalition token** (the original
+  `"UNKNOWN"` placeholder was removed entirely — a pilot hearing "UNKNOWN" on every single callout,
+  when no callout can ever say anything else yet, is net noise). `CONTACT_LOST` has **no template at
+  all** — `_render_lifecycle_text` returns `None`, joining `CONTACT_ATTENTION_CHANGED`'s existing
+  no-template pattern — a lost contact has no current position worth interrupting the pilot to
+  report. `CONTACT_CLASSIFICATION_CHANGED` speaks a new position-bearing line,
+  `"unit at {clock} o'clock, {range} km is {unit type}."` (range clause omitted when unenriched),
+  built from the contact's *current* `facts["classification"]` via `_unit_type_display` — not the
+  raw `event.classification` enum string as before. Range is rounded to the nearest 0.5 km with no
+  trailing `.0` (`_format_range_km`); a semantic fragment's embedded trailing distance (e.g. `"near
+  a road (439m)"`) is separately rounded to the nearest 100 m with a `~` prefix
+  (`_round_enrichment_fragment`, a display-only regex post-process — `enrichment.py`'s
+  `SemanticFact.text` itself is untouched and stays shared with the unaffected `belief.console`
+  debug path). A real coalition implementation should eventually *infer* coalition from unit-type
+  vocabulary + which side's terrain the contact sits in, not ground truth (`ROADMAP.md` backlog,
+  deferred, unaffected by the token's removal here). Unit type reads the classification lattice's
+  level+value (`_unit_type_display`/`_OP_CLASS_DISPLAY`, all lowercase): `"ground"`/`"contact"` at
   presence/unknown, a human word for a `class`-level `OP_*` bucket, the reporting name verbatim at
-  `type` level. `route_event` accepts `belief.events.Event | UrgentCall` and checks which
-  one it got *before* anything else — an `UrgentCall` (Stage 5's manual bypass-gate test harness,
-  constructed only by `crew_console.py`'s `!inject-urgent` command; no real threat-detection channel
-  exists) speaks immediately with `bypass_gate=True`, no ack/cooldown touched; a `belief.events.Event`
-  renders through a per-kind template (`CONTACT_DETECTED`/`CONTACT_LOST`/`CONTACT_REACQUIRED`/
-  `CONTACT_CLASSIFICATION_CHANGED` — the runtime doc's literal "C17 BMP"/"C17 lost"/"C17 reacquired"
-  lines, adapted to this store's own `CONTACT_<n>` id shape) and auto-acknowledges
+  `type` level. The semantic fragment is the highest-confidence `belief.enrichment.SemanticFact.text`
+  among `facts["semantic"]`, mirroring `belief.console.format_event_for_overlay`'s own selection;
+  omitted (not "unknown") when no `EnrichmentContext` was supplied or no semantic facts exist, same
+  absent-not-null convention as clock/range. `route_event` accepts `belief.events.Event | UrgentCall`
+  and checks which one it got *before* anything else — an `UrgentCall` (Stage 5's manual bypass-gate
+  test harness, constructed only by `crew_console.py`'s `!inject-urgent` command; no real
+  threat-detection channel exists) speaks immediately with `bypass_gate=True`, no ack/cooldown
+  touched; a `belief.events.Event` renders through a per-kind template and auto-acknowledges
   (`belief.tools.acknowledge_event`) the moment it is spoken, so a future brain's `poll_events` never
-  re-surfaces it. `CONTACT_ATTENTION_CHANGED` deliberately has no template (returns `None`, not
-  acknowledged) — the player's own command already got a readback, and area-driven attention changes
-  are not yet narrated proactively (a real, documented gap). `UrgentCall` is a separate small type
-  rather than a `bypass_gate` field grafted onto the shared BL-4 `Event` dataclass — `events.py` is
-  out of this milestone's Affected Modules.
+  re-surfaces it — a kind with no template (`CONTACT_LOST`, `CONTACT_ATTENTION_CHANGED`) is left
+  unacknowledged, since body never actually spoke it. `UrgentCall` is a separate small type rather
+  than a `bypass_gate` field grafted onto the shared BL-4 `Event` dataclass — `events.py` is out of
+  this milestone's Affected Modules.
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
@@ -358,6 +383,20 @@ this channel — UNVERIFIED against a live DCS session as of authorship.
   call and an unrendered kind (`CONTACT_ATTENTION_CHANGED`) is harmlessly re-skipped every poll.
   `!inject-urgent <contact_id> <text>` is Stage 5's clearly-labelled test harness for the
   bypass-gate/urgent-call path — not a production intent or a real detector.
+  `overlay_client: AircraftLayerClient | None` (`plans/overlay-speech-callouts/plan.md`) is a
+  second, deliberately separate optional-sink field from `aircraft_client` above — `aircraft_client`
+  is BL-6's reserved-for-a-different-purpose field (live search-trigger commands, no reader today),
+  while `overlay_client` is read every time `_print` runs. `_print` (the single funnel point both
+  `handle_line` and `drain_events` already call for every line of spoken text) is where the overlay
+  push lives: after printing a line to `output` it also pushes the same text to
+  `overlay_client.push_text_line`, wrapped in its own `try`/`except AircraftLayerError`
+  (log-and-continue), the same per-push isolation shape `logger.ConsolePerceptionRunner.run_once`'s
+  BL-2.5 push loop uses. A line whose source `OutgoingSpeech` carried `bypass_gate=True` (i.e. only
+  an injected urgent call, never a routine readback/contact report/lifecycle line) gets a `"!! "`
+  prefix on the *pushed* overlay copy only — `output`'s printed copy stays exactly the text
+  `belief.speech` produced, since the prefix is an overlay-display concern, not a change to what
+  was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
+  `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a
