@@ -195,7 +195,45 @@ first probe run (slew onto a landmark at a known relative bearing, compare).
 what one would expect for a sight that must look well below the nose — but the actual degrees are
 unconfirmed.
 
-### 4.2 Slewing it — and the mode question
+### 4.1.2 CONFIRMED LIVE — pointing the sight (2026-09-11, runs 3-5)
+
+```lua
+-- point: azimuth relative to the airframe centreline, stops at +/-60 deg
+GetDevice(7):SetCommand(3061, azimuth_deg / 60.0)
+
+-- read back where it actually is
+azimuth_deg = GetDevice(0):get_argument_value(874) * 136.36
+```
+
+| relation | formula |
+|---|---|
+| command → argument | `arg_874 = value * 0.44` |
+| command → degrees | `azimuth_deg = value * 60` |
+| argument → degrees | `azimuth_deg = arg_874 * 136.36` |
+
+**`SetCommand` is the verb** — `performClickableAction` only works on controls
+that have a clickable element, and the sight axes have none.
+
+**The AI axis (3060/3061) is a POSITION target, exactly linear**, measured at
+five points with ratio `0.440000` in every case, settling inside 0.25 s and
+then holding flat. So pointing is a **single write** — no closed loop.
+
+**The player axis (3025/3026) is NOT the same control** — it accumulates/slews
+the way a human holding a slew input expects, and commanded ±0.5 runs to ~99 %
+of full deflection. Do not use it as an effector, and do not assume one
+channel's behaviour from the other; that mistake cost two probe flights.
+
+Sign conventions: azimuth is same-sign on both channels. **Player elevation
+(3025) is inverted** relative to the argument (`val -1 → arg +1.0`); **AI
+elevation (3060) is not** (`val +1 → arg +1.0`).
+
+Elevation follows the same positional law against its piecewise gauge, but its
+limits **in degrees** are still unmeasured.
+
+Caveat: arg 874 is the sight's position *relative to the airframe*, so a world
+bearing needs aircraft heading folded in — a body-layer concern.
+
+### 4.2 Slewing it — the player/AI channel distinction
 
 | ID | Command | Note |
 |---|---|---|
