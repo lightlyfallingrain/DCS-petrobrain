@@ -46,9 +46,31 @@ GetDevice(devices.ASP_17V):performClickableAction(asp_commands.Range_Value, 0.5)
 -- equivalently, per-device: :SetCommand(cmd, value)
 ```
 `GetDevice` is **not** listed in `API/Sim_ControlAPI.md` (which enumerates only `Export.Lo*`
-functions) and appears in the install only in GUI-side scripts
-(`Scripts/UI/RadioCommandDialogPanel/`). Its availability inside the `Export.lua` state is the
-one unverified link in this chain — see §6.
+functions) and appears in shipped Lua only in GUI-side scripts
+(`Scripts/UI/RadioCommandDialogPanel/`).
+
+**But the binaries confirm these are real Lua registrations.** `bin/CockpitBase.dll` contains, as
+one contiguous block of plain strings — the form a Lua method-registration table takes:
+
+```
+____self_device_handle
+GetDevice
+GetSelf
+SetGlobalCommand
+SetCommand
+performClickableAction
+listen_command
+listen_event
+```
+
+alongside the mangled `?performClickableAction@avDevice@cockpit@@QEAAXHM_N@Z`, i.e.
+`void avDevice::performClickableAction(int, float, bool)` — note the **third argument**, absent
+from every community example.
+
+That moves `GetDevice` / `performClickableAction` / `SetCommand` / `get_argument_value` from
+"community folklore" (DCS-BIOS, Helios) to **confirmed-present registered names in this install**.
+What remains unverified is narrower: whether the `Export.lua` Lua state has `GetDevice` bound, as
+opposed to only the cockpit device states. That is what the probe settles.
 
 Supporting evidence that Export.lua's state *does* reach cockpit internals: this project already
 confirmed live that `get_param_handle(name):get()` "genuinely callable from Export.lua, no errors,
@@ -126,27 +148,89 @@ ASP-17 readback lead.**
 
 ---
 
-## 4. 9K113 Raduga-Sh (device 7) — the operator sight, slewable
+## 4. 9K113 Raduga-Sh (device 7) — the operator sight
 
-72 commands (3001-3072). Underexplored by this project so far, and arguably a bigger lever than
-the ASP-17 for "make the crew look at a place", because it exposes explicit slew axes:
+The sight Petrovich actually points at things, and **the only optic in this module with a working
+read channel**. 72 commands (3001-3072).
 
-| ID | Command |
-|---|---|
-| 3019 | `Command_VertPos` |
-| 3020 | `Command_HorizPos` |
-| 3021 | `Command_ZOOM` |
-| 3025 | `Command_SIGHT_UP_DOWN_AXIS` |
-| 3026 | `Command_SIGHT_LEFT_RIGHT_AXIS` |
-| 3027 | `Command_SIGHT_ZOOM` |
-| 3028 | `Command_Aiming` |
-| 3001 | `Command_POWER_PN` |
-| 3002 | `Command_NABL` (observation mode) |
+### 4.1 Reading where the sight is pointing — args 874 / 876
 
-`SIGHT_UP_DOWN_AXIS` / `SIGHT_LEFT_RIGHT_AXIS` as absolute axes are the closest thing in the whole
-module to "point the optics at bearing X, elevation Y".
+`mainpanel_init.lua:1575-1585` declares two gauges:
 
----
+```lua
+Sight9K113_Azimuth.arg_number   = 874 ; input {-1.0, 1.0}      -> output {-0.44, 0.44}
+Sight9K113_Elevation.arg_number = 876 ; input {-1.0, 0.0, 1.0} -> output {-0.75, 0.0, 1.0}
+```
+
+So `GetDevice(0):get_argument_value(874)` / `(876)` give the sight's live pointing angle. This is
+the thing the ASP-17 never had — its controllers were geometry-only with nothing to print, and its
+`FlexSight_*` param handles sat at 0 (`2026-09-08-pb1-live-spike-results.md` findings 3-4).
+
+**These are normalised gauge values, not radians.** Azimuth maps `-1..1` to `-0.44..0.44`
+linearly; elevation is piecewise (`-1→-0.75`, `0→0`, `1→1.0`), so negative and positive
+elevation scale differently. `CockpitMi24.dll` confirms the split — it exports both
+`av9K113::getSightAzimuth()`/`getSightElevation()` (returning `double`, the true angle) **and**
+`getSightAzimuthGauge()`/`getSightElevationGauge()`. Only the gauge value reaches Lua. Converting
+gauge units to a real bearing needs **live calibration** against a known target; the angular limits
+are native (`av9K113::initLimits`) and appear nowhere in Lua.
+
+### 4.2 Slewing it — and the mode question
+
+| ID | Command | Note |
+|---|---|---|
+| 3025 / 3026 | `Command_SIGHT_UP_DOWN_AXIS` / `..._LEFT_RIGHT_AXIS` | player slew |
+| 3057 / 3058 | `..._JOY_AXIS` pair | player, joystick |
+| 3067-3072 | `Command_TRACKIR_SIGHT_*` | player, head tracker |
+| **3060 / 3061** | **`Command_Intern_SIGHT_UP_DOWN_AI_AXIS` / `..._LEFT_RIGHT_AI_AXIS`** | **bound to no input anywhere — the AI's own channel** |
+| 3019 / 3020 | `Command_VertPos` / `Command_HorizPos` | |
+| 3021 / 3027 | `Command_ZOOM` / `Command_SIGHT_ZOOM` | |
+| 3028 | `Command_Aiming` | |
+| 3002 | `Command_NABL` | observation mode (*наблюдение*) |
+| 3001 | `Command_POWER_PN` | sight power |
+
+**The axes are velocity, not position.** `Devices_specs/9K113.lua` sets `axis_use_velocity = true`,
+`h_axis_velocity = rad(20)/s`, `v_axis_velocity = rad(10)/s`, `Slew_dead_zone = 0.003`,
+`min_slew_velocity = rad(0.07)`. A slew command sets a *rate*. Pointing the sight at a bearing
+therefore means closing a loop — command a rate, read 874/876, integrate, stop — which is exactly
+why §4.1 matters.
+
+**Two gates to be aware of, neither resolved from files alone:**
+
+1. **In gameplay the 9K113 is its own mode**, with its own viewport — `Devices_specs` sets
+   `SightWithCockpitView = false`, and `9K113_CAM_init.lua` renders to a `dedicated_viewport`
+   under `render_purpose.AUXILLARY_SIGHT_SCREENSPACE`. The **player** slew axes may simply be
+   ignored outside that mode. Unverified, and it is the first thing to test.
+2. **The `_AI_AXIS` pair (3060/3061) is a separate channel**, declared in `command_defs.lua` but
+   bound to no input in any of `Input/Mi_24P_op/{keyboard,joystick,…}` — i.e. the channel the AI
+   slews through rather than the player. If anything works outside sight mode, this is the
+   likeliest candidate. Also unverified.
+
+`Export.probe-commands.lua` stage E tests both channels on a repeating cycle precisely so the
+in-mode / out-of-mode difference shows up in one flight.
+
+### 4.3 Other readable state
+
+**Text, via `list_indication(0)`** — unlike the ASP-17, the 9K113 page has real `ceStringPoly`
+elements: `Zoom_Val`, `Laser_Filter`, `Orange_Filter`, `BackLight`, `ArrowHelper_Val`,
+`txt_Tips`, `txt_NABLTips`, `HintsOn`. Untested but the right shape for `list_indication` to print.
+
+**24 panel switches, via `get_argument_value`** — args 885 (POWER_PN), 886 (NABL), 884
+(backlight), 887, 890, 899, 903, 905, 910, 911, 912, 913, 871 (ZOOM), 872, 873, 775, 870, 875,
+882, 931-935. Full rows in §10.
+
+**Native-only, not reachable from Lua** (listed because it says what the module actually tracks):
+`get_LandPoint` — the ground point the sight is aimed at, exactly what this project would want —
+plus `get_CameraPoint`, `getCurrentFOV`/`getCurrentHFOV`, `is9K113Aiming`, `isCaged`,
+`isGyroReady`, `getHelperIsOn`, `get_slew_velocity`, `get9K113State`, `isLaunchPermission`.
+
+### 4.4 It is one of only seven Lua-registrable devices in the module
+
+`CockpitMi24.dll` shows `av9K113` inheriting `avLuaRegistrable`, alongside only `avASP_17V`,
+`avPKV`, `avWeaponSys_Mi24`, `avFMProxy_Mi24`, `avTimerDevice_Mi24` and `ccMainPanel_Mi24`. That
+means the device *can* expose Lua methods beyond the standard `avDevice` ones. **Which** methods,
+if any, is unknown — none of the getter names above appears as a plain registration string in the
+DLL, so do not assume `GetDevice(7):get_LandPoint()` exists. The probe's stage A enumerates what
+the device object actually carries.
 
 ## 5. HELPER_AI / Petrovich (device 30) — 21 commands
 
@@ -248,11 +332,10 @@ Helper functions seen, which tell you the control's shape without reading the me
 `default_button`, `default_2_position_tumb`, `default_3_position_tumb`,
 `default_2_position_small_tumb`, `default_axis`, `default_animated_lever`, `default_blue_cover`.
 
-**Caveat, and it is the important one:** `get_argument_value` is **not documented anywhere in the
-installed tree** — it appears in neither `Scripts/Export.lua` nor `API/Sim_ControlAPI.md`, and no
-shipped Lua calls it. It is a well-established community binding (DCS-BIOS, Helios and similar all
-depend on it) but for this project it remains **unverified until probed**, exactly like `GetDevice`
-itself (§1). Both stand or fall together — one probe settles both.
+**Caveat:** `get_argument_value` is not documented in `Scripts/Export.lua` or
+`API/Sim_ControlAPI.md`, and no shipped Lua calls it — but it *is* present as a plain registration
+string in `bin/CockpitBase.dll` (§1), so the name is real. What is unverified is reachability from
+the `Export.lua` state specifically. It stands or falls with `GetDevice`; one probe settles both.
 
 Relevance to the ASP-17 question: because `list_indication(2)` and the three `FlexSight_*` param
 handles are both already-confirmed dead ends for reading sight state (§3), **`get_argument_value`

@@ -49,13 +49,52 @@ so every "unread" item in that file is now read.
   variants take an absolute `[-1,1]` value, so "set the sight to *this*" is expressible, not just
   "nudge it". — **evidence: reproduced-locally.**
 
-- **The 9K113 operator sight (device 7, 72 commands) is a bigger lever than the ASP-17 for
-  pointing the crew's optics**, and had not previously been considered: it exposes
-  `Command_SIGHT_UP_DOWN_AXIS` (3025), `Command_SIGHT_LEFT_RIGHT_AXIS` (3026),
-  `Command_SIGHT_ZOOM` (3027), `Command_Aiming` (3028), `Command_VertPos`/`HorizPos` (3019/3020),
-  `Command_NABL` (observation mode, 3002). As absolute axes these are the closest thing in the
-  whole module to "point the optics at bearing X, elevation Y". — **evidence:
-  reproduced-locally** (enumeration); behavior untested.
+- **The 9K113 Raduga-Sh operator sight (device 7, 72 commands) is the one that matters** — the
+  sight Petrovich actually points at things, and, unlike the ASP-17, **the only optic in this
+  module with a working read channel.** `mainpanel_init.lua:1575-1585` declares
+  `Sight9K113_Azimuth` at **draw argument 874** (input `-1..1` → output `-0.44..0.44`) and
+  `Sight9K113_Elevation` at **argument 876** (input `-1,0,1` → output `-0.75,0,1.0`, piecewise).
+  So `get_argument_value(874)`/`(876)` give live sight pointing. — **evidence:
+  reproduced-locally.**
+
+  These are **normalised gauge values, not radians**. `CockpitMi24.dll` exports both
+  `av9K113::getSightAzimuth()`/`getSightElevation()` (true angle, `double`) *and*
+  `getSightAzimuthGauge()`/`getSightElevationGauge()`; only the gauge value reaches Lua, and the
+  angular limits are native (`av9K113::initLimits`), absent from Lua. **Converting gauge units to
+  a real bearing requires live calibration against a known target.**
+
+- **The 9K113 slew axes are velocity, not position.** `Devices_specs/9K113.lua`:
+  `axis_use_velocity = true`, `h_axis_velocity = rad(20)/s`, `v_axis_velocity = rad(10)/s`,
+  `Slew_dead_zone = 0.003`, `min_slew_velocity = rad(0.07)`. A slew command sets a *rate*, so
+  pointing the sight means closing a loop against args 874/876 — which is why the read channel
+  above is the enabling find, not a nice-to-have. — **evidence: reproduced-locally.**
+
+- **Two gates on slewing, neither resolvable from files:** (1) in gameplay the 9K113 is *its own
+  mode* with its own viewport (`SightWithCockpitView = false`; `9K113_CAM_init.lua` renders to a
+  `dedicated_viewport` under `AUXILLARY_SIGHT_SCREENSPACE`) — the **player** slew axes may be
+  ignored outside it; (2) a **separate AI channel exists**:
+  `Command_Intern_SIGHT_UP_DOWN_AI_AXIS` (3060) / `..._LEFT_RIGHT_AI_AXIS` (3061), declared in
+  `command_defs.lua` but **bound to no input in any `Input/Mi_24P_op/` profile** — i.e. the
+  channel the AI slews through rather than the player. If anything works outside sight mode this
+  is the likeliest candidate. — **evidence: reproduced-locally** (declaration + absence of
+  binding); **unverified** for behavior. Probe stage E tests both channels on a repeating cycle so
+  the in-mode/out-of-mode difference shows up in one flight.
+
+- **Further 9K113 readback:** `list_indication(0)` should print real text — the page has
+  `ceStringPoly` elements `Zoom_Val`, `Laser_Filter`, `Orange_Filter`, `BackLight`,
+  `ArrowHelper_Val`, `txt_Tips`, `txt_NABLTips` — unlike the ASP-17's geometry-only controllers.
+  Plus 24 panel switches as draw arguments (885 POWER_PN, 886 NABL, 871 ZOOM, …). Native-only and
+  *not* reachable from Lua, but worth recording because it says what the module tracks:
+  `get_LandPoint` (the ground point the sight is aimed at — exactly what this project would want),
+  `get_CameraPoint`, `getCurrentFOV`, `is9K113Aiming`, `isCaged`, `isGyroReady`, `getHelperIsOn`.
+  — **evidence: reproduced-locally** (DLL symbols + page source).
+
+- **`av9K113` is one of only seven `avLuaRegistrable` classes in the module** (with `avASP_17V`,
+  `avPKV`, `avWeaponSys_Mi24`, `avFMProxy_Mi24`, `avTimerDevice_Mi24`, `ccMainPanel_Mi24`), so it
+  *can* expose Lua methods beyond the standard `avDevice` set. **Which ones is unknown** — none of
+  the native getter names appears as a plain registration string, so do not assume
+  `GetDevice(7):get_LandPoint()` exists. Stage A enumerates what the object actually carries.
+  — **evidence: reproduced-locally** (vtable symbols); **inferred/unresolved** for what it means.
 
 - **Petrovich (HELPER_AI, device 30) has 21 commands, and none of them is a scan command.** Full
   list in the reference. The AI Wheel is *navigated*, not addressed: the entire `Mi_24P_AI_Menu`
@@ -114,20 +153,31 @@ Every enumeration above is certain. **The write capability is not**, and it all 
 link: whether `GetDevice`, `performClickableAction` and `get_argument_value` exist inside
 `Export.lua`'s own Lua state.
 
-They are **not documented anywhere in the installed tree** — absent from `Scripts/Export.lua`,
-absent from `API/Sim_ControlAPI.md` (which enumerates only `Export.Lo*` functions), and called by
-no shipped Lua outside GUI-side scripts (`Scripts/UI/RadioCommandDialogPanel/`). They are
-community-standard — DCS-BIOS, Helios and comparable tools all depend on them — but this project
-does not treat community usage as verification.
+They are absent from `Scripts/Export.lua` and from `API/Sim_ControlAPI.md`, and called by no
+shipped Lua outside GUI-side scripts.
 
-Two things argue they are present: this project already confirmed live that
-`get_param_handle(name):get()` is "genuinely callable from Export.lua, no errors, no nil"
-(2026-09-08 finding 4), and that `list_indication(n)` tree-walks arbitrary cockpit devices. Both
-are the same class of cockpit-side API.
+**But the binaries settle half of it.** `bin/CockpitBase.dll` carries, as one contiguous block of
+plain strings — the shape a Lua method-registration table takes:
 
-**So the honest answer to "can we manipulate switches and controls?" today is: almost certainly
-yes, and the exact commands to do it are now fully enumerated — but it is inferred, not
-demonstrated, and one probe settles it.**
+```
+____self_device_handle / GetDevice / GetSelf / SetGlobalCommand /
+SetCommand / performClickableAction / listen_command / listen_event
+```
+
+plus the mangled `?performClickableAction@avDevice@cockpit@@QEAAXHM_N@Z` =
+`void avDevice::performClickableAction(int, float, bool)` — a **three-argument** signature, the
+third absent from every community example. `get_argument_value` is likewise present as a plain
+string in the same DLL. — **evidence: reproduced-locally.**
+
+So these are **not community folklore**: they are registered Lua names shipped in this install.
+Add the two prior live confirmations — `get_param_handle(name):get()` is "genuinely callable from
+Export.lua, no errors, no nil" (2026-09-08 finding 4), and `list_indication(n)` tree-walks
+arbitrary cockpit devices — and the remaining uncertainty is narrow and specific: **does the
+`Export.lua` Lua state have `GetDevice` bound, or only the cockpit device states?**
+
+**The honest answer to "can we manipulate switches and controls?" is: very likely yes, the exact
+commands are enumerated, and the mechanism is confirmed to exist in the binaries — but it has not
+been demonstrated from Export.lua, and one probe settles it.**
 
 ### Reproducible Test
 
@@ -155,16 +205,20 @@ collector running, appends to `Saved Games\DCS\Logs\aircraft_layer_probe_cmd.log
 3. Read the log. Stages run at T+10 s / +20 s / +30 s from first frame:
    - **A (at start, passive)** — capability census: does `GetDevice` exist, and what methods does
      a device object actually expose? *This alone answers the central question.*
-   - **B (T+10 s, passive)** — reads all 16 ASP-17 switch arguments, dumps
-     `list_indication(10)` (AI wheel), `(6)` (HelperAI), `(2)` (ASP-17), and
-     `LoGetMechInfo().controlsurfaces`.
-   - **C (T+20 s, writes)** — the decisive test: sets ASP-17 crosshair brightness
-     (`Brightness_PM`, arg 564), reads the argument back, reports whether the switch moved, then
-     restores the original value. Cosmetic only, no tactical effect.
-   - **D (T+30 s, opt-in)** — fires `DesignateAttackPoint` at Petrovich and diffs the HelperAI
-     indication before/after. **Only runs if you create an empty file
-     `Saved Games\DCS\Scripts\probe_petrovich.flag`** — it commands Petrovich for real. Watch the
-     cockpit for a sight slew or callout while it fires.
+   - **B (T+10 s, passive)** — 9K113 pointing angle (args 874/876) and its 24 panel switches,
+     all 16 ASP-17 switch arguments, `list_indication(0)` (9K113 — has real text), `(10)` (AI
+     wheel), `(6)` (HelperAI), `(2)` (ASP-17), and `LoGetMechInfo().controlsurfaces`.
+   - **C (T+20 s, writes)** — write-mechanism proof on a control with no mode gating: sets ASP-17
+     crosshair brightness (`Brightness_PM`, arg 564), reads it back, reports whether the switch
+     moved, then restores it. Cosmetic only.
+   - **D (T+30 s, opt-in)** — fires `DesignateAttackPoint` at Petrovich, diffs the HelperAI
+     indication and the 9K113 angle before/after. **Only runs if you create an empty file
+     `Saved Games\DCS\Scripts\probe_petrovich.flag`** — it commands Petrovich for real.
+   - **E (repeating, after D)** — the 9K113 test. Each cycle logs `NABL` (arg 886) and the sight
+     angle, commands the **player** axis (3026) for 1.5 s and reports whether arg 874 moved, then
+     the **AI** axis (3061) the same way, then idles 8 s. **Fly several cycles outside the 9K113
+     sight view, then enter the sight view and fly several more** — the log then shows directly
+     whether slewing is mode-gated and whether the AI channel clears the gate.
 4. Restore the real `Export.lua` afterwards.
 
 Every DCS call in the probe is wrapped in `pcall`, including the userdata member lookups, so an
@@ -185,7 +239,17 @@ absent `GetDevice` logs a clean "ABSENT" line rather than taking down the export
 
 ### Unresolved
 
-- **Does `GetDevice` exist in the Export.lua state?** The whole write capability. Stage A.
+- **Does `GetDevice` exist in the Export.lua state?** The whole write capability. Now the *only*
+  unverified link in the mechanism, since the registrations themselves are confirmed in
+  `CockpitBase.dll`. Stage A.
+- **Is 9K113 slewing gated on the operator's sight mode, and does the `_AI_AXIS` channel
+  (3060/3061) bypass that gate?** The decisive question for using the sight as a pointing
+  device. Stage E, run in and out of the sight view.
+- **What do gauge args 874/876 mean in real angles?** Needs live calibration against a known
+  target; limits are native and not in Lua.
+- **Does `list_indication(0)` populate?** Would give zoom/filter/backlight state as text.
+- **Does `av9K113` expose extra Lua methods** (it is `avLuaRegistrable`), and in particular
+  anything like `get_LandPoint`? Stage A enumerates the object.
 - **Does `performClickableAction` actually move a switch, or silently no-op?** Stage C. A
   `default_axis` control may need a different value scale than the `0.75` the probe tries; a
   no-op result should be retried with the control's own declared step (0.05 for `Brightness_PM`)

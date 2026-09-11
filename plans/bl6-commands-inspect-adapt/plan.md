@@ -268,3 +268,28 @@ signatures, or the tool API.
 **Still blocking Stage 6:** whether `GetDevice`/`performClickableAction` exist in Export.lua's
 state. Not documented anywhere in the install; probe written
 (`aircraft-layer/dcs-export/Export.probe-commands.lua`) and ready for the user to run.
+
+### Addendum 2026-09-11b — the 9K113 is the better effector than the AI Wheel
+
+User redirected from the ASP-17 to the 9K113 Raduga-Sh operator sight (device 7). That changes
+BL-6's Stage 6 options for the better:
+
+- **It has a real read channel** — cockpit draw args **874** (azimuth) / **876** (elevation),
+  declared as gauges in `mainpanel_init.lua:1575-1585`. No other optic in the module has one; the
+  ASP-17's equivalents were closed out as dead ends in the 2026-09-08 spike. This matters because
+  it is the first candidate for *observing* where the crew's optics are actually pointing, rather
+  than inferring it.
+- **Slew axes are velocity, not position** (`axis_use_velocity = true`), so "point at bearing X"
+  is a closed loop against 874/876, not a single write. That is a real design constraint on any
+  future `look_at` tool and should be recorded before BL-7/BL-8 assume otherwise.
+- **A dedicated AI slew channel exists** — `Command_Intern_SIGHT_{UP_DOWN,LEFT_RIGHT}_AI_AXIS`
+  (3060/3061), bound to no input in any `Input/` profile. If Petrovich slews through it, it is a
+  more honest effector than driving the player's own axes.
+- **Caveat raised by the user:** the 9K113 is its own gameplay mode with its own viewport, and
+  player slew commands may not work outside it. Consistent with `SightWithCockpitView = false`
+  and the sight's `dedicated_viewport`. Unresolved from files; probe stage E tests player vs. AI
+  axis, in and out of the mode.
+
+Nothing here changes Stages 1-4. It changes which effector Stage 6 should target if the probe
+comes back positive: **`(device 7, 3060/3061)` with a closed loop on args 874/876**, rather than
+the AI Wheel, which has no scan command at all.
