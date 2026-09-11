@@ -317,8 +317,15 @@ work. Read five rows, scroll, read again, dedupe.
 *selected* target, which is the same selection `SELECT TGT` and `FIRE` act on.
 Enumerating the list is therefore not a read-only operation — an important
 constraint for any body-layer code that wants a full picture without
-disturbing the crew. Also unknown: whether the list wraps or stops at the end,
-which a scroll loop needs for termination.
+disturbing the crew.
+
+**Termination is solved: the list is terminated and does not wrap** (pilot,
+2026-09-11). So a scroll loop ends naturally — press `NEXT TGT` until the rows
+stop advancing — rather than needing wrap detection or a visit-set to avoid
+looping forever. It also means the selection ends up parked at the last entry
+rather than back where it started, so anything that scrolls to enumerate should
+either scroll back with `PREV TGT` or accept that it has moved the crew's
+selection.
 
 **Untested lead:** the target page's far-left slot reads **`ALL TGTS`**. If
 that expands the view rather than scrolling it, it may give the whole list
