@@ -107,18 +107,18 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     contact_id = store.contacts[0].id
 
     detected_lines = console.drain_events(now_sim=0.0)
-    assert detected_lines == [f"{contact_id}: UNKNOWN BMP-2."]
+    assert detected_lines == ["BMP-2."]
 
     # Player: "watch <id>" -> a readback, no brain call.
     readback_lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
     assert readback_lines == [f"Watching {contact_id}."]
     assert brain_client.payloads == []
 
-    # Petrovich later loses it.
+    # Petrovich later loses it -- CONTACT_LOST has no template, nothing spoken.
     lost_at = LOST_THRESHOLD_S + 1.0
     store.tick(now_sim=lost_at)
     lost_lines = console.drain_events(now_sim=lost_at)
-    assert f"{contact_id} lost." in lost_lines
+    assert lost_lines == []
 
     # Petrovich later detects it again.
     reacquired_at = lost_at + 1.0
@@ -128,18 +128,18 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     )
     store.tick(now_sim=reacquired_at)
     reacquired_lines = console.drain_events(now_sim=reacquired_at)
-    assert f"{contact_id}: UNKNOWN BMP-2." in reacquired_lines
+    assert "BMP-2." in reacquired_lines
 
     # Player: "Where was that BMP?" -> a memory-backed answer, not a guess.
     answer_lines = console.handle_line("where was that bmp?", now_sim=reacquired_at)
     assert len(answer_lines) == 1
-    assert answer_lines[0].startswith("UNKNOWN BMP-2")
+    assert answer_lines[0].startswith("BMP-2")
     assert brain_client.payloads == []  # answered from structured memory, no escalation
 
     # A contact report, triggered the same way ("status <id>").
     report_lines = console.handle_line(f"status {contact_id}", now_sim=reacquired_at)
     assert len(report_lines) == 1
-    assert report_lines[0].startswith("UNKNOWN BMP-2")
+    assert report_lines[0].startswith("BMP-2")
 
     # An injected urgent call -- Stage 5's manual bypass_gate test harness.
     urgent_lines = console.handle_line(
@@ -300,7 +300,7 @@ def test_failed_overlay_push_degrades_without_raising_and_does_not_block_remaini
     )
     store.tick(now_sim=0.0)
     contact_id = store.contacts[0].id
-    detected_line = f"{contact_id}: UNKNOWN BMP-2."
+    detected_line = "BMP-2."
 
     overlay_client = FakeOverlayClient(fail_on=frozenset({detected_line}))
     console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]
