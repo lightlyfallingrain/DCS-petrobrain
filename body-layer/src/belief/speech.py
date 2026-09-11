@@ -39,11 +39,15 @@ plan's Risks), so `UrgentCall` is only ever constructed by
 `belief.crew_console`'s `!inject-urgent` test-harness command, never by
 `ContactStore.tick`.
 
-**Which lifecycle kinds get a template.** `CONTACT_DETECTED`/`CONTACT_LOST`/
-`CONTACT_REACQUIRED` render the runtime doc's literal "C17 BMP" / "C17 lost"
-/ "C17 reacquired" lines (adapted to this store's own `CONTACT_<n>` id
-shape). `CONTACT_CLASSIFICATION_CHANGED` gets its own short transition
-line. `CONTACT_ATTENTION_CHANGED` deliberately gets **no** template --
+**Which lifecycle kinds get a template.** `CONTACT_DETECTED`/
+`CONTACT_REACQUIRED` render the full id-prefixed positional-callout format
+(`_contact_report_text`, shared with `render_contact_report` -- see "Contact
+report format" below), since a contact newly visible or reappearing is
+exactly the moment a crew gives a full callout. `CONTACT_LOST` stays a
+minimal `"{id} lost."` -- there is no current position to report.
+`CONTACT_CLASSIFICATION_CHANGED` gets its own short transition line, also
+minimal -- an identification update on an already-known contact, not a new
+sighting. `CONTACT_ATTENTION_CHANGED` deliberately gets **no** template --
 `route_event` returns `None` for it and does not acknowledge it -- because
 every attention change the crew would care about either already got a
 readback (the player's own `watch`/`ignore`/... command) or is an
@@ -61,19 +65,30 @@ report format below has no unit-count/"group of" element for the same
 reason.
 
 **Contact report format (2026-09-10 user decision, superseding the original
-"speak `describe_contact`'s `summary` verbatim" design).**
-`"<COALITION> <unit type>, <clock> o'clock, <range>."` -- own format, built
-from `facts["classification"]`/`facts["relative_now"]` directly rather than
-reusing `belief.tools._contact_summary` (which stays certainty/recency-
-phrased for the console debug tool and lifecycle-event lines; this format
-is for the player-facing spoken/typed contact report only).
-`_unit_type_display` reads the classification lattice's level+value
+"speak `describe_contact`'s `summary` verbatim" design; extended 2026-09-11
+to add the semantic-enrichment fragment and to share the format with two
+lifecycle kinds).**
+`"<COALITION> <unit type>[, <clock> o'clock, <range> km][ <best semantic
+fact text>]."` -- built by the shared, id-less `_contact_report_text` helper
+from `facts["classification"]`/`facts["relative_now"]`/`facts["semantic"]`
+directly rather than reusing `belief.tools._contact_summary` (which stays
+certainty/recency-phrased for the console debug tool and the minimal
+lifecycle lines). `render_contact_report` (player-initiated `describe_contact`,
+no id spoken -- the player already named the contact) and
+`_render_lifecycle_text`'s `CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches
+(id prepended, since the player has not yet named the contact themselves)
+both call this one helper -- see "Which lifecycle kinds get a template"
+above. `_unit_type_display` reads the classification lattice's level+value
 straight off `facts["classification"]` -- `"ground contact"`/`"unidentified
 contact"` at the presence/unknown levels, `_OP_CLASS_DISPLAY`'s human word
 for a `class`-level `OP_*` bucket, the value verbatim at `type` level (an
 already-human reporting name/type string). Clock/range are omitted
 entirely (not "unknown") when `relative_now` is absent -- no enrichment
-supplied, same absent-not-null convention `tools.py` itself uses.
+supplied, same absent-not-null convention `tools.py` itself uses. The
+semantic fragment is the highest-confidence `belief.enrichment.SemanticFact.
+text` among `facts["semantic"]`, mirroring `belief.console.
+format_event_for_overlay`'s own selection (`max(..., key=lambda fact:
+fact["confidence"])`); omitted when `facts["semantic"]` is absent/empty.
 
 **Coalition is always `"UNKNOWN"` -- deliberately deferred, not a bug.**
 No IFF/coalition perception channel exists (`perception.association`'s own
@@ -188,20 +203,19 @@ def _unit_type_display(value: object, level: object) -> str:
     return "unidentified contact"
 
 
-def render_contact_report(
-    store: ContactStore,
-    contact_id: str,
-    now_sim: float,
-    enrichment: EnrichmentContext | None = None,
-) -> OutgoingSpeech | None:
-    """A single-contact report (see module docstring's "No contact
-    clustering"/"Contact report format" notes). `None` if `contact_id` does
-    not exist -- callers must not invent a contact for an unknown id, same
-    convention as `belief.tools.describe_contact` itself."""
-    result = describe_contact(store, contact_id, now_sim, enrichment=enrichment)
-    if result is None:
-        return None
-    facts = result["facts"]
+def _contact_report_text(facts: dict[str, object]) -> str:
+    """The id-less positional-callout text shared by `render_contact_report`
+    (player-initiated `describe_contact`, no id spoken -- the player already
+    named the contact) and `_render_lifecycle_text`'s `CONTACT_DETECTED`/
+    `CONTACT_REACQUIRED` branches (id prepended by the caller, see this
+    module's docstring's "Contact report format" note). Format:
+    `"<COALITION> <unit type>[, <clock> o'clock, <range> km][ <best semantic
+    fact text>]."` -- clock/range omitted when `relative_now` is absent,
+    the semantic fragment omitted when `facts["semantic"]` is absent/empty,
+    both the module's existing absent-not-null convention. The semantic
+    fragment picks the highest-confidence `belief.enrichment.SemanticFact`,
+    mirroring `belief.console.format_event_for_overlay`'s own selection
+    (`max(semantic, key=lambda fact: fact["confidence"])`)."""
     classification = facts["classification"]
     assert isinstance(classification, dict)
     unit_type = _unit_type_display(
@@ -215,24 +229,45 @@ def render_contact_report(
         range_m = relative_now["range_m"]
         assert isinstance(range_m, float)
         text += f", {clock} o'clock, {range_m / 1000:.1f} km"
+    semantic = facts.get("semantic")
+    if isinstance(semantic, list) and semantic:
+        best = max(semantic, key=lambda fact: fact["confidence"])
+        text += f" {best['text']}"
     text += "."
+    return text
+
+
+def render_contact_report(
+    store: ContactStore,
+    contact_id: str,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> OutgoingSpeech | None:
+    """A single-contact report (see module docstring's "No contact
+    clustering"/"Contact report format" notes). `None` if `contact_id` does
+    not exist -- callers must not invent a contact for an unknown id, same
+    convention as `belief.tools.describe_contact` itself."""
+    result = describe_contact(store, contact_id, now_sim, enrichment=enrichment)
+    if result is None:
+        return None
+    text = _contact_report_text(result["facts"])
     return OutgoingSpeech(text=text, template="contact_report")
 
 
 def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
     """The per-kind template text for one lifecycle/classification event,
     or `None` for a kind with no template (see module docstring's "Which
-    lifecycle kinds get a template")."""
+    lifecycle kinds get a template"). `CONTACT_DETECTED`/`CONTACT_REACQUIRED`
+    prefix the shared `_contact_report_text` positional-callout format with
+    the contact id -- the one place across this module the id needs to be
+    spoken, since (unlike a player-initiated report) the player has not
+    already named this contact themselves (see module docstring's "Contact
+    report format" note)."""
     contact_id = str(result["facts"]["id"])
-    if event.kind == CONTACT_DETECTED:
-        classification = result["facts"]["classification"]
-        assert isinstance(classification, dict)
-        value = classification.get("value") or "unknown"
-        return f"{contact_id} {value}."
+    if event.kind == CONTACT_DETECTED or event.kind == CONTACT_REACQUIRED:
+        return f"{contact_id}: {_contact_report_text(result['facts'])}"
     if event.kind == CONTACT_LOST:
         return f"{contact_id} lost."
-    if event.kind == CONTACT_REACQUIRED:
-        return f"{contact_id} reacquired."
     if event.kind == CONTACT_CLASSIFICATION_CHANGED:
         return f"{contact_id} identified as {event.classification}."
     return None

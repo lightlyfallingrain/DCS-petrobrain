@@ -107,7 +107,7 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     contact_id = store.contacts[0].id
 
     detected_lines = console.drain_events(now_sim=0.0)
-    assert detected_lines == [f"{contact_id} BMP-2."]
+    assert detected_lines == [f"{contact_id}: UNKNOWN BMP-2."]
 
     # Player: "watch <id>" -> a readback, no brain call.
     readback_lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
@@ -128,7 +128,7 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     )
     store.tick(now_sim=reacquired_at)
     reacquired_lines = console.drain_events(now_sim=reacquired_at)
-    assert f"{contact_id} reacquired." in reacquired_lines
+    assert f"{contact_id}: UNKNOWN BMP-2." in reacquired_lines
 
     # Player: "Where was that BMP?" -> a memory-backed answer, not a guess.
     answer_lines = console.handle_line("where was that bmp?", now_sim=reacquired_at)
@@ -300,7 +300,7 @@ def test_failed_overlay_push_degrades_without_raising_and_does_not_block_remaini
     )
     store.tick(now_sim=0.0)
     contact_id = store.contacts[0].id
-    detected_line = f"{contact_id} BMP-2."
+    detected_line = f"{contact_id}: UNKNOWN BMP-2."
 
     overlay_client = FakeOverlayClient(fail_on=frozenset({detected_line}))
     console = CrewConsole(store=store, overlay_client=overlay_client)  # type: ignore[arg-type]

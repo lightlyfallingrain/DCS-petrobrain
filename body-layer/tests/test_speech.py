@@ -1,12 +1,21 @@
 """Tests for `belief.speech` -- `plans/bl5a-text-mode-crew-interaction/
 plan.md` Stage 2's `OutgoingSpeech`, the three body-written templates, and
 `route_event`'s gate ordering/pre-emption (bypass_gate-first) and
-auto-acknowledge behaviour."""
+auto-acknowledge behaviour. Also covers the `plans/overlay-speech-callouts/
+plan.md` addendum's shared `_contact_report_text` helper and the
+`CONTACT_DETECTED`/`CONTACT_REACQUIRED` full-callout format."""
 
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import dataclass
+
+import pytest
+
+from belief import enrichment as enrichment_module
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S
+from belief.enrichment import EnrichmentContext
 from belief.events import CONTACT_ATTENTION_CHANGED, Event
 from belief.speech import (
     UrgentCall,
@@ -17,9 +26,52 @@ from belief.speech import (
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
+_FAKE_CONN = sqlite3.connect(":memory:")
+
+
+@dataclass
+class _FakeInfo:
+    name: str | None = None
+    subtype: str | None = None
+    distance_m: float = 100.0
+    provenance: str = "osm"
+    confidence: str = "high"
+
+
+@dataclass
+class _FakeDescription:
+    nearest_settlement: _FakeInfo | None = None
+    inside_settlement: _FakeInfo | None = None
+    nearest_road: _FakeInfo | None = None
+    nearest_water: _FakeInfo | None = None
+    nearby_ridges: _FakeInfo | None = None
+    nearby_valleys: _FakeInfo | None = None
+
 
 def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
     return OwnshipState(t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0)
+
+
+def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
+    """BL-3 enrichment wired against fakes -- mirrors `test_console.py`'s
+    own `_enrichment_context` fixture (same fake shapes, same monkeypatch
+    targets) since this module has no shared test-fixture module to import
+    it from (per this project's per-test-file fixture convention)."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        ),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    return EnrichmentContext(
+        conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+    )
 
 
 def _observation(
@@ -115,8 +167,33 @@ def test_route_event_contact_detected_renders_id_and_classification() -> None:
     detected = next(e for e in events if e.kind == "CONTACT_DETECTED")
     speech = route_event(store, detected, now_sim=0.0)
     assert speech is not None
-    assert speech.text == f"{contact_id} BMP-2."
+    assert speech.text == f"{contact_id}: UNKNOWN BMP-2."
     assert speech.bypass_gate is False
+
+
+def test_route_event_contact_detected_includes_clock_range_when_enriched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, contact_id = _store_with_one_contact()
+    detected = next(e for e in store.events if e.kind == "CONTACT_DETECTED")
+    speech = route_event(
+        store, detected, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+    assert speech is not None
+    assert speech.text.startswith(f"{contact_id}: UNKNOWN BMP-2, ")
+    assert "o'clock" in speech.text
+    assert "Jableh" in speech.text
+
+
+def test_render_contact_report_includes_semantic_fragment_when_enriched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store, contact_id = _store_with_one_contact()
+    speech = render_contact_report(
+        store, contact_id, now_sim=0.0, enrichment=_enrichment_context(monkeypatch)
+    )
+    assert speech is not None
+    assert "Jableh" in speech.text
 
 
 def test_route_event_auto_acknowledges_a_rendered_event() -> None:
@@ -143,7 +220,7 @@ def test_route_event_contact_lost_and_reacquired() -> None:
     reacquired = next(e for e in store.events if e.kind == "CONTACT_REACQUIRED")
     speech = route_event(store, reacquired, now_sim=lost_at + 1.0)
     assert speech is not None
-    assert speech.text == f"{contact_id} reacquired."
+    assert speech.text == f"{contact_id}: UNKNOWN BMP-2."
 
 
 def test_route_event_attention_changed_has_no_template_and_is_not_acknowledged() -> (
