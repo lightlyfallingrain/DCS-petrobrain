@@ -475,3 +475,80 @@ element with no value; `av9K113::isGyroReady()` is native-only).
 **General lesson for live probes here: never conclude "no effect" from a test
 that had no room to produce one, and always sample the trajectory, not just the
 endpoints.**
+
+---
+
+## Live probe run 5 — 2026-09-11 10:24 — RESOLVED
+
+### The AI axis is a POSITION target, exactly linear
+
+Small commands on `3061` (AI azimuth), sampled every frame for 4 s each:
+
+| commanded | arg 874 | ratio | trace |
+|---|---|---|---|
+| +0.02 | +0.008800 | 0.440000 | flat from 0.25 s |
+| +0.05 | +0.022000 | 0.440000 | flat from 0.25 s |
+| +0.10 | +0.044000 | 0.440000 | flat from 0.25 s |
+| +0.25 | +0.110000 | 0.440000 | flat from 0.25 s |
+| −0.10 | −0.044000 | 0.440000 | flat from 0.25 s |
+
+Every trace settles inside 0.25 s and then holds dead flat for the remaining
+3.75 s. The ratio is **exactly 0.44 in all five cases**. That is a position
+target with a perfectly linear map — **not a rate.**
+
+### This reverses the run-4 correction, and explains it
+
+Run 4 reported ±0.5 reaching ~99 % of full deflection, which looked like a rate
+and prompted a correction of run 3's "positional" finding. **Both the original
+claim and the correction were partly wrong, for the same reason: the two
+channels are not the same control.**
+
+- Run 4's non-linear azimuth rows used **`3026`, the player axis.**
+- Run 5's linear rows use **`3061`, the AI axis.**
+- Run 4's own *AI* rows (`val +1 → +0.44`, `val −1 → −0.44`) fit the positional
+  law exactly — they were consistent with run 5 all along.
+
+So: **the AI axis (3060/3061) is positional and linear; the player axis
+(3025/3026) is not** (it accumulates/slews, which is what a human holding a
+slew input expects). Generalising one channel's behaviour to the other was the
+error.
+
+### Pointing the sight — the final form
+
+```lua
+-- azimuth, relative to the airframe centreline, stops at +/-60 deg
+GetDevice(7):SetCommand(3061, azimuth_deg / 60.0)
+
+-- read it back
+azimuth_deg = GetDevice(0):get_argument_value(874) * 136.36
+```
+
+| relation | formula |
+|---|---|
+| command → argument | `arg_874 = value * 0.44` |
+| command → degrees | `azimuth_deg = value * 60` |
+| argument → degrees | `azimuth_deg = arg_874 * 136.36` |
+
+**`look_at(bearing)` is a single write.** No closed loop, no integration, no
+rate limiting to manage — settling is under 0.25 s. This is materially simpler
+than the BL-6 plan assumed and simpler than either of this file's two earlier
+conclusions.
+
+Elevation: `3060` took `val +1 → arg +1.0`, consistent with the same positional
+law against the piecewise gauge (`-1 → -0.75`, `0 → 0`, `+1 → +1.0`).
+**Elevation limits in degrees remain the one unmeasured quantity** — worth a
+short follow-up sweep if elevation pointing is ever needed, but azimuth alone
+covers "look over there".
+
+**Caveat for the consumer:** the argument is the sight's position *relative to
+the airframe*, so converting a world bearing to a command needs aircraft
+heading. That is a body-layer concern, not an aircraft-layer one.
+
+### BL-6 status
+
+The milestone's blocking premise — "whether Petrovich's scan behavior can be
+influenced at all" — is answered. There is a working, calibrated effector for
+pointing the crew's optics, on the channel the AI itself uses, with a confirmed
+read-back for verifying where the sight actually is. What remains open is
+whether pointing the *sight* influences Petrovich's *detection*, which is a
+different question and not one this probe was built to answer.
