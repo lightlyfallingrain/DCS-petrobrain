@@ -86,54 +86,45 @@ def test_elevation_at_delegates_to_describe_position(
     assert calls == [("Syria", 10.0, 20.0)]
 
 
-def test_line_of_sight_clear_over_flat_terrain(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(geometry, "sample_grid", lambda conn, kind, x, z: 0.0)
+def test_line_of_sight_clear_delegates_to_world_model_primitive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`geometry.line_of_sight_clear` is a thin wrapper around `query.
+    line_of_sight.line_of_sight_clear` (`plans/world-model-los-
+    generalization/plan.md`) -- the LOS scenario coverage (flat terrain,
+    blocked by a ridge, ridge below the sightline, missing elevation) now
+    lives against that primitive directly in world-model's
+    `test_query_line_of_sight.py`. This test only checks the delegation:
+    `GeoPosition` -> `(x, z, alt_m)` tuple conversion, argument pass-through,
+    and the return value coming back unchanged -- mirroring how
+    `test_elevation_at_delegates_to_describe_position` above tests
+    `elevation_at`'s own delegation to `describe_position`."""
+    calls = []
+
+    def fake_wm_line_of_sight_clear(
+        conn: object,
+        theatre: str,
+        observer: tuple[float, float, float],
+        target: tuple[float, float, float],
+        *,
+        samples: int,
+    ) -> bool:
+        calls.append((theatre, observer, target, samples))
+        return False
+
+    monkeypatch.setattr(
+        geometry, "_wm_line_of_sight_clear", fake_wm_line_of_sight_clear
+    )
 
     observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
     target = GeoPosition(x=10000.0, z=0.0, alt_m=500.0)
 
-    assert geometry.line_of_sight_clear(_FAKE_CONN, "Syria", observer, target) is True
+    result = geometry.line_of_sight_clear(_FAKE_CONN, "Syria", observer, target)
 
-
-def test_line_of_sight_blocked_by_ridge_between_observer_and_target(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fake_sample_grid(conn: object, kind: str, x: float, z: float) -> float:
-        return 2000.0 if 4000.0 < x < 6000.0 else 0.0
-
-    monkeypatch.setattr(geometry, "sample_grid", fake_sample_grid)
-
-    observer = GeoPosition(x=0.0, z=0.0, alt_m=100.0)
-    target = GeoPosition(x=10000.0, z=0.0, alt_m=100.0)
-
-    assert geometry.line_of_sight_clear(_FAKE_CONN, "Syria", observer, target) is False
-
-
-def test_line_of_sight_clear_when_ridge_is_below_sightline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A hill exists but is well under the straight sightline between two
-    # high-altitude endpoints -- must not be treated as blocking.
-    def fake_sample_grid(conn: object, kind: str, x: float, z: float) -> float:
-        return 200.0 if 4000.0 < x < 6000.0 else 0.0
-
-    monkeypatch.setattr(geometry, "sample_grid", fake_sample_grid)
-
-    observer = GeoPosition(x=0.0, z=0.0, alt_m=3000.0)
-    target = GeoPosition(x=10000.0, z=0.0, alt_m=3000.0)
-
-    assert geometry.line_of_sight_clear(_FAKE_CONN, "Syria", observer, target) is True
-
-
-def test_line_of_sight_treats_missing_elevation_as_non_blocking(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(geometry, "sample_grid", lambda conn, kind, x, z: None)
-
-    observer = GeoPosition(x=0.0, z=0.0, alt_m=100.0)
-    target = GeoPosition(x=10000.0, z=0.0, alt_m=100.0)
-
-    assert geometry.line_of_sight_clear(_FAKE_CONN, "Syria", observer, target) is True
+    assert result is False
+    assert calls == [
+        ("Syria", (0.0, 0.0, 500.0), (10000.0, 0.0, 500.0), 20),
+    ]
 
 
 def test_project_terrain_aware_over_flat_terrain_matches_flat_projection(
