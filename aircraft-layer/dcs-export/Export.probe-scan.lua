@@ -143,28 +143,63 @@ local SLOT_ABBR = {wheel_text_center="C",wheel_text_up="U",wheel_text_right="R",
     wheel_text_down="D",wheel_text_left="L",wheel_text_far_up="FU",
     wheel_text_far_right="FR",wheel_text_far_down="FD",wheel_text_far_left="FL"}
 
+-- The centre slot carries TWO options separated by a SHORT dash divider:
+--     wheel_text_center
+--     SRCH BRST
+--     --------          <- 8 dashes: an intra-slot divider, NOT a separator
+--     SRCH FWD
+-- The element separator is a much longer dash run (~41). v4 matched "^%-%-%-"
+-- for both, so it kept "SRCH BRST" and silently DROPPED "SRCH FWD".
+-- Distinguish by length. Extra options land in vals2[slot] (the long-press one).
+local SEPARATOR_MIN_DASHES = 20
+local vals2 = {}
+
 local function wheel_slots()
     local s = tostring(try("li", list_indication, IND_WHEEL))
     if #s < 70 then return nil end
-    local vals, cur = {}, nil
+    local vals, cur, seen_divider = {}, nil, false
+    vals2 = {}
     for line in s:gmatch("[^\n]*") do
         local n = line:match("^(wheel_text_[a-z_]+)%s*$")
-        if n then cur = n ; vals[cur] = vals[cur] or ""
+        if n then
+            cur = n ; seen_divider = false
+            vals[cur] = vals[cur] or ""
         elseif cur then
-            if line:match("^%-%-%-") or line:match("^}") then cur = nil
+            local dashes = line:match("^(%-+)%s*$")
+            if dashes and #dashes >= SEPARATOR_MIN_DASHES then
+                cur = nil
+            elseif dashes then
+                seen_divider = true          -- intra-slot: what follows is option 2
+            elseif line:match("^}") then
+                cur = nil
             elseif line:match("%S") then
-                vals[cur] = (vals[cur] == "" and line or (vals[cur] .. " " .. line))
+                if seen_divider then
+                    vals2[cur] = (vals2[cur] == nil or vals2[cur] == "")
+                        and line or (vals2[cur] .. " " .. line)
+                else
+                    vals[cur] = (vals[cur] == "" and line or (vals[cur] .. " " .. line))
+                end
             end
         end
     end
     return vals
+end
+
+-- The centre slot's second (long-press) option, if any.
+local function centre_long_option()
+    wheel_slots()
+    return vals2["wheel_text_center"]
 end
 local function wheel_str()
     local v = wheel_slots()
     if v == nil then return "<closed>" end
     local out = {}
     for _, k in ipairs(SLOT_ORDER) do
-        if v[k] and v[k] ~= "" then out[#out+1] = SLOT_ABBR[k] .. "=" .. v[k] end
+        if v[k] and v[k] ~= "" then
+            local txt = v[k]
+            if vals2[k] and vals2[k] ~= "" then txt = txt .. " | " .. vals2[k] end
+            out[#out+1] = SLOT_ABBR[k] .. "=" .. txt
+        end
     end
     return #out > 0 and table.concat(out, "  ") or "<open, empty>"
 end
@@ -392,6 +427,93 @@ local function list_enumerate(t)
     return false
 end
 
+-- =================================================== CENTRE-KEY DISCOVERY
+-- The pilot reports the centre slot has TWO real actions -- SRCH BRST
+-- (boresight) and SRCH FWD (forward) -- reached by a middle click, short and
+-- long. But the AI_Menu mouse profile is EMPTY (only an empty axisCommands
+-- table), so no keybind exposes it; DCS must handle that click natively.
+--
+-- We cannot synthesise a mouse click, so the question is whether some DEVICE
+-- COMMAND does the same thing. Three helperai commands are declared but bound
+-- to nothing anywhere in Input/: Deprecated2 (3007), SelectTarget (3009) and
+-- UnselectTarget (3010). ShowMenu long-pressed is a fourth possibility.
+--
+-- This phase tries each and reports which, if any, changes Petrovich's state
+-- the way a search command would (WAITING/SEARCHING). It is pure discovery --
+-- if none works, the centre options are simply not reachable from code and the
+-- design must use the directional searches instead, which are proven.
+local CENTRE_TRIES = {
+    {"ShowMenu LONG",    CMD.ShowMenu, LONG_HOLD},
+    {"SelectTarget",     3009,         SHORT_HOLD},
+    {"SelectTarget LONG",3009,         LONG_HOLD},
+    {"Deprecated2",      3007,         SHORT_HOLD},
+    {"UnselectTarget",   3010,         SHORT_HOLD},
+}
+
+local C = {phase="idle", t=0, i=0, before=nil, winners={}}
+
+local function centre_try(t)
+    if C.phase == "idle" then
+        log("")
+        log("========== CENTRE-KEY DISCOVERY ==========")
+        log("  centre offers: " .. tostring((wheel_slots() or {})["wheel_text_center"])
+            .. "  |  " .. tostring(centre_long_option()))
+        C.i = 0 ; C.phase = "next" ; C.t = t
+
+    elseif C.phase == "next" then
+        if t - C.t < 1.5 then return false end
+        C.i = C.i + 1
+        local try_ = CENTRE_TRIES[C.i]
+        if try_ == nil then
+            log("  --- centre discovery done ---")
+            if #C.winners == 0 then
+                log("  NO command reproduced a centre action.")
+                log("  The centre options are likely mouse-only; use the")
+                log("  directional searches, which are proven to work.")
+            else
+                for _, w in ipairs(C.winners) do log("  CANDIDATE: " .. w) end
+            end
+            C.phase = "done"
+            return true
+        end
+        if page_kind() ~= "search" then
+            log("  not on search page; skipping centre discovery")
+            C.phase = "done" ; return true
+        end
+        C.before = petro_state()
+        log(string.format("  [%d/%d] %s (cmd %d, %s)", C.i, #CENTRE_TRIES,
+            try_[1], try_[2], (try_[3] >= LONG_HOLD) and "LONG" or "short"))
+        dev(DEV_HAI, "performClickableAction", try_[2], 1)
+        C.phase = "hold" ; C.t = t
+
+    elseif C.phase == "hold" then
+        local try_ = CENTRE_TRIES[C.i]
+        if t - C.t > try_[3] then
+            dev(DEV_HAI, "performClickableAction", try_[2], 0)
+            C.phase = "settle" ; C.t = t
+        end
+
+    elseif C.phase == "settle" then
+        if t - C.t > 1.5 then
+            local after = petro_state()
+            local changed = (after ~= C.before)
+            log(string.format("        state %s -> %s   %s", tostring(C.before),
+                tostring(after), changed and "<== CHANGED" or ""))
+            log("        wheel: " .. wheel_str())
+            if changed then
+                C.winners[#C.winners+1] = CENTRE_TRIES[C.i][1] ..
+                    string.format(" (cmd %d) : %s -> %s", CENTRE_TRIES[C.i][2],
+                                  tostring(C.before), tostring(after))
+            end
+            C.phase = "next" ; C.t = t
+        end
+
+    elseif C.phase == "done" then
+        return true
+    end
+    return false
+end
+
 -- ============================================================== PART B
 local PHASE_S = 25.0
 local SLOT_SEARCH_LOS  = "wheel_text_far_down"   -- SRCH 9K113 LOS  (long press)
@@ -445,6 +567,12 @@ local function part_b(t)
             return
         end
         log("  search page: " .. wheel_str())
+        B.phase = "centre" ; B.t = t
+
+    elseif B.phase == "centre" then
+        if C.phase ~= "done" then
+            if not centre_try(t) then return end
+        end
         B.phase = "observ" ; B.t = t
 
     elseif B.phase == "observ" then
