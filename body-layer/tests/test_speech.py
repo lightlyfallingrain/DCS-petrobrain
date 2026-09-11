@@ -173,7 +173,7 @@ def test_render_contact_report_maps_default_op_class_to_display_word() -> None:
     contact_id = store.contacts[0].id
     speech = render_contact_report(store, contact_id, now_sim=0.0)
     assert speech is not None
-    assert speech.text == "unit."
+    assert speech.text == "group."
 
 
 def test_route_event_urgent_call_bypasses_the_gate() -> None:
