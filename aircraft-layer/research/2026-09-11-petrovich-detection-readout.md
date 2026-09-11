@@ -483,3 +483,44 @@ meaningful when the search page is up.
   attempting the pinned round.
 - Read state **only when on the search page**.
 - Avoid the centre slot entirely until its access method is known.
+
+### The centre IS bindable — I was grepping the wrong profile
+
+**`helperai_commands.Select_or_fireEXT` (3015) is labelled "AI Wheel - Center"**,
+bound in `Input/Mi_24P_op/` and `Input/Mi_24P_pilot/`. Earlier probes searched
+only `Input/Mi_24P_AI_Menu/`, which binds just `ShowMenu` and the four
+directions — so the centre looked unreachable when it never was. Scoping a
+search to the obvious-looking profile hid a real capability for several
+iterations.
+
+That same mistake hid the rest of Petrovich's command vocabulary. With the
+labels DCS actually shows in its key-binding list:
+
+| id | command | DCS binding label |
+|---|---|---|
+| 3015 | `Select_or_fireEXT` | **AI Wheel - Center** |
+| 3020 | `DesignateAttackPoint` | **Designate custom AI attack point** |
+| 3017 | `LineUp_EXT` | **Turn to sight heading** |
+| 3018 | `UTurn_EXT` | Evasion turn (180 degrees) |
+| 3008 | `MainWeapSwitch` | Prepare Weapons Systems |
+| 3016 | `ShootIn_EXT` | ATGM launch align |
+| 3021 | `FixPN` | Fix Sight Gyro |
+| 3014 | `HeliControlEXT` | Request Aircraft Control |
+| 3019 | `CycleMissile_EXT` | Cycle Missile Type |
+| 3001-3005 | `ShowMenu`/`Up`/`Down`/`Left`/`Right` | menu navigation |
+| 3006 | `ToggleSubtitles_EXT` | Toggle AI Subtitles ON/OFF |
+
+Two of these matter beyond the wheel:
+
+- **`DesignateAttackPoint` (3020) is "Designate custom AI attack point"** — a
+  direct, labelled, bound command, not the speculative lead it was treated as
+  on 2026-09-10. Combined with `scan_rad_around_point = 2500`, it remains the
+  strongest candidate for a point-designated scan.
+- **`LineUp_EXT` (3017) is "Turn to sight heading"** — it commands the *pilot*
+  to turn the aircraft onto the sight line. Since we can place the sight line
+  precisely, this is a latent "fly toward that bearing" primitive, well beyond
+  BL-6's scope but worth recording.
+
+This also finally retires the 2026-09-11 claim that Petrovich's 21 commands
+contain "no scan command". They contain a labelled attack-point designation, a
+sight-heading turn, and a centre wheel action reaching two search modes.

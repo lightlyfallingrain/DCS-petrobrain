@@ -97,7 +97,14 @@ local function safe_index(o, k)
 end
 
 local DEV_MAIN, DEV_SIGHT, DEV_HAI = 0, 7, 30
-local CMD = { ShowMenu = 3001, Right = 3002, Left = 3003, Up = 3004, Down = 3005 }
+-- helperai_commands, with the labels DCS shows in its key-binding list.
+-- Note these live in the Mi_24P_op / Mi_24P_pilot profiles, NOT in
+-- Input/Mi_24P_AI_Menu/ -- searching only the AI_Menu profile is what hid
+-- the centre command for several probe iterations.
+local CMD = {
+    ShowMenu = 3001, Right = 3002, Left = 3003, Up = 3004, Down = 3005,
+    Centre   = 3015,   -- Select_or_fireEXT = "AI Wheel - Center"
+}
 local SIGHT_AI_AZ, ARG_AZ = 3061, 874
 local IND_HAI, IND_WHEEL = 6, 10
 local SHORT_HOLD, LONG_HOLD = 0.20, 0.80
@@ -127,6 +134,8 @@ end
 -- slot name -> {direction command, hold time}. Near slots are a short press of
 -- that direction, far slots a long press of the same key.
 local SLOT_KEY = {
+    -- the centre slot carries two options: short press and long press
+    wheel_text_center    = {CMD.Centre, SHORT_HOLD},
     wheel_text_up        = {CMD.Up,    SHORT_HOLD},
     wheel_text_down      = {CMD.Down,  SHORT_HOLD},
     wheel_text_left      = {CMD.Left,  SHORT_HOLD},
@@ -427,84 +436,67 @@ local function list_enumerate(t)
     return false
 end
 
--- =================================================== CENTRE-KEY DISCOVERY
--- The pilot reports the centre slot has TWO real actions -- SRCH BRST
--- (boresight) and SRCH FWD (forward) -- reached by a middle click, short and
--- long. But the AI_Menu mouse profile is EMPTY (only an empty axisCommands
--- table), so no keybind exposes it; DCS must handle that click natively.
+-- ======================================================= CENTRE-SLOT TEST
+-- The centre button IS bindable and we had simply been looking in the wrong
+-- profile: helperai_commands.Select_or_fireEXT (3015) is labelled
+-- "AI Wheel - Center" in Mi_24P_op and Mi_24P_pilot. Earlier probes grepped
+-- only Input/Mi_24P_AI_Menu/, which binds just ShowMenu and the four
+-- directions, so the centre looked unreachable.
 --
--- We cannot synthesise a mouse click, so the question is whether some DEVICE
--- COMMAND does the same thing. Three helperai commands are declared but bound
--- to nothing anywhere in Input/: Deprecated2 (3007), SelectTarget (3009) and
--- UnselectTarget (3010). ShowMenu long-pressed is a fourth possibility.
---
--- This phase tries each and reports which, if any, changes Petrovich's state
--- the way a search command would (WAITING/SEARCHING). It is pure discovery --
--- if none works, the centre options are simply not reachable from code and the
--- design must use the directional searches instead, which are proven.
+-- The centre slot shows two options split by a short divider, e.g.
+-- "SRCH BRST | SRCH FWD". Short press should fire one, long press the other;
+-- which is which is unknown, so this tests both and reports what each did.
+local C = {phase="idle", t=0, i=0, before=nil, results={}}
 local CENTRE_TRIES = {
-    {"ShowMenu LONG",    CMD.ShowMenu, LONG_HOLD},
-    {"SelectTarget",     3009,         SHORT_HOLD},
-    {"SelectTarget LONG",3009,         LONG_HOLD},
-    {"Deprecated2",      3007,         SHORT_HOLD},
-    {"UnselectTarget",   3010,         SHORT_HOLD},
+    {"centre SHORT", SHORT_HOLD},
+    {"centre LONG",  LONG_HOLD},
 }
-
-local C = {phase="idle", t=0, i=0, before=nil, winners={}}
 
 local function centre_try(t)
     if C.phase == "idle" then
+        local v = wheel_slots() or {}
         log("")
-        log("========== CENTRE-KEY DISCOVERY ==========")
-        log("  centre offers: " .. tostring((wheel_slots() or {})["wheel_text_center"])
-            .. "  |  " .. tostring(centre_long_option()))
+        log("========== CENTRE SLOT TEST (cmd 3015, AI Wheel - Center) ==========")
+        log(string.format("  centre offers: %q  |  %q",
+            tostring(v["wheel_text_center"]), tostring(centre_long_option())))
         C.i = 0 ; C.phase = "next" ; C.t = t
 
     elseif C.phase == "next" then
-        if t - C.t < 1.5 then return false end
+        if t - C.t < 2.0 then return false end
         C.i = C.i + 1
         local try_ = CENTRE_TRIES[C.i]
         if try_ == nil then
-            log("  --- centre discovery done ---")
-            if #C.winners == 0 then
-                log("  NO command reproduced a centre action.")
-                log("  The centre options are likely mouse-only; use the")
-                log("  directional searches, which are proven to work.")
-            else
-                for _, w in ipairs(C.winners) do log("  CANDIDATE: " .. w) end
-            end
+            log("  --- centre results ---")
+            for _, r in ipairs(C.results) do log("    " .. r) end
             C.phase = "done"
             return true
         end
         if page_kind() ~= "search" then
-            log("  not on search page; skipping centre discovery")
+            log("  not on search page; skipping centre test")
             C.phase = "done" ; return true
         end
         C.before = petro_state()
-        log(string.format("  [%d/%d] %s (cmd %d, %s)", C.i, #CENTRE_TRIES,
-            try_[1], try_[2], (try_[3] >= LONG_HOLD) and "LONG" or "short"))
-        dev(DEV_HAI, "performClickableAction", try_[2], 1)
+        log(string.format("  [%d/%d] %s   (state before: %s)",
+            C.i, #CENTRE_TRIES, try_[1], tostring(C.before)))
+        dev(DEV_HAI, "performClickableAction", CMD.Centre, 1)
         C.phase = "hold" ; C.t = t
 
     elseif C.phase == "hold" then
-        local try_ = CENTRE_TRIES[C.i]
-        if t - C.t > try_[3] then
-            dev(DEV_HAI, "performClickableAction", try_[2], 0)
+        if t - C.t > CENTRE_TRIES[C.i][2] then
+            dev(DEV_HAI, "performClickableAction", CMD.Centre, 0)
             C.phase = "settle" ; C.t = t
         end
 
     elseif C.phase == "settle" then
-        if t - C.t > 1.5 then
+        if t - C.t > 2.0 then
             local after = petro_state()
             local changed = (after ~= C.before)
             log(string.format("        state %s -> %s   %s", tostring(C.before),
-                tostring(after), changed and "<== CHANGED" or ""))
+                tostring(after), changed and "<== CHANGED" or "(no change)"))
             log("        wheel: " .. wheel_str())
-            if changed then
-                C.winners[#C.winners+1] = CENTRE_TRIES[C.i][1] ..
-                    string.format(" (cmd %d) : %s -> %s", CENTRE_TRIES[C.i][2],
-                                  tostring(C.before), tostring(after))
-            end
+            C.results[#C.results+1] = string.format("%s : %s -> %s%s",
+                CENTRE_TRIES[C.i][1], tostring(C.before), tostring(after),
+                changed and "" or "   (no effect)")
             C.phase = "next" ; C.t = t
         end
 
