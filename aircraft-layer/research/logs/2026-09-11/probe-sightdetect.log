@@ -76,3 +76,85 @@
 13:17:28 
 13:17:28 --- bearing +0 deg ---
 13:17:42 sightdetect probe: stopped.
+13:25:26 
+13:25:26 #########################################################
+13:25:26 SIGHT-DETECTION PROBE v3 -- FREE vs PINNED
+13:25:26   does holding the sight stop Petrovich finding anything?
+13:25:26 #########################################################
+13:25:30   20s grace -- get level and steady
+13:25:51   opening the AI wheel (ShowMenu)
+13:25:53   wheel open, state=OBSERV. OFF
+13:25:53   starting a forward search (centre LONG = SRCH FWD)
+13:25:55   search running, state=WAITING
+13:25:55   waiting 20s for gyro alignment
+13:26:15 
+13:26:15   baseline: state=SEARCHING az=-15.6 el=0.024214796721935 list=nil
+13:26:15 
+13:26:15 ========== round 1: FREE ==========
+13:26:15     start: state=SEARCHING az=-15.3 el=0.016060896217823 list=nil
+13:26:15     not touching the sight -- he aims it himself
+13:26:41 sightdetect probe: stopped.
+13:26:47 
+13:26:47 #########################################################
+13:26:47 SIGHT-DETECTION PROBE v3 -- FREE vs PINNED
+13:26:47   does holding the sight stop Petrovich finding anything?
+13:26:47 #########################################################
+13:26:51   20s grace -- get level and steady
+13:27:11   opening the AI wheel (ShowMenu)
+13:27:13   wheel open, state=OBSERV. OFF
+13:27:13   starting a forward search (centre LONG = SRCH FWD)
+13:27:16   search running, state=WAITING
+13:27:16   waiting 20s for gyro alignment
+13:27:36 
+13:27:36   baseline: state=SEARCHING az=-17.1 el=0.11543284356594 list=nil
+13:27:36 
+13:27:36 ========== round 1: FREE ==========
+13:27:36     start: state=SEARCHING az=-16.7 el=0.1087883412838 list=nil
+13:27:36     not touching the sight -- he aims it himself
+13:27:45 sightdetect probe: stopped.
+13:27:51 
+13:27:51 #########################################################
+13:27:51 SIGHT-DETECTION PROBE v3 -- FREE vs PINNED
+13:27:51   does holding the sight stop Petrovich finding anything?
+13:27:51 #########################################################
+13:27:55   20s grace -- get level and steady
+13:28:16   opening the AI wheel (ShowMenu)
+13:28:18   wheel open, state=OBSERV. OFF
+13:28:18   starting a forward search (centre LONG = SRCH FWD)
+13:28:20   search running, state=WAITING
+13:28:20   waiting 20s for gyro alignment
+13:28:40 
+13:28:40   baseline: state=SEARCHING az=-15.3 el=-0.006579477339983 list=nil
+13:28:40 
+13:28:40 ========== round 1: FREE ==========
+13:28:40     start: state=SEARCHING az=-16.0 el=-0.011901536956429 list=nil
+13:28:40     not touching the sight -- he aims it himself
+13:29:05     end  : state=SEARCHING az=+17.0 el=-0.068364828824997  NO DETECTIONS
+13:29:05 
+13:29:05 ========== round 2: PINNED ==========
+13:29:05     start: state=SEARCHING az=+17.3 el=-0.077328234910965 list=nil
+13:29:05     pinning az=+0 deg, el_cmd=-0.40
+13:29:30     end  : state=SEARCHING az=+0.0 el=-0.30000001192093  NO DETECTIONS
+13:29:30 
+13:29:30 ========== round 3: FREE ==========
+13:29:30     start: state=SEARCHING az=+0.0 el=-0.30000001192093 list=nil
+13:29:30     not touching the sight -- he aims it himself
+13:29:55     end  : state=SEARCHING az=-13.0 el=-0.057185109704733  NO DETECTIONS
+13:29:55 
+13:29:55 ========== round 4: PINNED ==========
+13:29:55     start: state=SEARCHING az=-12.7 el=-0.055918995290995 list=nil
+13:29:55     pinning az=+0 deg, el_cmd=-0.40
+13:30:20     end  : state=SEARCHING az=+0.0 el=-0.30000001192093  NO DETECTIONS
+13:30:20 
+13:30:20 ========== round 5: FREE ==========
+13:30:20     start: state=SEARCHING az=+0.0 el=-0.30000001192093 list=nil
+13:30:20     not touching the sight -- he aims it himself
+13:30:22   ~ t=146 contacts: BMD-1, BTR-80, T-72B  (state=NEXT TGT az=+2.7 el=0.17839914560318)
+13:30:22     +2s DETECTED: BMD-1, BTR-80, T-72B   (az=+2.7 el=0.17839914560318 state=NEXT TGT)
+13:30:45     end  : state=NEXT TGT az=-0.7 el=-0.0018069080542773  (detections above)
+13:30:45 
+13:30:45 ========== round 6: PINNED ==========
+13:30:45     start: state=NEXT TGT az=-0.7 el=-0.0020267693325877 list=BMD-1, BTR-80, T-72B
+13:30:45     pinning az=+0 deg, el_cmd=-0.40
+13:30:45     +0s DETECTED: BMD-1, BTR-80, T-72B   (az=-0.7 el=-0.00205796235241 state=NEXT TGT)
+13:31:13 sightdetect probe: stopped.

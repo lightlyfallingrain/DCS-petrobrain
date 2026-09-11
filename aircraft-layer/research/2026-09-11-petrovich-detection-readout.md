@@ -1055,3 +1055,78 @@ If the sweep produces detections at the bearings we choose, that is
 `scan_area(bearing)` — search once, then aim. If he takes the sight back
 instead, the directed scan rests on `DesignateAttackPoint` (3020), still
 untested under good conditions.
+
+---
+
+## Sight-detection run 3 (FREE vs PINNED) — detection achieved, test still confounded
+
+### Detection happened, and we now know what his search looks like
+
+```
+baseline            state=SEARCHING az=-15.3 el=-0.007
+round 1 FREE        az -16.0 -> +17.0   el -0.012 -> -0.068    no detections
+round 2 PINNED      az -> +0.0          el -> -0.300           no detections
+round 3 FREE        az +0.0 -> -13.0    el -0.300 -> -0.057    no detections
+round 4 PINNED      az -> +0.0          el -> -0.300           no detections
+round 5 FREE        +2s NEW: BMD-1, BTR-80, T-72B  (az=+2.7 el=+0.178)
+round 6 PINNED      (inherited the same list, not a new detection)
+```
+
+**He sweeps azimuth roughly ±17° on his own during `SRCH FWD`**, and his
+elevation stays essentially level — arg 876 in **−0.07 … +0.18** across every
+FREE round, and **+0.178 at the moment of detection**.
+
+The detection in round 5 followed the pilot commanding `SRCH PILOT LOS` at the
+targets shortly before, so it was his direction that produced it, not ours. It
+does confirm the whole chain works: search → he slews → contacts appear with
+classification (`BMD-1, BTR-80, T-72B`).
+
+### Why PINNED proves nothing yet — my error, twice over
+
+- **I commanded elevation `-0.40`, which settled at arg `-0.300`.** He never
+  goes below about `-0.07`. So the pinned sight was roughly **four times more
+  depressed than he ever looks**, pointed at ground close in with nothing on
+  it. The pilot saw exactly this: "crosshair was slewed to places where there
+  was nothing to detect."
+- **I pinned a fixed `+0°` azimuth**, which was simply an empty bearing. "PINNED
+  found nothing" therefore says nothing about suppression — it says we aimed at
+  nothing.
+
+So the suppression question is **still open**. The v3 design could not have
+answered it.
+
+### Attitude: the numbers are airframe-relative
+
+**Pilot:** helicopter attitude affects these numbers — check relative to the
+horizon, not to aircraft pitch.
+
+This is right and was not accounted for. Args 874/876 are the sight position
+relative to the **airframe**, so the same argument points somewhere different in
+the world as the helicopter pitches and rolls. A sight elevation that reads
+"level" in arg 876 is nose-high or nose-low in the world by exactly the aircraft
+pitch — very likely why the sweep was seen "scanning too high and too low" while
+the argument itself barely moved.
+
+Horizon-relative elevation ≈ `arg 876` + aircraft pitch. The probe now logs
+`LoGetADIPitchBankYaw()` alongside every sight reading so the two parts are
+visible. (Elevation is still uncalibrated in degrees — its limits remain
+unmeasured — so the log reports the parts rather than pretending to one angle.)
+
+**This matters well beyond the probe:** any `look_at(world bearing)` has to
+compose the sight argument with aircraft heading *and* pitch/bank. The reference
+doc already noted heading for azimuth; pitch for elevation is the same problem
+and was missed.
+
+### v4 — the controlled comparison
+
+- **Never command elevation.** Targets sit at much the same vertical level, and
+  he manages elevation competently; taking only azimuth is both sufficient and
+  the pilot's call.
+- **Pin adaptively**: remember the azimuth at which he *actually found*
+  something in a FREE round, and pin **there** in the next PINNED round. Same
+  bearing, same targets, only difference is who holds the sight — which is the
+  comparison v3 should have made.
+- **Per-round baseline**: contacts persist between rounds, so round 6 "detected"
+  only by inheriting round 5's list. Only items absent from the round's own
+  starting list now count.
+- **Log attitude** with every sight reading.

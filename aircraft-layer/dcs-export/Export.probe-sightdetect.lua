@@ -40,10 +40,17 @@ HOW TO FLY IT
 
 local DWELL_S   = 25.0     -- how long each condition runs
 local ROUNDS    = 6        -- alternating FREE / PINNED
-local PIN_AZ    = 0.0      -- bearing to pin at, degrees, + is right
-local PIN_EL    = -0.4     -- elevation COMMAND value on the AI axis (3060).
-                           -- Negative should be depressed; v2 never commanded
-                           -- elevation at all, which is why it sat too high.
+-- v4: DO NOT command elevation at all (pilot's call, and the v3 data agrees).
+-- During his own search his elevation sits in arg 876 ~= -0.07 .. +0.18, i.e.
+-- essentially level. v3 commanded el_cmd=-0.40, which settled at arg -0.30 --
+-- roughly 4x more depressed than he ever uses, i.e. pointed at ground close in
+-- with nothing on it. Targets are all at much the same vertical level, so
+-- elevation is his to manage; we only take azimuth.
+--
+-- And the pin bearing is now ADAPTIVE: pin to the azimuth at which he last
+-- actually found something. v3 pinned a fixed +0 deg, which was simply an
+-- empty bearing, so "PINNED found nothing" said nothing about suppression.
+local PIN_AZ_DEFAULT = 0.0
 local START_DELAY, GYRO_WAIT = 20.0, 20.0
 
 local LOG_PATH = lfs.writedir() .. "Logs\\aircraft_layer_probe_sightdetect.log"
@@ -143,10 +150,59 @@ local function press_centre(hold, t) -- caller drives the release via the phase 
 end
 
 -- ============================================================== driver
-local P = {phase="grace", t=0, i=0, pinned=true, seen={}, results={}}
+local P = {phase="grace", t=0, i=0, pinned=true, seen={}, results={},
+           pin_az = PIN_AZ_DEFAULT, base = {}}
+
+-- Contacts persist across rounds, so a PINNED round inherits whatever the
+-- previous FREE round found and would look like a detection. Count only items
+-- absent from THIS round's starting list.
+local function to_set(csv)
+    local set = {}
+    if csv == nil then return set end
+    for item in csv:gmatch("[^,]+") do
+        item = item:gsub("^%s+", ""):gsub("%s+$", "")
+        if item ~= "" then set[item] = true end
+    end
+    return set
+end
+local function novel_against(csv, base)
+    if csv == nil then return nil end
+    local out = {}
+    for item in csv:gmatch("[^,]+") do
+        item = item:gsub("^%s+", ""):gsub("%s+$", "")
+        if item ~= "" and not base[item] then out[#out+1] = item end
+    end
+    if #out == 0 then return nil end
+    return table.concat(out, ", ")
+end
 local t0, last_c = nil, nil
 
 local function el_arg() return tostring(read_arg(ARG_EL)) end
+
+-- Args 874/876 are the sight position relative to the AIRFRAME, so the
+-- helicopter's own attitude changes where that actually points in the world
+-- (pilot, 2026-09-11). A sight elevation that looks "level" in arg 876 is
+-- nose-high or nose-low in the world by exactly the aircraft pitch -- which is
+-- very likely why v3's sweep was seen "scanning too high and too low" while the
+-- argument barely moved. Log attitude alongside so the numbers are readable
+-- against the horizon rather than against the airframe.
+local function attitude()
+    local p, b, y = try("adi", LoGetADIPitchBankYaw)
+    if type(p) ~= "number" then return "pitch=? bank=?", nil end
+    local deg = 180.0 / math.pi
+    return string.format("pitch=%+.1f bank=%+.1f", p * deg, (b or 0) * deg), p * deg
+end
+
+-- Sight elevation relative to the HORIZON, as far as we can state it: the
+-- gauge value plus aircraft pitch. Elevation is not calibrated to degrees (its
+-- limits are still unmeasured), so this reports the two parts rather than
+-- pretending to a single angle.
+local function sight_world_el()
+    local a = read_arg(ARG_EL)
+    local att, pitch = attitude()
+    if type(a) ~= "number" or pitch == nil then return "el=? " .. att end
+    return string.format("el_arg=%+.3f %s (horizon-relative = arg + pitch)", a, att)
+end
 
 function LuaExportStart()
     log("")
@@ -170,8 +226,8 @@ function LuaExportAfterNextFrame()
     local c = contacts()
     if c ~= last_c then
         last_c = c
-        log(string.format("  ~ t=%.0f contacts: %s  (state=%s az=%s el=%s)",
-            t, tostring(c), petro_state(), az_deg(), el_arg()))
+        log(string.format("  ~ t=%.0f contacts: %s  (state=%s az=%s %s)",
+            t, tostring(c), petro_state(), az_deg(), sight_world_el()))
     end
 
     if P.phase == "grace" then
@@ -225,7 +281,7 @@ function LuaExportAfterNextFrame()
         if t - P.t > GYRO_WAIT then
             log("")
             log("  baseline: state=" .. petro_state() .. " az=" .. az_deg()
-                .. " el=" .. el_arg() .. " list=" .. tostring(contacts()))
+                .. " " .. sight_world_el() .. " list=" .. tostring(contacts()))
             P.phase = "next" ; P.t = t
         end
 
@@ -234,13 +290,14 @@ function LuaExportAfterNextFrame()
         if P.i > ROUNDS then P.phase = "report" ; return end
         P.pinned = not P.pinned
         P.seen = {}
+        P.base = to_set(contacts())          -- this round's starting list
         log("")
         log(string.format("========== round %d: %s ==========",
             P.i, P.pinned and "PINNED" or "FREE"))
-        log(string.format("    start: state=%s az=%s el=%s list=%s",
-            petro_state(), az_deg(), el_arg(), tostring(contacts())))
+        log(string.format("    start: state=%s az=%s %s list=%s",
+            petro_state(), az_deg(), sight_world_el(), tostring(contacts())))
         if P.pinned then
-            log(string.format("    pinning az=%+.0f deg, el_cmd=%+.2f", PIN_AZ, PIN_EL))
+            log(string.format("    pinning az=%+.1f deg (elevation left to him)", P.pin_az))
         else
             log("    not touching the sight -- he aims it himself")
         end
@@ -248,21 +305,32 @@ function LuaExportAfterNextFrame()
 
     elseif P.phase == "dwell" then
         if P.pinned then
-            dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, PIN_AZ / 60.0)
-            dev(DEV_SIGHT, "SetCommand", SIGHT_AI_EL, PIN_EL)
+            -- azimuth only; elevation stays his
+            dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, P.pin_az / 60.0)
         end
         local cur = contacts()
-        if cur ~= nil and P.seen[cur] == nil then
-            P.seen[cur] = true
-            log(string.format("    +%.0fs DETECTED: %s   (az=%s el=%s state=%s)",
-                t - P.t, cur, az_deg(), el_arg(), petro_state()))
+        local novel = novel_against(cur, P.base)
+        if novel ~= nil and P.seen[novel] == nil then
+            P.seen[novel] = true
+            log(string.format("    +%.0fs NEW: %s   (az=%s %s state=%s)",
+                t - P.t, novel, az_deg(), sight_world_el(), petro_state()))
             P.results[#P.results+1] = string.format("%s round %d: %s",
-                P.pinned and "PINNED" or "FREE", P.i, cur)
+                P.pinned and "PINNED" or "FREE", P.i, novel)
+            if not P.pinned then
+                -- remember WHERE he found it, and pin there next time. That is
+                -- the controlled comparison: same bearing, only difference is
+                -- whether he or we are holding the sight.
+                local a = tonumber(az_deg())
+                if a then
+                    P.pin_az = a
+                    log(string.format("    -> next PINNED round will hold az=%+.1f", a))
+                end
+            end
         end
         if t - P.t > DWELL_S then
-            log(string.format("    end  : state=%s az=%s el=%s  %s",
-                petro_state(), az_deg(), el_arg(),
-                (next(P.seen) == nil) and "NO DETECTIONS" or "(detections above)"))
+            log(string.format("    end  : state=%s az=%s %s  %s",
+                petro_state(), az_deg(), sight_world_el(),
+                (next(P.seen) == nil) and "NO NEW DETECTIONS" or "(new detections above)"))
             P.phase = "next" ; P.t = t
         end
 
