@@ -1,6 +1,6 @@
 ---
 name: reference-pydcs-prior-art
-description: pydcs GitHub repo is the strongest known prior-art source for DCS per-theatre coordinate/projection data
+description: pydcs GitHub repo is the strongest known prior-art source for DCS per-theatre coordinate/projection data AND for .miz/mission-Lua parsing
 metadata:
   type: reference
 ---
@@ -16,6 +16,15 @@ Caution: pydcs's airbase "ground truth" lat/lon values are themselves derived fr
 independent real-world database — do not treat pydcs internal self-consistency as external validation. Always
 pair with an independently-published real-world coordinate (e.g. an airport's published ARP) for genuine
 control-point validation. See [[project_syria_projection]].
+
+**Second confirmed use (2026-09-12, mission-interpreter recon):** pydcs is also the strongest available prior
+art for `.miz`/mission-table parsing. `dcs/mission.py` reads `mission`, `options`, `warehouses`, and
+`l10n/DEFAULT/dictionary` from the zip; `dcs/lua/parse.py` + `dcs/lua/serialize.py` is a hand-written
+recursive-descent Lua-table parser (no lupa/slpp dependency) — the de facto community-standard approach
+(dcs-liberation builds on pydcs rather than rolling its own). `dcs/unitgroup.py` exposes `lateActivation`,
+`hidden`, `hiddenOnPlanner`, `hiddenOnMFD` as real structural fields — directly useful for Mission
+Interpreter's "filter author-only knowledge" requirement. See
+`mission-interpreter/research/miz_file_structure.md` for full findings.
 
 GitHub raw file fetches worked fine via WebFetch (raw.githubusercontent.com); GitHub repo root page and
 directory listings needed api.github.com/repos/.../contents/<path> instead of the human-facing github.com page
