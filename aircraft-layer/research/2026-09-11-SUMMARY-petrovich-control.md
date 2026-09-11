@@ -160,16 +160,27 @@ several iterations):
 So we can aim his optics precisely and read everything he sees, but we cannot
 yet tell him **to search a bearing we choose**.
 
-**Two open routes, in priority order:**
+**Both routes were tested, and both are closed.**
 
-1. **Does aiming the sight itself drive detection?** If slewing onto an unlisted
-   target adds it to the list, `scan_area(bearing)` is one `SetCommand` plus a
-   list read. **Probe written and deployed:
-   `Export.probe-sightdetect.lua`; result pending.**
-2. **`DesignateAttackPoint` (3020)** — a real labelled command
-   ("Designate custom AI attack point"), and `HelperAI.lua` defines
-   `scan_rad_around_point = 2500`. Never tested under good conditions. This is
-   the fallback if (1) fails.
+1. **Aiming the sight does not drive detection.** Five flights. The sight goes
+   exactly where commanded, with or without Petrovich searching, and nothing
+   looks through it on our behalf. We move the glass; no one looks.
+2. **`DesignateAttackPoint` does not aim him.** Tested alongside the three
+   commands bound to nothing (`Deprecated2` 3007, `SelectTarget` 3009,
+   `UnselectTarget` 3010). None left the sight near our aim; none produced
+   detections. They are not no-ops — 3020 *stops* a search, 3009 starts one and
+   drives the sight to both limits, 3010 turns observation off — they simply do
+   not mean "look here".
+
+**A third route was identified and deliberately rejected:** the player's view is
+readable and writable (`LoGetCameraPosition` / `LoSetCameraPosition`), so
+`SRCH PILOT LOS` could be aimed by moving the pilot's head from code. Rejected
+on design grounds — puppeting the human's eyes to manufacture Petrovich's
+perception is the opposite of what this project is for. See the detection note.
+
+**So there is currently no way to make Petrovich search a bearing we choose.**
+What we *can* do is read everything he perceives, know his state, aim his optics,
+and trigger his own searches (`SRCH FWD`, `SRCH BRST`) — just not direct them.
 
 ---
 
