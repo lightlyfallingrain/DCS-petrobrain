@@ -154,6 +154,28 @@ def test_render_contact_report_maps_op_class_to_display_word() -> None:
     assert speech.text == "truck."
 
 
+def test_render_contact_report_maps_default_op_class_to_display_word() -> None:
+    """`OP_GROUPSOMETHING` (`perception.object_model.DEFAULT_OP_CLASS`, ED's
+    own "unclassified ground unit" fallback bucket) is a real, common
+    classification value, not a rare edge case -- it must map to a display
+    word like every other `OP_*` bucket, not leak the internal enum name
+    verbatim (live-acceptance regression, 2026-09-11)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1", t_sim=0.0, classification_raw="OP_GROUPSOMETHING"
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    speech = render_contact_report(store, contact_id, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "unit."
+
+
 def test_route_event_urgent_call_bypasses_the_gate() -> None:
     """An `UrgentCall` speaks immediately -- no store lookup, no ack, no
     dependency on the contact even existing."""
