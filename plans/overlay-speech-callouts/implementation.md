@@ -77,3 +77,74 @@ check was relaxed so `--overlay` combines with either.
 - Live acceptance (the actual `POST /text/push` call against a running aircraft-layer/DCS session)
   is out of this milestone's automated-test scope per the plan and is left to the user, per this
   project's execution-boundary convention for live/full DCS runs.
+
+---
+
+## Addendum implementation (2026-09-11): fix CONTACT_DETECTED/REACQUIRED lifecycle-event content
+
+### Implementation Summary
+Extracted `_contact_report_text(facts)` in `belief/speech.py` -- an id-less helper building
+`"<COALITION> <unit type>[, <clock> o'clock, <range> km][ <best semantic fact text>]."` from a
+`describe_contact` result's `facts` dict. `render_contact_report` is now a thin wrapper over it
+(unchanged output for existing callers/tests, verified). `_render_lifecycle_text`'s
+`CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches now call the same helper and prepend
+`f"{contact_id}: "`, replacing the old raw-enum-value template
+(`f"{contact_id} {classification.get('value')}."`). `CONTACT_LOST`/`CONTACT_CLASSIFICATION_CHANGED`
+branches are untouched, per the addendum's explicit design.
+
+The semantic-fragment selection (`max(semantic, key=lambda fact: fact["confidence"])`) mirrors
+`belief.console.format_event_for_overlay`'s existing logic exactly, reading `facts["semantic"]`
+(a `list[dict]` from `asdict(SemanticFact)`, same shape `tools.py`/`console.py` already consume).
+
+### Files Changed
+- `body-layer/src/belief/speech.py` -- added `_contact_report_text`; `render_contact_report`
+  delegates to it; `_render_lifecycle_text`'s `CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches
+  build `f"{contact_id}: {_contact_report_text(result['facts'])}"` instead of their own ad hoc
+  string. Updated the module docstring's "Which lifecycle kinds get a template" and "Contact
+  report format" notes to describe the shared helper, the semantic fragment, and the new
+  detected/reacquired format.
+- `body-layer/tests/test_speech.py` -- added a local `_enrichment_context` fixture (mirroring
+  `test_console.py`'s own fake `describe_position`/`project_terrain_aware` monkeypatches and fake
+  dataclasses, since this module had none of its own and per-test-file fixtures are this project's
+  convention). Updated `test_route_event_contact_detected_renders_id_and_classification` and
+  `test_route_event_contact_lost_and_reacquired`'s reacquired assertion to the new
+  `"{id}: UNKNOWN {type}."` format. Added
+  `test_route_event_contact_detected_includes_clock_range_when_enriched` and
+  `test_render_contact_report_includes_semantic_fragment_when_enriched` covering the new
+  enrichment-fragment append on both call sites.
+- `body-layer/tests/test_crew_console.py` -- updated two pre-existing assertions
+  (`test_scripted_crew_session_reproduces_the_first_useful_success_criterion`'s detected and
+  reacquired lines, and `test_failed_overlay_push_degrades_without_raising_and_does_not_block_
+  remaining_lines`'s `detected_line`) from the old `f"{contact_id} BMP-2."` to the new
+  `f"{contact_id}: UNKNOWN BMP-2."` -- not in the addendum's own Affected Modules list, but their
+  assertions encoded the exact broken output this addendum fixes, so they failed until updated
+  (a genuine full-suite regression catch, not a rewrite of test intent).
+- `body-layer/CLAUDE.md` -- updated `speech.py`'s Structure entry: replaced the old literal
+  "C17 BMP"/"C17 lost"/"C17 reacquired" description with the new split (full callout format +
+  id prefix for detected/reacquired via the shared helper; minimal, unextended lines for
+  lost/classification-changed) and documented the semantic-fragment source.
+
+### Tests Added
+- `test_route_event_contact_detected_includes_clock_range_when_enriched` -- an enriched
+  `CONTACT_DETECTED` includes clock/range and the semantic fragment ("Jableh").
+- `test_render_contact_report_includes_semantic_fragment_when_enriched` -- `render_contact_report`
+  itself also gains the semantic fragment when enriched (previously missing from both call sites,
+  per the addendum's "What already exists" note).
+
+### Checks
+(body-layer/)
+- ruff format --check: pass
+- ruff check: pass
+- mypy src (via `cd body-layer && mypy src`): pass, no issues in 29 source files
+- pytest -q: pass, 446 passed
+
+### Notable Discoveries
+- The addendum's own Affected Modules list did not name `test_crew_console.py`, but running the
+  full suite (not just the addendum's named test file) surfaced two pre-existing tests whose
+  assertions were pinned to the exact broken `_render_lifecycle_text` output being fixed here --
+  confirms this project's "verify full suite, not just new files" convention held real value on
+  this task.
+- `render_contact_report`'s pre-addendum tests (`test_render_contact_report_follows_coalition_
+  unit_type_clock_range_format`, `test_render_contact_report_maps_op_class_to_display_word`) needed
+  no changes -- confirms the `_contact_report_text` extraction is a pure refactor with identical
+  output for the existing no-enrichment call path, as the addendum's design predicted.
