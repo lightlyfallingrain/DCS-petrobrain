@@ -72,15 +72,13 @@ debug mirror that channel currently carries.
   convention; only the decision of what/when to push is.
 
 ### Decisions Requiring User Input
-- **Urgent-call visual prominence.** `route_event` already marks an `UrgentCall`'s
-  `OutgoingSpeech` with `urgency="critical"`/`bypass_gate=True`, but `TextOverlaySender`'s API
-  (`clear()`/`addText()`, per `aircraft-layer/CLAUDE.md`) has no documented mechanism for visual
-  distinction (color, bold, separate box) -- pushing it is a plain `push_text_line` call identical
-  to a routine contact report. Should this milestone leave urgent calls visually identical to
-  routine callouts (simplest, matches "the push mechanism today only supports one line of plain
-  text"), or is a cheap text-only distinguishing marker (e.g. a `"!! "` prefix) worth adding now
-  rather than waiting for a real prominence mechanism? Not answered here -- flagging per this
-  role's instruction not to invent an answer not grounded in what's documented.
+- **Urgent-call visual prominence -- resolved (user decision, 2026-09-11): add a text prefix
+  marker.** `TextOverlaySender` has no color/bold mechanism, so the distinction is a plain text
+  prefix -- e.g. `"!! "` -- prepended to the pushed line only when the source `OutgoingSpeech`
+  carries `bypass_gate=True` (i.e. only the `UrgentCall` path, never a routine contact report or
+  readback). Implementer: apply this at the `_print`-sink push call, not by mutating
+  `OutgoingSpeech.text` itself (the non-overlay print path -- stdout/REPL -- stays unprefixed,
+  since this is an overlay-display concern, not a change to what was spoken/printed generally).
 - **Whether `format_event_for_overlay`'s `--console --overlay` mirror should eventually be
   retired in favor of a speech-based overlay everywhere**, once/if `belief.console.Console` (the
   developer debug REPL) ever grows its own speech-template path. Out of scope for this plan (the
