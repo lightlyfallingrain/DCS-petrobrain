@@ -10,10 +10,14 @@ a separate HTTP client.
 A `TextOverlaySender` (`plans/dcs-text-panel-output/plan.md`, BL-2.5) is also
 constructed here and handed to `TelemetryAPIServer` so `POST /text/push` can
 forward lines to the in-cockpit overlay Hook script over loopback UDP -- the
-one inbound/write path on this otherwise read-only pipeline.
+one inbound/write path on this otherwise read-only pipeline. A
+`CommandSender` (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) is
+constructed the same way for `POST /command/petrovich_search`, this
+pipeline's second inbound/write path.
 
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
+       [--command-host HOST] [--command-port PORT]
        [--dump-interval SECONDS] [--debug]
 """
 
@@ -27,7 +31,15 @@ import time
 from api.server import DEFAULT_HOST as API_DEFAULT_HOST
 from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
-from collector.cache import PetrovichIndicationCache, TelemetryCache, WorldObjectsCache
+from collector.cache import (
+    PetrovichIndicationCache,
+    PetrovichWheelCache,
+    TelemetryCache,
+    WorldObjectsCache,
+)
+from collector.command_sender import DEFAULT_HOST as COMMAND_DEFAULT_HOST
+from collector.command_sender import DEFAULT_PORT as COMMAND_DEFAULT_PORT
+from collector.command_sender import CommandSender
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
 from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
@@ -60,6 +72,17 @@ def main() -> None:
         help="in-cockpit overlay Hook script listener port",
     )
     parser.add_argument(
+        "--command-host",
+        default=COMMAND_DEFAULT_HOST,
+        help="Export.lua's inbound command listener host (loopback)",
+    )
+    parser.add_argument(
+        "--command-port",
+        type=int,
+        default=COMMAND_DEFAULT_PORT,
+        help="Export.lua's inbound command listener port",
+    )
+    parser.add_argument(
         "--dump-interval",
         type=float,
         default=1.0,
@@ -81,15 +104,19 @@ def main() -> None:
     cache = TelemetryCache()
     world_objects_cache = WorldObjectsCache()
     petrovich_indication_cache = PetrovichIndicationCache()
+    petrovich_wheel_cache = PetrovichWheelCache()
     text_sender = TextOverlaySender(
         host=args.text_overlay_host, port=args.text_overlay_port
     )
     text_sender.open()
+    command_sender = CommandSender(host=args.command_host, port=args.command_port)
+    command_sender.open()
 
     collector = CollectorServer(
         cache,
         world_objects_cache,
         petrovich_indication_cache,
+        petrovich_wheel_cache,
         host=args.host,
         port=args.port,
     )
@@ -104,6 +131,8 @@ def main() -> None:
         port=args.api_port,
         petrovich_indication_cache=petrovich_indication_cache,
         text_sender=text_sender,
+        petrovich_wheel_cache=petrovich_wheel_cache,
+        command_sender=command_sender,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -120,6 +149,7 @@ def main() -> None:
         api.close()
         collector.close()
         text_sender.close()
+        command_sender.close()
 
 
 if __name__ == "__main__":

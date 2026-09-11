@@ -12,15 +12,17 @@ reads newline-delimited JSON lines, and feeds each parsed line into
 whichever of `TelemetryCache`/`WorldObjectsCache`/`PetrovichIndicationCache`
 matches its shape.
 
-All three line kinds share one connection and one JSON-lines wire format but
+All four line kinds share one connection and one JSON-lines wire format but
 have distinct shapes: a telemetry line is a flat object with a top-level
 `"x"` key; a world-objects line has a top-level `"objects"` key instead; a
-Petrovich-indication line has a top-level `"indication"` key instead (see
-`schema.TelemetrySample`/`schema.WorldObjectsSnapshot`/
-`schema.PetrovichIndicationSample`). `_handle_line` distinguishes them by
-that key's presence before parsing, rather than trying each parser in turn
-and falling back on failure -- a genuinely malformed line of any kind should
-be logged and dropped once, not misattributed to the wrong schema's error
+Petrovich-indication line has a top-level `"indication"` key instead; a
+Petrovich-wheel line (BL-6, `plans/bl6-commands-inspect-adapt/plan.md`) has
+a top-level `"wheel"` key instead (see `schema.TelemetrySample`/
+`schema.WorldObjectsSnapshot`/`schema.PetrovichIndicationSample`/
+`schema.PetrovichWheelSample`). `_handle_line` distinguishes them by that
+key's presence before parsing, rather than trying each parser in turn and
+falling back on failure -- a genuinely malformed line of any kind should be
+logged and dropped once, not misattributed to the wrong schema's error
 message.
 
 This module is intentionally thin. Its correctness against a real Export.lua
@@ -40,10 +42,17 @@ import time
 from types import TracebackType
 from typing import Self
 
-from collector.cache import PetrovichIndicationCache, TelemetryCache, WorldObjectsCache
+from collector.cache import (
+    PetrovichIndicationCache,
+    PetrovichWheelCache,
+    TelemetryCache,
+    WorldObjectsCache,
+)
 from schema import (
     PetrovichIndicationParseError,
     PetrovichIndicationSample,
+    PetrovichWheelParseError,
+    PetrovichWheelSample,
     TelemetryParseError,
     TelemetrySample,
     WorldObjectParseError,
@@ -67,12 +76,14 @@ class CollectorServer:
         cache: TelemetryCache,
         world_objects_cache: WorldObjectsCache,
         petrovich_indication_cache: PetrovichIndicationCache,
+        petrovich_wheel_cache: PetrovichWheelCache,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
         self._cache = cache
         self._world_objects_cache = world_objects_cache
         self._petrovich_indication_cache = petrovich_indication_cache
+        self._petrovich_wheel_cache = petrovich_wheel_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -175,6 +186,18 @@ class CollectorServer:
                 return
             logger.debug("parsed petrovich-indication sample: %r", indication_sample)
             self._petrovich_indication_cache.push(indication_sample)
+            return
+
+        if "wheel" in data:
+            try:
+                wheel_sample = PetrovichWheelSample.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except PetrovichWheelParseError:
+                logger.warning("dropping malformed petrovich-wheel line: %r", line)
+                return
+            logger.debug("parsed petrovich-wheel sample: %r", wheel_sample)
+            self._petrovich_wheel_cache.push(wheel_sample)
             return
 
         try:
