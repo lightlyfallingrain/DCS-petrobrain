@@ -900,3 +900,42 @@ either up (`SRCH PILOT LOS`) or down (`OBSERV. OFF`).
 
 Likely less of a problem for code, which can act within a frame or two, but any
 close-then-do sequence must not assume the list stays closed.
+
+### Sight authority is real but not absolute (pilot, 2026-09-11)
+
+Refining the "9/9 HELD" result: code **can** override the commanded 9K113
+direction, and the pilot confirms the effect is genuinely visual — **the sight
+crosshair moved** (the pilot HUD shows where the 9K113 points in missile mode),
+so our `SetCommand(3061, …)` moves the real optics, not merely a gauge argument.
+
+But Petrovich **slews it back to a target when the list is scrolled or a target
+is selected for tracking**. So authority is event-scoped, not permanent: we hold
+the sight until he has a reason to reassert, and list interaction is exactly
+such a reason. The earlier 9/9 result held because those cycles did not scroll
+or select.
+
+**Consequence for any test of sight-driven detection: do not scroll or select
+while measuring**, or Petrovich takes the sight back and the measurement is of
+his aim, not ours.
+
+### THE open question for BL-6
+
+**Does pointing the sight ourselves cause Petrovich to DETECT what is there?**
+
+Known: we can aim the sight precisely, and the optics really move. Unknown:
+whether anything downstream *looks* through them on our behalf — i.e. whether a
+commanded slew onto an unlisted target adds it to the contact list.
+
+This matters more than anything else still open, because of where the other
+routes ended up:
+
+- `SRCH PILOT LOS` — triggerable but aimed by the human's head, not by code
+- `SRCH 9K113 LOS` — would be exactly right, but appears broken
+- `SRCH FWD` / `SRCH BRST` — triggerable but not aimable
+- **sight-driven detection — untested, and the only remaining route to a
+  *directed* scan that does not depend on `DesignateAttackPoint`**
+
+If pointing the sight does drive detection, BL-6 gets `scan_area(bearing)` with
+no wheel interaction at all: one `SetCommand`, then read the list. If it does
+not, the directed-scan capability rests entirely on `DesignateAttackPoint`
+(3020), still untested under good conditions.
