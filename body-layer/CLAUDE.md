@@ -319,41 +319,48 @@ stay mutually exclusive with each other; `--overlay` is valid alongside either.
   after stripping leading filler words (`that`/`the`/`a`/`an`) — place-name phrasing (`find_place`)
   stays unmatched until BL-5 merges (documented gap, not a bug). No fabricated per-candidate score —
   `find_contact` (BL-2) has no ranking to carry through.
-- `src/belief/speech.py` (BL-5a, extended by `plans/overlay-speech-callouts/plan.md`'s addendum) —
-  `OutgoingSpeech` (§5's record, trimmed), the three body-written templated classes (§2.1/§3.6):
-  `render_readback`, `render_contact_report` (single-contact only — no clustering exists yet,
-  `docs/concept/PETROBRAIN_RUNTIME.md` line 336), and `route_event`, the outbound routing gate.
-  **Contact-report format (2026-09-10 user decision, extended 2026-09-11):**
-  `"<COALITION> <unit type>[, <clock> o'clock, <range> km][ <best semantic fact text>]."`, built by
-  a shared, id-less `_contact_report_text(facts)` helper — no longer a verbatim echo of
-  `tools.describe_contact`'s `summary`. `render_contact_report` is a thin wrapper over it (no id,
-  since the player already named the contact); `_render_lifecycle_text`'s `CONTACT_DETECTED`/
-  `CONTACT_REACQUIRED` branches call the same helper and prepend `f"{contact_id}: "` (the one place
-  in this module an id needs to be spoken, since the player has not yet named this contact
-  themselves). `CONTACT_LOST` (`"{id} lost."`) and `CONTACT_CLASSIFICATION_CHANGED`
-  (`"{id} identified as {classification}."`) stay minimal, unextended — a lost contact has no
-  current position to report, and a classification update is not a new sighting. Coalition is
-  always `"UNKNOWN"` — no IFF/coalition perception channel exists, and reading `LoGetWorldObjects`'s
-  real coalition into `Contact` would break the no-omniscience invariant `percept.py` enforces; a
-  real implementation should *infer* coalition from unit-type vocabulary + which side's terrain the
-  contact sits in, not ground truth (`ROADMAP.md` backlog, deferred). Unit type reads the
-  classification lattice's level+value (`_unit_type_display`/`_OP_CLASS_DISPLAY`): `"ground
-  contact"`/`"unidentified contact"` at presence/unknown, a human word for a `class`-level `OP_*`
-  bucket, the reporting name verbatim at `type` level. The semantic fragment is the
-  highest-confidence `belief.enrichment.SemanticFact.text` among `facts["semantic"]`, mirroring
-  `belief.console.format_event_for_overlay`'s own selection; omitted (not "unknown") when no
-  `EnrichmentContext` was supplied or no semantic facts exist, same absent-not-null convention as
-  clock/range. `route_event` accepts `belief.events.Event | UrgentCall` and checks which
-  one it got *before* anything else — an `UrgentCall` (Stage 5's manual bypass-gate test harness,
-  constructed only by `crew_console.py`'s `!inject-urgent` command; no real threat-detection channel
-  exists) speaks immediately with `bypass_gate=True`, no ack/cooldown touched; a `belief.events.Event`
-  renders through a per-kind template and auto-acknowledges (`belief.tools.acknowledge_event`) the
-  moment it is spoken, so a future brain's `poll_events` never re-surfaces it. `CONTACT_ATTENTION_
-  CHANGED` deliberately has no template (returns `None`, not acknowledged) — the player's own
-  command already got a readback, and area-driven attention changes are not yet narrated
-  proactively (a real, documented gap). `UrgentCall` is a separate small type rather than a
-  `bypass_gate` field grafted onto the shared BL-4 `Event` dataclass — `events.py` is out of this
-  milestone's Affected Modules.
+- `src/belief/speech.py` (BL-5a, extended twice by `plans/overlay-speech-callouts/plan.md`'s two
+  addenda) — `OutgoingSpeech` (§5's record, trimmed), the three body-written templated classes
+  (§2.1/§3.6): `render_readback`, `render_contact_report` (single-contact only — no clustering
+  exists yet, `docs/concept/PETROBRAIN_RUNTIME.md` line 336), and `route_event`, the outbound
+  routing gate. **Contact-report format (2026-09-10 user decision, extended 2026-09-11 twice —
+  terser crew-text is the current, live behaviour):**
+  `"<unit type>[, <clock> o'clock, <range> km][ <best semantic fact text>]."`, built by a shared,
+  id-less, coalition-less `_contact_report_text(facts)` helper — no longer a verbatim echo of
+  `tools.describe_contact`'s `summary`. `render_contact_report` and `_render_lifecycle_text`'s
+  `CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches both call this one helper directly, with **no id
+  spoken anywhere** (a pilot cannot track `CONTACT_<n>` ids by ear; the id still exists on
+  typed/console surfaces, only what is *spoken* changed) and **no coalition token** (the original
+  `"UNKNOWN"` placeholder was removed entirely — a pilot hearing "UNKNOWN" on every single callout,
+  when no callout can ever say anything else yet, is net noise). `CONTACT_LOST` has **no template at
+  all** — `_render_lifecycle_text` returns `None`, joining `CONTACT_ATTENTION_CHANGED`'s existing
+  no-template pattern — a lost contact has no current position worth interrupting the pilot to
+  report. `CONTACT_CLASSIFICATION_CHANGED` speaks a new position-bearing line,
+  `"unit at {clock} o'clock, {range} km is {unit type}."` (range clause omitted when unenriched),
+  built from the contact's *current* `facts["classification"]` via `_unit_type_display` — not the
+  raw `event.classification` enum string as before. Range is rounded to the nearest 0.5 km with no
+  trailing `.0` (`_format_range_km`); a semantic fragment's embedded trailing distance (e.g. `"near
+  a road (439m)"`) is separately rounded to the nearest 100 m with a `~` prefix
+  (`_round_enrichment_fragment`, a display-only regex post-process — `enrichment.py`'s
+  `SemanticFact.text` itself is untouched and stays shared with the unaffected `belief.console`
+  debug path). A real coalition implementation should eventually *infer* coalition from unit-type
+  vocabulary + which side's terrain the contact sits in, not ground truth (`ROADMAP.md` backlog,
+  deferred, unaffected by the token's removal here). Unit type reads the classification lattice's
+  level+value (`_unit_type_display`/`_OP_CLASS_DISPLAY`, all lowercase): `"ground"`/`"contact"` at
+  presence/unknown, a human word for a `class`-level `OP_*` bucket, the reporting name verbatim at
+  `type` level. The semantic fragment is the highest-confidence `belief.enrichment.SemanticFact.text`
+  among `facts["semantic"]`, mirroring `belief.console.format_event_for_overlay`'s own selection;
+  omitted (not "unknown") when no `EnrichmentContext` was supplied or no semantic facts exist, same
+  absent-not-null convention as clock/range. `route_event` accepts `belief.events.Event | UrgentCall`
+  and checks which one it got *before* anything else — an `UrgentCall` (Stage 5's manual bypass-gate
+  test harness, constructed only by `crew_console.py`'s `!inject-urgent` command; no real
+  threat-detection channel exists) speaks immediately with `bypass_gate=True`, no ack/cooldown
+  touched; a `belief.events.Event` renders through a per-kind template and auto-acknowledges
+  (`belief.tools.acknowledge_event`) the moment it is spoken, so a future brain's `poll_events` never
+  re-surfaces it — a kind with no template (`CONTACT_LOST`, `CONTACT_ATTENTION_CHANGED`) is left
+  unacknowledged, since body never actually spoke it. `UrgentCall` is a separate small type rather
+  than a `bypass_gate` field grafted onto the shared BL-4 `Event` dataclass — `events.py` is out of
+  this milestone's Affected Modules.
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
