@@ -272,3 +272,95 @@ GetDevice(0):get_argument_value(874) * 136.36   -- where he is looking, degrees
 
 Two unknowns remain, both narrow: the long-press hypothesis, and whether
 holding the sight suppresses detection.
+
+---
+
+## Enumerating the full contact list, and hiding the overlay
+
+Two questions raised 2026-09-11 while the scan probe was flying. Static analysis
+of `HelperAI_page_common.lua:879-1075` plus a re-read of the detection log.
+
+### The list is a fixed 5-row window — and we were already reading all five
+
+```
+upper_upper_list_text     row -2   controller 'upper_upper_list_text'
+upper_list_text           row -1   controller 'upper_list_text'
+middle_list_text          row  0   controller 'middle_list_text'      <- selected
+lower_list_text           row +1   controller 'lower_list_text'
+lower_lower_list_text     row +2   controller 'lower_lower_list_text'
+```
+
+**`upper_list_text` is registered under the element name `"LeftCenter"`**
+(`HelperAI_page_common.lua:925`: `upper_list_text.name = "LeftCenter"`) — an
+apparent copy-paste slip in ED's code, since `LeftCenter` is the alignment
+value used on every row. This explains the stray `LeftCenter` entry in the
+detection dump: it is row −1, not a stray. **So `list_indication(6)` already
+returns all five rows**; one of them just has a misleading name. Any parser
+must special-case it. — **evidence: reproduced-locally.**
+
+Each row additionally carries `list_red_arrow` (indices −2…+2) and
+`list_red_arrow_text`, so per-row annotation is available too.
+
+### Beyond five contacts: scrolling is the only route, and it has a side effect
+
+There is **no Lua-visible array of all detected units.** `list_indication`
+returns rendered element values and nothing else; the full list lives in
+Petrovich's native state, and `avHelperAI_Mi24` has no symbols anywhere in the
+install (confirmed by exhaustive scan), so there is nothing else to read.
+
+To enumerate more than five, the only mechanism is to **scroll and accumulate**:
+the target page exposes `NEXT TGT` (down) and `PREV TGT` (up), both drivable
+via `GetDevice(30):performClickableAction(...)`, which is now confirmed to
+work. Read five rows, scroll, read again, dedupe.
+
+**This mutates state, and that matters.** Scrolling changes Petrovich's
+*selected* target, which is the same selection `SELECT TGT` and `FIRE` act on.
+Enumerating the list is therefore not a read-only operation — an important
+constraint for any body-layer code that wants a full picture without
+disturbing the crew. Also unknown: whether the list wraps or stops at the end,
+which a scroll loop needs for termination.
+
+**Untested lead:** the target page's far-left slot reads **`ALL TGTS`**. If
+that expands the view rather than scrolling it, it may give the whole list
+without stepping the selection. Worth one press in a future flight — it is the
+cheapest possible answer to this question.
+
+### Hiding the overlay while keeping the data — probably coupled, not proven
+
+`list_indication` reports **rendered element values**, and the list container
+`middle_list_holder` is gated by a `show_list` controller
+(`HelperAI_page_common.lua:894`). So visibility and readability are
+structurally linked, not independent.
+
+The log agrees, though only circumstantially. In every sample where the list
+carried a contact, the Petrovich UI was also showing:
+
+| t | list | wheel/UI showing |
+|---|---|---|
+| 37.8 | T-90A | yes |
+| 81.9 | BTR-60 | yes |
+| 199.1 | BTR-60 | yes |
+| 227.8 | BTR-60 | yes |
+
+**This is co-occurrence, not demonstrated causation** — both the wheel and the
+list appear when Petrovich is engaged, so the log cannot separate "the list
+needs the UI shown" from "both happen to accompany an active Petrovich". Do
+not treat it as settled.
+
+Related, and a real practical problem: **reading Petrovich's state
+(`SEARCHING`/`TRACKING`/`WAITING`) currently requires the wheel to be open**,
+because that text lives in the wheel's down slot — and an open wheel is
+player-visible UI. Two possible outs, both untested:
+
+- **`mode_text`** is declared on the Petrovich page
+  (`HelperAI_page_common.lua:717-724`, controller `mode_text`) and has **never
+  been seen populated**. If it carries the same state independently of the
+  wheel, it is the clean channel.
+- **`ToggleSubtitles_EXT` (3006)** toggles AI *subtitles* — the speech text
+  overlay, a different element from the target list — so it probably does not
+  help, but it is one command away from being checked.
+
+**Bottom line:** we can read all five visible rows today; more than five needs
+a state-mutating scroll; and whether any of it survives hiding the overlay is
+an open question that one short probe would settle. None of this blocks BL-6,
+which needs "did he find something" rather than a complete ordered list.
