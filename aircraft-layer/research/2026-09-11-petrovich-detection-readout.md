@@ -364,3 +364,59 @@ player-visible UI. Two possible outs, both untested:
 a state-mutating scroll; and whether any of it survives hiding the overlay is
 an open question that one short probe would settle. None of this blocks BL-6,
 which needs "did he find something" rather than a complete ordered list.
+
+---
+
+## Scan probe run 1 — 2026-09-11 11:21 — long-press CONFIRMED, Part B void
+
+### CONFIRMED: far slots are long presses
+
+`HelperAI.lua:13`'s `long_press_time = 0.5` is the mechanism. With a 0.80 s
+hold:
+
+```
+Up   LONG press -> FU changed  HOLD FIRE -> FREE FIRE
+Left LONG press -> wheel switched to the CM page (far-left slot was CM MENU)
+                   U=CM INTERVAL  R=CM/SERIES  D=CM SIDE  L=CLOSE/CM  FD=CM TYPE
+```
+
+So the slot mapping is settled:
+
+| slot | key | hold |
+|---|---|---|
+| near U / D / L / R | Up / Down / Left / Right | short (< 0.5 s) |
+| far FU / FD / FL / FR | Up / Down / Left / Right | **long (> 0.5 s)** |
+
+`Right` did nothing on either hold — its near slot was `NO/MSL` and far
+`TGT/PILOT`, at least one of which was presumably unavailable. Centre (`C`) has
+no direction key and its access method is still unknown.
+
+— **evidence: reproduced-locally, live.**
+
+### Part B produced nothing — a probe design fault
+
+Part A's `Left LONG` press opened the **countermeasures submenu**, and the
+probe never navigated back. Part B then issued its search as "press `Up`",
+assuming the search page — but `Up` on the CM page is `CM INTERVAL`. No search
+was ever started, and the run was stopped 17 s in.
+
+```
+========== PART B round 1: FREE ==========
+    wheel: U=CM INTERVAL  R=CM/SERIES  D=CM SIDE  L=CLOSE/CM  FD=CM TYPE
+    [FREE] issuing search (Up / SRCH PILOT LOS)     <- actually pressed CM INTERVAL
+```
+
+**The lesson, and it is a general one:** the wheel is a *stateful, multi-page*
+menu, so pressing a direction by position is unsafe. We can read the slot
+labels, so every press must be **selected by label and verified after the
+fact** — position-based pressing throws away the one advantage this channel
+has. v2 does that.
+
+**Side effect to be aware of:** the run toggled Petrovich from `HOLD FIRE` to
+`FREE FIRE` and left him there. Probes that drive the wheel change real crew
+state; they should restore what they touch, or at least report it.
+
+### Still unanswered
+
+Whether pinning the sight suppresses detection — the question this flight was
+built to answer. Needs a re-run with label-driven presses.
