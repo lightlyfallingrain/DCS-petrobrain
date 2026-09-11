@@ -208,9 +208,25 @@ end
 
 -- ------------------------------------------------------ label-driven press
 -- Press an option by its LABEL, not its position, and report what happened.
-local press = {active=false, phase=nil, t=0, cmd=nil, hold=0, label="", slot="", before=""}
+-- Attempt bookkeeping: a press that does not change its own slot label is a
+-- press that did nothing. Run 3 hammered "OBSERV. OFF" forever because nothing
+-- checked. Every press now records the label it was trying to change, and the
+-- caller must consult press_took() before assuming it worked.
+local press = {active=false, phase=nil, t=0, cmd=nil, hold=0, label="", slot="",
+               before="", before_label=nil, took=nil}
+local attempts = {}
+local function attempt_key(slot, expect) return tostring(slot) .. "|" .. tostring(expect) end
+local function press_took() return press.took end
 -- Press an EXACT slot, but only after confirming it currently shows `expect`.
+-- Refuses after MAX_ATTEMPTS so a press that does nothing cannot loop forever.
+local MAX_ATTEMPTS = 3
 local function press_start(slot, expect, why)
+    local k = attempt_key(slot, expect)
+    if (attempts[k] or 0) >= MAX_ATTEMPTS then
+        log(string.format("    !! giving up on %s=%q after %d attempts",
+            SLOT_ABBR[slot] or tostring(slot), expect, attempts[k]))
+        return false
+    end
     local map = SLOT_KEY[slot]
     if map == nil then
         log(string.format("    !! slot %s has no direction key (centre?)", tostring(slot)))
@@ -227,6 +243,8 @@ local function press_start(slot, expect, why)
     press.active, press.phase, press.t = true, "down", 0
     press.cmd, press.hold, press.label, press.slot = cmd, hold, expect, slot
     press.before = wheel_str()
+    press.before_label = slot_label(slot)
+    press.took = nil
     return true
 end
 local function press_update(t)
@@ -241,7 +259,14 @@ local function press_update(t)
         end
     elseif press.phase == "settle" then
         if t - press.t > 1.0 then
-            log("      -> " .. wheel_str())
+            local after = slot_label(press.slot)
+            press.took = (after ~= press.before_label)
+            local k = attempt_key(press.slot, press.label)
+            attempts[k] = (attempts[k] or 0) + 1
+            log(string.format("      -> %s   [%s, attempt %d]",
+                wheel_str(),
+                press.took and "took effect" or "NO EFFECT on that slot",
+                attempts[k]))
             press.active = false
             return true
         end
@@ -251,6 +276,108 @@ end
 
 -- Make sure we are on the root/search page: if a SRCH option is visible we are.
 local function on_search_page() return (on_search_page_v()) end
+
+-- ---------------------------------------------------- page identification
+-- The pilot's observation, which explains run 3's loop: when the contact list
+-- is displayed, Up/Down SCROLL THE LIST instead of operating the wheel. So the
+-- same key means different things depending on the page, and any press must
+-- know which page is up.
+--   search page : centre shows SRCH...   Up/Down are wheel actions
+--   target page : centre shows MARK TGT  Up/Down are PREV/NEXT TGT (scroll)
+local function page_kind()
+    local v = wheel_slots()
+    if v == nil then return "closed" end
+    local c = (v["wheel_text_center"] or ""):upper()
+    if c:find("SRCH", 1, true) then return "search" end
+    if c:find("MARK", 1, true) then return "target" end
+    local d = (v["wheel_text_down"] or ""):upper()
+    if d:find("NEXT TGT", 1, true) then return "target" end
+    if d:find("CM ", 1, true) or (v["wheel_text_left"] or ""):upper():find("CLOSE CM", 1, true) then
+        return "cm"
+    end
+    return "other"
+end
+
+-- ======================================================= LIST ENUMERATION
+-- Requested 2026-09-11: when a group is bigger than the five visible rows, can
+-- we walk the whole list? The pilot confirmed the list is TERMINATED and does
+-- not wrap, so scrolling down until the rows stop changing enumerates it.
+-- Scrolling moves Petrovich's selected target, so this is not read-only.
+local SLOT_NEXT_TGT = "wheel_text_down"    -- on the TARGET page
+local SLOT_PREV_TGT = "wheel_text_up"
+
+local L = {phase="idle", t=0, steps=0, seen={}, order={}, last_rows=nil, done=false}
+
+local function record_rows(why)
+    local c = contacts()
+    if c == nil then return false end
+    local isnew = false
+    for row in c:gmatch("[^,]+") do
+        local val = row:match("=%s*(.+)$")
+        if val then
+            val = val:gsub("^%s+", ""):gsub("%s+$", "")
+            if val ~= "" and L.seen[val] == nil then
+                L.seen[val] = true
+                L.order[#L.order + 1] = val
+                isnew = true
+            end
+        end
+    end
+    log(string.format("    [list %s] rows: %s", why, c))
+    return isnew
+end
+
+local function list_enumerate(t)
+    if L.phase == "idle" then
+        if page_kind() ~= "target" then return true end   -- nothing to do
+        log("")
+        log("========== LIST ENUMERATION (target page is up) ==========")
+        L.steps, L.seen, L.order = 0, {}, {}
+        record_rows("initial")
+        L.last_rows = contacts()
+        L.phase = "scroll" ; L.t = t
+
+    elseif L.phase == "scroll" then
+        if press.active then press_update(t) return false end
+        if L.steps >= 12 then
+            log("    stopping: 12 scroll steps without reaching the end")
+            L.phase = "report" ; return false
+        end
+        if page_kind() ~= "target" then
+            log("    left the target page; stopping enumeration")
+            L.phase = "report" ; return false
+        end
+        L.steps = L.steps + 1
+        if not press_start(SLOT_NEXT_TGT, "NEXT TGT", "scrolling the list") then
+            L.phase = "report" ; return false
+        end
+        L.phase = "settle" ; L.t = t
+
+    elseif L.phase == "settle" then
+        if press.active then press_update(t) return false end
+        if t - L.t > 0.6 then
+            local rows = contacts()
+            record_rows("after step " .. L.steps)
+            if rows == L.last_rows then
+                log("    rows unchanged -> end of list (it terminates, does not wrap)")
+                L.phase = "report"
+            else
+                L.last_rows = rows
+                L.phase = "scroll"
+            end
+        end
+
+    elseif L.phase == "report" then
+        log(string.format("    ==> enumerated %d distinct entries in %d scroll steps:",
+                          #L.order, L.steps))
+        for i, v in ipairs(L.order) do log(string.format("        %2d. %s", i, v)) end
+        log("    NOTE: scrolling moved the selection; it is parked at the last entry.")
+        L.done = true
+        L.phase = "idle"
+        return true
+    end
+    return false
+end
 
 -- ============================================================== PART B
 local PHASE_S = 25.0
@@ -285,12 +412,22 @@ local function part_b(t)
 
     elseif B.phase == "sync" then
         if press.active then press_update(t) return end
-        if not on_search_page() then
-            log("  not on the search page: " .. wheel_str())
-            if not press_start(SLOT_CLOSE_LIST, "CLOSE", "returning to search page") then
-                -- last resort: toggle the wheel shut and open again
-                press.active, press.phase, press.cmd, press.hold =
-                    true, "down", CMD.ShowMenu, SHORT_HOLD
+        local kind = page_kind()
+        if kind == "target" then
+            -- the contact list is up: Up/Down scroll it rather than driving the
+            -- wheel. Enumerate it once (it is what we want anyway), then leave.
+            if not L.done then
+                if not list_enumerate(t) then return end
+            end
+            log("  target page up; closing the list to regain wheel control")
+            if not press_start(SLOT_CLOSE_LIST, "CLOSE", "close list") then
+                B.phase = "round" ; B.t = t
+            end
+            return
+        elseif kind ~= "search" then
+            log("  on page '" .. kind .. "': " .. wheel_str())
+            if not press_start(SLOT_CLOSE_LIST, "CLOSE", "leaving submenu") then
+                B.phase = "round" ; B.t = t
             end
             return
         end
@@ -298,10 +435,25 @@ local function part_b(t)
         B.phase = "observ" ; B.t = t
 
     elseif B.phase == "observ" then
-        -- run 2 established SRCH 9K113 LOS is only offered once observation is ON
-        if press.active then press_update(t) return end
+        -- run 2 established SRCH 9K113 LOS is only offered once observation is ON.
+        -- run 3 then hammered OBSERV. OFF forever because nothing verified the
+        -- press; press_start now caps attempts and press_took() reports effect.
+        if press.active then
+            if press_update(t) and press.slot == SLOT_OBSERV and press_took() == false then
+                -- exactly run 3's failure mode: the toggle did nothing. Most
+                -- likely Up/Down were being consumed by a visible contact list.
+                log("  !! observation toggle had NO EFFECT (page=" .. page_kind() .. ")")
+                log("     Up/Down are probably being consumed by the contact list.")
+                B.phase = "sync" ; B.t = t
+            end
+            return
+        end
+        if page_kind() ~= "search" then B.phase = "sync" ; return end
         if slot_offers(SLOT_OBSERV, "OBSERV. OFF") then
-            press_start(SLOT_OBSERV, "OBSERV. OFF", "enabling observation")
+            if not press_start(SLOT_OBSERV, "OBSERV. OFF", "enabling observation") then
+                log("  !! cannot enable observation -- continuing without it")
+                B.phase = "round" ; B.t = t
+            end
             return
         end
         if not slot_offers(SLOT_SEARCH_LOS, "SRCH 9K113") then
@@ -404,5 +556,9 @@ function LuaExportAfterNextFrame()
             t, tostring(c), petro_state(), az_deg()))
     end
 
+    -- the contact list being up is itself an opportunity: enumerate it once
+    if page_kind() == "target" and not L.done and not press.active then
+        if not list_enumerate(t) then return end
+    end
     part_b(t)
 end
