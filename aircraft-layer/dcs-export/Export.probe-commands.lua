@@ -358,6 +358,19 @@ local stage_d_fired = false
 
 local TEST_SECS = 3.0
 
+-- The Mi-24 9K113 needs roughly 10s of gyro spin-up after the sight doors open
+-- before it can be slewed at all (pilot, 2026-09-11). Run 2 opened the doors at
+-- 10:06:02 and began sweeping at 10:06:09 -- 7s -- so the gyro was still
+-- spinning and "NEVER MOVED" was guaranteed regardless of verb.
+--
+-- There is no Lua-readable readiness signal to gate on: `Ready_9k113` appears in
+-- list_indication(0) but is a mesh element with no value, and isGyroReady() is
+-- native-only. So: wait generously, and run the whole matrix TWICE, so a
+-- too-early first pass cannot masquerade as a negative result.
+local GYRO_WAIT   = 20.0
+local PASS_GAP    = 15.0
+local MAX_PASSES  = 2
+
 -- {label, method, command, arg}
 local TESTS = {
     {"SetCommand  player LR",  "SetCommand",  K113.Command_SIGHT_LEFT_RIGHT_AXIS,           K113_ARG_AZIMUTH},
@@ -373,6 +386,7 @@ local TESTS = {
 local mx = {
     phase = "setup",
     t_phase = 0,
+    pass = 1,
     idx = 0,
     start_val = nil,
     samples = {},
@@ -432,14 +446,24 @@ local function stage_e_sight_slew(t)
             return
         end
         log("    sight ready. *** DO NOT TOUCH THE SIGHT FROM HERE ON ***")
-        log(string.format("    running %d command/verb combinations, %.0fs each",
-                          #TESTS, TEST_SECS))
+        log(string.format("    waiting %.0fs for gyro spin-up before testing",
+                          GYRO_WAIT))
         if not stage_d_fired then
             stage_d_fired = true
             stage_d_petrovich()
         end
-        mx.phase = "next"
+        mx.phase = "gyro_wait"
         mx.t_phase = t
+
+    elseif mx.phase == "gyro_wait" then
+        if (t - mx.t_phase) > GYRO_WAIT then
+            log(string.format(
+                "--- pass %d/%d: %d command/verb combinations, %.0fs each ---",
+                mx.pass, MAX_PASSES, #TESTS, TEST_SECS))
+            mx.idx = 0
+            mx.phase = "next"
+            mx.t_phase = t
+        end
 
     elseif mx.phase == "wait_retry" then
         if (t - mx.t_phase) > 5.0 then mx.phase = "setup" end
@@ -449,6 +473,16 @@ local function stage_e_sight_slew(t)
         mx.idx = mx.idx + 1
         local test = TESTS[mx.idx]
         if test == nil then
+            if #mx.winners == 0 and mx.pass < MAX_PASSES then
+                mx.pass = mx.pass + 1
+                log(string.format(
+                    "--- pass %d found nothing; waiting %.0fs and repeating in",
+                    mx.pass - 1, PASS_GAP))
+                log("    case the gyro was still spinning up ---")
+                mx.phase = "gyro_wait"
+                mx.t_phase = t - GYRO_WAIT + PASS_GAP
+                return
+            end
             mx.phase = "report"
             return
         end
@@ -492,7 +526,7 @@ local function stage_e_sight_slew(t)
     elseif mx.phase == "report" then
         log("=========================================================")
         if #mx.winners == 0 then
-            log("NO COMBINATION MOVED THE 9K113.")
+            log(string.format("NO COMBINATION MOVED THE 9K113 (%d passes).", mx.pass))
             log("  Checked: SetCommand and performClickableAction, against the")
             log("  player LR/UD axes, the Intern _AI_AXIS pair, and Horiz/VertPos.")
             log("  Next hypotheses, in order:")
