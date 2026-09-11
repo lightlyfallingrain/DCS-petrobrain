@@ -129,13 +129,15 @@ stay mutually exclusive with each other; `--overlay` is valid alongside either.
 - `src/perception/source.py` — the tier-independent `PerceptionSource` protocol
   (`poll(now_sim, ownship_state) -> list[Observation]`) plus the `OwnshipState`/`Observation`
   dataclasses every tier's implementation returns. No concrete tier lives here.
-- `src/perception/geometry.py` — bearing/range/LOS-terrain-masking helpers, shared by every
-  tier (per both investigator sessions, no tier has a native range field). Calls world-model's
-  `query.describe_position` for a single-point elevation lookup, and `store.reader.sample_grid`
-  directly for the LOS sampling loop's repeated per-point elevation reads — the latter is a
-  documented, deliberate deviation from routing every read through `describe_position` (which
-  also joins roads/settlements/navaids irrelevant to a bare elevation sample); see the module
-  docstring.
+- `src/perception/geometry.py` — bearing/range helpers, shared by every tier (per both
+  investigator sessions, no tier has a native range field). Calls world-model's
+  `query.describe_position` for a single-point elevation lookup. `line_of_sight_clear` (LOS
+  terrain-masking) is now a thin wrapper delegating to world-model's own
+  `query.line_of_sight.line_of_sight_clear` (moved there so LOS is an ownship-agnostic
+  point-A-to-point-B primitive, not body-layer-owned logic — `plans/
+  world-model-los-generalization/plan.md`); this module's own docstring on the
+  `sample_grid`-vs-`describe_position` sampling-cost tradeoff moved with it into that new
+  module's docstring, not duplicated here.
 - `src/perception/association.py` — pure, fixture-testable single-detection <-> world-object
   resolution: a range-cap + forward-hemisphere plausibility filter (no coalition/IFF filtering)
   over a `LoGetWorldObjects` candidate pool, keyword-overlap type-match scoring, and a
