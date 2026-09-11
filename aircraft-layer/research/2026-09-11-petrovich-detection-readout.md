@@ -1328,7 +1328,10 @@ Every route through Petrovich's own commands is now closed:
 pilot has used it repeatedly to populate the list — and its only disqualifying
 property was that it follows the *human's* view.
 
-## Next lead: control the view, and `SRCH PILOT LOS` becomes directed
+## Rejected lead: controlling the player's view (recorded so it is not retried)
+
+**Decision, pilot, 2026-09-11: do not pursue this.** It is documented below only
+so the option is not rediscovered and re-attempted later.
 
 If the pilot's line of sight can be set from code, then the one reliable search
 becomes a directed one. Two documented, first-party routes exist in the shipped
@@ -1355,7 +1358,13 @@ camera commands are documented for `LoSetCommand` (2007/2008 mouse rotate,
 2010/2011 joystick rotate), which could be driven as a loop against
 `LoGetCameraPosition` until the view points where we want.
 
-**Caveat to check first:** this moves the *player's own view*, which is
-intrusive in a way none of the previous mechanisms were. It would need to be
-weighed for the real design even if it works — but as an investigation step it
-is cheap and decisive.
+**Why it is rejected despite being mechanically available.** It moves the
+*player's own view*. That is the wrong shape for this project: Petrovich seizing
+the pilot's head is not Petrovich looking somewhere, it is the software taking
+control of the human's eyes. It would degrade the thing Petrobrain exists to
+improve — a crew that feels like a crew — and no amount of it working would make
+it the right mechanism. Not a cost/benefit call; a category error.
+
+It also fails the project's own invariant in spirit: the crew layer models what
+Petrovich could perceive, and manufacturing his perception by puppeting the
+pilot is exactly the kind of omniscience-by-backdoor the design forbids.
