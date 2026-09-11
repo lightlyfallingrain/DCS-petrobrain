@@ -200,6 +200,7 @@ _OP_CLASS_DISPLAY: Final[dict[str, str]] = {
     "OP_SPAAG": "AAA",
     "OP_ZU23": "AAA",
     "OP_SHIP": "ship",
+    "OP_GROUPSOMETHING": "unit",
 }
 
 #: Matches a `belief.enrichment.SemanticFact.text` fragment's trailing
