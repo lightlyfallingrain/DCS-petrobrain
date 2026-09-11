@@ -1,66 +1,49 @@
 --[[
-SIGHT-DRIVEN DETECTION PROBE -- not the production export script.
+SIGHT-DRIVEN DETECTION PROBE v3 -- not the production export script.
 Log: Logs\aircraft_layer_probe_sightdetect.log
 Deploy to Saved Games\DCS\Scripts\Export.lua
 
-THE QUESTION (v2)
-  Run 1 answered half of it and exposed a probe bug. The sight slewed exactly
-  as commanded (-45.0, -25.0, +0.0) and NOTHING was ever detected -- but the
-  probe never pressed ShowMenu, so the wheel was never open, the centre press
-  had nothing to act on, and no search was ever running. The log shows it:
-  "state=?" means petro_state() found no wheel slots at all.
+WHERE THIS GOT TO
+  v1: the probe never pressed ShowMenu, so no wheel, no search. The sight
+      slewed exactly as commanded and nothing was detected -- consistent with
+      "nobody is looking through it", but not isolated from "no search ran".
+  v2: fixed that. SRCH FWD genuinely running (state=SEARCHING throughout), the
+      sight pinned at five bearings for 12s each. Our azimuth HELD every time --
+      he never fought us for it -- and there were ZERO detections at any
+      bearing. The pilot then commanded a boresight search with the target
+      group ON the boresight, and still got nothing.
 
-  So run 1 is consistent with the pilot's reading -- the 9K113 can be slewed
-  with the helper inactive, but with nobody looking through it, nothing is
-  seen -- while not isolating it from "the probe never started a search".
+  Two explanations are confounded in v2, and one of them is my omission:
+    (a) v2 never commanded ELEVATION (3060), only azimuth, so the sight sat
+        wherever it happened to be. The pilot saw it pointing too high -- so
+        the sweep may simply have been scanning sky.
+    (b) Pinning the sight SUPPRESSES the search. "Searching" means slewing the
+        sight in a pattern; we were overriding that every frame, so he could be
+        nominally SEARCHING while unable to actually look anywhere.
 
-  v2 asks the sharper question the pilot posed:
-    WITH a search actively running, what happens when we slew by code?
-  Does the swept bearing produce detections, or does Petrovich fight us for
-  the sight / carry on with his own pattern?
+WHAT v3 DOES
+  Tests (b) directly, which also sidesteps (a):
 
-  Sequence: open the wheel, VERIFY it is open, start SRCH FWD, VERIFY the state
-  actually moved to WAITING/SEARCHING, wait out the gyro, take a baseline, then
-  sweep -- logging contacts, state, and whether our commanded azimuth HOLDS.
+    FREE   -- search running, we do NOT touch the sight. He aims it himself,
+              at whatever elevation is right, and we log both what he finds and
+              WHERE HE POINTS IT.
+    PINNED -- search running, we hold azimuth AND elevation.
 
-  We know we can aim it: SetCommand(3061, deg/60) moves the real optics (the
-  pilot confirms the HUD crosshair moves in missile mode), and the position
-  holds. What we do NOT know is whether anything LOOKS through the sight on our
-  behalf -- i.e. whether slewing onto an unlisted target adds it to the list.
-
-  This matters because every other route to a DIRECTED scan has closed:
-    SRCH PILOT LOS   triggerable, but aimed by the human's head (TrackIR)
-    SRCH 9K113 LOS   would be exactly right, but appears broken -- pressing
-                     down, short or long, just toggles OBSERV.
-    SRCH FWD / BRST  triggerable, but not aimable
-  If sight-driven detection works, scan_area(bearing) is one SetCommand plus a
-  list read, with no wheel interaction at all.
-
-METHOD
-  1. Get Petrovich observing and searching (centre LONG = SRCH FWD).
-  2. Record the baseline contact list.
-  3. Sweep the sight across a series of bearings, holding each, and record the
-     contact list at each one.
-  4. Report which bearings produced contacts that were not in the baseline.
-
-  It NEVER scrolls the list and NEVER selects a target -- the pilot established
-  that Petrovich takes the sight back on either action, which would make the
-  measurement his aim rather than ours.
-
-  It also never toggles OBSERV. off: every OBSERV. ON costs the ~10s gyro
-  alignment. Note Petrovich may turn observation off himself during hard
-  manoeuvring to protect the gyros, so the log records OBSERV. state each step
-  -- if it goes off mid-sweep, that step's result is void.
+  Alternating rounds. If FREE detects and PINNED does not, pinning suppresses
+  detection and the question is settled. The FREE rounds also reveal the
+  elevation he uses for ground targets -- the number v2 was missing.
 
 HOW TO FLY IT
   Level and STEADY (hard manoeuvring makes him stow the sight), sight powered,
-  with targets spread across a decent arc ahead. 20s grace. Then hands off --
-  in particular do not touch the wheel, the sight, or your TrackIR view more
-  than necessary.
+  targets ahead. 20s grace, then hands off -- wheel, sight and TrackIR.
 ]]
 
-local BEARINGS = {-45, -25, 0, 25, 45, 0}   -- degrees from the nose, + is right
-local DWELL_S  = 12.0                       -- hold each bearing this long
+local DWELL_S   = 25.0     -- how long each condition runs
+local ROUNDS    = 6        -- alternating FREE / PINNED
+local PIN_AZ    = 0.0      -- bearing to pin at, degrees, + is right
+local PIN_EL    = -0.4     -- elevation COMMAND value on the AI axis (3060).
+                           -- Negative should be depressed; v2 never commanded
+                           -- elevation at all, which is why it sat too high.
 local START_DELAY, GYRO_WAIT = 20.0, 20.0
 
 local LOG_PATH = lfs.writedir() .. "Logs\\aircraft_layer_probe_sightdetect.log"
@@ -86,8 +69,9 @@ local function safe_index(o, k)
 end
 
 local DEV_MAIN, DEV_SIGHT, DEV_HAI = 0, 7, 30
-local CMD_CENTRE, CMD_SHOWMENU, SIGHT_AI_AZ = 3015, 3001, 3061
-local ARG_AZ, ARG_NABL = 874, 886
+local CMD_CENTRE, CMD_SHOWMENU = 3015, 3001
+local SIGHT_AI_AZ, SIGHT_AI_EL = 3061, 3060   -- Intern_SIGHT_*_AI_AXIS
+local ARG_AZ, ARG_EL, ARG_NABL = 874, 876, 886
 local IND_HAI, IND_WHEEL = 6, 10
 local SHORT_HOLD, LONG_HOLD = 0.20, 0.80
 
@@ -159,23 +143,16 @@ local function press_centre(hold, t) -- caller drives the release via the phase 
 end
 
 -- ============================================================== driver
-local P = {phase="grace", t=0, i=0, baseline={}, results={}}
-local t0 = nil
-local last_c = nil
+local P = {phase="grace", t=0, i=0, pinned=true, seen={}, results={}}
+local t0, last_c = nil, nil
 
-local function add_set(tbl, csv)
-    if csv == nil then return end
-    for item in csv:gmatch("[^,]+") do
-        item = item:gsub("^%s+", ""):gsub("%s+$", "")
-        if item ~= "" then tbl[item] = true end
-    end
-end
+local function el_arg() return tostring(read_arg(ARG_EL)) end
 
 function LuaExportStart()
     log("")
     log("#########################################################")
-    log("SIGHT-DRIVEN DETECTION PROBE")
-    log("  does aiming the 9K113 ourselves make Petrovich detect?")
+    log("SIGHT-DETECTION PROBE v3 -- FREE vs PINNED")
+    log("  does holding the sight stop Petrovich finding anything?")
     log("#########################################################")
 end
 function LuaExportStop()
@@ -193,16 +170,14 @@ function LuaExportAfterNextFrame()
     local c = contacts()
     if c ~= last_c then
         last_c = c
-        log(string.format("  ~ t=%.0f contacts: %s   (state=%s az=%s NABL=%s)",
-            t, tostring(c), petro_state(), az_deg(), tostring(read_arg(ARG_NABL))))
+        log(string.format("  ~ t=%.0f contacts: %s  (state=%s az=%s el=%s)",
+            t, tostring(c), petro_state(), az_deg(), el_arg()))
     end
 
     if P.phase == "grace" then
-        -- run 1's bug: it pressed the centre without ever opening the wheel.
         if wheel_slots() ~= nil then
-            log("  wheel already open: " .. tostring(petro_state()))
-            P.phase = "search" ; P.t = t
-            return
+            log("  wheel already open, state=" .. petro_state())
+            P.phase = "search" ; P.t = t ; return
         end
         log("  opening the AI wheel (ShowMenu)")
         dev(DEV_HAI, "performClickableAction", CMD_SHOWMENU, 1)
@@ -217,19 +192,18 @@ function LuaExportAfterNextFrame()
     elseif P.phase == "open_check" then
         if t - P.t < 1.5 then return end
         if wheel_slots() == nil then
-            log("  !! wheel did not open -- cannot run a search; aborting")
-            log("     (without the helper UI there is nobody looking through the sight)")
+            log("  !! wheel did not open -- no search possible; aborting")
             P.phase = "done" ; return
         end
-        log("  wheel open, state=" .. tostring(petro_state()))
+        log("  wheel open, state=" .. petro_state())
         P.phase = "search" ; P.t = t
 
     elseif P.phase == "search" then
         log("  starting a forward search (centre LONG = SRCH FWD)")
-        press_centre(LONG_HOLD, t)
-        P.phase = "rel" ; P.t = t
+        dev(DEV_HAI, "performClickableAction", CMD_CENTRE, 1)
+        P.phase = "search_rel" ; P.t = t
 
-    elseif P.phase == "rel" then
+    elseif P.phase == "search_rel" then
         if t - P.t > LONG_HOLD then
             dev(DEV_HAI, "performClickableAction", CMD_CENTRE, 0)
             P.phase = "search_check" ; P.t = t
@@ -237,80 +211,87 @@ function LuaExportAfterNextFrame()
 
     elseif P.phase == "search_check" then
         if t - P.t < 2.0 then return end
-        local st = tostring(petro_state())
+        local st = petro_state()
         if st:find("WAITING", 1, true) or st:find("SEARCHING", 1, true)
            or st:find("TRACKING", 1, true) then
             log("  search running, state=" .. st)
         else
-            log("  !! state is " .. st .. " -- the search may not have started.")
-            log("     Continuing anyway; the sweep results will say.")
+            log("  !! state is " .. st .. " -- search may not have started; continuing")
         end
         log(string.format("  waiting %.0fs for gyro alignment", GYRO_WAIT))
         P.phase = "gyro" ; P.t = t
 
     elseif P.phase == "gyro" then
         if t - P.t > GYRO_WAIT then
-            add_set(P.baseline, contacts())
             log("")
-            log("  BASELINE contacts: " .. tostring(contacts()))
-            log(string.format("  state=%s  now sweeping the sight across %d bearings",
-                petro_state(), #BEARINGS))
-            log("  (never scrolling, never selecting -- either hands the sight back)")
+            log("  baseline: state=" .. petro_state() .. " az=" .. az_deg()
+                .. " el=" .. el_arg() .. " list=" .. tostring(contacts()))
             P.phase = "next" ; P.t = t
         end
 
     elseif P.phase == "next" then
         P.i = P.i + 1
-        if BEARINGS[P.i] == nil then P.phase = "report" ; return end
-        log("")
-        log(string.format("--- bearing %+d deg ---", BEARINGS[P.i]))
+        if P.i > ROUNDS then P.phase = "report" ; return end
+        P.pinned = not P.pinned
         P.seen = {}
+        log("")
+        log(string.format("========== round %d: %s ==========",
+            P.i, P.pinned and "PINNED" or "FREE"))
+        log(string.format("    start: state=%s az=%s el=%s list=%s",
+            petro_state(), az_deg(), el_arg(), tostring(contacts())))
+        if P.pinned then
+            log(string.format("    pinning az=%+.0f deg, el_cmd=%+.2f", PIN_AZ, PIN_EL))
+        else
+            log("    not touching the sight -- he aims it himself")
+        end
         P.phase = "dwell" ; P.t = t
 
     elseif P.phase == "dwell" then
-        point_sight(BEARINGS[P.i])          -- re-assert every frame
+        if P.pinned then
+            dev(DEV_SIGHT, "SetCommand", SIGHT_AI_AZ, PIN_AZ / 60.0)
+            dev(DEV_SIGHT, "SetCommand", SIGHT_AI_EL, PIN_EL)
+        end
         local cur = contacts()
         if cur ~= nil and P.seen[cur] == nil then
             P.seen[cur] = true
-            local novel = {}
-            for item in cur:gmatch("[^,]+") do
-                item = item:gsub("^%s+", ""):gsub("%s+$", "")
-                if item ~= "" and not P.baseline[item] then novel[#novel+1] = item end
-            end
-            log(string.format("    +%.0fs az=%s NABL=%s state=%s", t - P.t, az_deg(),
-                tostring(read_arg(ARG_NABL)), petro_state()))
-            log("      list : " .. cur)
-            if #novel > 0 then
-                log("      NEW  : " .. table.concat(novel, ", ") .. "   <== NOT IN BASELINE")
-                P.results[#P.results+1] = string.format("%+d deg -> %s",
-                    BEARINGS[P.i], table.concat(novel, ", "))
-            end
+            log(string.format("    +%.0fs DETECTED: %s   (az=%s el=%s state=%s)",
+                t - P.t, cur, az_deg(), el_arg(), petro_state()))
+            P.results[#P.results+1] = string.format("%s round %d: %s",
+                P.pinned and "PINNED" or "FREE", P.i, cur)
         end
         if t - P.t > DWELL_S then
-            local actual = tonumber(az_deg()) or 0
-            local held = math.abs(actual - BEARINGS[P.i]) < 2.0
-            log(string.format("    settled az=%s (commanded %+d) %s  state=%s  list=%s",
-                az_deg(), BEARINGS[P.i],
-                held and "HELD" or "<== PETROVICH TOOK THE SIGHT BACK",
-                petro_state(), tostring(contacts())))
+            log(string.format("    end  : state=%s az=%s el=%s  %s",
+                petro_state(), az_deg(), el_arg(),
+                (next(P.seen) == nil) and "NO DETECTIONS" or "(detections above)"))
             P.phase = "next" ; P.t = t
         end
 
     elseif P.phase == "report" then
         log("")
         log("=========================================================")
-        if #P.results == 0 then
-            log("NO bearing produced a contact outside the baseline.")
-            log("  Aiming the sight does NOT appear to drive detection on its own.")
-            log("  If so, directed scanning rests on DesignateAttackPoint (3020),")
-            log("  which remains untested under good conditions.")
-        else
-            log("BEARINGS THAT PRODUCED NEW CONTACTS:")
-            for _, r in ipairs(P.results) do log("   " .. r) end
-            log("  Aiming the sight DOES drive detection -- scan_area(bearing)")
-            log("  is one SetCommand plus a list read, no wheel interaction.")
+        local free_hits, pin_hits = 0, 0
+        for _, r in ipairs(P.results) do
+            if r:sub(1, 4) == "FREE" then free_hits = free_hits + 1
+            else pin_hits = pin_hits + 1 end
+            log("   " .. r)
+        end
+        log(string.format("  FREE detections: %d    PINNED detections: %d",
+            free_hits, pin_hits))
+        if free_hits > 0 and pin_hits == 0 then
+            log("  ==> PINNING SUPPRESSES DETECTION. He has to be free to slew")
+            log("      the sight in order to find anything, so holding it blinds")
+            log("      him. scan_area cannot work by pinning -- the directed")
+            log("      scan rests on DesignateAttackPoint (3020).")
+        elseif free_hits > 0 and pin_hits > 0 then
+            log("  ==> detection happens in BOTH. Pinning does not blind him.")
+        elseif free_hits == 0 and pin_hits == 0 then
+            log("  ==> NO detections in either condition -- INCONCLUSIVE. Either")
+            log("      no targets were in view, or something else gates detection.")
+            log("      Check the FREE rounds' az/el above to see where he looked.")
         end
         log("=========================================================")
         P.phase = "done"
+
+    elseif P.phase == "done" then
     end
 end

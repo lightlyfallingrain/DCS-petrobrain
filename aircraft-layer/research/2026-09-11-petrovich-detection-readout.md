@@ -991,7 +991,55 @@ optics mechanically, and none of the helper machinery gates it.
 That is worth stating plainly because it bounds what the effector is: **we move
 the glass; we do not thereby cause anyone to look through it.**
 
-### Next test — the pilot's question
+### Sight-detection run 2 — search genuinely running, still nothing
+
+```
+wheel open, state=OBSERV. OFF
+search running, state=WAITING
+state=SEARCHING  now sweeping the sight across 6 bearings
+  -45 deg  HELD  state=SEARCHING  list=nil
+  -25 deg  HELD  state=SEARCHING  list=nil
+   +0 deg  HELD  state=SEARCHING  list=nil
+  +25 deg  HELD  state=SEARCHING  list=nil
+  +45 deg  HELD  state=SEARCHING  list=nil
+```
+
+This time the wheel opened, `SRCH FWD` started, and `state=SEARCHING` held
+throughout. Our commanded azimuth **held at every bearing** — Petrovich never
+took the sight back, even mid-search. And **zero detections at any bearing**.
+The pilot then commanded a boresight search with the target group *on* the
+boresight, and still got no detections and no list.
+
+**Two explanations are confounded, and one is my omission:**
+
+- **(a) Elevation was never commanded.** The probe drove azimuth (3061) only,
+  never elevation (3060), so the sight sat at whatever elevation it had. The
+  pilot observed it pointing **too high** — so the sweep may simply have been
+  scanning sky, and "nothing much to detect" is the pilot's own read.
+- **(b) Pinning the sight suppresses the search.** "Searching" means slewing the
+  sight in a pattern, and we were overriding that every frame. He could be
+  nominally `SEARCHING` while unable to actually look anywhere — which would
+  also explain the pilot's boresight search failing, if the probe was still
+  pinning at that moment.
+
+(b) is the more interesting possibility and would answer the original
+"does pinning suppress detection?" question with **yes**.
+
+### Next test — FREE vs PINNED
+
+v3 tests (b) directly and sidesteps (a) at the same time, by alternating:
+
+- **FREE** — search running, we do not touch the sight. He aims it himself, at
+  whatever elevation is correct, and we log both what he finds **and where he
+  points it**.
+- **PINNED** — search running, we hold azimuth *and* elevation.
+
+If FREE detects and PINNED does not, pinning suppresses detection and the
+question is settled. The FREE rounds additionally reveal **the elevation he uses
+for ground targets** — the number (a) was missing, and which no amount of
+guessing from the gauge range would have given us.
+
+### The earlier framing of this question
 
 **With a search actively running, what happens when we slew by code?** Either
 the swept bearing yields detections, or Petrovich reasserts his own search

@@ -22,3 +22,57 @@
 13:09:10 
 13:09:10 --- bearing +25 deg ---
 13:09:20 sightdetect probe: stopped.
+13:14:17 
+13:14:17 #########################################################
+13:14:17 SIGHT-DRIVEN DETECTION PROBE
+13:14:17   does aiming the 9K113 ourselves make Petrovich detect?
+13:14:17 #########################################################
+13:14:24   20s grace -- get level and steady
+13:14:44   opening the AI wheel (ShowMenu)
+13:14:46   wheel open, state=OBSERV. OFF
+13:14:46   starting a forward search (centre LONG = SRCH FWD)
+13:14:49   search running, state=WAITING
+13:14:49   waiting 20s for gyro alignment
+13:15:09 
+13:15:09   BASELINE contacts: nil
+13:15:09   state=SEARCHING  now sweeping the sight across 6 bearings
+13:15:09   (never scrolling, never selecting -- either hands the sight back)
+13:15:09 
+13:15:09 --- bearing -45 deg ---
+13:15:21     settled az=-45.0 (commanded -45) HELD  state=SEARCHING  list=nil
+13:15:21 
+13:15:21 --- bearing -25 deg ---
+13:15:32 sightdetect probe: stopped.
+13:15:38 
+13:15:38 #########################################################
+13:15:38 SIGHT-DRIVEN DETECTION PROBE
+13:15:38   does aiming the 9K113 ourselves make Petrovich detect?
+13:15:38 #########################################################
+13:15:43   20s grace -- get level and steady
+13:16:03   opening the AI wheel (ShowMenu)
+13:16:05   wheel open, state=OBSERV. OFF
+13:16:05   starting a forward search (centre LONG = SRCH FWD)
+13:16:08   search running, state=WAITING
+13:16:08   waiting 20s for gyro alignment
+13:16:28 
+13:16:28   BASELINE contacts: nil
+13:16:28   state=SEARCHING  now sweeping the sight across 6 bearings
+13:16:28   (never scrolling, never selecting -- either hands the sight back)
+13:16:28 
+13:16:28 --- bearing -45 deg ---
+13:16:40     settled az=-45.0 (commanded -45) HELD  state=SEARCHING  list=nil
+13:16:40 
+13:16:40 --- bearing -25 deg ---
+13:16:52     settled az=-25.0 (commanded -25) HELD  state=SEARCHING  list=nil
+13:16:52 
+13:16:52 --- bearing +0 deg ---
+13:17:04     settled az=+0.0 (commanded +0) HELD  state=SEARCHING  list=nil
+13:17:04 
+13:17:04 --- bearing +25 deg ---
+13:17:16     settled az=+25.0 (commanded +25) HELD  state=SEARCHING  list=nil
+13:17:16 
+13:17:16 --- bearing +45 deg ---
+13:17:28     settled az=+45.0 (commanded +45) HELD  state=SEARCHING  list=nil
+13:17:28 
+13:17:28 --- bearing +0 deg ---
+13:17:42 sightdetect probe: stopped.
