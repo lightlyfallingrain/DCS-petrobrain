@@ -427,3 +427,59 @@ state; they should restore what they touch, or at least report it.
 
 Whether pinning the sight suppresses detection — the question this flight was
 built to answer. Needs a re-run with label-driven presses.
+
+---
+
+## Scan probe run 2 — 2026-09-11 11:29 — void again, three findings salvaged
+
+Pilot note: one manual `SRCH PILOT LOS` was issued during the run to aim the
+scan at the units.
+
+### Findings worth keeping
+
+**1. `SRCH 9K113 LOS` is only offered once observation is ON.** The far-down
+slot is absent when the down slot reads `OBSERV. OFF`, and present when it
+reads `OBSERV. ON`, `SEARCHING` or `TRACKING`. Seen both ways twice. So the
+scan_area sequence must **enable observation first**, then the sight-line
+search becomes available. — **evidence: reproduced-locally.**
+
+**2. `CLOSE LIST` (near-left, short press) reliably returns from the target
+page to the search page.** The probe's re-sync used it successfully, which
+means page navigation is recoverable and a driver need not get stuck in a
+submenu. — **evidence: reproduced-locally.**
+
+**3. The target-list page appeared while `list_indication(6)` stayed empty.**
+After the far-down press the wheel switched to `C=MARK TGT U=PREV TGT
+R=SELECT TGT D=NEXT TGT L=CLOSE LIST`, which is the page shown when there are
+targets to step through — yet no contact text was ever readable in indicator 6
+for the whole flight. This **weakens the earlier hypothesis** that the contact
+list and the UI are simply coupled; here the target *page* was up and the
+contact list was still empty. Unexplained.
+
+### Why the run is void — three faults, all mine
+
+**a. Arbitrary option selection.** When the exact option was missing the probe
+fell back to `find_option("SRCH")`, which scans slots with `pairs()` — whose
+order is undefined. Round 1 (PINNED) therefore pressed `SRCH PILOT LOS` and
+round 2 (FREE) pressed `SRCH 9K113 LOS`: **the two conditions were inverted**,
+so the comparison means nothing.
+
+**b. The centre slot is not pressable by the current mapping.** `SRCH BRST`
+sits in the centre, which has no direction key, so `find_option` skips it and
+the fallback fired. **How the centre option is selected is still unknown** —
+possibly it is the default action, possibly there is a separate commit key.
+Until that is known, no design should depend on a centre option.
+
+**c. State reading is not page-aware.** `petro_state()` always reads the down
+slot, which is Petrovich's state on the search page but `NEXT TGT` on the
+target page — hence the nonsense `state=NEXT TGT` in the log. State is only
+meaningful when the search page is up.
+
+### What the next probe must do differently
+
+- Select options by **exact slot**, never by substring with undefined
+  iteration order.
+- **Enable `OBSERV. ON` first** and wait for `SRCH 9K113 LOS` to appear before
+  attempting the pinned round.
+- Read state **only when on the search page**.
+- Avoid the centre slot entirely until its access method is known.
