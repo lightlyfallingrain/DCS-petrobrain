@@ -155,9 +155,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   then read (same defect class as BL-2 Stage 6, in a field that fix didn't cover). Fixed: the REPL
   now lazily builds its own thread-local connection/`EnrichmentContext`. Harvested to NOTES.md:
   sqlite3 thread-affinity is a recurring defect class in this codebase's polling/REPL architecture.
-  **The tool-set freeze point is the end of BL-7, not BL-5** — §3.3's tool list is the API's
-  intended final shape, delivered incrementally; a brain-layer prototype can start against the BL-5
-  subset now but should expect the surface to grow. Full history: `plans/bl5-tool-api/`.
+  **The tool-set freeze point was BL-6, not BL-7** (moved 2026-09-11 when BL-6's investigation
+  resolved what it needed to add — see that entry below) — §3.3's tool list is the API's intended
+  final shape, delivered incrementally; a brain-layer prototype can start against the BL-5 subset
+  now but should expect the surface to grow through BL-6. Full history: `plans/bl5-tool-api/`.
 
 - [x] **Scope-channel type-namespace mismatch, re-verified (closed as a stale backlog item, not
   new work; `fix/association-namespace-mismatch`).** The fix was already in `main` under BL-2/PB-2
@@ -200,17 +201,42 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   the user re-ran live acceptance against the same repro scenario post-merge — passed, no more
   duplicate spawning. Full history: `plans/bl5a-text-mode-crew-interaction/`.
 
-- [ ] **BL-6 — Commands and inspect-and-adapt (swapped with BL-7, 2026-09-10 — user decision,
-  no reason recorded beyond preferring this order; BL-7's Mission-Interpreter/fixture gate wasn't
-  the blocker, this one has its own gate below).** Not started. `PendingIntent` lifecycle,
-  aircraft-layer command issuance, outcome verification, retry/escalation. Sensors/detection only —
-  flight control stays deferred. Gated on the aircraft layer's command channel, which needs its own
-  Security plan review. Adds `scan_area`/`get_task_status`/`cancel_task`; this is the tool-set
-  freeze point.
+- [x] **BL-6 — Commands and inspect-and-adapt (done, merged 2026-09-11, `feature/bl6-commands-
+  inspect-adapt`, merge commit — see `git log --oneline -1 main` after this push).** `PendingIntent`
+  lifecycle (`body-layer/src/belief/tasks.py`), `scan_area`/`get_task_status`/`cancel_task`; this
+  was the tool-set freeze point (moved from BL-7, see that entry above). A day of live-DCS probing
+  plus a real-manual cross-check (RU Mi-24P QuickStart, `docs/concept/mi-24_info/`) resolved the
+  plan's original two blocking premises — see `aircraft-layer/research/2026-09-11-SUMMARY-
+  petrovich-control.md` and the revised `plans/bl6-commands-inspect-adapt/plan.md`: Petrovich has
+  real search verbs (`SRCH FWD`/`BRST` triggerable; every *directed*-aim route — `SRCH 9K113 LOS`,
+  `DesignateAttackPoint`, puppeting the pilot's view — closed, the last confirmed by the manual to
+  have no real-hardware analog at all) and a real, directly-readable outcome signal
+  (`list_indication(6)`/`(10)`), so `scan_area` triggers a real search and verifies a real outcome
+  rather than inferring success from belief-state timeout. `cancel_task` removes its
+  `AttentionArea` (user decision). Aircraft-layer effector: `POST /command/petrovich_search` +
+  `GET /petrovich_wheel/latest`, wired into body-layer's `Console` via an optional
+  `aircraft_client` field — no separate Security plan review was run (this project's current
+  phase exempts Security/Performance Reviewer per root `CLAUDE.md`'s "Agents" section; the
+  original "needs its own Security plan review" language above predates that exemption and is
+  superseded). 437 body-layer + 90 aircraft-layer tests green; live-DCS acceptance of the new
+  effector (does `POST /command/petrovich_search` actually fire `SRCH FWD` in a running mission)
+  is deliberately deferred to the user's own follow-up, not this milestone's DoD gate — add to the
+  "Live acceptance debt" list above if it isn't exercised soon. **Downstream consequence for BL-7/
+  BL-8:** every future "have Petrovich actually do X" idea inherits the same closed-directed-aim
+  ceiling this investigation found — no design assumes we can point his attention at a bearing we
+  choose, only trigger-and-verify. **Next queued item (user priority, `todo/todo.md`):** route
+  `belief.speech`'s spoken contact callouts to the in-game overlay (currently only reaches
+  `--crew-text`'s stdout, not `--overlay`'s cockpit text panel) — not part of BL-6's own scope, a
+  separate follow-on.
 
 - [ ] **BL-7 — Mission phase and relevance (≈ PB-9's deterministic half; swapped with BL-6,
   2026-09-10).** Not started. Gated on the Mission Interpreter existing, or a hand-written Mission
-  Understanding fixture (fine to use, should not wait on the Interpreter). Adds `get_mission_phase`
+  Understanding fixture (fine to use, should not wait on the Interpreter). **Stale-flag (2026-09-11,
+  not resolved here):** this entry still says it "adds `get_mission_phase`" to the tool API, but
+  BL-6's entry above and `tool_api.py`'s own docstring now say the freeze point was BL-6, not
+  BL-7 — whoever plans BL-7 needs to explicitly decide whether `get_mission_phase` still extends
+  `TOOL_SET` post-freeze (an amendment) or is scoped some other way; not a call to make in this
+  roadmap edit. Adds `get_mission_phase`
   to the tool API.
 
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:

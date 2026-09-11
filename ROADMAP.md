@@ -29,7 +29,7 @@ Per-layer design docs (status: draft/provisional): `docs/concept/WORLD_MODEL_BUI
 |---|---|---|
 | World Model | **Good enough, gate lifted 2026-09-06.** M0–M8 done. M9 (OSM augmentation) deferred, unscheduled. | [`world-model/ROADMAP.md`](world-model/ROADMAP.md) |
 | Aircraft Layer | **Core done, merged 2026-09-07.** DCS I/O pipeline (telemetry, world objects, Petrovich indication text, text-overlay write channel) live and stable. A few small tuning items open. | [`aircraft-layer/ROADMAP.md`](aircraft-layer/ROADMAP.md) |
-| Body Layer | **In progress — BL-5a done, BL-6 next.** Contact memory, classification, world enrichment, attention/events, the deterministic tool API, and text-mode crew interaction (BL-5a, `64015cd`) are all built and merged; BL-5a's duplicate-contact bug was cleared by the already-merged object-permanence fix, re-verified live post-merge. | [`body-layer/ROADMAP.md`](body-layer/ROADMAP.md) |
+| Body Layer | **In progress — BL-6 done, tool-set frozen.** Contact memory, classification, world enrichment, attention/events, the deterministic tool API (now frozen at twelve tools as of BL-6, moved from the originally-planned BL-7), text-mode crew interaction, and Petrovich command/verification (`scan_area`/`get_task_status`/`cancel_task`, BL-6, merged 2026-09-11) are all built and merged. Live-DCS acceptance of BL-6's new aircraft-layer effector is the user's own deferred follow-up. | [`body-layer/ROADMAP.md`](body-layer/ROADMAP.md) |
 | Mission Interpreter | Not started. | — |
 
 ## Keeping this current
