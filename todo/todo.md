@@ -10,6 +10,16 @@ the relevant roadmap to be updated in the same push as any merge.
 ## User priority tasks
 Prioritize any open task here over any other task in this file or roadmap files.
 
+- [ ] Route crew-text speech callouts ("tank, 12 o'clock, 3 km" style contact reports, from
+  `body-layer/src/belief/speech.py`'s `render_contact_report`/`route_event`) to the in-game
+  Petrobrain overlay (`aircraft-layer`'s `POST /text/push` channel, `--overlay` flag). Next item
+  after BL-6 merges. **Why:** the overlay is a stand-in for SRS text-to-speech and this callout
+  path is a key gameplay feature — it currently only reaches `--crew-text`'s stdout REPL, not the
+  in-cockpit overlay. Today `--overlay` mirrors `belief.events.Event` lifecycle lines via
+  `format_event_for_overlay` (a different formatting path than `speech.py`'s templates) — this
+  task is about getting the actual spoken-callout text onto the overlay, not just presence/lost
+  events; needs a design look at whether that means reusing `route_event`'s output as the overlay
+  line, running `--crew-text` and `--overlay` together, or something else.
 - [x] Create integrity audit skill, see instructions @todo/integrity-audit-skill.md — `.claude/skills/integrity-audit/SKILL.md` created 2026-09-08. 6-phase diagnostic audit (inventory → cross-file consistency → staleness → genericity leaks → duplication/dead mechanisms → memory hygiene → classify+report); never self-edits config, writes dated report to `audits/system-integrity/`.
 - [x] claude workflow changes — `AGENTS.md` updated 2026-09-08: new "Auto-Advance" section (proceed through Architect → Implementer → Reviewer → (loop) → DoD without stopping between stages) and Escalation Rules extended with the local/reversible/non-material autonomy criterion. Existing `UserPromptSubmit` hook already injects "apply automatically, no user input needed" each turn — left as-is per user decision to observe first; hook mirror-update deferred unless AGENTS.md alone proves insufficient.
     - [x] move automatically to next stage in worklfows: architecht -> implementor -> reviewer -> (loop back to implementer if fixes are needed) -> DoD. If there is genuine ambiguity or need for user input/verification/perception, stop and hand to user. In normal cases, proceed to next step in workflow.
