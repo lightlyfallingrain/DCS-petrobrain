@@ -187,3 +187,30 @@
 13:41:02     start: state=NEXT TGT az=+0.0 el_arg=-0.004 pitch=-2.5 bank=+0.0 (horizon-relative = arg + pitch) list=SA-10 Big Bird radar, T-55, T62
 13:41:02     not touching the sight -- he aims it himself
 13:41:14 sightdetect probe: stopped.
+13:45:51 
+13:45:51 #########################################################
+13:45:51 SIGHT-DETECTION PROBE v3 -- FREE vs PINNED
+13:45:51   does holding the sight stop Petrovich finding anything?
+13:45:51 #########################################################
+13:45:59   20s grace -- get level and steady
+13:46:19   opening the AI wheel (ShowMenu)
+13:46:21   wheel open, state=OBSERV. OFF
+13:46:21   starting a forward search (centre LONG = SRCH FWD)
+13:46:24   search running, state=WAITING
+13:46:24   waiting 20s for gyro alignment
+13:46:41   ~ t=42 contacts: BTR-80, BMD-1, T-72B  (state=NEXT TGT az=-2.9 el_arg=-0.057 pitch=-2.0 bank=+0.0 (horizon-relative = arg + pitch))
+13:46:44 
+13:46:44   baseline: state=NEXT TGT az=+0.6 el_arg=+0.003 pitch=+0.3 bank=+0.0 (horizon-relative = arg + pitch) list=BTR-80, BMD-1, T-72B
+13:46:45   re-arming search (state was NEXT TGT)
+13:46:45   ~ t=46 contacts: nil  (state=OBSERV. ON az=+0.5 el_arg=+0.003 pitch=+1.3 bank=+0.0 (horizon-relative = arg + pitch))
+13:46:48 
+13:46:48 ========== round 1: FREE ==========
+13:46:48     start: state=SEARCHING az=+14.7 el_arg=-0.040 pitch=+2.6 bank=+0.0 (horizon-relative = arg + pitch) list=nil
+13:46:48     not touching the sight -- he aims it himself
+13:47:13     end  : state=SEARCHING az=-18.2 el_arg=-0.016 pitch=+2.5 bank=+0.0 (horizon-relative = arg + pitch)  NO NEW DETECTIONS
+13:47:14   (already searching: SEARCHING)
+13:47:14 
+13:47:14 ========== round 2: PINNED ==========
+13:47:14     start: state=SEARCHING az=-13.3 el_arg=-0.067 pitch=+2.5 bank=+0.0 (horizon-relative = arg + pitch) list=nil
+13:47:14     sweeping az +0 -> -60 deg over 25s (elevation left to him)
+13:47:30 sightdetect probe: stopped.

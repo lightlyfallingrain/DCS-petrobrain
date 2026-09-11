@@ -1173,3 +1173,68 @@ just vehicles.
 The comparison this finally makes is the right one: with him genuinely
 searching, does *our* sweep across the target arc produce detections, or only
 *his* own?
+
+---
+
+## Sight-detection run 5 — the rig finally worked, the flight ended first
+
+```
+baseline            state=NEXT TGT  list=BTR-80, BMD-1, T-72B
+re-arming search (state was NEXT TGT)
+  ~ t=46 contacts: nil   (state=OBSERV. ON)
+round 1 FREE        start state=SEARCHING az=+14.7
+                    end   state=SEARCHING az=-18.2    NO NEW DETECTIONS
+  (already searching: SEARCHING)
+round 2 PINNED      start state=SEARCHING az=-13.3
+                    sweeping az +0 -> -60 deg over 25s
+<probe stopped 16s into round 2>
+```
+
+**The v5 rig works.** Re-arming detected `NEXT TGT`, closed the list, re-issued
+`SRCH FWD`, and the state went `OBSERV. ON` → `SEARCHING`. Round 1 ran with him
+genuinely searching and sweeping ±18° on his own; round 2 began its 0 → −60°
+sweep. The flight simply ended 16 s in, so PINNED has no result.
+
+**Useful side finding: closing the list clears the contacts** (`list=nil` right
+after the re-arm). So re-arming gives each round a clean baseline, which is
+what the per-round baseline logic was working around — it now comes for free.
+
+Still unresolved after five iterations: **does our sweep produce detections?**
+Round 1's FREE sweep found nothing either, even though the same targets had been
+found minutes earlier via `SRCH PILOT LOS` — which suggests `SRCH FWD` alone
+does not look where these targets are, and that the pilot's LOS direction is
+doing real work.
+
+### Stopping this line
+
+Five runs, each derailed by a different setup problem rather than by DCS
+telling us anything. The remaining question is worth answering but this is not
+the cheapest route to it, and `DesignateAttackPoint` is both untested and
+directly relevant.
+
+## `DesignateAttackPoint` — the next line, and a good hypothesis
+
+**Pilot's hypothesis:** `DesignateAttackPoint` may be the actual mechanism
+behind `SRCH PILOT LOS` — DCS computing where the centre-screen crosshair
+intersects the terrain, and designating *that* point.
+
+It fits what is known, and it splits into two cases that matter enormously:
+
+- **If the designated point comes from the pilot's view**, it inherits the same
+  disqualifying property as `SRCH PILOT LOS`: not code-controllable.
+- **If it comes from the 9K113's own ground intersection**, it is exactly what
+  BL-6 needs — we can already aim that sight precisely, so "point, then
+  designate" becomes `scan_area(bearing)`. `av9K113::get_LandPoint()` exists in
+  the DLL ("the ground point the sight is aimed at"), which makes this
+  mechanically plausible.
+
+`HelperAI.lua`'s `scan_rad_around_point = 2500` and
+`custom_attack_point_speed = 0.125` both sit alongside this command, and DCS's
+own binding label is **"Designate custom AI attack point"** — so a point is
+designated and something scans a 2.5 km radius around it.
+
+**The test that separates the two cases:** aim the 9K113 at a known bearing,
+fire `DesignateAttackPoint` (3020), then **release the sight** and watch. If he
+slews to *our* designated bearing and works that area, the point came from the
+sight and BL-6 is solved. If he goes somewhere unrelated to it — particularly
+somewhere matching where the pilot was looking — it came from the view.
