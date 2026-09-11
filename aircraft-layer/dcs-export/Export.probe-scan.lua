@@ -1,6 +1,19 @@
 --[[
-SCAN-AT-BEARING PROBE v3 -- not the production export script.
+SCAN-AT-BEARING PROBE v4 -- not the production export script.
 Log: Logs\aircraft_layer_probe_scan.log   Deploy to Saved Games\DCS\Scripts\Export.lua
+
+WHAT CHANGED IN v4
+  Run 3 hammered "OBSERV. OFF" endlessly. The pilot's diagnosis: when the
+  contact list is displayed, Up/Down SCROLL THE LIST rather than driving the
+  wheel -- so the press was being consumed and nothing checked whether it had
+  had any effect. v4 therefore:
+   * VERIFIES every press (records the slot label before, reports "took effect"
+     or "NO EFFECT", and refuses after 3 attempts, so nothing can loop);
+   * IDENTIFIES the page (search / target / cm) from the centre and down slot
+     labels and interprets key meaning accordingly;
+   * ENUMERATES the contact list by scrolling NEXT TGT until the rows stop
+     changing -- which terminates, since the list ends rather than wraps.
+     Scrolling moves the selection, so this is not read-only.
 
 WHAT CHANGED IN v3
   Run 2 was void because of three faults of mine:
@@ -14,7 +27,7 @@ WHAT CHANGED IN v3
    c. State was read from the down slot regardless of page -- but that slot is
       Petrovich's state only on the search page, and "NEXT TGT" on the target
       page.
-  v3 therefore presses an EXACT NAMED SLOT, having first verified that slot's
+  v3 presses an EXACT NAMED SLOT, having first verified that slot's
   current label; enables observation before expecting the sight-line search to
   appear (run 2 established SRCH 9K113 LOS is only offered once OBSERV. is ON);
   and reads state only when the search page is up.
