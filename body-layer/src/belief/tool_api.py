@@ -13,7 +13,7 @@ Second-Order Effect note, the tool-set freeze point is BL-6, not BL-5 --
 BL-5a's `say`/`ask_player` and BL-6's `scan_area`/`get_task_status`/
 `cancel_task` (`plans/bl6-commands-inspect-adapt/plan.md`) are expected to
 extend `TOOL_SET`, not be blocked by it. With BL-6 landed, `TOOL_SET` is
-now the frozen surface `docs/concept/PETROBRAIN_RUNTIME.md` §3.3 names in
+now the frozen surface `plans/body-layer/plan.md` §3.3 names in
 full.
 
 Descriptions below are taken verbatim from `plans/body-layer/plan.md` §3.3
