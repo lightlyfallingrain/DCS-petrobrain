@@ -60,8 +60,14 @@ so every "unread" item in that file is now read.
   These are **normalised gauge values, not radians**. `CockpitMi24.dll` exports both
   `av9K113::getSightAzimuth()`/`getSightElevation()` (true angle, `double`) *and*
   `getSightAzimuthGauge()`/`getSightElevationGauge()`; only the gauge value reaches Lua, and the
-  angular limits are native (`av9K113::initLimits`), absent from Lua. **Converting gauge units to
-  a real bearing requires live calibration against a known target.**
+  angular limits are native (`av9K113::initLimits`), absent from Lua.
+
+  **Azimuth calibration supplied by the user (2026-09-11): ±60° from the aircraft centerline.**
+  With the gauge mapping that gives `azimuth_deg = (arg_874 / 0.44) * 60`, i.e.
+  `arg_874 * 136.36`. Assumes the gauge input is linear in angle — the natural reading, worth one
+  sanity check against a known bearing. **Elevation limits remain unknown**, so arg 876 has no
+  conversion yet; its asymmetric `-0.75 / +1.0` output split implies more travel up than down.
+  — **evidence: user-supplied** for the limits, **reproduced-locally** for the gauge mapping.
 
 - **The 9K113 slew axes are velocity, not position.** `Devices_specs/9K113.lua`:
   `axis_use_velocity = true`, `h_axis_velocity = rad(20)/s`, `v_axis_velocity = rad(10)/s`,
@@ -245,8 +251,9 @@ absent `GetDevice` logs a clean "ABSENT" line rather than taking down the export
 - **Is 9K113 slewing gated on the operator's sight mode, and does the `_AI_AXIS` channel
   (3060/3061) bypass that gate?** The decisive question for using the sight as a pointing
   device. Stage E, run in and out of the sight view.
-- **What do gauge args 874/876 mean in real angles?** Needs live calibration against a known
-  target; limits are native and not in Lua.
+- **Elevation limits (arg 876)** — still unknown, so no angle conversion for elevation. Azimuth is
+  now resolved (±60°, user-supplied). Worth reading off during the probe by slewing to both
+  elevation stops and recording the arg values.
 - **Does `list_indication(0)` populate?** Would give zoom/filter/backlight state as text.
 - **Does `av9K113` expose extra Lua methods** (it is `avLuaRegistrable`), and in particular
   anything like `get_LandPoint`? Stage A enumerates the object.

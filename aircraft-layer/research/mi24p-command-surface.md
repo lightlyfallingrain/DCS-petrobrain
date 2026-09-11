@@ -170,9 +170,30 @@ the thing the ASP-17 never had — its controllers were geometry-only with nothi
 linearly; elevation is piecewise (`-1→-0.75`, `0→0`, `1→1.0`), so negative and positive
 elevation scale differently. `CockpitMi24.dll` confirms the split — it exports both
 `av9K113::getSightAzimuth()`/`getSightElevation()` (returning `double`, the true angle) **and**
-`getSightAzimuthGauge()`/`getSightElevationGauge()`. Only the gauge value reaches Lua. Converting
-gauge units to a real bearing needs **live calibration** against a known target; the angular limits
-are native (`av9K113::initLimits`) and appear nowhere in Lua.
+`getSightAzimuthGauge()`/`getSightElevationGauge()`. Only the gauge value reaches Lua; the angular
+limits are native (`av9K113::initLimits`) and appear nowhere in Lua.
+
+### 4.1.1 Azimuth calibration
+
+**Azimuth limits are ±60° from the aircraft centerline** (user-supplied, 2026-09-11; not
+derivable from the installed files). Combined with the gauge mapping above:
+
+```
+gauge input -1 .. +1   ==  -60° .. +60°
+arg 874     -0.44 .. +0.44
+
+azimuth_deg = (arg_874 / 0.44) * 60      ->  arg_874 * 136.36
+arg_874     = (azimuth_deg / 60) * 0.44  ->  azimuth_deg * 0.007333
+```
+
+**Assumes the controller's normalised input is linear in angle** — the natural reading of a
+`CreateGauge()` input/output pair, but worth one sanity check against a known bearing during the
+first probe run (slew onto a landmark at a known relative bearing, compare).
+
+**Elevation limits are still unknown**, so arg 876 has no angle conversion yet. Its piecewise
+`-0.75 / +1.0` output split suggests an asymmetric range (more travel up than down), which is
+what one would expect for a sight that must look well below the nose — but the actual degrees are
+unconfirmed.
 
 ### 4.2 Slewing it — and the mode question
 
