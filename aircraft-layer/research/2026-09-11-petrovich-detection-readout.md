@@ -805,3 +805,98 @@ list_indication(6)    -- classified contacts, 5-row window, fully walkable
 What remains is not mechanism but **design**: the BL-6 plan was written assuming
 no effector and no outcome signal, and both assumptions are now false. That
 plan needs an Architect revision before implementation.
+
+---
+
+## Operational semantics of the Petrovich command flow (pilot, 2026-09-11)
+
+Everything below is the pilot's direct operating experience, not probe output.
+It is recorded because several items change what a `scan_area` design can
+actually assume, and two of them contradict earlier probe conclusions.
+
+### The engagement flow
+
+- **`MARK TGT`** (centre, list page) — marks/toggles targets with **1, 2, 3…**,
+  letting the operator pick a subset of the list. This explains the probe's
+  "no observable effect": the marking is a numeric annotation on list rows, and
+  the probe pressed it while watching azimuth and row *text*, neither of which
+  carries the marker. **Presumed but untested:** as a marked target is
+  destroyed, the 9K113 slews to the next.
+- **`SELECT TGT`** (right) — begins tracking for engagement. Confirmed by probe:
+  state → `TRACKING`, list closes, centre becomes `FIRE`.
+- **Leaving tracking** — the only way back to the list appears to be issuing a
+  new scan command (e.g. `SRCH PILOT LOS`).
+- **Firing** requires the *helicopter boresight* to be aimed at the tracked
+  target, within a few degrees. The probe mission carried no missiles, so
+  nothing in this investigation exercised weapons release.
+- **On target destruction nothing happens automatically** — a new search must be
+  commanded.
+
+### `SRCH 9K113 LOS` does not work as labelled — and this matters a lot
+
+**Pilot:** the far-down slot advertises `SRCH 9K113 LOS`, but pressing down —
+short *or* long — only triggers `OBSERV. OFF`. Presumed a DCS bug or a
+misleading label.
+
+This **conflicts with scan run 3**, where the probe logged
+`press FD="SRCH 9K113" [LONG press] ... [took effect]` and the wheel then
+switched to the target page. That "took effect" was judged by label change, and
+the page switch could equally have been Petrovich surfacing results from an
+earlier search — so the probe evidence is weak and the pilot's direct
+observation should be preferred until a clean test says otherwise.
+
+It also retrospectively explains the repeated `OBSERV. OFF` firing: the probe
+believed it was pressing the far-down search while DCS was actually toggling
+observation.
+
+Note this is **slot-specific, not a long-press failure**: far-up (`HOLD FIRE` →
+`FREE FIRE`) and far-left (`CM MENU`) both fired correctly on long press.
+
+**Design consequence — this is the important one.** The three search commands
+have very different value to a code-driven system:
+
+| search | directable from code? |
+|---|---|
+| `SRCH PILOT LOS` | **No** — see below |
+| `SRCH 9K113 LOS` | Would be ideal (we can aim that sight precisely) but **appears broken** |
+| `SRCH FWD` / `SRCH BRST` | Triggerable, but **not aimable** — forward sweep / boresight |
+
+### `SRCH PILOT LOS` is not code-controllable
+
+**It takes the pilot's line of sight from a crosshair at mid-screen — i.e. it
+depends on where the human player is physically looking** (the pilot uses
+TrackIR head tracking). So although it is the easiest search to *trigger* from
+code, where it actually looks is set by the player's head, not by us.
+
+For Petrobrain this is disqualifying for a `scan_area(bearing)` primitive: the
+same command would scan somewhere different depending on the human's head
+position at that instant. It remains useful as *"look where I'm looking"*, which
+is a legitimate crew interaction — just not a programmatic one.
+
+**With `SRCH 9K113 LOS` apparently broken and `SRCH PILOT LOS` player-dependent,
+there is currently no confirmed way to make Petrovich search a *specified*
+bearing via the wheel.** That puts `DesignateAttackPoint` (3020, "Designate
+custom AI attack point") back at the centre of BL-6 — it is now the strongest
+remaining candidate for directed search, and it has never been tested under good
+conditions.
+
+### Observation mode: do not toggle it casually
+
+- **Every `OBSERV. ON` incurs the gyro/servo alignment delay** (~10 s, matching
+  the spin-up the pilot reported earlier). So a design should keep observation
+  on and avoid `OBSERV. OFF` as a matter of course — the probe's habit of
+  toggling it was actively counterproductive.
+- **Petrovich turns `OBSERV. OFF` himself during hard manoeuvring**, to protect
+  the sight gyros from violent movement. **So observation state changes without
+  our command** — any code driving this must treat `OBSERV.` as observed state
+  to react to, never as state it owns.
+
+### A DCS UI race worth knowing about
+
+After `SRCH PILOT LOS` populates the list, pressing `CLOSE LIST` reopens it
+almost immediately, because Petrovich is still actively scanning where he was
+asked to. The pilot's workaround is to press left to close and then *immediately*
+either up (`SRCH PILOT LOS`) or down (`OBSERV. OFF`).
+
+Likely less of a problem for code, which can act within a frame or two, but any
+close-then-do sequence must not assume the list stays closed.
