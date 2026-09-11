@@ -8,6 +8,20 @@ description: Locate and read files in the installed DCS World tree -- module Lua
 Static reconnaissance of the **installed DCS tree**. Complements `dcs-log-recon`, which parses
 *runtime* `Export.lua` output — this skill is about the files DCS ships on disk.
 
+## In-repo reference: the real Mi-24P manual (RU)
+
+`docs/concept/mi-24_info/DCS Mi-24P QuickStart RU.pdf` (167 pages) is the full Russian-language DCS
+Mi-24P Quick Start manual — the actual cockpit/systems manual, more comprehensive than the English
+quickstart guide. Unlike everything else in this skill, it needs no DCS machine: it's checked into
+the repo and readable from any checkout. Use `Read` with `pages:"a-b"` (poppler/`pdftoppm` required
+on the reading machine, max 20 pages/call — `brew install poppler` on Mac).
+
+Useful for cross-checking live-probe conclusions about real systems (e.g. the 9K113 Raduga-Sh
+guidance device/ПН, ASP-17 sight, PTUR designation procedure) against how the actual aircraft's
+systems are meant to work, not just how DCS happens to expose them. A first mining pass for BL-6
+is `aircraft-layer/research/` (dated 2026-09-11 or later, RU-manual-sourced note) — check there
+before re-reading the whole PDF from scratch.
+
 Most of the World Model Builder and body-layer work depends on unverified DCS internals, so the
 `investigator` role re-derives "where does this live, is it readable" every session. This skill
 is that answer, verified against the install (`2.9.29.27278`, 2026-09-09).
