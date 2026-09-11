@@ -130,6 +130,7 @@ from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
+from belief.tasks import TaskStore
 from perception.geometry import open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -214,6 +215,13 @@ class ConsolePerceptionRunner:
     #: `sources` explicitly, same as before.
     sources: list[PerceptionSource] = field(default_factory=list)
     store: ContactStore = field(default_factory=ContactStore)
+    #: BL-6's `belief.tasks.TaskStore` (`plans/bl6-commands-inspect-adapt/
+    #: plan.md`) -- ticked alongside `store` every poll (see `run_once`),
+    #: the same hook point `ContactStore.tick` already runs from. Shared
+    #: with whichever `Console`/`CrewConsole` instance `main()` builds on
+    #: top of this runner's `store`, since `scan-area`'s handler needs the
+    #: same `TaskStore` the poll loop is ticking.
+    tasks: TaskStore = field(default_factory=TaskStore)
     output: TextIO | None = None
     last_t_sim: float | None = None
     #: In-cockpit text overlay mirror (BL-2.5, `--overlay`), mirroring
@@ -258,6 +266,12 @@ class ConsolePerceptionRunner:
         command the operator just typed, since the REPL has no telemetry
         feed of its own.
 
+        `self.tasks.tick(self.store, ...)` (BL-6) runs immediately after
+        `self.store.tick(...)`, the same poll-loop hook point -- a
+        `scan_area` task's success check reads `self.store`'s freshly
+        ticked contacts, so it must run after that tick, not before or
+        independently scheduled.
+
         If `overlay_client` is set (BL-2.5), every lifecycle event newly
         appended by this call's `tick()` is formatted
         (`belief.console.format_event_for_overlay`) and pushed
@@ -289,6 +303,7 @@ class ConsolePerceptionRunner:
         self.store.ingest(observations, now_sim=ownship.t_sim)
         events_before = len(self.store.events)
         self.store.tick(ownship.t_sim)
+        self.tasks.tick(self.store, ownship.t_sim)
         self.last_t_sim = ownship.t_sim
         if self.overlay_client is not None:
             new_events = self.store.events[events_before:]
@@ -589,7 +604,10 @@ def main() -> None:
             aircraft_client=aircraft_client, output=None
         )
         crew_console = CrewConsole(
-            store=crew_runner.store, brain_client=brain_client, output=sys.stdout
+            store=crew_runner.store,
+            brain_client=brain_client,
+            output=sys.stdout,
+            aircraft_client=aircraft_client,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(
@@ -636,7 +654,12 @@ def main() -> None:
             daemon=True,
         )
         poll_thread.start()
-        console = Console(store=console_runner.store, output=sys.stdout)
+        console = Console(
+            store=console_runner.store,
+            tasks=console_runner.tasks,
+            output=sys.stdout,
+            aircraft_client=aircraft_client,
+        )
         print(HELP_TEXT, file=sys.stdout)
         try:
             _run_console_repl(

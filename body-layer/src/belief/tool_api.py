@@ -9,9 +9,12 @@ milestone; the registry is what a thin HTTP/RPC adapter would wrap later,
 not a replacement for one).
 
 **This is provisional scaffolding, not a frozen contract.** Per the plan's
-Second-Order Effect note, the tool-set freeze point is the end of BL-7, not
-BL-5 -- BL-5a's `say`/`ask_player` and BL-7's `scan_area`/`get_task_status`/
-`cancel_task` are expected to extend `TOOL_SET`, not be blocked by it.
+Second-Order Effect note, the tool-set freeze point is BL-6, not BL-5 --
+BL-5a's `say`/`ask_player` and BL-6's `scan_area`/`get_task_status`/
+`cancel_task` (`plans/bl6-commands-inspect-adapt/plan.md`) are expected to
+extend `TOOL_SET`, not be blocked by it. With BL-6 landed, `TOOL_SET` is
+now the frozen surface `docs/concept/PETROBRAIN_RUNTIME.md` §3.3 names in
+full.
 
 Descriptions below are taken verbatim from `plans/body-layer/plan.md` §3.3
 where that section already wrote one; the three net-new tools' descriptions
@@ -124,5 +127,36 @@ TOOL_SET: list[ToolSpec] = [
             "facts (settlements, roads, water, ridges/valleys)."
         ),
         fn=tools.describe_our_position,
+    ),
+    ToolSpec(
+        name="scan_area",
+        description=(
+            "Ask Petrovich to search, and report whether something "
+            "relevant is subsequently found in a named area (a center "
+            "position + radius, optionally a sector). This does NOT aim "
+            "Petrovich at that area -- he decides where to look, this only "
+            "scopes which of his own findings count as satisfying the "
+            "request. A later 'failed' status means nothing was confirmed "
+            "by the deadline, never that the area was confirmed empty."
+        ),
+        fn=tools.scan_area,
+    ),
+    ToolSpec(
+        name="get_task_status",
+        description=(
+            "The current status of a scan_area task (pending/succeeded/"
+            "failed/cancelled), by id. 'failed' means nothing was "
+            "confirmed by the deadline -- never 'confirmed empty', since "
+            "Petrovich's search was never aimed at the requested area."
+        ),
+        fn=tools.get_task_status,
+    ),
+    ToolSpec(
+        name="cancel_task",
+        description=(
+            "Cancel a still-pending scan_area task, by id, and stop "
+            "watching the area it registered."
+        ),
+        fn=tools.cancel_task,
     ),
 ]
