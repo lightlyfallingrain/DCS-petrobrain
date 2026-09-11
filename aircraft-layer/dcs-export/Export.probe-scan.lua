@@ -311,30 +311,26 @@ local press = {active=false, phase=nil, t=0, cmd=nil, hold=0, label="", slot="",
 local attempts = {}
 local function attempt_key(slot, expect) return tostring(slot) .. "|" .. tostring(expect) end
 local function press_took() return press.took end
--- SAFETY (pilot, 2026-09-11): on the TARGET page the slots are
---   up/down  = scroll the list          -- safe, read-only browsing
---   right    = SELECT TGT               -- Petrovich TRACKS it, and if weapons
---                                          are free he will FIRE when in params
---   left     = CLOSE LIST               -- safe
---   centre   = MARK TGT                 -- believed to mark targets for
---                                          engagement (pilot unsure)
--- So two of the five inputs can start a shooting sequence. A probe that walks
--- the list must never touch them. This refuses them outright rather than
--- relying on every call site to remember.
-local FORBIDDEN_ON_TARGET_PAGE = {
-    wheel_text_right  = "SELECT TGT -- would make Petrovich track and possibly FIRE",
-    wheel_text_center = "MARK TGT -- believed to mark targets for engagement",
-}
+-- TARGET PAGE semantics (pilot, 2026-09-11):
+--   up/down  = scroll the list / change selected target
+--   right    = SELECT TGT  -- Petrovich tracks it, and fires when in parameters
+--                             if weapons are free
+--   left     = CLOSE LIST
+--   centre   = MARK TGT    -- believed to mark several targets for engagement
+--
+-- This is a simulator, so these are STATE-MUTATING, not dangerous, and during
+-- investigation we press them deliberately to learn what they do. MARK TGT's
+-- semantics in particular are unknown and worth establishing.
+--
+-- The distinction that matters is for the PRODUCTION code, not the probe:
+-- observation and engagement are different acts, and a body-layer
+-- list_contacts() must not quietly select or mark while merely reading. That
+-- belongs in the BL-6 design, not in a guard here.
 
 -- Press an EXACT slot, but only after confirming it currently shows `expect`.
 -- Refuses after MAX_ATTEMPTS so a press that does nothing cannot loop forever.
 local MAX_ATTEMPTS = 3
 local function press_start(slot, expect, why)
-    if page_kind() == "target" and FORBIDDEN_ON_TARGET_PAGE[slot] then
-        log(string.format("    !! REFUSING %s on the target page: %s",
-            SLOT_ABBR[slot] or tostring(slot), FORBIDDEN_ON_TARGET_PAGE[slot]))
-        return false
-    end
     local k = attempt_key(slot, expect)
     if (attempts[k] or 0) >= MAX_ATTEMPTS then
         log(string.format("    !! giving up on %s=%q after %d attempts",
@@ -427,8 +423,8 @@ local function list_enumerate(t)
         if page_kind() ~= "target" then return true end   -- nothing to do
         log("")
         log("========== LIST ENUMERATION (target page is up) ==========")
-        log("    safety: only scroll (up/down) and close (left) will be pressed;")
-        log("            SELECT TGT and MARK TGT are refused outright.")
+        log("    will scroll with NEXT TGT, then probe MARK TGT and SELECT TGT")
+        log("    to establish what they do -- state-mutating, which is fine here.")
         L.steps, L.seen, L.order, L.rowsets = 0, {}, {}, {}
         record_rows("initial")
         L.last_rows = contacts()
@@ -438,12 +434,12 @@ local function list_enumerate(t)
     elseif L.phase == "scroll" then
         if press.active then press_update(t) return false end
         if L.steps >= 12 then
-            log("    stopping: 12 scroll steps without reaching the end")
-            L.phase = "report" ; return false
+            log("    stopping: 12 scroll steps without wrapping")
+            L.phase = "probe_actions" ; L.t = t ; return false
         end
         if page_kind() ~= "target" then
             log("    left the target page; stopping enumeration")
-            L.phase = "report" ; return false
+            L.phase = "probe_actions" ; L.t = t ; return false
         end
         L.steps = L.steps + 1
         -- NEXT TGT's own label never changes when it scrolls, so the generic
@@ -468,10 +464,10 @@ local function list_enumerate(t)
             -- a REPEAT of a previously seen row-set instead.
             if rows == nil then
                 log("    no rows readable; stopping")
-                L.phase = "report"
+                L.phase = "probe_actions" ; L.t = t
             elseif L.rowsets[rows] then
                 log("    row-set already seen -> traversal has wrapped; full circle")
-                L.phase = "report"
+                L.phase = "probe_actions" ; L.t = t
             else
                 L.rowsets[rows] = true
                 L.last_rows = rows
@@ -479,10 +475,38 @@ local function list_enumerate(t)
             end
         end
 
+    elseif L.phase == "probe_actions" then
+        -- Establish what MARK TGT (centre) and SELECT TGT (right) actually do.
+        -- Both mutate state; that is the point. Record wheel + indicator 6 +
+        -- sight azimuth around each, since SELECT TGT should make Petrovich
+        -- track -- which would show up as the sight moving on its own.
+        if press.active then press_update(t) return false end
+        if t - L.t < 2.0 then return false end
+        L.act = (L.act or 0) + 1
+        local a = ({
+            {"wheel_text_center", "MARK",   "MARK TGT -- unknown semantics"},
+            {"wheel_text_right",  "SELECT", "SELECT TGT -- expect tracking"},
+        })[L.act]
+        if a == nil then L.phase = "report" ; return false end
+        if page_kind() ~= "target" then
+            log("    left the target page; skipping action probe")
+            L.phase = "report" ; return false
+        end
+        log(string.format("    -- probing %s --", a[3]))
+        log(string.format("       before: az=%s  rows=%s", az_deg(), tostring(contacts())))
+        attempts[attempt_key(a[1], a[2])] = 0
+        if not press_start(a[1], a[2], a[3]) then
+            log("       slot does not offer it; skipping")
+        end
+        L.t = t
+        return false
+
     elseif L.phase == "report" then
         log(string.format("    ==> enumerated %d distinct entries in %d scroll steps:",
                           #L.order, L.steps))
         for i, v in ipairs(L.order) do log(string.format("        %2d. %s", i, v)) end
+        log(string.format("    after action probes: az=%s  rows=%s  wheel=%s",
+            az_deg(), tostring(contacts()), wheel_str()))
         log("    NOTE: scrolling moved the selection. Traversal wraps, so the")
         log("          selection is wherever the walk stopped, not necessarily home.")
         L.done = true

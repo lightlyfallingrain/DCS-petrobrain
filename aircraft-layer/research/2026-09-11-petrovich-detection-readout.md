@@ -596,30 +596,28 @@ nothing once the target page appeared. The raw dump will settle it.
 
 ---
 
-## Target-page semantics — and a safety constraint
+## Target-page semantics
 
 Pilot, 2026-09-11. The target page's five inputs:
 
-| input | action | safe to automate? |
-|---|---|---|
-| up / down | scroll the list / change selected target | **yes** — browsing |
-| **right** | **`SELECT TGT`** — Petrovich tracks it, and **if weapons are free he will FIRE when within parameters** | **NO** |
-| left | `CLOSE LIST` | yes |
-| centre | `MARK TGT` — believed to mark multiple targets for engagement (pilot unsure) | **no** — treat as unsafe until known |
+| input | action |
+|---|---|
+| up / down | scroll the list / change selected target |
+| **right** | **`SELECT TGT`** — Petrovich tracks it, and fires when within parameters if weapons are free |
+| left | `CLOSE LIST` |
+| centre | `MARK TGT` — believed to mark several targets for engagement (pilot unsure) |
 
-**Two of the five inputs can begin a shooting sequence.** That is a real
-constraint on anything that walks the list, and it is sharpened by an earlier
-probe run having left Petrovich on **`FREE FIRE`** — the exact state in which
-`SELECT TGT` becomes a weapons-release action rather than a bookkeeping one.
+**These are state-mutating, not dangerous.** An earlier revision of this note
+framed them as a safety constraint and had the probe refuse them; that was
+overstated. This is a simulator, and during investigation the right move is to
+press them deliberately and record what they do — `MARK TGT`'s semantics are
+unknown and only a press will establish them. The probe now does exactly that
+after enumerating, logging the wheel, indicator 6 and the sight azimuth around
+each press (`SELECT TGT` should make Petrovich track, which would show as the
+sight moving on its own).
 
-The probe now **refuses `SELECT TGT` and `MARK TGT` outright whenever the
-target page is up**, as a guard inside the press routine rather than a
-convention every call site has to remember. Enumeration uses only scroll and
-close.
-
-**Design consequence for body-layer**, beyond the probe: reading Petrovich's
-full contact list is not merely "not read-only" — it is adjacent to weapons
-release. A `scan_area` / `list_contacts` implementation must treat the target
-page as a hazardous surface: scroll and close only, never select, and ideally
-assert `HOLD FIRE` before browsing. This belongs in the BL-6 plan revision, not
-just in probe code.
+**Where the distinction does matter is the production code.** Observation and
+engagement are different acts: a body-layer `list_contacts()` that merely reads
+must not quietly select or mark, because `SELECT TGT` commits Petrovich to
+tracking and, weapons free, to firing. That is a design requirement for the
+BL-6 revision — model the difference — not a guard to bolt onto a probe.
