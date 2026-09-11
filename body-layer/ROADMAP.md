@@ -255,6 +255,22 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 ## Backlog (body-layer)
 
+- [ ] **F10 radio-menu command input for Petrovich — no brain layer needed, blocked on DCS access.**
+  Raised 2026-09-12: contact reports (overlay-speech-callouts, merged) are in a good state; next
+  most useful thing is letting the player issue Petrovich commands (watch nearest, scan forward,
+  cancel task, etc.) from in-cockpit UI instead of typing into `--crew-text`'s console. **User
+  preference: the DCS F10 radio-comms menu** (the same mechanism AI wingmen commands and many
+  mission scripts/add-ons already use), not a custom keybind-per-command scheme — more discoverable,
+  more game-native. User explicitly flagged the F-4E module's radial action-wheel copilot UI as
+  nicer but more polish than needed now. **Genuinely unverified DCS-internals question, same class
+  as BL-6's original gate**: is an F10 menu selection (or an `addCommand`-style registration) reachable
+  from `Export.lua`'s own state, or does it require Hook-script/mission-scripting access this
+  project doesn't currently have a channel for? This is a new *inbound* DCS→body direction — the
+  reverse of BL-6's search-trigger write — and needs an investigator pass before any Architect
+  planning. **Blocked on DCS box access** (per this project's execution-boundary rule, static/live
+  recon needs `$DCS_INSTALL_PATH`, only set on the Windows machine) — pick up when that's available,
+  not before.
+
 - [>] **Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:
   the new contact-report format (`belief/speech.py`'s `render_contact_report`) has a
   FRIENDLY/ENEMY/HOSTILE/UNKNOWN slot, always `"UNKNOWN"` for now — no coalition/IFF perception
