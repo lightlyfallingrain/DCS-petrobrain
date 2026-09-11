@@ -339,52 +339,66 @@ end
 local K113_ARG_DOORS = 775   -- STVORKI
 local stage_d_fired = false
 
--- v2 runs a LIMIT SWEEP instead of short pulses. v1's "no change" readings were
--- almost certainly the sight SATURATED at its stop (user confirmed: "the sight
--- is just at max angle and does not move anymore"), i.e. our commands were
--- working all along. A sweep settles that beyond doubt and pays for itself
--- three times over:
---   1. If the value ramps then pins, our command is driving it. Causation.
---   2. The pinned values ARE the mechanical stops -> gauge calibration.
---   3. Doing it on elevation too yields the elevation limits, which are
---      unknown and absent from every Lua file.
+-- v3: TEST MATRIX, because v2 proved nothing due to two faults of mine.
 --
--- Azimuth stops are known to be +/-60 deg (user, 2026-09-11), so the azimuth
--- sweep also cross-checks whether the stop sits at the declared gauge extreme
--- (0.44) or lower -- v1 suggested ~0.396, an 11% difference that matters for
--- any bearing conversion.
+-- v2 fault 1: the settle detector (25 unchanged frames) fired after 0.2s --
+--   before the sight had begun moving at all -- so every sweep reported
+--   "NEVER MOVED" from rest. That was a probe bug, not a DCS result.
+-- v2 fault 2: wrong verb, probably. performClickableAction is for CLICKABLE
+--   cockpit elements; it worked on ASP-17 Brightness_PM because that has a
+--   clickable element (arg 564). The 9K113 slew axes appear in NO clickable
+--   entry and in NO axisCommands binding -- the player slews via native mouse
+--   handling inside the sight view. So the right verb is probably SetCommand,
+--   which the device object also exposes.
+--
+-- Rather than guess again, try every plausible combination and report which
+-- (if any) moves the sight. Each test: re-issue the command EVERY FRAME for
+-- TEST_SECS (velocity axes generally need sustained input, and v1's single
+-- shots may be why motion looked quantised), sampling the angle each frame.
 
-local SWEEP_RATE  = 1.0     -- full commanded rate, straight at the stop
-local SETTLE_N    = 25      -- frames of no movement before calling it pinned
-local SWEEP_EPS   = 1e-5
+local TEST_SECS = 3.0
 
-local sweep = {
+-- {label, method, command, arg}
+local TESTS = {
+    {"SetCommand  player LR",  "SetCommand",  K113.Command_SIGHT_LEFT_RIGHT_AXIS,           K113_ARG_AZIMUTH},
+    {"clickable   player LR",  "click",       K113.Command_SIGHT_LEFT_RIGHT_AXIS,           K113_ARG_AZIMUTH},
+    {"SetCommand  AI LR",      "SetCommand",  K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS, K113_ARG_AZIMUTH},
+    {"clickable   AI LR",      "click",       K113.Command_Intern_SIGHT_LEFT_RIGHT_AI_AXIS, K113_ARG_AZIMUTH},
+    {"SetCommand  HorizPos",   "SetCommand",  K113.Command_HorizPos,                        K113_ARG_AZIMUTH},
+    {"SetCommand  player UD",  "SetCommand",  K113.Command_SIGHT_UP_DOWN_AXIS,              K113_ARG_ELEVATION},
+    {"SetCommand  AI UD",      "SetCommand",  K113.Command_Intern_SIGHT_UP_DOWN_AI_AXIS,    K113_ARG_ELEVATION},
+    {"SetCommand  VertPos",    "SetCommand",  K113.Command_VertPos,                         K113_ARG_ELEVATION},
+}
+
+local mx = {
     phase = "setup",
     t_phase = 0,
-    axis = "az",            -- az then el
-    dir = 1,
-    still = 0,
-    last = nil,
-    started = nil,
-    results = {},
+    idx = 0,
+    start_val = nil,
+    samples = {},
+    winners = {},
 }
 
 local function k113_angles()
     return read_arg(K113_ARG_AZIMUTH), read_arg(K113_ARG_ELEVATION)
 end
 
-local function k113_send(cmd, value)
+-- Send via whichever verb this test wants. Returns false if unavailable.
+local function k113_send_via(method, cmd, value)
     local dev = try("GetDevice(I9K113)", GetDevice, DEV_I9K113)
     if dev == nil then return false end
-    local act = safe_index(dev, "performClickableAction")
-    if type(act) ~= "function" then return false end
-    try("performClickableAction", act, dev, cmd, value)
+    local name = (method == "SetCommand") and "SetCommand"
+                                          or "performClickableAction"
+    local fn = safe_index(dev, name)
+    if type(fn) ~= "function" then return false end
+    try(name, fn, dev, cmd, value)
     return true
 end
 
--- Only command if the switch is not already where we want it. STVORKI/NABL
--- may be toggles, and blind-setting a toggle that is already open would close
--- it -- which is exactly the state confusion that muddied the v1 run.
+local function k113_send(cmd, value)
+    return k113_send_via("click", cmd, value)
+end
+
 local function k113_set_verified(label, cmd, value, arg, want)
     local before = read_arg(arg)
     if type(before) == "number" and math.abs(before - want) < 0.01 then
@@ -401,124 +415,103 @@ local function k113_set_verified(label, cmd, value, arg, want)
     return ok
 end
 
-local function sweep_cmd_arg()
-    if sweep.axis == "az" then
-        return K113.Command_SIGHT_LEFT_RIGHT_AXIS, K113_ARG_AZIMUTH
-    end
-    return K113.Command_SIGHT_UP_DOWN_AXIS, K113_ARG_ELEVATION
-end
-
 local function stage_e_sight_slew(t)
     if not caps.performClickableAction then return end
 
-    if sweep.phase == "setup" then
-        log("--- stage E v2: preparing the 9K113 ---")
-        local powered = read_arg(885)
-        log("    POWER_PN (885) = " .. tostring(powered))
-        if type(powered) ~= "number" or powered < 0.5 then
-            k113_set_verified("power on", K113.Command_POWER_PN, 1, 885, 1)
-        end
+    if mx.phase == "setup" then
+        log("--- stage E v3: preparing the 9K113 ---")
+        log("    POWER_PN (885) = " .. tostring(read_arg(885)))
         local doors_ok = k113_set_verified("open sight doors",
                                            K113.Command_STVORKI, 1,
                                            K113_ARG_DOORS, 1)
         k113_set_verified("observation (NABL)", K113.Command_NABL, 1, 886, 1)
-
         if not doors_ok then
-            log("    !! sight doors still shut -- open them in the cockpit.")
-            log("       Retrying in a few seconds.")
-            sweep.phase = "wait_retry"
-            sweep.t_phase = t
+            log("    !! sight doors shut -- open them in the cockpit. Retrying.")
+            mx.phase = "wait_retry"
+            mx.t_phase = t
             return
         end
-
         log("    sight ready. *** DO NOT TOUCH THE SIGHT FROM HERE ON ***")
+        log(string.format("    running %d command/verb combinations, %.0fs each",
+                          #TESTS, TEST_SECS))
         if not stage_d_fired then
             stage_d_fired = true
             stage_d_petrovich()
         end
-        sweep.phase = "begin"
-        sweep.t_phase = t
+        mx.phase = "next"
+        mx.t_phase = t
 
-    elseif sweep.phase == "wait_retry" then
-        if (t - sweep.t_phase) > 5.0 then sweep.phase = "setup" end
+    elseif mx.phase == "wait_retry" then
+        if (t - mx.t_phase) > 5.0 then mx.phase = "setup" end
 
-    elseif sweep.phase == "begin" then
-        if (t - sweep.t_phase) < 2.0 then return end
-        local cmd, arg = sweep_cmd_arg()
-        sweep.started = read_arg(arg)
-        sweep.last = sweep.started
-        sweep.still = 0
-        log(string.format(
-            "--- SWEEP %s %s  from arg %d = %s   [doors775=%s NABL886=%s pwr885=%s] ---",
-            sweep.axis, (sweep.dir > 0) and "POSITIVE" or "NEGATIVE",
-            arg, tostring(sweep.started), tostring(read_arg(K113_ARG_DOORS)),
-            tostring(read_arg(886)), tostring(read_arg(885))))
-        k113_send(cmd, SWEEP_RATE * sweep.dir)
-        sweep.phase = "sweeping"
-        sweep.t_phase = t
+    elseif mx.phase == "next" then
+        if (t - mx.t_phase) < 1.5 then return end   -- let the axis settle
+        mx.idx = mx.idx + 1
+        local test = TESTS[mx.idx]
+        if test == nil then
+            mx.phase = "report"
+            return
+        end
+        mx.start_val = read_arg(test[4])
+        mx.samples = {}
+        log(string.format("--- test %d/%d: %s  (cmd %d, arg %d) from %s ---",
+            mx.idx, #TESTS, test[1], test[3], test[4], tostring(mx.start_val)))
+        mx.phase = "running"
+        mx.t_phase = t
 
-    elseif sweep.phase == "sweeping" then
-        local cmd, arg = sweep_cmd_arg()
-        local v = read_arg(arg)
-        if type(v) ~= "number" then return end
+    elseif mx.phase == "running" then
+        local test = TESTS[mx.idx]
+        -- re-issue EVERY frame: a velocity axis needs sustained input
+        k113_send_via(test[2], test[3], 1.0)
+        local v = read_arg(test[4])
+        if type(v) == "number" then
+            mx.samples[#mx.samples + 1] =
+                string.format("%.2f:%.5f", t - mx.t_phase, v)
+        end
+        if (t - mx.t_phase) > TEST_SECS then
+            k113_send_via(test[2], test[3], 0.0)
+            local final = read_arg(test[4])
+            local moved = (type(final) == "number"
+                           and type(mx.start_val) == "number"
+                           and math.abs(final - mx.start_val) > 1e-4)
+            log(string.format("    %s -> %s over %.1fs, %d samples  ==> %s",
+                tostring(mx.start_val), tostring(final), t - mx.t_phase,
+                #mx.samples, moved and "*** MOVED ***" or "no change"))
+            local n, line = #mx.samples, {}
+            local step = math.max(1, math.floor(n / 10))
+            for i = 1, n, step do line[#line + 1] = mx.samples[i] end
+            log("      traj: " .. table.concat(line, "  "))
+            if moved then
+                mx.winners[#mx.winners + 1] =
+                    string.format("%s (cmd %d)", test[1], test[3])
+            end
+            mx.phase = "next"
+            mx.t_phase = t
+        end
 
-        if sweep.last ~= nil and math.abs(v - sweep.last) < SWEEP_EPS then
-            sweep.still = sweep.still + 1
+    elseif mx.phase == "report" then
+        log("=========================================================")
+        if #mx.winners == 0 then
+            log("NO COMBINATION MOVED THE 9K113.")
+            log("  Checked: SetCommand and performClickableAction, against the")
+            log("  player LR/UD axes, the Intern _AI_AXIS pair, and Horiz/VertPos.")
+            log("  Next hypotheses, in order:")
+            log("   1. slewing is gated on being IN the sight view -- re-run this")
+            log("      probe while sitting in the 9K113 sight view the whole time")
+            log("   2. the axes need a value scale other than 1.0, or a -1..1")
+            log("      sign convention we are not hitting")
+            log("   3. slew is handled natively from mouse input and these")
+            log("      command IDs are vestigial for the player path")
         else
-            sweep.still = 0
+            log("COMBINATIONS THAT MOVED THE SIGHT:")
+            for _, w in ipairs(mx.winners) do log("   " .. w) end
+            log("  Re-run with a limit sweep using the winning combination to")
+            log("  get the mechanical stops and the gauge->degree calibration.")
         end
-        sweep.last = v
-
-        local timeout = (t - sweep.t_phase) > 20.0
-        if sweep.still >= SETTLE_N or timeout then
-            k113_send(cmd, 0.0)
-            local moved = (type(sweep.started) == "number")
-                          and math.abs(v - sweep.started) > 1e-4
-            local key = sweep.axis .. ((sweep.dir > 0) and "_max" or "_min")
-            sweep.results[key] = v
-            log(string.format(
-                "    %s: %s -> %s after %.1fs  [%s]%s",
-                key, tostring(sweep.started), tostring(v),
-                t - sweep.t_phase,
-                moved and "MOVED, then pinned" or "NEVER MOVED",
-                timeout and "  (timeout, may not be a true stop)" or ""))
-
-            -- next: flip direction, then switch axis, then report
-            if sweep.dir > 0 then
-                sweep.dir = -1
-                sweep.phase = "begin"
-            elseif sweep.axis == "az" then
-                sweep.axis = "el"
-                sweep.dir = 1
-                sweep.phase = "begin"
-            else
-                sweep.phase = "report"
-            end
-            sweep.t_phase = t
-        end
-
-    elseif sweep.phase == "report" then
-        local r = sweep.results
         log("=========================================================")
-        log("SWEEP RESULTS -- mechanical stops in gauge units")
-        log(string.format("  azimuth   min=%s  max=%s",
-            tostring(r.az_min), tostring(r.az_max)))
-        log(string.format("  elevation min=%s  max=%s",
-            tostring(r.el_min), tostring(r.el_max)))
-        if type(r.az_max) == "number" and type(r.az_min) == "number" then
-            local span = r.az_max - r.az_min
-            log(string.format(
-                "  azimuth span %.5f gauge units == 120 deg (known +/-60)", span))
-            if math.abs(span) > 1e-6 then
-                log(string.format("  => deg_per_gauge_unit = %.3f", 120.0 / span))
-            end
-        end
-        log("  elevation limits in DEGREES are still unknown -- these gauge")
-        log("  values are the stops; someone must correlate them to real angles.")
-        log("=========================================================")
-        sweep.phase = "done"
+        mx.phase = "done"
 
-    elseif sweep.phase == "done" then
+    elseif mx.phase == "done" then
         -- idle
     end
 end
