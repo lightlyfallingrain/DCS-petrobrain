@@ -218,3 +218,53 @@ specifically meant to avoid this milestone complicating BL-7 (mission phase) or 
 - **Module independence:** no new cross-subproject import; body-layer's Stages 1–4 depend only on
   `belief.attention`/`belief.contacts`, already in-module. Stage 6 (if built) stays inside
   aircraft-layer's existing HTTP boundary to body-layer — no in-process coupling introduced.
+
+---
+
+## Update 2026-09-11 — live install read, probe written
+
+The DCS install became available, so the "unread" half of this plan's dependency is now read.
+Full results: `aircraft-layer/research/2026-09-11-command-injection-surface.md`; enumerated
+command/indication catalogue: `aircraft-layer/research/mi24p-command-surface.md`.
+
+**Resolved:**
+
+- *"AI_Wheel vs `g_panel`/`AI_Gunners` relationship is unread"* — answered. They are different
+  devices, not successor/predecessor: `g_panel` is indicator 8 owned by `devices.WEAP_SYS` (6);
+  the wheel is indicator 10 owned by `HELPER_AI` (30).
+- *"the single biggest open question: does the wheel offer anything resembling scan this
+  area?"* — answered: **no**, not as a named command. Petrovich has 21 commands
+  (3001-3021) and the wheel is navigated (`ShowMenu`/`Up`/`Down`/`Left`/`Right`), with dynamic
+  contents rendered from compiled code, not declared in Lua.
+- *"whether `LoSetCommand` still functions for modern modules"* — documented in this install
+  (`Scripts/Export.lua:854`, `API/Sim_ControlAPI.md:538`), so not deprecated as far as shipped
+  docs go. But it is the **global** channel; cockpit device commands need a device object, since
+  every device's command table restarts at 3001 and an ID alone cannot name a device.
+
+**Changed for Stage 6:** the plan's `POST /command/scan_area` shape survives, but the body should
+carry `(device_id, command_id, value)` rather than a single `LoSetCommand` ID, and the call is
+`GetDevice(dev):performClickableAction(cmd, val)`. The keypress/`SendInput` fallback is only
+needed if the probe's stage C fails.
+
+**New lead, strongest one BL-6 has:** `helperai_commands.DesignateAttackPoint` (3020) may be a
+scan-area primitive under an attack-flavoured name — `HelperAI.lua` defines
+`scan_rad_around_point = 2500`, a constant that only makes sense if some command designates a
+point to scan around. Unverified; stage D of the probe tests it.
+
+**Bearing on this plan's three flagged decisions:**
+
+- *Naming (`scan_area` vs something not implying a command is issued)* — if
+  `DesignateAttackPoint` does drive a 2.5 km scan, `scan_area` is an honest name after all.
+  Still blocked on the probe.
+- *"Is body-layer-only acceptable as BL-6 done?"* — unchanged, still a user call. Nothing found
+  weakens the "virtual scan" framing; the belief-state success check is still required either
+  way, because no read-side "Petrovich is scanning" signal was found (that conclusion stands).
+- *`cancel_task`'s `AttentionArea` handling* — untouched by these findings, still open.
+
+**Stages 1-4 (body-layer) remain unaffected and unblocked**, as designed. The mechanism-agnostic
+split held up: nothing learned this session changes `PendingIntent`'s shape, `tools.py`'s
+signatures, or the tool API.
+
+**Still blocking Stage 6:** whether `GetDevice`/`performClickableAction` exist in Export.lua's
+state. Not documented anywhere in the install; probe written
+(`aircraft-layer/dcs-export/Export.probe-commands.lua`) and ready for the user to run.
