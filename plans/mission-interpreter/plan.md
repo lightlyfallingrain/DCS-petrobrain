@@ -254,14 +254,16 @@ author-only-knowledge filter have proven out on a real mission file.
    integrate against without waiting for Stage 4-6, and so the schema itself gets exercised and
    corrected before the harder synthesis work is built on top of it.
 
-6. **MI-4 — Capable-model synthesis (gated on Decision 3).**
+6. **MI-4 — Capable-model synthesis (Decision 3 resolved: Ollama, `qwen3:14b`).**
    `src/synth/` adds the actual reasoning layer: purpose/task inference from briefing text +
    route/objective geometry, known/suspected threats from briefing + `trigrules` (never raw
-   `trigrules` verbatim — only what a briefing-literate crew could plausibly expect), tactical
-   relationship analysis (terrain masking, threat-to-route proximity). Every model-produced
-   statement carries `epistemic_status` + `basis` + `confidence`, never silently upgraded to FACT.
-   Only start once MI-3's schema has been exercised against at least one real mission and found
-   basically right — the concept doc's own MI-3 milestone already assumes this ordering.
+   `trigrules` verbatim — only what a briefing-literate crew could plausibly expect). **Tactical
+   relationship analysis (terrain masking, threat-to-route proximity) is explicitly out of scope**
+   (resolved 2026-09-13, see Decision 3) — that reasoning stays the player's own responsibility, not
+   something Petrovich/the brain does for them. Every model-produced statement carries
+   `epistemic_status` + `basis` + `confidence`, never silently upgraded to FACT. Only start once
+   MI-3's schema has been exercised against at least one real mission and found basically right —
+   the concept doc's own MI-3 milestone already assumes this ordering.
 
 7. **MI-5 — Player questions (MVP: text console).**
    Deterministic-first ambiguity surfacing (concept doc's examples), player answers written back
@@ -318,9 +320,18 @@ author-only-knowledge filter have proven out on a real mission file.
   author-only flag (including `hiddenOnMFD`, unconfirmed in the one real sample), and treat any
   *new* top-level `mission` key encountered during MI-1 parsing as "investigate before assuming
   it's safe to expose," not "pass through by default."
-- **Vision-capable model need for briefing images/kneeboards** is out of scope through MI-4 (Stage
-  2's "Possible Approaches" note: treat as opaque pass-through, not OCR/VLM). If a later milestone
-  wants kneeboard text extracted, that's a new capability decision, not assumed here.
+- **Vision-capable model need for briefing images/kneeboards — resolved 2026-09-13: deferred,
+  text-only MI-4.** Kneeboard images stay opaque pass-through through MI-4 (no OCR/VLM), per
+  Stage 2's original scope cut. User's reasoning for accepting this gap rather than closing it now:
+  waypoint/route/objective *geometry* already comes structurally from the `.miz` file itself (MI-1/
+  MI-2), which is most of what a briefing image would otherwise be conveying; where an image genuinely
+  carries information the parsed mission data doesn't (e.g. a hand-marked expected-target area), the
+  player can enter that as text via MI-5's player-intent input — the same mechanism already planned
+  for pilot clarification, not a new capability. If kneeboard images turn out to carry load-bearing
+  info the player doesn't reliably transcribe, revisit with a vision-language model
+  (`qwen3-vl`/`qwen2.5vl` were surveyed as of 2026-09-13 on Ollama's library) as an additive pass —
+  the epistemic-tagging design (`Tagged[T]`, MI-3) already accommodates a new `basis` source like
+  `"kneeboard_image_vlm"` without a schema change.
 - **Schema churn.** `docs/concept/MISSION_INTERPRETER.md`'s own "Key dependency" section warns not
   to lock coordinate/provenance formats until World Model shows what's practical — World Model has
   now done that (M0-M8), but the *Mission Understanding* schema itself is still genuinely first-
@@ -363,20 +374,27 @@ MI-1/MI-1.5 Implementer sign-off** — see Decision 5's reasoning.
    designed as part of this plan — see Affected Modules/Files above (`world-model/src/api/
    server.py`, `mission-interpreter/src/world_enrich/world_model_client.py`) and MI-2's
    prerequisite sub-stage in the Implementation Plan.
-3. **Capable-model hosting for MI-4 synthesis — partially resolved 2026-09-13: Ollama.** User
-   decision: MI-4 hosts its capable model via Ollama, same local-first posture as PB-6's runtime
-   model (`plans/brain-layer/plan.md` Decision 2 — Ollama chosen there too, for the same
-   Windows(DCS)/Mac(body+brain) GPU-separation reasoning). This resolves the hosting *mechanism*
-   but not the model choice — **exactly which model MI-4 loads is still an open question,
-   explicitly flagged by the user as needing more investigation**, not decided here. Unlike PB-6
-   (which needs a fast, low-latency model for the in-flight crew-cognition loop), MI-4 runs
-   entirely pre-mission/offline with no runtime-latency pressure, so its model can lean toward
-   capability over speed — likely a larger/more-capable Qwen2.5 tier (e.g. 32B) or a different
-   family entirely, unbenchmarked as of this writing. Whether MI-4 and PB-6 end up sharing one
-   Ollama instance (swap) or run two models resident at once (parallel, at a real 32GB-memory
-   cost) is the same open resource question `plans/brain-layer/plan.md` Decision 2 already
-   flags as gated on both models' actual sizes — not resolved here either. MI-4 stays unstarted
-   until the model choice lands; MI-0 through MI-3 do not need it.
+3. **Capable-model hosting and choice for MI-4 synthesis — resolved 2026-09-13: Ollama,
+   `qwen3:14b`, non-thinking mode.** MI-4's scope was narrowed in the same conversation: **tactical
+   reasoning (terrain masking, threat-to-route proximity) is explicitly not MI-4's job — that stays
+   the player's own responsibility.** MI-4 is therefore extraction/structuring/summarization from
+   briefing prose and mission data into `MissionUnderstanding`'s schema fields with correct
+   epistemic tagging, not deep multi-step tactical inference — a meaningfully lighter task than
+   originally scoped, which is why a mid-size model suffices. `qwen3` (current mainline generation,
+   superseding the Qwen2.5 family this plan originally floated) was chosen over the newer
+   `qwen3.5`/`qwen3.6`/`qwen3.8` lines surveyed on Ollama's library the same day — those carry
+   always-on vision/thinking capabilities this task doesn't need and are weeks old, too unproven for
+   a first pick. Qwen3's "thinking" (extended chain-of-thought) mode should stay **off** — no
+   reasoning task justifies its latency/verbosity here. If `qwen3:14b`'s extraction quality proves
+   too weak in practice, `qwen3:32b` is the natural same-generation step up (Q4 quantization, ~20GB,
+   fits comfortably in 32GB solo). Same local-first posture as PB-6's runtime model
+   (`plans/brain-layer/plan.md` Decision 2 — Ollama chosen there too, for the Windows(DCS)/
+   Mac(body+brain) GPU-separation reasoning). **The swap-vs-parallel resource question from that
+   plan's Decision 2 resolves favorably for this pair specifically**: MI-4 runs pre-mission/offline
+   and PB-6 runs in-flight — they are temporally disjoint, not concurrent, so the natural pattern is
+   swap (unload MI-4's model at "step into cockpit," load PB-6's), not both models resident at once.
+   A future mid-mission escalation to a "senior model" (`PETROBRAIN_RUNTIME.md`'s separate,
+   unbuilt concept) is a different question this doesn't resolve. MI-4 can now start.
 4. ~~Player-intent input form.~~ **Resolved: text console for MVP (MI-5, unchanged mechanism from
    this plan's original proposal), a simple web form later (MI-5b, new future milestone — see the
    Implementation Plan). Briefing/debriefing as a web page with text and images is explicitly out
