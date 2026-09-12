@@ -197,14 +197,10 @@ treated as reopening OSM augmentation generally, not a narrow one-field patch.
 
 ### Decisions Requiring User Input
 
-- **`.osm.pbf` parsing: stdlib hand-roll vs `pyosmium`.** M9's own plan already surfaces this;
-  now that M9 is reopened with a concrete consumer, it needs an actual answer before M9
-  implementation starts. `pyosmium` is a well-maintained C++-backed binding (fast, handles
-  node-resolution complexity for you) but is this project's first native-extension dependency
-  in world-model; a stdlib hand-roll (protobuf/zlib-based, per the geofabrik recon's confirmed
-  PBF structure) keeps the zero-new-dependency posture but is real new parser code with the
-  node-ID-resolution complexity M9's plan already flags as exceeding the `.routes`/`.rn4`
-  precedent.
+- **`.osm.pbf` parsing — resolved 2026-09-13: `pyosmium`.** User approved world-model's first
+  native-extension dependency over a stdlib hand-roll, given the node-ID-resolution complexity
+  a hand-rolled parser would need to solve itself. BSD-2-Clause, prebuilt wheels on
+  macOS/Linux/Windows x64 — no compiler needed on this project's supported platforms.
 - **Junction minimum-degree threshold (≥3 routes) and coordinate-match tolerance (proposed
   0.5 m)** — first-guess values pending Stage 2's empirical tuning; flagging here in case the
   user has a different tactical bar in mind for what counts as a "significant" junction (e.g.
