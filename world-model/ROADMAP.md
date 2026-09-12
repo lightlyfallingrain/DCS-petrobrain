@@ -46,6 +46,19 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   tests pass. Raised while scoping tactical-landmark enrichment for Mission Interpreter — see
   `plans/world-model-tactical-landmarks/plan.md` and `plans/m10-road-junctions/`.
 
+- [x] **HTTP API server (no M-number — a cross-subproject interface, done, merged 2026-09-12).** 
+  Wraps world-model's read-only query surface (`describe_position`, `find_place_by_name`, 
+  `line_of_sight_clear`) as a single-threaded `http.server.HTTPServer` for mission-interpreter's 
+  `world_enrich/` package to call over the network (mirrors `aircraft-layer` ↔ `body-layer`'s 
+  existing HTTP seam; `body-layer` ↔ `world-model` remains the sole in-process exception). 
+  Implemented in `src/api/` (`server.py` + `__main__.py`); three `GET` routes with proper 
+  error handling (400 on bad params/theatre mismatch, 404 on unknown path); test coverage 
+  `tests/test_api.py` (10 tests). Single-threaded design (not `ThreadingHTTPServer`) is sound 
+  for offline, low-volume, pre-mission use — `sqlite3.Connection` is not thread-safe by default, 
+  and this is a read-only consumer. Enables MI-2 (world enrichment, producing `EnrichedMission` 
+  with nearest-settlement/road/junction/terrain context attached to mission coordinates). See 
+  `plans/mi2-world-enrichment/plan.md`.
+
 - [x] **M9 — OSM augmentation (geofabrik) — done 2026-09-12, merged 2026-09-12.** Re-introduced
   OSM as an augmentation layer from offline geofabrik.de per-country extracts (`.osm.pbf` format,
   parsed via `pyosmium`'s C++-backed sparse_mem_array index to handle node-location resolution
