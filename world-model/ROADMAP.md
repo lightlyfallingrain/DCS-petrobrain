@@ -78,6 +78,26 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   `OsmFeatureSet` shape, so `query/describe.py` needs zero changes). Reviewer all-clear. DoD PASSED.
   See `plans/m9-osm-geofabrik/plan.md`, `plans/m9-osm-geofabrik/review.md`, `plans/m9-osm-geofabrik/dod-check.md`.
 
+- [x] **OSM streaming-ingest memory fix (no M-number — a bug fix on M9, not a milestone; done,
+  merged 2026-09-13).** A real `syria-full` rebuild (full 7-country merge, dominated by Turkey's
+  646MB extract) stalled after ~8.6M ways / high memory usage on the user's Windows box, killed
+  after 22 minutes of total silence — `osm/pbf.py`'s `_FeatureCollector` accumulated every kept
+  node/way into Python lists for the entire `apply_file` pass, gigabytes of Python object overhead
+  at theatre-merged scale. Fixed: `stream_features` flushes to caller callbacks every `batch_size`
+  (50,000) elements instead of buffering the whole file; `build/pipeline.py`'s `osm_pbf_path`
+  branch calls it directly, writing each batch to the store immediately (`tracemalloc`-verified
+  memory bound, Reviewer confirmed the pipeline actually uses the new path, not just that better
+  code exists unused). `load_features` (M9's original entry point) stays a thin
+  backward-compatible wrapper (`stream_features` with an unbounded batch), so its existing
+  correctness tests are untouched. New regression test proves streaming and bulk paths produce
+  byte-identical output. Also produced a memory-exhaustion audit of the rest of the pipeline
+  (`plans/osm-streaming-ingest/plan.md`'s addendum) — `roadnet/`, `ingest_srtm.py`,
+  `ingest_terrain.py`, `dcs_data/towns.py` all judged fine at current scale; `roadnet/junctions.py`
+  flagged as backlog below (unmeasured at `syria-full`+OSM-combined scale, probably fine by
+  extrapolation but not confirmed). `M9_OSM_RUN_INSTRUCTIONS.md` updated with what steady-but-slow
+  progress looks like vs. a genuine stall. Reviewer approved, no required fixes. See
+  `plans/osm-streaming-ingest/plan.md`, `plans/osm-streaming-ingest/review.md`.
+
 ## Backlog (open, unscheduled)
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
@@ -99,6 +119,18 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   and needs its own investigation before committing. Afghanistan and Caucasus are both within
   SRTM range, no elevation-source blocker. Needs an Architect + investigator pass before any
   theatre starts, per this project's standing convention for DCS-internals-uncertain work.
+
+- **Confirm `roadnet/junctions.py` memory/timing behavior against a real completed `syria-full` build.**
+  Raised 2026-09-12 during the OSM streaming-ingest memory audit (`plans/osm-streaming-ingest/plan.md`
+  addendum). M10's junction detector loads the *entire* `"road"` feature layer into memory
+  (`store.reader.all_features`) — once M9's OSM ingest is included, that layer is DCS `.routes` +
+  OSM `highway` ways combined, not `.routes` alone, which is a different (larger, unmeasured)
+  population than the one real data point this stage has ever run against (`latakia-20km`, DCS
+  roads only: 3,266 roads / 162K endpoints+interior vertices). Linear extrapolation to `syria-full`'s
+  reported 14,833 roads (~700K vertices) suggests this is still fine, but that is extrapolation, not
+  a measurement — confirm with real `JunctionIngestStats`/timing the next time a `syria-full` build
+  (with OSM roads folded in) actually completes through Stage 5. No fix needed unless that
+  confirmation finds a real problem.
 
 - **Incremental per-layer pipeline builds.** `build_region` deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. Wanted: run individual pipeline sections (roads only, elevation only, validation only) and *add* that data into an existing store — staged builds, partial re-runs when debugging a single layer. Raised during M7 DoD acceptance testing (2026-09-06), explicitly considered for M8 and dropped from it to keep that milestone scoped to the probe store. M9 (OSM) would also benefit — see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` and `src/build/pipeline.py`'s `build_region`.
 

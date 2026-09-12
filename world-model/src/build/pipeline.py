@@ -57,7 +57,12 @@ from pathlib import Path
 
 from build.ingest_beacons import BeaconIngestStats, ingest_beacons
 from build.ingest_junctions import JunctionIngestStats, ingest_junctions
-from build.ingest_osm import OsmIngestStats, ingest_osm
+from build.ingest_osm import (
+    OsmIngestStats,
+    ingest_osm,
+    ingest_osm_nodes_batch,
+    ingest_osm_ways_batch,
+)
 from build.ingest_probe import (
     ChunkProbeIngestStats,
     ProbeIngestStats,
@@ -76,8 +81,8 @@ from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
 from dcs_data.towns import parse_towns_lua
 from elevation.dem import SrtmTile
-from osm.features import load_features
-from osm.pbf import load_features as load_features_from_pbf
+from osm.features import OsmNode, OsmWay, load_features
+from osm.pbf import stream_features as stream_features_from_pbf
 from probe_store.models import ChunkStatus
 from probe_store.paths import probe_store_path
 from probe_store.reader import load_chunk_elevation_window
@@ -313,19 +318,56 @@ def build_region(
                 ),
             )
             with _stage("OSM overlay (.osm.pbf)", 3):
-                feature_set = load_features_from_pbf(osm_pbf_path)
-                osm_features, osm_stats = ingest_osm(
-                    feature_set,
-                    region.theatre,
-                    region.centre_x,
-                    region.centre_z,
-                    region.half_extent_x_m,
-                    region.half_extent_z_m,
-                    osm_source_id,
+                # Streams the file in bounded batches rather than parsing it
+                # into one whole-file `OsmFeatureSet` first -- at
+                # `syria-full` scale (~8.6M ways kept) that reproduced a
+                # memory blowup severe enough to stall and require killing
+                # the run; see `plans/osm-streaming-ingest/plan.md`. Each
+                # batch's features are classified and committed immediately
+                # (a separate SQLite transaction per batch, not one atomic
+                # transaction for the whole stage) into one running
+                # `OsmIngestStats` shared by every batch. Safe because
+                # `open_for_build` always deletes-and-recreates `out_path`
+                # from scratch, so a crash mid-stage never leaves stale
+                # partial data mistaken for a complete build -- the next
+                # build overwrites the file entirely rather than resuming it.
+                osm_stats = OsmIngestStats()
+
+                def _flush_nodes(nodes: list[OsmNode]) -> None:
+                    node_features = ingest_osm_nodes_batch(
+                        nodes,
+                        region.theatre,
+                        region.centre_x,
+                        region.centre_z,
+                        region.half_extent_x_m,
+                        region.half_extent_z_m,
+                        osm_source_id,
+                        osm_stats,
+                    )
+                    insert_features(conn, node_features)
+                    for f in node_features:
+                        report.feature_counts[f.kind] += 1
+
+                def _flush_ways(ways: list[OsmWay]) -> None:
+                    way_features = ingest_osm_ways_batch(
+                        ways,
+                        region.theatre,
+                        region.centre_x,
+                        region.centre_z,
+                        region.half_extent_x_m,
+                        region.half_extent_z_m,
+                        osm_source_id,
+                        osm_stats,
+                    )
+                    insert_features(conn, way_features)
+                    for f in way_features:
+                        report.feature_counts[f.kind] += 1
+
+                relations_skipped, ways_skipped_unresolved_nodes = (
+                    stream_features_from_pbf(osm_pbf_path, _flush_nodes, _flush_ways)
                 )
-                insert_features(conn, osm_features)
-                for f in osm_features:
-                    report.feature_counts[f.kind] += 1
+                osm_stats.relations_skipped = relations_skipped
+                osm_stats.ways_skipped_unresolved_nodes = ways_skipped_unresolved_nodes
                 report.osm_stats = osm_stats
         elif osm_cache_path is not None and osm_cache_path.exists():
             osm_source_id = insert_source(
