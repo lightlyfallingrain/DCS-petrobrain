@@ -20,6 +20,17 @@ absent from a fresh checkout the way `routes_path`/`probe_output_path` can
 be. A missing/absent OSM cache degrades the same way: skipped, reported in
 `BuildReport.osm_skipped`, never an error.
 
+`osm_pbf_path` (M9) is an alternative OSM source: a pre-clipped,
+pre-merged Geofabrik `.osm.pbf` extract, parsed with `osm.pbf.load_features`
+instead of `osm.features.load_features`. When both `osm_pbf_path` and
+`osm_cache_path` are given, `osm_pbf_path` wins -- it is the real-data path
+this milestone exists for; `osm_cache_path` stays purely for continuity
+with pre-M9 Overpass-cache-based builds/tooling. Downstream of the parse,
+both paths are identical: the same `ingest_osm`/`OsmFeatureSet` shape, the
+same `BuildReport.osm_stats`/`osm_skipped` fields (see
+`plans/m9-osm-geofabrik/plan.md` Design Decision 3 -- nothing past the
+parse needed to change).
+
 `srtm_tile_paths` is M7 Stage 2's addition: SRTM as the region's *primary*
 `elevation` grid (`build.ingest_srtm`, `provenance="srtm"`), run before the
 pre-existing live-probe grid stage (`probe_output_path`,
@@ -66,6 +77,7 @@ from dcs_data.beacons import parse_beacons_lua
 from dcs_data.towns import parse_towns_lua
 from elevation.dem import SrtmTile
 from osm.features import load_features
+from osm.pbf import load_features as load_features_from_pbf
 from probe_store.models import ChunkStatus
 from probe_store.paths import probe_store_path
 from probe_store.reader import load_chunk_elevation_window
@@ -177,6 +189,7 @@ def build_region(
     srtm_grid_spacing_m: float = DEFAULT_SRTM_GRID_SPACING_M,
     junction_tolerance_m: float = DEFAULT_JUNCTION_TOLERANCE_M,
     junction_min_degree: int = DEFAULT_JUNCTION_MIN_DEGREE,
+    osm_pbf_path: Path | None = None,
 ) -> BuildReport:
     """Build `out_path` from scratch for `region`, ingesting towns.lua,
     beacons.lua, (if `osm_cache_path` is given and exists) the cached
@@ -208,8 +221,16 @@ def build_region(
     `ORDER BY id DESC LIMIT 1`) -- for a real `syria-full` build only
     `srtm_tile_paths` is used (see the plan's Stage 2, which repurposes the
     live probe to spot-check validation rather than a stored grid), so this
-    ambiguity does not arise in practice for M7's own builds. Returns a
-    `BuildReport` with per-kind feature counts."""
+    ambiguity does not arise in practice for M7's own builds.
+
+    `osm_pbf_path` (M9) takes precedence over `osm_cache_path` when both are
+    given -- see the module docstring. It is a keyword-only-by-convention
+    trailing parameter (added after `junction_min_degree`) rather than
+    inserted next to `osm_cache_path`/`routes_path`, so it does not shift
+    the positional slots `tools/build_world_model.py`'s existing positional
+    call already relies on.
+
+    Returns a `BuildReport` with per-kind feature counts."""
     conn = open_for_build(out_path)
     try:
         built_at = datetime.datetime.now(datetime.UTC).isoformat()
@@ -278,7 +299,35 @@ def build_region(
                 report.feature_counts[f.kind] += 1
             report.beacon_stats = beacon_stats
 
-        if osm_cache_path is not None and osm_cache_path.exists():
+        if osm_pbf_path is not None and osm_pbf_path.exists():
+            osm_source_id = insert_source(
+                conn,
+                Source(
+                    name="OpenStreetMap (Geofabrik .osm.pbf)",
+                    fetched_at=built_at,
+                    raw_path=str(osm_pbf_path),
+                    attribution="(c) OpenStreetMap contributors, ODbL",
+                    notes="Pre-clipped, pre-merged Geofabrik extract; see "
+                    "osm.pbf module docstring and "
+                    "docs/M9_OSM_RUN_INSTRUCTIONS.md.",
+                ),
+            )
+            with _stage("OSM overlay (.osm.pbf)", 3):
+                feature_set = load_features_from_pbf(osm_pbf_path)
+                osm_features, osm_stats = ingest_osm(
+                    feature_set,
+                    region.theatre,
+                    region.centre_x,
+                    region.centre_z,
+                    region.half_extent_x_m,
+                    region.half_extent_z_m,
+                    osm_source_id,
+                )
+                insert_features(conn, osm_features)
+                for f in osm_features:
+                    report.feature_counts[f.kind] += 1
+                report.osm_stats = osm_stats
+        elif osm_cache_path is not None and osm_cache_path.exists():
             osm_source_id = insert_source(
                 conn,
                 Source(
