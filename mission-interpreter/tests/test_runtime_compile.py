@@ -164,7 +164,9 @@ def test_purpose_stays_none_when_never_populated_and_never_asked() -> None:
 
     compact = compile_current_mission(understanding)
 
-    assert compact.purpose is None
+    assert compact.purpose.value is None
+    assert compact.purpose.epistemic_status == "UNKNOWN"
+    assert compact.purpose.basis == ()
 
 
 def test_task_confirmed_raises_confidence_without_upgrading_epistemic_status() -> None:
@@ -191,7 +193,7 @@ def test_task_confirmed_raises_confidence_without_upgrading_epistemic_status() -
     assert compact.task.basis == ("model:qwen3", "player:console")
 
 
-def test_purpose_rejected_clears_to_none() -> None:
+def test_purpose_rejected_clears_value_but_keeps_tagged_wrapper() -> None:
     low_confidence_purpose = Tagged(
         value="Recon the border",
         epistemic_status="INFERENCE",
@@ -205,7 +207,13 @@ def test_purpose_rejected_clears_to_none() -> None:
 
     compact = compile_current_mission(understanding)
 
-    assert compact.purpose is None
+    assert compact.purpose.value is None
+    # Rejection doesn't change epistemic_status, mirroring confirmation's
+    # own "don't upgrade" rule -- it's distinguished from "never had a
+    # guess" by non-empty `basis` instead.
+    assert compact.purpose.epistemic_status == "INFERENCE"
+    assert compact.purpose.basis == ("model:qwen3", "player:rejected")
+    assert compact.purpose.confidence is None
 
 
 def test_purpose_untouched_when_no_matching_player_intent_entry() -> None:

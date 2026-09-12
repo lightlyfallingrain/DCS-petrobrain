@@ -47,6 +47,6 @@ def test_emit_compact_writes_parseable_round_tripping_json(tmp_path: Path) -> No
     assert parsed["schema_version"] == SCHEMA_VERSION
     assert parsed["theatre"]["value"] == "Caucasus"
     assert parsed["ownship"]["value"] == "Mi-24P (Hip-1)"
-    assert parsed["purpose"] is None
-    assert parsed["task"] is None
+    assert parsed["purpose"]["value"] is None
+    assert parsed["task"]["value"] is None
     assert parsed["route"] == []

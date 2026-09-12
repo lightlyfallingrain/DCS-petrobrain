@@ -19,15 +19,22 @@ independently-testable rules, one per question-id pattern MI-5's
   identifier, tagged `FACT`, `basis=("player:console",)`.
 - `question_id in ("purpose", "task")` -- two cases mirroring
   `_detect_purpose_or_task_question`: (a) the source field was `None`
-  (always asked `free_text`) -> the answer *is* the compact value, `FACT`.
-  (b) the source field existed at `confidence == "low"` (always asked
-  `bool`) -> `True` keeps the existing value but raises `confidence` to
-  `"high"` and appends `"player:console"` to `basis` (`epistemic_status`
+  (always asked `free_text`) -> the answer *is* the compact value, `FACT`;
+  if there is no answer either (no player_intent stage ran, or this
+  question was never reached), the field stays unpopulated as
+  `Tagged(value=None, epistemic_status="UNKNOWN", basis=())` -- "never had
+  a guess". (b) the source field existed at `confidence == "low"` (always
+  asked `bool`) -> `True` keeps the existing value but raises `confidence`
+  to `"high"` and appends `"player:console"` to `basis` (`epistemic_status`
   is untouched -- player confirmation doesn't turn a model inference into
-  ground truth); `False` clears the compact field to `None` -- the guess
-  was wrong and nothing better is known, matching this schema's
-  absence-not-null convention for "no populated value" rather than
-  inventing a rejected-but-present placeholder.
+  ground truth); `False` clears the *value* to `None` but keeps the
+  wrapping `Tagged` (`epistemic_status` unchanged from `source`, `basis`
+  gains `"player:rejected"`, `confidence` reset to `None`) -- "the model
+  guessed, and the player said it's wrong," a different fact from "never
+  had a guess," distinguished by non-empty `basis` alone. Both cases
+  return `Tagged[str | None]`, never a bare `None`, which is why
+  `RuntimeMissionUnderstanding.purpose`/`.task` are typed `Tagged[str |
+  None]` rather than `Tagged[str] | None`.
 - `question_id.startswith("threat_")` -- the trailing integer indexes into
   `understanding.known_threats` (stable: nothing between question
   detection and this compilation mutates that tuple). `True` keeps the
@@ -107,7 +114,7 @@ def _reconcile_ownship(understanding: MissionUnderstanding) -> Tagged[str]:
 
 def _reconcile_purpose_or_task(
     understanding: MissionUnderstanding, *, field_name: str
-) -> Tagged[str] | None:
+) -> Tagged[str | None]:
     source = understanding.purpose if field_name == "purpose" else understanding.task
     answer = _find_answer(understanding, field_name)
 
@@ -115,20 +122,28 @@ def _reconcile_purpose_or_task(
         # Never populated by MI-4 -- `questions.py` always asks a
         # `free_text` question in this case. If the player answered, that
         # answer *is* the value; if not (no player_intent stage ran at
-        # all), stays `None`, matching MI-3's own absence-not-null
-        # convention for a field with no data source.
+        # all, or this question was never reached), the field stays
+        # unpopulated -- but as `Tagged(None, "UNKNOWN", basis=())`, not a
+        # bare `None`, so this "never had a guess" case stays
+        # distinguishable from the "guessed and rejected" case below
+        # purely by `basis` (empty here, non-empty there).
         if answer is not None and isinstance(answer.parsed, str):
             return Tagged(
                 value=answer.parsed, epistemic_status="FACT", basis=("player:console",)
             )
-        return None
+        return Tagged(value=None, epistemic_status="UNKNOWN", basis=())
 
     if (
         source.confidence != "low"
         or answer is None
         or not isinstance(answer.parsed, bool)
     ):
-        return source
+        return Tagged(
+            value=source.value,
+            epistemic_status=source.epistemic_status,
+            basis=source.basis,
+            confidence=source.confidence,
+        )
 
     if answer.parsed:
         return Tagged(
@@ -137,7 +152,22 @@ def _reconcile_purpose_or_task(
             basis=(*source.basis, "player:console"),
             confidence="high",
         )
-    return None
+
+    # Rejected: the model's guess was wrong -- an active correction, not
+    # an absence of one. `epistemic_status` is left unchanged from `source`
+    # for the same reason confirmation above doesn't upgrade it: the
+    # player's act doesn't change *how the model arrived* at its
+    # now-retracted guess. `confidence` resets to `None` since it
+    # described the model's certainty in a value that no longer stands.
+    # `basis` gaining `"player:rejected"` (non-empty) is what distinguishes
+    # this from the "never had a guess" `Tagged(None, "UNKNOWN", ())` case
+    # above -- a future BL-7 dialogue layer can use that to e.g. never
+    # resurface this specific debunked value.
+    return Tagged(
+        value=None,
+        epistemic_status=source.epistemic_status,
+        basis=(*source.basis, "player:rejected"),
+    )
 
 
 def _build_route(
