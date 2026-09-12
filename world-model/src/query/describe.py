@@ -32,7 +32,19 @@ see `build.ingest_probe`'s module docstring.
 `nearest_feature` machinery as `nearest_road`/`nearest_water`, restricted to
 `kind="ridge"`/`"valley"` rows -- present only once a build's probe grid has
 run `build.ingest_terrain` (see `build/pipeline.py`), `None` otherwise, same
-absence-as-absence rule as every other field here.
+absence-as-absence rule as every other field here. **Both being `None` at a
+position that does have a probe-grid-derived terrain layer built is itself a
+fact, not missing data**: it means the classifier found no ridge or valley
+component near enough to report, i.e. the terrain there is comparatively
+flat -- callers should not treat a `None`/`None` pair as "terrain semantics
+unavailable" the way they would for a layer that was never built at all.
+
+**M10 status**: `nearest_junction` answers from the same `nearest_feature`
+machinery, restricted to `kind="junction"` rows -- present only once a
+build's roadnet stage has run `build.ingest_junctions` (see
+`build/pipeline.py`), `None` otherwise, same absence-as-absence rule. See
+`roadnet.junctions`'s module docstring for what `degree`/
+`connecting_road_ids` mean and the arm-counting rule behind them.
 
 **M7 Stage 2 status**: `elevation.source`/`surface_type.provenance` read the
 store's actual `grid.provenance` (`store.reader.grid_provenance`) instead of
@@ -208,11 +220,31 @@ class TerrainLineInfo:
     and `elevation_range_m` come straight from the feature's `tags_json`
     (`terrain.features.to_stored_features`); `elevation_range_m` is `None`
     only if an older/foreign store row lacks the tag, never a fabricated
-    default."""
+    default.
+
+    `PositionDescription.nearby_ridges`/`nearby_valleys` being `None` at a
+    position with a built terrain layer means "no notable relief found
+    nearby" (flat), not "data unavailable" -- see the module docstring's M6
+    status note."""
 
     distance_m: float
     orientation_deg: float | None
     elevation_range_m: list[float] | None
+    provenance: str
+    confidence: str
+    position_uncertainty_m: float
+
+
+@dataclass(frozen=True)
+class JunctionInfo:
+    """A nearest road-junction's structured facts (M10). `degree` and
+    `connecting_road_ids` come straight from the feature's `tags_json`
+    (`roadnet.junctions.to_stored_features`) -- see that module's docstring
+    for the arm-counting rule that produces `degree`."""
+
+    distance_m: float
+    degree: int
+    connecting_road_ids: list[int]
     provenance: str
     confidence: str
     position_uncertainty_m: float
@@ -240,6 +272,7 @@ class PositionDescription:
     nearest_water: WaterInfo | None
     nearby_ridges: TerrainLineInfo | None
     nearby_valleys: TerrainLineInfo | None
+    nearest_junction: JunctionInfo | None
     named_places_within_radius: list[NamedPlaceInfo]
     named_places_radius_m: float
     nearest_airfield: AirfieldInfo | None
@@ -316,6 +349,20 @@ def _terrain_line_info(
         distance_m=distance,
         orientation_deg=feature.tags.get("orientation_deg"),
         elevation_range_m=feature.tags.get("elevation_range_m"),
+        provenance=_provenance_str(feature),
+        confidence=_confidence_str(feature),
+        position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+    )
+
+
+def _junction_info(match: tuple[StoredFeature, float] | None) -> JunctionInfo | None:
+    if match is None:
+        return None
+    feature, distance = match
+    return JunctionInfo(
+        distance_m=distance,
+        degree=feature.tags.get("degree", 0),
+        connecting_road_ids=feature.tags.get("connecting_road_ids", []),
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
@@ -465,6 +512,8 @@ def describe_position(
     nearby_ridges = _terrain_line_info(nearest_feature(conn, ["ridge"], x, z))
     nearby_valleys = _terrain_line_info(nearest_feature(conn, ["valley"], x, z))
 
+    nearest_junction = _junction_info(nearest_feature(conn, ["junction"], x, z))
+
     named_place_candidates = features_in_bbox(
         conn,
         ["named_place"],
@@ -541,6 +590,7 @@ def describe_position(
         nearest_water=nearest_water,
         nearby_ridges=nearby_ridges,
         nearby_valleys=nearby_valleys,
+        nearest_junction=nearest_junction,
         named_places_within_radius=named_places_within_radius,
         named_places_radius_m=named_places_radius_m,
         nearest_airfield=nearest_airfield,
