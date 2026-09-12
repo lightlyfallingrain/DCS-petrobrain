@@ -82,3 +82,50 @@ mission-interpreter/:
   the right key for extracting a place name from `WorldRef.name_matches` — not independently
   verified in the MI-6 plan itself, checked directly against world-model's schema before relying
   on it in `_first_place_name`.
+
+### Fix Round 1 (Reviewer's one Required Fix, `plans/mi6-runtime-compilation/review.md`)
+
+Reviewer confirmed the exact gap flagged above under Notable Discoveries — "never populated" and
+"asked and rejected" both collapsing to bare `None` — is real information loss, and recommended
+retyping `purpose`/`task` to `Tagged[str | None]` rather than leaving it as documented debt.
+
+- `mission-interpreter/src/runtime/compact.py` — `RuntimeMissionUnderstanding.purpose`/`.task`
+  retyped from `Tagged[str] | None` to `Tagged[str | None]`, matching every other field on the
+  dataclass (always wrapped). Added a docstring note explaining why, cross-referencing
+  `compile._reconcile_purpose_or_task`.
+- `mission-interpreter/src/runtime/compile.py` — `_reconcile_purpose_or_task` now always returns
+  `Tagged[str | None]`, never a bare `None`: never-populated-and-never-asked returns
+  `Tagged(value=None, epistemic_status="UNKNOWN", basis=())`; asked-and-rejected returns
+  `Tagged(value=None, epistemic_status=source.epistemic_status, basis=(*source.basis,
+  "player:rejected"), confidence=None)`. Chose `source.epistemic_status` (not a new "FACT for the
+  player's act" reading, the reviewer's other offered option) for symmetry with the confirmed-case
+  branch, which also leaves `epistemic_status` untouched by the player's action — only `basis`/
+  `confidence` change in either direction. `confidence` resets to `None` on rejection since it
+  described the model's certainty in a value that no longer stands. The two cases are
+  distinguishable purely by `basis` (`()` vs. non-empty), as the reviewer specified. The
+  "confidence != low / no answer / not bool" passthrough branch and the confirmed branch both now
+  construct a fresh `Tagged` (rather than returning `source` directly) since `Tagged[str]` and
+  `Tagged[str | None]` are different types under `mypy --strict`'s invariant generics.
+- Updated 3 tests in `mission-interpreter/tests/test_runtime_compile.py`
+  (`test_purpose_stays_none_when_never_populated_and_never_asked`, renamed
+  `test_purpose_rejected_clears_to_none` → `test_purpose_rejected_clears_value_but_keeps_tagged_wrapper`)
+  to assert on `.value`/`.epistemic_status`/`.basis`/`.confidence` instead of identity-with-`None`.
+  `test_purpose_untouched_when_no_matching_player_intent_entry` needed no change — the passthrough
+  branch's freshly-constructed `Tagged` is still `==` to the original via dataclass field equality.
+- `mission-interpreter/tests/test_runtime_compact.py` — `_full_compact()`'s `task=None` became
+  `task=Tagged(value=None, epistemic_status="UNKNOWN", basis=())`; both round-trip tests updated to
+  check `["value"] is None` instead of the field itself being `None`. Renamed
+  `test_absent_optional_fields_serialize_as_null` → `test_absent_optional_field_values_serialize_as_null`
+  to match what it now actually asserts.
+- `mission-interpreter/tests/test_player_intent_main.py` — one assertion
+  (`test_emit_compact_writes_parseable_round_tripping_json`) updated the same way; this call site
+  wasn't named in the review but pytest caught it immediately as the one remaining consumer of the
+  old bare-`None` shape.
+
+Checks re-run from `mission-interpreter/`: `ruff format --check` pass, `ruff check` pass,
+`mypy --strict src` pass (31 files), `pytest -q` pass (111 passed — same count as before the fix,
+no tests added or removed, only retargeted).
+
+No notable discoveries beyond the one test call site pytest surfaced that the review didn't
+enumerate by name (`test_player_intent_main.py`) — expected, since the review's "every call
+site/test" instruction already anticipated more than the two files it named explicitly.
