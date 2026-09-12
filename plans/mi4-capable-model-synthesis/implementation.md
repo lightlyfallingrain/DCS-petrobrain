@@ -11,9 +11,10 @@ JSON-schema request restricting `epistemic_status` to `INFERENCE`/`ASSUMPTION` o
 in `synthesize.py` as defense in depth.
 
 **Important disclosure: stage 6 (live validation) happened, but not the way the plan anticipated.**
-The plan flagged `qwen3:14b` as not pulled locally and explicitly said "do not attempt to pull the
-model yourself... just scope it out honestly as a pending user follow-up." I did not run
-`ollama pull qwen3:14b`. However, running `tests/test_synth_live_ollama.py` (which is
+The plan flagged `qwen3:14b` as not pulled locally, stating (Prerequisite check / Risks section)
+that stage 6 was blocked "until the user *or Implementer* runs `ollama pull qwen3:14b`" -- it did
+not forbid the Implementer from pulling it. I chose, on my own judgment, not to run
+`ollama pull qwen3:14b` myself. However, running `tests/test_synth_live_ollama.py` (which is
 skip-guarded on the model being present, and *was* skipping correctly against the not-yet-pulled
 model) led me to also manually probe the running Ollama daemon to de-risk the request/response
 shape before finalizing `prompts.py`/`ollama_client.py`. That probe -- a real `/api/chat` call --
@@ -127,3 +128,39 @@ human pass, left for the user.
 - The real sample mission's hidden/lateActivation groups produced 49 `ThreatSignal`s -- a
   substantially higher count than the plan's prose implied might be typical; worth knowing if a
   future prompt-size/token-budget concern comes up for larger missions.
+
+### Review Fixes (post-review, `plans/mi4-capable-model-synthesis/review.md`, commit `a1c18ec`)
+
+Both required fixes applied:
+
+1. **`OllamaClient` fail-closed preflight against silent auto-pull.** Added
+   `OllamaModelNotPulledError` (a third exception type alongside `OllamaUnavailableError`/
+   `OllamaOutputError`) and `OllamaClient._ensure_model_pulled`, called as the first thing
+   `chat_json` does. It queries `GET /api/tags` and checks the requested model appears under
+   either `name` or `model` in the response; if the daemon itself is unreachable that raises
+   `OllamaUnavailableError` (same as the existing connection-failure path), and if the daemon
+   responds but the model isn't listed it raises `OllamaModelNotPulledError` telling the caller to
+   run `ollama pull <model>` themselves. `synthesize.py` does not catch this new exception, same as
+   it doesn't catch `OllamaUnavailableError` -- both are environment problems the caller should see,
+   not something a synthesis pass silently degrades on. Added
+   `test_chat_json_fails_closed_when_model_not_pulled` against the fake HTTP double
+   (`test_synth_ollama_client.py`), and extended that file's fake server with a `do_GET` handler for
+   `/api/tags` so the existing `/api/chat`-path tests (which use model names like `"bad-envelope"`,
+   `"server-error"`, etc. to select response scenarios, not real pulled-model names) still reach the
+   behavior they're testing -- those names are listed in a `_PULLED_MODELS` constant the preflight
+   check is satisfied against.
+2. **Corrected the plan misquote** in this file and
+   `.claude/agent-memory/implementer/project_mi4_ollama_synth.md`. Both previously quoted the plan as
+   having "explicitly" told the Implementer not to pull the model -- that exact wording is not in
+   `plans/mi4-capable-model-synthesis/plan.md`. What the plan actually says (Prerequisite check /
+   Risks section) is that stage 6 was blocked "until the user *or Implementer* runs
+   `ollama pull qwen3:14b`" -- it does not forbid the Implementer from pulling it; not pulling it was
+   the Implementer's own judgment call, not a plan requirement. Both files now state this correctly.
+
+Also updated `test_synth_live_ollama.py`'s module docstring, which was stale (still said `qwen3:14b`
+"is **not** pulled locally" and the test "is expected to skip") -- the model is now present and the
+test runs for real, confirmed by this fix round's own full-suite pass.
+
+Verification re-run after these fixes: `ruff format --check`, `ruff check`, `mypy --strict src`, and
+`pytest -q` (74 passed, up from 73 -- the one new preflight test -- including the live Ollama test)
+all pass.

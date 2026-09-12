@@ -4,12 +4,11 @@ the real sample mission end-to-end, using an actual local Ollama daemon.
 Skip-guarded by a quick reachability probe -- mirrors this codebase's
 `REAL_SAMPLE_MIZ_PATH.exists()` skip convention (`conftest.py`), adapted to
 "can we reach Ollama, and is `qwen3:14b` present" instead of "does this
-file exist". As of this implementation session, `qwen3:14b` is **not**
-pulled locally (`ollama list` confirmed only `qwen3.6:27b`/`qwen3.5:9b`/
-`gemma4:12b`/`gemma4:e4b`) and this session had no outbound network access
-to run `ollama pull qwen3:14b` itself (per the plan's Prerequisite check
-and this project's "never run real external-resource operations silently"
-posture) -- so this test is expected to skip until a human runs that pull.
+file exist". `qwen3:14b` was not pulled locally as of the MI-4
+implementation session (`ollama list` then showed only `qwen3.6:27b`/
+`qwen3.5:9b`/`gemma4:12b`/`gemma4:e4b`), so this test skipped until a
+human ran `ollama pull qwen3:14b` -- the model is now present, and this
+test runs for real.
 
 This test only asserts the call completes and produces a plausible
 non-empty result -- output *quality* judgment (does the inferred purpose

@@ -23,9 +23,12 @@ needs a more visible signal (or a retry-with-stricter-instruction path) is
 left to be revisited once a live run against the real sample mission shows
 how often it actually happens (plan stage 6/7).
 
-`OllamaUnavailableError` (the daemon itself unreachable) is deliberately
-**not** caught here -- that is an environment problem the caller should
-see and handle explicitly, not something this stage silently degrades on.
+`OllamaUnavailableError` (the daemon itself unreachable) and
+`OllamaModelNotPulledError` (the daemon's fail-closed guard against
+silently auto-pulling an absent model, see `ollama_client.py`) are
+deliberately **not** caught here -- both are environment problems the
+caller should see and handle explicitly, not something this stage
+silently degrades on.
 """
 
 from __future__ import annotations
