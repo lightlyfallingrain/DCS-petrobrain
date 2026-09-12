@@ -82,10 +82,22 @@ def test_visible_group_route_point_gets_world_ref(tmp_path: Path) -> None:
         if group.group.name == VISIBLE_GROUP_NAME
     )
     assert visible.route is not None
-    assert len(visible.route) == 1
+    # Fixture route: TakeOffGround (10, 20) -> Turning Point (15, 25) ->
+    # Land (30, 40) -- see MI-3's synthetic_mission.py update.
+    assert len(visible.route) == 3
     assert visible.route[0].world_ref.position == {
         "x": 10.0,
         "z": 20.0,
+        "nearest_settlement": None,
+    }
+    assert visible.route[1].world_ref.position == {
+        "x": 15.0,
+        "z": 25.0,
+        "nearest_settlement": None,
+    }
+    assert visible.route[2].world_ref.position == {
+        "x": 30.0,
+        "z": 40.0,
         "nearest_settlement": None,
     }
 
@@ -185,10 +197,10 @@ def test_call_count_is_bounded_and_deterministic(tmp_path: Path) -> None:
 
     enrich_mission(mission, client)
 
-    # 5 crew-available groups after filtering -- wait, hidden ones are
-    # already dropped by filter_crew_available, so only the visible group
-    # remains: 1 representative position + 1 route waypoint = 2 calls,
-    # plus 2 trigger zones (circle + polygon) = 2 more calls.
-    assert len(client.describe_position_calls) == 4
+    # Hidden groups are already dropped by filter_crew_available, so only
+    # the visible group remains: 1 representative position + 3 route
+    # waypoints (TakeOffGround/Turning Point/Land) = 4 calls, plus 2 trigger
+    # zones (circle + polygon) = 2 more calls.
+    assert len(client.describe_position_calls) == 6
     # Named entities: the visible group + 2 trigger zones = 3 calls.
     assert len(client.find_place_by_name_calls) == 3

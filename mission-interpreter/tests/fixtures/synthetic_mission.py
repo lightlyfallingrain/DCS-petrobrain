@@ -22,6 +22,13 @@ is not exercised by the real sample at all, see the validation note, so
 this fixture is its only test coverage), a circle and a polygon trigger
 zone (the polygon using the real, misspelled `"verticies"` key), one
 `trigrules` rule, and a kneeboard image path.
+
+The visible group's unit carries `skill = "Player"` (MI-3's ownship happy
+path) and its route has three waypoints with real-bytes-confirmed `type`
+values (`"TakeOffGround"`, `"Turning Point"`, `"Land"`) at distinct `x`/`y`
+so `mission_phases` mapping tests aren't coincidental (see
+`mission-interpreter/research/2026-09-12-player-slot-skill-field.md` and
+the miz validation note).
 """
 
 from __future__ import annotations
@@ -128,8 +135,32 @@ mission =
                                             ["alt"] = 500,
                                             ["alt_type"] = "BARO",
                                             ["speed"] = 50,
+                                            ["type"] = "TakeOffGround",
+                                            ["action"] = "From Ground Area",
+                                            ["ETA"] = 0,
+                                            ["ETA_locked"] = true,
+                                        },
+                                        [2] =
+                                        {
+                                            ["x"] = 15,
+                                            ["y"] = 25,
+                                            ["alt"] = 500,
+                                            ["alt_type"] = "BARO",
+                                            ["speed"] = 50,
                                             ["type"] = "Turning Point",
                                             ["action"] = "Turning Point",
+                                            ["ETA"] = 0,
+                                            ["ETA_locked"] = true,
+                                        },
+                                        [3] =
+                                        {
+                                            ["x"] = 30,
+                                            ["y"] = 40,
+                                            ["alt"] = 0,
+                                            ["alt_type"] = "BARO",
+                                            ["speed"] = 50,
+                                            ["type"] = "Land",
+                                            ["action"] = "Landing",
                                             ["ETA"] = 0,
                                             ["ETA_locked"] = true,
                                         },
@@ -137,7 +168,7 @@ mission =
                                 },
                                 ["units"] =
                                 {
-                                    [1] = { ["unitId"] = 1, ["name"] = "Unit1", ["type"] = "Mi-24P", ["x"] = 10, ["y"] = 20 },
+                                    [1] = { ["unitId"] = 1, ["name"] = "Unit1", ["type"] = "Mi-24P", ["x"] = 10, ["y"] = 20, ["skill"] = "Player" },
                                 },
                             },
                             [2] =
@@ -148,7 +179,7 @@ mission =
                                 ["hiddenOnPlanner"] = false,
                                 ["hiddenOnMFD"] = false,
                                 ["lateActivation"] = false,
-                                ["units"] = { [1] = { ["unitId"] = 2, ["name"] = "HiddenUnit", ["type"] = "T-72", ["x"] = 1, ["y"] = 1 } },
+                                ["units"] = { [1] = { ["unitId"] = 2, ["name"] = "HiddenUnit", ["type"] = "T-72", ["x"] = 1, ["y"] = 1, ["skill"] = "Average" } },
                             },
                             [3] =
                             {
@@ -158,7 +189,7 @@ mission =
                                 ["hiddenOnPlanner"] = true,
                                 ["hiddenOnMFD"] = false,
                                 ["lateActivation"] = false,
-                                ["units"] = { [1] = { ["unitId"] = 3, ["name"] = "PlannerHiddenUnit", ["type"] = "T-72", ["x"] = 2, ["y"] = 2 } },
+                                ["units"] = { [1] = { ["unitId"] = 3, ["name"] = "PlannerHiddenUnit", ["type"] = "T-72", ["x"] = 2, ["y"] = 2, ["skill"] = "Average" } },
                             },
                             [4] =
                             {
@@ -168,7 +199,7 @@ mission =
                                 ["hiddenOnPlanner"] = false,
                                 ["hiddenOnMFD"] = true,
                                 ["lateActivation"] = false,
-                                ["units"] = { [1] = { ["unitId"] = 4, ["name"] = "MFDHiddenUnit", ["type"] = "T-72", ["x"] = 3, ["y"] = 3 } },
+                                ["units"] = { [1] = { ["unitId"] = 4, ["name"] = "MFDHiddenUnit", ["type"] = "T-72", ["x"] = 3, ["y"] = 3, ["skill"] = "Average" } },
                             },
                             [5] =
                             {
@@ -178,7 +209,7 @@ mission =
                                 ["hiddenOnPlanner"] = false,
                                 ["hiddenOnMFD"] = false,
                                 ["lateActivation"] = true,
-                                ["units"] = { [1] = { ["unitId"] = 5, ["name"] = "LateUnit", ["type"] = "T-72", ["x"] = 4, ["y"] = 4 } },
+                                ["units"] = { [1] = { ["unitId"] = 5, ["name"] = "LateUnit", ["type"] = "T-72", ["x"] = 4, ["y"] = 4, ["skill"] = "Average" } },
                             },
                         },
                     },

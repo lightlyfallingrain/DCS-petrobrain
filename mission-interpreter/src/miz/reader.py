@@ -220,6 +220,7 @@ def _parse_unit(node: Mapping[str, Any]) -> Unit:
         type=str(node.get("type", "")),
         x=float(node.get("x", 0.0)),
         y=float(node.get("y", 0.0)),
+        skill=str(node.get("skill", "")),
         raw=node,
     )
 
