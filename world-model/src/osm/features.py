@@ -4,6 +4,13 @@ Uses stdlib `json` only -- no new dependency. Handles the two element shapes
 produced by the plan's `out geom;` query: `"node"` elements (bare `lat`/`lon`
 plus `tags`) and `"way"` elements (a `geometry` list of `{lat, lon}` points
 inline, avoiding a separate node-ID resolution pass, plus `tags`).
+
+**Superseded on the pipeline path as of M9** by `osm.pbf.load_features`,
+which parses a pre-clipped `.osm.pbf` extract into the exact same
+`OsmFeatureSet`/`OsmNode`/`OsmWay` shapes defined below -- this module is
+unchanged and still used by `tools/inspect_osm_overlay.py` and any build
+that still supplies `osm_cache_path` instead of `osm_pbf_path`
+(`build.pipeline.build_region`).
 """
 
 import json
@@ -48,11 +55,21 @@ class OsmFeatureSet:
     risk entry, an unsupported relation must be an explicitly counted skip,
     never a silent drop -- `build/ingest_osm.py` surfaces this count in the
     research note.
+
+    `ways_skipped_unresolved_nodes` is M9's addition, always 0 for this
+    module's own Overpass-sourced path (Overpass's `out geom;` never omits a
+    way's inline geometry) -- it exists here, on the shared dataclass,
+    because `osm.pbf.load_features` produces the exact same `OsmFeatureSet`
+    shape and needs a field for a way whose node locations pyosmium's index
+    never resolved (should not happen post-`osmium extract
+    --strategy=smart`, but is a counted skip rather than assumed away; see
+    that module's docstring).
     """
 
     nodes: list[OsmNode] = field(default_factory=list)
     ways: list[OsmWay] = field(default_factory=list)
     relations_skipped: int = 0
+    ways_skipped_unresolved_nodes: int = 0
 
 
 def _parse_node(element: dict[str, Any]) -> OsmNode:

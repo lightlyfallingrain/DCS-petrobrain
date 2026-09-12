@@ -8,6 +8,12 @@ the request fails, it raises rather than silently retrying.
 
 Uses stdlib `urllib.request` only -- no new dependency for a one-off HTTP
 call (see plan's "Data source" section).
+
+**Superseded on the pipeline path as of M9** by `osm.pbf.load_features`
+against a Geofabrik `.osm.pbf` extract -- kept for `tools/
+inspect_osm_overlay.py` diagnostic continuity and for any small-region
+build that still prefers a scoped Overpass fetch over a full country
+extract.
 """
 
 import urllib.request
