@@ -29,7 +29,38 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   settlement/road join overhead for a bare elevation read — rationale restated in the new module's
   docstring). See `plans/world-model-los-generalization/plan.md`.
 
-- [ ] **M9 — OSM augmentation (geofabrik).** Re-introduce OSM as an augmentation layer from manually-downloaded offline geofabrik.de per-country extracts instead of M3's live Overpass queries, filling the `nearest_settlement`/`nearest_water`/`inside_settlement` gap M7 leaves `null` theatre-wide. Split out of the original combined M8 plan on 2026-09-06; **not yet scheduled**, and gated on an unresolved new-dependency decision (`.osm.pbf` parsing: stdlib hand-roll vs `pyosmium`) plus an unverified claim about which formats geofabrik.de still offers. Needs a fresh Architect pass before work starts. **Value reassessed 2026-09-06**: DCS-native + M8's live-probe path now cover most of OSM's original role ("DCS = where, OSM = what"); remaining unique value is narrow — settlement boundary polygons (DCS only gives center points) and semantic tags (road class/ref, land-use, POI type). Not worth the new-dependency cost while no downstream consumer (Mission Interpreter/Runtime, neither built yet) needs settlement-extent reasoning or richer naming — revisit only when one does. See `plans/m9-osm-geofabrik/plan.md` and `research/2026-09-06-m8-geofabrik-osm-recon.md`.
+- [x] **M10 — Road-junction detection (done, merged 2026-09-13).** Derives road-junction
+  landmarks purely from geometry over the already-parsed `.routes`/road layer — no new
+  dependency, no OSM data. Grid-bucketed union-find over road-segment endpoints/interior
+  vertices (`src/roadnet/junctions.py`); a junction is emitted at degree ≥ 3 (endpoint = 1 arm,
+  interior-attachment = 2 arms). New pipeline stage 5 (`src/build/ingest_junctions.py`,
+  `_TOTAL_STAGES` 7→8), new query surface `describe.nearest_junction`/`JunctionInfo`. Real
+  numbers against `latakia-20km`: 3,266 roads → 6,496 endpoints + 155,900 interior vertices →
+  3,980 clusters → 3,634 junctions kept (346 dropped as degree-2 route continuation); pipeline
+  stage 0.6s, `nearest_feature(["junction"])` mean 8.2ms (cheaper than the pre-existing road
+  lookup). Known bounded limitation: ~32/3,634 false positives where DCS represents one road
+  corridor as multiple exactly-coincident `.routes` polylines, indistinguishable from a genuine
+  multi-way junction by tolerance/min-degree tuning alone — documented in `junctions.py`'s
+  docstring, not fixed. Also clarified (docstring-only, no behavior change): `nearby_ridges`/
+  `nearby_valleys` both `None` already means "flat terrain," no new classification needed. 266
+  tests pass. Raised while scoping tactical-landmark enrichment for Mission Interpreter — see
+  `plans/world-model-tactical-landmarks/plan.md` and `plans/m10-road-junctions/`.
+
+- [ ] **M9 — OSM augmentation (geofabrik) — reopened 2026-09-13.** Re-introduce OSM as an
+  augmentation layer from manually-downloaded offline geofabrik.de per-country extracts instead
+  of M3's live Overpass queries, filling the `nearest_settlement`/`nearest_water`/
+  `inside_settlement` gap M7 leaves `null` theatre-wide, and unlocking settlement *boundary*
+  polygons (DCS only ever gives center points — confirmed no DCS-native alternative exists,
+  `towns.lua` is point-only per a full key-scan). Deferred 2026-09-06 for lack of a downstream
+  consumer; **that consumer now exists** — Mission Interpreter's world-enrichment stage (MI-2,
+  `plans/mission-interpreter/plan.md`) needs settlement-extent reasoning for tactical narrative.
+  **`.osm.pbf` parser decision resolved 2026-09-13: `pyosmium`** (world-model's first
+  native-extension dependency, user-approved over a stdlib hand-roll given the node-ID-resolution
+  complexity the latter would need to solve itself). All 7 country extracts covering the Syria
+  theatre's real-world footprint (Cyprus, Iraq, Israel-and-Palestine, Jordan, Lebanon, Syria,
+  Turkey — `.osm.pbf` format) downloaded to `data/raw/osm/`, gitignored. Not yet implemented.
+  See `plans/m9-osm-geofabrik/plan.md`, `plans/world-model-tactical-landmarks/plan.md`, and
+  `research/2026-09-06-m8-geofabrik-osm-recon.md`.
 
 ## Backlog (open, unscheduled)
 
