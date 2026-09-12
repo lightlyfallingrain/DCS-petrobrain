@@ -80,6 +80,26 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
 
 ## Backlog (open, unscheduled)
 
+- **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
+  Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
+  per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
+  rewrite. Per-theatre work identified: (1) Transverse Mercator projection params — `pydcs` has
+  fitted values for every theatre, but each needs live-DCS verification against real
+  `coord.LOtoLL` output like M1 did for Syria, not trusted blind; (2) a `RegionDefinition` entry
+  (bbox/name) — cheap, mechanical; (3) raster chart registration (F10 paper map) — M2's Syria fit
+  was hand-derived from real-world control points on that specific raster, genuinely per-theatre
+  manual work, not automatable from the pattern; (4) DCS source files (`towns.lua`/`beacons.lua`/
+  `.routes`) — same parsers *should* work (same DCS-internal formats) but need an investigator
+  pass per theatre, not assumed, since format has drifted across DCS versions before and no
+  theatre besides Syria has been checked; (5) OSM/Geofabrik country-extract set differs per
+  theatre, same `derive_m9_osm_clip_bbox.py`-style approach per theatre.
+  **Kola is a genuinely harder case, not just "repeat the pattern":** SRTM only covers ±60°
+  latitude, and Kola peninsula sits ~68-69°N, entirely outside SRTM's coverage — needs a
+  different DEM source (ASTER GDEM to 83°N, or a Nordic national elevation dataset), unresolved
+  and needs its own investigation before committing. Afghanistan and Caucasus are both within
+  SRTM range, no elevation-source blocker. Needs an Architect + investigator pass before any
+  theatre starts, per this project's standing convention for DCS-internals-uncertain work.
+
 - **Incremental per-layer pipeline builds.** `build_region` deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. Wanted: run individual pipeline sections (roads only, elevation only, validation only) and *add* that data into an existing store — staged builds, partial re-runs when debugging a single layer. Raised during M7 DoD acceptance testing (2026-09-06), explicitly considered for M8 and dropped from it to keep that milestone scoped to the probe store. M9 (OSM) would also benefit — see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` and `src/build/pipeline.py`'s `build_region`.
 
 Not doing yet (see concept doc "Things Not To Do Yet"): Petrovich dialogue, speech, embeddings, screenshot interpretation, full-theatre processing, elaborate distributed architecture. Threat-level-driven contact reporting/prioritization (`../docs/concept/threat-levels.md`) is deferred further still — runtime layer, needs contact memory + attention model (PB-2/PB-4) first.
