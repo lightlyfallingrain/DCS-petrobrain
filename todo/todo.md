@@ -57,3 +57,15 @@ Prioritize any open task here over any other task in this file or roadmap files.
   (the actual gating logic before a landmark reference reaches speech output, likely a
   `belief/` concern parallel to `percept.py`'s existing DCS-truth-stripping boundary). Revisit
   once world-model's landmark enrichment and a first Mission Understanding schema both exist.
+
+- [>] **"Wingman brain" — a much later, far-future direction.** Raised 2026-09-13, deliberately
+  deferred, not scoped. Combines observation + flight control + world perception from a
+  *non-player-position* aircraft — i.e. an AI-controlled wingman with its own Petrobrain-style
+  cognition, not just Petrovich riding along in the player's own cockpit. A materially different
+  architecture from everything built so far: today's aircraft-layer/body-layer split assumes
+  perception is anchored to the player's own ownship telemetry throughout (`OwnshipState`,
+  `perception/geometry.py`'s bearing/range math, `aircraft_client`'s `/telemetry/latest`). A
+  wingman brain would need perception/state for an aircraft that isn't the player's — a new
+  telemetry source, not a reuse of the existing one. Do not start scoping this until the current
+  three-layer architecture (world model, mission interpreter, body/brain layer) is mature and
+  proven for the single-player-aircraft case first.
