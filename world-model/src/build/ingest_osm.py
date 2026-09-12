@@ -38,6 +38,13 @@ class OsmIngestStats:
     relations_skipped: int = 0
     ways_skipped_unclassified: int = 0
     ways_skipped_degenerate: int = 0
+    # M9's own `OsmFeatureSet.ways_skipped_unresolved_nodes` had no matching
+    # field here until the streaming-ingest fix -- it was silently dropped by
+    # `ingest_osm` and never reached `BuildReport` for either OSM path.
+    # Surfaced now that the streaming pipeline change threads this count
+    # through directly from `osm.pbf.stream_features`'s return value; see
+    # `plans/osm-streaming-ingest/plan.md` Step 2.
+    ways_skipped_unresolved_nodes: int = 0
 
 
 def _within_region(
@@ -154,22 +161,23 @@ def _ingest_way(
     )
 
 
-def ingest_osm(
-    feature_set: OsmFeatureSet,
+def ingest_osm_nodes_batch(
+    nodes: list[OsmNode],
     theatre: str,
     centre_x: float,
     centre_z: float,
     half_extent_x_m: float,
     half_extent_z_m: float,
     source_id: int | None,
-) -> tuple[list[StoredFeature], OsmIngestStats]:
-    """Convert a parsed Overpass response into `road`/`settlement`/`water`/
-    `named_place` features clipped to the rectangular region `(centre_x,
-    centre_z) +/- (half_extent_x_m, half_extent_z_m)`."""
-    stats = OsmIngestStats(relations_skipped=feature_set.relations_skipped)
+    stats: OsmIngestStats,
+) -> list[StoredFeature]:
+    """Ingest one batch of nodes, mutating `stats` in place and returning the
+    batch's kept features -- the batch-scoped body of `ingest_osm`'s node
+    loop, extracted so the streaming pipeline path (`build.pipeline`'s
+    `osm_pbf_path` branch) can call it once per flushed batch instead of
+    once over a whole-file `OsmFeatureSet`."""
     features: list[StoredFeature] = []
-
-    for node in feature_set.nodes:
+    for node in nodes:
         feature = _ingest_node(
             node,
             theatre,
@@ -182,8 +190,23 @@ def ingest_osm(
         )
         if feature is not None:
             features.append(feature)
+    return features
 
-    for way in feature_set.ways:
+
+def ingest_osm_ways_batch(
+    ways: list[OsmWay],
+    theatre: str,
+    centre_x: float,
+    centre_z: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
+    source_id: int | None,
+    stats: OsmIngestStats,
+) -> list[StoredFeature]:
+    """Ingest one batch of ways, mutating `stats` in place and returning the
+    batch's kept features -- see `ingest_osm_nodes_batch`."""
+    features: list[StoredFeature] = []
+    for way in ways:
         feature = _ingest_way(
             way,
             theatre,
@@ -196,5 +219,49 @@ def ingest_osm(
         )
         if feature is not None:
             features.append(feature)
+    return features
 
-    return features, stats
+
+def ingest_osm(
+    feature_set: OsmFeatureSet,
+    theatre: str,
+    centre_x: float,
+    centre_z: float,
+    half_extent_x_m: float,
+    half_extent_z_m: float,
+    source_id: int | None,
+) -> tuple[list[StoredFeature], OsmIngestStats]:
+    """Convert a parsed Overpass response into `road`/`settlement`/`water`/
+    `named_place` features clipped to the rectangular region `(centre_x,
+    centre_z) +/- (half_extent_x_m, half_extent_z_m)`.
+
+    A thin wrapper over `ingest_osm_nodes_batch`/`ingest_osm_ways_batch`,
+    each called once over the feature set's full node/way lists -- identical
+    behaviour to before the streaming-ingest fix split those loop bodies
+    out, so the Overpass (M3) path and this module's own tests need no
+    change."""
+    stats = OsmIngestStats(
+        relations_skipped=feature_set.relations_skipped,
+        ways_skipped_unresolved_nodes=feature_set.ways_skipped_unresolved_nodes,
+    )
+    node_features = ingest_osm_nodes_batch(
+        feature_set.nodes,
+        theatre,
+        centre_x,
+        centre_z,
+        half_extent_x_m,
+        half_extent_z_m,
+        source_id,
+        stats,
+    )
+    way_features = ingest_osm_ways_batch(
+        feature_set.ways,
+        theatre,
+        centre_x,
+        centre_z,
+        half_extent_x_m,
+        half_extent_z_m,
+        source_id,
+        stats,
+    )
+    return node_features + way_features, stats
