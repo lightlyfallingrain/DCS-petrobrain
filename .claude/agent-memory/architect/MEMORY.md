@@ -1,6 +1,3 @@
-# Agent Memory Index
+# Memory Index
 
-One line per entry, under ~150 characters: `- [Title](file.md) — one-line hook`.
-
-- [Tactical landmarks scoping](project_tactical_landmarks_scoping.md) — settlement extent OSM-only, junctions cheap/DCS-native, water OSM-only, M9 reopened, .osm.pbf choice still open.
-- [M10 junction design](project_m10_junction_design.md) — arm-counting degree rule (endpoint=1, interior-attachment=2) for junction clustering; pipeline.py has no "layers=" mechanism despite a parent plan claiming otherwise.
+- [MI-3 Tagged[T] epistemic pattern](project_mi3_tagged_epistemic_pattern.md) — generic per-item epistemic wrapper chosen over world-model's per-field dict-map; OBSERVATION redefined for pre-mission GIS correlation, flagged unresolved.

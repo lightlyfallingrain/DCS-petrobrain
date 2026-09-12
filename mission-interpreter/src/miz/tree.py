@@ -51,13 +51,22 @@ class Route:
 
 @dataclass(frozen=True, slots=True)
 class Unit:
-    """One `group.units[]` entry."""
+    """One `group.units[]` entry.
+
+    `skill` is real-bytes-confirmed present on every `unit[]` entry (see
+    `mission-interpreter/research/2026-09-12-player-slot-skill-field.md`).
+    The one unit whose `skill` is `"Player"` (single-player) or `"Client"`
+    (multiplayer slot, unverified against a real sample -- see that
+    research note) is the player's own aircraft; every other observed value
+    (`"Average"`, `"High"`, etc.) is an AI skill level, not a player marker.
+    """
 
     unit_id: int
     name: str
     type: str
     x: float
     y: float
+    skill: str
     raw: Mapping[str, Any]
 
 

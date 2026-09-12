@@ -36,8 +36,29 @@ the plan this subproject was built from, and `docs/concept/MISSION_INTERPRETER.m
   `aircraft_client.py`'s `get_*` methods, every `WorldModelClient` method raises
   `WorldModelClientError` on failure -- there is no "world-model not built yet" expected-empty
   state once this client is called. No spatial storage of its own.
-- No model/LLM involved through MI-1.5 (MI-4 is the first stage that adds one, gated on Decision 3
+- No model/LLM involved through MI-3 (MI-4 is the first stage that adds one, gated on Decision 3
   in the plan -- model choice/hosting is still open).
+- **Epistemic tagging: `Tagged[T]`, not a per-field-name dict-map (MI-3 decision)**. `src/schema/
+  tags.py`'s `Tagged[T]` (`value`, `epistemic_status`, `basis`) wraps every top-level
+  `MissionUnderstanding` field and every `mission_phases`/`important_locations` list item
+  individually -- chosen over world-model's `StoredFeature` precedent (parallel
+  `provenance`/`confidence` dict-maps keyed by field name) because `MissionUnderstanding` is a
+  nested tree whose *list items* need independent epistemic status (one phase FACT, a later one
+  INFERENCE once MI-4 exists), which a flat `dict[str, str]` can't express. Every later stage
+  (MI-4's threats/purpose/task, MI-5's `player_intent`, MI-6's runtime compaction) is expected to
+  reuse this mechanism rather than reinvent one. `basis` is always non-empty for anything MI-3
+  populates. Round-trips through `dataclasses.asdict()` -> `json.dumps` with no custom `to_dict`,
+  same as world-model's `src/api/server.py` convention.
+- **FACT/OBSERVATION redefined for pre-mission use (MI-3 decision, flagged as an interpretation
+  call)**. `PETROBRAIN_SYSTEM.md` defines "observation" as "perceived during the mission" (a
+  runtime concept); MI-3 runs entirely offline/pre-mission, so nothing it produces is literally
+  that. For this schema: **FACT** = read (or mechanically mapped via a fixed table) directly from
+  the parsed `.miz`/`CrewAvailableMission` tree, no external source consulted. **OBSERVATION** =
+  resolved by consulting the World Model (`describe_position`/`find_place_by_name`) rather than the
+  mission file alone -- still fully deterministic, but required a second authority to produce.
+  `INFERENCE`/`ASSUMPTION` are declared in the `EpistemicStatus` vocabulary but MI-3 never produces
+  either -- see `test_schema_understanding.py`'s invariant test. If this reading of OBSERVATION
+  needs tightening once MI-4 needs true inference, that's a cheap rename now, not later.
 
 ## Commands
 
@@ -91,9 +112,19 @@ mission-interpreter/.venv/bin/pip install "ruff==0.16.5" "mypy==2.3.1" "pytest==
 - `src/world_enrich/` -- MI-2, done: `world_model_client.py` (HTTP client), `schema.py` (the
   parallel `Enriched*` tree), `enrich.py` (`enrich_mission`, the walk that attaches world-model
   context to route waypoints/group positions/trigger zones).
-- `src/schema/`, `src/synth/` -- future stages (MI-3 onward), not built yet.
+- `src/schema/` -- MI-3, done: `tags.py` (`EpistemicStatus`, `Tagged[T]`), `understanding.py`
+  (`SCHEMA_VERSION`, `MissionUnderstanding`, `Ownship`, `MissionPhase`, `ImportantLocation` --
+  shape only), `build.py` (`build_mission_understanding`, the mechanical, no-judgment mapping from
+  an `EnrichedMission` to a `MissionUnderstanding`; player-slot/ownship resolution is the one piece
+  of real logic, scanning every unit for `skill in ("Player", "Client")` and resolving to `UNKNOWN`
+  on 0 or >=2 matches rather than guessing). `purpose`/`task`/`known_threats`/`player_intent` are
+  declared on `MissionUnderstanding` but left unpopulated -- MI-4 onward.
+- `src/synth/` -- future stage (MI-4 onward), not built yet.
 - `tests/` -- parser tests (`test_reader.py`), dictionary-substitution tests (`test_dictionary.py`),
-  and the central author-only-knowledge invariant tests (`test_filter.py`).
+  the central author-only-knowledge invariant tests (`test_filter.py`), world-enrichment tests
+  (`test_enrich.py`), and MI-3's schema/mapping tests (`test_schema_tags.py`,
+  `test_schema_understanding.py` -- the latter's central invariant: no `Tagged` value MI-3 produces
+  is ever `INFERENCE`/`ASSUMPTION`).
 - `tests/fixtures/` -- committed synthetic `.miz` fixture builder.
 - `research/` -- dated findings from `.miz` format investigation (see root `CLAUDE.md`'s
   "investigator" section). `2026-09-12-miz-validation-against-real-sample.md` is the load-bearing

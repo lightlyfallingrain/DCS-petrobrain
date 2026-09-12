@@ -65,3 +65,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [M10 road junctions](project_m10_road_junctions.md) — real cluster/junction counts (3980/3634), singleton-cluster filtering needed, coincident-duplicate-road false positive found (not tolerance-fixable).
 - [pyosmium package name](feedback_pyosmium_package_name.md) — PyPI/import name is `osmium`, not `pyosmium`; `pip install pyosmium` 404s, check PyPI JSON API before escalating a dependency as unavailable.
 - [MI-2 world enrichment](project_mi2_world_enrichment.md) — shared-sqlite server can't use ThreadingHTTPServer, cross-venv integration test correctly dropped per plan, mypy CWD bug caught live.
+- [MI-3 schema/Tagged[T]](project_mi3_schema_tagged.md) — Unit.skill fan-out was 1 site not many, fixture route extension broke 2 existing MI-2 tests, mypy --strict skips tests/ here.
