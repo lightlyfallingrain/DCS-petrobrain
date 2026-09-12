@@ -12,7 +12,8 @@ This is an **offline** tool. Nothing here talks to a running DCS.
 
 For working rules (DCS reconnaissance, provenance, read-only DCS access) see
 `docs/CONVENTIONS.md`; for the full-theatre procedure see
-`docs/M7_RUN_INSTRUCTIONS.md`.
+`docs/M7_RUN_INSTRUCTIONS.md`, and for the optional OSM-augmentation
+preprocessing (M9, `--osm-pbf`) see `docs/M9_OSM_RUN_INSTRUCTIONS.md`.
 
 ---
 
@@ -64,8 +65,16 @@ cd world-model
 
 ### Full theatre
 
-`syria-full` has **no registered defaults** and no OSM cache, so every input
-must be given explicitly.
+`syria-full` has **no registered defaults**, so every input must be given
+explicitly. As of M9, it can also take a pre-clipped/merged Geofabrik OSM
+extract via `--osm-pbf` — settlement *boundary* polygons (DCS only ever gives
+center points) and richer named-place/water coverage. Producing that merged
+`.osm.pbf` needs a one-time `osmium-tool` clip+merge over 7 country extracts
+first — **see `docs/M9_OSM_RUN_INSTRUCTIONS.md` for those steps**; skip
+`--osm-pbf` entirely to build without OSM augmentation, same as before M9.
+
+Road-junction detection (M10) needs no flag — it runs automatically as part
+of the pipeline over whatever road network `--routes` provides.
 
 **Windows (Command Prompt)**
 
@@ -74,7 +83,8 @@ must be given explicitly.
   --towns <path\to\towns.lua> ^
   --beacons <path\to\beacons.lua> ^
   --routes <path\to\Syria.routes> ^
-  --srtm-dir <path\to\hgt_tiles\>
+  --srtm-dir <path\to\hgt_tiles\> ^
+  --osm-pbf <path\to\syria-theatre.osm.pbf>
 ```
 
 **macOS (zsh)**
@@ -84,10 +94,16 @@ must be given explicitly.
   --towns <path/to/towns.lua> \
   --beacons <path/to/beacons.lua> \
   --routes <path/to/Syria.routes> \
-  --srtm-dir <path/to/hgt_tiles/>
+  --srtm-dir <path/to/hgt_tiles/> \
+  --osm-pbf <path/to/syria-theatre.osm.pbf>
 ```
 
-Expect roughly 7–8 minutes and a ~460 MB output for the full Syria theatre.
+Drop `--osm-pbf` if you don't have the merged extract yet — everything else
+still builds. The ~460 MB / 7–8 minute baseline is from M7, **before** M9's
+OSM data and M10's junction detection existed; expect a larger `.sqlite` and
+a longer build with `--osm-pbf` present (the merged extract is dominated by
+Turkey's clipped southern-strip share of its 646 MB nationwide extract) —
+no re-measured baseline exists yet as of this writing.
 
 ### Options
 
@@ -96,7 +112,8 @@ Expect roughly 7–8 minutes and a ~460 MB output for the full Syria theatre.
 | `--towns` | DCS `towns.lua` — named places |
 | `--beacons` | DCS `beacons.lua` — navigation beacons |
 | `--routes` | DCS `.routes` binary — road network |
-| `--osm-cache` | cached OSM overlay JSON (small regions only) |
+| `--osm-cache` | cached OSM overlay JSON (small regions only — M3's live-Overpass path) |
+| `--osm-pbf` | pre-clipped/merged Geofabrik `.osm.pbf` (full-theatre — M9's path; takes precedence over `--osm-cache` if both are given) |
 | `--srtm-dir` | directory of `.hgt` tiles, ingested as the **primary** elevation grid |
 | `--srtm-tile` | a single `.hgt`, metadata-only delta stats for a probe grid |
 | `--srtm-grid-spacing-m` | elevation grid cell spacing, default 1000 m |
