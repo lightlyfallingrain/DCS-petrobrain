@@ -79,9 +79,57 @@ author-only-knowledge filter have proven out on a real mission file.
     currently at `mission-interpreter/research/miz_file_structure.md` — rename to add the date
     prefix other subprojects use, e.g. `research/2026-09-12-miz-file-structure.md`, for
     consistency with `world-model/research/`'s naming convention).
-- `world-model/` — no code change expected at Stage 1-2. If Decision 2 resolves toward an HTTP
-  boundary, a small `src/api/` read-only HTTP wrapper around `query.describe`/`query.search` would
-  be new scope there, out of this plan (flag to the user, don't silently add it here).
+- `world-model/` — **real new scope (Decision 2 resolved to HTTP, see below), not "out of this
+  plan" any more.**
+  - `src/api/server.py` — world-model's **first-ever HTTP server**, mirroring
+    `aircraft-layer/src/api/server.py`'s shape exactly: stdlib `http.server.ThreadingHTTPServer`,
+    no framework, no auth (Security is exempt this phase per `CLAUDE.md`'s Agents section).
+    Read-only GET only — world-model has no write path and this plan adds none. One server
+    instance is bound to one already-open `sqlite3.Connection` (i.e. one theatre's built
+    `<theatre>.sqlite`, optionally with a probe store path for `describe_position`'s
+    `probe_db_path`), the same "one process, one region" shape `query`'s functions already
+    assume — a second theatre means a second server process/port, not a theatre selector on every
+    request.
+    - `GET /describe_position?x=<float>&z=<float>&theatre=<str>` -> `query.describe.
+      describe_position(conn, theatre, x, z)` result as JSON (`PositionDescription` needs a
+      `to_dict`/`asdict`-equivalent — check whether one already exists on that dataclass before
+      adding one; if not, add the smallest one that round-trips through `json.dumps`).
+      `named_places_radius_m`/`navaids_radius_m`/`probe_db_path` stay server-side configuration
+      (constructor args), not query params — Mission Interpreter has no reason to vary them
+      per-call, and exposing `probe_db_path` as a client-supplied filesystem path would be a
+      needless surface even under this phase's no-auth exemption.
+    - `GET /find_place_by_name?text=<str>[&kinds=<comma-separated>]` -> `query.search.
+      find_place_by_name(conn, text, kinds)` -> JSON list of `PlaceMatch` dicts. `kinds` omitted
+      means the function's own `PLACE_KINDS` default, not an empty list.
+    - `GET /line_of_sight?ox=<float>&oz=<float>&oalt=<float>&tx=<float>&tz=<float>&talt=<float>&theatre=<str>`
+      -> `query.line_of_sight.line_of_sight_clear(conn, theatre, (ox, oz, oalt), (tx, tz, talt))`
+      -> JSON `{"clear": <bool>}`. `samples` stays server-side default, same reasoning as
+      `describe_position`'s radii above.
+    - All three: `400 {"error": ...}` on a missing/non-numeric required param, matching
+      `aircraft-layer/src/api/server.py`'s `_respond_json` error-body convention exactly (reuse
+      that convention's shape, don't invent a new error envelope).
+  - `src/api/__main__.py` (or a `--serve` mode wired through an existing entrypoint, implementer's
+    call) — process entrypoint: open one theatre's `.sqlite` (+ optional probe store), bind
+    `TelemetryAPIServer`-equivalent (name it e.g. `WorldModelAPIServer`), `serve_forever()`.
+  - `tests/test_api.py` — spin up a real server on an OS-assigned port in a background thread,
+    query with stdlib `urllib.request`, mirroring `aircraft-layer/tests/test_api.py`'s pattern
+    exactly (same precedent Decision 2's design leans on).
+  - `CLAUDE.md` — add a "World-model seam: HTTP, not in-process" line under Tech stack once this
+    lands, so a future reader of world-model's own doc sees the same fact body-layer's `CLAUDE.md`
+    states from the client side (see below) — this is documentation of an existing-project-wide
+    fact, not new design, but it belongs on both sides.
+- `mission-interpreter/src/world_enrich/` — an HTTP client module, `world_model_client.py`,
+  mirroring `body-layer/src/aircraft_client.py`'s shape: a small `@dataclass(frozen=True, slots=True)`
+  wrapping `base_url`/`timeout_s`, stdlib `urllib.request` only (no `requests` dependency — matches
+  this project's stdlib-only-unless-justified policy already followed by both aircraft-layer and
+  body-layer's HTTP clients), one `get_*` method per endpoint above
+  (`describe_position`/`find_place_by_name`/`line_of_sight_clear`), raising a
+  `WorldModelClientError` on network failure or non-JSON response (all three are reads Mission
+  Interpreter needs to succeed to enrich a waypoint — unlike aircraft-layer's `/latest` "empty
+  cache is not an error" convention, a world-model query failure here is a real gap the caller
+  should know about, closer to `push_text_line`'s raise-on-failure posture than `get_telemetry_latest`'s
+  swallow-to-`None` one, since there is no "not built yet" expected-empty state once MI-2 runs —
+  the store either has an answer or the call itself failed).
 - `body-layer/ROADMAP.md` — update BL-7's entry once this subproject exists, noting it's
   available (not requiring BL-7 to still wait on a fixture) — a bookkeeping change for later, not
   part of this plan's own commits.
@@ -117,9 +165,14 @@ author-only-knowledge filter have proven out on a real mission file.
    afterthought bolted onto a later stage.
 
 4. **MI-2 — World enrichment.**
-   `src/world_enrich/` resolves route/objective/group DCS x/z coordinates against World Model
-   (`describe_position` for "what's near this waypoint", `find_place_by_name` for named
-   objectives/briefing place mentions). Transport per Decision 2. Output: the raw tree gains
+   Prerequisite sub-stage: stand up world-model's `src/api/server.py` (HTTP wrapper around
+   `describe_position`/`find_place_by_name`/`line_of_sight_clear`, see Affected Modules/Decision
+   2) and `mission-interpreter/src/world_enrich/world_model_client.py` against it — this is new
+   scope in a subproject (world-model) that otherwise has none planned this cycle, so treat it as
+   its own small implementation+test pass, not folded silently into MI-2's "resolve coordinates"
+   work. Once the client is up: `src/world_enrich/` resolves route/objective/group DCS x/z
+   coordinates against it (`describe_position` for "what's near this waypoint",
+   `find_place_by_name` for named objectives/briefing place mentions). Output: the raw tree gains
    `world_ref` fields (settlement/road/terrain context) alongside DCS coordinates, still no
    inference/interpretation layer yet.
 
@@ -141,11 +194,26 @@ author-only-knowledge filter have proven out on a real mission file.
    Only start once MI-3's schema has been exercised against at least one real mission and found
    basically right — the concept doc's own MI-3 milestone already assumes this ordering.
 
-7. **MI-5 — Player questions.**
+7. **MI-5 — Player questions (MVP: text console).**
    Deterministic-first ambiguity surfacing (concept doc's examples), player answers written back
    into `player_intent` as structured fields, not prose. Reuses BL-5a's precedent (typed
    console I/O first, answers persisted outside conversation history) rather than inventing a new
-   interaction pattern.
+   interaction pattern. **This is the MVP mechanism, confirmed by the user (Decision 4, resolved
+   below) — not a placeholder pending a UI decision.**
+
+7a. **MI-5b — Player questions, web form (future, not this plan's Implementer scope).**
+   User-confirmed direction: once MI-5's console mechanism proves out, replace the console loop's
+   *input surface* with a simple web form asking the same structured questions — same
+   `player_intent` schema and write-back target, only the I/O surface changes. Flagged here as a
+   named future milestone so it doesn't get silently conflated with MI-5's own scope or with the
+   separate briefing/debriefing capability below. No design work happens on this until MI-5 has
+   run against a real mission.
+
+   **Explicitly out of scope for this entire plan** (not MI-5, not MI-5b): a briefing/debriefing
+   web page with text and images (maps, kneeboard images). The user raised this only as a
+   "could be" aside, not a request — and it is a materially different capability (image/map
+   rendering, not a Q&A form) from MI-5's player-intent clarification. Do not let a future MI-5b
+   implementation grow into building this; it needs its own plan if/when the user asks for it.
 
 8. **MI-6 — Runtime compilation.**
    Compile the full `MissionUnderstanding` into the compact runtime-facing subset
@@ -154,11 +222,11 @@ author-only-knowledge filter have proven out on a real mission file.
 
 ### Risks & Unknowns
 
-- **No `.miz` sample exists anywhere in this repo or reachable from this Mac dev session** —
-  MI-0/MI-1 are blocked without one. This is the same class of gap as `body-layer/ROADMAP.md`'s
-  F10-menu backlog item ("blocked on DCS access"), but resolvable more cheaply: any existing
-  Petrobrain test mission, or a trivially hand-built one, would unblock it — doesn't need a live
-  DCS session, just DCS/Mission Editor access once, on the Windows box, to export one `.miz`.
+- **No `.miz` sample exists anywhere in this repo yet — blocked pending the user delivering a
+  sample `.miz`, expected soon.** The user has said they can provide one; it has not arrived as of
+  this writing. This is no longer an open-ended "no path to unblock" gap (as it read in this
+  plan's first draft) — MI-0/MI-1 simply wait on that delivery, not on DCS/Mission Editor access
+  being separately arranged.
 - **`.miz`/mission-table schema is entirely community-reverse-engineered, not ED-documented.**
   pydcs has a known open issue where a DCS content patch broke its parsing assumptions. Format
   drift across DCS versions is a real, standing risk to any parser built here — same category as
@@ -198,45 +266,37 @@ change after BL-7 lands is a two-subproject coordination cost, not a local one.
 
 ### Decisions Requiring User Input
 
-1. **New dependency: pydcs's `dcs.lua` parse/serialize subpackage (LGPL-3.0).** Investigator's
-   recommendation is to vendor or depend on this rather than hand-roll a regex parser or pull in a
-   full Lua VM (`lupa`) — the format has real nested-table/comment/numeric-edge-case handling
-   pydcs already solved against years of real ED mission files. This is a genuine new third-party
-   dependency for a from-scratch subproject (AGENTS.md escalation rule: "a new dependency seems
-   necessary" → stop and ask), and an LGPL-3.0 license implication worth the user's explicit
-   sign-off before Implementer starts. Alternative considered and not recommended: hand-rolled
-   parser (more maintenance, no benefit over a proven implementation) or a full Lua VM (unneeded
-   weight for a format that isn't executing Lua logic, only reading a data literal).
-2. **World-model query transport: in-process import (body-layer's precedent) vs. HTTP.** Root
-   `CLAUDE.md`'s module-independence rule defaults to HTTP/JSON across a subproject boundary,
-   naming body-layer↔world-model's in-process import as "the sole exception... do not introduce a
-   similar in-process cross-subproject import elsewhere without the same explicit justification."
-   Mission Interpreter runs offline/pre-mission (no live-DCS latency pressure, unlike body-layer),
-   which weakens the "same box, tight coupling" argument that justified body-layer's exception —
-   but building a new HTTP server for world-model's currently-in-process-only `query` API is new
-   scope not otherwise needed yet, and world-model has no such server today. Two reasonable
-   approaches, CLAUDE.md's stated default doesn't cleanly resolve which one applies to a batch
-   offline consumer: (a) in-process import mirroring body-layer, justified the same way ("same Mac
-   box always, at least for now"); (b) a small read-only HTTP wrapper around `query.describe`/
-   `query.search`, keeping the exception genuinely singular as CLAUDE.md's wording implies it
-   should stay. Recommend (a) for cost reasons but this is the user's call, not a local/reversible
-   detail.
-3. **Capable-model choice and hosting for MI-4 synthesis.** `division-or-responsibility.md`'s
-   compute-topology note (Mac/Ollama + Windows/DCS split, "model-swap only at briefing/on-ground")
-   was written with the *runtime* model-swap constraint in mind; Mission Interpreter runs entirely
-   pre-mission/offline, so that specific timing constraint doesn't bind here, but the model choice
-   itself is still open: a local Ollama-hosted capable model on the Mac (cost: possibly weaker
-   reasoning + no vision unless a vision-capable local model is chosen) vs. a cloud API model (cost:
-   external dependency, ongoing API cost, sends mission content off-machine). This is a new
-   dependency / architecture decision per AGENTS.md's escalation rules, gates MI-4 specifically —
-   MI-0 through MI-3 don't need it and can proceed first.
-4. **Player-intent input form.** Concept doc says "the player may need to clarify intent the
-   mission file cannot know" but doesn't fix a UI. Proposed default (not escalated — mirrors
-   BL-5a's already-accepted pattern of typed console I/O before voice): a pre-flight text console
-   prompt/response loop, answers persisted as structured `player_intent` fields, run once per
-   mission before MI-6's runtime compilation. Flagging here so the user can object before MI-5 is
-   built, but this one is treated as local/reversible per AGENTS.md's autonomy criterion unless
-   told otherwise.
+Three of the original four decisions are now resolved (1, 2, 4). **Decision 3 (MI-4's model
+choice) is the only one still open, and remains the only thing this plan is blocked on for
+Implementer sign-off purposes.** It gates MI-4 specifically — MI-0 through MI-3 (and now MI-2's
+world-model HTTP prerequisite sub-stage) are unblocked by it and can proceed first.
+
+1. ~~New dependency: pydcs's `dcs.lua` parse/serialize subpackage (LGPL-3.0).~~ **Resolved:
+   approved as-is.** Vendor or depend on pydcs's `dcs.lua` parse/serialize subpackage (not the
+   full `pydcs` package) rather than hand-rolling a parser or pulling in a full Lua VM. No design
+   change from the original recommendation.
+2. ~~World-model query transport: in-process import vs. HTTP.~~ **Resolved: HTTP.** The user chose
+   the HTTP wrapper over mirroring body-layer's in-process-import exception — keeping that
+   exception genuinely singular, per CLAUDE.md's own wording, rather than extending it to a second
+   subproject pair. This is real new scope (world-model's first-ever HTTP server) and is now
+   designed as part of this plan — see Affected Modules/Files above (`world-model/src/api/
+   server.py`, `mission-interpreter/src/world_enrich/world_model_client.py`) and MI-2's
+   prerequisite sub-stage in the Implementation Plan.
+3. **Capable-model choice and hosting for MI-4 synthesis — still open, needs more investigation
+   (user's own words).** `division-or-responsibility.md`'s compute-topology note (Mac/Ollama +
+   Windows/DCS split, "model-swap only at briefing/on-ground") was written with the *runtime*
+   model-swap constraint in mind; Mission Interpreter runs entirely pre-mission/offline, so that
+   specific timing constraint doesn't bind here, but the model choice itself is still open: a
+   local Ollama-hosted capable model on the Mac (cost: possibly weaker reasoning + no vision unless
+   a vision-capable local model is chosen) vs. a cloud API model (cost: external dependency,
+   ongoing API cost, sends mission content off-machine). This is a new dependency/architecture
+   decision per AGENTS.md's escalation rules. Do not guess an answer here — MI-4 stays unstarted
+   until this is resolved; MI-0 through MI-3 do not need it.
+4. ~~Player-intent input form.~~ **Resolved: text console for MVP (MI-5, unchanged mechanism from
+   this plan's original proposal), a simple web form later (MI-5b, new future milestone — see the
+   Implementation Plan). Briefing/debriefing as a web page with text and images is explicitly out
+   of scope for this entire plan** — a distinct future capability, not MI-5/MI-5b's job. See the
+   Implementation Plan's MI-5/MI-5b/MI-6 entries for where each piece now lives.
 
 ### Note on planning depth
 
