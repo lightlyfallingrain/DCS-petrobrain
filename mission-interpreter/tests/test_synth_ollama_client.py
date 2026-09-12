@@ -17,15 +17,36 @@ import pytest
 
 from synth.ollama_client import (
     OllamaClient,
+    OllamaModelNotPulledError,
     OllamaOutputError,
     OllamaUnavailableError,
 )
 
 _HAPPY_MESSAGE_CONTENT = json.dumps({"purpose": "escort the convoy"})
 
+# Every model name any `chat_json` test in this file exercises the real
+# POST path with -- `_ensure_model_pulled`'s `/api/tags` preflight must
+# report all of these as already pulled so those tests still reach the
+# `/api/chat` behavior they're actually testing. Tests for the preflight
+# check itself use a model name deliberately absent from this list.
+_PULLED_MODELS = [
+    "happy-model",
+    "bad-envelope",
+    "bad-content",
+    "non-object-content",
+    "missing-message",
+    "server-error",
+]
+
 
 def _make_handler() -> type[BaseHTTPRequestHandler]:
     class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path != "/api/tags":
+                self._respond(404, {"error": "not found"})
+                return
+            self._respond(200, {"models": [{"name": name} for name in _PULLED_MODELS]})
+
         def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(length)
@@ -138,4 +159,14 @@ def test_chat_json_raises_output_error_on_http_error_status(server_url: str) -> 
     client = OllamaClient(model="server-error", base_url=server_url)
 
     with pytest.raises(OllamaOutputError):
+        client.chat_json([{"role": "user", "content": "hi"}], {"type": "object"})
+
+
+def test_chat_json_fails_closed_when_model_not_pulled(server_url: str) -> None:
+    """`/api/tags` not listing the requested model must raise
+    `OllamaModelNotPulledError` and never reach `/api/chat` -- this is the
+    fail-closed guard against Ollama's silent auto-pull behavior."""
+    client = OllamaClient(model="not-pulled-model", base_url=server_url)
+
+    with pytest.raises(OllamaModelNotPulledError):
         client.chat_json([{"role": "user", "content": "hi"}], {"type": "object"})

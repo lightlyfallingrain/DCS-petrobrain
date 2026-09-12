@@ -40,12 +40,16 @@ the plan this subproject was built from, and `docs/concept/MISSION_INTERPRETER.m
   Ollama's `qwen3:14b`, non-thinking mode). `src/synth/ollama_client.py`'s `OllamaClient` is this
   subproject's second HTTP seam (stdlib `urllib.request`, mirrors `world_model_client.py`'s
   shape), against a local Ollama daemon's `/api/chat`. Unlike `WorldModelClient`'s single error
-  type, it raises two distinct exceptions -- `OllamaUnavailableError` (daemon unreachable: an
-  environment problem the caller surfaces) and `OllamaOutputError` (200 OK but bad/unparseable/
-  schema-violating output: a prompt/model-quality problem `synth/synthesize.py` degrades on,
-  leaving the affected `MissionUnderstanding` field at its MI-3 `None`/`()` default rather than
-  failing the whole pass) -- because those two failure modes need different handling. Testable
-  offline against a fake `http.server` double (`tests/test_synth_ollama_client.py`,
+  type, it raises three distinct exceptions -- `OllamaUnavailableError` (daemon unreachable: an
+  environment problem the caller surfaces), `OllamaModelNotPulledError` (daemon reachable but
+  `model` isn't pulled yet: `chat_json` checks this with a `/api/tags` preflight before ever
+  calling `/api/chat`, because Ollama otherwise silently auto-pulls an absent model -- a multi-GB
+  download -- as a side effect; also surfaced to the caller, not degraded on), and
+  `OllamaOutputError` (200 OK but bad/unparseable/schema-violating output: a prompt/model-quality
+  problem `synth/synthesize.py` degrades on, leaving the affected `MissionUnderstanding` field at
+  its MI-3 `None`/`()` default rather than failing the whole pass) -- because those failure modes
+  need different handling. Testable offline against a fake `http.server` double
+  (`tests/test_synth_ollama_client.py`,
   `tests/test_synth_synthesize.py`) with **no live Ollama daemon or `qwen3:14b` required** for the
   rest of the suite; `tests/test_synth_live_ollama.py` is the one real integration test, skip-
   guarded on reachability + the model being present (mirrors `REAL_SAMPLE_MIZ_PATH.exists()`'s
