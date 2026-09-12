@@ -72,7 +72,26 @@ Milestones below are from `plans/mission-interpreter/plan.md`'s Implementation P
   MI-4 should be, but confirms `Tagged[T]` as the one epistemic-tagging convention MI-4/5/6 should
   reuse rather than reinvent.
 - [x] **MI-4 — Capable-model synthesis.** Completed 2026-09-12 (`plans/mi4-capable-model-synthesis/plan.md`, Decision 3: model=`qwen3:14b`, non-thinking mode, merged commit `9dbb8fa`). **Delivered:** `Tagged[T]` gained a `confidence` field (separate axis from `epistemic_status`, defaults to `None` so MI-1-MI-3 values remain valid); `MissionUnderstanding.known_threats` retyped to `tuple[Tagged[Threat], ...]` (with new `Threat` dataclass: `kind`, `description`, `area_ref: WorldRef | None`); `src/filter/threat_signals.py` (the second, MI-4-specific author-only-knowledge boundary -- derives coarse `ThreatSignal`s from `RawMission`'s hidden/lateActivation groups only, never a name/id/unit count/activation timing, unmapped unit types → `"unknown"`); `world_enrich.enrich.enrich_threat_signals` (resolves each signal's raw coordinate to a `WorldRef` -- the last point that coordinate exists in memory); `src/synth/` (`ollama_client.py` with three-exception design: `OllamaUnavailableError`/`OllamaModelNotPulledError`/`OllamaOutputError`, with `/api/tags` preflight preventing silent model auto-pull; `prompts.py` with structured-output JSON schema restricting `epistemic_status` to `["INFERENCE", "ASSUMPTION"]` only; `synthesize.py` re-validating as defense in depth). **Live validation:** end-to-end tested against real sample mission `Mission 02-Bagram.miz` and `qwen3:14b`; real output: purpose INFERENCE (medium confidence), task INFERENCE (high confidence), 3 known_threats all INFERENCE, zero FACT/OBSERVATION/UNKNOWN overclaims observed across 74 unit tests + 1 live integration test. User confirmed output "looks kinda correct" per the briefing. **Key decisions:** coordinate-leak boundary verified by Reviewer (full data flow from raw signals → world-ref → prompt respects WorldRef.position place names only, never x/z); fail-closed guard against Ollama auto-pull added per project posture (see `OllamaModelNotPulledError`). **Second-order effects:** first real INFERENCE/ASSUMPTION values in the schema provide concrete contract for MI-6's downstream consumption; MI-5 (player questions) independent, unblocked.
-- [ ] **MI-5 — Player questions (text console MVP).** Not started.
+- [x] **MI-5 — Player questions (text console MVP).** Completed 2026-09-12
+  (`plans/mi5-player-questions/plan.md`, locked commit `9947c93`). **Delivered:** `PlayerAnswer`
+  dataclass (`question_id`, `question_text`, `question_kind`, `parsed: bool | str | int`);
+  `MissionUnderstanding.player_intent` retyped from the unused MI-3 placeholder `Tagged[str] |
+  None` to `tuple[Tagged[PlayerAnswer], ...]`, mirroring `known_threats`'s per-item-tagged-tuple
+  shape; new `src/player_intent/` package -- `questions.py`'s `detect_questions` (a pure,
+  deterministic detector grounded in what MI-3/MI-4 actually produce today: ownship `UNKNOWN`,
+  `purpose`/`task` `None` or `confidence == "low"`, per-threat `confidence == "low"` -- not the
+  concept doc's three literal worked examples, which need schema fields that don't exist yet, see
+  Decision 1); `console.py`'s `PlayerIntentConsole` (typed `bool`/`choice`/`free_text` parsing over
+  a `TextIO` pair, one re-prompt on a parse failure then give-up-as-unparsed-`free_text` with the
+  original `question_kind` preserved, mirroring `body-layer`'s `CrewConsole` shape without
+  importing it); `main.py`'s `main()` (a plain script wiring MI-1 through MI-5 end to end, same
+  construction sequence `test_synth_live_ollama.py` already used, not a new subcommand framework).
+  93 unit tests (detector: one case per rule + a no-questions case; console: `io.StringIO`-driven,
+  including both re-prompt-once-then-give-up paths). **Does not change what MI-6 should be**, but
+  narrows its scope: `player_intent`'s new tagged shape means `bool`/`choice` answers reach MI-6
+  already structured (`PlayerAnswer.parsed` typed by `question_kind`), leaving only the two
+  genuinely free-text questions (`purpose`/`task` when MI-4 produced nothing) and the runtime
+  block's specific field-name/enum mapping as MI-6's remaining interpretation work.
 - [ ] **MI-5b — Player questions, web form.** Future; not started, no design work until MI-5 proves
   out.
 - [ ] **MI-6 — Runtime compilation.** Not started.

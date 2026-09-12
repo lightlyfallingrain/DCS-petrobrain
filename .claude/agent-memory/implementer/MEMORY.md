@@ -67,3 +67,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [MI-2 world enrichment](project_mi2_world_enrichment.md) — shared-sqlite server can't use ThreadingHTTPServer, cross-venv integration test correctly dropped per plan, mypy CWD bug caught live.
 - [MI-3 schema/Tagged[T]](project_mi3_schema_tagged.md) — Unit.skill fan-out was 1 site not many, fixture route extension broke 2 existing MI-2 tests, mypy --strict skips tests/ here.
 - [MI-4 Ollama synth](project_mi4_ollama_synth.md) — Ollama auto-pulls an absent model on /api/chat (no clean "not found" error); Bash curl to loopback denied but in-process urllib succeeded; Threat.area_ref always None.
+- [MI-5 player questions](project_mi5_player_questions.md) — ownship choice-question path is dead (basis has no candidate names, always falls back to free_text); main.py copies live-ollama test's pipeline sequence, never smoke-tested live.
