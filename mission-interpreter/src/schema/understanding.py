@@ -33,6 +33,7 @@ each per mission.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from schema.tags import Tagged
 from world_enrich.schema import EnrichedRoutePoint, WorldRef
@@ -93,6 +94,28 @@ class Threat:
 
 
 @dataclass(frozen=True, slots=True)
+class PlayerAnswer:
+    """One player answer to a MI-5 `player_intent.questions.Question`,
+    collected by `player_intent.console.PlayerIntentConsole` (MI-5 --
+    `plans/mi5-player-questions/plan.md`).
+
+    `question_kind` is copied from the originating `Question`, not
+    re-derived from `parsed`'s runtime type -- this is what lets a
+    downstream consumer (MI-6) distinguish a real typed `bool`/`choice`
+    answer from unparsed `free_text` left over after the console gave up
+    on a `bool`/`choice` question that failed to parse twice (see
+    `console.py`'s re-prompt-once-then-give-up behavior). `parsed`'s
+    runtime type is therefore determined by `question_kind` *unless* the
+    give-up path applies, in which case `parsed` is the raw `str` line
+    even though `question_kind` still says `"bool"`/`"choice"`."""
+
+    question_id: str
+    question_text: str
+    question_kind: Literal["free_text", "bool", "choice"]
+    parsed: bool | str | int
+
+
+@dataclass(frozen=True, slots=True)
 class MissionUnderstanding:
     """MI-3's output. `schema_version` is carried from day one so a future
     schema change (MI-4 onward) has a field BL-7 can branch on rather than
@@ -108,4 +131,8 @@ class MissionUnderstanding:
     purpose: Tagged[str] | None = None
     task: Tagged[str] | None = None
     known_threats: tuple[Tagged[Threat], ...] = field(default=())
-    player_intent: Tagged[str] | None = None
+    # MI-5 (player_intent/questions.py, console.py) populates this --
+    # every populated entry uses epistemic_status="FACT" (the player
+    # stating their own intent directly is the most ground-truth a value
+    # can be in this schema's vocabulary) and basis=("player:console",).
+    player_intent: tuple[Tagged[PlayerAnswer], ...] = field(default=())

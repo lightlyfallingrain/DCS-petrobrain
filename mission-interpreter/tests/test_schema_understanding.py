@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, is_dataclass
+from dataclasses import replace as dataclasses_replace
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,7 @@ from miz.reader import read_miz
 from miz.tree import BriefingText, Group, Unit
 from schema.build import build_mission_understanding
 from schema.tags import Tagged
-from schema.understanding import MissionUnderstanding
+from schema.understanding import MissionUnderstanding, PlayerAnswer
 from world_enrich.enrich import enrich_mission
 from world_enrich.schema import (
     EnrichedCoalition,
@@ -161,7 +162,7 @@ def test_happy_path_populates_expected_fields(tmp_path: Path) -> None:
     assert understanding.purpose is None
     assert understanding.task is None
     assert understanding.known_threats == ()
-    assert understanding.player_intent is None
+    assert understanding.player_intent == ()
 
 
 def test_zero_player_units_resolves_ownship_and_route_to_unknown() -> None:
@@ -240,3 +241,34 @@ def test_mission_understanding_round_trips_through_json(tmp_path: Path) -> None:
 
 def test_mission_understanding_is_a_dataclass() -> None:
     assert is_dataclass(MissionUnderstanding)
+
+
+def test_populated_player_intent_round_trips_through_json(tmp_path: Path) -> None:
+    """MI-5's `player_intent` retype (`Tagged[str] | None` ->
+    `tuple[Tagged[PlayerAnswer], ...]`) must still round-trip cleanly
+    through `dataclasses.asdict()` -> `json.dumps`, same as every other
+    field on this schema (`tags.Tagged`'s docstring)."""
+    enriched = _happy_path_enriched(tmp_path)
+    understanding = build_mission_understanding(enriched)
+
+    answer = Tagged(
+        value=PlayerAnswer(
+            question_id="purpose",
+            question_text="What is the mission's overall purpose?",
+            question_kind="free_text",
+            parsed="Escort the convoy to the FARP.",
+        ),
+        epistemic_status="FACT",
+        basis=("player:console",),
+    )
+    populated = dataclasses_replace(understanding, player_intent=(answer,))
+
+    payload = json.loads(json.dumps(asdict(populated)))
+
+    assert len(payload["player_intent"]) == 1
+    entry = payload["player_intent"][0]
+    assert entry["epistemic_status"] == "FACT"
+    assert entry["basis"] == ["player:console"]
+    assert entry["value"]["question_id"] == "purpose"
+    assert entry["value"]["question_kind"] == "free_text"
+    assert entry["value"]["parsed"] == "Escort the convoy to the FARP."
