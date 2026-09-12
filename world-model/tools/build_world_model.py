@@ -42,6 +42,11 @@ invoked with explicit `--towns`, `--beacons` and `--routes` and no
 See `world-model/docs/M7_RUN_INSTRUCTIONS.md` for the full step-by-step
 procedure -- this is the actual full-theatre build, which per the plan's
 "Execution boundary" only the user runs, on their Windows DCS machine.
+
+`--osm-pbf` (M9) points at a pre-clipped, pre-merged Geofabrik `.osm.pbf`
+extract (see `world-model/docs/M9_OSM_RUN_INSTRUCTIONS.md`) and, if given,
+takes precedence over `--osm-cache` for that build -- `build.pipeline.
+build_region`'s `osm_pbf_path` parameter.
 """
 
 import argparse
@@ -73,6 +78,7 @@ def main() -> None:
     parser.add_argument("--towns", type=Path, default=None)
     parser.add_argument("--beacons", type=Path, default=None)
     parser.add_argument("--osm-cache", type=Path, default=None)
+    parser.add_argument("--osm-pbf", type=Path, default=None)
     parser.add_argument("--routes", type=Path, default=None)
     parser.add_argument("--probe-output", type=Path, default=None)
     parser.add_argument("--srtm-tile", type=Path, default=None)
@@ -121,6 +127,7 @@ def main() -> None:
         srtm_tile_path,
         srtm_tile_paths,
         args.srtm_grid_spacing_m,
+        osm_pbf_path=args.osm_pbf,
     )
 
     print(f"Built {out_path}")

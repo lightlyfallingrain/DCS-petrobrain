@@ -6,6 +6,13 @@ requires-python = ">=3.11"
 dependencies = [
     "pyproj>=3.6",
     "pillow>=9.1",
+    # M9 decision: parses Geofabrik .osm.pbf extracts (src/osm/pbf.py). The
+    # project is named "pyosmium" (pyosmium.org) but its PyPI distribution
+    # and import name are both "osmium" -- confirmed against the real
+    # PyPI JSON API during M9 implementation (a plain `pip install
+    # pyosmium` 404s; `pip install osmium` is correct). Ships cp314 wheels
+    # for macOS arm64/x86_64, manylinux and Windows as of 4.3.1.
+    "osmium>=4.3",
 ]
 
 [tool.mypy]

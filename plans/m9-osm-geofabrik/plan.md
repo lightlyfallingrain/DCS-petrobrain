@@ -1,183 +1,210 @@
 ### Goal
 
-Re-introduce OpenStreetMap as an augmentation layer over the DCS-native world model, sourced
-from manually-downloaded offline geofabrik.de per-country extracts instead of M3's live
-Overpass API queries — filling the `nearest_settlement` / `nearest_water` /
-`inside_settlement` fields that M7's full-theatre build leaves `null` theatre-wide.
+Fill the `nearest_settlement` / `inside_settlement` / `nearest_water` gap M7 leaves `null`
+theatre-wide by parsing the 7 already-downloaded Geofabrik `.osm.pbf` country extracts covering
+Syria's real-world theatre footprint with `pyosmium`, feeding them through M3's existing
+`OsmFeatureSet` → `ingest_osm` → store pipeline (unchanged), so settlement boundary *polygons*
+(not just DCS's `towns.lua` center points) become queryable.
 
-> **Status: deferred (value reassessed 2026-09-06), not scheduled.** Split out of the
-> original combined M8 plan on 2026-09-06 at the user's direction; M8 is now
-> incremental-store work only (`plans/m8-incremental-store/plan.md`). Its central open
-> dependency question is still unresolved, and the reconnaissance behind it carries an
-> explicit unverified caveat (below) — nothing in that respect has changed.
->
-> Additionally, on 2026-09-06 the user asked whether OSM still brings value given what
-> DCS-native extraction plus M8's future live-probe incremental store already cover.
-> Conclusion: OSM's original role split ("DCS = where, OSM = what") is now partly absorbed —
-> DCS-native gives exact roads/named places/elevation, and live probing can fill point-level
-> `surface_type`/water ground-truth with zero new dependency. Remaining unique OSM value is
-> narrow: settlement **boundary polygons** (DCS only gives town-center points) and semantic
-> **tags** (road class/ref, land-use, POI type). Not worth the new-dependency/`.osm.pbf`
-> cost while no downstream consumer (Mission Interpreter/Runtime — neither built yet) needs
-> settlement-extent reasoning or richer naming. **Deferred indefinitely; revisit only when
-> the user decides to come back to it**, not on a fixed schedule. Re-run an Architect pass
-> before starting work if that happens; do not implement from this file as-is.
+> **Status: active (reopened 2026-09-13).** Supersedes the 2026-09-06 deferred version of this
+> file (recoverable via `git log -- plans/m9-osm-geofabrik/plan.md`). The dependency question
+> that version left open is resolved (`pyosmium`, user-approved); this revision also reverses
+> that version's Design Decision 1 (mandatory `osmium-tool` clip) for a different reason than it
+> was written for — see "What changed from the deferred plan" below.
 
-Reconnaissance: `world-model/research/2026-09-06-m8-geofabrik-osm-recon.md`. **Read its
-caveat first** — `download.geofabrik.de` was unreachable during that pass (5/5 fetch
-failures), so its format/size claims are search-snippet-derived rather than read off the
-site. Stage 0 below exists to close that gap, and nothing downstream of it should be treated
-as settled.
+Reconnaissance already on file, read but not re-litigated here:
+`research/2026-09-06-m8-geofabrik-osm-recon.md` (original Geofabrik/format recon) and
+`research/2026-09-12-m9-tactical-landmarks-recon.md` (confirms zero DCS-native settlement-extent
+source exists anywhere in the installed Syria terrain — OSM is the only path).
 
-### Why OSM is back in scope
+### What changed from the deferred plan (read this before Stage 0)
 
-OSM was dropped from M7 because of its *live-query dependency* (Overpass API: rate limits,
-availability, non-reproducibility), not because of the data. Geofabrik removes that
-dependency — pre-packaged files the user downloads once, offline thereafter. The role stays
-exactly as `WORLD_MODEL_BUILDER.md`'s "Data Fusion and Provenance" defines it: **DCS answers
-"where is it in the simulation", OSM answers "what is it"**, never collapsed into one
-undocumented fact.
+The deferred version's central open question was "hand-roll a `.pbf` parser, or take a new
+dependency" — driven by the fear that a hand-rolled node-ID→(lat,lon) resolution pass would blow
+up in memory over a ~612 MB Turkey extract. That question is now closed: **pyosmium**, whose C++
+side handles node-location indexing internally (`SimpleHandler.apply_file(...,
+locations=True, idx="sparse_mem_array")` — a memory-efficient index, not a naive Python dict),
+so the memory-blowup concern that justified the deferred plan's Design Decision 1 ("bbox-clipping
+with `osmium-tool` is mandatory... over a raw ~612 MB Turkey extract that is tens of millions of
+nodes — a memory blowup") no longer holds as stated.
 
-### What already survives the source change (most of it)
+That does **not** mean skip clipping — it means the justification changes. Reading actual file
+sizes now on disk (`ls -la data/raw/osm/`): Cyprus 37 MB, Jordan 31 MB, Lebanon 52 MB, Syria
+82 MB, Iraq 90 MB, Israel-and-Palestine 119 MB, **Turkey 646 MB**. Syria's DCS theatre only
+touches Turkey's southern strip — most of a 646 MB nationwide extract's node/way graph is
+irrelevant. Indexing it in full 7 times (once per country, unfiltered) wastes real time on a
+pipeline stage with no incremental-rebuild mechanism (`todo/todo.md`'s "Incremental per-layer
+pipeline builds" backlog item, considered and dropped for M8, still not built — a rule-tuning
+iteration means a full re-parse every time). **Decision: keep the pre-clip step, but as a
+time/wasted-work optimization, not a memory-safety requirement** — same tool (`osmium-tool`),
+same "user-run prerequisite, not a project dependency" framing the deferred plan already used
+for it (GPLv3 CLI, invoked via `subprocess`, never imported/linked — same category as DCS itself,
+not a second entry in `pyproject.toml`, so this does not re-trigger AGENTS.md's
+new-dependency-escalation rule).
 
-`src/osm/features.py`'s `OsmNode` / `OsmWay` / `OsmFeatureSet` are source-format-agnostic:
-id, tags, and lat/lon. `build/ingest_osm.py` consumes `OsmFeatureSet` and nothing else, and
-`query/describe.py` already has `nearest_road_osm` / `nearest_settlement` /
-`inside_settlement` / `nearest_water` wired and returning `None` purely because the ingest
-never ran. So the whole downstream path — dataclasses, classification rules, clipping,
-provenance stamping, storage, query — is reusable **unchanged**. What must be replaced is
-exactly one function: `load_features(cache_path)`, the Overpass-JSON parser.
-
-The one genuine structural difference is upstream of it: Overpass's `out geom;` inlined each
-way's geometry, whereas a `.pbf` way carries only **node ID references**, so the new path
-needs a node-ID → (lat, lon) resolution pass the Overpass path never needed. This single
-fact drives the design below.
+Also newly confirmed by reading current code (not assumed from the deferred plan's framing):
+**the query surface needs zero changes.** `query/describe.py`'s `nearest_settlement` already
+calls `store.reader.nearest_feature(conn, ["settlement"], x, z)` — geom-type-agnostic, works
+identically whether a `settlement` row is a `Point` or a `Polygon`. `inside_settlement` already
+calls `store.reader.containing_polygons(conn, ["settlement"], x, z)`, which already filters to
+`geom_type == "Polygon"` and does real point-in-ring containment
+(`store/reader.py:230`). Both already return `None` when no polygon/no nearby point exists —
+the absence-not-null convention this milestone needs is already in place, not something to add.
+This machinery has existed, unexercised, since M5 (`store/schema.py`'s `Polygon` geom_type,
+`store/reader.py`'s `containing_polygons`) — it was simply never fed real polygon data because
+Overpass was never run against Syria in `build_region`. **This milestone is entirely a data-
+sourcing problem, not a query-surface problem** — narrower scope than the deferred plan's file
+list implied (it listed `describe_position` changes as still-open; they are not).
 
 ### Affected Modules / Files
 
-- `world-model/src/osm/pbf.py` *(new)* — `.osm.pbf` → `OsmFeatureSet`. The only new parsing
-  code; deliberately terminates at the existing dataclasses.
-- `world-model/src/osm/features.py` — unchanged dataclasses; `load_features` gains a
-  docstring noting it is the Overpass-era path.
-- `world-model/src/osm/overpass.py` — no longer on the pipeline path. Keep it for M3
-  diagnostic-tool continuity, marked superseded, rather than deleting working code that
-  `tools/inspect_osm_overlay.py` still uses.
-- `world-model/src/build/ingest_osm.py` — mostly unchanged; the `source` record it is given
-  changes (Geofabrik extract list + clip bbox + download date, not an Overpass URL), and
-  `_classify_way`'s rules get revisited against real extract tags rather than Overpass
-  query-filtered ones (see Risks).
-- `world-model/src/build/pipeline.py` — the OSM stage reads a `.pbf` path instead of a JSON
-  cache path; becomes a selectable layer under M8's `layers=` mechanism.
-- `world-model/docs/M9_OSM_RUN_INSTRUCTIONS.md` *(new)* — which extracts to download and the
-  exact `osmium` merge/clip commands, mirroring `M7_RUN_INSTRUCTIONS.md`'s
-  execution-boundary precedent. Downloading and clipping is a **user-run step**, not
-  something the pipeline fetches.
-- `world-model/tests/test_osm_pbf.py` *(new)* — parser tests against a tiny committed
-  fixture `.pbf`; `test_osm_features.py` / `test_ingest_osm.py` extended.
+- `world-model/src/osm/pbf.py` *(new)* — `pyosmium`-based `.osm.pbf` → `OsmFeatureSet`
+  (`osm/features.py`'s existing dataclasses, unchanged). The only new parsing code.
+- `world-model/src/osm/features.py` — unchanged. `load_features`'s docstring gains a note that
+  it is the Overpass-era path, superseded by `osm/pbf.py` for real builds.
+- `world-model/src/osm/overpass.py` — untouched, kept for `tools/inspect_osm_overlay.py`
+  diagnostic continuity, marked superseded on the pipeline path.
+- `world-model/src/build/ingest_osm.py` — **no logic change expected**, but `_classify_way`'s
+  four rules (road/water/settlement via `highway`/`waterway`+`natural=water`/`landuse`+`place`)
+  were written against Overpass-narrowed results and have never run against a raw extract's full
+  tag vocabulary. Re-validate against real data in Stage 4; only touch the file if real tags
+  reveal a gap.
+- `world-model/src/build/pipeline.py` — `build_region` gains `osm_pbf_path: Path | None = None`
+  alongside the existing `osm_cache_path: Path | None`; Stage 3 branches: `osm_pbf_path` present
+  → `osm.pbf.load_features`, else fall back to the existing `osm_cache_path`/`load_features`
+  path (keeps existing Overpass-cache-based tests/tooling unaffected — additive, not a
+  replacement).
+- `world-model/pyproject.toml` — adds `pyosmium` to `dependencies`.
+- `world-model/docs/M9_OSM_RUN_INSTRUCTIONS.md` *(new)* — the exact `osmium-tool` extract+merge
+  commands (with the theatre bbox in lat/lon, derived once from `syria-full`'s region corners via
+  `coordinates.dcs_to_wgs84` and written down as fixed numbers, not recomputed at build time) and
+  which machine runs them. Mirrors `M7_RUN_INSTRUCTIONS.md`'s execution-boundary precedent —
+  clipping/merging/the full-theatre pipeline run are **user-run steps**, not something this
+  session executes (per this project's standing rule against running real full-theatre
+  builds/large external processing itself).
+- `world-model/tests/test_osm_pbf.py` *(new)* — parser tests against a tiny committed fixture
+  `.pbf` (hand-built via `osmium-tool` or pyosmium's own writer from a handful of synthetic
+  nodes/ways covering each of the four classification rules plus one relation, so
+  `relations_skipped` stays exercised).
+- `world-model/tests/test_ingest_osm.py` *(new — none currently exists; `ingest_osm.py`'s
+  classification logic has zero direct test coverage today, confirmed by grep)* — exercise
+  `_classify_way`/`_ingest_node`/`_ingest_way` against realistic tag combinations, independent of
+  the Overpass-vs-pbf source question.
 
 ### Design decisions
 
-**1. bbox-clipping with `osmium-tool` is mandatory, not an optimization.**
-The node-resolution requirement makes this load-bearing. Resolving way geometry needs every
-referenced node's coordinates; over a raw ~612 MB Turkey extract that is tens of millions of
-nodes — a memory blowup, or a complex two-pass design. If the user clips and merges first,
-the Python side only ever sees a single theatre-sized `.pbf` and an in-memory node dict is
-entirely reasonable. So the pipeline's contract is: **input is one pre-clipped, pre-merged
-`.osm.pbf` covering the theatre envelope.** `osmium-tool` is GPLv3 but is a separately
-invoked CLI, never linked or redistributed — a documented user prerequisite like DCS itself,
-not a project dependency.
+**1. Pre-clip + merge with `osmium-tool`, done once per extract set, is a user-run
+prerequisite** (not a project dependency, not something the pipeline invokes). Rationale above.
+Concretely: `osmium extract -b <lon_min>,<lat_min>,<lon_max>,<lat_max> --strategy=smart -o
+<country>-clipped.osm.pbf <country>-260911.osm.pbf` per country, then `osmium merge
+*-clipped.osm.pbf -o syria-theatre.osm.pbf`. `--strategy=smart` matters: it completes ways whose
+nodes straddle the bbox edge, avoiding the "way references a node pyosmium's index never saw"
+failure mode a naive bbox cut would hit at the Turkey/Syria border specifically (the theatre's
+most bbox-edge-heavy country by construction).
 
-**2. OSM never overwrites DCS-sourced rows.** M7's store already has `road` and
-`named_place` from DCS-native sources. OSM features keep
-`provenance={"geometry": "osm", "name": "osm"}` and the ~1,300 m M1 uncertainty, and land
-*beside* the DCS rows — `describe_position` already reports `nearest_road` and
-`nearest_road_osm` as separate fields precisely so the disagreement stays visible.
+**2. `osm/pbf.py` processes exactly one pre-clipped, pre-merged file.** Same contract the
+deferred plan already committed to — the Python side never juggles 7 separate country files or
+re-derives the theatre bbox; it takes one path. `SimpleHandler` subclass with `locations=True,
+idx="sparse_mem_array"` resolves way geometry inline; a way whose nodes are still unresolved
+after that (shouldn't happen post-`--strategy=smart`, but must be handled, not assumed away) is a
+**counted skip** (`ways_skipped_unresolved_nodes` on `OsmFeatureSet` or an equivalent stat),
+following the `relations_skipped`-precedent this project already uses for "unsupported construct,
+not silent drop."
 
-**3. Provenance must record the extract set and the clip.** The `source` row needs the list
-of Geofabrik files merged, their download dates, the clip bbox, and the exact `osmium`
-command — otherwise an OSM feature's origin is unreproducible. ODbL attribution is already
-carried; extract identity is the new part.
+**3. Everything M3 built downstream of `OsmFeatureSet` stays exactly as-is.** No schema change
+(`Polygon` geom_type already exists, `SCHEMA_VERSION` stays 3), no `describe.py` change (already
+generic over geom_type, confirmed above), `ingest_osm.py` unchanged unless Stage 4's real-tag
+validation finds a gap. The seam this milestone adds is a single new function,
+`osm.pbf.load_features(pbf_path) -> OsmFeatureSet`, parallel to the existing
+`osm.features.load_features(cache_path) -> OsmFeatureSet`.
 
-**4. Per-layer append would help, but is not available.** This layer would benefit a lot from
-being independently re-runnable and deletable without a ~450 s full rebuild, while tuning
-classification rules against a real extract. That capability is `todo/todo.md`'s "Incremental
-per-layer pipeline builds" backlog item — it was considered for M8 and **explicitly dropped**
-from it, so it is *not* a dependency this plan can assume. Either schedule that backlog item
-alongside this milestone, or accept full rebuilds during rule tuning. Worth deciding in the
-fresh Architect pass this plan requires.
+**4. Water and named-place ingestion ride along for free — no separate scoping decision
+needed.** `_classify_way` and `_ingest_node` already classify `waterway`/`natural=water` and
+`place`+`name` nodes in the same pass as settlement ways; there is no code path that produces
+settlement polygons without also producing whatever water/named-place features the same extract
+tags support. Restricting this pass to "settlement polygons only" would mean throwing away
+already-computed classifications for no savings — so water and named-place are in scope by
+construction, not as an added feature.
+
+**5. Multipolygon relations remain an explicit, counted skip** — same as M3's original scope.
+This matters concretely for settlement coverage: real-world large-city administrative boundaries
+are frequently mapped as `type=multipolygon`/`type=boundary` *relations* with inner/outer rings,
+not simple closed ways, so they will **not** produce a `settlement` polygon this pass — only
+smaller settlements/villages/`landuse` parcels mapped as plain closed ways will. This is a real,
+documented coverage gap (see Risks), not a bug, and not blocking: partial polygon coverage is
+still strictly more than the theatre-wide `null` M7 leaves today.
+
+**6. OSM rows never overwrite DCS rows** (unchanged invariant from the deferred plan) —
+`provenance={"geometry": "osm", "name": "osm"}`, ~1,300 m M1 uncertainty, land beside DCS's
+`road`/`named_place` rows exactly as `nearest_road` vs `nearest_road_osm` already does.
 
 ### Implementation Plan
 
-0. **Close the format question before writing any parser.** Open
-   `https://download.geofabrik.de/europe/turkey.html` and
-   `https://download.geofabrik.de/asia/syria.html` and record what formats, sizes and
-   sub-region links actually exist. Two claims decide the dependency question and neither is
-   currently verified: (a) whether `.osm.bz2` is truly gone — if it still exists, the whole
-   PBF problem evaporates into stdlib `bz2` + `xml.etree.iterparse` with zero new
-   dependencies; (b) whether Turkey has a sub-national split, which decides whether the
-   download is ~1.0 GB or far less. Append findings to the existing research note.
-   **This stage gates the dependency decision — do not skip it.**
-1. **Parsing spike, timeboxed.** Prove the chosen path against one small real extract: parse
-   it, count nodes/ways, round-trip known coordinates. Success criterion is a control-point
-   check per this project's testing rule — a known place (e.g. Latakia) parsed out of the
-   extract must land within M1's ~1.3 km residual of its DCS position.
-2. **`osm/pbf.py` → `OsmFeatureSet`,** with a committed tiny fixture and unit tests.
-   Unsupported constructs (relations, and now also ways whose nodes fall outside the clip)
-   must be **counted skips, not silent drops** — `OsmFeatureSet.relations_skipped` already
-   sets this precedent and the new failure modes get the same treatment.
-3. **Wire into the pipeline as a selectable layer,** re-validate `_classify_way` against real
-   extract tags, and measure what actually lands in the store.
-4. **Scale check and, if needed, filtering design.** Measure feature counts before deciding
-   anything about decimation — see Risks.
-5. **Write `M9_OSM_RUN_INSTRUCTIONS.md`** and hand the real build to the Windows machine.
+1. **Derive and document the theatre clip bbox.** One-off script using
+   `coordinates.dcs_to_wgs84("Syria", ...)` against `syria-full`'s four region corners
+   (`build/region.py`) to get a lat/lon bounding box; pad it the same way `syria-full` itself was
+   padded (some margin, not a knife-edge cut against DCS's own extent uncertainty). Write
+   `M9_OSM_RUN_INSTRUCTIONS.md` with the exact numbers and the `osmium extract`/`merge` commands.
+   Hand this to the user to run (`brew install osmium-tool` + the commands) — do not run
+   multi-hundred-MB external processing in this session.
+2. **`osm/pbf.py` + fixture tests**, independent of the real merge finishing. A tiny synthetic
+   `.pbf` fixture (few nodes/ways covering road/water/settlement/named_place + one relation)
+   proves the parser end-to-end without waiting on the real 7-country merge. Verify `pyosmium`
+   actually installs in the real dev environment before relying on it (flagged as a risk below —
+   this session's sandboxed tool environment could not resolve `pyosmium` from PyPI even with an
+   explicit index URL, while a plain `pip install requests` against the same index succeeded;
+   root cause not established, but web search confirms pyosmium ships wheels through at least
+   cp313 and claims cp314 support, so treat this as this-session's-sandbox-specific until proven
+   otherwise on the real machine).
+3. **Wire `osm_pbf_path` into `build_region`** (Stage 3, additive alongside `osm_cache_path`).
+4. **Validate against the real Syria-only extract first** (`syria-260911.osm.pbf`, 82 MB, clipped
+   to itself trivially or used as-is since it's the smallest and already theatre-relevant) before
+   touching the 646 MB Turkey file: control-point check per this project's testing convention
+   (a known real place, e.g. Latakia, should land inside or very near an OSM settlement polygon
+   if one exists in this extract) and a `_classify_way` real-tag audit — log actual
+   `ways_skipped_unclassified` counts and inspect a sample of skipped tags to confirm the four
+   rules aren't missing an obviously-common case.
+5. **Full merged-theatre run.** Once the user has produced the merged/clipped
+   `syria-theatre.osm.pbf`, run the full `build_region("syria-full", ...)` rebuild with
+   `osm_pbf_path` set. Measure: feature counts by kind, store size delta vs. M7's 461 MB baseline,
+   `describe_position` p99 delta vs. M7's already-flagged 803 ms tail (this is a real risk, not
+   a formality — see Risks).
+6. **Write findings to `research/`** (extract coverage, skip counts, store growth, query-latency
+   delta) and update `world-model/ROADMAP.md`'s M9 entry to done.
 
 ### Risks & Unknowns
 
-- **The pivotal fact is unverified.** `download.geofabrik.de` was unreachable during
-  reconnaissance, so "`.osm.bz2` is deprecated, `.pbf` is the only full-data format" is a
-  search-snippet claim, not an observed one. It is also the single claim that decides whether
-  this milestone needs a new dependency at all. Hence Stage 0. Per project convention, an
-  unverified community claim must not be encoded as fact.
-- **Turkey dominates the download** (~612 MB of a ~1.0 GB total, with no sub-national split
-  found). Note it is filed under `europe/`, not `asia/` — an easy wrong guess when writing
-  the instructions.
-- **Node resolution is the real complexity, and it exceeds the `.routes`/`.rn4` precedent.**
-  Those parsers are forward scans over self-contained records; a `.pbf` way needs a lookup
-  table built from a different part of the file. The 200-400 LOC estimate covers block/varint
-  decoding and does not fully cover this.
-- **Scale could be a 10x+ store growth on roads alone.** M7's store is already 461 MB with
-  `describe_position` p99 at 803 ms — itself a flagged M7 follow-up. A large OSM layer could
-  push the query tail from "flagged" to "blocking". Measure before designing decimation, but
-  treat this as a live possibility.
-- **A raw extract is not a filtered Overpass response.** M3's `_classify_way` rules ran on
-  results the Overpass query had already narrowed. A raw extract contains every tagged way in
-  the bbox, so `ways_skipped_unclassified` will be enormous and the rules need re-validation
-  rather than reuse-on-faith.
-- **OSM is not period-accurate for DCS's Syria**, and post-2011 conflict changed the real
-  region substantially. Reference data for "what is it", never game truth.
-- **`osmium-tool` is a new user-side prerequisite** (`brew install osmium-tool`) on whichever
-  machine does the clipping.
+- **`pyosmium` install verification is outstanding.** This session's sandbox could not resolve it
+  from PyPI (explicit-index-url install of `requests` worked; `pyosmium` did not, "no versions
+  found"). Confirm on the actual dev machine before Stage 2 is considered complete — if it
+  genuinely lacks a wheel for the project's Python version, that is an escalation-worthy
+  dependency-decision reopening, not something to route around silently.
+- **Multipolygon-relation settlements are invisible this pass** (Design Decision 5) — large
+  cities mapped as relations get no polygon; only closed-way-mapped villages/landuse parcels do.
+  Real, bounded, documented — not a blocker, but don't report "settlement polygons done" as
+  uniform coverage.
+- **`_classify_way`'s rules are unvalidated against real extract tags** — they were written
+  against Overpass-narrowed results in a query that no longer runs. Stage 4 exists specifically
+  to close this before the full Turkey-scale run.
+- **Store growth / query-tail risk carries forward from M7.** M7's `describe_position` p99 was
+  already 803 ms and flagged as a followup, not fixed. A large new polygon layer risks pushing
+  that further; measure in Stage 5, don't assume it's fine.
+- **No incremental per-layer rebuild exists** (`todo/todo.md` backlog item, dropped from M8) —
+  every `_classify_way` rule tweak in Stage 4 costs a full pipeline rebuild. Accepted cost for
+  this milestone; still on the backlog, not being scheduled here.
+- **OSM is not period-accurate for DCS's Syria** (unchanged from the deferred plan) — post-2011
+  conflict changed the real region; this is reference "what is it" data, never game truth.
+- **`osmium-tool`'s `--strategy=smart` behavior at the Turkey/Syria border is unverified** beyond
+  its documented purpose — if it still produces ways with dangling/unresolved node references,
+  Design Decision 2's counted-skip path is the safety net, but the resulting settlement/road
+  coverage right at that border may be thinner than elsewhere. Worth a spot-check in Stage 5, not
+  a blocker.
 
-### Decisions Requiring User Input
+### Second-order effect
 
-1. **The dependency decision** — `AGENTS.md`'s "a new dependency seems necessary → stop and
-   ask" trigger. Three options, in the order Stage 0 should test them:
-   - **(a) `.osm.bz2` still exists** → stdlib `bz2` + `xml.etree.iterparse`, zero new
-     dependencies, simplest possible path. Verify first; if true, take it.
-   - **(b) Hand-rolled stdlib `.pbf` parser** (`zlib` + `struct` + varints, no protobuf
-     compiler). Zero new dependencies, consistent with the `.hgt`/`.routes`/`.rn4`
-     precedent, fully inspectable. Costs ~200-400 LOC plus node-resolution work, and it is
-     new binary-format code to maintain and get right.
-   - **(c) `pyosmium`** (BSD-2-Clause, prebuilt wheels, no compiler needed, actively
-     maintained, handles node resolution). Fastest route to working code; adds a dependency
-     to a project that has so far avoided every geospatial library. (`pyrosm` is already
-     ruled out — it pulls GeoPandas.)
-
-     Architect's lean, conditional on (a) failing: **(b)**, because the mandatory
-     `osmium-tool` clip means the parser only ever handles a small, well-formed input, which
-     removes most of the argument for a robust general-purpose library. A real tradeoff
-     between maintenance burden and dependency policy — the user's call.
-2. **Scope check on fusion depth.** This plan stops at "OSM features stored beside DCS
-   features, both labelled." The concept doc's richer `external_matches` / `match_score` /
-   `preferred_name` model is entity resolution and belongs in its own milestone. Confirm that
-   is the intended stopping point.
+Unblocks Mission Interpreter's MI-2 world-enrichment stage, which needs settlement-extent
+reasoning for tactical narrative (`plans/mission-interpreter/plan.md`,
+`plans/world-model-tactical-landmarks/plan.md`) — MI-2 can now query `inside_settlement` and get
+a real polygon-backed answer for at least partial theatre coverage instead of a permanent `null`.
+It does not unblock or narrow anything else on the roadmap; M10 (junctions) and the LOS
+generalization already merged are independent of this data source.

@@ -18,10 +18,13 @@ import sqlite3
 from array import array
 from pathlib import Path
 
+import osmium
+import osmium.osm.mutable as osmium_mutable
 import pytest
 
 from build.pipeline import build_region
 from build.region import RegionDefinition
+from coordinates import dcs_to_wgs84
 from dcs_data.towns import TownEntry
 from store.reader import grid_provenance, load_full_grid
 
@@ -95,6 +98,73 @@ def test_build_region_osm_cache_path_given_but_missing_is_skipped_not_an_error(
 
     assert report.osm_skipped is True
     assert "road" not in report.feature_counts
+
+
+def _write_fixture_osm_pbf(path: Path, place_name: str) -> None:
+    """A one-node `.osm.pbf` fixture -- a `place`+`name` node at
+    `_TEST_REGION`'s centre, so `build_region`'s `osm_pbf_path` path can be
+    exercised without a real Geofabrik extract (M9 Stage 3 wiring test)."""
+    lat, lon = dcs_to_wgs84(
+        _TEST_REGION.theatre, _TEST_REGION.centre_x, _TEST_REGION.centre_z
+    )
+    writer = osmium.SimpleWriter(str(path))
+    try:
+        writer.add_node(
+            osmium_mutable.Node(
+                id=1,
+                location=(lon, lat),
+                tags={"place": "town", "name": place_name},
+                version=1,
+                visible=True,
+                changeset=1,
+                timestamp="2020-01-01T00:00:00Z",
+                uid=1,
+            )
+        )
+    finally:
+        writer.close()
+
+
+def test_build_region_osm_pbf_path_takes_precedence_over_osm_cache(
+    tmp_path: Path,
+) -> None:
+    """M9 Stage 3 wiring: `osm_pbf_path`, when given, is used instead of
+    `osm_cache_path`, and its features flow through the same `ingest_osm`/
+    `BuildReport.osm_stats` path as the Overpass-cache source."""
+    pbf_path = tmp_path / "fixture.osm.pbf"
+    _write_fixture_osm_pbf(pbf_path, "FromPbf")
+    stale_cache_path = tmp_path / "stale-cache.json"
+    stale_cache_path.write_text('{"elements": []}', encoding="utf-8")
+
+    report = build_region(
+        _TEST_REGION,
+        towns_lua_path=Path("unused-towns.lua"),
+        beacons_lua_path=Path("unused-beacons.lua"),
+        osm_cache_path=stale_cache_path,
+        out_path=tmp_path / "test-rectangular-region-osm-pbf.sqlite",
+        osm_pbf_path=pbf_path,
+    )
+
+    assert report.osm_skipped is False
+    assert report.osm_stats is not None
+    assert report.osm_stats.named_places == 1
+    assert report.feature_counts["named_place"] == 2  # 1 town.lua + 1 OSM
+
+
+def test_build_region_osm_pbf_path_given_but_missing_is_skipped_not_an_error(
+    tmp_path: Path,
+) -> None:
+    report = build_region(
+        _TEST_REGION,
+        towns_lua_path=Path("unused-towns.lua"),
+        beacons_lua_path=Path("unused-beacons.lua"),
+        osm_cache_path=None,
+        out_path=tmp_path / "test-rectangular-region-osm-pbf-missing.sqlite",
+        osm_pbf_path=tmp_path / "does-not-exist.osm.pbf",
+    )
+
+    assert report.osm_skipped is True
+    assert report.osm_stats is None
 
 
 def _write_fake_hgt_tile(path: Path, value: int) -> None:
