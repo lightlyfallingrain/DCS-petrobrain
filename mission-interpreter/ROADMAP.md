@@ -71,7 +71,20 @@ Milestones below are from `plans/mission-interpreter/plan.md`'s Implementation P
   but deliberately left unpopulated -- MI-4's job once a capable model exists. Does not change what
   MI-4 should be, but confirms `Tagged[T]` as the one epistemic-tagging convention MI-4/5/6 should
   reuse rather than reinvent.
-- [ ] **MI-4 — Capable-model synthesis.** Not started; gated on Decision 3 (model choice/hosting).
+- [~] **MI-4 — Capable-model synthesis.** In progress (`plans/mi4-capable-model-synthesis/plan.md`,
+  Decision 3: model=`qwen3:14b`, non-thinking mode). Implemented: `Tagged[T]` gained a `confidence`
+  field; `MissionUnderstanding.known_threats` retyped to `tuple[Tagged[Threat], ...]`;
+  `src/filter/threat_signals.py` (the second, MI-4-specific author-only-knowledge boundary --
+  derives coarse `ThreatSignal`s from `RawMission`'s hidden/lateActivation groups, never a name/
+  id/unit count); `world_enrich.enrich.enrich_threat_signals` (resolves each signal's raw
+  coordinate to a `WorldRef` -- the last point that coordinate exists in memory); `src/synth/`
+  (`ollama_client.py`, `prompts.py`, `synthesize.py`) -- structured-output JSON schema restricts
+  `epistemic_status` to `INFERENCE`/`ASSUMPTION` only, re-validated as defense in depth.
+  End-to-end validated live against the real sample mission and `qwen3:14b` (see
+  `plans/mi4-capable-model-synthesis/implementation.md` for the real output and a caveat: running
+  the live test caused Ollama to auto-pull the model on-demand as a side effect, not an explicit
+  pull). Remaining: human quality judgment on the live output (plan stage 6's "would a human
+  familiar with the briefing agree" bar) and `CLAUDE.md`/structure-doc updates.
 - [ ] **MI-5 — Player questions (text console MVP).** Not started.
 - [ ] **MI-5b — Player questions, web form.** Future; not started, no design work until MI-5 proves
   out.
