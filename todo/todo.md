@@ -35,6 +35,25 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ## Cross-cutting / unscoped backlog
 
-*(None open right now — every current backlog item belongs to a subproject and lives in that
-subproject's own `ROADMAP.md`. Add items here only if they don't yet belong to one, e.g. a
-process/workflow change or something spanning multiple subprojects at once.)*
+- [ ] **Landmark references must be LOS- and knowledge-gated, not ground-truth.** Raised
+  2026-09-13, while scoping world-model tactical-landmark enrichment (ridges/valleys,
+  settlements, road intersections, other aerial landmarks — see
+  `plans/world-model-tactical-landmarks/plan.md` once it lands). World-model can compute
+  "this unit is 500m from a road intersection, south of a large building," but per this
+  project's no-omniscience invariant, Petrovich/the brain must never speak a landmark
+  reference the crew has no actual basis for knowing. Two independent gates, both needed:
+  1. **Line-of-sight**: can we (or Petrovich) actually see the landmark itself right now, using
+     the generalized A↔B LOS primitive (`plans/world-model-los-generalization/plan.md`,
+     `query.line_of_sight.line_of_sight_clear`) applied ownship/Petrovich → landmark position,
+     not just ownship → contact.
+  2. **Knowledge**: do we have a standing memory of that landmark (a prior perception/
+     observation of it — this is squarely BL-8's future territory), or does the Mission
+     Understanding / briefing (Mission Interpreter's schema, `plans/mission-interpreter/
+     plan.md`) name it explicitly? If neither, the landmark is not known and must not be
+     referenced, even if world-model's query layer can compute its existence and position from
+     ground truth.
+  **Not scoped to a milestone yet** — spans world-model (landmark data + LOS query),
+  mission-interpreter (briefing-named landmarks as a knowledge source), and body-layer
+  (the actual gating logic before a landmark reference reaches speech output, likely a
+  `belief/` concern parallel to `percept.py`'s existing DCS-truth-stripping boundary). Revisit
+  once world-model's landmark enrichment and a first Mission Understanding schema both exist.
