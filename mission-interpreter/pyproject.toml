@@ -1,0 +1,36 @@
+[project]
+name = "dcs-mission-interpreter"
+version = "0.1.0"
+description = "Understands one DCS mission (.miz + briefing + world model + player intent), offline/pre-mission"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src:tests"
+
+# The vendored pydcs `dcs.lua` subpackage (Decision 1, see
+# `src/_vendor/dcs_lua/__init__.py`) is third-party code we did not write --
+# it predates `mypy --strict` conventions (implicit `Any` returns, untyped
+# nested functions) and reformatting it just to satisfy our own strictness
+# bar would make future re-vendoring from upstream a diff nightmare. Excluded
+# from strict checking; everything under `src/miz`, `src/filter` that calls
+# into it is still fully strict itself.
+[[tool.mypy.overrides]]
+module = "_vendor.dcs_lua.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+
+[tool.ruff]
+extend-exclude = ["src/_vendor"]
+
+[tool.ruff.lint.isort]
+# Same known-first-party declaration world-model's pyproject.toml carries,
+# for the same reason (ruff's isort auto-detection of first-party packages
+# depends on invocation cwd, which recurs across this repo's subprojects --
+# see world-model/pyproject.toml's comment on this for the full history).
+known-first-party = ["miz", "filter", "_vendor"]
