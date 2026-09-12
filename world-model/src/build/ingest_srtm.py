@@ -35,16 +35,26 @@ per the plan's "Execution boundary") chooses the actual spacing to use, not
 this module.
 """
 
+import logging
+import time
 from dataclasses import dataclass
 
 from coordinates import dcs_to_wgs84
 from elevation.dem import SrtmTile, select_tile
 from store.models import ElevationGrid
 
+logger = logging.getLogger(__name__)
+
 # `store.models.ElevationGrid.provenance` tag for grids built by this
 # module -- distinct from `build.ingest_probe.GRID_PROVENANCE_DCS_PROBE`.
 # See `store/schema.py`'s version-3 note.
 GRID_PROVENANCE_SRTM = "srtm"
+
+# How often the row loop below logs progress, in rows. A full-theatre grid
+# is on the order of millions of cells (see this module's docstring); without
+# periodic feedback, this stage looks indistinguishable from a hang for
+# however long it actually takes.
+_PROGRESS_LOG_INTERVAL_ROWS = 50
 
 
 @dataclass
@@ -90,8 +100,20 @@ def ingest_srtm_grid(
     sampled = 0
     void_or_uncovered = 0
     tiles_used: set[tuple[float, float]] = set()
+    started_at = time.monotonic()
 
     for row in range(n_rows):
+        if row % _PROGRESS_LOG_INTERVAL_ROWS == 0 and row > 0:
+            elapsed_s = time.monotonic() - started_at
+            logger.info(
+                "ingest_srtm: row %d/%d (%.1f%%, %d sampled, %d void/uncovered, %.1fs elapsed)",
+                row,
+                n_rows,
+                100.0 * row / n_rows,
+                sampled,
+                void_or_uncovered,
+                elapsed_s,
+            )
         x = origin_x + row * spacing_m
         for col in range(n_cols):
             z = origin_z + col * spacing_m
