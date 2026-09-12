@@ -36,8 +36,39 @@ the plan this subproject was built from, and `docs/concept/MISSION_INTERPRETER.m
   `aircraft_client.py`'s `get_*` methods, every `WorldModelClient` method raises
   `WorldModelClientError` on failure -- there is no "world-model not built yet" expected-empty
   state once this client is called. No spatial storage of its own.
-- No model/LLM involved through MI-3 (MI-4 is the first stage that adds one, gated on Decision 3
-  in the plan -- model choice/hosting is still open).
+- **No model/LLM involved through MI-3; MI-4 is the first stage that adds one** (Decision 3:
+  Ollama's `qwen3:14b`, non-thinking mode). `src/synth/ollama_client.py`'s `OllamaClient` is this
+  subproject's second HTTP seam (stdlib `urllib.request`, mirrors `world_model_client.py`'s
+  shape), against a local Ollama daemon's `/api/chat`. Unlike `WorldModelClient`'s single error
+  type, it raises two distinct exceptions -- `OllamaUnavailableError` (daemon unreachable: an
+  environment problem the caller surfaces) and `OllamaOutputError` (200 OK but bad/unparseable/
+  schema-violating output: a prompt/model-quality problem `synth/synthesize.py` degrades on,
+  leaving the affected `MissionUnderstanding` field at its MI-3 `None`/`()` default rather than
+  failing the whole pass) -- because those two failure modes need different handling. Testable
+  offline against a fake `http.server` double (`tests/test_synth_ollama_client.py`,
+  `tests/test_synth_synthesize.py`) with **no live Ollama daemon or `qwen3:14b` required** for the
+  rest of the suite; `tests/test_synth_live_ollama.py` is the one real integration test, skip-
+  guarded on reachability + the model being present (mirrors `REAL_SAMPLE_MIZ_PATH.exists()`'s
+  skip convention). The exact `/api/chat` request/response shape (`format` for structured JSON
+  output, `think: false` for non-thinking mode) was designed against Ollama's documented API, not
+  confirmed live before `qwen3:14b` was available locally -- see `ollama_client.py`'s module
+  docstring for the caveat and what to re-check if the daemon's real behavior differs.
+- **A second, MI-4-specific author-only-knowledge boundary: `filter/threat_signals.py`**, distinct
+  from MI-1.5's `crew_available.py`. `crew_available.py` drops hidden/lateActivation groups so no
+  trace of them reaches `CrewAvailableMission`; `threat_signals.py` does the opposite walk --
+  reading `RawMission` directly (those groups aren't reachable from `CrewAvailableMission` at all)
+  specifically to look *at* them, deriving a deliberately coarse `ThreatSignal` (a type-category
+  `kind` + raw position, via a small hand-maintained DCS-unit-type -> category lookup table --
+  unmapped types surface as `"unknown"`, never dropped) -- never a group's name, id, unit count, or
+  activation timing. `world_enrich.enrich.enrich_threat_signals` resolves that raw position to a
+  `WorldRef` -- the last point in the pipeline a hidden unit's exact coordinate exists in memory;
+  `synth/prompts.py` must only ever read a `WorldRef`'s place-name fields when building prompt
+  text, never `x`/`z`. See `tests/test_synth_synthesize.py`'s coordinate-leak regression test.
+- **`Tagged[T].confidence` (MI-4)**: a separate axis from `epistemic_status` -- `epistemic_status`
+  says *how* a value was arrived at, `confidence` says *how sure* the model was, and only ever
+  means anything once a model (not a deterministic mapping) produced the value. Defaults to `None`
+  so every MI-1-MI-3 `FACT`/`OBSERVATION` value stays valid without a confidence judgment that was
+  never asked of it.
 - **Epistemic tagging: `Tagged[T]`, not a per-field-name dict-map (MI-3 decision)**. `src/schema/
   tags.py`'s `Tagged[T]` (`value`, `epistemic_status`, `basis`) wraps every top-level
   `MissionUnderstanding` field and every `mission_phases`/`important_locations` list item
@@ -106,7 +137,8 @@ mission-interpreter/.venv/bin/pip install "ruff==0.16.5" "mypy==2.3.1" "pytest==
   hidden group's existence cannot leak back in through an unfiltered catch-all field.
   `trigrules.py` provides predicate-inspection helpers for `trigrules`' raw schema, for
   research/debugging only -- `trigrules`/`mission["trig"]` are never surfaced on
-  `CrewAvailableMission` at all.
+  `CrewAvailableMission` at all. `threat_signals.py` (MI-4) is the second, distinct
+  author-only-knowledge boundary -- see Tech stack above.
 - `src/_vendor/` -- third-party code (currently: pydcs's `dcs.lua` parse/serialize subpackage). Not
   our code to edit; see Tech stack above.
 - `src/world_enrich/` -- MI-2, done: `world_model_client.py` (HTTP client), `schema.py` (the
@@ -118,8 +150,11 @@ mission-interpreter/.venv/bin/pip install "ruff==0.16.5" "mypy==2.3.1" "pytest==
   an `EnrichedMission` to a `MissionUnderstanding`; player-slot/ownship resolution is the one piece
   of real logic, scanning every unit for `skill in ("Player", "Client")` and resolving to `UNKNOWN`
   on 0 or >=2 matches rather than guessing). `purpose`/`task`/`known_threats`/`player_intent` are
-  declared on `MissionUnderstanding` but left unpopulated -- MI-4 onward.
-- `src/synth/` -- future stage (MI-4 onward), not built yet.
+  declared on `MissionUnderstanding` but left unpopulated by MI-3 -- MI-4 fills in the first three.
+- `src/synth/` -- MI-4, in progress: `ollama_client.py` (`OllamaClient`, the Ollama `/api/chat` HTTP
+  client), `prompts.py` (system/user message construction + the structured-output JSON schema
+  restricting `epistemic_status` to `INFERENCE`/`ASSUMPTION`), `synthesize.py`
+  (`synthesize_mission_understanding`, the entry point). See Tech stack above.
 - `tests/` -- parser tests (`test_reader.py`), dictionary-substitution tests (`test_dictionary.py`),
   the central author-only-knowledge invariant tests (`test_filter.py`), world-enrichment tests
   (`test_enrich.py`), and MI-3's schema/mapping tests (`test_schema_tags.py`,
