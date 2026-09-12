@@ -363,16 +363,20 @@ MI-1/MI-1.5 Implementer sign-off** — see Decision 5's reasoning.
    designed as part of this plan — see Affected Modules/Files above (`world-model/src/api/
    server.py`, `mission-interpreter/src/world_enrich/world_model_client.py`) and MI-2's
    prerequisite sub-stage in the Implementation Plan.
-3. **Capable-model choice and hosting for MI-4 synthesis — still open, needs more investigation
-   (user's own words).** `division-or-responsibility.md`'s compute-topology note (Mac/Ollama +
-   Windows/DCS split, "model-swap only at briefing/on-ground") was written with the *runtime*
-   model-swap constraint in mind; Mission Interpreter runs entirely pre-mission/offline, so that
-   specific timing constraint doesn't bind here, but the model choice itself is still open: a
-   local Ollama-hosted capable model on the Mac (cost: possibly weaker reasoning + no vision unless
-   a vision-capable local model is chosen) vs. a cloud API model (cost: external dependency,
-   ongoing API cost, sends mission content off-machine). This is a new dependency/architecture
-   decision per AGENTS.md's escalation rules. Do not guess an answer here — MI-4 stays unstarted
-   until this is resolved; MI-0 through MI-3 do not need it.
+3. **Capable-model hosting for MI-4 synthesis — partially resolved 2026-09-13: Ollama.** User
+   decision: MI-4 hosts its capable model via Ollama, same local-first posture as PB-6's runtime
+   model (`plans/brain-layer/plan.md` Decision 2 — Ollama chosen there too, for the same
+   Windows(DCS)/Mac(body+brain) GPU-separation reasoning). This resolves the hosting *mechanism*
+   but not the model choice — **exactly which model MI-4 loads is still an open question,
+   explicitly flagged by the user as needing more investigation**, not decided here. Unlike PB-6
+   (which needs a fast, low-latency model for the in-flight crew-cognition loop), MI-4 runs
+   entirely pre-mission/offline with no runtime-latency pressure, so its model can lean toward
+   capability over speed — likely a larger/more-capable Qwen2.5 tier (e.g. 32B) or a different
+   family entirely, unbenchmarked as of this writing. Whether MI-4 and PB-6 end up sharing one
+   Ollama instance (swap) or run two models resident at once (parallel, at a real 32GB-memory
+   cost) is the same open resource question `plans/brain-layer/plan.md` Decision 2 already
+   flags as gated on both models' actual sizes — not resolved here either. MI-4 stays unstarted
+   until the model choice lands; MI-0 through MI-3 do not need it.
 4. ~~Player-intent input form.~~ **Resolved: text console for MVP (MI-5, unchanged mechanism from
    this plan's original proposal), a simple web form later (MI-5b, new future milestone — see the
    Implementation Plan). Briefing/debriefing as a web page with text and images is explicitly out
