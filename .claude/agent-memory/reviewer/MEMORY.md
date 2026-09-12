@@ -5,3 +5,4 @@
 - [MI-3 reviewed/approved](project_mi3_reviewed_approved.md) — Tagged[T] pattern precedent; bar for reviewing MI-4's first INFERENCE/ASSUMPTION-producing code.
 - [MI-4 reviewed, minor fixes](project_mi4_reviewed_minor_fixes.md) — Ollama auto-pull needs a fail-closed guard; implementer's decision log misquoted the plan — verify quoted plan text against the file.
 - [MI-5 reviewed, approved](project_mi5_reviewed_approved.md) — disclosed "unreachable choice path" gap verified against `_build_ownship`; check deferrals are explicit branches, not accidents.
+- [MI-6 reviewed, minor fix](project_mi6_reviewed_minor_fix.md) — bare-None reject sentinel collapses "never asked" vs "asked-and-rejected"; watch for this pattern in reconciliation code.
