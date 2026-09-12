@@ -64,3 +64,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [MI-1/MI-1.5 scaffold](project_mi1_mi15_scaffold.md) — pydcs dcs.lua vendors cleanly via `pip download git+...`, no raw-passthrough field on filtered output = structural leak guarantee, mypy cwd gotcha recurred.
 - [M10 road junctions](project_m10_road_junctions.md) — real cluster/junction counts (3980/3634), singleton-cluster filtering needed, coincident-duplicate-road false positive found (not tolerance-fixable).
 - [pyosmium package name](feedback_pyosmium_package_name.md) — PyPI/import name is `osmium`, not `pyosmium`; `pip install pyosmium` 404s, check PyPI JSON API before escalating a dependency as unavailable.
+- [MI-2 world enrichment](project_mi2_world_enrichment.md) — shared-sqlite server can't use ThreadingHTTPServer, cross-venv integration test correctly dropped per plan, mypy CWD bug caught live.
