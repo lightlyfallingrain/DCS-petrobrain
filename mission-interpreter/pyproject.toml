@@ -33,4 +33,4 @@ extend-exclude = ["src/_vendor"]
 # for the same reason (ruff's isort auto-detection of first-party packages
 # depends on invocation cwd, which recurs across this repo's subprojects --
 # see world-model/pyproject.toml's comment on this for the full history).
-known-first-party = ["miz", "filter", "_vendor", "world_enrich", "schema", "synth"]
+known-first-party = ["miz", "filter", "_vendor", "world_enrich", "schema", "synth", "player_intent"]
