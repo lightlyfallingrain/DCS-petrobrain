@@ -70,13 +70,21 @@ class RuntimeMissionUnderstanding:
     `schema_version` is carried through unchanged from the source
     `MissionUnderstanding` (not a separate compact-schema version counter --
     not needed until BL-7 actually consumes this and schema churn on this
-    side needs independent tracking)."""
+    side needs independent tracking).
+
+    `purpose`/`task` are `Tagged[str | None]` -- always wrapped, like every
+    other field here -- rather than `Tagged[str] | None`, so that "MI-4
+    never had a guess" (`Tagged(None, "UNKNOWN", basis=())`) and "MI-4
+    guessed, the player said it's wrong" (`Tagged(None, epistemic_status,
+    basis=(..., "player:rejected"))`) stay distinguishable instead of both
+    collapsing to a bare `None`. See `compile._reconcile_purpose_or_task`.
+    """
 
     schema_version: int
     theatre: Tagged[str]
     ownship: Tagged[str]
-    purpose: Tagged[str] | None
-    task: Tagged[str] | None
+    purpose: Tagged[str | None]
+    task: Tagged[str | None]
     phases: tuple[Tagged[MissionPhase], ...] = field(default=())
     route: tuple[Tagged[CompactRoutePoint], ...] = field(default=())
     key_locations: tuple[Tagged[CompactLocation], ...] = field(default=())

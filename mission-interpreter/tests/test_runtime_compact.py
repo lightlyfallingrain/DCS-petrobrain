@@ -35,7 +35,7 @@ def _full_compact() -> RuntimeMissionUnderstanding:
             basis=("model:qwen3", "player:console"),
             confidence="high",
         ),
-        task=None,
+        task=Tagged(value=None, epistemic_status="UNKNOWN", basis=()),
         phases=(
             Tagged(
                 value=MissionPhase(name="DEPARTURE", waypoint_index=0),
@@ -81,19 +81,23 @@ def test_asdict_json_round_trip() -> None:
     assert round_tripped["theatre"]["value"] == "Caucasus"
     assert round_tripped["ownship"]["value"] == "Mi-24P (Hip-1)"
     assert round_tripped["purpose"]["confidence"] == "high"
-    assert round_tripped["task"] is None
+    assert round_tripped["task"]["value"] is None
+    assert round_tripped["task"]["epistemic_status"] == "UNKNOWN"
     assert round_tripped["phases"][0]["value"]["name"] == "DEPARTURE"
     assert round_tripped["route"][0]["value"]["place_name"] == "Ridgeline"
     assert round_tripped["key_locations"][0]["value"]["id"] == "Zone-Circle"
     assert round_tripped["expected_threats"][0]["value"] == "sam: near the ridge"
 
 
-def test_absent_optional_fields_serialize_as_null() -> None:
-    compact = dataclasses.replace(_full_compact(), purpose=None, task=None)
+def test_absent_optional_field_values_serialize_as_null() -> None:
+    never_asked = Tagged(value=None, epistemic_status="UNKNOWN", basis=())
+    compact = dataclasses.replace(
+        _full_compact(), purpose=never_asked, task=never_asked
+    )
 
     as_dict = dataclasses.asdict(compact)
     serialized = json.dumps(as_dict)
     round_tripped = json.loads(serialized)
 
-    assert round_tripped["purpose"] is None
-    assert round_tripped["task"] is None
+    assert round_tripped["purpose"]["value"] is None
+    assert round_tripped["task"]["value"] is None
