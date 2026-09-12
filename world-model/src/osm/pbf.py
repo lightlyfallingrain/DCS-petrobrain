@@ -31,12 +31,24 @@ a counted skip, `ways_skipped_unresolved_nodes`, following this project's
 drop" (see `osm.features.OsmFeatureSet`'s docstring).
 """
 
+import logging
+import time
 from pathlib import Path
 
 import osmium
 import osmium.osm
 
 from osm.features import OsmFeatureSet, OsmNode, OsmWay
+
+logger = logging.getLogger(__name__)
+
+# How often `_FeatureCollector` logs progress while `apply_file` is running,
+# in raw elements seen (tagged or not -- pyosmium calls back on every element
+# in the file, so this is a real progress signal even though only tagged
+# nodes/geometry-resolved ways are kept). A country-scale merged extract can
+# run `apply_file` for minutes with no other feedback; without this, a long
+# OSM stage looks indistinguishable from a hang. See `docs/M9_OSM_RUN_INSTRUCTIONS.md`.
+_PROGRESS_LOG_INTERVAL_ELEMENTS = 500_000
 
 
 class _FeatureCollector(osmium.SimpleHandler):
@@ -49,8 +61,24 @@ class _FeatureCollector(osmium.SimpleHandler):
         self.ways: list[OsmWay] = []
         self.relations_skipped = 0
         self.ways_skipped_unresolved_nodes = 0
+        self._elements_seen = 0
+        self._started_at = time.monotonic()
+
+    def _log_progress_if_due(self) -> None:
+        self._elements_seen += 1
+        if self._elements_seen % _PROGRESS_LOG_INTERVAL_ELEMENTS != 0:
+            return
+        elapsed_s = time.monotonic() - self._started_at
+        logger.info(
+            "osm.pbf: %d elements seen (%d tagged nodes, %d ways kept, %.1fs elapsed)",
+            self._elements_seen,
+            len(self.nodes),
+            len(self.ways),
+            elapsed_s,
+        )
 
     def node(self, n: osmium.osm.Node) -> None:
+        self._log_progress_if_due()
         if len(n.tags) == 0:
             return
         self.nodes.append(
@@ -63,6 +91,7 @@ class _FeatureCollector(osmium.SimpleHandler):
         )
 
     def way(self, w: osmium.osm.Way) -> None:
+        self._log_progress_if_due()
         points: list[tuple[float, float]] = []
         for node_ref in w.nodes:
             if not node_ref.location.valid():
@@ -74,6 +103,7 @@ class _FeatureCollector(osmium.SimpleHandler):
         )
 
     def relation(self, r: osmium.osm.Relation) -> None:
+        self._log_progress_if_due()
         self.relations_skipped += 1
 
 
