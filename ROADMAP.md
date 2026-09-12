@@ -27,7 +27,7 @@ Per-layer design docs (status: draft/provisional): `docs/concept/WORLD_MODEL_BUI
 
 | Subproject | Status | Roadmap |
 |---|---|---|
-| World Model | **Good enough, gate lifted 2026-09-06.** M0–M8 done. M9 (OSM augmentation) deferred, unscheduled. | [`world-model/ROADMAP.md`](world-model/ROADMAP.md) |
+| World Model | **Good enough, gate lifted 2026-09-06.** M0–M10 done. M9 (OSM augmentation) deferred, unscheduled (reopened with consumer — Mission Interpreter — now identified). | [`world-model/ROADMAP.md`](world-model/ROADMAP.md) |
 | Aircraft Layer | **Core done, merged 2026-09-07.** DCS I/O pipeline (telemetry, world objects, Petrovich indication text, text-overlay write channel) live and stable. A few small tuning items open. | [`aircraft-layer/ROADMAP.md`](aircraft-layer/ROADMAP.md) |
 | Body Layer | **In progress — BL-6 done, tool-set frozen.** Contact memory, classification, world enrichment, attention/events, the deterministic tool API (now frozen at twelve tools as of BL-6, moved from the originally-planned BL-7), text-mode crew interaction, and Petrovich command/verification (`scan_area`/`get_task_status`/`cancel_task`, BL-6, merged 2026-09-11) are all built and merged. Live-DCS acceptance of BL-6's new aircraft-layer effector is the user's own deferred follow-up. | [`body-layer/ROADMAP.md`](body-layer/ROADMAP.md) |
 | Mission Interpreter | **In progress.** MI-0 (real `.miz` sample + schema research), MI-1 (`.miz` parser: zip read, DictKey resolution, typed `RawMission`), and MI-1.5 (author-only-knowledge filter, `CrewAvailableMission`) done. MI-2 (world enrichment, needs world-model's first HTTP server) onward not started. | [`mission-interpreter/ROADMAP.md`](mission-interpreter/ROADMAP.md) |
