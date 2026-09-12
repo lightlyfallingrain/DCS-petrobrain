@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from build.ingest_beacons import BeaconIngestStats, ingest_beacons
+from build.ingest_junctions import JunctionIngestStats, ingest_junctions
 from build.ingest_osm import OsmIngestStats, ingest_osm
 from build.ingest_probe import (
     ChunkProbeIngestStats,
@@ -76,9 +77,10 @@ from probe_store.writer import (
     upsert_chunk_coverage,
     upsert_grid_samples,
 )
+from roadnet.junctions import DEFAULT_JUNCTION_MIN_DEGREE, DEFAULT_JUNCTION_TOLERANCE_M
 from store.chunks import CHUNK_SIZE_M
 from store.models import Region, Source
-from store.reader import load_full_grid, load_only_region
+from store.reader import all_features, load_full_grid, load_only_region
 from store.schema import SCHEMA_VERSION as BASE_SCHEMA_VERSION
 from store.schema import check_schema_version
 from store.writer import (
@@ -103,7 +105,7 @@ _PROBE_GRID_SPACING_M = 500.0
 # `build.ingest_srtm`'s module docstring and
 # `world-model/docs/M7_RUN_INSTRUCTIONS.md`'s Stage 2 section.
 DEFAULT_SRTM_GRID_SPACING_M = 1000.0
-_TOTAL_STAGES = 7
+_TOTAL_STAGES = 8
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,8 @@ class BuildReport:
     osm_stats: OsmIngestStats | None = None
     roadnet_stats: RoadnetIngestStats | None = None
     roadnet_skipped: bool = False
+    junction_stats: JunctionIngestStats | None = None
+    junction_skipped: bool = False
     osm_skipped: bool = False
     probe_stats: ProbeIngestStats | None = None
     probe_skipped: bool = False
@@ -171,6 +175,8 @@ def build_region(
     srtm_tile_path: Path | None = None,
     srtm_tile_paths: list[Path] | None = None,
     srtm_grid_spacing_m: float = DEFAULT_SRTM_GRID_SPACING_M,
+    junction_tolerance_m: float = DEFAULT_JUNCTION_TOLERANCE_M,
+    junction_min_degree: int = DEFAULT_JUNCTION_MIN_DEGREE,
 ) -> BuildReport:
     """Build `out_path` from scratch for `region`, ingesting towns.lua,
     beacons.lua, (if `osm_cache_path` is given and exists) the cached
@@ -180,6 +186,15 @@ def build_region(
     `srtm_tile_path`, if given, adds an SRTM delta summary to the
     `probe_output_path` elevation grid's metadata (see `ingest_probe`'s
     module docstring -- stats only, never stored samples).
+
+    `junction_tolerance_m`/`junction_min_degree` (M10) control the road-
+    junction detection stage, which runs unconditionally whenever the
+    roadnet stage actually ran (`not report.roadnet_skipped`) -- it needs no
+    path parameter of its own because it reads back the `road` features that
+    stage just inserted (`store.reader.all_features`), the same read-back
+    pattern the terrain stage already uses for the probe grid it just wrote.
+    See `roadnet.junctions`'s module docstring for the clustering/degree
+    design and Stage 2's real-data validation numbers.
 
     `srtm_tile_paths` (M7 Stage 2), if given and non-empty, ingests SRTM as
     the region's **primary** `elevation` grid (`provenance="srtm"`,
@@ -321,6 +336,22 @@ def build_region(
         else:
             report.roadnet_skipped = True
 
+        if not report.roadnet_skipped:
+            with _stage("road junctions", 5):
+                roads = all_features(conn, ["road"])
+                junction_features, junction_stats = ingest_junctions(
+                    roads,
+                    roadnet_source_id,
+                    tolerance_m=junction_tolerance_m,
+                    min_degree=junction_min_degree,
+                )
+                insert_features(conn, junction_features)
+                for f in junction_features:
+                    report.feature_counts[f.kind] += 1
+                report.junction_stats = junction_stats
+        else:
+            report.junction_skipped = True
+
         if srtm_tile_paths:
             existing_tile_paths = [p for p in srtm_tile_paths if p.exists()]
             if existing_tile_paths:
@@ -340,7 +371,7 @@ def build_region(
                 srtm_origin_x, srtm_origin_z, _, srtm_n_rows, srtm_n_cols = (
                     probe_grid_for_region(region, spacing_m=srtm_grid_spacing_m)
                 )
-                with _stage(f"SRTM elevation grid ({len(tiles)} tile(s))", 5):
+                with _stage(f"SRTM elevation grid ({len(tiles)} tile(s))", 6):
                     srtm_grid, srtm_stats = ingest_srtm_grid(
                         tiles,
                         region.theatre,
@@ -379,7 +410,7 @@ def build_region(
             origin_x, origin_z, spacing_m, n_rows, n_cols = probe_grid_for_region(
                 region
             )
-            with _stage("elevation/surface probe grid", 6):
+            with _stage("elevation/surface probe grid", 7):
                 elevation_grid, surface_grid, probe_stats = ingest_probe(
                     probe_output_path,
                     region.theatre,
@@ -395,7 +426,7 @@ def build_region(
                 insert_grid(conn, surface_grid)
                 report.probe_stats = probe_stats
 
-            with _stage("terrain semantics (ridge/valley)", 7):
+            with _stage("terrain semantics (ridge/valley)", 8):
                 terrain_grid = load_full_grid(conn, "elevation")
                 if terrain_grid is not None:
                     terrain_features, terrain_stats = ingest_terrain(
