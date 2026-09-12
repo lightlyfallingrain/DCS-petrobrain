@@ -82,6 +82,18 @@ class EnrichedTriggerZone:
 
 
 @dataclass(frozen=True, slots=True)
+class EnrichedThreatSignal:
+    """MI-4's resolved form of `filter.threat_signals.ThreatSignal` -- this
+    is the last point in the pipeline `ThreatSignal`'s raw `(x, z)` exists;
+    `synth/prompts.py` must only ever read `world_ref`'s place-name fields
+    (`.position`'s nested settlement info / `.name_matches`), never a raw
+    coordinate, when turning this into prompt text."""
+
+    kind: str
+    world_ref: WorldRef
+
+
+@dataclass(frozen=True, slots=True)
 class EnrichedMission:
     """MI-2's output. `briefing`/`kneeboard_images` are `CrewAvailableMission`'s
     own fields, unchanged byte-for-byte -- free-text place-mention
