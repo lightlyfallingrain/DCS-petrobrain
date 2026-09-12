@@ -24,8 +24,9 @@ from typing import Any
 from fixtures.synthetic_mission import VISIBLE_GROUP_NAME, write_synthetic_miz
 
 from filter.crew_available import filter_crew_available
+from filter.threat_signals import ThreatSignal
 from miz.reader import read_miz
-from world_enrich.enrich import enrich_mission
+from world_enrich.enrich import enrich_mission, enrich_threat_signals
 
 
 class FakeWorldModelClient:
@@ -204,3 +205,46 @@ def test_call_count_is_bounded_and_deterministic(tmp_path: Path) -> None:
     assert len(client.describe_position_calls) == 6
     # Named entities: the visible group + 2 trigger zones = 3 calls.
     assert len(client.find_place_by_name_calls) == 3
+
+
+def test_enrich_threat_signals_resolves_each_to_a_world_ref() -> None:
+    signals = (
+        ThreatSignal(kind="armor", x=100.0, z=200.0),
+        ThreatSignal(kind="sam", x=5.0, z=6.0),
+    )
+    client = FakeWorldModelClient()
+
+    result = enrich_threat_signals(signals, client)
+
+    assert len(result) == 2
+    assert result[0].kind == "armor"
+    assert result[0].world_ref.position == {
+        "x": 100.0,
+        "z": 200.0,
+        "nearest_settlement": None,
+    }
+    assert result[1].kind == "sam"
+    assert result[1].world_ref.position == {
+        "x": 5.0,
+        "z": 6.0,
+        "nearest_settlement": None,
+    }
+    assert (100.0, 200.0) in client.describe_position_calls
+    assert (5.0, 6.0) in client.describe_position_calls
+
+
+def test_enrich_threat_signals_never_calls_find_place_by_name() -> None:
+    """A threat signal has no name to resolve -- see
+    `filter.threat_signals`'s docstring on never surfacing a group name."""
+    signals = (ThreatSignal(kind="armor", x=1.0, z=2.0),)
+    client = FakeWorldModelClient()
+
+    enrich_threat_signals(signals, client)
+
+    assert client.find_place_by_name_calls == []
+
+
+def test_enrich_threat_signals_of_empty_tuple_is_empty() -> None:
+    client = FakeWorldModelClient()
+
+    assert enrich_threat_signals((), client) == ()
