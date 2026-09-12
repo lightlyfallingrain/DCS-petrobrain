@@ -34,13 +34,17 @@ def test_synthetic_fixture_groups_and_routes(tmp_path: Path) -> None:
 
     visible = next(g for g in country.groups if g.name == "Visible Group")
     assert visible.route is not None
-    (point,) = visible.route.points
-    assert point.x == 10
-    assert point.y == 20
-    assert point.type == "Turning Point"
+    # TakeOffGround (10, 20) -> Turning Point (15, 25) -> Land (30, 40).
+    takeoff, turning, land = visible.route.points
+    assert takeoff.x == 10
+    assert takeoff.y == 20
+    assert takeoff.type == "TakeOffGround"
+    assert turning.type == "Turning Point"
+    assert land.type == "Land"
     (unit,) = visible.units
     assert unit.name == "Unit1"
     assert unit.type == "Mi-24P"
+    assert unit.skill == "Player"
 
 
 def test_synthetic_fixture_author_only_markers_are_parsed(tmp_path: Path) -> None:
