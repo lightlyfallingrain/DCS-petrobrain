@@ -74,6 +74,25 @@ class ImportantLocation:
 
 
 @dataclass(frozen=True, slots=True)
+class Threat:
+    """One model-inferred (MI-4) known threat. `kind` is a coarse category
+    (e.g. `"armor"`, `"sam"`, `"unknown"` -- see `filter.threat_signals`'s
+    lookup table, the deterministic source the model's threat summary is
+    ultimately derived from) and `description` is the model's own prose.
+
+    `area_ref` is deliberately always `None` for MI-4's first pass: the
+    model receives threat-signal place names only as prose (never a
+    `WorldRef`, see `synth/prompts.py`), and re-resolving its free-text
+    output back to a specific `WorldRef` is itself a judgment call this
+    stage doesn't make yet -- left `None` rather than guessed, the same
+    posture as `Ownship.role`."""
+
+    kind: str
+    description: str
+    area_ref: WorldRef | None
+
+
+@dataclass(frozen=True, slots=True)
 class MissionUnderstanding:
     """MI-3's output. `schema_version` is carried from day one so a future
     schema change (MI-4 onward) has a field BL-7 can branch on rather than
@@ -88,5 +107,5 @@ class MissionUnderstanding:
     # Deferred to later stages -- never populated, never guessed, by MI-3:
     purpose: Tagged[str] | None = None
     task: Tagged[str] | None = None
-    known_threats: tuple[Tagged[str], ...] = field(default=())
+    known_threats: tuple[Tagged[Threat], ...] = field(default=())
     player_intent: Tagged[str] | None = None
