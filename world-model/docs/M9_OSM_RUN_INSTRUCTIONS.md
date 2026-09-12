@@ -138,6 +138,18 @@ Expect a substantially longer OSM stage than the single-country Stage 4 run abov
 ~6s ingest for Syria alone at 82 MB) — the merged file is dominated by Turkey's clipped
 southern-strip share of its 646 MB nationwide extract.
 
+**What "still working" looks like, and what a real stall looks like.** This stage logs progress
+periodically (`osm.pbf: N elements seen...`) — steady lines every ~10-20s at this scale are
+normal, not a problem, even though the interval between lines can vary (a slow batch is not
+necessarily a stall). Memory is now bounded by batching (`stream_features`'s `batch_size`,
+`osm-streaming-ingest` fix) rather than growing with the whole file, so this stage should no
+longer exhaust memory the way an earlier build attempt did (a real `syria-full` run stalled
+after ~8.6M ways / high memory usage before this fix, confirmed and killed after 22 minutes of
+total silence). If you genuinely see **no new progress line for several minutes** on a build
+built from this fix, that is worth reporting as a new issue, not assumed to be "just slow" —
+but a `syria-full`-scale OSM stage taking many minutes total, with steady incremental progress
+throughout, is expected, not a bug.
+
 Measure and record:
 
 - Feature counts by `kind` (the CLI prints these), especially `settlement`/`water`/`named_place`
