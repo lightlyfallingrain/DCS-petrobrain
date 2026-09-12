@@ -5,3 +5,8 @@
 # skill canditates, not worth tracking in repo
 .claude/agent-memory/skill-candidates.md
 
+# Third-party .miz sample missions -- real DCS mission files used for
+# mission-interpreter development/testing, not licensed for redistribution
+# (community campaign content, community-tool assets, etc.). Local-only.
+mission-interpreter/research/samples/
+
