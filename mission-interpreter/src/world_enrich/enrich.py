@@ -39,6 +39,7 @@ from __future__ import annotations
 from typing import Any
 
 from filter.crew_available import CrewAvailableMission
+from filter.threat_signals import ThreatSignal
 from miz.tree import Coalition, Country, Group, RoutePoint, TriggerZone
 from world_enrich.schema import (
     EnrichedCoalition,
@@ -46,6 +47,7 @@ from world_enrich.schema import (
     EnrichedGroup,
     EnrichedMission,
     EnrichedRoutePoint,
+    EnrichedThreatSignal,
     EnrichedTriggerZone,
     WorldRef,
 )
@@ -134,6 +136,27 @@ def _zone_position(zone: TriggerZone) -> tuple[float, float]:
     sum_z = sum(vertex.y for vertex in zone.vertices)
     count = len(zone.vertices)
     return sum_x / count, sum_z / count
+
+
+def enrich_threat_signals(
+    signals: tuple[ThreatSignal, ...], client: WorldModelClient
+) -> tuple[EnrichedThreatSignal, ...]:
+    """Resolve each `ThreatSignal`'s raw `(x, z)` to a `WorldRef`, exactly
+    like existing group/route-point enrichment (`_world_ref_for` with no
+    name to look up -- a threat signal never carries a name, see
+    `filter.threat_signals`'s docstring). This is the last point a hidden
+    unit's raw coordinate exists in memory; see `EnrichedThreatSignal`'s
+    docstring."""
+    return tuple(
+        EnrichedThreatSignal(
+            kind=signal.kind,
+            world_ref=WorldRef(
+                position=client.get_describe_position(signal.x, signal.z),
+                name_matches=(),
+            ),
+        )
+        for signal in signals
+    )
 
 
 def _world_ref_for(client: WorldModelClient, x: float, z: float, name: str) -> WorldRef:
