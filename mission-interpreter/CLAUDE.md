@@ -28,8 +28,14 @@ the plan this subproject was built from, and `docs/concept/MISSION_INTERPRETER.m
   a lossy abstraction over this specific structure for author-only-knowledge filtering purposes;
   `filter/trigrules.py` reads the raw `predicate` field (`c_*`/`a_*`/rule-kind/`"or"`) directly.
   See `mission-interpreter/research/2026-09-12-miz-validation-against-real-sample.md`.
-- No spatial storage, no HTTP server yet (MI-2 adds a `world_model_client.py` HTTP client against
-  world-model's future `src/api/server.py` -- not built yet, see the plan's Decision 2).
+- **World-model seam: HTTP, not in-process (MI-2 decision)**. `src/world_enrich/
+  world_model_client.py`'s `WorldModelClient` is a stdlib-`urllib.request`-only HTTP client against
+  world-model's `src/api/server.py` (`WorldModelAPIServer`) -- mirrors `aircraft-layer` <->
+  `body-layer`'s existing HTTP seam, not `body-layer` <-> `world-model`'s deliberate single
+  in-process exception (see root `CLAUDE.md`'s "Module independence" note). Unlike
+  `aircraft_client.py`'s `get_*` methods, every `WorldModelClient` method raises
+  `WorldModelClientError` on failure -- there is no "world-model not built yet" expected-empty
+  state once this client is called. No spatial storage of its own.
 - No model/LLM involved through MI-1.5 (MI-4 is the first stage that adds one, gated on Decision 3
   in the plan -- model choice/hosting is still open).
 
@@ -82,7 +88,10 @@ mission-interpreter/.venv/bin/pip install "ruff==0.16.5" "mypy==2.3.1" "pytest==
   `CrewAvailableMission` at all.
 - `src/_vendor/` -- third-party code (currently: pydcs's `dcs.lua` parse/serialize subpackage). Not
   our code to edit; see Tech stack above.
-- `src/schema/`, `src/world_enrich/`, `src/synth/` -- future stages (MI-2 onward), not built yet.
+- `src/world_enrich/` -- MI-2, done: `world_model_client.py` (HTTP client), `schema.py` (the
+  parallel `Enriched*` tree), `enrich.py` (`enrich_mission`, the walk that attaches world-model
+  context to route waypoints/group positions/trigger zones).
+- `src/schema/`, `src/synth/` -- future stages (MI-3 onward), not built yet.
 - `tests/` -- parser tests (`test_reader.py`), dictionary-substitution tests (`test_dictionary.py`),
   and the central author-only-knowledge invariant tests (`test_filter.py`).
 - `tests/fixtures/` -- committed synthetic `.miz` fixture builder.
