@@ -245,16 +245,33 @@ task-store instances `CrewConsole` already holds.
    but this is a real architectural fork with different future consequences (synchronous will need
    rework to support true clarifying-question round trips; async needs building now for something
    this milestone doesn't exercise) — flagging rather than treating as settled.
-2. **Model hosting for brain-layer (real decision, new-dependency-class per `AGENTS.md`'s
-   escalation rules).** `division-or-responsibility.md`'s compute topology names Ollama on the Mac
-   as the intended local-first target, and root `CLAUDE.md`/project memory both establish that
-   posture project-wide. Options: (a) local model via Ollama's HTTP API (no new package, matches
-   `body-layer`/`aircraft-layer`'s stdlib-only precedent, but the Mac's actual usable model
-   quality/speed for reliable tool-calling + reference resolution is unverified — no benchmark run
-   yet); (b) a cloud API for this prototype only, explicitly flagged as not the final architecture,
-   to de-risk "is the design even viable" from "is the local model good enough." Not resolving
-   this silently — it changes `brain-layer/`'s dependency footprint and its `CLAUDE.md`'s stated
-   posture either way.
+2. **Model hosting for brain-layer — resolved 2026-09-13: Ollama, local, prioritized over the
+   cloud-API option.** User's explicit reasoning: the Windows(DCS)/Mac(body+brain) machine split
+   exists precisely so DCS and Ollama never have to share a GPU — a cloud API would still work
+   mechanically, but it isn't the point of that topology, so it's deprioritized rather than ruled
+   out (fall back to it only if local proves genuinely unworkable, not as a parallel default).
+   Recommended starting model for this Mac (M1 Max, 32GB unified memory): **Qwen2.5:14b-instruct**
+   (Q4_K_M) for tool-calling/reference-resolution quality, with **Qwen2.5:7b-instruct** or
+   **Llama-3.1:8b-instruct** as faster fallbacks if PB-6's actual latency (Implementation Plan
+   stage 4) proves 14B too slow for the crew-cognition loop — unbenchmarked, an empirical question
+   for PB-6b, not decided here.
+
+   **This project genuinely needs two models, not one** — PB-6's fast runtime model (this plan)
+   and MI-4's more capable mission-interpretation model (`plans/mission-interpreter/plan.md`
+   Decision 3, offline/pre-mission, no runtime-latency pressure) have different size/quality
+   tradeoffs and will very likely be different model weights entirely. **Open sub-question, not
+   resolved here**: does brain-layer run one Ollama instance that **swaps** models between
+   pre-mission (capable model loaded for Mission Interpreter escalation) and in-flight (fast model
+   loaded for PB-6), or does it run **both simultaneously** (keeps the capable model resident for
+   mid-mission escalation to a "senior" reasoning pass, at the cost of both models' memory
+   footprints sharing the same 32GB at once)? This is a real resource-budget question that depends
+   on the two models' actual sizes once MI-4's model choice is also made, and on measuring whether
+   32GB comfortably holds both loaded at once — needs a benchmarking pass on the real Mac before
+   deciding, not a documentation-only call. Flagged as the concrete next step once MI-4's model
+   choice narrows the second model's size, not blocking PB-6a/PB-6b (which only need the one fast
+   model) but directly gating whether PB-6's "senior model escalation" path (explicitly out of
+   scope for this plan, per `PETROBRAIN_RUNTIME.md`'s own separate milestone) can share an Ollama
+   process with PB-6's model or needs its own.
 3. **Grounding-check strictness (chosen: fail-closed/silence on any ungrounded id — see "No-
    omniscience enforcement" above).** Flagging as a decision anyway since it trades a real product
    cost (Petrovich stays silent more often than a looser check would allow) for the safety
