@@ -37,3 +37,11 @@ Key corrections/additions to carry forward, don't re-derive:
   note for full field lists) — no need to re-derive from Hoggit prose again.
 - pydcs was NOT installed in this repo's Python env this session (`pip3 show dcs` → not found) —
   don't assume it's available; check first if a future task wants to cross-validate with it.
+
+Follow-up session 2026-09-12 (same sample): confirmed the player-slot marker is
+`unit["skill"] = "Player"` (or community-claimed `"Client"` in MP, unverified — this SP sample
+only had `"Player"`, count exactly 1, zero `"Client"`). No other field is reliable: `callsign`,
+`onboard_num`, `AddPropAircraft`, group-level `uncontrolled` are all present on AI units too, and
+unit/group `name` containing the string "Player" was coincidental mission-author text, not a
+schema guarantee. Full detail: `mission-interpreter/research/2026-09-12-player-slot-skill-field.md`.
+`Unit` dataclass in `tree.py` needs a `skill: str` field added for MI-3 ownship passthrough.
