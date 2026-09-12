@@ -46,21 +46,24 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   tests pass. Raised while scoping tactical-landmark enrichment for Mission Interpreter — see
   `plans/world-model-tactical-landmarks/plan.md` and `plans/m10-road-junctions/`.
 
-- [ ] **M9 — OSM augmentation (geofabrik) — reopened 2026-09-13.** Re-introduce OSM as an
-  augmentation layer from manually-downloaded offline geofabrik.de per-country extracts instead
-  of M3's live Overpass queries, filling the `nearest_settlement`/`nearest_water`/
-  `inside_settlement` gap M7 leaves `null` theatre-wide, and unlocking settlement *boundary*
-  polygons (DCS only ever gives center points — confirmed no DCS-native alternative exists,
-  `towns.lua` is point-only per a full key-scan). Deferred 2026-09-06 for lack of a downstream
-  consumer; **that consumer now exists** — Mission Interpreter's world-enrichment stage (MI-2,
-  `plans/mission-interpreter/plan.md`) needs settlement-extent reasoning for tactical narrative.
-  **`.osm.pbf` parser decision resolved 2026-09-13: `pyosmium`** (world-model's first
-  native-extension dependency, user-approved over a stdlib hand-roll given the node-ID-resolution
-  complexity the latter would need to solve itself). All 7 country extracts covering the Syria
-  theatre's real-world footprint (Cyprus, Iraq, Israel-and-Palestine, Jordan, Lebanon, Syria,
-  Turkey — `.osm.pbf` format) downloaded to `data/raw/osm/`, gitignored. Not yet implemented.
-  See `plans/m9-osm-geofabrik/plan.md`, `plans/world-model-tactical-landmarks/plan.md`, and
-  `research/2026-09-06-m8-geofabrik-osm-recon.md`.
+- [x] **M9 — OSM augmentation (geofabrik) — done 2026-09-12, merged 2026-09-12.** Re-introduced
+  OSM as an augmentation layer from offline geofabrik.de per-country extracts (`.osm.pbf` format,
+  parsed via `pyosmium`'s C++-backed sparse_mem_array index to handle node-location resolution
+  without Python-side memory blowup). Fills the `nearest_settlement`/`nearest_water`/
+  `inside_settlement` gap M7 leaves `null` theatre-wide and unlocks settlement *boundary* polygons
+  (DCS only ever gives center points). Stages 1-4 complete: (1) theatre bbox derivation and
+  `M9_OSM_RUN_INSTRUCTIONS.md` with exact `osmium-tool` clip/merge commands; (2) `osm/pbf.py`
+  parser, tested against synthetic fixture covering all four classification rules + dangling-node
+  edge case + relation skip; (3) pipeline integration (`osm_pbf_path` parameter on `build_region`,
+  additive alongside `osm_cache_path`, takes precedence); (4) validation against real
+  `syria-260911.osm.pbf` extract (no classification-rule gaps found). Stages 5-6 (full 7-country
+  merge + rebuild) are user-run prerequisites, documented in RUN_INSTRUCTIONS.md per execution-
+  boundary pattern (mirrors M7). Implementation: `src/osm/pbf.py` (new), test coverage
+  `tests/test_osm_pbf.py` + `tests/test_ingest_osm.py` (19 tests for classification logic, first
+  direct coverage of code live since M3), `pyproject.toml` adds `pyosmium` dependency. Design
+  Decision 3 verified: query surface unchanged (both Overpass and pbf paths produce identical
+  `OsmFeatureSet` shape, so `query/describe.py` needs zero changes). Reviewer all-clear. DoD PASSED.
+  See `plans/m9-osm-geofabrik/plan.md`, `plans/m9-osm-geofabrik/review.md`, `plans/m9-osm-geofabrik/dod-check.md`.
 
 ## Backlog (open, unscheduled)
 
