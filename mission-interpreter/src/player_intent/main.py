@@ -10,6 +10,13 @@ No committed MI-3->MI-4->MI-5 CLI chain existed before this stage
 construction sequence `tests/test_synth_live_ollama.py` already uses end
 to end, rather than inventing a second loading convention -- a script,
 not a new subcommand framework, per the plan's own framing.
+
+`--emit-compact PATH` (MI-6, `plans/mi6-runtime-compilation/plan.md`) is
+additive: after `console.run(...)`, if given, the full
+`MissionUnderstanding` is also compiled into the compact
+`RuntimeMissionUnderstanding` and written to that path as JSON. The
+existing unconditional stdout dump of the full `MissionUnderstanding` is
+unchanged by this flag.
 """
 
 from __future__ import annotations
@@ -18,12 +25,15 @@ import argparse
 import dataclasses
 import json
 import sys
+from pathlib import Path
 
 from filter.crew_available import filter_crew_available
 from filter.threat_signals import derive_threat_signals
 from miz.reader import read_miz
 from player_intent.console import PlayerIntentConsole
+from runtime.compile import compile_current_mission
 from schema.build import build_mission_understanding
+from schema.understanding import MissionUnderstanding
 from synth.ollama_client import OllamaClient
 from synth.synthesize import synthesize_mission_understanding
 from world_enrich.enrich import enrich_mission, enrich_threat_signals
@@ -57,6 +67,18 @@ def main(argv: list[str] | None = None) -> None:
     json.dump(dataclasses.asdict(understanding), sys.stdout, indent=2)
     sys.stdout.write("\n")
 
+    if args.emit_compact is not None:
+        write_compact(understanding, args.emit_compact)
+
+
+def write_compact(understanding: MissionUnderstanding, path: Path) -> None:
+    """Compiles `understanding` into a `RuntimeMissionUnderstanding` and
+    writes it to `path` as JSON -- the `--emit-compact` flag's behavior,
+    factored out so it's testable without a live Ollama/world-model pair
+    (see `tests/test_player_intent_main.py`)."""
+    compact = compile_current_mission(understanding)
+    path.write_text(json.dumps(dataclasses.asdict(compact), indent=2))
+
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -78,6 +100,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--ollama-model",
         default=_DEFAULT_OLLAMA_MODEL,
         help=f"Ollama model name (default: {_DEFAULT_OLLAMA_MODEL})",
+    )
+    parser.add_argument(
+        "--emit-compact",
+        type=Path,
+        default=None,
+        help="If given, also compile the runtime-facing "
+        "RuntimeMissionUnderstanding and write it as JSON to this path.",
     )
     return parser.parse_args(argv)
 

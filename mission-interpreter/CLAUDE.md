@@ -159,11 +159,31 @@ mission-interpreter/.venv/bin/pip install "ruff==0.16.5" "mypy==2.3.1" "pytest==
   client), `prompts.py` (system/user message construction + the structured-output JSON schema
   restricting `epistemic_status` to `INFERENCE`/`ASSUMPTION`), `synthesize.py`
   (`synthesize_mission_understanding`, the entry point). See Tech stack above.
+- `src/player_intent/` -- MI-5, done: `questions.py` (`detect_questions`, a pure ambiguity
+  detector), `console.py` (`PlayerIntentConsole`, typed `bool`/`choice`/`free_text` parsing over a
+  `TextIO` pair), `main.py` (`main()`, the MI-1-through-MI-5 CLI entry point).
+- `src/runtime/` -- MI-6, done, the last planned Mission Interpreter stage
+  (`plans/mi6-runtime-compilation/plan.md`): `compact.py` (`RuntimeMissionUnderstanding`, the
+  compact `current_mission` shape, plus `CompactRoutePoint`/`CompactLocation`) and `compile.py`
+  (`compile_current_mission`, a pure deterministic mapping -- no model, no world-model call -- that
+  also reconciles MI-5's `player_intent` answers back into the fields they answered, which nothing
+  upstream does). Two deliberate corrections to `docs/concept/MISSION_INTERPRETER.md`'s
+  `current_mission` example, treat that doc's YAML as superseded by `compact.py`: **no
+  `current_phase` field** -- `phases` (ordered `MissionPhase` boundaries) is emitted instead, since
+  computing a single "current" phase needs a live aircraft-position state engine that doesn't exist
+  yet (`PETROBRAIN_RUNTIME.md`'s own "Runtime mission state" section is explicit about this being a
+  separate, future component). **No `priorities`/`intended_plan` fields** -- neither has a producer
+  anywhere in this pipeline (no schema field, no MI-5 question shape); left undeclared rather than
+  fabricated. `key_locations` is keyed by `ImportantLocation.id`, not a semantic role, since no
+  role classifier exists anywhere in the pipeline. No BL-7 wiring exists yet -- this stage produces
+  the artifact and stops.
 - `tests/` -- parser tests (`test_reader.py`), dictionary-substitution tests (`test_dictionary.py`),
   the central author-only-knowledge invariant tests (`test_filter.py`), world-enrichment tests
-  (`test_enrich.py`), and MI-3's schema/mapping tests (`test_schema_tags.py`,
+  (`test_enrich.py`), MI-3's schema/mapping tests (`test_schema_tags.py`,
   `test_schema_understanding.py` -- the latter's central invariant: no `Tagged` value MI-3 produces
-  is ever `INFERENCE`/`ASSUMPTION`).
+  is ever `INFERENCE`/`ASSUMPTION`), MI-5's `test_player_intent_questions.py`/
+  `test_player_intent_console.py`/`test_player_intent_main.py`, and MI-6's
+  `test_runtime_compile.py`/`test_runtime_compact.py`.
 - `tests/fixtures/` -- committed synthetic `.miz` fixture builder.
 - `research/` -- dated findings from `.miz` format investigation (see root `CLAUDE.md`'s
   "investigator" section). `2026-09-12-miz-validation-against-real-sample.md` is the load-bearing
