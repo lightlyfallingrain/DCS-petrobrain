@@ -100,6 +100,18 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   SRTM range, no elevation-source blocker. Needs an Architect + investigator pass before any
   theatre starts, per this project's standing convention for DCS-internals-uncertain work.
 
+- **Confirm `roadnet/junctions.py` memory/timing behavior against a real completed `syria-full` build.**
+  Raised 2026-09-12 during the OSM streaming-ingest memory audit (`plans/osm-streaming-ingest/plan.md`
+  addendum). M10's junction detector loads the *entire* `"road"` feature layer into memory
+  (`store.reader.all_features`) — once M9's OSM ingest is included, that layer is DCS `.routes` +
+  OSM `highway` ways combined, not `.routes` alone, which is a different (larger, unmeasured)
+  population than the one real data point this stage has ever run against (`latakia-20km`, DCS
+  roads only: 3,266 roads / 162K endpoints+interior vertices). Linear extrapolation to `syria-full`'s
+  reported 14,833 roads (~700K vertices) suggests this is still fine, but that is extrapolation, not
+  a measurement — confirm with real `JunctionIngestStats`/timing the next time a `syria-full` build
+  (with OSM roads folded in) actually completes through Stage 5. No fix needed unless that
+  confirmation finds a real problem.
+
 - **Incremental per-layer pipeline builds.** `build_region` deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. Wanted: run individual pipeline sections (roads only, elevation only, validation only) and *add* that data into an existing store — staged builds, partial re-runs when debugging a single layer. Raised during M7 DoD acceptance testing (2026-09-06), explicitly considered for M8 and dropped from it to keep that milestone scoped to the probe store. M9 (OSM) would also benefit — see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` and `src/build/pipeline.py`'s `build_region`.
 
 Not doing yet (see concept doc "Things Not To Do Yet"): Petrovich dialogue, speech, embeddings, screenshot interpretation, full-theatre processing, elaborate distributed architecture. Threat-level-driven contact reporting/prioritization (`../docs/concept/threat-levels.md`) is deferred further still — runtime layer, needs contact memory + attention model (PB-2/PB-4) first.
