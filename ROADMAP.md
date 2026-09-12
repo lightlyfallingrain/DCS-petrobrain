@@ -14,8 +14,8 @@ Three layers, each a separate subproject with an explicit interface:
 1. **World Model** (`world-model/`) — persistent geographic knowledge of a DCS theatre (roads,
    settlements, terrain, elevation), built offline from DCS-derived data + external DEM/OSM
    augmentation. DCS geometry is always authoritative.
-2. **Mission Interpreter** — understands one specific mission (`.miz` + briefing + world model +
-   player intent), offline/pre-mission. Not started yet.
+2. **Mission Interpreter** (`mission-interpreter/`) — understands one specific mission (`.miz` +
+   briefing + world model + player intent), offline/pre-mission. MI-0–MI-5 done; MI-6 in progress.
 3. **Body Layer / Petrobrain Runtime** (`body-layer/`, fed by `aircraft-layer/`) — low-latency
    runtime crew cognition: perception, episodic/working memory, attention, dialogue. Memory is
    explicit application state, never LLM chat history.
@@ -30,7 +30,7 @@ Per-layer design docs (status: draft/provisional): `docs/concept/WORLD_MODEL_BUI
 | World Model | **M0–M10 done, all query surfaces (settlement boundaries, road junctions, LOS) serving Mission Interpreter via HTTP.** `syria-full` rebuild with M9 OSM + M10 junctions in progress on the user's Windows box as of 2026-09-13. Multi-theatre support (Afghanistan/Caucasus/Kola) is backlog, needed soonish — architecture already generalizes (per-theatre registries), Kola has a real elevation-source gap (SRTM has no coverage above 60°N). | [`world-model/ROADMAP.md`](world-model/ROADMAP.md) |
 | Aircraft Layer | **Core done, merged 2026-09-07.** DCS I/O pipeline (telemetry, world objects, Petrovich indication text, text-overlay write channel) live and stable. A few small tuning items open. | [`aircraft-layer/ROADMAP.md`](aircraft-layer/ROADMAP.md) |
 | Body Layer | **In progress — BL-6 done, tool-set frozen.** Contact memory, classification, world enrichment, attention/events, the deterministic tool API (now frozen at twelve tools as of BL-6, moved from the originally-planned BL-7), text-mode crew interaction, and Petrovich command/verification (`scan_area`/`get_task_status`/`cancel_task`, BL-6, merged 2026-09-11) are all built and merged. Live-DCS acceptance of BL-6's new aircraft-layer effector is the user's own deferred follow-up. | [`body-layer/ROADMAP.md`](body-layer/ROADMAP.md) |
-| Mission Interpreter | **In progress.** MI-0, MI-1, MI-1.5, MI-2, MI-3, and MI-4 (capable-model synthesis with `qwen3:14b`, merged 2026-09-12) all done. MI-5 (player questions, text console MVP) next, unblocked by Decision 4. | [`mission-interpreter/ROADMAP.md`](mission-interpreter/ROADMAP.md) |
+| Mission Interpreter | **MI-0–MI-5 done.** MI-0, MI-1, MI-1.5, MI-2, MI-3, MI-4 (capable-model synthesis with `qwen3:14b`, merged 2026-09-12), and MI-5 (player questions, text console MVP, merged 2026-09-12) complete. MI-6 (runtime compilation) next. | [`mission-interpreter/ROADMAP.md`](mission-interpreter/ROADMAP.md) |
 
 ## Keeping this current
 
