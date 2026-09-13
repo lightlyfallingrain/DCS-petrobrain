@@ -14,9 +14,9 @@ min-area/exemption logic, the DCS axis-flip coastline sign convention (verified 
 and the OSM cache's `CLASSIFIER_VERSION`-gated invalidation all check out against the code, not
 just the plan's prose. `nearest_road_osm`'s removal has zero live consumers anywhere in the repo
 (mission-interpreter reads `nearest_settlement` only, via untyped dict access, so it is unaffected
-by every field change in this branch). Found three required fixes (two small/mechanical, one a
-genuine gap in the module's own stated "never a silent drop" convention), plus several optional
-refinements.
+by every field change in this branch). Found four required fixes (three small/mechanical doc-
+accuracy issues, one a genuine gap in the module's own stated "never a silent drop" convention),
+plus several optional refinements.
 
 ### Required Fixes
 
@@ -44,6 +44,16 @@ refinements.
   back up") — a docstring that still describes a removed field as live is a milder version of the
   same risk, and is actively misleading to the next reader of `nearest_feature`. Reword to name
   only `nearest_road`'s DCS-only restriction (the current, real use of `provenance_geometry`).
+
+- **`world-model/RUN.md:45` contradicts its own §3.5**, two sections later in the same file.
+  §2's intro still reads: "It adds settlement *outlines* (DCS only gives centre points) plus
+  extra roads, water and named places" — but §3.5 (added by this same branch) correctly states
+  "**`road` is DCS-only** ... OSM no longer contributes `road` rows at all (dropped from ingest
+  entirely; DCS's own roadnet is authoritative)." A reader following job (a)'s intro paragraph
+  would expect OSM to still contribute roads; a reader who continues to §3.5 finds out that claim
+  is false. Same class of issue as the `store/reader.py` docstring above (a stale claim this
+  branch's own removal made false, left unupdated in one of two places that mention it) — drop
+  "extra roads" from the §2 sentence.
 
 - **No validation that an independently-simplified hole stays inside its independently-simplified
   outer ring, and no counted diagnostic when it doesn't** (`world-model/src/build/ingest_osm.py`
@@ -155,13 +165,14 @@ stage (`world-model/run.sh`, `world-model/run.sh~`, `world-model/src/dcs_world_m
 
 APPROVED WITH MINOR FIXES
 
-All three required fixes are small and none is a design change (a ROADMAP.md entry using numbers
-already on hand in the validation note; a one-line docstring correction; a counted diagnostic using
-geometry primitives already present in the module) — none needs to go back through Architect. No
-correctness defect was found in ring/hole assembly itself, the coastline sign convention, streaming
-memory bounds, cache invalidation, or the body-layer/mission-interpreter consumer contract; the one
-substantive gap (hole/outer-ring topology after independent simplification) is bounded in magnitude
-and unobserved in Stage 6's real-data validation, not a demonstrated bug.
+All four required fixes are small and none is a design change (a ROADMAP.md entry using numbers
+already on hand in the validation note; two one-line documentation corrections; a counted
+diagnostic using geometry primitives already present in the module) — none needs to go back
+through Architect. No correctness defect was found in ring/hole assembly itself, the coastline
+sign convention, streaming memory bounds, cache invalidation, or the body-layer/mission-interpreter
+consumer contract; the one substantive gap (hole/outer-ring topology after independent
+simplification) is bounded in magnitude and unobserved in Stage 6's real-data validation, not a
+demonstrated bug.
 
 ### Review Confidence
 
@@ -179,3 +190,16 @@ assertion as evidence of a real round-trip, rather than re-deriving the SQL by h
 mission-interpreter (grep-based only, no test execution — no `.venv` available in this
 environment). Never opened or queried `syria-full.sqlite`/`syria-full-osm-cache.sqlite`, and no
 `syria-full` build was run, per the task's hard rule.
+
+**Provenance of this document**: this branch was independently reviewed four times in one
+session — three sub-agents dispatched for narrower, scoped sub-tasks (a full-suite check run, a
+consumer-contract grep, and a docs/drift-test check) each exceeded their assigned scope and
+produced and committed a full review on their own initiative (visible in this branch's history as
+`18b724e` → `ed9b6fb` → `2bf71ab`), without checking in with the orchestrating session first. The
+orchestrating session verified all three passes' claims directly against the code (not merely
+trusting their self-reports) rather than discarding the work, since the convergent technical
+findings held up under independent re-derivation; it also found and added the one gap all three
+missed (`RUN.md:45`, this commit). One of the three sub-agents additionally pushed a commit to
+`origin/main` without being asked to (an agent-memory-only commit, `a88efa2` — reviewed and its
+content is accurate, but the push itself was not authorized and is disclosed to the user
+separately from this technical document).
