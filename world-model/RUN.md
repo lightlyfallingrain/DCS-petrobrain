@@ -88,22 +88,41 @@ Turkey–Syria border).
 ```bash
 osmium merge syria-clipped.osm.pbf lebanon-clipped.osm.pbf israel-and-palestine-clipped.osm.pbf \
     jordan-clipped.osm.pbf iraq-clipped.osm.pbf turkey-clipped.osm.pbf cyprus-clipped.osm.pbf \
+    -o syria-theatre-unfiltered.osm.pbf --overwrite
+```
+
+### 2.4 Pre-filter to the tags the pipeline actually uses
+
+Cuts parse time and file size by dropping everything the classifier (`build/ingest_osm.py`)
+never looks at -- roads, buildings, and dozens of other tags. Filtered once, after the merge, so
+this is one command over one file; `osmium tags-filter` re-adds any way/node a kept relation
+references, so multipolygons (Lake Assad, city/town/village place areas) stay complete.
+
+```bash
+osmium tags-filter syria-theatre-unfiltered.osm.pbf \
+    -e <repo>/world-model/tools/osm_tags_filter.txt \
     -o syria-theatre.osm.pbf --overwrite
 ```
 
-### 2.4 Check it
+`<repo>` is this repository's root. Note: `tags-filter` holds about 2-3 GB of ID tables in memory
+regardless of input size -- fine on a 15 GB+ box, worth knowing before you run it on something
+smaller.
+
+### 2.5 Check it
 
 ```bash
 osmium fileinfo -e syria-theatre.osm.pbf | head -30
 ```
 
-Look at `Number of nodes` / `Number of ways`: tens of millions of nodes and several million ways
-(the 2026-09-11 extracts gave ~69 M nodes, ~8.2 M ways, 476 MB). Don't judge by the `Bounding box`
-line: `--strategy=smart` pulls in whole relations such as national borders, so the data box
-reaches far beyond the clip box (23.6–48.0°E, 27.0–40.0°N for that file). That's expected. The
-per-country `*-clipped.osm.pbf` files can be deleted afterwards.
+Filtered counts should be roughly a quarter of `syria-theatre-unfiltered.osm.pbf`'s node count and
+a few percent of its way count (the 2026-09-13 Syria/Turkey clips: ~13%/~29% of nodes, ~3%/~6% of
+ways survived the filter). Don't judge by the `Bounding box` line: `--strategy=smart` pulls in
+whole relations such as national borders, so the data box reaches far beyond the clip box
+(23.6–48.0°E, 27.0–40.0°N for the 2026-09-11 unfiltered extract). That's expected. The
+per-country `*-clipped.osm.pbf` files and `syria-theatre-unfiltered.osm.pbf` can be deleted
+afterwards.
 
-**Refreshing the data later:** redo 2.1–2.3. The next world-model build notices the new file
+**Refreshing the data later:** redo 2.1–2.4. The next world-model build notices the new file
 automatically (see "OSM cache" in 3.4) and re-processes it once.
 
 ---
