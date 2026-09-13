@@ -32,6 +32,14 @@ next call, and a kind with no template (`CONTACT_ATTENTION_CHANGED`, see
 `speech.py`) is harmlessly re-checked and re-skipped every poll rather than
 needing its own suppression bookkeeping here.
 
+**`handle_f10_command`.** `plans/f10-crew-commands/plan.md`'s second,
+non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
+loop drains player-selected DCS F10 radio-menu tokens
+(`aircraft_client.get_f10_commands`) and dispatches each one here, through
+the same `_print` funnel `handle_line`/`drain_events` already use --
+`CrewConsole` has no separate "what F10 says" path to keep in sync with
+what typed/spoken output produces.
+
 **`!inject-urgent <contact_id> <text...>`.** Stage 5's manual bypass_gate
 proof (the plan's accepted decision: no real threat-detection channel
 exists yet, so this is a clearly-labelled test harness, not a production
@@ -60,7 +68,8 @@ from belief.speech import (
     render_readback,
     route_event,
 )
-from belief.tools import set_attention
+from belief.tasks import TaskStore
+from belief.tools import cancel_task, get_contacts, set_attention
 from belief.utterance import PartialParse, PlayerUtterance, parse_utterance
 
 #: Printed once at session startup (`logger.py`'s `main()`), mirroring
@@ -119,6 +128,15 @@ class CrewConsole:
     #: player-facing scan command has a client to reach for without a
     #: second wiring pass through `logger.py`.
     aircraft_client: AircraftLayerClient | None = None
+    #: BL-6's `belief.tasks.TaskStore` (`plans/f10-crew-commands/plan.md`,
+    #: mirroring `aircraft_client`'s own reserved-field pattern above) --
+    #: `handle_f10_command`'s `cancel_task` handler is this field's first
+    #: reader. `logger.py`'s `--crew-text` branch wires this to the same
+    #: `ConsolePerceptionRunner.tasks` instance its poll loop already
+    #: ticks (`TaskStore.tick`), the same store `--console`'s `Console.
+    #: tasks` reads/mutates. `None` (the default) means the F10 "Cancel
+    #: Task" item always reports "no pending task" rather than raising.
+    tasks: TaskStore | None = None
     #: In-cockpit text overlay mirror (`plans/overlay-speech-callouts/
     #: plan.md`), mirroring `logger.ConsolePerceptionRunner.overlay_client`'s
     #: None-means-no-op pattern exactly. **Deliberately a separate field
@@ -159,6 +177,100 @@ class CrewConsole:
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
         self._print(spoken, bypass_gate=False)
         return spoken
+
+    def handle_f10_command(self, token: str, now_sim: float) -> list[str]:
+        """Dispatches one player-selected F10 radio-menu token (`plans/
+        f10-crew-commands/plan.md`) -- `logger.py`'s `--crew-text
+        --f10-commands` poll loop calls this once per token drained from
+        `aircraft_client.get_f10_commands`, the same post-`drain_events`
+        hook point as every other spoken-output path. A fixed dispatch
+        table of three verbs; an unrecognized token returns `[]` without
+        printing anything -- aircraft-layer's `F10CommandReceiver` already
+        filters to its own `ALLOWED_COMMANDS`, so this branch is
+        defensive, not a real path in practice."""
+        if token == "watch_nearest":
+            lines = self._handle_watch_nearest(now_sim)
+        elif token == "scan_forward":
+            lines = self._handle_scan_forward()
+        elif token == "cancel_task":
+            lines = self._handle_cancel_task()
+        else:
+            return []
+        self._print(lines)
+        return lines
+
+    def _nearest_contact_id(self, now_sim: float) -> str | None:
+        """The currently-nearest contact by range, for the F10 "Watch
+        Nearest" item. New glue logic, not a rediscovery of existing
+        selection logic -- `belief.tools`/`belief.attention` have no
+        "nearest by range" helper today, only `_highest_attention_contact`'s
+        attention-tier-then-phase selection, a different question. Requires
+        `self.enrichment` (range comes from `facts["relative_now"]
+        ["range_m"]`, BL-3) -- returns `None` when it is unset or no
+        contact has a resolvable range."""
+        if self.enrichment is None:
+            return None
+        nearest_id: str | None = None
+        nearest_range_m: float | None = None
+        for result in get_contacts(self.store, now_sim, enrichment=self.enrichment):
+            relative_now = result["facts"].get("relative_now")
+            if not isinstance(relative_now, dict):
+                continue
+            range_m = relative_now.get("range_m")
+            if not isinstance(range_m, float):
+                continue
+            if nearest_range_m is None or range_m < nearest_range_m:
+                contact_id = result["facts"]["id"]
+                assert isinstance(contact_id, str)
+                nearest_range_m = range_m
+                nearest_id = contact_id
+        return nearest_id
+
+    def _handle_watch_nearest(self, now_sim: float) -> list[str]:
+        contact_id = self._nearest_contact_id(now_sim)
+        if contact_id is None:
+            return ["no contact to watch"]
+        found = set_attention(self.store, contact_id, "watch", source="player")
+        if not found:
+            return [f"no such contact: {contact_id}"]
+        return [render_readback("watch", contact_id).text]
+
+    def _handle_scan_forward(self) -> list[str]:
+        """The bare AI-Wheel trigger (`aircraft_client.
+        trigger_petrovich_search("forward")`), not `belief.tools.
+        scan_area` -- `scan_area`'s full form needs real geometry and a
+        real justification an F10 button cannot supply (plan Decision 3);
+        fabricating placeholder values for those fields would be exactly
+        the kind of invented-not-derived body behavior this project's
+        brief warns against."""
+        if self.aircraft_client is None:
+            return ["no aircraft-layer connection configured"]
+        try:
+            self.aircraft_client.trigger_petrovich_search("forward")
+            return ["scanning forward"]
+        except AircraftLayerError:
+            logger.warning(
+                "F10 scan-forward trigger failed (continuing)", exc_info=True
+            )
+            return ["scan trigger failed"]
+
+    def _handle_cancel_task(self) -> list[str]:
+        """Cancels the most-recently-created still-`pending` task in
+        `self.tasks`, regardless of source (plan Decision 3) -- since
+        `_handle_scan_forward` above deliberately never creates a
+        `PendingIntent`, and `--crew-text` mode has no other command path
+        that creates one either, this currently always reports "no
+        pending task" in practice; kept anyway since it becomes real the
+        moment any future command path creates one while running in
+        `--crew-text` mode (see the plan's Risks note)."""
+        if self.tasks is None:
+            return ["no pending task"]
+        pending = [task for task in self.tasks.tasks if task.status == "pending"]
+        if not pending:
+            return ["no pending task"]
+        task = pending[-1]  # most recently created (TaskStore.tasks is insertion order)
+        cancel_task(self.store, self.tasks, task.id)
+        return [f"cancelled task {task.id}"]
 
     def _new_utterance_id(self) -> str:
         self._next_utterance_number += 1
