@@ -128,6 +128,51 @@ def all_features(
     return [_row_to_feature(row) for row in conn.execute(query, params)]
 
 
+def feature_layer_bbox(
+    conn: sqlite3.Connection, kinds: list[str] | None = None
+) -> tuple[float, float, float, float] | None:
+    """Return the overall `(min_x, max_x, min_z, max_z)` bbox spanning every
+    feature of one of `kinds` (or all kinds), via one `feature_bbox` R*Tree
+    aggregate query -- `None` if no such feature exists. No row
+    materialization: this is a `MIN`/`MAX` aggregate, not a feature scan.
+
+    Used by `build.ingest_junctions.ingest_junctions_streaming` to determine
+    which spatial chunks actually need visiting: `build.ingest_roadnet`'s
+    own docstring notes a route with *any* point inside the built region's
+    bbox is stored with its full, unclipped geometry, so a `road` feature's
+    vertices can extend well outside the nominal region rectangle -- walking
+    chunks over the region's own bbox alone can silently miss real vertices
+    (and therefore real junctions) that live outside it but are still
+    store-resident. Walking chunks over this function's result instead
+    guarantees every stored vertex is visited by some chunk."""
+    query = "SELECT MIN(fb.min_x), MAX(fb.max_x), MIN(fb.min_z), MAX(fb.max_z) "
+    query += "FROM feature_bbox fb"
+    params: list[object] = []
+    if kinds is not None:
+        placeholders = ",".join("?" for _ in kinds)
+        query += f" JOIN feature f ON f.id = fb.id WHERE f.kind IN ({placeholders})"
+        params.extend(kinds)
+    row = conn.execute(query, params).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return float(row[0]), float(row[1]), float(row[2]), float(row[3])
+
+
+def count_features(conn: sqlite3.Connection, kinds: list[str] | None = None) -> int:
+    """Return the count of features of one of `kinds` (or all kinds), without
+    materializing any rows -- for stats/census callers (e.g.
+    `build.ingest_junctions.ingest_junctions_streaming`'s `roads_scanned`)
+    that only need a total, not the actual feature list."""
+    query = "SELECT COUNT(*) FROM feature"
+    params: list[object] = []
+    if kinds is not None:
+        placeholders = ",".join("?" for _ in kinds)
+        query += f" WHERE kind IN ({placeholders})"
+        params.extend(kinds)
+    row = conn.execute(query, params).fetchone()
+    return int(row[0])
+
+
 def features_in_bbox(
     conn: sqlite3.Connection,
     kinds: list[str] | None,

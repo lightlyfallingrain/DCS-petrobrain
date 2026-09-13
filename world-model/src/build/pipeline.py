@@ -56,7 +56,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from build.ingest_beacons import BeaconIngestStats, ingest_beacons
-from build.ingest_junctions import JunctionIngestStats, ingest_junctions
+from build.ingest_junctions import (
+    JunctionIngestStats,
+    ingest_junctions_streaming,
+)
 from build.ingest_osm import (
     CLASSIFIER_VERSION,
     OsmIngestStats,
@@ -108,7 +111,7 @@ from probe_store.writer import (
 from roadnet.junctions import DEFAULT_JUNCTION_MIN_DEGREE, DEFAULT_JUNCTION_TOLERANCE_M
 from store.chunks import CHUNK_SIZE_M
 from store.models import Region, Source
-from store.reader import all_features, load_full_grid, load_only_region
+from store.reader import load_full_grid, load_only_region
 from store.schema import SCHEMA_VERSION as BASE_SCHEMA_VERSION
 from store.schema import check_schema_version
 from store.writer import (
@@ -227,10 +230,15 @@ def build_region(
     junction detection stage, which runs unconditionally whenever the
     roadnet stage actually ran (`not report.roadnet_skipped`) -- it needs no
     path parameter of its own because it reads back the `road` features that
-    stage just inserted (`store.reader.all_features`), the same read-back
-    pattern the terrain stage already uses for the probe grid it just wrote.
-    See `roadnet.junctions`'s module docstring for the clustering/degree
-    design and Stage 2's real-data validation numbers.
+    stage just inserted, chunk by chunk
+    (`build.ingest_junctions.ingest_junctions_streaming`, per
+    `plans/junctions-streaming-fix/plan.md`), the same read-back pattern the
+    terrain stage already uses for the probe grid it just wrote -- just
+    bounded to one spatial tile's worth of features at a time rather than
+    the whole `road` layer in one `store.reader.all_features` call, since a
+    `syria-full`-scale combined DCS+OSM road layer OOM'd the old whole-layer
+    approach. See `roadnet.junctions`'s module docstring for the
+    clustering/degree design and Stage 2's real-data validation numbers.
 
     `srtm_tile_paths` (M7 Stage 2), if given and non-empty, ingests SRTM as
     the region's **primary** `elevation` grid (`provenance="srtm"`,
@@ -532,16 +540,35 @@ def build_region(
 
         if not report.roadnet_skipped:
             with _stage("road junctions", 5):
-                roads = all_features(conn, ["road"])
-                junction_features, junction_stats = ingest_junctions(
-                    roads,
+                # Streams one chunk-of-`store.chunks.CHUNK_SIZE_M` at a time
+                # rather than loading the whole `road` layer into memory --
+                # see `build.ingest_junctions.ingest_junctions_streaming`'s
+                # docstring and `plans/junctions-streaming-fix/plan.md`. Each
+                # chunk's features are inserted (one SQLite transaction per
+                # chunk, not one atomic transaction for the whole stage) into
+                # one running `JunctionIngestStats` shared by every chunk --
+                # safe for the same reason the OSM streaming fix's per-batch
+                # commits are safe: `open_for_build` always
+                # deletes-and-recreates `out_path` from scratch, so a crash
+                # mid-stage just means the next build starts over, never a
+                # stale-partial-data hazard.
+                junction_stats = JunctionIngestStats(
+                    roads_scanned=0,
+                    clusters_found=0,
+                    junctions_kept=0,
+                    degree_histogram={},
+                )
+                for chunk_features in ingest_junctions_streaming(
+                    conn,
+                    region,
                     roadnet_source_id,
+                    junction_stats,
                     tolerance_m=junction_tolerance_m,
                     min_degree=junction_min_degree,
-                )
-                insert_features(conn, junction_features)
-                for f in junction_features:
-                    report.feature_counts[f.kind] += 1
+                ):
+                    insert_features(conn, chunk_features)
+                    for f in chunk_features:
+                        report.feature_counts[f.kind] += 1
                 report.junction_stats = junction_stats
         else:
             report.junction_skipped = True

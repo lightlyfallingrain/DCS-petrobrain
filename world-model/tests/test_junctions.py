@@ -18,9 +18,12 @@ import pytest
 from roadnet.junctions import (
     DEFAULT_JUNCTION_MIN_DEGREE,
     DEFAULT_JUNCTION_TOLERANCE_M,
+    collect_endpoints,
+    collect_interior_vertices,
     extract_clusters,
     to_stored_features,
 )
+from store.chunks import chunk_bounds, chunks_covering
 from store.models import StoredFeature
 
 _TOLERANCE_M = 0.5
@@ -153,6 +156,124 @@ def test_near_miss_pair_is_not_clustered() -> None:
     assert features == []
 
 
+def test_vertex_bbox_none_matches_pre_fix_behaviour() -> None:
+    # Default (no vertex_bbox) must be byte-for-byte identical to calling
+    # the collectors with no filtering argument at all -- this is the
+    # regression guarantee the whole junctions-streaming-fix plan depends
+    # on for the existing bulk path.
+    roads = [
+        _road(1, [(0.0, 0.0), (100.0, 0.0)]),
+        _road(2, [(0.0, 0.0), (-100.0, 0.0)]),
+        _road(3, [(-50.0, 0.0), (0.0, 0.0), (50.0, 0.0)]),
+    ]
+
+    assert collect_endpoints(roads, vertex_bbox=None) == collect_endpoints(roads)
+    assert collect_interior_vertices(
+        roads, vertex_bbox=None
+    ) == collect_interior_vertices(roads)
+    assert extract_clusters(roads, tolerance_m=_TOLERANCE_M, vertex_bbox=None) == (
+        extract_clusters(roads, tolerance_m=_TOLERANCE_M)
+    )
+
+
+def test_vertex_bbox_drops_vertex_outside_box() -> None:
+    # A vertex outside vertex_bbox is dropped even though it would otherwise
+    # cluster with another vertex.
+    roads = [
+        _road(1, [(0.0, 0.0), (100.0, 0.0)]),
+        _road(2, [(0.0, 0.0), (-100.0, 0.0)]),
+    ]
+
+    # Box excludes the origin entirely -- neither endpoint at (0,0) survives.
+    endpoints = collect_endpoints(roads, vertex_bbox=(10.0, 20.0, 10.0, 20.0))
+    assert endpoints == []
+
+    clusters = extract_clusters(
+        roads, tolerance_m=_TOLERANCE_M, vertex_bbox=(10.0, 20.0, 10.0, 20.0)
+    )
+    assert clusters == []
+
+
+def test_vertex_bbox_boundary_is_inclusive() -> None:
+    # A vertex exactly on vertex_bbox's edge is kept (inclusive filtering) --
+    # over-inclusion at a padded tile boundary is the safe direction; the
+    # downstream centroid-ownership filter is what must be exact.
+    roads = [_road(1, [(10.0, 0.0), (0.0, 0.0)])]
+
+    endpoints = collect_endpoints(roads, vertex_bbox=(0.0, 10.0, 0.0, 10.0))
+    assert len(endpoints) == 2  # both (10.0, 0.0) and (0.0, 0.0) kept
+
+    interior_roads = [_road(1, [(-10.0, 0.0), (0.0, 0.0), (10.0, 0.0)])]
+    interior = collect_interior_vertices(
+        interior_roads, vertex_bbox=(0.0, 0.0, 0.0, 0.0)
+    )
+    assert len(interior) == 1  # the interior vertex sits exactly at (0,0)
+
+
+def test_chunked_clustering_matches_monolithic_clustering() -> None:
+    """Synthetic multi-chunk regression: roads placed across 3 distinct
+    5000m-scale tiles, including one junction deliberately placed within
+    padding distance of a tile boundary, must produce the exact same
+    cluster set whether clustered in one monolithic pass or per-padded-tile
+    with centroid-ownership filtering -- the correctness claim
+    `build.ingest_junctions.ingest_junctions_streaming` depends on."""
+    chunk_size_m = 5000.0
+    tolerance_m = _TOLERANCE_M
+    padding_m = max(tolerance_m * 10.0, 10.0)
+
+    roads = [
+        # Interior-of-tile 4-way junction, well inside chunk (0, 0).
+        _road(1, [(1000.0, 1000.0), (1100.0, 1000.0)]),
+        _road(2, [(1000.0, 1000.0), (900.0, 1000.0)]),
+        _road(3, [(1000.0, 1000.0), (1000.0, 1100.0)]),
+        _road(4, [(1000.0, 1000.0), (1000.0, 900.0)]),
+        # A 3-way junction deliberately placed 2m from the x=5000 boundary
+        # between chunk (0, 0) and chunk (1, 0) -- well within padding_m of
+        # that boundary, so both chunks' padded regions see it, and only
+        # centroid-ownership decides who keeps it.
+        _road(5, [(4998.0, 2000.0), (4900.0, 2000.0)]),
+        _road(6, [(4998.0, 2000.0), (5000.0 + 100.0, 2000.0)]),
+        _road(7, [(4998.0, 2000.0), (4998.0, 2100.0)]),
+        # Interior-of-tile junction far away in a third chunk (0, 2).
+        _road(8, [(2000.0, 11000.0), (2100.0, 11000.0)]),
+        _road(9, [(2000.0, 11000.0), (1900.0, 11000.0)]),
+        _road(10, [(2000.0, 11000.0), (2000.0, 11100.0)]),
+    ]
+
+    monolithic = extract_clusters(roads, tolerance_m=tolerance_m)
+    monolithic_centroids = sorted(c.centroid for c in monolithic)
+
+    region_bbox = (0.0, 15000.0, 0.0, 15000.0)
+    chunked_clusters = []
+    for ix, iz in chunks_covering(region_bbox, chunk_size_m):
+        core = chunk_bounds(ix, iz, chunk_size_m)
+        padded = (
+            core[0] - padding_m,
+            core[1] + padding_m,
+            core[2] - padding_m,
+            core[3] + padding_m,
+        )
+        # `vertex_bbox` alone determines which vertices actually participate
+        # in this tile's clustering -- no separate road-level pre-filter is
+        # needed for this pure-geometry test (a real store query would add
+        # one, `store.reader.features_in_bbox`, purely as an I/O
+        # optimization that must not change the result).
+        clusters = extract_clusters(roads, tolerance_m=tolerance_m, vertex_bbox=padded)
+        owned = [
+            c
+            for c in clusters
+            if core[0] <= c.centroid[0] < core[1] and core[2] <= c.centroid[1] < core[3]
+        ]
+        chunked_clusters.extend(owned)
+
+    chunked_centroids = sorted(c.centroid for c in chunked_clusters)
+    assert chunked_centroids == monolithic_centroids
+    assert len(chunked_clusters) == 3
+    assert len(monolithic) == 3
+    assert sorted(c.degree for c in monolithic) == [3, 3, 4]
+    assert sorted(c.degree for c in chunked_clusters) == [3, 3, 4]
+
+
 def test_source_id_and_default_position_uncertainty_are_plumbed() -> None:
     roads = [
         _road(1, [(0.0, 0.0), (100.0, 0.0)]),
@@ -196,6 +317,88 @@ def test_latakia_20km_regression_baseline() -> None:
     assert len(roads) == 3266
     assert len(clusters) == _LATAKIA_CLUSTER_COUNT
     assert len(features) == _LATAKIA_JUNCTION_COUNT
+
+
+@pytest.mark.skipif(
+    not _LATAKIA_STORE_PATH.exists(),
+    reason="latakia-20km.sqlite not present in this environment (gitignored "
+    "world-model data) -- the chunked-vs-bulk comparison cannot be "
+    "established here.",
+)
+def test_latakia_20km_chunked_streaming_matches_bulk() -> None:
+    """junctions-streaming-fix regression: the chunked streaming ingest path
+    (`build.ingest_junctions.ingest_junctions_streaming`) must produce the
+    exact same junction population as the bulk `ingest_junctions` path
+    against real (if modest-scale) road geometry, not just a synthetic
+    fixture."""
+    from build.ingest_junctions import JunctionIngestStats, ingest_junctions_streaming
+    from build.region import RegionDefinition
+    from store.reader import all_features
+
+    conn = sqlite3.connect(f"file:{_LATAKIA_STORE_PATH}?mode=ro", uri=True)
+    try:
+        # `latakia-20km.sqlite` is a pre-M7 fixture whose `region` table
+        # predates the rectangular half_extent_x_m/half_extent_z_m schema
+        # (still the single-column `half_extent_m` -- see
+        # `store.reader.load_only_region`'s docstring/schema, which this
+        # fixture no longer matches). Read the raw row directly rather than
+        # via `load_only_region`, and treat it as the square region it is.
+        theatre, centre_x, centre_z, half_extent_m = conn.execute(
+            "SELECT theatre, centre_x, centre_z, half_extent_m FROM region LIMIT 1"
+        ).fetchone()
+        region = RegionDefinition.square(
+            theatre=theatre,
+            name="latakia-20km",
+            centre_x=centre_x,
+            centre_z=centre_z,
+            half_extent_m=half_extent_m,
+        )
+
+        roads = all_features(conn, ["road"])
+        bulk_clusters = extract_clusters(
+            roads, tolerance_m=DEFAULT_JUNCTION_TOLERANCE_M
+        )
+        bulk_features = to_stored_features(
+            bulk_clusters, source_id=None, min_degree=DEFAULT_JUNCTION_MIN_DEGREE
+        )
+
+        stats = JunctionIngestStats(
+            roads_scanned=0, clusters_found=0, junctions_kept=0, degree_histogram={}
+        )
+        streamed_features: list[StoredFeature] = []
+        for chunk_features in ingest_junctions_streaming(
+            conn,
+            region,
+            None,
+            stats,
+            tolerance_m=DEFAULT_JUNCTION_TOLERANCE_M,
+            min_degree=DEFAULT_JUNCTION_MIN_DEGREE,
+        ):
+            streamed_features.extend(chunk_features)
+    finally:
+        conn.close()
+
+    def _content(f: StoredFeature) -> tuple[object, ...]:
+        # `source_ref` (a per-batch "junction_{index}" label) and `id` are
+        # deliberately excluded -- the streaming path assigns indices/ids
+        # per chunk, not per the whole theatre, so they legitimately differ
+        # from the bulk path's numbering even for an identical junction.
+        return (
+            f.kind,
+            f.geom_type,
+            f.geometry[0],
+            f.tags["degree"],
+            tuple(sorted(f.tags["connecting_road_ids"])),
+            tuple(sorted(f.provenance.items())),
+            tuple(sorted(f.confidence.items())),
+            f.position_uncertainty_m,
+        )
+
+    streamed_content = sorted(_content(f) for f in streamed_features)
+    bulk_content = sorted(_content(f) for f in bulk_features)
+    assert streamed_content == bulk_content
+    assert len(streamed_features) == len(bulk_features) == _LATAKIA_JUNCTION_COUNT
+    assert stats.junctions_kept == _LATAKIA_JUNCTION_COUNT
 
 
 # Filled in by Stage 2's real measurement run against `latakia-20km`'s 3,266

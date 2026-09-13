@@ -63,11 +63,24 @@ deduplicating arms by outgoing bearing before counting degree), which is a
 change to the arm-counting rule itself, not a threshold tune, and is left as
 backlog rather than attempted in this pass. See
 `plans/m10-road-junctions/implementation.md` for the full finding.
+
+**`vertex_bbox` (junctions-streaming-fix)**: `collect_endpoints`,
+`collect_interior_vertices` and `extract_clusters` all take an additive,
+opt-in `vertex_bbox: Bbox | None = None` parameter that restricts which
+vertices are collected/clustered to those whose point falls inside it.
+`None` preserves the original whole-layer behaviour exactly. This exists so
+`build.ingest_junctions.ingest_junctions_streaming` can run this module's
+grid-bucketed union-find over one padded spatial tile at a time (bounded
+memory) instead of the whole theatre's road layer at once -- see that
+function's docstring and `plans/junctions-streaming-fix/plan.md` for the
+padding/ownership-by-centroid scheme that makes per-tile clustering
+equivalent to one whole-layer pass.
 """
 
 from dataclasses import dataclass
 
 from geometry import distance_point_point
+from store.chunks import Bbox
 from store.models import Point, StoredFeature
 
 # First-guess value (Stage 1), tuned against real `latakia-20km` output in
@@ -110,31 +123,59 @@ class JunctionCluster:
     max_intra_cluster_distance_m: float
 
 
-def collect_endpoints(roads: list[StoredFeature]) -> list[Vertex]:
+def _in_bbox(point: Point, vertex_bbox: Bbox | None) -> bool:
+    """`True` if `vertex_bbox` is `None` (no filtering) or `point` falls
+    inside it, inclusive on both ends. Inclusive (not half-open like
+    `store.chunks.chunk_bounds`) deliberately: over-inclusion at a padded
+    chunk's boundary is safe here -- the caller's downstream centroid-
+    ownership filter is what must be exact, not this pre-filter."""
+    if vertex_bbox is None:
+        return True
+    min_x, max_x, min_z, max_z = vertex_bbox
+    x, z = point
+    return min_x <= x <= max_x and min_z <= z <= max_z
+
+
+def collect_endpoints(
+    roads: list[StoredFeature], vertex_bbox: Bbox | None = None
+) -> list[Vertex]:
     """Return the first and last point of every `LineString` road, as
     `is_endpoint=True` vertices. Roads must have `id` set (post-insertion) and
     at least one point; a road with only one point contributes that single
-    point once, not twice."""
+    point once, not twice.
+
+    `vertex_bbox`, if given, drops any vertex whose point falls outside it --
+    an additive, opt-in filter used by the chunked streaming ingest path
+    (`build.ingest_junctions.ingest_junctions_streaming`) to restrict
+    clustering to one spatial tile at a time. `None` (the default) preserves
+    exactly the original whole-layer behaviour."""
     vertices: list[Vertex] = []
     for road in roads:
         if road.id is None or road.geom_type != "LineString" or not road.geometry:
             continue
         first, last = road.geometry[0], road.geometry[-1]
-        vertices.append(Vertex(feature_id=road.id, point=first, is_endpoint=True))
-        if last != first:
+        if _in_bbox(first, vertex_bbox):
+            vertices.append(Vertex(feature_id=road.id, point=first, is_endpoint=True))
+        if last != first and _in_bbox(last, vertex_bbox):
             vertices.append(Vertex(feature_id=road.id, point=last, is_endpoint=True))
     return vertices
 
 
-def collect_interior_vertices(roads: list[StoredFeature]) -> list[Vertex]:
+def collect_interior_vertices(
+    roads: list[StoredFeature], vertex_bbox: Bbox | None = None
+) -> list[Vertex]:
     """Return every interior (non-endpoint) vertex of every `LineString`
-    road, as `is_endpoint=False` vertices."""
+    road, as `is_endpoint=False` vertices. `vertex_bbox` behaves exactly as
+    in `collect_endpoints`."""
     vertices: list[Vertex] = []
     for road in roads:
         if road.id is None or road.geom_type != "LineString" or len(road.geometry) < 3:
             continue
         for point in road.geometry[1:-1]:
-            vertices.append(Vertex(feature_id=road.id, point=point, is_endpoint=False))
+            if _in_bbox(point, vertex_bbox):
+                vertices.append(
+                    Vertex(feature_id=road.id, point=point, is_endpoint=False)
+                )
     return vertices
 
 
@@ -216,7 +257,9 @@ def _arm_count(cluster: list[Vertex]) -> int:
 
 
 def extract_clusters(
-    roads: list[StoredFeature], tolerance_m: float = DEFAULT_JUNCTION_TOLERANCE_M
+    roads: list[StoredFeature],
+    tolerance_m: float = DEFAULT_JUNCTION_TOLERANCE_M,
+    vertex_bbox: Bbox | None = None,
 ) -> list[JunctionCluster]:
     """Cluster `roads`' endpoints and interior vertices within `tolerance_m`
     and return one `JunctionCluster` per resulting group of 2 or more
@@ -225,9 +268,14 @@ def extract_clusters(
     population. A group of exactly one vertex is not a cluster at all (no
     coincidence occurred) and is dropped here rather than surfaced as
     meaningless degree-1/2 noise -- the vast majority of a real road layer's
-    endpoints/interior vertices never coincide with anything."""
-    endpoints = collect_endpoints(roads)
-    interior = collect_interior_vertices(roads)
+    endpoints/interior vertices never coincide with anything.
+
+    `vertex_bbox`, if given, is threaded through to both collectors (see
+    `collect_endpoints`); `None` (the default) preserves exactly the
+    original whole-layer behaviour, so every existing caller/test is
+    unaffected."""
+    endpoints = collect_endpoints(roads, vertex_bbox)
+    interior = collect_interior_vertices(roads, vertex_bbox)
     groups = _cluster_vertices(endpoints, interior, tolerance_m)
 
     clusters: list[JunctionCluster] = []
