@@ -170,8 +170,9 @@ not considered above.
       `onSimulationStart` (`"mission"` → `Invalid state name`). A real Hook should only poll
       between `onSimulationStart` and `onSimulationStop`.
     - **`onRadioCommand` never fired** in either mission, including for the probe's own
-      mission-registered items. Whether it fires for built-in (ATC/wingman) commands depends on
-      whether one was selected during the run — not confirmed.
+      mission-registered items. No built-in (ATC/wingman) command was selected during the run
+      (user-confirmed), so its behaviour for those is untested. Moot for Approach B, which gets
+      selections from its own callbacks; only relevant if Approach C is ever revisited.
 
 **Status after run 2:** Approach B is feasible without per-mission authoring: a Hook registers
 F10 items in the mission scripting state via `net.dostring_in("scripting", ...)` at
@@ -180,8 +181,8 @@ it by polling the same bridge, then forwards over the existing Hook→collector 
 `autoexec.cfg` opt-in (a user-machine config change that applies to all DCS sessions and all
 installed Hooks), which Architect should treat as a deploy prerequisite in `WORKFLOW.md`.
 Still open: the minimal opt-in (whether `"gui"` in `allow_unsafe_api` and anything beyond
-`"scripting"` in `allow_dostring_in` is needed — run 2 enabled all of them), per-group scoping
-(`addCommandForGroup` vs global `addCommand`) in multiplayer, and `onRadioCommand`'s payload.
+`"scripting"` in `allow_dostring_in` is needed — run 2 enabled all of them), and per-group scoping
+(`addCommandForGroup` vs global `addCommand`) in multiplayer.
 
 ### Reproducible Test
 
