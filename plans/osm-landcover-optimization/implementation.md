@@ -219,3 +219,65 @@ review, just a different owner/timing for that one item).
   dataclass). `tools/validate_osm_landcover.py`'s Stage 6 diagnostic dict (a manually curated subset
   of `OsmIngestStats` fields, not the two new ones) was deliberately left unchanged — optional, not
   adjacent to the required fix, and out of scope for this pass.
+
+### Re-review fix (commit 4b19c6d's hole-fallback bug)
+
+The re-review of `4b19c6d` (`plans/osm-landcover-optimization/review.md`, "Re-review of 4b19c6d")
+found that the fallback added above was itself wrong -- worse than the gap it was meant to close.
+Corrected reasoning, recorded so the earlier fallback's mistake isn't repeated:
+
+- **The dead-code proof from round 1 was correct**: once `_ring_vertices_contained(simplified_hole,
+  simplified_outer)` fails on some vertex `v`, re-checking any larger vertex set containing `v`
+  (including the full unsimplified `hole`, since `simplify_ring` only ever removes vertices, never
+  moves or adds one, so `v` is present unchanged) against the same `simplified_outer` can never
+  newly pass. That part of the round-1 reasoning stands.
+- **What the fallback then did was a different, wrong question.** Instead of stopping there, the
+  fallback checked the unsimplified `hole` against the unsimplified `outer` -- a materially
+  different pairing -- and on success stored the *unsimplified* hole
+  (`simplified_holes.append(hole)`) next to the *simplified* outer ring that is actually written as
+  `geometry`. By the proof's own logic, that stored pairing is guaranteed invalid whenever the
+  fallback fires: the same vertex `v` that failed the first check is still present, unchanged, in
+  the stored hole, and still sits outside the stored outer ring -- the check that would have caught
+  this (`hole` vs. `simplified_outer`) was never run. `holes_kept_via_unsimplified_fallback` never
+  meant "kept, validated"; by construction it meant "kept, known to still poke outside its own
+  stored outer ring."
+- **Consumer-facing consequence, not just stored-geometry purity**: `store/reader.py`'s
+  `_distance_to_feature` checks every hole before ever checking the outer ring (no "is this point
+  even inside the feature" guard first), so a query point in the sliver between the stored
+  simplified outer boundary and the stranded hole's true boundary -- a point genuinely outside the
+  feature -- can still land inside the hole ring (a hole ring is a valid closed polygon on its own,
+  even when it pokes past its nominal outer ring), producing a fabricated `nearest_feature`
+  distance. `containing_polygons`/`inside_landcover`/`inside_settlement` were never affected
+  (`polygon_contains` checks the outer ring first, before ever consulting holes) -- the defect was
+  specific to the distance path.
+- **The fix**: there is no legitimate "keep, unsimplified" outcome once the simplified check fails
+  -- drop the hole and count it (`holes_dropped_not_contained_after_simplify`). Removed the
+  unsimplified fallback branch and the `holes_kept_via_unsimplified_fallback` counter entirely,
+  rather than repurposing it as a non-authoritative debugging signal -- a removed field can't be
+  silently wired back up as a "keep" path by a future edit the way a dead-but-present one could.
+  `test_hole_kept_unsimplified_when_simplified_hole_leaves_simplified_outer` (which asserted the
+  invalid "kept" outcome as correct) is renamed
+  `test_hole_dropped_when_simplified_hole_leaves_simplified_outer` and now asserts the hole is
+  dropped and counted. `test_hole_dropped_when_neither_simplified_nor_unsimplified_is_contained` is
+  renamed `test_hole_dropped_when_far_outside_simplified_outer` (its old name described a
+  now-nonexistent second check) with its now-invalid `holes_kept_via_unsimplified_fallback`
+  assertion removed; its behavior is otherwise unchanged. A new `TestHoleOuterContainmentInvariant`
+  class asserts the general invariant directly: for every feature `_ingest_ring` returns with
+  `tags["inner_rings"]`, every stored inner-ring vertex lies inside the stored outer `geometry`
+  (`geometry.point_in_polygon`) -- exercised against both a genuinely-kept hole and the
+  now-correctly-dropped former-fallback case.
+- **`CLASSIFIER_VERSION` left at 3, not bumped to 4.** `OsmIngestStats`'s shape changed again (one
+  field removed), which would normally warrant a bump per the module's own convention (`osm_cache`
+  persists the stats dataclass). But version 3 only ever existed on this unmerged
+  `feature/osm-landcover-optimization` branch -- it was never in a released/merged state, so no
+  cached `<region>-osm-cache.sqlite` anywhere carries `CLASSIFIER_VERSION == 3` under the old
+  (buggy-fallback) field shape that a bump would need to invalidate against. If such a cache did
+  exist, `osm_cache/reader.py`'s `OsmIngestStats(**json.loads(row[0]))` reconstruction would raise
+  `TypeError` on the now-removed key rather than silently accept it -- so the failure mode of *not*
+  bumping here is a loud crash on the next build, not a silent stale-cache reuse, and only reachable
+  from a cache nobody has.
+- `_distance_to_feature`'s hole-checked-before-outer ordering itself was left unchanged, per this
+  task's explicit instruction -- it is correct for valid holes (a point inside a well-formed hole
+  really is closer to that hole's boundary than to the outer ring's), and the review found no
+  problem with it for that case. The bug was entirely in what `_ingest_ring` stored, not in how
+  `_distance_to_feature` reads it.
