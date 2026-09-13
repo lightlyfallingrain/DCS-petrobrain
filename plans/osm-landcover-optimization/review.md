@@ -203,3 +203,169 @@ missed (`RUN.md:45`, this commit). One of the three sub-agents additionally push
 `origin/main` without being asked to (an agent-memory-only commit, `a88efa2` — reviewed and its
 content is accurate, but the push itself was not authorized and is disclosed to the user
 separately from this technical document).
+
+---
+
+### Re-review of 4b19c6d
+
+Re-reviewed commit `4b19c6d` ("Address osm-landcover-optimization review required fixes") against
+this file's four required fixes. Read the commit's full diff (`store/reader.py`, `RUN.md`,
+`build/ingest_osm.py`, `tests/test_ingest_osm.py`, `implementation.md`'s new "Review round 1
+fixes" section), re-read `_ingest_ring` and `_distance_to_feature`/`containing_polygons` in full,
+and ran both subprojects' check suites directly.
+
+**Fix 1 — `store/reader.py:263` docstring — confirmed correct.** `nearest_feature`'s docstring now
+names only `nearest_road`'s DCS-only `provenance_geometry` restriction; `nearest_road_osm` is gone
+from the docstring, matching its removal from `query/describe.py`/`PositionDescription`. `grep -rn
+nearest_road_osm world-model/` (excluding `plans/`) returns nothing.
+
+**Fix 2 — `RUN.md` §2/§3 — confirmed correct.** §2's intro now reads "...plus water, landcover,
+coastline and named places -- **not roads**: DCS's own roadnet (`--routes`) is the sole road
+source (see §3.5)", consistent with §3.5's existing "`road` is DCS-only" statement. Read §2–§3 end
+to end; no other stale road claim found.
+
+**Fix 3 — hole/outer-ring topology — NOT correctly fixed. This is a new required fix, more severe
+than the gap it was meant to close.**
+
+The task asked three specific questions; answering each, then the consumer-facing consequence:
+
+1. *Is a per-vertex point-in-polygon check adequate, given a hole can have all vertices inside
+   while an edge crosses the outer boundary?* For the **primary** check
+   (`_ring_vertices_contained(simplified_hole, simplified_outer)`, `ingest_osm.py:529`) this is a
+   real but bounded residual — an edge-crossing-only violation needs a stretch of both rings
+   simplified in a way that leaves no vertex outside despite an edge dipping out, on the order of
+   `SIMPLIFY_TOLERANCE_M` (30 m), small next to the 1300 m `position_uncertainty_m` already carried
+   on every OSM-derived fact. Consistent with the original review's own "bounded, not unbounded"
+   framing. **Optional**, not required, on its own.
+
+2. *Is the implementer's "unsimplified hole vs unsimplified outer" argument correct?* **The
+   subset/dead-code proof itself is correct**, but it proves something other than what the
+   fallback then does. The proof correctly shows: once
+   `_ring_vertices_contained(simplified_hole, simplified_outer)` fails on some vertex `v`, checking
+   any larger vertex set containing `v` (including the full unsimplified `hole`, since
+   `simplify_ring` only removes vertices and `v ∈ simplified_hole ⊆ hole` unchanged) against
+   `simplified_outer` **also fails on that same `v`** — so a second check against
+   `simplified_outer` is indeed dead code, exactly as argued. But the fallback the implementer
+   built from that proof (`ingest_osm.py:551-554`) checks `hole` against **`outer`** (both
+   unsimplified) instead — a materially different, weaker question ("was this hole ever valid
+   before either ring was simplified?") — and on success stores the result as
+   `tags["inner_rings"]` (`simplified_holes.append(hole)`, line 552) paired with `geometry =
+   simplified_outer` (line 568, the ring actually written to the DB). The implementer's own proof
+   demonstrates that this combination is **always** invalid whenever the fallback fires
+   successfully: the very vertex `v` that failed `simplified_hole` vs `simplified_outer` is present
+   unchanged in the stored `hole`, and by the proof's own logic would still fail `hole` vs
+   `simplified_outer` if that check were run — it just never is. So
+   `holes_kept_via_unsimplified_fallback` does not mean "kept, validated" — by construction it
+   means "kept, known to still poke outside its own stored outer ring." This is not a hypothetical:
+   the implementer's own new test,
+   `test_hole_kept_unsimplified_when_simplified_hole_leaves_simplified_outer`
+   (`tests/test_ingest_osm.py`), constructs exactly this case and its own comment states the hole
+   vertices sit "outside the *simplified* outer ring's flat north edge at z = +1000" — then asserts
+   `feature is not None`, `"inner_rings" in feature.tags`, and
+   `stats.holes_kept_via_unsimplified_fallback == 1` as the expected/passing outcome. The test
+   encodes the bug as correct behavior rather than catching it.
+
+   Consumer-facing consequence (not merely a stored-geometry purity issue):
+   `store/reader.py`'s `_distance_to_feature` (`reader.py:228-244`) checks every hole **before**
+   checking the outer ring at all — `for hole in _inner_rings(feature): if point_in_polygon(point,
+   hole): return distance_point_polyline(...)` runs unconditionally, with no prior "is this point
+   even inside `feature.geometry`" guard. For a query point that falls in the sliver between the
+   stored (simplified) outer boundary and the stranded hole's true boundary — i.e. a point that is
+   **outside the feature entirely** — `point_in_polygon(point, hole)` can still be `True` (the hole
+   ring, taken alone, is a perfectly valid closed polygon that happens to extend past the outer
+   ring), so `_distance_to_feature` returns the distance to the *hole's* boundary instead of
+   falling through to the outer-boundary/zero-distance logic on lines 241-243. `nearest_feature`
+   (called by `query/describe.py` for `nearest_road`, `nearest_coastline`, and any other
+   `kind`/`provenance_geometry` lookup that can match a landcover/water/settlement polygon with
+   holes) can therefore report a small, plausible-looking distance to a forest/lake/settlement
+   feature for a crew position that is, geometrically, not inside that feature at all — a factual
+   distance claim fabricated by an internal geometry defect, not derived from real DCS+OSM data.
+   `containing_polygons` (`reader.py:294-307`, used by `inside_landcover`/`inside_settlement`) is
+   *not* affected the same way, since `polygon_contains` checks the outer ring first (`if not
+   point_in_polygon(p, outer): return False`) before ever consulting holes — so `inside_*` queries
+   are safe; the defect is specific to `nearest_feature`'s distance path.
+
+   **Verdict: required fix, more serious than the one the review originally flagged.** The
+   original finding was "no validation, bounded risk, unobserved in real data." The fix as
+   implemented adds a counter and a validation-shaped code path, but the fallback branch does not
+   actually validate against what gets stored — it is guaranteed, by the implementer's own correct
+   proof (misapplied), to keep geometry that is invalid relative to its own paired outer ring, and
+   this now has a demonstrated (not hypothetical) consumer-facing path to a wrong `nearest_feature`
+   distance. The minimal correct fix consistent with the review's original scope ("a cheap
+   post-simplification check using the geometry primitives already in this module," no new
+   topology-repair dependency) is simpler than what was built: once
+   `_ring_vertices_contained(simplified_hole, simplified_outer)` fails, the implementer's own proof
+   shows no version of the hole can pass against `simplified_outer` — so there is no legitimate
+   "keep" outcome to fall back to. Drop the hole and count it
+   (`holes_dropped_not_contained_after_simplify`) in that branch; remove the
+   `holes_kept_via_unsimplified_fallback` keep-path (and, since its stored-invalid case is provably
+   unreachable-as-a-correct-outcome, either delete that counter or repurpose it into a debugging
+   signal that's never treated as a "kept" success in any tests). Update or remove
+   `test_hole_kept_unsimplified_when_simplified_hole_leaves_simplified_outer` to match a "dropped"
+   outcome instead of asserting the invalid-geometry "kept" one, or replace it with the correct
+   "dropped" assertions `test_hole_dropped_when_neither_simplified_nor_unsimplified_is_contained`
+   already models.
+
+3. *Do the two new counters appear in the build summary?* Yes —
+   `tools/build_world_model.py:138` prints `report.osm_stats` via the bare dataclass `repr()`, so
+   both new `OsmIngestStats` fields show automatically with no separate wiring needed. Confirmed.
+
+**Fix 3, sub-item — `CLASSIFIER_VERSION` bump — justified, correctly wired.** `OsmIngestStats`
+gained two fields; `osm_cache/writer.py:101` persists `asdict(stats)` and
+`osm_cache/reader.py:74` reconstructs via `OsmIngestStats(**json.loads(row[0]))`. A stale
+version-2 cache lacking the new keys would actually still construct successfully (the new fields
+have defaults), but the bump is still correct and necessary on its own terms: features ingested
+under the old code never went through the new hole-containment path at all, so serving them from a
+stale cache would silently carry forward whatever the pre-fix behavior did for that data, with no
+record it happened. `test_pipeline_osm_cache.py`'s existing generic version-mismatch tests
+(`:326-341`, `:389`) cover invalidation-on-bump mechanically; ran and confirmed passing.
+
+**Fix 3, sub-item — do the new tests exercise both paths?** They exercise both *code* paths
+(`holes_kept_via_unsimplified_fallback` and `holes_dropped_not_contained_after_simplify` each hit
+once), and `TestRingVerticesContained`'s two unit tests on the helper itself are correct and
+useful in isolation. But the *kept* path's test does not verify the actual invariant that matters
+(the stored hole is contained in the stored outer ring) — see above; it asserts the opposite.
+Coverage exists; correctness verification does not, for that one test.
+
+**Fix 4 (ROADMAP.md entry)** — correctly left out of this commit per this session's own task
+instructions ("the ROADMAP.md entry is left to the orchestrator at merge time"), not a gap in this
+re-review's scope.
+
+#### Check Results (re-run)
+
+**world-model/** (from `world-model/`, `.venv/bin/python -m ...`)
+- `ruff format --check src tests`: pass (104 files already formatted)
+- `ruff check src tests`: pass (all checks passed)
+- `mypy src --strict`: pass, 62 source files, no issues
+- `pytest tests -q`: pass, 469 passed, 3 skipped (4 more than the prior review's 465 — the two new
+  `TestIngestRing` tests plus two new `TestRingVerticesContained` tests)
+
+**body-layer/** (from `body-layer/`, `.venv/bin/python -m ...`)
+- `ruff format --check src tests`: pass (64 files already formatted)
+- `ruff check src tests`: pass (all checks passed)
+- `mypy src --strict`: pass, 30 source files, no issues
+- `pytest tests -q`: pass, 506 passed (unchanged — no body-layer files touched by 4b19c6d)
+
+All checks pass; the defect above is a correctness gap in new code, not a check failure.
+
+#### Verdict (4b19c6d)
+
+**NEEDS REVISION** — one required fix remains: the hole/outer-ring containment fallback in
+`world-model/src/build/ingest_osm.py::_ingest_ring` (lines ~526-554) stores geometry it has
+already proven (via its own correct dead-code argument, misapplied) to be invalid relative to its
+paired stored outer ring, with a demonstrated path to a wrong `nearest_feature` distance via
+`store/reader.py::_distance_to_feature`'s hole-checked-before-outer ordering. The fix is smaller
+than the one already attempted: drop the hole in that branch instead of falling back to the
+unsimplified geometry, and correct
+`test_hole_kept_unsimplified_when_simplified_hole_leaves_simplified_outer` to match. Fixes 1, 2,
+and the two sub-items under fix 3 (counters, `CLASSIFIER_VERSION`) are confirmed correct and need
+no further changes.
+
+#### Review Confidence (re-review)
+
+Full read of the commit's diff and the surrounding `_ingest_ring`/`_distance_to_feature`/
+`containing_polygons`/`polygon_contains` functions in their entirety (not sampled), including
+manually re-deriving the geometry of the implementer's own added test case to confirm the failure
+mode by hand rather than trusting the test's passing status. Ran both subprojects' full
+format/lint/type/test suites directly. Did not open or query
+`syria-full*.sqlite`/`*-osm-cache.sqlite`, and ran no full build, per this task's hard rule.
