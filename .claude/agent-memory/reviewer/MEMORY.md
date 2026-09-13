@@ -10,3 +10,4 @@
 - [Verify pipeline wiring, not just module](feedback_verify_pipeline_wiring_not_just_module.md) — a correct leaf-module fix is a no-op if the orchestrator still calls the old function; grep/read the call site directly.
 - [BL-7 mission-phase reviewed, minor fixes](project_bl7_mission_phase_minor_fixes.md) — reported test-delta was wrong (verify via clean-worktree baseline); a plan deferring one doc file's update doesn't imply deferring a sibling doc file too.
 - [OSM classified-cache reviewed, approved](project_osm_classified_cache_approved.md) — atomicity except-block relies on canonical path never being written, not active cleanup; verify this reasoning directly, not just that tests pass.
+- [Junctions-streaming-fix reviewed, minor fix](project_junctions_streaming_fix_minor_fix.md) — feature_layer_bbox deviation verified genuine; watch for tracemalloc calls whose traced value is computed but never asserted.
