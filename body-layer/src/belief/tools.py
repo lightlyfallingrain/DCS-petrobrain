@@ -110,6 +110,7 @@ from belief.enrichment import (
     semantic_facts_for,
 )
 from belief.events import Event
+from belief.mission_phase import MissionPhaseTracker, mission_phase_relevance
 from belief.tasks import PendingIntent, TaskKind, TaskStore
 from perception.geometry import GeoPosition
 from perception.source import OwnshipState
@@ -647,11 +648,50 @@ def describe_our_position(enrichment: EnrichmentContext) -> ToolResult:
     return ToolResult(facts=facts, summary=summary, phrasing_hints={})
 
 
-def _highest_attention_contact(store: ContactStore, now_sim: float) -> Contact | None:
+def _select_from_tier(
+    contacts: list[Contact], mission_phase_tracker: MissionPhaseTracker | None
+) -> Contact:
+    """Picks one contact from an already-filtered attention tier (BL-7,
+    `plans/bl7-mission-phase-relevance/plan.md`). When mission-phase data is
+    loaded and there is an active phase, `mission_phase_relevance` (distance
+    to that phase's route waypoint, ascending -- closer wins) is the
+    tie-break *before* `last_seen_sim`, but only when a relevance value is
+    available for every candidate; otherwise this falls back to the
+    original `last_seen_sim`-only rule, unchanged from before this
+    milestone. Attention rank itself (which tier a contact is even in)
+    stays the dominant signal -- this function only orders within one
+    already-chosen tier."""
+    if mission_phase_tracker is not None:
+        phase = mission_phase_tracker.current_phase()
+        if phase is not None:
+            route = mission_phase_tracker.data.route
+            relevances: dict[str, float] = {}
+            for contact in contacts:
+                relevance = mission_phase_relevance(contact.last_position, phase, route)
+                if relevance is None:
+                    break
+                relevances[contact.id] = relevance
+            else:
+                return min(
+                    contacts,
+                    key=lambda contact: (
+                        relevances[contact.id],
+                        -contact.last_seen_sim,
+                    ),
+                )
+    return max(contacts, key=lambda contact: contact.last_seen_sim)
+
+
+def _highest_attention_contact(
+    store: ContactStore,
+    now_sim: float,
+    mission_phase_tracker: MissionPhaseTracker | None = None,
+) -> Contact | None:
     """Deterministic stand-in for a real relevance score (BL-6 hasn't built
     one yet, per `plans/bl5-tool-api/plan.md`'s Risks & Unknowns):
     `priority` > `watch` > most-recently-observed `visible`, in that order.
-    Ties within a tier break on `last_seen_sim`, most recent first."""
+    Ties within a tier break per `_select_from_tier` above -- mission-phase
+    proximity first (BL-7, when available), `last_seen_sim` otherwise."""
     priority: list[Contact] = []
     watch: list[Contact] = []
     for contact in store.contacts:
@@ -663,17 +703,20 @@ def _highest_attention_contact(store: ContactStore, now_sim: float) -> Contact |
         elif effective == "watch":
             watch.append(contact)
     if priority:
-        return max(priority, key=lambda contact: contact.last_seen_sim)
+        return _select_from_tier(priority, mission_phase_tracker)
     if watch:
-        return max(watch, key=lambda contact: contact.last_seen_sim)
+        return _select_from_tier(watch, mission_phase_tracker)
     visible = [c for c in store.contacts if certainty_of(c, now_sim) == "observed"]
     if visible:
-        return max(visible, key=lambda contact: contact.last_seen_sim)
+        return _select_from_tier(visible, mission_phase_tracker)
     return None
 
 
 def get_situation(
-    store: ContactStore, now_sim: float, enrichment: EnrichmentContext
+    store: ContactStore,
+    now_sim: float,
+    enrichment: EnrichmentContext,
+    mission_phase_tracker: MissionPhaseTracker | None = None,
 ) -> ToolResult:
     """Aggregate sitrep (`plans/bl5-tool-api/plan.md`): contact counts
     (total/visible/watched), the highest-attention contact (see
@@ -681,7 +724,19 @@ def get_situation(
     `describe_our_position`'s own summary line, folded into one `{facts,
     summary, phrasing_hints}` result. `enrichment` is required for the same
     reason as `describe_our_position`'s -- this tool has no meaning without
-    ownship/world-model access."""
+    ownship/world-model access.
+
+    `mission_phase_tracker` (BL-7, optional) adds `facts["mission_phase"]`:
+    **absent entirely** when no tracker is supplied (no mission data
+    loaded -- the same absent-not-empty convention this module already
+    uses for `enrichment`-gated facts), present but `None` when a tracker
+    is loaded but ownship hasn't reached the first phase's waypoint yet,
+    and the active phase's name otherwise -- so a caller can tell "no
+    mission data" from "before first phase" instead of both collapsing to
+    a missing/null value. The summary line only gets a `"Phase: <name>."`
+    fragment appended when a phase is actually active, mirroring
+    `unacknowledged_events`'s "only mention it if there's something to
+    say" pattern."""
     total = len(store.contacts)
     visible = sum(1 for c in store.contacts if certainty_of(c, now_sim) == "observed")
     watched = sum(
@@ -699,7 +754,12 @@ def get_situation(
         "our_position_summary": our_position["summary"],
     }
 
-    highest = _highest_attention_contact(store, now_sim)
+    active_phase = None
+    if mission_phase_tracker is not None:
+        active_phase = mission_phase_tracker.current_phase()
+        facts["mission_phase"] = active_phase.name if active_phase is not None else None
+
+    highest = _highest_attention_contact(store, now_sim, mission_phase_tracker)
     summary_parts = [f"{total} contact(s) ({visible} visible, {watched} watched)."]
     if highest is not None:
         highest_result = _contact_result(highest, now_sim, store, enrichment)
@@ -707,6 +767,8 @@ def get_situation(
         summary_parts.append(f"Highest attention: {highest_result['summary']}")
     if unacknowledged:
         summary_parts.append(f"{unacknowledged} unacknowledged event(s).")
+    if active_phase is not None:
+        summary_parts.append(f"Phase: {active_phase.name}.")
     summary_parts.append(our_position["summary"])
 
     return ToolResult(facts=facts, summary=" ".join(summary_parts), phrasing_hints={})

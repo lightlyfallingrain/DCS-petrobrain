@@ -8,3 +8,4 @@
 - [MI-6 reviewed, minor fix](project_mi6_reviewed_minor_fix.md) — bare-None reject sentinel collapses "never asked" vs "asked-and-rejected"; watch for this pattern in reconciliation code.
 - [OSM streaming-ingest reviewed, approved](project_osm_streaming_ingest_approved.md) — memory-bounded pbf.py fix genuinely wired into pipeline.py; only gap was a missed docs update.
 - [Verify pipeline wiring, not just module](feedback_verify_pipeline_wiring_not_just_module.md) — a correct leaf-module fix is a no-op if the orchestrator still calls the old function; grep/read the call site directly.
+- [BL-7 mission-phase reviewed, minor fixes](project_bl7_mission_phase_minor_fixes.md) — reported test-delta was wrong (verify via clean-worktree baseline); a plan deferring one doc file's update doesn't imply deferring a sibling doc file too.

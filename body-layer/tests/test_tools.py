@@ -15,11 +15,18 @@ from belief import tools as tools_module
 from belief.contacts import ContactStore
 from belief.decay import IDENTITY_HALF_LIFE_S, LOST_THRESHOLD_S, OBSERVED_WINDOW_S
 from belief.enrichment import EnrichmentContext
+from belief.mission_phase import (
+    CompactRoutePoint,
+    MissionPhaseInfo,
+    MissionPhaseTracker,
+    MissionUnderstandingData,
+)
 from belief.tasks import TaskStore
 from belief.tools import (
     DEFAULT_SCAN_DEADLINE_S,
     _contact_summary,
     _format_range_km,
+    _highest_attention_contact,
     acknowledge_event,
     cancel_task,
     describe_contact,
@@ -729,6 +736,170 @@ def test_get_situation_includes_unacknowledged_event_count(
     result = get_situation(store, now_sim=0.0, enrichment=context)
     assert result["facts"]["unacknowledged_events"] == 1
     assert "unacknowledged event" in result["summary"]
+
+
+def _mission_data_with_one_phase(
+    waypoint_index: int = 0, x: float = 1000.0, y: float = 0.0
+) -> MissionUnderstandingData:
+    return MissionUnderstandingData(
+        phases=(
+            MissionPhaseInfo(
+                name="attack",
+                waypoint_index=waypoint_index,
+                epistemic_status="FACT",
+                basis=(),
+            ),
+        ),
+        route=(
+            CompactRoutePoint(
+                index=waypoint_index,
+                x=x,
+                y=y,
+                place_name=None,
+                epistemic_status="FACT",
+                basis=(),
+            ),
+        ),
+    )
+
+
+def test_get_situation_omits_mission_phase_fact_without_a_tracker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _enrichment_context(monkeypatch)
+    store = ContactStore()
+    result = get_situation(store, now_sim=0.0, enrichment=context)
+    assert "mission_phase" not in result["facts"]
+    assert "Phase:" not in result["summary"]
+
+
+def test_get_situation_reports_null_mission_phase_before_first_waypoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _enrichment_context(monkeypatch)
+    store = ContactStore()
+    tracker = MissionPhaseTracker(data=_mission_data_with_one_phase())
+    result = get_situation(
+        store, now_sim=0.0, enrichment=context, mission_phase_tracker=tracker
+    )
+    assert result["facts"]["mission_phase"] is None
+    assert "Phase:" not in result["summary"]
+
+
+def test_get_situation_reports_the_active_mission_phase_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _enrichment_context(monkeypatch)
+    store = ContactStore()
+    tracker = MissionPhaseTracker(
+        data=_mission_data_with_one_phase(), last_reached_waypoint_index=0
+    )
+    result = get_situation(
+        store, now_sim=0.0, enrichment=context, mission_phase_tracker=tracker
+    )
+    assert result["facts"]["mission_phase"] == "attack"
+    assert "Phase: attack." in result["summary"]
+
+
+# --- _highest_attention_contact: BL-7 mission-phase tie-break --------------
+
+
+def test_highest_attention_contact_falls_back_to_recency_without_a_tracker() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="BMP-2",
+                bearing_deg=90.0,
+            )
+        ],
+        now_sim=1.0,
+    )
+    for contact in store.contacts:
+        set_attention(store, contact.id, "watch")
+    older_id = store.contacts[0].id
+    newer_id = store.contacts[1].id
+
+    highest = _highest_attention_contact(store, now_sim=1.0)
+    assert highest is not None
+    assert highest.id == newer_id
+    assert highest.id != older_id
+
+
+def test_highest_attention_contact_breaks_ties_by_mission_phase_proximity() -> None:
+    """Two `"watch"`-tier contacts: OBS_1 (older, bearing 0 deg -> position
+    (1000, 0)) and OBS_2 (newer, bearing 90 deg -> position (0, 1000)). The
+    active phase's waypoint sits exactly at OBS_1's position -- mission-phase
+    proximity must pick OBS_1 even though OBS_2 was seen more recently."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="BMP-2",
+                bearing_deg=90.0,
+            )
+        ],
+        now_sim=1.0,
+    )
+    for contact in store.contacts:
+        set_attention(store, contact.id, "watch")
+    closer_id = store.contacts[0].id
+    newer_id = store.contacts[1].id
+    assert closer_id != newer_id
+
+    tracker = MissionPhaseTracker(
+        data=_mission_data_with_one_phase(x=1000.0, y=0.0),
+        last_reached_waypoint_index=0,
+    )
+
+    highest = _highest_attention_contact(
+        store, now_sim=1.0, mission_phase_tracker=tracker
+    )
+    assert highest is not None
+    assert highest.id == closer_id
+
+
+def test_highest_attention_contact_falls_back_when_no_active_phase() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="Ural truck")],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="BMP-2",
+                bearing_deg=90.0,
+            )
+        ],
+        now_sim=1.0,
+    )
+    for contact in store.contacts:
+        set_attention(store, contact.id, "watch")
+    newer_id = store.contacts[1].id
+
+    # last_reached_waypoint_index stays -1 -- no active phase yet.
+    tracker = MissionPhaseTracker(data=_mission_data_with_one_phase(x=1000.0, y=0.0))
+
+    highest = _highest_attention_contact(
+        store, now_sim=1.0, mission_phase_tracker=tracker
+    )
+    assert highest is not None
+    assert highest.id == newer_id
 
 
 # --- poll_events -------------------------------------------------------
