@@ -1,0 +1,11 @@
+# osmium tags-filter expressions for world-model OSM ingest (RUN.md job a).
+# Must stay a superset of build/ingest_osm.py's rules -- tests/test_osm_tags_filter.py guards this.
+a/landuse=farmland,meadow,grass,residential,commercial,retail,industrial,military,construction,forest,orchard,vineyard,plantation,quarry,reservoir
+a/natural=wood,scrub,heath,grassland,sand,bare_rock,scree,water
+a/waterway=riverbank
+a/place=city,town,village
+w/waterway=river,dam
+w/natural=coastline
+n/place=city,town,village
+n/natural=peak
+n/waterway=dam
