@@ -37,8 +37,9 @@ from build.ingest_osm import (
     ingest_osm,
 )
 from coordinates import dcs_to_wgs84, wgs84_to_dcs
-from geometry import Point, ring_area_m2
+from geometry import Point, point_in_polygon, ring_area_m2
 from osm.features import OsmArea, OsmFeatureSet, OsmNode, OsmRing, OsmWay
+from store.models import StoredFeature
 
 _THEATRE = "Syria"
 # An arbitrary real-world point well inside Syria's projected coverage --
@@ -867,7 +868,7 @@ class TestIngestRing:
         assert feature is None
         assert stats.rings_dropped_degenerate_after_simplify == 1
 
-    def test_hole_kept_unsimplified_when_simplified_hole_leaves_simplified_outer(
+    def test_hole_dropped_when_simplified_hole_leaves_simplified_outer(
         self,
     ) -> None:
         # Outer ring: a square with one extra vertex bumping outward by 20m
@@ -884,7 +885,13 @@ class TestIngestRing:
         # Hole: entirely inside the *unsimplified* (bumped) outer ring --
         # two of its own vertices sit at z = +1005, inside the bump's wedge
         # (unsimplified boundary reaches ~+1017 there) but outside the
-        # *simplified* outer ring's flat north edge at z = +1000.
+        # *simplified* outer ring's flat north edge at z = +1000. There is
+        # no valid "keep it unsimplified" outcome here (re-review of
+        # 4b19c6d): any stored hole geometry is paired with
+        # `simplified_outer` (the ring actually written as `geometry`), and
+        # by `simplify_ring`'s only-ever-removes-vertices guarantee, the
+        # failing vertex is present unchanged in the unsimplified hole too
+        # -- so the hole must be dropped, not kept unsimplified.
         hole_corners_dcs: list[Point] = [
             (_CENTRE_X - 200.0, _CENTRE_Z + 700.0),
             (_CENTRE_X + 200.0, _CENTRE_Z + 700.0),
@@ -910,16 +917,15 @@ class TestIngestRing:
         feature = self._ingest(ring, "landcover", "forest", "forest", stats)
 
         assert feature is not None
-        assert "inner_rings" in feature.tags
-        stored_hole = feature.tags["inner_rings"][0]
-        # Kept unsimplified -- the apex vertex Douglas-Peucker would have
-        # dropped (within tolerance of its neighbours) survives.
-        assert len(stored_hole) == len(hole_corners_dcs) + 1
-        assert stats.holes_kept == 1
-        assert stats.holes_kept_via_unsimplified_fallback == 1
-        assert stats.holes_dropped_not_contained_after_simplify == 0
+        assert "inner_rings" not in feature.tags
+        assert stats.holes_kept == 0
+        assert stats.holes_dropped_not_contained_after_simplify == 1
+        # No stored inner ring at all for this feature, so the containment
+        # invariant holds trivially -- nothing outside the stored outer ring
+        # was kept.
+        assert feature.tags.get("inner_rings") is None
 
-    def test_hole_dropped_when_neither_simplified_nor_unsimplified_is_contained(
+    def test_hole_dropped_when_far_outside_simplified_outer(
         self,
     ) -> None:
         outer_corners_dcs: list[Point] = [
@@ -930,8 +936,8 @@ class TestIngestRing:
             (_CENTRE_X - 1000.0, _CENTRE_Z + 1000.0),
         ]
         # Same hole shape, but the apex now reaches z = +1025 -- past even
-        # the unsimplified outer ring's own bump apex (+1020), so it is not
-        # contained in either the simplified or the unsimplified outer ring.
+        # the unsimplified outer ring's own bump apex (+1020), well outside
+        # the simplified outer ring too.
         hole_corners_dcs: list[Point] = [
             (_CENTRE_X - 200.0, _CENTRE_Z + 700.0),
             (_CENTRE_X + 200.0, _CENTRE_Z + 700.0),
@@ -959,8 +965,135 @@ class TestIngestRing:
         assert feature is not None
         assert "inner_rings" not in feature.tags
         assert stats.holes_kept == 0
-        assert stats.holes_kept_via_unsimplified_fallback == 0
         assert stats.holes_dropped_not_contained_after_simplify == 1
+
+
+class TestHoleOuterContainmentInvariant:
+    """Cross-cutting invariant over `_ingest_ring`'s output, independent of
+    which drop/keep path produced it (re-review of 4b19c6d): for every
+    stored feature that carries `tags["inner_rings"]`, every vertex of
+    every stored inner ring must lie inside the stored outer `geometry`.
+    `store/reader.py`'s `_distance_to_feature` checks holes before it ever
+    checks the outer ring, so a stored hole with a vertex outside its own
+    outer ring can fabricate a plausible-looking `nearest_feature` distance
+    for a point that is not actually inside the feature at all."""
+
+    def _assert_invariant(self, feature: StoredFeature | None) -> None:
+        assert feature is not None
+        inner_rings = feature.tags.get("inner_rings")
+        if not inner_rings:
+            return
+        outer = feature.geometry
+        for hole in inner_rings:
+            for vertex in hole:
+                assert point_in_polygon(vertex, outer), (
+                    f"stored hole vertex {vertex} lies outside the stored outer ring"
+                )
+
+    def test_genuinely_kept_hole_satisfies_the_invariant(self) -> None:
+        # Same geometry as `test_hole_kept_when_at_or_above_min_area` -- a
+        # hole comfortably inside the outer ring, well clear of any
+        # simplification drift, so it is genuinely kept.
+        outer_corners_dcs: list[Point] = [
+            (_CENTRE_X - 1000.0, _CENTRE_Z - 1000.0),
+            (_CENTRE_X + 1000.0, _CENTRE_Z - 1000.0),
+            (_CENTRE_X + 1000.0, _CENTRE_Z + 1000.0),
+            (_CENTRE_X - 1000.0, _CENTRE_Z + 1000.0),
+        ]
+        hole_corners_dcs: list[Point] = [
+            (_CENTRE_X - 150.0, _CENTRE_Z - 150.0),
+            (_CENTRE_X + 150.0, _CENTRE_Z - 150.0),
+            (_CENTRE_X + 150.0, _CENTRE_Z + 150.0),
+            (_CENTRE_X - 150.0, _CENTRE_Z + 150.0),
+        ]
+        ring = OsmRing(
+            outer=[
+                dcs_to_wgs84(_THEATRE, x, z)
+                for x, z in [*outer_corners_dcs, outer_corners_dcs[0]]
+            ],
+            inners=[
+                [
+                    dcs_to_wgs84(_THEATRE, x, z)
+                    for x, z in [*hole_corners_dcs, hole_corners_dcs[0]]
+                ]
+            ],
+        )
+        stats = _stats()
+
+        feature = _ingest_ring(
+            ring,
+            "landcover",
+            "forest",
+            "forest",
+            "Test Name",
+            "way/999",
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            9,
+            stats,
+        )
+
+        assert stats.holes_kept == 1
+        assert feature is not None
+        assert "inner_rings" in feature.tags
+        self._assert_invariant(feature)
+
+    def test_hole_that_would_have_used_the_removed_fallback_satisfies_the_invariant(
+        self,
+    ) -> None:
+        # Same geometry as `test_hole_dropped_when_simplified_hole_leaves_
+        # simplified_outer` -- previously kept unsimplified via the removed
+        # fallback (an invalid pairing); now dropped, so the invariant holds
+        # trivially (no stored inner ring at all).
+        outer_corners_dcs: list[Point] = [
+            (_CENTRE_X - 1000.0, _CENTRE_Z - 1000.0),
+            (_CENTRE_X + 1000.0, _CENTRE_Z - 1000.0),
+            (_CENTRE_X + 1000.0, _CENTRE_Z + 1000.0),
+            (_CENTRE_X, _CENTRE_Z + 1020.0),
+            (_CENTRE_X - 1000.0, _CENTRE_Z + 1000.0),
+        ]
+        hole_corners_dcs: list[Point] = [
+            (_CENTRE_X - 200.0, _CENTRE_Z + 700.0),
+            (_CENTRE_X + 200.0, _CENTRE_Z + 700.0),
+            (_CENTRE_X + 200.0, _CENTRE_Z + 1005.0),
+            (_CENTRE_X, _CENTRE_Z + 1015.0),
+            (_CENTRE_X - 200.0, _CENTRE_Z + 1005.0),
+        ]
+        ring = OsmRing(
+            outer=[
+                dcs_to_wgs84(_THEATRE, x, z)
+                for x, z in [*outer_corners_dcs, outer_corners_dcs[0]]
+            ],
+            inners=[
+                [
+                    dcs_to_wgs84(_THEATRE, x, z)
+                    for x, z in [*hole_corners_dcs, hole_corners_dcs[0]]
+                ]
+            ],
+        )
+        stats = _stats()
+
+        feature = _ingest_ring(
+            ring,
+            "landcover",
+            "forest",
+            "forest",
+            "Test Name",
+            "way/999",
+            _THEATRE,
+            _CENTRE_X,
+            _CENTRE_Z,
+            _HALF_EXTENT_M,
+            _HALF_EXTENT_M,
+            9,
+            stats,
+        )
+
+        assert stats.holes_dropped_not_contained_after_simplify == 1
+        self._assert_invariant(feature)
 
 
 # --- _ring_vertices_contained ----------------------------------------------
