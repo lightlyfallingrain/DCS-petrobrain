@@ -9,6 +9,7 @@ already covers.
 """
 
 import datetime
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -198,6 +199,59 @@ def test_ingest_junctions_streaming_matches_bulk_across_chunk_boundary(
     assert streaming_stats.clusters_found == bulk_stats.clusters_found == 2
     assert streaming_stats.junctions_kept == bulk_stats.junctions_kept == 2
     assert streaming_stats.degree_histogram == bulk_stats.degree_histogram
+
+
+def _two_chunk_roads() -> list[StoredFeature]:
+    # One 3-way junction straddling the x=5000 chunk boundary: the road
+    # layer's bbox spans chunks (0, 0) and (1, 0), and nothing else.
+    return [
+        _road(None, [(4998.0, 2000.0), (4900.0, 2000.0)]),
+        _road(None, [(4998.0, 2000.0), (5100.0, 2000.0)]),
+        _road(None, [(4998.0, 2000.0), (4998.0, 2100.0)]),
+    ]
+
+
+def _drain_streaming(db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    try:
+        for _ in ingest_junctions_streaming(
+            conn, _TEST_REGION, None, _empty_stats(), tolerance_m=0.5, min_degree=3
+        ):
+            pass
+    finally:
+        conn.close()
+
+
+def test_ingest_junctions_streaming_logs_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With the interval forced to zero, every chunk after the first logs a
+    progress line; the up-front line reports the chunk total so a long
+    `syria-full` run shows how far it has to go."""
+    db_path = _build_store(tmp_path, _two_chunk_roads())
+    monkeypatch.setattr(ingest_junctions_module, "_PROGRESS_LOG_INTERVAL_S", 0.0)
+
+    with caplog.at_level(logging.INFO, logger="build.ingest_junctions"):
+        _drain_streaming(db_path)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("3 roads, 2 chunks" in m for m in messages)
+    assert any(m.startswith("ingest_junctions: chunk 1/2 (50.0%") for m in messages)
+
+
+def test_ingest_junctions_streaming_progress_is_throttled(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """At the default interval a fast run logs only the up-front line, not a
+    line per chunk."""
+    db_path = _build_store(tmp_path, _two_chunk_roads())
+
+    with caplog.at_level(logging.INFO, logger="build.ingest_junctions"):
+        _drain_streaming(db_path)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("2 chunks" in m for m in messages)
+    assert not any("ingest_junctions: chunk " in m for m in messages)
 
 
 def test_ingest_junctions_streaming_empty_store(tmp_path: Path) -> None:
