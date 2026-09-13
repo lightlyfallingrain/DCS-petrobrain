@@ -267,7 +267,15 @@ against a live DCS session as of authorship.
   *current* ownship position — never cached, since ownship moves every poll), `motion_when_seen`
   (direction derived from a contact's two most recent distinct implied positions, `None` when fewer
   exist). `EnrichmentContext` bundles `conn`/`theatre`/`ownship`/the cache and is the one object
-  threaded through `tools.py`/`console.py`/`logger.py` above.
+  threaded through `tools.py`/`console.py`/`logger.py` above. `semantic_facts_for` (osm-landcover-
+  optimization, `plans/osm-landcover-optimization/plan.md` Design D7) reads world-model's newer
+  `SettlementInfo`/`WaterInfo.subtype` for wording ("a built-up area" for an unnamed built-up
+  settlement; "a river"/"a lake"/"a reservoir" for unnamed water) and appends two more facts after
+  every pre-existing one: a landcover fact ("in forest"/"in orchards"/"in scrubland"/"in open
+  fields"/"on barren ground") whenever `inside_landcover` is non-`None` and its class isn't
+  `"built_up"` (already covered by `inside_settlement`), and a coast fact ("over the sea, off the
+  coast (Nm)" or "near the coast (Nm)") within the new `COAST_FACT_RADIUS_M` (5000m) or whenever
+  `nearest_coastline.side == "sea"`.
 - `src/belief/classification.py` (BL-2.6, `plans/classification-refinement/plan.md` Stages 1-2) —
   the classification specificity lattice: `SpecificityLevel` (`UNKNOWN`/`PRESENCE`/`CLASS`/`TYPE`,
   a total order 0-3) over a shallow tree of *values* (a `TYPE` value's parent is its `CLASS`
