@@ -85,7 +85,8 @@ parser, rather than guessing the envelope shape from the plan's prose alone).
   "raises a plain `ValueError`" instruction; no existing `# noqa` precedent existed in this
   codebase, so this is a new but narrowly-scoped suppression, not a config-wide rule change)
 - mypy src (strict): pass
-- pytest tests -q: pass (475 passed, up from 466 before this milestone)
+- pytest tests -q: pass (475 passed, up from 451 on `main` before this milestone — corrected
+  per Reviewer's fix: the original "466" figure was wrong, real delta is +24 not +9)
 - `test_mock_flight_chain.py` re-verified passing unchanged, per the plan's Stage 4 instruction
 
 ### Notable Discoveries
