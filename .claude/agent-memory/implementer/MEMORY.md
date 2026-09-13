@@ -61,6 +61,7 @@ Write directly to this directory — it already exists, no need to create it or 
 
 - [Overlay speech callouts addendum](project_overlay_speech_callouts_addendum.md) — shared _contact_report_text helper fixes broken lifecycle callout text; facts["semantic"] is list[dict] not list[SemanticFact].
 - [Overlay speech callouts addendum 2](project_overlay_speech_callouts_addendum2.md) — round() ties-to-even on rounding boundaries, CONTACT_LOST no-template needs no route_event change, classification-changed relative_now needs EnrichmentContext.
+- [BL-7 mission phase](project_bl7_mission_phase.md) — get_situation's only caller is console.py; MissionPhaseTracker needs no cross-thread sync (built once, shared by reference); verified real asdict() JSON shape before writing parser/fixture.
 - [MI-1/MI-1.5 scaffold](project_mi1_mi15_scaffold.md) — pydcs dcs.lua vendors cleanly via `pip download git+...`, no raw-passthrough field on filtered output = structural leak guarantee, mypy cwd gotcha recurred.
 - [M10 road junctions](project_m10_road_junctions.md) — real cluster/junction counts (3980/3634), singleton-cluster filtering needed, coincident-duplicate-road false positive found (not tolerance-fixable).
 - [pyosmium package name](feedback_pyosmium_package_name.md) — PyPI/import name is `osmium`, not `pyosmium`; `pip install pyosmium` 404s, check PyPI JSON API before escalating a dependency as unavailable.

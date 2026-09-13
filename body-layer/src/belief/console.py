@@ -84,6 +84,7 @@ from belief.attention import SECTORS, Attention, AttentionArea, Sector
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import CONTACT_CLASSIFICATION_CHANGED, Event
+from belief.mission_phase import MissionPhaseTracker
 from belief.tasks import PendingIntent, TaskStore
 from belief.tools import (
     ContactFilter,
@@ -189,10 +190,24 @@ class Console:
     #: telemetry (no separate URL/flag), mirroring `--overlay`'s own
     #: wiring of `ConsolePerceptionRunner.overlay_client`.
     aircraft_client: AircraftLayerClient | None = None
+    #: BL-7's mission-phase tracker (`plans/bl7-mission-phase-relevance/
+    #: plan.md`) -- mirrors `enrichment`'s None-means-unchanged pattern:
+    #: `None` (the default) leaves `situation`'s output byte-for-byte
+    #: unchanged. Unlike `enrichment`, `logger.py` sets this once (not
+    #: rebuilt per poll/command) -- the same `MissionPhaseTracker` instance
+    #: is mutated in place by the poll thread and only ever read here
+    #: (`.current_phase()`), never mutated from this thread.
+    mission_phase_tracker: MissionPhaseTracker | None = None
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         lines = _dispatch(
-            self.store, self.tasks, line, now_sim, self.enrichment, self.aircraft_client
+            self.store,
+            self.tasks,
+            line,
+            now_sim,
+            self.enrichment,
+            self.aircraft_client,
+            self.mission_phase_tracker,
         )
         if self.output is not None:
             for formatted in lines:
@@ -207,6 +222,7 @@ def _dispatch(
     now_sim: float,
     enrichment: EnrichmentContext | None = None,
     aircraft_client: AircraftLayerClient | None = None,
+    mission_phase_tracker: MissionPhaseTracker | None = None,
 ) -> list[str]:
     stripped = line.strip()
     if not stripped:
@@ -244,7 +260,7 @@ def _dispatch(
     if command == "place":
         return _handle_place(rest, enrichment)
     if command == "situation":
-        return _handle_situation(store, now_sim, enrichment)
+        return _handle_situation(store, now_sim, enrichment, mission_phase_tracker)
     if command == "position":
         return _handle_position(enrichment)
     if command == "scan-area":
@@ -468,11 +484,14 @@ def _handle_place(rest: str, enrichment: EnrichmentContext | None) -> list[str]:
 
 
 def _handle_situation(
-    store: ContactStore, now_sim: float, enrichment: EnrichmentContext | None
+    store: ContactStore,
+    now_sim: float,
+    enrichment: EnrichmentContext | None,
+    mission_phase_tracker: MissionPhaseTracker | None = None,
 ) -> list[str]:
     if enrichment is None:
         return [f"situation {_ENRICHMENT_REQUIRED_MESSAGE}"]
-    result = get_situation(store, now_sim, enrichment)
+    result = get_situation(store, now_sim, enrichment, mission_phase_tracker)
     return [result["summary"]]
 
 
