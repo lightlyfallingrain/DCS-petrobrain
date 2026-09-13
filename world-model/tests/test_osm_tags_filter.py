@@ -3,66 +3,66 @@
 whose tags the classifier would keep is never pre-filtered away by
 `osmium tags-filter` before it ever reaches the Python classifier.
 
-**Stage 0 status**: the classifier itself has not been rewritten yet
-(`CLASSIFIER_VERSION` is still 1's road/water/settlement rules) -- so the
-"classifier accepts" side of this test is a **hard-coded table** of D2's
-*planned* rules (`plans/osm-landcover-optimization/plan.md` Design D2), not
-yet read from `build.ingest_osm` itself. Stage 3 rewires this test to
-import that module's own constants once the classifier rewrite lands, so
-the two can never drift apart silently after that point.
+**Stage 3 rewire**: `_CLASSIFIER_ACCEPTED_TAGS` below is now built directly
+from `build.ingest_osm`'s own module-level constants (`_NODE_PLACE_VALUES`,
+`_AREA_PLACE_VALUES`, `_BUILT_UP_LANDUSE_VALUES`, `_WATER_TAG_TO_SUBTYPE`,
+`_LANDUSE_TO_LANDCOVER_CLASS`, `_NATURAL_TO_LANDCOVER_CLASS`, plus the two
+hardcoded rules -- `natural=peak`, `waterway=dam` on both a node and a way --
+that have no vocabulary dict of their own), not a hand-copied table -- so the
+two can never silently drift apart again. `element_type` is one of "n"
+(node), "w" (way/line), "a" (area: closed way or multipolygon relation), the
+same three letters `osmium tags-filter`'s own expression grammar uses.
 """
 
 from pathlib import Path
 
+from build.ingest_osm import (
+    _AREA_PLACE_VALUES,
+    _BUILT_UP_LANDUSE_VALUES,
+    _LANDUSE_TO_LANDCOVER_CLASS,
+    _NATURAL_TO_LANDCOVER_CLASS,
+    _NODE_PLACE_VALUES,
+)
+
 _FILTER_PATH = Path(__file__).resolve().parent.parent / "tools" / "osm_tags_filter.txt"
 
-# `(element_type, key, value)` triples D2's classifier accepts -- see the
-# plan's Design D2 "Nodes"/"Lines"/"Areas" sections. `element_type` is one
-# of "n" (node), "w" (way/line), "a" (area: closed way or multipolygon
-# relation) -- the same three letters `osmium tags-filter`'s own expression
-# grammar uses.
-_CLASSIFIER_ACCEPTED_TAGS: frozenset[tuple[str, str, str]] = frozenset(
-    {
-        # Nodes (D2 "Nodes").
-        ("n", "place", "city"),
-        ("n", "place", "town"),
-        ("n", "place", "village"),
-        ("n", "natural", "peak"),
-        ("n", "waterway", "dam"),
-        # Lines (D2 "Lines").
-        ("w", "waterway", "river"),
-        ("w", "natural", "coastline"),
-        ("w", "waterway", "dam"),
-        # Areas (D2 "Areas", precedence rules 1-4).
-        ("a", "natural", "water"),
-        ("a", "landuse", "reservoir"),
-        ("a", "waterway", "riverbank"),
-        ("a", "place", "city"),
-        ("a", "place", "town"),
-        ("a", "place", "village"),
-        ("a", "landuse", "residential"),
-        ("a", "landuse", "commercial"),
-        ("a", "landuse", "retail"),
-        ("a", "landuse", "industrial"),
-        ("a", "landuse", "military"),
-        ("a", "landuse", "construction"),
-        ("a", "landuse", "forest"),
-        ("a", "landuse", "orchard"),
-        ("a", "landuse", "vineyard"),
-        ("a", "landuse", "plantation"),
-        ("a", "landuse", "farmland"),
-        ("a", "landuse", "meadow"),
-        ("a", "landuse", "grass"),
-        ("a", "landuse", "quarry"),
-        ("a", "natural", "wood"),
-        ("a", "natural", "scrub"),
-        ("a", "natural", "heath"),
-        ("a", "natural", "grassland"),
-        ("a", "natural", "sand"),
-        ("a", "natural", "bare_rock"),
-        ("a", "natural", "scree"),
-    }
-)
+
+def _classifier_accepted_tags() -> frozenset[tuple[str, str, str]]:
+    """Every `(element_type, key, value)` triple `build.ingest_osm`'s
+    classifier accepts, derived from its own vocabulary constants (D2
+    "Nodes"/"Lines"/"Areas")."""
+    accepted: set[tuple[str, str, str]] = set()
+
+    # Nodes (D2 "Nodes").
+    accepted |= {("n", "place", v) for v in _NODE_PLACE_VALUES}
+    accepted.add(("n", "natural", "peak"))
+    accepted.add(("n", "waterway", "dam"))
+
+    # Lines (D2 "Lines") -- `waterway=dam` on a way is handled directly by
+    # `_ingest_line`, not `_classify_line`, but still needs filter coverage.
+    accepted.add(("w", "waterway", "river"))
+    accepted.add(("w", "natural", "coastline"))
+    accepted.add(("w", "waterway", "dam"))
+
+    # Areas (D2 "Areas", precedence rules 1-4).
+    accepted.add(("a", "natural", "water"))
+    accepted.add(("a", "landuse", "reservoir"))
+    accepted.add(("a", "waterway", "riverbank"))
+    accepted |= {("a", "place", v) for v in _AREA_PLACE_VALUES}
+    accepted |= {("a", "landuse", v) for v in _BUILT_UP_LANDUSE_VALUES}
+    accepted |= {("a", "landuse", v) for v in _LANDUSE_TO_LANDCOVER_CLASS}
+    accepted |= {("a", "natural", v) for v in _NATURAL_TO_LANDCOVER_CLASS}
+    # `_WATER_TAG_TO_SUBTYPE`'s keys (lake/reservoir/river) are `water=*`
+    # *values*, not their own top-level tag key -- already covered by the
+    # `("a", "natural", "water")` line above, which is what actually gates
+    # this rule through `osmium tags-filter` (the filter has no visibility
+    # into the secondary `water=*` tag, so there is nothing further to add
+    # here).
+
+    return frozenset(accepted)
+
+
+_CLASSIFIER_ACCEPTED_TAGS = _classifier_accepted_tags()
 
 
 def _parse_filter_expressions(path: Path) -> set[tuple[str, str, str]]:
