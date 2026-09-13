@@ -24,6 +24,12 @@ details and `WORKFLOW.md` for the cross-machine deploy/run workflow. Full design
   (`Saved Games/DCS/Scripts/Hooks/`), modeled on SRS's overlay pattern. First write path in an
   otherwise read-only layer; reframed `CLAUDE.md` from "read-only" to "read-mostly with narrow
   write channels." See `body-layer/ROADMAP.md` BL-2.5 for the body-layer side.
+- [x] **F10 command inbound channel — done, merged 2026-09-13 (`eacc45c`).** First Hook→collector
+  direction: `petrobrain-f10-commands-hook.lua` registers F10 menu items through
+  `net.dostring_in("scripting", ...)` and forwards selections over loopback UDP 7794 to
+  `F10CommandReceiver` (three allowed tokens only), served once via `GET /f10_commands/poll`.
+  Needs `autoexec.cfg` `net.allow_dostring_in = { "scripting" }`. Wall-clock provenance only.
+  See `body-layer/ROADMAP.md` "F10 radio-menu command input" and `plans/f10-crew-commands/`.
 
 ## Backlog
 

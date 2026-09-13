@@ -263,26 +263,44 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 ## Backlog (body-layer)
 
-- [ ] **F10 radio-menu command input for Petrovich — no brain layer needed; feasibility confirmed, ready for Architect.**
-  Raised 2026-09-12: contact reports (overlay-speech-callouts, merged) are in a good state; next
-  most useful thing is letting the player issue Petrovich commands (watch nearest, scan forward,
-  cancel task, etc.) from in-cockpit UI instead of typing into `--crew-text`'s console. **User
-  preference: the DCS F10 radio-comms menu** (the same mechanism AI wingmen commands and many
-  mission scripts/add-ons already use), not a custom keybind-per-command scheme — more discoverable,
-  more game-native. User explicitly flagged the F-4E module's radial action-wheel copilot UI as
-  nicer but more polish than needed now. **Genuinely unverified DCS-internals question, same class
-  as BL-6's original gate**: is an F10 menu selection (or an `addCommand`-style registration) reachable
-  from `Export.lua`'s own state, or does it require Hook-script/mission-scripting access this
-  project doesn't currently have a channel for? This is a new *inbound* DCS→body direction — the
-  reverse of BL-6's search-trigger write — and needs an investigator pass before any Architect
-  planning. **Investigated 2026-09-13, feasible** (`aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md`
-  Findings 7–11): not reachable from Export.lua or plain Hook state, but a Hook can register F10 →
-  Other items via `net.dostring_in("scripting", "missionCommands.addCommand(...)")` at
-  `onSimulationStart`, and poll selections back out through the same bridge (live-confirmed, ~1 s
-  latency at a 1 Hz poll, no per-mission authoring). Prerequisite: the user-machine
-  `Saved Games\DCS\Config\autoexec.cfg` unsafe-API opt-in (user accepted it for the probe).
-  Open for the plan: minimal opt-in set (multiplayer out of scope, root `CLAUDE.md`). Next: Architect plan
-  (Hook registration + poll, Hook→collector→body inbound path).
+- [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
+  `eacc45c`, `feature/f10-crew-commands`).** The player's preferred in-cockpit command UI: the
+  native DCS F10 radio menu, not keybinds (F-4E-style radial wheel explicitly out of scope). A
+  Hook script (`aircraft-layer/dcs-export/petrobrain-f10-commands-hook.lua`) registers
+  F10 → Other → Petrovich (Watch Nearest / Scan Forward / Cancel Task) via
+  `net.dostring_in("scripting", "missionCommands.addCommand(...)")` at `onSimulationStart`, polls
+  selections back at 1 Hz, and forwards them over loopback UDP 7794 to the collector's
+  `GET /f10_commands/poll` (drain-once queue); `logger --crew-text --f10-commands` dispatches them
+  through `CrewConsole.handle_f10_command` into the same output/overlay path as typed commands.
+  Prerequisite: `Saved Games\DCS\Config\autoexec.cfg` with `net.allow_dostring_in = { "scripting" }`
+  (minimal set, live-confirmed). Recon: `aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md`
+  Findings 7–11. **Live acceptance (user, 2026-09-13, DCS 2.9.29.27278):** menu appears and all
+  three items reach body-layer, including across pause and mission restart. User verdict: "the
+  commands themselves need work. But the mechanism is ok." — merged on the mechanism, command
+  behaviour split into the follow-ups below. History: `plans/f10-crew-commands/` (plan, review,
+  dod-check). Next-milestone impact: none on the BL sequence; it adds a second `CrewConsole` input
+  surface that BL-10's SRS transport can follow.
+
+- [ ] **F10 Watch Nearest: reply wording and what "watch" should do.** Live 2026-09-13 it replied
+  "Watching CONTACT_1." — right action, but it breaks the contact-report principle (unit type and
+  where it is, no spoken ids; `body-layer/CLAUDE.md`, `_contact_report_text`). The deeper question
+  is **user decision pending**: `set_attention(..., "watch")` only changes body-layer bookkeeping
+  (more position-projection iterations, "Being watched." in descriptions, situation-report
+  preference); it has no DCS-side and no spoken effect. Decide whether watching should drive real
+  behaviour (e.g. more frequent position callouts for that contact, or cueing DCS Petrovich), or
+  whether the item should leave the menu until it does.
+
+- [ ] **F10 "Observation Off" item (separate from Cancel Task).** Live 2026-09-13: Scan Forward
+  started DCS AI Petrovich's forward scan, and Cancel Task did not stop it — Cancel Task only
+  cancels body-layer's own pending task. User direction: a new, separate F10 item that fires the AI
+  wheel's OBSERV OFF, leaving Cancel Task as its own item. Needs recon first: which AI-wheel
+  button/command turns observation off (BL-6 only recorded 3001 menu-open and 3015 search,
+  `plans/bl6-commands-inspect-adapt/plan.md`). Note BL-6's finding that toggling `OBSERV.` costs
+  ~10 s of gyro alignment when switched back on.
+
+- [ ] **F10 Cancel Task: define what it cancels once F10 creates tasks.** Correct today ("no pending
+  task" — no `--crew-text`/F10 path creates a `PendingIntent` yet). Kept as its own menu item per
+  user direction; revisit its semantics when an F10 command starts creating tasks.
 
 - [>] **Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:
   the new contact-report format (`belief/speech.py`'s `render_contact_report`) has a
