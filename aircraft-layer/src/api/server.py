@@ -54,6 +54,21 @@ the body/brain process, on either Windows or Mac (compute topology note in
   for why this write path does not share `/text/push`'s
   never-raises posture).
 
+- `GET /f10_commands/poll` -> drains the collector's `F10CommandQueue`
+  (`plans/f10-crew-commands/plan.md`) and returns every pending F10
+  radio-menu selection as a JSON list, oldest first (`[]` if none pending,
+  never `null` -- unlike every `/latest` endpoint above, this response is
+  always a list). **Documented exception to every other endpoint's
+  idempotent-read contract**: this one mutates collector-local queue state
+  on every call, so it assumes exactly one poller (body-layer's
+  `--crew-text --f10-commands`) -- a second concurrent poller would
+  silently steal commands from the first. The queue defaults to a fresh,
+  never-populated one (same optional-cache-defaults-to-empty pattern as
+  `world_objects_cache`/`petrovich_indication_cache`/`petrovich_wheel_cache`
+  above), so this endpoint always answers `200 []` rather than `503` when
+  unconfigured -- there is no live effector here to be "not configured,"
+  only an always-valid, possibly-empty queue.
+
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
 content, so during a paused mission it returned every motionless sample as
@@ -79,6 +94,7 @@ from typing import Any, Self
 from urllib.parse import urlparse
 
 from collector.cache import (
+    F10CommandQueue,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     TelemetryCache,
@@ -99,6 +115,7 @@ _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
+_F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
 
 #: `SearchMode`'s two valid wire values -- checked against the request
 #: body's `mode` field before forwarding to `CommandSender.send_command`.
@@ -131,11 +148,16 @@ def _handle_petrovich_wheel_latest(
     return None if sample is None else sample.to_dict()
 
 
+def _handle_f10_commands_poll(queue: F10CommandQueue) -> list[dict[str, Any]]:
+    return [event.to_dict() for event in queue.drain_all()]
+
+
 def _make_handler(
     cache: TelemetryCache,
     world_objects_cache: WorldObjectsCache,
     petrovich_indication_cache: PetrovichIndicationCache,
     petrovich_wheel_cache: PetrovichWheelCache,
+    f10_command_queue: F10CommandQueue,
     text_sender: TextOverlaySender | None,
     command_sender: CommandSender | None,
 ) -> type[BaseHTTPRequestHandler]:
@@ -160,6 +182,9 @@ def _make_handler(
                 self._respond_json(
                     200, _handle_petrovich_wheel_latest(petrovich_wheel_cache)
                 )
+                return
+            if path == _F10_COMMANDS_POLL_PATH:
+                self._respond_json(200, _handle_f10_commands_poll(f10_command_queue))
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -259,15 +284,17 @@ class TelemetryAPIServer:
         text_sender: TextOverlaySender | None = None,
         petrovich_wheel_cache: PetrovichWheelCache | None = None,
         command_sender: CommandSender | None = None,
+        f10_command_queue: F10CommandQueue | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
-        # `petrovich_wheel_cache` default to a fresh, never-populated cache
-        # rather than being required -- keeps every existing
-        # `TelemetryAPIServer(cache, host=..., port=...)` call site (tests
-        # included) working unchanged; the corresponding `/latest` endpoint
-        # on such a server just always answers `null`, same as an empty
-        # cache would. `text_sender`/`command_sender` default to `None`
-        # rather than a real sender for the same reason -- `/text/push`/
+        # `petrovich_wheel_cache`/`f10_command_queue` default to a fresh,
+        # never-populated cache/queue rather than being required -- keeps
+        # every existing `TelemetryAPIServer(cache, host=..., port=...)`
+        # call site (tests included) working unchanged; the corresponding
+        # `/latest` (or `/f10_commands/poll`) endpoint on such a server
+        # just always answers `null` (or `[]`), same as an empty cache
+        # would. `text_sender`/`command_sender` default to `None` rather
+        # than a real sender for the same reason -- `/text/push`/
         # `/command/petrovich_search` answer `503` rather than crashing
         # when they aren't configured.
         self._cache = cache
@@ -285,6 +312,9 @@ class TelemetryAPIServer:
             petrovich_wheel_cache
             if petrovich_wheel_cache is not None
             else PetrovichWheelCache()
+        )
+        self._f10_command_queue = (
+            f10_command_queue if f10_command_queue is not None else F10CommandQueue()
         )
         self._text_sender = text_sender
         self._command_sender = command_sender
@@ -320,6 +350,7 @@ class TelemetryAPIServer:
                 self._world_objects_cache,
                 self._petrovich_indication_cache,
                 self._petrovich_wheel_cache,
+                self._f10_command_queue,
                 self._text_sender,
                 self._command_sender,
             ),
