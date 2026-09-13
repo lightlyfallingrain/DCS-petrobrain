@@ -28,6 +28,14 @@ _OSM_POSITION_UNCERTAINTY_M = 1300.0
 _PROVENANCE = {"geometry": "osm", "name": "osm"}
 _CONFIDENCE = {"geometry": "medium", "name": "medium"}
 
+# Bump whenever `_classify_way`'s four rules (or any other logic in
+# `_ingest_node`/`_ingest_way` that changes what a feature's stored fields
+# look like) change. `osm_cache` (`plans/osm-classified-cache/plan.md`)
+# includes this in its cache invalidation key: a cached row is this
+# function's *output*, so a rule change must force a rebuild even when the
+# source `.osm.pbf` is byte-for-byte unchanged.
+CLASSIFIER_VERSION = 1
+
 
 @dataclass
 class OsmIngestStats:
