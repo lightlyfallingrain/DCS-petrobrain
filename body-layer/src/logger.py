@@ -98,6 +98,27 @@ aircraft-layer client for this purpose. `PerceptionLogger`'s plain
 not get this wiring (line-noise vs. signal tradeoff, see the BL-2.5 plan's
 "Deliberately not modified" section).
 
+**`--mission-understanding PATH` (BL-7, `plans/bl7-mission-phase-relevance/
+plan.md`)**: optional. When given, `main()` calls `belief.mission_phase.
+load_mission_understanding(path)` once at startup (a mission-interpreter
+`--emit-compact` JSON artifact -- a plain file read/JSON parse, never a
+Python import of mission-interpreter's own code, per root `CLAUDE.md`'s
+module-independence rule) and constructs one `belief.mission_phase.
+MissionPhaseTracker`, held alongside (not inside) `EnrichmentContext` --
+mission phase isn't world-model/ownship-shaped state, it has its own
+lifecycle. The *same* tracker instance is threaded into whichever
+`ConsolePerceptionRunner` is built (`--console` or `--crew-text`) and, for
+`--console`, into `Console` too. `ConsolePerceptionRunner.run_once` is the
+only place that ever mutates it (`.update()`, poll thread); `Console`'s
+`situation` command only ever reads it (`.current_phase()`, REPL thread) --
+the same write-thread/read-thread split `EnrichmentContext.ownship`
+already uses, deliberately, to avoid reproducing this codebase's recurring
+sqlite thread-affinity defect class (BL-2 Stage 6, BL-5) in a new field.
+Omitted (default `None`): a true no-op, `get_situation`'s `mission_phase`
+fact is absent entirely, same as before this milestone. Only meaningful
+with `--console` (`get_situation`'s only caller); harmless but otherwise
+unused with `--crew-text` or the plain logger path.
+
 **`--crew-text` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`;
 `--overlay` combination added by `plans/overlay-speech-callouts/plan.md`)**:
 runs `belief.crew_console.CrewConsole` -- the player-facing text channel --
@@ -136,8 +157,9 @@ from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
 from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
+from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
 from belief.tasks import TaskStore
-from perception.geometry import open_world_model
+from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import Observation, OwnshipState, PerceptionSource
@@ -259,6 +281,22 @@ class ConsolePerceptionRunner:
     #: own docstring). `_run_console_repl` reads this field fresh before
     #: every console command.
     enrichment: EnrichmentContext | None = None
+    #: BL-7's mission-phase tracker (`plans/bl7-mission-phase-relevance/
+    #: plan.md`), built once by `main()` (a plain JSON file load, not a
+    #: sqlite connection -- no thread-affinity concern, unlike `sources`/
+    #: `world_model_conn`/`enrichment` above) and shared as the *same*
+    #: instance across the poll thread and the REPL/crew-text thread.
+    #: `run_once` below is the only place that ever calls `.update()` on
+    #: it (poll thread, write); `_run_console_repl`/`Console` only ever
+    #: call `.current_phase()` on it (REPL thread, read) -- the same
+    #: write-thread/read-thread split `last_t_sim`/`last_ownship_state`
+    #: already use, chosen deliberately to avoid reproducing the sqlite
+    #: thread-affinity defect class this codebase has hit twice (BL-2
+    #: Stage 6, BL-5's REPL-thread enrichment fix above). `None` (the
+    #: default, when `--mission-understanding` is omitted) is a true
+    #: no-op: `run_once` never touches this field, `get_situation` reports
+    #: no phase data, unchanged from before this milestone.
+    mission_phase_tracker: MissionPhaseTracker | None = None
 
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -294,6 +332,10 @@ class ConsolePerceptionRunner:
             return []
         ownship = OwnshipState.from_telemetry_dict(telemetry)
         self.last_ownship_state = ownship
+        if self.mission_phase_tracker is not None:
+            self.mission_phase_tracker.update(
+                GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+            )
         if self.world_model_conn is not None and self.theatre is not None:
             if self.enrichment is None:
                 self.enrichment = EnrichmentContext(
@@ -589,6 +631,20 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--mission-understanding",
+        type=Path,
+        default=None,
+        help=(
+            "path to a mission-interpreter --emit-compact JSON artifact "
+            "(BL-7, plans/bl7-mission-phase-relevance/plan.md) -- when "
+            "given, loaded once at startup and used to track live mission "
+            "phase against ownship position, surfaced via get_situation's "
+            "'situation' command. Omitted (default): no phase data, "
+            "unchanged from before this milestone. Only meaningful with "
+            "--console."
+        ),
+    )
+    parser.add_argument(
         "--brain-client",
         choices=("debug", "null"),
         default="debug",
@@ -606,6 +662,16 @@ def main() -> None:
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
+    # BL-7: a plain JSON file load, not a sqlite connection -- built once,
+    # here, on the main thread, before either poll thread starts, and
+    # shared as the same MissionPhaseTracker instance across threads (see
+    # ConsolePerceptionRunner.mission_phase_tracker's own docstring for the
+    # write-thread/read-thread split this relies on).
+    mission_phase_tracker: MissionPhaseTracker | None = None
+    if args.mission_understanding is not None:
+        mission_data = load_mission_understanding(args.mission_understanding)
+        mission_phase_tracker = MissionPhaseTracker(data=mission_data)
+
     if args.crew_text:
         brain_client: BrainClient = (
             DebugPrintBrainClient()
@@ -613,7 +679,9 @@ def main() -> None:
             else NullBrainClient()
         )
         crew_runner = ConsolePerceptionRunner(
-            aircraft_client=aircraft_client, output=None
+            aircraft_client=aircraft_client,
+            output=None,
+            mission_phase_tracker=mission_phase_tracker,
         )
         crew_console = CrewConsole(
             store=crew_runner.store,
@@ -652,6 +720,7 @@ def main() -> None:
             aircraft_client=aircraft_client,
             output=None,
             overlay_client=aircraft_client if args.overlay else None,
+            mission_phase_tracker=mission_phase_tracker,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(
@@ -672,6 +741,7 @@ def main() -> None:
             tasks=console_runner.tasks,
             output=sys.stdout,
             aircraft_client=aircraft_client,
+            mission_phase_tracker=mission_phase_tracker,
         )
         print(HELP_TEXT, file=sys.stdout)
         try:

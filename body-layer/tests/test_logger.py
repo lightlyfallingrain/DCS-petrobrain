@@ -24,6 +24,11 @@ import pytest
 from aircraft_client import AircraftLayerError
 from belief.console import Console
 from belief.contacts import ContactStore
+from belief.mission_phase import (
+    CompactRoutePoint,
+    MissionPhaseTracker,
+    MissionUnderstandingData,
+)
 from logger import (
     ConsolePerceptionRunner,
     PerceptionLogger,
@@ -369,6 +374,50 @@ def test_console_runner_prints_a_periodic_contact_count_line() -> None:
 
     assert "contacts=1" in output.getvalue()
     assert "observations=1" in output.getvalue()
+
+
+# --- BL-7: mission_phase_tracker threading through run_once -----------------
+
+
+def test_console_runner_updates_mission_phase_tracker_on_the_poll_thread() -> None:
+    """`--mission-understanding` (BL-7): `run_once` calls `mission_phase_
+    tracker.update()` with ownship's position on every poll, when a tracker
+    is configured -- the only place this field is ever mutated."""
+    telemetry = _telemetry_dict()  # position_x_m=5000.0, position_z_m=8000.0
+    data = MissionUnderstandingData(
+        phases=(),
+        route=(
+            CompactRoutePoint(
+                index=0,
+                x=5000.0,
+                y=8000.0,
+                place_name=None,
+                epistemic_status="FACT",
+                basis=(),
+            ),
+        ),
+    )
+    tracker = MissionPhaseTracker(data=data)
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([])],
+        mission_phase_tracker=tracker,
+    )
+
+    assert tracker.last_reached_waypoint_index == -1
+    runner.run_once()
+    assert tracker.last_reached_waypoint_index == 0
+
+
+def test_console_runner_without_mission_phase_tracker_is_a_no_op() -> None:
+    telemetry = _telemetry_dict()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([])],
+    )
+    assert runner.mission_phase_tracker is None
+    runner.run_once()
+    assert runner.mission_phase_tracker is None
 
 
 # --- Stage 6 regression: real sqlite3.Connection across the --console poll

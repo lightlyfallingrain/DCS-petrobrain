@@ -587,6 +587,47 @@ def test_situation_command_reports_a_summary_line(
     assert "0 contact(s)" in output[0]
 
 
+def test_situation_command_reports_active_mission_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BL-7 (`plans/bl7-mission-phase-relevance/plan.md`): `Console.
+    mission_phase_tracker`, when set, is threaded through to `tools.
+    get_situation`'s new `mission_phase` fact/summary fragment."""
+    from belief.mission_phase import (
+        CompactRoutePoint,
+        MissionPhaseInfo,
+        MissionPhaseTracker,
+        MissionUnderstandingData,
+    )
+
+    data = MissionUnderstandingData(
+        phases=(
+            MissionPhaseInfo(
+                name="ingress", waypoint_index=0, epistemic_status="FACT", basis=()
+            ),
+        ),
+        route=(
+            CompactRoutePoint(
+                index=0,
+                x=0.0,
+                y=0.0,
+                place_name=None,
+                epistemic_status="FACT",
+                basis=(),
+            ),
+        ),
+    )
+    tracker = MissionPhaseTracker(data=data, last_reached_waypoint_index=0)
+    console = Console(
+        store=ContactStore(),
+        enrichment=_enrichment_context(monkeypatch),
+        mission_phase_tracker=tracker,
+    )
+    output = console.handle_line("situation", now_sim=0.0)
+    assert len(output) == 1
+    assert "Phase: ingress." in output[0]
+
+
 def test_position_command_requires_enrichment() -> None:
     console = Console(store=ContactStore())
     assert console.handle_line("position", now_sim=0.0) == [
