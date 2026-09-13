@@ -117,6 +117,37 @@ def test_load_features_parses_way_geometry_in_order(tmp_path: Path) -> None:
     )
 
 
+def test_load_features_mirrors_closed_tagged_ways_into_areas(tmp_path: Path) -> None:
+    """osm-landcover-optimization: every tagged closed way (4+ points,
+    first == last) is also emitted as a single-ring, no-holes `OsmArea`,
+    alongside its `OsmWay` -- Overpass's flat response carries no relation
+    geometry, so multipolygons stay a counted `relations_skipped` skip, but
+    a closed way needs no assembly and mirrors `osm.pbf`'s own
+    `from_way=True` area shape."""
+    cache_path = tmp_path / "fixture.json"
+    cache_path.write_text(json.dumps(_FIXTURE_OVERPASS_RESPONSE), encoding="utf-8")
+
+    feature_set = load_features(cache_path)
+
+    # The two closed ways (a building outline and a named mosque) each
+    # produce an area; the open residential way does not.
+    area_ids = {area.id for area in feature_set.areas}
+    assert area_ids == {286447599, 532529565}
+
+    mosque_area = next(a for a in feature_set.areas if a.id == 532529565)
+    assert mosque_area.from_way is True
+    assert mosque_area.tags == {
+        "name": "Cami",
+        "amenity": "place_of_worship",
+        "building": "mosque",
+        "denomination": "sunni",
+        "religion": "muslim",
+    }
+    assert len(mosque_area.rings) == 1
+    assert mosque_area.rings[0].inners == []
+    assert mosque_area.rings[0].outer[0] == mosque_area.rings[0].outer[-1]
+
+
 def test_load_features_ignores_unrecognized_element_types(tmp_path: Path) -> None:
     cache_path = tmp_path / "fixture.json"
     cache_path.write_text(json.dumps(_FIXTURE_OVERPASS_RESPONSE), encoding="utf-8")

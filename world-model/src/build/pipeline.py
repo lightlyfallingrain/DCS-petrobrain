@@ -85,7 +85,7 @@ from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
 from dcs_data.towns import parse_towns_lua
 from elevation.dem import SrtmTile
-from osm.features import OsmNode, OsmWay, load_features
+from osm.features import OsmArea, OsmNode, OsmWay, load_features
 from osm.pbf import stream_features as stream_features_from_pbf
 from osm_cache.hashing import sha256_file
 from osm_cache.models import OsmCacheMeta, cache_meta_matches
@@ -452,15 +452,26 @@ def build_region(
                         for f in way_features:
                             report.feature_counts[f.kind] += 1
 
+                    def _flush_areas(areas: list[OsmArea]) -> None:
+                        # Stage 1 (osm-landcover-optimization) only:
+                        # `osm.pbf.stream_features` now assembles areas, but
+                        # the area classifier/ingest path
+                        # (`ingest_osm_areas_batch`) does not exist yet --
+                        # that is Stage 3/4's job (`plans/
+                        # osm-landcover-optimization/plan.md` Implementation
+                        # Plan steps 3-4). This placeholder keeps the
+                        # pipeline compiling and running against the new
+                        # `stream_features` signature without ingesting
+                        # areas yet.
+                        pass
+
                     try:
-                        relations_skipped, ways_skipped_unresolved_nodes = (
-                            stream_features_from_pbf(
-                                osm_pbf_path, _flush_nodes, _flush_ways
-                            )
+                        result = stream_features_from_pbf(
+                            osm_pbf_path, _flush_nodes, _flush_ways, _flush_areas
                         )
-                        osm_stats.relations_skipped = relations_skipped
+                        osm_stats.relations_skipped = result.relations_skipped
                         osm_stats.ways_skipped_unresolved_nodes = (
-                            ways_skipped_unresolved_nodes
+                            result.ways_skipped_unresolved_nodes
                         )
                         finalize_cache(
                             cache_populate_conn,
