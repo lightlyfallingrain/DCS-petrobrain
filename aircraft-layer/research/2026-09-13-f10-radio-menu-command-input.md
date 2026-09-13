@@ -90,6 +90,61 @@ material.
    that note as unresolved, now directly relevant to a second use case (inbound F10 registration,
    not just outbound text).
 
+### Follow-up on the DCS machine (same day, DCS 2.9.29.27278)
+
+Static recon against the install, then one live probe run. Resolves Findings 4–6 and adds routes
+not considered above.
+
+7. **`missionCommands` is confirmed as a Mission-Scripting API** — **evidence: reproduced-locally**
+   — **source:** the installed `AddCommandRadioF10.lua` (Finding 5) states "Script attached to
+   mission and executed via trigger" and calls `missionCommands.addCommandForGroup(gid, name, nil,
+   fn, arg)` / `addSubMenuForGroup` / `removeItemForGroup` (lines 1127–1156). `Scripts/ScriptingSystem.lua`
+   (loaded by `MissionScripting.lua`, lines 37–59) implements the ME trigger actions
+   `trigger.action.addOtherCommand*` on top of `missionCommands.addCommand*`. Upgrades Finding 4
+   from community-convention to reproduced-locally. `$DCS_INSTALL_PATH/API/` has no other doc
+   mentioning `missionCommands`.
+
+8. **The F10 "Other" menu is rendered by `Scripts/UI/RadioCommandDialogPanel/RadioCommandDialogsPanel.lua`,
+   loaded by `Scripts/autoexec.lua` ("Main lua Environment (globalL)")** — **evidence:
+   documented (source read)**. Its `data.menuOther.submenu.items` holds the entries;
+   `getDataParameter("menuOther")` returns that table by reference; selecting an item runs
+   `command:perform(parameters)` (`onDialogCommand`, line 1459). Mission-registered items are
+   `DoMissionAction` wrappers calling `missionCommands.doAction(actionIndex)` back into the
+   mission state. Consequence: any code in the globalL state could add an arbitrary
+   `{name, command={perform=fn}}` item with no mission scripting — *if reachable*. Live probe
+   (Finding 10) shows it is not reachable from Hooks.
+
+9. **The `Sim_ControlAPI.md` note "There's no need for net.dostring_in anymore … `a_do_script()`"
+   does not mean `a_do_script` is a Hook API.** `a_do_script` / `a_do_script_file` are the
+   Mission Editor's DO SCRIPT / DO SCRIPT FILE trigger actions (`MissionEditor/modules/me_trigrules.lua`
+   lines 176–177, 2890–2910). Live probe confirms it is `nil` in Hook state.
+
+10. **Live probe results** — **evidence: reproduced-locally** — **source:** probe Hook
+    `aircraft-layer/dcs-export/petrobrain-f10-probe-hook.lua`, deployed to `Scripts/Hooks/`, run
+    against a Mi-24P single-player mission, no `Config/autoexec.cfg` present; `dcs.log` lines
+    tagged `PB-F10-PROBE`:
+    - **R0 (visibility from Hook state):** `net.dostring_in` = `function` (visible without any
+      opt-in); `a_do_script`, `missionCommands`, `RadioCommandDialogsPanel` (bare, `_G.`, and
+      `package.loaded`) all `nil`. Hooks run in a Lua state separate from globalL.
+    - **R1 (direct insert into menuOther):** `panel not reachable` at `onSimulationStart` and on
+      every `onShowRadioMenu`. No F10 "Other" entry appeared (it only shows when non-empty).
+    - **R2 (`net.dostring_in("mission", …)`, no opt-in):** returns `("Invalid state name", false)`
+      without raising, for all three calls. Not a permission error message — consistent with the
+      state allowlist (`net.allow_dostring_in`) being empty when `autoexec.cfg` is absent, but a
+      wrong state name would produce the same text; untested which.
+    - **R3 (`a_do_script` direct):** `attempt to call global 'a_do_script' (a nil value)`.
+    - **R4:** `onShowRadioMenu(a_h)` fires on every menu open/close/navigate, typically twice per
+      event, `a_h` = `0` or `562` (plausibly menu height in px). `onRadioCommand` never fired
+      during the run (no radio command was selected, since no probe item existed; built-in
+      commands were not exercised).
+
+**Status after live run:** with no opt-in, no route from Hook state registers an F10 item.
+Remaining candidates: **B** (`net.dostring_in` with `autoexec.cfg` opt-in — the single open
+question is whether it then accepts `"mission"` or another state name) and **A** (per-mission
+authored script). The inbound selection event would also need a channel back out of the mission
+state (e.g. Hook polling a mission-state queue via the same `dostring_in`), so B's feasibility
+gates both registration and callback delivery.
+
 ### Reproducible Test
 
 No live test was run this session (no DCS box access). Exact steps for the user to run on the
