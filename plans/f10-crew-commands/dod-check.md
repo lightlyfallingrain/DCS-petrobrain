@@ -96,15 +96,15 @@
 - F10 → Other → Petrovich submenu appeared; all three items (Watch Nearest, Scan Forward, Cancel Task) delivered selections to body-layer
 - Aircraft-layer log: `PetrobrainF10Commands (Main): registration -> ok=true result=registered`
 - Minimal opt-in confirmed: `net.allow_dostring_in = { "scripting" }` alone works (no `allow_unsafe_api` needed)
-- Paused-mission check: selections queue and fire correctly on resume
-- Mission-restart check: menu re-registers; all three items still fire across mission boundary
+- Paused-mission check: performed by the user, no problems reported (per-selection pause behaviour not separately described)
+- Mission-restart check: performed by the user, no problems reported
 
 **User Verdict:** "F10 commands menu works, the commands themselves need work. But the mechanism is ok." User accepted the merge, deferring command-behavior fixes (Watch Nearest reporting contact id instead of type/location, etc.) as follow-ups, not merge blockers.
 
 **Known Deferred Issues (not merge blockers):**
-1. Watch Nearest speaks "Watching CONTACT_1" (internal id) instead of unit type + position
-2. Scan Forward fires DCS AI helper wheel (correct action, no body-layer integration yet)
-3. Cancel Task with no pending task says "no pending task" (correct behavior; no command path creates tasks in `--crew-text` mode yet)
+1. Watch Nearest replies "Watching CONTACT_1." (internal id) instead of the contact-report format (unit type, clock, range). Separately, "watch" only sets body-layer attention (finer position projection, "Being watched." in descriptions, situation preference); it has no DCS-side or spoken effect, so what the command should *do* is an open user decision.
+2. Scan Forward correctly starts DCS AI Petrovich's forward scan (same as the AI helper wheel), but a following Cancel Task does not stop it: Cancel Task only cancels body-layer's own pending task. User direction: add a separate "Observation Off" F10 item that fires the AI wheel's OBSERV OFF (button not yet identified; BL-6 only recorded 3001/3015), and keep Cancel Task as its own item.
+3. Cancel Task with nothing pending says "no pending task": correct.
 
 ---
 
