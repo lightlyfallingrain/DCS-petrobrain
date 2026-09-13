@@ -10,7 +10,6 @@ already covers.
 
 import datetime
 import sqlite3
-import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -225,13 +224,15 @@ def test_ingest_junctions_streaming_empty_store(tmp_path: Path) -> None:
 def test_ingest_junctions_streaming_bounded_peak_roads_per_chunk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Memory-bound validation (mirrors `plans/osm-streaming-ingest/plan.md`
-    Step 5's `tracemalloc` pattern): as the total road count grows across
-    many widely-separated chunks, the number of roads returned to any single
+    """Memory-bound validation: as the total road count grows across many
+    widely-separated chunks, the number of roads returned to any single
     `features_in_bbox` call -- i.e. the peak simultaneously-resident road
     list -- must stay bounded to roughly one chunk's own content, not scale
     with the total. This is the direct proof of the fix: the old bulk path's
-    peak was exactly the total road count."""
+    peak was exactly the total road count. Asserted via a row-count proxy on
+    `features_in_bbox` itself (not `tracemalloc`, whose byte counts carry
+    enough unrelated-allocation noise to make a tight bound flaky) -- the
+    row count is what actually determines peak `Vertex`-object memory."""
     n_clusters = 40
     roads: list[StoredFeature] = []
     # Spread clusters 20,000m apart (four chunk-widths) so no two clusters'
@@ -271,17 +272,12 @@ def test_ingest_junctions_streaming_bounded_peak_roads_per_chunk(
     )
 
     try:
-        tracemalloc.start()
-        try:
-            stats = _empty_stats()
-            total_features = 0
-            for chunk in ingest_junctions_streaming(
-                conn, region, None, stats, tolerance_m=0.5, min_degree=3
-            ):
-                total_features += len(chunk)
-            _current, _peak_bytes = tracemalloc.get_traced_memory()
-        finally:
-            tracemalloc.stop()
+        stats = _empty_stats()
+        total_features = 0
+        for chunk in ingest_junctions_streaming(
+            conn, region, None, stats, tolerance_m=0.5, min_degree=3
+        ):
+            total_features += len(chunk)
     finally:
         conn.close()
 
