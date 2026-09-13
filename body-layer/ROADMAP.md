@@ -281,7 +281,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `onSimulationStart`, and poll selections back out through the same bridge (live-confirmed, ~1 s
   latency at a 1 Hz poll, no per-mission authoring). Prerequisite: the user-machine
   `Saved Games\DCS\Config\autoexec.cfg` unsafe-API opt-in (user accepted it for the probe).
-  Open for the plan: minimal opt-in set, per-group scoping in multiplayer. Next: Architect plan
+  Open for the plan: minimal opt-in set (multiplayer out of scope, root `CLAUDE.md`). Next: Architect plan
   (Hook registration + poll, Hook→collector→body inbound path).
 
 - [>] **Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:

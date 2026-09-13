@@ -181,8 +181,8 @@ it by polling the same bridge, then forwards over the existing Hook→collector 
 `autoexec.cfg` opt-in (a user-machine config change that applies to all DCS sessions and all
 installed Hooks), which Architect should treat as a deploy prerequisite in `WORKFLOW.md`.
 Still open: the minimal opt-in (whether `"gui"` in `allow_unsafe_api` and anything beyond
-`"scripting"` in `allow_dostring_in` is needed — run 2 enabled all of them), and per-group scoping
-(`addCommandForGroup` vs global `addCommand`) in multiplayer.
+`"scripting"` in `allow_dostring_in` is needed — run 2 enabled all of them). Multiplayer group scoping is out of scope (root
+`CLAUDE.md`, single-player only).
 
 ### Reproducible Test
 
