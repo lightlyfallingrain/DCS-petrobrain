@@ -295,7 +295,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     item.
   - What Cancel Task cancels once an F10 command creates tasks.
 
-- [~] **F10 Watch Nearest reply in contact-report format** (`fix/f10-watch-nearest-readback`). Live
+- [x] **F10 Watch Nearest reply in contact-report format — done, merged 2026-09-13 (merge
+  `a4e8704`, `fix/f10-watch-nearest-readback`).** Live
   2026-09-13 it replied "Watching CONTACT_1."; now `"Watching <unit type>, <clock> o'clock, <range>
   km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
   spoken id. Typed `watch <id>` readback unchanged.
