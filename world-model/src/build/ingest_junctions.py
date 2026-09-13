@@ -23,7 +23,9 @@ itself is left completely unchanged -- still the right choice for any
 small-store caller that doesn't need chunking, and untouched by this fix.
 """
 
+import logging
 import sqlite3
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -50,6 +52,15 @@ from store.reader import count_features, feature_layer_bbox, features_in_bbox
 # after watching a real `syria-full` run rather than treating it as final.
 _MIN_PADDING_M = 10.0
 _PADDING_MULTIPLE = 10.0
+
+logger = logging.getLogger(__name__)
+
+# How often the chunk loop below logs progress, in seconds. Time-based rather
+# than every-N-chunks (cf. `build.ingest_srtm`'s row interval) because per-chunk
+# cost varies by orders of magnitude between empty desert and dense city
+# chunks; a fixed chunk count would log in bursts, then go silent for minutes
+# -- which at `syria-full` scale is indistinguishable from a hang.
+_PROGRESS_LOG_INTERVAL_S = 30.0
 
 
 @dataclass
@@ -166,7 +177,34 @@ def ingest_junctions_streaming(
 
     padding_m = max(tolerance_m * _PADDING_MULTIPLE, _MIN_PADDING_M)
 
-    for ix, iz in chunks_covering(layer_bbox, chunk_size_m):
+    chunks = chunks_covering(layer_bbox, chunk_size_m)
+    logger.info(
+        "ingest_junctions: %d roads, %d chunks of %.0f m (padding %.0f m)",
+        stats.roads_scanned,
+        len(chunks),
+        chunk_size_m,
+        padding_m,
+    )
+    started_at = time.monotonic()
+    last_logged_at = started_at
+
+    for index, (ix, iz) in enumerate(chunks):
+        now = time.monotonic()
+        if index > 0 and now - last_logged_at >= _PROGRESS_LOG_INTERVAL_S:
+            elapsed_s = now - started_at
+            remaining_s = elapsed_s / index * (len(chunks) - index)
+            logger.info(
+                "ingest_junctions: chunk %d/%d (%.1f%%, %d junctions kept, "
+                "%.0fs elapsed, ~%.0fs remaining)",
+                index,
+                len(chunks),
+                100.0 * index / len(chunks),
+                stats.junctions_kept,
+                elapsed_s,
+                remaining_s,
+            )
+            last_logged_at = now
+
         core = chunk_bounds(ix, iz, chunk_size_m)
         padded: Bbox = (
             core[0] - padding_m,
