@@ -429,7 +429,8 @@ against a live DCS session as of authorship.
   `GET /f10_commands/poll`) and dispatches each through `handle_f10_command`, the same `_print`
   funnel `handle_line`/`drain_events` already use. Three tokens: `watch_nearest` (a new
   `_nearest_contact_id` helper — nearest contact by `facts["relative_now"]["range_m"]`, requires
-  `enrichment` — plus `set_attention`), `scan_forward` (the bare
+  `enrichment` — plus `set_attention`; its readback, `speech.render_watch_nearest_readback`, speaks
+  `"Watching <contact report>."` via `_contact_report_text` since the player named no id), `scan_forward` (the bare
   `aircraft_client.trigger_petrovich_search("forward")` trigger, not `belief.tools.scan_area` — an
   F10 button has no geometry/reason to supply one), `cancel_task` (cancels the most-recently-created
   still-`pending` task in `self.tasks`, regardless of source — currently always reports "no pending
