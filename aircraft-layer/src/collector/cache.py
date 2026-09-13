@@ -16,16 +16,35 @@ test: `since()` filtered on receipt time, not content, so it returned every
 paused-and-motionless sample as "new" -- not useful, and the body/brain
 consumer polling model doesn't need gap-free history anyway (it can just
 poll `/latest` as often as it needs). See `plans/aircraft-layer/plan.md`.
+
+`F10CommandQueue` (`plans/f10-crew-commands/plan.md`) is a different shape
+from every cache above: a **bounded FIFO event queue**, not a single-slot
+"latest" cache. Two F10 selections landing inside one body-layer poll
+interval must both survive -- a "latest" slot would silently collapse them
+into one, a real behavioral loss for discrete commands (e.g. two different
+menu picks) in a way it isn't for continuously-refreshed telemetry. Fed by
+`collector.f10_command_receiver.F10CommandReceiver`; drained by
+`GET /f10_commands/poll` (`api.server`), which -- unlike every `/latest`
+endpoint -- mutates this queue's state on every call (drain-on-GET,
+at-most-once delivery; see that endpoint's own docstring).
 """
 
 from __future__ import annotations
 
+from collections import deque
+
 from schema import (
+    F10CommandEvent,
     PetrovichIndicationSample,
     PetrovichWheelSample,
     TelemetrySample,
     WorldObjectsSnapshot,
 )
+
+#: Bounded so a pathological flood of F10 selections (or a stuck poller)
+#: cannot grow this queue unboundedly -- generous relative to any plausible
+#: player selection rate (three menu items, hand-operated).
+_MAX_QUEUE_LEN = 64
 
 
 class TelemetryCache:
@@ -99,3 +118,35 @@ class PetrovichWheelCache:
     def latest(self) -> PetrovichWheelSample | None:
         """Return the most recently pushed sample, or `None` if empty."""
         return self._latest
+
+
+class F10CommandQueue:
+    """Holds pending F10 radio-menu command selections
+    (`plans/f10-crew-commands/plan.md`) -- a bounded FIFO, not a
+    single-slot "latest" cache (see this module's own docstring for why).
+    `push`/`drain_all`, not `push`/`latest` -- the first event-queue cache
+    in this module, not a latest-value one."""
+
+    def __init__(self, maxlen: int = _MAX_QUEUE_LEN) -> None:
+        self._queue: deque[F10CommandEvent] = deque(maxlen=maxlen)
+
+    def push(self, event: F10CommandEvent) -> None:
+        """Enqueue one newly-received F10 command event. If the queue is
+        already at `maxlen`, the oldest pending event is silently dropped
+        (deque's own overflow behavior) -- an accepted, at-most-once-class
+        loss under this module's docstring, and only reachable at a
+        pathological selection rate."""
+        self._queue.append(event)
+
+    def drain_all(self) -> list[F10CommandEvent]:
+        """Remove and return every currently-queued event, oldest first.
+        Uses repeated `popleft()` rather than a snapshot-then-clear so a
+        `push` racing this call (from the receiver's own thread) is never
+        silently dropped by a clear() that fires after the snapshot was
+        taken -- each `popleft()` is itself atomic under the GIL."""
+        drained: list[F10CommandEvent] = []
+        while True:
+            try:
+                drained.append(self._queue.popleft())
+            except IndexError:
+                return drained
