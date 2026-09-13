@@ -86,7 +86,7 @@ def _write_fixture_osm_pbf(
         )
         writer.add_way(
             osmium_mutable.Way(
-                id=100, nodes=[2, 3], tags={"highway": "residential"}, **common
+                id=100, nodes=[2, 3], tags={"waterway": "stream"}, **common
             )
         )
         if extra_way:
@@ -97,7 +97,7 @@ def _write_fixture_osm_pbf(
             )
             writer.add_way(
                 osmium_mutable.Way(
-                    id=101, nodes=[3, 4], tags={"highway": "track"}, **common
+                    id=101, nodes=[3, 4], tags={"waterway": "canal"}, **common
                 )
             )
     finally:
@@ -109,7 +109,7 @@ def _feature_rows_ignoring_ids(out_path: Path) -> list[tuple[object, ...]]:
 
     conn = sqlite3.connect(f"file:{out_path}?mode=ro", uri=True)
     try:
-        features = all_features(conn, ["road", "named_place"])
+        features = all_features(conn, ["water", "named_place"])
     finally:
         conn.close()
     return sorted(
@@ -282,12 +282,14 @@ class TestMidStreamFailure:
         out_path = tmp_path / "region.sqlite"
         _write_fixture_osm_pbf(pbf_path)
 
-        def _fake_stream_raises(pbf_path, on_nodes, on_ways, batch_size=None):  # type: ignore[no-untyped-def]
+        def _fake_stream_raises(  # type: ignore[no-untyped-def]
+            pbf_path, on_nodes, on_ways, on_areas, batch_size=None, area_batch_size=None
+        ):
             on_ways(
                 [
                     OsmWay(
                         id=100,
-                        tags={"highway": "residential"},
+                        tags={"waterway": "stream"},
                         points=[(36.0, 39.0), (36.001, 39.001)],
                     )
                 ]
@@ -315,7 +317,9 @@ class TestMidStreamFailure:
         out_path = tmp_path / "region.sqlite"
         _write_fixture_osm_pbf(pbf_path)
 
-        def _fake_stream_raises(pbf_path, on_nodes, on_ways, batch_size=None):  # type: ignore[no-untyped-def]
+        def _fake_stream_raises(  # type: ignore[no-untyped-def]
+            pbf_path, on_nodes, on_ways, on_areas, batch_size=None, area_batch_size=None
+        ):
             raise RuntimeError("simulated mid-stream failure")
 
         with pytest.MonkeyPatch.context() as mp:
