@@ -18,13 +18,21 @@ import osmium.osm.mutable as osmium_mutable
 import pytest
 
 from build import pipeline
-from build.ingest_osm import CLASSIFIER_VERSION
+from build.ingest_osm import CLASSIFIER_VERSION, OsmIngestStats
 from build.pipeline import build_region
 from build.region import RegionDefinition
 from coordinates import dcs_to_wgs84
 from dcs_data.towns import TownEntry
 from osm.features import OsmWay
+from osm_cache.hashing import sha256_file
+from osm_cache.models import OsmCacheMeta
 from osm_cache.paths import osm_cache_store_path, osm_cache_tmp_path
+from osm_cache.schema import OSM_CACHE_SCHEMA_VERSION
+from osm_cache.writer import (
+    finalize_cache,
+    insert_cached_features,
+    open_osm_cache_for_populate,
+)
 from store.reader import all_features
 
 _ALEPPO_TOWN = TownEntry(
@@ -50,10 +58,16 @@ def _patch_parsers(monkeypatch: pytest.MonkeyPatch) -> None:
 def _write_fixture_osm_pbf(
     path: Path, place_name: str = "FromPbf", extra_way: bool = False
 ) -> None:
-    """A small `.osm.pbf` fixture: one named-place node and one classified
-    way, both inside `_TEST_REGION`. `extra_way` adds a second, distinctly-
-    tagged way -- used to change the fixture's content (and therefore its
-    hash) between runs without changing its node/place content."""
+    """A small `.osm.pbf` fixture inside `_TEST_REGION`, covering one of
+    each of the new post-osm-landcover-optimization feature shapes: a named
+    place node, a `water`/river line, a `named_place`/peak node, a
+    `coastline` line (a closed island way -- also proves its shadow area is
+    silently skipped, not stored), and a `landcover`/forest polygon with one
+    hole (a `type=multipolygon` relation with untagged outer/inner member
+    ways) -- Stage 4's "extend the cache parity fixture with areas, holes, a
+    coastline and a peak". `extra_way` adds a second river segment -- used to
+    change the fixture's content (and therefore its hash) between runs
+    without changing its node/place content."""
     if path.exists():
         path.unlink()
     lat, lon = dcs_to_wgs84(
@@ -86,7 +100,7 @@ def _write_fixture_osm_pbf(
         )
         writer.add_way(
             osmium_mutable.Way(
-                id=100, nodes=[2, 3], tags={"waterway": "stream"}, **common
+                id=100, nodes=[2, 3], tags={"waterway": "river"}, **common
             )
         )
         if extra_way:
@@ -97,9 +111,81 @@ def _write_fixture_osm_pbf(
             )
             writer.add_way(
                 osmium_mutable.Way(
-                    id=101, nodes=[3, 4], tags={"waterway": "canal"}, **common
+                    id=101, nodes=[3, 4], tags={"waterway": "river"}, **common
                 )
             )
+
+        # A named peak.
+        writer.add_node(
+            osmium_mutable.Node(
+                id=5,
+                location=(lon + 0.004, lat + 0.004),
+                tags={"natural": "peak", "name": "Test Peak"},
+                **common,
+            )
+        )
+
+        # A closed coastline way (an island) -- reaches both way() (kept, a
+        # `coastline` line) and area() (silently skipped, not stored --
+        # `_ingest_area`'s D2 rule 5 note).
+        coastline_centre = (lon + 0.006, lat + 0.006)
+        coastline_nodes = [
+            (10, coastline_centre[0] - 0.0005, coastline_centre[1] - 0.0005),
+            (11, coastline_centre[0] + 0.0005, coastline_centre[1] - 0.0005),
+            (12, coastline_centre[0] + 0.0005, coastline_centre[1] + 0.0005),
+            (13, coastline_centre[0] - 0.0005, coastline_centre[1] + 0.0005),
+        ]
+        for node_id, node_lon, node_lat in coastline_nodes:
+            writer.add_node(
+                osmium_mutable.Node(
+                    id=node_id, location=(node_lon, node_lat), tags={}, **common
+                )
+            )
+        writer.add_way(
+            osmium_mutable.Way(
+                id=102,
+                nodes=[10, 11, 12, 13, 10],
+                tags={"natural": "coastline"},
+                **common,
+            )
+        )
+
+        # A `landuse=forest` multipolygon with one hole: an untagged outer
+        # ring (~44 ha, well above the 5 ha minimum) and an untagged inner
+        # ring/hole (~11 ha, also above the minimum -- kept, not dropped).
+        forest_centre = (lon + 0.01, lat + 0.01)
+        outer_nodes = [
+            (20, forest_centre[0] - 0.003, forest_centre[1] - 0.003),
+            (21, forest_centre[0] + 0.003, forest_centre[1] - 0.003),
+            (22, forest_centre[0] + 0.003, forest_centre[1] + 0.003),
+            (23, forest_centre[0] - 0.003, forest_centre[1] + 0.003),
+        ]
+        hole_nodes = [
+            (30, forest_centre[0] - 0.0015, forest_centre[1] - 0.0015),
+            (31, forest_centre[0] + 0.0015, forest_centre[1] - 0.0015),
+            (32, forest_centre[0] + 0.0015, forest_centre[1] + 0.0015),
+            (33, forest_centre[0] - 0.0015, forest_centre[1] + 0.0015),
+        ]
+        for node_id, node_lon, node_lat in [*outer_nodes, *hole_nodes]:
+            writer.add_node(
+                osmium_mutable.Node(
+                    id=node_id, location=(node_lon, node_lat), tags={}, **common
+                )
+            )
+        writer.add_way(
+            osmium_mutable.Way(id=103, nodes=[20, 21, 22, 23, 20], tags={}, **common)
+        )
+        writer.add_way(
+            osmium_mutable.Way(id=104, nodes=[30, 31, 32, 33, 30], tags={}, **common)
+        )
+        writer.add_relation(
+            osmium_mutable.Relation(
+                id=300,
+                members=[("w", 103, "outer"), ("w", 104, "inner")],
+                tags={"type": "multipolygon", "landuse": "forest"},
+                **common,
+            )
+        )
     finally:
         writer.close()
 
@@ -109,7 +195,9 @@ def _feature_rows_ignoring_ids(out_path: Path) -> list[tuple[object, ...]]:
 
     conn = sqlite3.connect(f"file:{out_path}?mode=ro", uri=True)
     try:
-        features = all_features(conn, ["water", "named_place"])
+        features = all_features(
+            conn, ["water", "named_place", "coastline", "landcover"]
+        )
     finally:
         conn.close()
     return sorted(
@@ -168,6 +256,19 @@ class TestCacheMissThenHitParity:
         # *different* out_path still has to seed its own sibling cache file
         # once, from the same pbf content.
         assert osm_cache_store_path(out_path_2).exists()
+
+        # The fixture's new post-osm-landcover-optimization shapes actually
+        # made it through both the cache-miss (parse) and cache-hit (read)
+        # paths -- a hole, a coastline, and a peak, not just the original
+        # named-place/water pair.
+        assert report_2.feature_counts["coastline"] == 1
+        assert report_2.feature_counts["landcover"] == 1
+        assert report_2.osm_stats is not None
+        assert report_2.osm_stats.holes_kept == 1
+        assert report_2.osm_stats.multipolygon_relations_seen == 1
+        # named_place: towns.lua's Aleppo (DCS-sourced) + the OSM node/1
+        # place node + the OSM peak node.
+        assert report_2.feature_counts["named_place"] == 3
 
 
 class TestInvalidation:
@@ -239,6 +340,55 @@ class TestInvalidation:
         assert cache_meta_after is not None
         assert cache_meta_after.classifier_version == CLASSIFIER_VERSION + 1
 
+    def test_classifier_version_1_cache_is_rejected(self, tmp_path: Path) -> None:
+        """A concrete instance of the version-mismatch mechanism above: a
+        real leftover `classifier_version=1` cache (the shape any cache
+        built before this milestone's D2 rewrite would have) must never be
+        served to today's code, which classifies under `CLASSIFIER_VERSION
+        == 2`."""
+        pbf_path = tmp_path / "fixture.osm.pbf"
+        out_path = tmp_path / "region.sqlite"
+        _write_fixture_osm_pbf(pbf_path)
+
+        cache_path = osm_cache_store_path(out_path)
+        tmp_cache_path = osm_cache_tmp_path(out_path)
+        stale_meta = OsmCacheMeta(
+            pbf_sha256=sha256_file(pbf_path),
+            pbf_size_bytes=pbf_path.stat().st_size,
+            classifier_version=1,
+            cache_schema_version=OSM_CACHE_SCHEMA_VERSION,
+            region_name=_TEST_REGION.name,
+            centre_x=_TEST_REGION.centre_x,
+            centre_z=_TEST_REGION.centre_z,
+            half_extent_x_m=_TEST_REGION.half_extent_x_m,
+            half_extent_z_m=_TEST_REGION.half_extent_z_m,
+            built_at="2020-01-01T00:00:00Z",
+        )
+        populate_conn = open_osm_cache_for_populate(tmp_cache_path)
+        insert_cached_features(populate_conn, [])  # empty -- content must never be read
+        finalize_cache(
+            populate_conn, tmp_cache_path, cache_path, stale_meta, OsmIngestStats()
+        )
+
+        report = build_region(
+            _TEST_REGION,
+            towns_lua_path=Path("unused-towns.lua"),
+            beacons_lua_path=Path("unused-beacons.lua"),
+            osm_cache_path=None,
+            out_path=out_path,
+            osm_pbf_path=pbf_path,
+        )
+
+        assert report.osm_stats is not None
+        # The stale cache's classifier_version=1 must not have been served
+        # -- a real parse ran and produced real features (the empty stale
+        # cache would have produced none).
+        assert report.feature_counts["named_place"] >= 1
+        cache_meta_after = pipeline.load_cache_meta(cache_path)
+        assert cache_meta_after is not None
+        assert cache_meta_after.classifier_version == CLASSIFIER_VERSION
+        assert cache_meta_after.classifier_version != 1
+
     def test_different_region_bbox_forces_rebuild(self, tmp_path: Path) -> None:
         pbf_path = tmp_path / "fixture.osm.pbf"
         out_path_1 = tmp_path / "region-1.sqlite"
@@ -289,7 +439,7 @@ class TestMidStreamFailure:
                 [
                     OsmWay(
                         id=100,
-                        tags={"waterway": "stream"},
+                        tags={"waterway": "river"},
                         points=[(36.0, 39.0), (36.001, 39.001)],
                     )
                 ]
