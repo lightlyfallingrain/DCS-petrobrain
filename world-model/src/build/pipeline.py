@@ -64,6 +64,7 @@ from build.ingest_osm import (
     CLASSIFIER_VERSION,
     OsmIngestStats,
     ingest_osm,
+    ingest_osm_areas_batch,
     ingest_osm_nodes_batch,
     ingest_osm_ways_batch,
 )
@@ -237,8 +238,15 @@ def build_region(
     bounded to one spatial tile's worth of features at a time rather than
     the whole `road` layer in one `store.reader.all_features` call, since a
     `syria-full`-scale combined DCS+OSM road layer OOM'd the old whole-layer
-    approach. See `roadnet.junctions`'s module docstring for the
-    clustering/degree design and Stage 2's real-data validation numbers.
+    approach. **osm-landcover-optimization**: this stage now sees DCS-sourced
+    `road` features only -- no code change here (it still reads
+    `kind="road"`), but `build.ingest_osm` no longer classifies anything as
+    `road` at all (roads are dropped from OSM ingest entirely; DCS's own
+    `.routes` layer is authoritative), so junction detection's candidate
+    pool is smaller and single-provenance now. See `roadnet.junctions`'s
+    module docstring for the clustering/degree design and Stage 2's
+    real-data validation numbers (measured before this change, against a
+    combined DCS+OSM road layer).
 
     `srtm_tile_paths` (M7 Stage 2), if given and non-empty, ingests SRTM as
     the region's **primary** `elevation` grid (`provenance="srtm"`,
@@ -453,23 +461,29 @@ def build_region(
                             report.feature_counts[f.kind] += 1
 
                     def _flush_areas(areas: list[OsmArea]) -> None:
-                        # Stage 1 (osm-landcover-optimization) only:
-                        # `osm.pbf.stream_features` now assembles areas, but
-                        # the area classifier/ingest path
-                        # (`ingest_osm_areas_batch`) does not exist yet --
-                        # that is Stage 3/4's job (`plans/
-                        # osm-landcover-optimization/plan.md` Implementation
-                        # Plan steps 3-4). This placeholder keeps the
-                        # pipeline compiling and running against the new
-                        # `stream_features` signature without ingesting
-                        # areas yet.
-                        pass
+                        area_features = ingest_osm_areas_batch(
+                            areas,
+                            region.theatre,
+                            region.centre_x,
+                            region.centre_z,
+                            region.half_extent_x_m,
+                            region.half_extent_z_m,
+                            osm_source_id,
+                            osm_stats,
+                        )
+                        insert_features(conn, area_features)
+                        insert_cached_features(cache_populate_conn, area_features)
+                        for f in area_features:
+                            report.feature_counts[f.kind] += 1
 
                     try:
                         result = stream_features_from_pbf(
                             osm_pbf_path, _flush_nodes, _flush_ways, _flush_areas
                         )
                         osm_stats.relations_skipped = result.relations_skipped
+                        osm_stats.multipolygon_relations_seen = (
+                            result.multipolygon_relations_seen
+                        )
                         osm_stats.ways_skipped_unresolved_nodes = (
                             result.ways_skipped_unresolved_nodes
                         )
