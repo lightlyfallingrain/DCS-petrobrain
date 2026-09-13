@@ -5,6 +5,10 @@ and `plans/f10-crew-commands/implementation.md`, diff base `main` (`git diff mai
 23 files, +1935/-16). Stages 1-3 (collector-side inbound channel, body-layer consumption, the Hook
 script) are in scope; Stage 4 (live DCS acceptance) is correctly left to the user.
 
+**Re-review addendum (commit `9d2a84a`):** addresses the one required fix and the first optional
+refinement from the initial pass below. See "Re-review of 9d2a84a" at the end of this file for the
+verification and final verdict — that section supersedes the original Verdict below.
+
 Scope matches the plan closely — no drift found. Module boundaries are respected: coordinate/DCS
 internals stay in `aircraft-layer`, dispatch stays inside `CrewConsole`'s existing `_print` funnel,
 no new cross-subproject coupling. Provenance is handled correctly (wall-clock-only is disclosed as
@@ -142,3 +146,62 @@ for comparison, all new/changed Python source and tests in both subprojects, bot
 diffs, `WORKFLOW.md`'s new section, the plan, implementation.md, and the research doc's Findings
 7-11). All four touched-subproject check commands were run directly by this review, not taken from
 the implementer's reported numbers — which is how the required-fix test failure was found.
+
+---
+
+## Re-review of 9d2a84a
+
+`git show 9d2a84a` — two files, `aircraft-layer/dcs-export/petrobrain-f10-commands-hook.lua`
+(+4/-1) and `aircraft-layer/tests/test_f10_command_receiver.py` (+26/-6).
+
+**Required fix verification.** `test_all_allowed_commands_are_enqueued` now opens one
+`socket.socket(...)` before the send loop, passes it into `_send(port, {"command": command},
+sock=sock)` for all three sends, and closes it after — matching
+`petrobrain-f10-commands-hook.lua`'s own `sendToken`, which opens `sendSocket` once and reuses it
+across every token forwarded from one `pollAndForward` call. The assertion also changed from
+`drained == list(ALLOWED_COMMANDS)` (order-dependent) to `sorted(drained) ==
+sorted(ALLOWED_COMMANDS)` (order-independent) — belt-and-suspenders on top of the now-realistic
+send pattern, not a substitute for it. `_send`'s new `sock: socket.socket | None = None` parameter
+defaults to the prior throwaway-socket-per-call behavior for every other call site in this file
+(single-datagram tests), so nothing else in this file's test suite changed behavior.
+
+Reran `pytest aircraft-layer/tests -q` **three times, in the foreground, no background tasks**,
+via `body-layer/.venv`'s interpreter:
+
+```
+PYTHONPATH=aircraft-layer/src body-layer/.venv/bin/python -m pytest aircraft-layer/tests -q
+```
+
+- Run 1: `109 passed in 51.84s`
+- Run 2: `109 passed in 51.84s`
+- Run 3: `109 passed in 51.83s`
+
+Also ran `test_f10_command_receiver.py` alone a fourth time for extra margin on the specific file
+that was flaky: `7 passed in 36.62s`. All four runs clean — the fix holds; the original failure
+(reproduced 4/4 before the fix) does not recur.
+
+`luac5.1 -p` (Lua 5.1.5) rerun on all 11 `aircraft-layer/dcs-export/*.lua` files, including the
+patched `petrobrain-f10-commands-hook.lua`: all pass.
+
+**Optional-refinement verification.** `onSimulationStart` now wraps `registerF10Menu()` in
+`local ok, err = pcall(registerF10Menu); if not ok then logi("registration failed: " ..
+tostring(err)) end` — the same `pcall`-then-log-on-failure shape `onSimulationFrame`'s
+`pollAndForward` call already used. Consistent, no new risk introduced. The second optional
+refinement (the `removeItem`-based idempotency note) was not something the commit needed to
+address — it was already flagged as an accepted, disclosed risk deferred to Stage 4's live
+mission-restart check, not a code change.
+
+No new issues introduced by this commit — the diff is a narrowly-targeted fix matching exactly
+what the required fix and first optional refinement asked for, nothing broader.
+
+### Final Verdict
+**APPROVED**
+
+Both items from the original review are resolved and verified by direct reproduction (3 foreground
+full-suite runs + 1 isolated run of the previously-flaky test, all clean; Lua re-syntax-checked).
+No remaining required fixes. Stage 4 (live DCS acceptance) remains correctly deferred to the user.
+
+### Re-review Confidence
+Full read of the commit diff (`git show 9d2a84a`, both files in full) plus direct reproduction of
+every check this addendum reports — not taken on the commit message's own claim of "5 foreground
+runs post-fix."
