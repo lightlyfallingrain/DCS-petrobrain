@@ -14,8 +14,9 @@ min-area/exemption logic, the DCS axis-flip coastline sign convention (verified 
 and the OSM cache's `CLASSIFIER_VERSION`-gated invalidation all check out against the code, not
 just the plan's prose. `nearest_road_osm`'s removal has zero live consumers anywhere in the repo
 (mission-interpreter reads `nearest_settlement` only, via untyped dict access, so it is unaffected
-by every field change in this branch). Found two required fixes, both small and mechanical, plus
-several optional refinements.
+by every field change in this branch). Found three required fixes (two small/mechanical, one a
+genuine gap in the module's own stated "never a silent drop" convention), plus several optional
+refinements.
 
 ### Required Fixes
 
@@ -44,6 +45,41 @@ several optional refinements.
   same risk, and is actively misleading to the next reader of `nearest_feature`. Reword to name
   only `nearest_road`'s DCS-only restriction (the current, real use of `provenance_geometry`).
 
+- **No validation that an independently-simplified hole stays inside its independently-simplified
+  outer ring, and no counted diagnostic when it doesn't** (`world-model/src/build/ingest_osm.py`
+  `_ingest_ring`, lines 479-495; `world-model/src/geometry/__init__.py` `simplify_ring`, lines
+  224-268). `simplify_ring` is called once for the outer ring and once independently per kept hole.
+  Douglas-Peucker only removes vertices (never moves a kept one), so a simplified segment stays
+  within `SIMPLIFY_TOLERANCE_M` (30 m) of the *original* line it replaces, but nothing constrains
+  the *relationship* between the two independently-simplified rings afterward. A hole whose boundary
+  comes within roughly 2×30 m = 60 m of the outer boundary along a stretch simplified on both sides
+  can, in principle, end up partially outside the simplified outer ring or overlapping it — an
+  invalid polygon that `store.reader.containing_polygons`/`_distance_to_feature` and
+  `geometry.polygon_contains` have no way to detect, since both trust `inner_rings` to be
+  well-formed. Concrete failure scenario: a small island close to a lake's shore, or a forest
+  relation's clearing near its own outer boundary — both realistic OSM shapes — could, after
+  simplification, report a point as "inside the forest" when the true (unsimplified) geometry places
+  it in the clearing, or vice versa, with nothing anywhere recording that this happened. This is one
+  of the two correctness areas the review brief named explicitly ("holes preserved through
+  simplification... must not make an inner ring cross its outer ring or collapse invalidly"), and
+  `_ingest_ring`/`simplify_ring` never check it — `polygon_contains` is only ever called at *query*
+  time in `store/reader.py`, never at ingest. Every other drop/degenerate condition in this exact
+  function is a counted `OsmIngestStats` field, per this module's own stated convention ("A way/area
+  whose tags match no classification rule, or whose geometry degenerates below the minimum vertex
+  count... at any stage, is always a counted skip on `OsmIngestStats`, never a silent drop") — this
+  is the one silent exception to that stated invariant, which is why it's a required fix rather than
+  an optional one, despite being bounded in magnitude (see below).
+  Severity note: this is bounded, not unbounded — worst case on the order of tens of metres, small
+  relative to the `position_uncertainty_m = 1300` already carried on every OSM-derived fact, and
+  Stage 6's real-data validation exercised real holes (15 kept in the Lake Assad region) with no
+  observed anomaly. A full topology-repair library is out of scope (a new dependency this project
+  has deliberately avoided elsewhere). The fix in scope: a cheap post-simplification check using the
+  geometry primitives already in this module (`polygon_contains`/`point_in_polygon` against the
+  *simplified* outer ring for each simplified hole's vertices) that increments a new, named
+  `OsmIngestStats` counter (e.g. `holes_dropped_or_flagged_invalid_after_simplify`) instead of
+  silently trusting the result — consistent with the project's own "never silent, always counted"
+  convention, and cheap given hole vertex counts are small after simplification.
+
 ### Optional Refinements
 
 - **`test_api.py` and `test_pipeline_build_region.py`**, both named in the plan's "Affected
@@ -57,14 +93,11 @@ several optional refinements.
   assertion that `nearest_road_osm` is absent / `nearest_coastline`/`inside_landcover` are present
   in the live JSON response, mirroring what `test_describe_position.py` already does one layer
   down).
-- **Independent hole/outer-ring simplification (D3 step 5) has no test or guard against an inner
-  ring crossing or escaping its simplified outer ring.** `geometry.simplify_ring` simplifies the
-  outer ring and each kept hole independently (`build/ingest_osm.py:479-490`); nothing checks the
-  result stays a valid polygon-with-holes afterward. At 30 m tolerance against a 5 ha minimum ring
-  size (a 5 ha square is ~224 m per side), this is a low-probability edge case in practice — but
-  it is untested and not called out as an accepted risk anywhere (the plan's own Risks & Unknowns
-  section doesn't mention it). Worth either a boundary-case test (a hole deliberately close to its
-  outer ring's edge) or one line acknowledging the gap.
+- The plan's own Risks & Unknowns section documents `position_uncertainty_m`/near-coast-side
+  unreliability and smallest-area-precedence misreporting, but not the hole/outer-ring topology risk
+  above — worth a line there too, even independent of whether the counted-diagnostic fix lands, so a
+  future reader of the plan sees the full risk picture in one place (the required fix already
+  surfaces it in code; this is just closing the loop in the plan doc).
 - **The D5 coastline control-point test exercises only one real-geography orientation**
   (north-to-south, sea-to-the-west, Syrian coast, `tests/test_geometry.py:321-339`). The
   convex/concave shared-vertex tests (`:298-313`) cover different local vertex geometry but use
@@ -122,11 +155,13 @@ stage (`world-model/run.sh`, `world-model/run.sh~`, `world-model/src/dcs_world_m
 
 APPROVED WITH MINOR FIXES
 
-Both required fixes are small and mechanical (a ROADMAP.md entry using numbers already on hand in
-the validation note, and a one-line docstring correction) — neither requires touching pipeline
-logic, geometry code, or tests. No correctness defect was found in ring/hole assembly, the
-coastline sign convention, streaming memory bounds, cache invalidation, or the body-layer/
-mission-interpreter consumer contract.
+All three required fixes are small and none is a design change (a ROADMAP.md entry using numbers
+already on hand in the validation note; a one-line docstring correction; a counted diagnostic using
+geometry primitives already present in the module) — none needs to go back through Architect. No
+correctness defect was found in ring/hole assembly itself, the coastline sign convention, streaming
+memory bounds, cache invalidation, or the body-layer/mission-interpreter consumer contract; the one
+substantive gap (hole/outer-ring topology after independent simplification) is bounded in magnitude
+and unobserved in Stage 6's real-data validation, not a demonstrated bug.
 
 ### Review Confidence
 
