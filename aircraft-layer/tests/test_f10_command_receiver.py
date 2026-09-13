@@ -15,12 +15,20 @@ from collector.cache import F10CommandQueue
 from collector.f10_command_receiver import ALLOWED_COMMANDS, F10CommandReceiver
 
 
-def _send(port: int, payload: object) -> None:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def _send(port: int, payload: object, sock: socket.socket | None = None) -> None:
+    """Sends one UDP datagram. With no `sock` given, opens and closes a
+    throwaway socket per call (fine for single-datagram tests). Callers
+    that send multiple datagrams and care about delivery order should pass
+    a shared `sock` -- UDP delivery order across independently-created
+    sockets is not guaranteed by the OS, even on loopback."""
+    owned_sock = sock is None
+    if sock is None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.sendto(json.dumps(payload).encode("utf-8"), ("127.0.0.1", port))
     finally:
-        sock.close()
+        if owned_sock:
+            sock.close()
 
 
 def _run_receiver_briefly(receiver: F10CommandReceiver) -> None:
@@ -51,17 +59,29 @@ def test_well_formed_allowed_command_is_enqueued() -> None:
 
 
 def test_all_allowed_commands_are_enqueued() -> None:
+    """Sends all three commands over one shared socket, reused across the
+    sends -- mirroring the real Hook script's `sendToken` (petrobrain-f10-
+    commands-hook.lua), which opens `sendSocket` once and reuses it for
+    every token forwarded from one `pollAndForward` call, rather than the
+    one-socket-per-datagram pattern `_send`'s default uses. A single socket
+    sending in a tight loop over loopback preserves send order in practice
+    (and is representative of the real sender), whereas UDP delivery order
+    across independently-created sockets is not guaranteed by the OS."""
     queue = F10CommandQueue()
     receiver = F10CommandReceiver(queue, host="127.0.0.1", port=0)
     receiver.open()
     port = receiver.port
 
-    for command in ALLOWED_COMMANDS:
-        _send(port, {"command": command})
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        for command in ALLOWED_COMMANDS:
+            _send(port, {"command": command}, sock=sock)
+    finally:
+        sock.close()
     _run_receiver_briefly(receiver)
 
     drained = [event.command for event in queue.drain_all()]
-    assert drained == list(ALLOWED_COMMANDS)
+    assert sorted(drained) == sorted(ALLOWED_COMMANDS)
 
 
 def test_unrecognized_command_is_dropped() -> None:

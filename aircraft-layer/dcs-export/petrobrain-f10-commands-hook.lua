@@ -200,7 +200,10 @@ function petrobrainF10.onSimulationStart()
     logi("onSimulationStart")
     simulationRunning = true
     nextPollAt = 0
-    registerF10Menu()
+    local ok, err = pcall(registerF10Menu)
+    if not ok then
+        logi("registration failed: " .. tostring(err))
+    end
 end
 
 function petrobrainF10.onSimulationFrame()
