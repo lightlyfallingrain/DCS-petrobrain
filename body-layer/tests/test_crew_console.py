@@ -10,11 +10,20 @@ explicitly."""
 
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import dataclass
+
+import pytest
+
 from aircraft_client import AircraftLayerError
+from belief import enrichment as enrichment_module
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.decay import LOST_THRESHOLD_S
+from belief.enrichment import EnrichmentContext
 from belief.escalation import EscalationPayload
+from belief.tasks import TaskStore
+from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -71,6 +80,97 @@ def _observation(
         provenance="test_fixture",
         classification_level=2,
     )
+
+
+_FAKE_CONN = sqlite3.connect(":memory:")
+
+
+@dataclass
+class _FakeInfo:
+    name: str | None = None
+    subtype: str | None = None
+    distance_m: float = 100.0
+    provenance: str = "osm"
+    confidence: str = "high"
+
+
+@dataclass
+class _FakeDescription:
+    nearest_settlement: _FakeInfo | None = None
+    inside_settlement: _FakeInfo | None = None
+    nearest_road: _FakeInfo | None = None
+    nearest_water: _FakeInfo | None = None
+    nearby_ridges: _FakeInfo | None = None
+    nearby_valleys: _FakeInfo | None = None
+
+
+def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
+    """`plans/f10-crew-commands/plan.md`'s `_nearest_contact_id` needs a
+    real `EnrichmentContext` to read `facts["relative_now"]["range_m"]`
+    through -- mirrors `test_console.py`'s own `_enrichment_context` helper
+    (kept as a local copy per this project's per-test-file fixture
+    convention, same as `FakeOverlayClient` above): `describe_position` is
+    stubbed to a fixed settlement, `project_terrain_aware` is a no-op
+    passthrough of the observer position it is given, so a contact's
+    projected world position is exactly its most recent observation's
+    `ownship_at_observation` position -- what `_observation_with_ownship_x`
+    below exploits to give two contacts distinct, predictable ranges from
+    ownship."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        ),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    return EnrichmentContext(
+        conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+    )
+
+
+def _observation_with_ownship_x(
+    *, obs_id: str, t_sim: float, classification_raw: str, ownship_x: float
+) -> Observation:
+    """Same shape as `_observation` above, but with a caller-controlled
+    `ownship_at_observation.x` -- see `_enrichment_context`'s docstring for
+    why that is what actually drives a contact's projected range here."""
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(x=ownship_x),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+        classification_level=2,
+    )
+
+
+class _RecordingAircraftClient:
+    """Test double recording `trigger_petrovich_search` calls, never
+    touching a real network socket -- a local copy of `test_console.py`'s
+    own double of the same name, per this project's per-test-file fixture
+    convention."""
+
+    def __init__(self) -> None:
+        self.triggered_modes: list[str] = []
+        self.raise_on_trigger = False
+
+    def trigger_petrovich_search(self, mode: str) -> None:
+        if self.raise_on_trigger:
+            raise AircraftLayerError("simulated failure")
+        self.triggered_modes.append(mode)
 
 
 def test_blank_line_produces_no_output() -> None:
@@ -316,3 +416,162 @@ def test_failed_overlay_push_degrades_without_raising_and_does_not_block_remaini
     lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
     assert overlay_client.pushed == [f"Watching {contact_id}."]
     assert lines == [f"Watching {contact_id}."]
+
+
+# -- handle_f10_command (plans/f10-crew-commands/plan.md) -------------------
+
+
+def test_handle_f10_command_unrecognized_token_returns_empty_list() -> None:
+    console = CrewConsole(store=ContactStore())
+    assert console.handle_f10_command("shut_down_dcs", now_sim=0.0) == []
+
+
+def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store)
+
+    assert console.handle_f10_command("watch_nearest", now_sim=0.0) == [
+        "no contact to watch"
+    ]
+
+
+def test_watch_nearest_reports_no_contact_to_watch_when_store_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert console.handle_f10_command("watch_nearest", now_sim=0.0) == [
+        "no contact to watch"
+    ]
+
+
+def test_watch_nearest_selects_the_nearest_contact_by_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_FAR",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                ownship_x=2000.0,
+            ),
+            _observation_with_ownship_x(
+                obs_id="OBS_NEAR", t_sim=0.0, classification_raw="T-72", ownship_x=500.0
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    near_contact = next(c for c in store.contacts if c.classification.value == "T-72")
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_f10_command("watch_nearest", now_sim=0.0)
+
+    assert lines == [f"Watching {near_contact.id}."]
+    assert near_contact.attention == "watch"
+
+
+def test_scan_forward_without_aircraft_client_reports_not_configured() -> None:
+    console = CrewConsole(store=ContactStore())
+    assert console.handle_f10_command("scan_forward", now_sim=0.0) == [
+        "no aircraft-layer connection configured"
+    ]
+
+
+def test_scan_forward_triggers_a_live_search_via_aircraft_client() -> None:
+    client = _RecordingAircraftClient()
+    console = CrewConsole(
+        store=ContactStore(),
+        aircraft_client=client,  # type: ignore[arg-type]
+    )
+
+    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+
+    assert client.triggered_modes == ["forward"]
+    assert lines == ["scanning forward"]
+
+
+def test_scan_forward_degrades_gracefully_on_a_failed_live_trigger() -> None:
+    client = _RecordingAircraftClient()
+    client.raise_on_trigger = True
+    console = CrewConsole(
+        store=ContactStore(),
+        aircraft_client=client,  # type: ignore[arg-type]
+    )
+
+    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+
+    assert lines == ["scan trigger failed"]
+
+
+def test_cancel_task_without_tasks_configured_reports_no_pending_task() -> None:
+    console = CrewConsole(store=ContactStore())
+    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["no pending task"]
+
+
+def test_cancel_task_reports_no_pending_task_when_none_pending() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(store=store, tasks=tasks)
+
+    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["no pending task"]
+
+
+def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(store=store, tasks=tasks)
+
+    area1 = store.add_area(
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=500.0,
+        level="watch",
+        source="scan_area",
+    )
+    task1 = tasks.create(
+        kind="scan_area", area=area1, created_sim=0.0, deadline_sim=60.0, reason="first"
+    )
+    area2 = store.add_area(
+        center=GeoPosition(x=1000.0, z=0.0, alt_m=0.0),
+        radius_m=500.0,
+        level="watch",
+        source="scan_area",
+    )
+    task2 = tasks.create(
+        kind="scan_area",
+        area=area2,
+        created_sim=1.0,
+        deadline_sim=60.0,
+        reason="second",
+    )
+
+    lines = console.handle_f10_command("cancel_task", now_sim=2.0)
+
+    assert lines == [f"cancelled task {task2.id}"]
+    resolved_task2 = tasks.get(task2.id)
+    resolved_task1 = tasks.get(task1.id)
+    assert resolved_task2 is not None and resolved_task2.status == "cancelled"
+    assert resolved_task1 is not None and resolved_task1.status == "pending"
+
+
+def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel() -> None:
+    client = _RecordingAircraftClient()
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(
+        store=ContactStore(),
+        aircraft_client=client,  # type: ignore[arg-type]
+        overlay_client=overlay_client,  # type: ignore[arg-type]
+    )
+
+    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+
+    assert lines == ["scanning forward"]
+    assert overlay_client.pushed == ["scanning forward"]

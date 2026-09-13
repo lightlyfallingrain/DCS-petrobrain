@@ -110,6 +110,14 @@ overlay copy only, never on the printed/stdout copy) — verbatim, i.e. exactly 
 would actually say, a radio-callout feed rather than a debug mirror. `--console` and `--crew-text`
 stay mutually exclusive with each other; `--overlay` is valid alongside either.
 
+Add `--f10-commands` alongside `--crew-text` (`plans/f10-crew-commands/plan.md`) to poll and
+dispatch player-selected DCS F10 radio-menu commands — Watch Nearest / Scan Forward / Cancel Task —
+through `CrewConsole.handle_f10_command`, the same output funnel typed/spoken text already goes
+through. Only meaningful with `--crew-text`; defaults off, a true no-op when absent, same additive
+posture as `--overlay`. See `aircraft-layer/WORKFLOW.md`'s "Deploy the F10 commands Hook script"
+section for the DCS-side half of this channel (including its `autoexec.cfg` opt-in) — UNVERIFIED
+against a live DCS session as of authorship.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
@@ -183,6 +191,13 @@ stay mutually exclusive with each other; `--overlay` is valid alongside either.
   `get_*` methods above, it raises `AircraftLayerError` on any failure
   rather than swallowing it, since `logger.ConsolePerceptionRunner`'s
   per-push try/except is where that failure is meant to be caught.
+  `trigger_petrovich_search`/`get_petrovich_wheel_latest` (BL-6) are a
+  second write call and its matching read. `get_f10_commands`
+  (`plans/f10-crew-commands/plan.md`) is this seam's first *inbound* read
+  (`GET /f10_commands/poll`): unlike every other `get_*` method here, its
+  empty state is `[]`, not `None` (the aircraft layer's response is always
+  a JSON list) — it still raises `AircraftLayerError` on transport/parse
+  failure like the rest of them.
 - `src/replay.py` — BL-0 replay harness: drives any `PerceptionSource.poll()` over a recorded
   sequence of ownship states, no live DCS/aircraft-layer connection required.
 - `src/belief/` — PB-2's observation-*consumption* package (`perception/` stays observation
@@ -310,6 +325,15 @@ stay mutually exclusive with each other; `--overlay` is valid alongside either.
   `ConsolePerceptionRunner`, except the poll loop also calls `belief.crew_console.CrewConsole.
   drain_events` after each `run_once()` — the same post-`tick()` hook point `--overlay` uses — and
   the REPL dispatches into `CrewConsole.handle_line` instead of `belief.console.Console.handle_line`.
+  `--f10-commands` (`plans/f10-crew-commands/plan.md`, only meaningful with `--crew-text`, same
+  additive-no-op-when-absent posture as `--overlay`) adds a `_poll_f10_commands` call to
+  `_run_crew_text_poll_loop` right after `drain_events`, draining `aircraft_client.
+  get_f10_commands()` and dispatching each token through `CrewConsole.handle_f10_command` — its own
+  `try`/`except AircraftLayerError` (log-and-continue), the same per-call isolation shape the
+  `--overlay` push loop above uses, so one failed poll never stops the loop. `main()`'s
+  `--crew-text` branch also now wires `CrewConsole(tasks=crew_runner.tasks, ...)`, the same
+  `TaskStore` `ConsolePerceptionRunner.run_once` already ticks — needed for the F10 "Cancel Task"
+  item.
 - `src/belief/utterance.py` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`) — the
   deterministic intent parser: `PlayerUtterance`/`PartialParse` (§5/§3.5's shapes, trimmed to what
   this milestone populates) and `parse_utterance`, a small ordered table of `(regex, intent)` pairs
@@ -399,6 +423,19 @@ stay mutually exclusive with each other; `--overlay` is valid alongside either.
   `belief.speech` produced, since the prefix is an overlay-display concern, not a change to what
   was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
   `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
+  `tasks: TaskStore | None` + `handle_f10_command` (`plans/f10-crew-commands/plan.md`) are
+  `CrewConsole`'s second, non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
+  loop drains player-selected DCS F10 radio-menu tokens (`aircraft_client.get_f10_commands`,
+  `GET /f10_commands/poll`) and dispatches each through `handle_f10_command`, the same `_print`
+  funnel `handle_line`/`drain_events` already use. Three tokens: `watch_nearest` (a new
+  `_nearest_contact_id` helper — nearest contact by `facts["relative_now"]["range_m"]`, requires
+  `enrichment` — plus `set_attention`), `scan_forward` (the bare
+  `aircraft_client.trigger_petrovich_search("forward")` trigger, not `belief.tools.scan_area` — an
+  F10 button has no geometry/reason to supply one), `cancel_task` (cancels the most-recently-created
+  still-`pending` task in `self.tasks`, regardless of source — currently always reports "no pending
+  task" in `--crew-text` sessions, since no command path there creates a `PendingIntent` yet).
+  `tasks` mirrors `aircraft_client`'s own reserved-field pattern; `logger.py` wires it to the same
+  `ConsolePerceptionRunner.tasks` instance its poll loop already ticks.
 - `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
   Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
   Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into
