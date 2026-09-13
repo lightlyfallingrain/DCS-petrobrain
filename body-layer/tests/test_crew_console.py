@@ -475,7 +475,10 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
     lines = console.handle_f10_command("watch_nearest", now_sim=0.0)
 
-    assert lines == [f"Watching {near_contact.id}."]
+    # Contact-report wording (unit type, clock, range), no spoken id -- the
+    # player named no contact, so the readback has to say which one it was.
+    assert lines == ["Watching T-72, 12 o'clock, 0.5 km near Jableh (~200m)."]
+    assert near_contact.id not in lines[0]
     assert near_contact.attention == "watch"
 
 
