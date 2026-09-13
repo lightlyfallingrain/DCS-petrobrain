@@ -48,8 +48,9 @@ deploy step alone does not confirm the script actually works.
 
 ## Deploy the F10 commands Hook script (Windows box, once per change)
 
-**UNVERIFIED against a live DCS session as of authorship** (`plans/
-f10-crew-commands/plan.md` Stage 4 is user-only) -- built on the live
+**Menu registration and delivery live-confirmed 2026-09-13** (`plans/
+f10-crew-commands/plan.md` Stage 4); the individual commands' behaviour still
+needs work -- built on the live
 recon in `aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md`
 (Findings 7-11), which did confirm `net.dostring_in("scripting", ...)`
 registering an F10 item and draining selections back out. Copy:
@@ -71,14 +72,11 @@ state). Create/edit `Saved Games\DCS\Config\autoexec.cfg`:
 net.allow_dostring_in = { "scripting" }
 ```
 
-The research doc's own probe run 2 used a broader opt-in
-(`net.allow_unsafe_api = { "userhooks", "gui" }` plus six
-`net.allow_dostring_in` states) without isolating which entries were
-load-bearing. Per the plan's Stage 4, try the reduced opt-in above first;
-if the F10 menu never appears or registration logs an "Invalid state name"
-failure, fall back to the research doc's known-working superset instead
-and note that the reduction failed -- one reduced attempt, one full
-fallback, not an open-ended search. This is a user-machine config change
+That single line is sufficient -- **live-confirmed 2026-09-13** (DCS 2.9.29.27278, Stage 4):
+with only it in `autoexec.cfg`, `dcs.log` showed `registration -> ok=true result=registered` and
+the F10 -> Other -> Petrovich menu appeared. No `net.allow_unsafe_api` entry is needed; the
+broader opt-in from the research doc's probe run 2 (`allow_unsafe_api = { "userhooks", "gui" }`
+plus six `allow_dostring_in` states) was a superset, not a requirement. This is a user-machine config change
 that applies to every DCS session and every installed Hook script, ED-
 labeled "OBSOLETE and UNSAFE!!!" in its own docs (already accepted for the
 overlay/search-trigger channels).
