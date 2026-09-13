@@ -369,3 +369,116 @@ manually re-deriving the geometry of the implementer's own added test case to co
 mode by hand rather than trusting the test's passing status. Ran both subprojects' full
 format/lint/type/test suites directly. Did not open or query
 `syria-full*.sqlite`/`*-osm-cache.sqlite`, and ran no full build, per this task's hard rule.
+
+---
+
+### Re-review of 638239a
+
+Re-reviewed commit `638239a` ("Fix invalid hole/outer-ring pairing in `_ingest_ring`'s simplify
+fallback"), which addresses the one required fix from the 4b19c6d re-review above. Read the full
+diff (`build/ingest_osm.py`, `tests/test_ingest_osm.py`, `implementation.md`'s new "Re-review fix"
+section), re-read the corrected `_ingest_ring`, and re-ran both subprojects' check suites.
+
+**The fallback is genuinely removed, not just renamed.** `ingest_osm.py`'s hole loop
+(`_ingest_ring`, ~lines 526-553) now has exactly two outcomes once a hole is simplified: contained
+in `simplified_outer` → kept as simplified (`holes_kept += 1`); not contained → dropped and
+counted (`stats.holes_dropped_not_contained_after_simplify += 1`), full stop. The unsimplified
+`hole`/`outer` fallback branch, the `simplified_holes.append(hole)` call that used to store it, and
+the `holes_kept_via_unsimplified_fallback` counter are all gone — confirmed by reading the diff
+(not just the commit message) and independently `grep -rn holes_kept_via_unsimplified_fallback`
+across `world-model/`, `plans/`, and `docs/`: the only remaining hits are in `plans/
+osm-landcover-optimization/review.md` (this document, historical) and `implementation.md`
+(the decision-log entry explaining why it was removed) — both correct places for a removed
+field's name to still appear. No hit in `world-model/src/`, `world-model/tests/`,
+`world-model/tools/` (including `tools/validate_osm_landcover.py`, which never referenced the two
+new counters to begin with, per the original review's own optional-refinement note), or
+`world-model/RUN.md`.
+
+**Stored-hole invariant: verified true by construction, not just by the new test.** The only
+`simplified_holes.append(...)` call left in `_ingest_ring` is `simplified_holes.append(
+simplified_hole)` inside the `if _ring_vertices_contained(simplified_hole, simplified_outer):`
+branch (the loop's `continue` after that `append` skips the drop-counting code entirely) — so
+every ring that reaches `tags["inner_rings"]` has already passed the exact per-vertex containment
+check against `simplified_outer`, the same ring written as `geometry` two lines later. There is no
+remaining code path that can append a hole without that check having just passed. This closes the
+gap the 4b19c6d re-review found: previously, the fallback branch could append `hole` (unsimplified)
+after checking a *different* ring (`outer`, unsimplified) — that mismatch is what made the old
+fallback's "kept" outcome provably invalid; it no longer exists.
+
+**`TestHoleOuterContainmentInvariant` genuinely exercises `_ingest_ring`'s real output, not a
+synthetic check.** Both tests call `_ingest_ring` directly (not a mock or a hand-built
+`StoredFeature`) and assert the invariant (`point_in_polygon(vertex, outer)` for every stored inner
+ring vertex against the stored `feature.geometry`) against its actual return value:
+`test_genuinely_kept_hole_satisfies_the_invariant` uses a hole comfortably interior to the outer
+ring (the "normal" kept case, previously untested by an explicit cross-check against the stored
+outer, only implicitly via `holes_kept == 1`), and
+`test_hole_that_would_have_used_the_removed_fallback_satisfies_the_invariant` reuses the exact
+geometry that used to trigger the old fallback (confirmed identical to the old
+`test_hole_kept_unsimplified_when_simplified_hole_leaves_simplified_outer` fixture) and asserts
+`stats.holes_dropped_not_contained_after_simplify == 1` plus the invariant — i.e. it directly
+proves the specific case the 4b19c6d re-review flagged is now handled correctly, not just that
+some other case still passes. The two renamed/rewritten tests in `TestIngestRing`
+(`test_hole_dropped_when_simplified_hole_leaves_simplified_outer`,
+`test_hole_dropped_when_far_outside_simplified_outer`) correctly now assert the drop, matching the
+counter and the absence of `inner_rings`. One gap, noted but not required: the invariant test's
+"genuinely kept" case uses a hole comfortably interior (150 m square well inside a 2000 m outer),
+not a hole that passes the containment check by a narrow margin — so the invariant is verified for
+the easy case and for the (correctly-)dropped former-fallback case, but not for a hole that legitimately
+survives *close* to the boundary. Given the check is a direct, unconditional per-vertex assertion
+with no fallback logic left to go wrong, this is low risk and optional, not a required fix.
+
+**`CLASSIFIER_VERSION` left at 3 (not bumped to 4) — reasoning checked and correct.** Version 3
+was introduced in `4b19c6d` on this same unmerged branch and never shipped/merged, so no cache
+file anywhere on disk or in any other branch carries `classifier_version == 3` under the old
+(buggy-fallback) `OsmIngestStats` shape — there is nothing for a bump to invalidate against.
+Verified the stated fallback-safety claim directly: `osm_cache/reader.py:74`'s
+`OsmIngestStats(**json.loads(row[0]))` uses a dataclass's generated `__init__`, which raises
+`TypeError` on an unexpected keyword argument — so if such a cache somehow existed, loading it
+would crash loudly on the removed `holes_kept_via_unsimplified_fallback` key rather than silently
+misinterpret the data. Re-ran `test_pipeline_osm_cache.py`'s version-mismatch tests; still pass
+(they test the generic bump-invalidation mechanism, unaffected by this branch's specific
+before/after version choice).
+
+**`_distance_to_feature`'s hole-before-outer check ordering was correctly left unchanged.**
+`implementation.md` explicitly notes this was in scope for consideration and left alone because it
+is correct for valid holes and the bug was entirely in what `_ingest_ring` stored, not in how the
+reader consumes it. Confirmed: with the invariant now enforced at ingest, a point inside a stored
+hole is necessarily also inside the stored outer ring (the hole is fully contained), so
+`_distance_to_feature` returning the hole-boundary distance without first checking the outer ring
+is now always safe for `Polygon` features produced by this code path.
+
+#### Check Results (re-run)
+
+**world-model/** (from `world-model/`, `.venv/bin/python -m ...`)
+- `ruff format --check src tests`: pass (104 files already formatted)
+- `ruff check src tests`: pass (all checks passed)
+- `mypy src --strict`: pass, 62 source files, no issues
+- `pytest tests -q`: pass, 471 passed, 3 skipped (2 more than 638239a's parent — the two new
+  `TestHoleOuterContainmentInvariant` tests; net test count is right: the two rewritten
+  `TestIngestRing` tests replace 1-for-1, and two are added)
+
+**body-layer/** (from `body-layer/`, `.venv/bin/python -m ...`)
+- `ruff format --check src tests`: pass (64 files already formatted)
+- `ruff check src tests`: pass (all checks passed)
+- `mypy src --strict`: pass, 30 source files, no issues
+- `pytest tests -q`: pass, 506 passed (unchanged — no body-layer files touched)
+
+#### Verdict (638239a)
+
+**APPROVED.** The required fix from the 4b19c6d re-review is correctly and completely addressed:
+the invalid fallback is removed rather than patched, the stored-hole-inside-stored-outer invariant
+now holds by construction (the only append path is gated by the exact check against the ring
+actually stored as `geometry`), a cross-cutting invariant test exercises real `_ingest_ring` output
+including the specific case that previously broke, the removed counter has zero remaining live
+references anywhere in `world-model/` (src, tests, tools, RUN.md), and the `CLASSIFIER_VERSION`
+no-bump decision is correctly reasoned (version 3 never left this branch, and the failure mode of
+skipping the bump is a loud crash, not silent corruption). No further required fixes.
+
+#### Review Confidence (re-review of 638239a)
+
+Full read of the diff and the corrected `_ingest_ring` in its entirety, cross-checked the "only
+append path is gated by the check" claim directly against the current source rather than trusting
+the commit message, and manually traced the `_distance_to_feature` safety argument against the
+newly-enforced invariant rather than accepting `implementation.md`'s statement of it at face value.
+Ran both subprojects' full format/lint/type/test suites directly. Did not open or query
+`syria-full*.sqlite`/`*-osm-cache.sqlite`, and ran no full build, per this task's hard rule.
