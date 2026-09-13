@@ -508,6 +508,26 @@ def _run_console_repl(
             repl_conn.close()
 
 
+def _poll_f10_commands(
+    aircraft_client: AircraftLayerClient, crew_console: CrewConsole, now_sim: float
+) -> None:
+    """Drains pending F10 radio-menu selections (`plans/f10-crew-commands/
+    plan.md`) and dispatches each through `CrewConsole.handle_f10_command`
+    -- the same post-`tick()` hook point `drain_events` already uses.
+    Wrapped in its own `try`/`except AircraftLayerError` (log-and-continue),
+    the same per-call isolation shape the BL-2.5 overlay-push loop already
+    uses, so one failed poll never stops the loop."""
+    try:
+        commands = aircraft_client.get_f10_commands()
+    except AircraftLayerError:
+        logger.warning("F10 command poll failed (continuing)", exc_info=True)
+        return
+    for command in commands:
+        token = command.get("command")
+        if isinstance(token, str):
+            crew_console.handle_f10_command(token, now_sim)
+
+
 def _run_crew_text_poll_loop(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
@@ -516,6 +536,7 @@ def _run_crew_text_poll_loop(
     world_model_db: Path,
     poll_interval_s: float,
     stop_event: threading.Event,
+    f10_commands_enabled: bool = False,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -523,7 +544,10 @@ def _run_crew_text_poll_loop(
     fix"), plus one extra call per poll: `crew_console.drain_events` speaks
     whatever lifecycle events this poll's `tick()` newly surfaced, the same
     hook point `--overlay`'s mirroring uses in `ConsolePerceptionRunner.
-    run_once` itself."""
+    run_once` itself. `f10_commands_enabled` (`--f10-commands`, `plans/
+    f10-crew-commands/plan.md`) additionally polls/dispatches pending F10
+    radio-menu selections each cycle via `_poll_f10_commands` -- defaults
+    off, a true no-op when unset."""
     world_model_conn = open_world_model(world_model_db)
     try:
         runner.sources = _build_sources(
@@ -536,6 +560,8 @@ def _run_crew_text_poll_loop(
             if runner.last_t_sim is not None:
                 crew_console.enrichment = runner.enrichment
                 crew_console.drain_events(runner.last_t_sim)
+                if f10_commands_enabled:
+                    _poll_f10_commands(aircraft_client, crew_console, runner.last_t_sim)
             stop_event.wait(poll_interval_s)
     finally:
         world_model_conn.close()
@@ -645,6 +671,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--f10-commands",
+        action="store_true",
+        help=(
+            "poll and dispatch player-selected DCS F10 radio-menu commands "
+            "(watch nearest / scan forward / cancel task) through "
+            "CrewConsole.handle_f10_command -- plans/f10-crew-commands/"
+            "plan.md. Only meaningful with --crew-text; defaults off, a "
+            "true no-op when absent. Reuses the same --aircraft-layer-url "
+            "instance, no separate URL needed."
+        ),
+    )
+    parser.add_argument(
         "--brain-client",
         choices=("debug", "null"),
         default="debug",
@@ -688,6 +726,7 @@ def main() -> None:
             brain_client=brain_client,
             output=sys.stdout,
             aircraft_client=aircraft_client,
+            tasks=crew_runner.tasks,
             overlay_client=aircraft_client if args.overlay else None,
         )
         stop_event = threading.Event()
@@ -701,6 +740,7 @@ def main() -> None:
                 args.world_model_db,
                 args.poll_interval_s,
                 stop_event,
+                args.f10_commands,
             ),
             daemon=True,
         )

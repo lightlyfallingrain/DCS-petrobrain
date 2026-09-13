@@ -15,9 +15,16 @@ one inbound/write path on this otherwise read-only pipeline. A
 constructed the same way for `POST /command/petrovich_search`, this
 pipeline's second inbound/write path.
 
+An `F10CommandReceiver` (`plans/f10-crew-commands/plan.md`) is also opened
+here and run on its own background thread, feeding an `F10CommandQueue`
+that `GET /f10_commands/poll` drains -- the first channel running the
+opposite direction (Hook script -> collector, not collector -> Hook/
+Export.lua) alongside the two write paths above.
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
+       [--f10-host HOST] [--f10-port PORT]
        [--dump-interval SECONDS] [--debug]
 """
 
@@ -32,6 +39,7 @@ from api.server import DEFAULT_HOST as API_DEFAULT_HOST
 from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
 from collector.cache import (
+    F10CommandQueue,
     PetrovichIndicationCache,
     PetrovichWheelCache,
     TelemetryCache,
@@ -40,6 +48,9 @@ from collector.cache import (
 from collector.command_sender import DEFAULT_HOST as COMMAND_DEFAULT_HOST
 from collector.command_sender import DEFAULT_PORT as COMMAND_DEFAULT_PORT
 from collector.command_sender import CommandSender
+from collector.f10_command_receiver import DEFAULT_HOST as F10_DEFAULT_HOST
+from collector.f10_command_receiver import DEFAULT_PORT as F10_DEFAULT_PORT
+from collector.f10_command_receiver import F10CommandReceiver
 from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
 from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
@@ -83,6 +94,17 @@ def main() -> None:
         help="Export.lua's inbound command listener port",
     )
     parser.add_argument(
+        "--f10-host",
+        default=F10_DEFAULT_HOST,
+        help="F10 radio-menu Hook script's UDP sender host (loopback)",
+    )
+    parser.add_argument(
+        "--f10-port",
+        type=int,
+        default=F10_DEFAULT_PORT,
+        help="F10 radio-menu Hook script's UDP sender port",
+    )
+    parser.add_argument(
         "--dump-interval",
         type=float,
         default=1.0,
@@ -111,6 +133,15 @@ def main() -> None:
     text_sender.open()
     command_sender = CommandSender(host=args.command_host, port=args.command_port)
     command_sender.open()
+    f10_command_queue = F10CommandQueue()
+    f10_command_receiver = F10CommandReceiver(
+        f10_command_queue, host=args.f10_host, port=args.f10_port
+    )
+    f10_command_receiver.open()
+    f10_command_receiver_thread = threading.Thread(
+        target=f10_command_receiver.serve_forever, daemon=True
+    )
+    f10_command_receiver_thread.start()
 
     collector = CollectorServer(
         cache,
@@ -133,6 +164,7 @@ def main() -> None:
         text_sender=text_sender,
         petrovich_wheel_cache=petrovich_wheel_cache,
         command_sender=command_sender,
+        f10_command_queue=f10_command_queue,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -150,6 +182,7 @@ def main() -> None:
         collector.close()
         text_sender.close()
         command_sender.close()
+        f10_command_receiver.close()
 
 
 if __name__ == "__main__":

@@ -29,6 +29,10 @@ _PETROVICH_WHEEL_BODY = {
     "received_wall_clock_s": 1000.0,
     "fields": {"state": "SEARCHING"},
 }
+_F10_COMMANDS_BODY = [
+    {"command": "watch_nearest", "received_wall_clock_s": 999.0},
+    {"command": "cancel_task", "received_wall_clock_s": 1000.0},
+]
 
 
 def _make_handler(
@@ -48,6 +52,8 @@ def _make_handler(
                 self._respond(200, _PETROVICH_INDICATION_BODY)
             elif self.path == "/petrovich_wheel/latest":
                 self._respond(200, _PETROVICH_WHEEL_BODY)
+            elif self.path == "/f10_commands/poll":
+                self._respond(200, _F10_COMMANDS_BODY)
             elif self.path == "/telemetry/empty":
                 self._respond(200, None)
             elif self.path == "/not-json":
@@ -218,3 +224,18 @@ def test_trigger_petrovich_search_raises_on_unreachable_host() -> None:
 
     with pytest.raises(AircraftLayerError):
         client.trigger_petrovich_search("boresight")
+
+
+def test_get_f10_commands_returns_parsed_list(server_url: str) -> None:
+    client = AircraftLayerClient(base_url=server_url)
+
+    result = client.get_f10_commands()
+
+    assert result == _F10_COMMANDS_BODY
+
+
+def test_get_f10_commands_raises_on_unreachable_host() -> None:
+    client = AircraftLayerClient(base_url="http://127.0.0.1:1", timeout_s=0.5)
+
+    with pytest.raises(AircraftLayerError):
+        client.get_f10_commands()
