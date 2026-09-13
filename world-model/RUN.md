@@ -1,150 +1,234 @@
 # Running the World Model Builder
 
-Builds a persistent, queryable geographic model of a DCS theatre — roads,
-settlements, elevation, terrain semantics — into a single `.sqlite` file, and
-queries it.
+Builds a persistent, queryable geographic model of a DCS theatre (roads, settlements, junctions,
+elevation, terrain semantics) into a `.sqlite` file, and queries it.
 
-**Where this runs:** building needs DCS-derived source files, so it is normally
-run on the Windows DCS box. Once a `.sqlite` exists it is just a file — copy it
-anywhere and query it from either platform.
+- **Where this runs:** building reads DCS install files, so it runs on the Windows DCS box — in
+  WSL (what the commands below show) or native Windows. A built `.sqlite` is just a file: copy it
+  anywhere and query it from any platform.
+- **Offline:** nothing here talks to a running DCS.
+- **Two jobs, in order:** (a) build the OSM dataset once, then (b) build the whole world model.
+  (a) is only needed again when you want fresher OpenStreetMap data.
 
-This is an **offline** tool. Nothing here talks to a running DCS.
-
-For working rules (DCS reconnaissance, provenance, read-only DCS access) see
-`docs/CONVENTIONS.md`; for the full-theatre procedure see
-`docs/M7_RUN_INSTRUCTIONS.md`, and for the optional OSM-augmentation
-preprocessing (M9, `--osm-pbf`) see `docs/M9_OSM_RUN_INSTRUCTIONS.md`.
+Background docs (not needed to follow this page): `docs/CONVENTIONS.md` (working rules),
+`docs/M7_RUN_INSTRUCTIONS.md` (full-theatre validation), `docs/M9_OSM_RUN_INSTRUCTIONS.md` (OSM
+design notes and validation), `docs/M8_PROBE_STORE.md` (the separate live-probe store).
 
 ---
 
 ## 1. One-time setup
 
-Two dependencies: `pyproj` (projections) and `pillow` (raster tiles).
-
-**Windows (Command Prompt)**
-
-```bat
-cd world-model
-python -m venv .venv
-.venv\Scripts\python -m pip install -e .
-```
-
-**macOS (zsh)**
-
-```zsh
+```bash
 cd world-model
 python3 -m venv .venv
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -e .                  # pyproj, pillow, osmium (Python bindings)
+.venv/bin/python -m pip install pytest ruff mypy      # only for the development checks, section 6
 ```
 
-No `PYTHONPATH` needed — the `tools/` scripts add `src` to `sys.path`
-themselves.
+For job (a) you also need the `osmium-tool` command-line program (separate from the Python
+`osmium` package above):
 
-## 2. Build a region
-
-Available regions: **`latakia-20km`**, **`gemerek-20km`**, **`syria-full`**.
-
-### The small regions
-
-`latakia-20km` and `gemerek-20km` have registered default input paths, so the
-common case needs only the region name.
-
-**Windows (Command Prompt)**
-
-```bat
-cd world-model
-.venv\Scripts\python tools\build_world_model.py latakia-20km
+```bash
+sudo apt install osmium-tool      # WSL / Debian / Ubuntu
+brew install osmium-tool          # macOS
 ```
 
-**macOS (zsh)**
+Native Windows: use `.venv\Scripts\python` instead of `.venv/bin/python`, and `^` instead of `\`
+for line continuation. No `PYTHONPATH` is needed; the `tools/` scripts add `src` themselves.
 
-```zsh
-cd world-model
+---
+
+## 2. Job (a): build the OSM dataset
+
+**Result:** one file, `syria-theatre.osm.pbf`: OpenStreetMap data for the seven countries the
+Syria theatre touches, cut down to the theatre's area and merged. Job (b) reads it via
+`--osm-pbf`. It adds settlement *outlines* (DCS only gives centre points) plus extra roads, water
+and named places. The world model still builds without it; you just lose that layer.
+
+Pick a working directory for the raw OSM files (e.g. `/mnt/f/dcs-world-model/syria/raw/osm`)
+and run everything below from there.
+
+### 2.1 Download the seven country extracts
+
+From Geofabrik. **Turkey and Cyprus are under `europe/`**, the rest under `asia/`:
+
+```bash
+OSM_DIR=/mnt/f/dcs-world-model/syria/raw/osm        # your choice
+mkdir -p "$OSM_DIR" && cd "$OSM_DIR"
+
+for path in asia/syria asia/lebanon asia/israel-and-palestine asia/jordan asia/iraq \
+            europe/turkey europe/cyprus; do
+  curl -L -O "https://download.geofabrik.de/${path}-latest.osm.pbf"
+done
+```
+
+About 1 GB in total, most of it Turkey (~650 MB). You get `<country>-latest.osm.pbf` files; the
+older files in this project are named with a date instead (e.g. `syria-260911.osm.pbf`). The name
+doesn't matter, just use the same one in the next step.
+
+### 2.2 Clip each extract to the theatre
+
+The bounding box below is the `syria-full` region plus a safety margin, in
+`west,south,east,north` order (reproducible with `tools/derive_m9_osm_clip_bbox.py`):
+
+```bash
+for country in syria lebanon israel-and-palestine jordan iraq turkey cyprus; do
+  osmium extract -b 31.4701,30.5157,40.8808,38.7353 \
+      --strategy=smart \
+      -o "${country}-clipped.osm.pbf" --overwrite \
+      "${country}-latest.osm.pbf"
+done
+```
+
+Keep `--strategy=smart`: it keeps roads that cross the box edge intact (it matters at the
+Turkey–Syria border).
+
+### 2.3 Merge into one file
+
+```bash
+osmium merge syria-clipped.osm.pbf lebanon-clipped.osm.pbf israel-and-palestine-clipped.osm.pbf \
+    jordan-clipped.osm.pbf iraq-clipped.osm.pbf turkey-clipped.osm.pbf cyprus-clipped.osm.pbf \
+    -o syria-theatre.osm.pbf --overwrite
+```
+
+### 2.4 Check it
+
+```bash
+osmium fileinfo -e syria-theatre.osm.pbf | head -30
+```
+
+Look at `Number of nodes` / `Number of ways`: tens of millions of nodes and several million ways
+(the 2026-09-11 extracts gave ~69 M nodes, ~8.2 M ways, 476 MB). Don't judge by the `Bounding box`
+line: `--strategy=smart` pulls in whole relations such as national borders, so the data box
+reaches far beyond the clip box (23.6–48.0°E, 27.0–40.0°N for that file). That's expected. The
+per-country `*-clipped.osm.pbf` files can be deleted afterwards.
+
+**Refreshing the data later:** redo 2.1–2.3. The next world-model build notices the new file
+automatically (see "OSM cache" in 3.4) and re-processes it once.
+
+---
+
+## 3. Job (b): build the whole world model (`syria-full`)
+
+### 3.1 Inputs
+
+| flag | file | where it comes from |
+|---|---|---|
+| `--towns` | `towns.lua` | DCS install: `Mods/terrains/Syria/map/towns.lua` |
+| `--beacons` | `beacons.lua` | DCS install: `Mods/terrains/Syria/beacons.lua` |
+| `--routes` | `Syria.routes` (~2.25 GB) | DCS install: `Mods/terrains/Syria/roads/Syria.routes` |
+| `--srtm-dir` | directory of `.hgt` elevation tiles | SRTM 1×1-degree tiles covering the theatre (~130 tiles, e.g. from viewfinderpanoramas.org; see `docs/M7_RUN_INSTRUCTIONS.md` §2a) |
+| `--osm-pbf` | `syria-theatre.osm.pbf` | job (a) |
+
+The DCS files are read in place, read-only; nothing in the DCS install is modified.
+
+> **Trap: a missing input is skipped, not an error.** Mistype `--routes` and you get a store with
+> zero roads and a "success" message. Always check the summary and row counts (3.5).
+
+### 3.2 Run it
+
+From `world-model/`. Note `2>&1`: progress is logged to stderr, so without it `tee` saves an
+empty log file.
+
+```bash
+DCS="/mnt/f/Games/DCS World/Mods/terrains/Syria"
+
+.venv/bin/python tools/build_world_model.py syria-full \
+    --towns   "$DCS/map/towns.lua" \
+    --beacons "$DCS/beacons.lua" \
+    --routes  "$DCS/roads/Syria.routes" \
+    --srtm-dir /mnt/f/dcs-world-model/syria/raw/dem/syria-full/ \
+    --osm-pbf  /mnt/f/dcs-world-model/syria/raw/osm/syria-theatre.osm.pbf \
+    2>&1 | tee syria-full-build.log
+```
+
+Output (override with `--out`): `data/world-model/syria-full.sqlite`. The builder **deletes and
+recreates** that file on every run; there is no incremental rebuild.
+
+### 3.3 What you'll see: the 8 stages
+
+Every stage logs `[i/8] <name>: starting` and `[i/8] <name>: done (Ns)`. The long ones also log
+progress in between, so a gap of a minute or two between lines is normal. Several minutes with
+no new line at all during a progress-logging stage is worth reporting.
+
+| # | stage | progress lines in between |
+|---|---|---|
+| 1 | `towns.lua` | — (fast) |
+| 2 | `beacons.lua` | — (fast) |
+| 3 | `OSM overlay (.osm.pbf)` | `osm.pbf: N elements seen...` every ~10–20 s. Tens of minutes on the first run; low minutes when the OSM cache hits (3.4) |
+| 4 | `Syria.routes (N bytes)` | — (reads the 2.25 GB road file) |
+| 5 | `road junctions` | `ingest_junctions: R roads, N chunks ...` once, then `chunk i/N (x%, J junctions kept, Ts elapsed, ~Ts remaining)` at most every 30 s. The remaining-time figure is rough, since chunk cost varies a lot |
+| 6 | `SRTM elevation grid (N tile(s))` | `ingest_srtm: row i/N (...)` every 50 rows |
+| 7 | `elevation/surface probe grid` | skipped for `syria-full` (needs `--probe-output` from a live mission probe) |
+| 8 | `terrain semantics (ridge/valley)` | skipped with stage 7. Full-theatre ridge/valley data comes from the separate probe store (`docs/M8_PROBE_STORE.md`) |
+
+The final summary prints feature counts by kind and a stats line per stage. For `syria-full`,
+`probe: skipped` and `terrain: skipped` are expected; any other `skipped` means an input was
+missing.
+
+### 3.4 Files it produces
+
+| file | what | safe to delete? |
+|---|---|---|
+| `data/world-model/syria-full.sqlite` | the world model (several GB with OSM) | yes, rebuildable |
+| `data/world-model/syria-full-osm-cache.sqlite` | **OSM cache**: stage 3's classified OSM features, kept between builds | yes; the next build is just slower |
+
+**OSM cache.** The first build against a given `syria-theatre.osm.pbf` fills the cache. Later
+builds with the same file, the same OSM classification rules and the same region skip the OSM
+parse (log: `osm_cache: ... matches current .osm.pbf/classifier/region -- serving OSM overlay from
+cache, skipping the parse`). A new `.osm.pbf` from job (a) invalidates it automatically. To force
+a full re-parse anyway, delete the cache file.
+
+### 3.5 Check the result
+
+```bash
+.venv/bin/python - <<'EOF'
+import sqlite3
+conn = sqlite3.connect("data/world-model/syria-full.sqlite")
+for kind, n in conn.execute("SELECT kind, COUNT(*) FROM feature GROUP BY kind ORDER BY kind"):
+    print(f"{kind:20} {n}")
+EOF
+```
+
+`road`, `junction`, `settlement`, `named_place` and `water` should all be non-zero with every
+input given. Then spot-check a known place (section 4).
+
+### Small regions
+
+`latakia-20km` has registered default inputs (raw files under the repo's `data/raw/`), so only
+the region name is needed. `gemerek-20km` has none; give it inputs explicitly like `syria-full`.
+
+```bash
 .venv/bin/python tools/build_world_model.py latakia-20km
 ```
 
-### Full theatre
-
-`syria-full` has **no registered defaults**, so every input must be given
-explicitly. As of M9, it can also take a pre-clipped/merged Geofabrik OSM
-extract via `--osm-pbf` — settlement *boundary* polygons (DCS only ever gives
-center points) and richer named-place/water coverage. Producing that merged
-`.osm.pbf` needs a one-time `osmium-tool` clip+merge over 7 country extracts
-first — **see `docs/M9_OSM_RUN_INSTRUCTIONS.md` for those steps**; skip
-`--osm-pbf` entirely to build without OSM augmentation, same as before M9.
-
-Road-junction detection (M10) needs no flag — it runs automatically as part
-of the pipeline over whatever road network `--routes` provides.
-
-**Windows (Command Prompt)**
-
-```bat
-.venv\Scripts\python tools\build_world_model.py syria-full ^
-  --towns <path\to\towns.lua> ^
-  --beacons <path\to\beacons.lua> ^
-  --routes <path\to\Syria.routes> ^
-  --srtm-dir <path\to\hgt_tiles\> ^
-  --osm-pbf <path\to\syria-theatre.osm.pbf>
-```
-
-**macOS (zsh)**
-
-```zsh
-.venv/bin/python tools/build_world_model.py syria-full \
-  --towns <path/to/towns.lua> \
-  --beacons <path/to/beacons.lua> \
-  --routes <path/to/Syria.routes> \
-  --srtm-dir <path/to/hgt_tiles/> \
-  --osm-pbf <path/to/syria-theatre.osm.pbf>
-```
-
-Drop `--osm-pbf` if you don't have the merged extract yet — everything else
-still builds. The ~460 MB / 7–8 minute baseline is from M7, **before** M9's
-OSM data and M10's junction detection existed; expect a larger `.sqlite` and
-a longer build with `--osm-pbf` present (the merged extract is dominated by
-Turkey's clipped southern-strip share of its 646 MB nationwide extract) —
-no re-measured baseline exists yet as of this writing.
-
-### Options
+### All options
 
 | flag | meaning |
 |---|---|
-| `--towns` | DCS `towns.lua` — named places |
-| `--beacons` | DCS `beacons.lua` — navigation beacons |
-| `--routes` | DCS `.routes` binary — road network |
-| `--osm-cache` | cached OSM overlay JSON (small regions only — M3's live-Overpass path) |
-| `--osm-pbf` | pre-clipped/merged Geofabrik `.osm.pbf` (full-theatre — M9's path; takes precedence over `--osm-cache` if both are given) |
-| `--srtm-dir` | directory of `.hgt` tiles, ingested as the **primary** elevation grid |
-| `--srtm-tile` | a single `.hgt`, metadata-only delta stats for a probe grid |
+| `--towns` | DCS `towns.lua`: named places |
+| `--beacons` | DCS `beacons.lua`: navigation beacons |
+| `--routes` | DCS `.routes` binary: road network (junction detection runs automatically on it) |
+| `--osm-pbf` | merged theatre `.osm.pbf` from job (a); takes precedence over `--osm-cache` |
+| `--osm-cache` | cached OSM overlay JSON (small regions only, M3's live-Overpass path) |
+| `--srtm-dir` | directory of `.hgt` tiles, the primary elevation grid |
 | `--srtm-grid-spacing-m` | elevation grid cell spacing, default 1000 m |
-| `--probe-output` | a live mission probe's `.jsonl` output |
+| `--srtm-tile` | a single `.hgt`, metadata-only delta stats for a probe grid |
+| `--probe-output` | a live mission probe's `.jsonl` output (enables stages 7–8) |
 | `--out` | output `.sqlite` path |
 
-> **A real trap.** Optional flags with no registered default are **silently
-> skipped**, not errors — a rebuild that omits `--routes` produces a store with
-> zero roads and reports success. **Always verify row counts after a rebuild**
-> rather than trusting the CLI summary. `build_region` deletes and recreates the
-> whole `.sqlite` on every call; there is no incremental per-layer build yet.
+---
 
-## 3. Query a built model
+## 4. Query a built model
 
-```zsh
-.venv/bin/python tools/describe_position.py <db.sqlite> <theatre> <x> <z>
+```bash
+.venv/bin/python tools/describe_position.py data/world-model/syria-full.sqlite Syria <x> <z>
+.venv/bin/python tools/describe_position.py data/world-model/syria-full.sqlite Syria --latlon 35.53 35.78
 ```
 
-```bat
-.venv\Scripts\python tools\describe_position.py <db.sqlite> <theatre> <x> <z>
-```
+## 5. Diagnostics
 
-Or by latitude/longitude instead of DCS x/z:
-
-```zsh
-.venv/bin/python tools/describe_position.py <db.sqlite> Syria --latlon 35.53 35.78
-```
-
-## 4. Diagnostics
-
-Each writes an image or report for eyeballing a layer.
+Each writes an image or report for eyeballing one layer. Pass `--help` for arguments.
 
 | tool | shows |
 |---|---|
@@ -154,47 +238,39 @@ Each writes an image or report for eyeballing a layer.
 | `tools/inspect_osm_overlay.py` | the OSM overlay |
 | `tools/export_geojson.py` | GeoJSON export for external viewers |
 
-Run them the same way as the tools above. Pass `--help` for arguments.
+## 6. Development checks
 
-## 5. Development checks
+From the repository root, with the venv's tools:
 
-Run from the repository root.
-
-**macOS (zsh)**
-
-```zsh
-ruff format world-model/src world-model/tests
-ruff check world-model/src world-model/tests
-mypy world-model/src
-pytest world-model/tests
-```
-
-**Windows (Command Prompt)**
-
-```bat
-ruff format world-model\src world-model\tests
-ruff check world-model\src world-model\tests
-mypy world-model\src
-pytest world-model\tests
+```bash
+V=world-model/.venv/bin
+$V/ruff format world-model/src world-model/tests
+$V/ruff check world-model/src world-model/tests
+(cd world-model && ../$V/mypy src)
+(cd world-model && ../$V/pytest tests -q)
 ```
 
 ---
 
 ## Troubleshooting
 
-**`No module named pyproj`** — system Python instead of the venv interpreter.
-Use the `.venv/bin/python` (or `.venv\Scripts\python`) prefix.
+**`No module named pyproj` / `osmium`**: system Python instead of the venv. Use the
+`.venv/bin/python` prefix, and re-run `pip install -e .` if `osmium` is missing.
 
-**A layer is missing from the built store** — the corresponding input flag was
-omitted or its file was absent. Missing inputs are reported as skipped, not as
-errors. Check the build summary and verify row counts.
+**`osmium: command not found`** during job (a): install `osmium-tool` (section 1). The Python
+`osmium` package does not provide the command.
 
-**`Syria.routes` not found** — it is ~2.25 GB and lives in the DCS install, not
-this repo. A fresh checkout without it builds fine, just with no roads.
+**Log file is empty**: you piped only stdout. Use `2>&1 | tee <file>` (3.2).
 
-**Elevation looks wrong at a region's edge** — usually a real
-terrain-mesh-resolution mismatch between SRTM and DCS rather than a bug. See
-`research/2026-09-03-m4-dcs-elevation.md`.
+**A layer is missing from the built store**: its input flag was omitted or the path was wrong;
+missing inputs are reported as skipped, not errors. Check the summary and row counts (3.5).
 
-**Queries are slow on `syria-full`** — a known tail; p99 for
-`describe_position` sits around 800 ms on the full theatre.
+**Stage 3 takes tens of minutes again although nothing changed**: the OSM cache missed. Look for
+the `osm_cache:` log line; a changed `.osm.pbf`, a classifier update in the code, or a region
+change all invalidate it by design.
+
+**Elevation looks wrong at a region's edge**: usually a real terrain-resolution mismatch between
+SRTM and DCS, not a bug. See `research/2026-09-03-m4-dcs-elevation.md`.
+
+**Queries are slow on `syria-full`**: a known tail; `describe_position` p99 is around 800 ms on
+the full theatre.
