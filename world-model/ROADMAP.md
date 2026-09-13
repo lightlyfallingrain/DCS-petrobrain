@@ -46,6 +46,32 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   tests pass. Raised while scoping tactical-landmark enrichment for Mission Interpreter — see
   `plans/world-model-tactical-landmarks/plan.md` and `plans/m10-road-junctions/`.
 
+- [x] **Road-junction detection memory fix (no M-number — a bug fix on M10, not a milestone; done,
+  merged 2026-09-13).** A real `syria-full` rebuild (with M9's OSM roads folded into the DCS
+  `road` layer) died at Stage 5 ("road junctions") with a silent OOM-kill after OSM ingest
+  completed. Root cause: M10's junction detector (`roadnet.junctions.extract_clusters` +
+  `ingest_junctions.ingest_junctions`) bulk-loaded the entire combined `road` feature layer
+  into one Python list before clustering — a size (~500K+ vertices at `syria-full` scale with
+  OSM) that the pipeline had never actually run against, only extrapolated for. Fixed: spatial
+  chunking reuses M8's existing chunk lattice (`store/chunks.py`), walking the theatre in 5 km
+  tiles, querying padded-bbox per tile (`padding_m = max(tolerance_m * 10.0, 10.0)` = 10 m at
+  defaults), clustering only within that tile's padded extent, keeping only clusters whose
+  centroid falls in the tile's unpadded core (centroid-in-core ownership — no double-count,
+  guaranteed exhaustive coverage). `roadnet/junctions.py` gains an additive, opt-in
+  `vertex_bbox` parameter; `ingest_junctions` (bulk) is untouched; new
+  `ingest_junctions_streaming` generator walks chunks. Planning deviation (discovered during
+  implementation): region nominal bbox does not include all stored road features; fixed with
+  new `feature_layer_bbox(conn, kinds)` MIN/MAX aggregate for actual data extent. Post-merge
+  verification: all 341 tests pass (333 pre-existing + 8 new streaming/boundary/memory-bound
+  tests), no regressions. Reviewer independently validated chunking correctness against
+  `latakia-20km.sqlite` and confirmed the deviation's fix (MIN/MAX query prevents silent
+  skipping of roads outside region bbox). Wall-clock time for Stage 5 may increase (roads
+  are re-fetched once per chunk that overlaps them) but completion instead of OOM is the
+  fundamental win. User's next real `syria-full` rebuild (to be run separately after merge)
+  is the natural follow-up validation, not a DoD/merge gate. See `plans/junctions-streaming-fix/plan.md`,
+  `plans/junctions-streaming-fix/review.md`, `plans/junctions-streaming-fix/dod-check.md`,
+  and `plans/junctions-streaming-fix/implementation.md`.
+
 - [x] **HTTP API server (no M-number — a cross-subproject interface, done, merged 2026-09-12).** 
   Wraps world-model's read-only query surface (`describe_position`, `find_place_by_name`, 
   `line_of_sight_clear`) as a single-threaded `http.server.HTTPServer` for mission-interpreter's 
@@ -145,17 +171,18 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   SRTM range, no elevation-source blocker. Needs an Architect + investigator pass before any
   theatre starts, per this project's standing convention for DCS-internals-uncertain work.
 
-- **Confirm `roadnet/junctions.py` memory/timing behavior against a real completed `syria-full` build.**
+- **RESOLVED: `roadnet/junctions.py` memory issue at `syria-full`+OSM scale (2026-09-13).**
   Raised 2026-09-12 during the OSM streaming-ingest memory audit (`plans/osm-streaming-ingest/plan.md`
-  addendum). M10's junction detector loads the *entire* `"road"` feature layer into memory
-  (`store.reader.all_features`) — once M9's OSM ingest is included, that layer is DCS `.routes` +
-  OSM `highway` ways combined, not `.routes` alone, which is a different (larger, unmeasured)
-  population than the one real data point this stage has ever run against (`latakia-20km`, DCS
-  roads only: 3,266 roads / 162K endpoints+interior vertices). Linear extrapolation to `syria-full`'s
-  reported 14,833 roads (~700K vertices) suggests this is still fine, but that is extrapolation, not
-  a measurement — confirm with real `JunctionIngestStats`/timing the next time a `syria-full` build
-  (with OSM roads folded in) actually completes through Stage 5. No fix needed unless that
-  confirmation finds a real problem.
+  addendum): M10's bulk-load approach (`store.reader.all_features`) failed in practice when that
+  `"road"` layer grew to include both DCS `.routes` and OSM `highway` ways (~500K vertices at
+  theatre scale), causing a silent OOM-kill of the actual `syria-full` rebuild at Stage 5.
+  **Fixed by junctions-streaming-fix (merged 2026-09-13):** spatial chunking walks the theatre
+  in 5 km tiles with padded-bbox queries and centroid-ownership filtering, keeping peak
+  vertex memory bounded to one tile's content instead of the whole layer. Correctness validated:
+  synthetic and real-store (`latakia-20km`) tests prove chunked path produces byte-identical
+  output to bulk path; Reviewer independently verified against real data. User's next real
+  `syria-full` rebuild is the natural follow-up to confirm end-to-end completion (expected
+  to complete, wall-clock time for Stage 5 may increase due to per-chunk road re-fetching).
 
 - **Incremental per-layer pipeline builds.** `build_region` deletes and recreates the entire `.sqlite` on every call, forcing a full rebuild of all layers each time. Wanted: run individual pipeline sections (roads only, elevation only, validation only) and *add* that data into an existing store — staged builds, partial re-runs when debugging a single layer. Raised during M7 DoD acceptance testing (2026-09-06), explicitly considered for M8 and dropped from it to keep that milestone scoped to the probe store. M9 (OSM) would also benefit — see `plans/m9-osm-geofabrik/plan.md` design decision 4. See `plans/m7-full-theatre-pipeline/` and `src/build/pipeline.py`'s `build_region`.
 
