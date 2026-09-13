@@ -31,6 +31,21 @@ never threads it through. The fallback string is therefore always used
 here, built from each fact's kind plus whatever naming information that
 kind's info dataclass does carry (name, or a distance bucket for the
 nameless ridge/valley lines) -- not a numeric database id.
+
+**osm-landcover-optimization (Design D7)**: `semantic_facts_for` gains
+subtype-aware wording for unnamed settlements/water (world-model's
+`SettlementInfo`/`WaterInfo` now carry `subtype`) and two new facts,
+appended after the pre-existing ones so `belief.tools`/`belief.speech`'s
+`max(..., key=confidence)` selection keeps its current tie-break behaviour
+(first maximum wins) unchanged for the current-location phrasing that
+already existed: a landcover fact (only when `inside_landcover` is
+non-`None` and its class isn't `"built_up"` -- that case is already covered
+by `inside_settlement`) and a coast fact (only when `nearest_coastline` is
+within `COAST_FACT_RADIUS_M` or already reports `side == "sea"` -- D5's own
+risk note that `side` is unreliable *near* the coast is why the wording
+hedges to "near the coast" rather than asserting a side in that band, only
+asserting "over the sea" once far enough out that the position uncertainty
+itself can't explain the `side` reading).
 """
 
 from __future__ import annotations
@@ -86,6 +101,35 @@ _FEATURE_CONFIDENCE_NUMERIC: dict[str, float] = {
     "unknown": 0.2,
 }
 
+#: `world-model`'s `WaterInfo.subtype` (river/lake/reservoir/river_area)
+#: mapped to a semantic-fact noun phrase for an *unnamed* water feature
+#: (D7 "near a river|lake|reservoir (Nm)"). `river_area` (the polygon
+#: variant of a mapped river, D2 "Areas" rule 1) reads the same as `river`
+#: -- there is no separate natural-language distinction worth making here.
+_WATER_SUBTYPE_LABELS: dict[str, str] = {
+    "river": "a river",
+    "lake": "a lake",
+    "reservoir": "a reservoir",
+    "river_area": "a river",
+}
+
+#: `world-model`'s `LandcoverInfo.landcover_class` mapped to the D7 fact
+#: text -- `"built_up"` deliberately excluded (already covered by
+#: `inside_settlement`, D7's own note).
+_LANDCOVER_CLASS_TEXTS: dict[str, str] = {
+    "forest": "in forest",
+    "orchard": "in orchards",
+    "scrub": "in scrubland",
+    "fields": "in open fields",
+    "barren": "on barren ground",
+}
+
+#: How close `nearest_coastline` must be for a coast fact to fire at all,
+#: when `side` isn't already `"sea"` (D7). Named the way the plan itself
+#: names it, not a private `_`-prefixed constant, since it is the one new
+#: D7 knob a caller might reasonably want to see/tune.
+COAST_FACT_RADIUS_M: Final[float] = 5000.0
+
 
 @dataclass(frozen=True, slots=True)
 class SemanticFact:
@@ -107,6 +151,24 @@ def _combined_confidence(feature_confidence: str, position_conf: float) -> float
     return numeric * position_conf
 
 
+def _unnamed_settlement_label(subtype: str | None) -> str:
+    """D7: an unnamed built-up settlement reads as "a built-up area";
+    anything else unnamed keeps the pre-D7 generic wording."""
+    if subtype == "built_up":
+        return "a built-up area"
+    return "an unnamed settlement"
+
+
+def _unnamed_water_label(subtype: str | None) -> str:
+    """D7: "near a river|lake|reservoir (Nm)" from `subtype` for unnamed
+    water; the pre-D7 generic "water" wording is the fallback for a
+    `subtype` this table doesn't recognize (e.g. an older/foreign store
+    row)."""
+    if subtype is not None and subtype in _WATER_SUBTYPE_LABELS:
+        return _WATER_SUBTYPE_LABELS[subtype]
+    return "water"
+
+
 def semantic_facts_for(
     conn: sqlite3.Connection,
     theatre: str,
@@ -115,17 +177,19 @@ def semantic_facts_for(
 ) -> list[SemanticFact]:
     """Flatten `query.describe.describe_position`'s
     `nearest_settlement`/`inside_settlement`/`nearest_road`/`nearest_water`/
-    `nearby_ridges`/`nearby_valleys` fields into a list of `SemanticFact`s,
-    one call to `describe_position`. Absent facts stay absent -- a `None`
-    field on `PositionDescription` simply does not produce a
-    `SemanticFact`, same "absent, not null" rule `belief.tools` already
-    documents."""
+    `nearby_ridges`/`nearby_valleys`/`inside_landcover`/`nearest_coastline`
+    fields into a list of `SemanticFact`s, one call to `describe_position`.
+    Absent facts stay absent -- a `None` field on `PositionDescription`
+    simply does not produce a `SemanticFact`, same "absent, not null" rule
+    `belief.tools` already documents. The two osm-landcover-optimization
+    facts (landcover, coast) are appended after every pre-existing one --
+    see the module docstring's D7 status note on why order matters here."""
     description = describe_position(conn, theatre, position.x, position.z)
     facts: list[SemanticFact] = []
 
     settlement = description.nearest_settlement
     if settlement is not None:
-        name = settlement.name or "an unnamed settlement"
+        name = settlement.name or _unnamed_settlement_label(settlement.subtype)
         facts.append(
             SemanticFact(
                 text=f"near {name} ({settlement.distance_m:.0f}m)",
@@ -137,7 +201,7 @@ def semantic_facts_for(
 
     inside = description.inside_settlement
     if inside is not None:
-        name = inside.name or "an unnamed settlement"
+        name = inside.name or _unnamed_settlement_label(inside.subtype)
         facts.append(
             SemanticFact(
                 text=f"inside {name}",
@@ -161,7 +225,7 @@ def semantic_facts_for(
 
     water = description.nearest_water
     if water is not None:
-        name = water.name or "water"
+        name = water.name or _unnamed_water_label(water.subtype)
         facts.append(
             SemanticFact(
                 text=f"near {name} ({water.distance_m:.0f}m)",
@@ -190,6 +254,41 @@ def semantic_facts_for(
                 confidence=_combined_confidence(valley.confidence, position_conf),
                 provenance=valley.provenance,
                 feature_id=f"valley:{round(valley.distance_m / 100.0) * 100}",
+            )
+        )
+
+    landcover = description.inside_landcover
+    if landcover is not None and landcover.landcover_class != "built_up":
+        text = _LANDCOVER_CLASS_TEXTS.get(landcover.landcover_class)
+        if text is not None:
+            facts.append(
+                SemanticFact(
+                    text=text,
+                    confidence=_combined_confidence(
+                        landcover.confidence, position_conf
+                    ),
+                    provenance=landcover.provenance,
+                    feature_id=f"landcover:{landcover.landcover_class}",
+                )
+            )
+
+    coastline = description.nearest_coastline
+    if coastline is not None and (
+        coastline.distance_m <= COAST_FACT_RADIUS_M or coastline.side == "sea"
+    ):
+        if (
+            coastline.side == "sea"
+            and coastline.distance_m >= coastline.position_uncertainty_m
+        ):
+            text = f"over the sea, off the coast ({coastline.distance_m:.0f}m)"
+        else:
+            text = f"near the coast ({coastline.distance_m:.0f}m)"
+        facts.append(
+            SemanticFact(
+                text=text,
+                confidence=_combined_confidence(coastline.confidence, position_conf),
+                provenance=coastline.provenance,
+                feature_id="coastline",
             )
         )
 

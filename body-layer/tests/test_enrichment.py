@@ -75,6 +75,24 @@ class _FakeInfo:
 
 
 @dataclass
+class _FakeLandcoverInfo:
+    landcover_class: str = "forest"
+    name: str | None = None
+    provenance: str = "osm"
+    confidence: str = "high"
+    position_uncertainty_m: float = 1300.0
+
+
+@dataclass
+class _FakeCoastlineInfo:
+    distance_m: float = 100.0
+    side: str = "land"
+    provenance: str = "osm"
+    confidence: str = "high"
+    position_uncertainty_m: float = 1300.0
+
+
+@dataclass
 class _FakeDescription:
     nearest_settlement: _FakeInfo | None = None
     inside_settlement: _FakeInfo | None = None
@@ -82,6 +100,8 @@ class _FakeDescription:
     nearest_water: _FakeInfo | None = None
     nearby_ridges: _FakeInfo | None = None
     nearby_valleys: _FakeInfo | None = None
+    inside_landcover: _FakeLandcoverInfo | None = None
+    nearest_coastline: _FakeCoastlineInfo | None = None
 
 
 def test_semantic_facts_for_empty_description_returns_no_facts(
@@ -106,6 +126,8 @@ def test_semantic_facts_for_includes_every_present_field(
         nearest_water=_FakeInfo(name="Mediterranean Sea", distance_m=2000.0),
         nearby_ridges=_FakeInfo(distance_m=800.0),
         nearby_valleys=_FakeInfo(distance_m=900.0),
+        inside_landcover=_FakeLandcoverInfo(landcover_class="forest"),
+        nearest_coastline=_FakeCoastlineInfo(distance_m=300.0, side="land"),
     )
     monkeypatch.setattr(
         enrichment, "describe_position", lambda conn, theatre, x, z: description
@@ -115,7 +137,7 @@ def test_semantic_facts_for_includes_every_present_field(
         _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
     )
 
-    assert len(facts) == 6
+    assert len(facts) == 8
     assert all(isinstance(fact, SemanticFact) for fact in facts)
     texts = [fact.text for fact in facts]
     assert any("Jableh" in text and "near" in text for text in texts)
@@ -124,6 +146,11 @@ def test_semantic_facts_for_includes_every_present_field(
     assert any("Mediterranean Sea" in text for text in texts)
     assert any("ridge" in text for text in texts)
     assert any("valley" in text for text in texts)
+    assert any("in forest" == text for text in texts)
+    assert any("near the coast" in text for text in texts)
+    # D7: the two new facts are appended after every pre-existing one.
+    assert facts[-2].feature_id == "landcover:forest"
+    assert facts[-1].feature_id == "coastline"
 
 
 def test_semantic_facts_for_confidence_combines_feature_and_position(
@@ -178,6 +205,229 @@ def test_semantic_facts_for_unnamed_settlement_uses_placeholder_text(
 
     assert "unnamed" in fact.text
     assert fact.feature_id == "settlement:unnamed"
+
+
+# --- D7: subtype-aware unnamed wording -----------------------------------
+
+
+def test_semantic_facts_for_unnamed_built_up_settlement_says_built_up_area(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_settlement=_FakeInfo(name=None, subtype="built_up", distance_m=250.0),
+        inside_settlement=_FakeInfo(name=None, subtype="built_up"),
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+
+    assert facts[0].text == "near a built-up area (250m)"
+    assert facts[1].text == "inside a built-up area"
+
+
+@pytest.mark.parametrize(
+    ("subtype", "expected_label"),
+    [
+        ("river", "a river"),
+        ("lake", "a lake"),
+        ("reservoir", "a reservoir"),
+        ("river_area", "a river"),
+    ],
+)
+def test_semantic_facts_for_unnamed_water_uses_subtype_label(
+    monkeypatch: pytest.MonkeyPatch, subtype: str, expected_label: str
+) -> None:
+    description = _FakeDescription(
+        nearest_water=_FakeInfo(name=None, subtype=subtype, distance_m=400.0)
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    fact = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+
+    assert fact.text == f"near {expected_label} (400m)"
+
+
+def test_semantic_facts_for_unnamed_water_unknown_subtype_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_water=_FakeInfo(name=None, subtype=None, distance_m=400.0)
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    fact = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+
+    assert fact.text == "near water (400m)"
+
+
+# --- D7: landcover fact ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("landcover_class", "expected_text"),
+    [
+        ("forest", "in forest"),
+        ("orchard", "in orchards"),
+        ("scrub", "in scrubland"),
+        ("fields", "in open fields"),
+        ("barren", "on barren ground"),
+    ],
+)
+def test_semantic_facts_for_landcover_class_texts(
+    monkeypatch: pytest.MonkeyPatch, landcover_class: str, expected_text: str
+) -> None:
+    description = _FakeDescription(
+        inside_landcover=_FakeLandcoverInfo(landcover_class=landcover_class)
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+
+    assert len(facts) == 1
+    assert facts[0].text == expected_text
+    assert facts[0].feature_id == f"landcover:{landcover_class}"
+
+
+def test_semantic_facts_for_landcover_built_up_class_produces_no_fact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D7: `built_up` is deliberately excluded -- `inside_settlement` already
+    covers it, so a second fact would be redundant."""
+    description = _FakeDescription(
+        inside_landcover=_FakeLandcoverInfo(landcover_class="built_up")
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+
+    assert facts == []
+
+
+def test_semantic_facts_for_no_landcover_produces_no_fact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+
+    assert facts == []
+
+
+# --- D7: coast fact ---------------------------------------------------
+
+
+def test_semantic_facts_for_coast_far_at_sea_says_over_the_sea(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_coastline=_FakeCoastlineInfo(
+            distance_m=5000.0, side="sea", position_uncertainty_m=1300.0
+        )
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    fact = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+
+    assert fact.text == "over the sea, off the coast (5000m)"
+    assert fact.feature_id == "coastline"
+
+
+def test_semantic_facts_for_coast_sea_within_uncertainty_hedges_to_near_coast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D5's own risk note: `side` is unreliable within `position_uncertainty_m`
+    of the coastline, so even a `side == "sea"` reading that close hedges to
+    "near the coast" rather than asserting "over the sea"."""
+    description = _FakeDescription(
+        nearest_coastline=_FakeCoastlineInfo(
+            distance_m=500.0, side="sea", position_uncertainty_m=1300.0
+        )
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    fact = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+
+    assert fact.text == "near the coast (500m)"
+
+
+def test_semantic_facts_for_coast_land_within_radius_says_near_coast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_coastline=_FakeCoastlineInfo(distance_m=1000.0, side="land")
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    fact = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )[0]
+
+    assert fact.text == "near the coast (1000m)"
+
+
+def test_semantic_facts_for_coast_land_beyond_radius_produces_no_fact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_coastline=_FakeCoastlineInfo(distance_m=6000.0, side="land")
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+
+    assert facts == []
+
+
+def test_semantic_facts_for_no_coastline_produces_no_fact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+
+    assert facts == []
 
 
 # --- WorldEnrichmentCache -----------------------------------------------
