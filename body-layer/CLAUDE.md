@@ -399,6 +399,28 @@ stay mutually exclusive with each other; `--overlay` is valid alongside either.
   `belief.speech` produced, since the prefix is an overlay-display concern, not a change to what
   was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
   `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
+- `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
+  Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
+  Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into
+  `MissionUnderstandingData` (phases + route). `MissionPhaseTracker` sequences ownship past route
+  waypoints via a capture-radius check (`WAYPOINT_CAPTURE_RADIUS_M`, an uncalibrated placeholder —
+  same debt class as `visibility.py`'s tier constants) and is **monotonic**: phase progression
+  never decrements even if ownship temporarily drifts back outside a waypoint's capture radius
+  after being captured once. Pure in-memory state (ints/tuples, no sqlite/thread-unsafe object),
+  written only from `logger.py`'s poll thread (`.update()`) and read-only from the REPL/`Console`
+  thread (`.current_phase()`) — deliberately mirrors `EnrichmentContext.ownship`'s existing
+  cross-thread split to avoid this codebase's own recurring sqlite thread-affinity defect class
+  (BL-2 Stage 6, BL-5). `load_mission_understanding` raises `ValueError` on schema violation,
+  tolerates empty `phases`/`route`. **`get_mission_phase` does NOT extend `TOOL_SET`** (resolves a
+  stale roadmap flag from when the tool-freeze point moved to BL-6) — mission-phase proximity
+  instead folds additively into `get_situation`'s existing facts payload (`tools.py`,
+  `mission_phase_tracker: MissionPhaseTracker | None = None` param, `None` → unchanged output) and
+  becomes a **tie-breaker only** under attention rank in `_highest_attention_contact`
+  (`_select_from_tier` helper — never overrides a higher attention level, only orders within one).
+  `Console.mission_phase_tracker` threads the tracker to `get_situation`'s real call site.
+  `logger.py` gains `--mission-understanding PATH` to load it. `key_locations` (MI-6's
+  `CompactLocation`) carries no position field, so relevance can only be scored against route
+  waypoints, not named mission-critical areas — a real, documented gap, not worked around.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a

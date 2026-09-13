@@ -18,7 +18,14 @@ full.
 
 Descriptions below are taken verbatim from `plans/body-layer/plan.md` §3.3
 where that section already wrote one; the three net-new tools' descriptions
-are written fresh, matching that section's plain-language style."""
+are written fresh, matching that section's plain-language style.
+
+**BL-7** (`plans/bl7-mission-phase-relevance/plan.md`) considered and
+rejected adding a `get_mission_phase` tool here: current mission phase is a
+single global value, a strict id-less subset of what `get_situation`
+already returns, so it was folded into `get_situation`'s facts payload
+instead (`facts["mission_phase"]`) -- `TOOL_SET` itself is unchanged by
+that milestone."""
 
 from __future__ import annotations
 
