@@ -174,7 +174,7 @@ no new line at all during a progress-logging stage is worth reporting.
 |---|---|---|
 | 1 | `towns.lua` | — (fast) |
 | 2 | `beacons.lua` | — (fast) |
-| 3 | `OSM overlay (.osm.pbf)` | `osm.pbf: N elements seen...` every ~10–20 s. Tens of minutes on the first run; low minutes when the OSM cache hits (3.4) |
+| 3 | `OSM overlay (.osm.pbf)` | `osm.pbf: N elements seen (N tagged nodes, N ways kept, N areas kept, Ns elapsed)` every ~10–20 s. Low minutes on the first run against the pre-filtered file (§2.4 cuts this from the old "tens of minutes" — a 20 km region's OSM stage measured well under a minute end to end during validation); low minutes when the OSM cache hits too (3.4) |
 | 4 | `Syria.routes (N bytes)` | — (reads the 2.25 GB road file) |
 | 5 | `road junctions` | `ingest_junctions: R roads, N chunks ...` once, then `chunk i/N (x%, J junctions kept, Ts elapsed, ~Ts remaining)` at most every 30 s. The remaining-time figure is rough, since chunk cost varies a lot |
 | 6 | `SRTM elevation grid (N tile(s))` | `ingest_srtm: row i/N (...)` every 50 rows |
@@ -209,8 +209,12 @@ for kind, n in conn.execute("SELECT kind, COUNT(*) FROM feature GROUP BY kind OR
 EOF
 ```
 
-`road`, `junction`, `settlement`, `named_place` and `water` should all be non-zero with every
-input given. Then spot-check a known place (section 4).
+`road`, `junction`, `settlement`, `named_place`, `water`, `landcover` and `coastline` should all be
+non-zero with every input given. **`road` is DCS-only** (`Syria.routes`) — OSM no longer
+contributes `road` rows at all (dropped from ingest entirely; DCS's own roadnet is authoritative).
+`landcover` (forest/orchard/fields/scrub/barren polygons) and `coastline` (the shoreline, as its
+own kind, separate from `water`) are new as of the osm-landcover-optimization milestone. Then
+spot-check a known place (section 4).
 
 ### Small regions
 
@@ -284,9 +288,11 @@ $V/ruff check world-model/src world-model/tests
 **A layer is missing from the built store**: its input flag was omitted or the path was wrong;
 missing inputs are reported as skipped, not errors. Check the summary and row counts (3.5).
 
-**Stage 3 takes tens of minutes again although nothing changed**: the OSM cache missed. Look for
-the `osm_cache:` log line; a changed `.osm.pbf`, a classifier update in the code, or a region
-change all invalidate it by design.
+**Stage 3 takes as long as a fresh parse again although nothing changed**: the OSM cache missed.
+Look for the `osm_cache:` log line; a changed `.osm.pbf`, a classifier update in the code, or a
+region change all invalidate it by design. (A fresh parse against the §2.4-filtered file is itself
+now low minutes, not the old "tens of minutes" against an unfiltered extract — but it's still far
+slower than a cache hit.)
 
 **Elevation looks wrong at a region's edge**: usually a real terrain-resolution mismatch between
 SRTM and DCS, not a bug. See `research/2026-09-03-m4-dcs-elevation.md`.
