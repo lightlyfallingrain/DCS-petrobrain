@@ -29,9 +29,12 @@ ruff format aircraft-layer/src aircraft-layer/tests   # format
 ruff check aircraft-layer/src aircraft-layer/tests    # lint
 mypy aircraft-layer/src                                 # type check (strict)
 pytest aircraft-layer/tests -q                           # test
+for f in aircraft-layer/dcs-export/*.lua; do luac5.1 -p "$f" || echo "FAIL $f"; done   # Lua syntax
 ```
 
 Run a single test: `pytest aircraft-layer/tests/test_file.py::test_name -q`.
+
+**Lua syntax check (`luac5.1 -p`)** parses without executing — it catches syntax errors in `Export.lua`, the Hook scripts, and probes before a DCS launch, and nothing more (`DCS`/`net`/`log`/`Lo*` exist only inside DCS, so behaviour still needs a live run). Must be **Lua 5.1** specifically, the version DCS embeds; a newer `luac` accepts syntax DCS rejects. Install: `sudo apt install lua5.1` (WSL/Debian).
 
 ## Testing
 
