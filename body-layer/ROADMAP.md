@@ -263,7 +263,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 ## Backlog (body-layer)
 
-- [ ] **F10 radio-menu command input for Petrovich — no brain layer needed, blocked on DCS access.**
+- [ ] **F10 radio-menu command input for Petrovich — no brain layer needed; feasibility confirmed, ready for Architect.**
   Raised 2026-09-12: contact reports (overlay-speech-callouts, merged) are in a good state; next
   most useful thing is letting the player issue Petrovich commands (watch nearest, scan forward,
   cancel task, etc.) from in-cockpit UI instead of typing into `--crew-text`'s console. **User
@@ -275,9 +275,14 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   from `Export.lua`'s own state, or does it require Hook-script/mission-scripting access this
   project doesn't currently have a channel for? This is a new *inbound* DCS→body direction — the
   reverse of BL-6's search-trigger write — and needs an investigator pass before any Architect
-  planning. **Blocked on DCS box access** (per this project's execution-boundary rule, static/live
-  recon needs `$DCS_INSTALL_PATH`, only set on the Windows machine) — pick up when that's available,
-  not before.
+  planning. **Investigated 2026-09-13, feasible** (`aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md`
+  Findings 7–11): not reachable from Export.lua or plain Hook state, but a Hook can register F10 →
+  Other items via `net.dostring_in("scripting", "missionCommands.addCommand(...)")` at
+  `onSimulationStart`, and poll selections back out through the same bridge (live-confirmed, ~1 s
+  latency at a 1 Hz poll, no per-mission authoring). Prerequisite: the user-machine
+  `Saved Games\DCS\Config\autoexec.cfg` unsafe-API opt-in (user accepted it for the probe).
+  Open for the plan: minimal opt-in set, per-group scoping in multiplayer. Next: Architect plan
+  (Hook registration + poll, Hook→collector→body inbound path).
 
 - [>] **Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:
   the new contact-report format (`belief/speech.py`'s `render_contact_report`) has a

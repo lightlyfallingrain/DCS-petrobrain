@@ -138,12 +138,50 @@ not considered above.
       during the run (no radio command was selected, since no probe item existed; built-in
       commands were not exercised).
 
-**Status after live run:** with no opt-in, no route from Hook state registers an F10 item.
-Remaining candidates: **B** (`net.dostring_in` with `autoexec.cfg` opt-in — the single open
-question is whether it then accepts `"mission"` or another state name) and **A** (per-mission
-authored script). The inbound selection event would also need a channel back out of the mission
-state (e.g. Hook polling a mission-state queue via the same `dostring_in`), so B's feasibility
-gates both registration and callback delivery.
+**Status after run 1:** with no opt-in, no route from Hook state registers an F10 item.
+
+11. **Run 2, with the opt-in: Approach B works end to end** — **evidence: reproduced-locally** —
+    **source:** probe run 2 (state-name sweep), `Config/autoexec.cfg` created with
+    `net.allow_unsafe_api = { "userhooks", "gui" }` and
+    `net.allow_dostring_in = { "mission", "scripting", "server", "export", "config", "gui" }`,
+    DCS fully restarted; two missions flown (a MIST/MOOSE mission, then a Mi-24P Outpost campaign
+    mission on Syria); `dcs.log` `PB-F10-PROBE` lines.
+    - **State names:** all six accepted by `dostring_in` (`return 'pong'`). `"scripting"` and
+      `"server"` both see `missionCommands`/`env`/`trigger` as tables, and are **the same Lua
+      state** — a global written through one is read back through the other.
+      `"mission"` sees only `a_do_script` (no `missionCommands`/`env`); `"export"`, `"config"`,
+      `"gui"` see none of them.
+    - **Registration:** `net.dostring_in("scripting", "missionCommands.addCommand(label, nil, fn)
+      return 'registered'")` returns `("registered", true)`, and the entry appears under F10 →
+      Other. Same via `"server"`.
+    - **Selection → callback → Hook:** selecting each entry fired its callback in the mission
+      scripting state (`SCRIPTING (Main): PB-F10-PROBE callback FIRED PB probe: scripting direct`
+      at 11:23:05.157, `... server direct` at 11:23:13.718); the Hook's 1 Hz poll
+      (`dostring_in("scripting", "return <serialised counters>")`) read the incremented counter
+      0.4 s and 1.0 s later. Registration is per mission: `onSimulationStart` re-registered on
+      the second mission and it worked again.
+    - **`a_do_script` via `"mission"`:** returned `""` for both the registration and the poll; its
+      label never appeared in the scripting-state counter table, so the code did not run there
+      (or ran elsewhere). The `Sim_ControlAPI.md` "return values from `a_do_script()`" note was
+      not borne out. Also `"mission"` returned `Invalid state name` on the second mission (and
+      between missions), while `"scripting"`/`"server"` stayed valid. **Use `"scripting"`, not
+      `"mission"`/`a_do_script`.**
+    - **`onSimulationFrame` keeps firing between missions:** a poll ran at mission load before
+      `onSimulationStart` (`"mission"` → `Invalid state name`). A real Hook should only poll
+      between `onSimulationStart` and `onSimulationStop`.
+    - **`onRadioCommand` never fired** in either mission, including for the probe's own
+      mission-registered items. Whether it fires for built-in (ATC/wingman) commands depends on
+      whether one was selected during the run — not confirmed.
+
+**Status after run 2:** Approach B is feasible without per-mission authoring: a Hook registers
+F10 items in the mission scripting state via `net.dostring_in("scripting", ...)` at
+`onSimulationStart`, callbacks record selections in a mission-state global, and the Hook drains
+it by polling the same bridge, then forwards over the existing Hook→collector path. Cost: the
+`autoexec.cfg` opt-in (a user-machine config change that applies to all DCS sessions and all
+installed Hooks), which Architect should treat as a deploy prerequisite in `WORKFLOW.md`.
+Still open: the minimal opt-in (whether `"gui"` in `allow_unsafe_api` and anything beyond
+`"scripting"` in `allow_dostring_in` is needed — run 2 enabled all of them), per-group scoping
+(`addCommandForGroup` vs global `addCommand`) in multiplayer, and `onRadioCommand`'s payload.
 
 ### Reproducible Test
 

@@ -1,29 +1,36 @@
 -- petrobrain-f10-probe-hook.lua -- THROWAWAY recon probe, not pipeline code.
 --
 -- Question (aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md): can a
--- Hook-state script put its own item into the F10 radio menu, and get told when the
--- player selects it, without per-mission authoring?
+-- Hook-state script put its own item into the F10 radio menu, and learn when the player
+-- selects it, without per-mission authoring?
+--
+-- Run 1 (no autoexec.cfg) showed: RadioCommandDialogsPanel and a_do_script unreachable from
+-- Hooks; net.dostring_in("mission", ...) -> ("Invalid state name", false). See Finding 10.
+--
+-- Run 2 (this version) needs Saved Games\DCS\Config\autoexec.cfg:
+--     net.allow_unsafe_api = { "userhooks", "gui" }
+--     net.allow_dostring_in = { "mission", "scripting", "server", "export", "config", "gui" }
+-- It asks, per candidate state name:
+--   S1  does net.dostring_in accept the state at all?
+--   S2  is missionCommands / a_do_script / env visible there?
+--   S3  register an F10 "Other" item from each state that has missionCommands (directly) or
+--       a_do_script (bridged into the mission scripting state); callback bumps a counter.
+--   S4  poll that counter back out once a second, logging changes -- the inbound path.
+--   S5  log onRadioCommand payloads (does selecting a mission item fire it?).
 --
 -- Deploy: copy to Saved Games\DCS\Scripts\Hooks\. Remove after the probe run.
--- Output: every line goes to Saved Games\DCS\Logs\dcs.log tagged PB-F10-PROBE.
---
--- Routes probed (all pcall-wrapped; a failure is data, not a crash):
---   R0  what is visible from Hook state at all (net.dostring_in, a_do_script,
---       RadioCommandDialogsPanel, missionCommands).
---   R1  DIRECT: insert {name, command={perform=...}} into RadioCommandDialogsPanel's
---       live menuOther table (static read of Scripts/UI/RadioCommandDialogPanel/
---       RadioCommandDialogsPanel.lua: getDataParameter returns data[...] by reference;
---       onDialogCommand calls command:perform(parameters)). Only works if that module
---       lives in the same Lua state as Hooks -- autoexec.lua loads it into "globalL".
---   R2  BRIDGE: net.dostring_in("mission", ...) without the autoexec.cfg opt-in, to
---       record whether 2.9.29 refuses it, and if not, register via a_do_script.
---   R3  a_do_script called directly from Hook state (Sim_ControlAPI.md line 323 note).
---   R4  onShowRadioMenu / onRadioCommand payloads, logged for the record.
+-- Output: dcs.log lines tagged PB-F10-PROBE.
 
 local DCS = require("DCS")
 
 local TAG = "PB-F10-PROBE"
+local STATES = { "mission", "scripting", "server", "export", "config", "gui" }
+local POLL_INTERVAL_S = 1.0
+
 local probe = {}
+local registered = {} -- list of { state = name, how = "direct" | "a_do_script" }
+local lastCounts = {}
+local nextPollAt = 0
 
 local function logi(msg)
     log.write(TAG, log.INFO, msg)
@@ -47,97 +54,102 @@ local function describe(value, depth)
     return "{" .. table.concat(parts, ", ") .. "}"
 end
 
-local function try(label, fn)
-    local ok, a, b = pcall(fn)
-    logi(label .. " -> ok=" .. tostring(ok) .. " a=" .. describe(a) .. " b=" .. describe(b))
-    return ok, a
+-- Returns (ok, result): ok is dostring_in's own success flag, false on a raised error too.
+local function dostring(state, code)
+    local callOk, result, success = pcall(net.dostring_in, state, code)
+    if not callOk then
+        return false, "raised: " .. tostring(result)
+    end
+    return success ~= false, result
 end
 
--- R0 -------------------------------------------------------------------------------------
-logi("R0 loaded")
-logi("R0 type(net)=" .. type(net) .. " type(net.dostring_in)=" .. type(net and net.dostring_in))
-logi("R0 type(a_do_script)=" .. type(a_do_script))
-logi("R0 type(missionCommands)=" .. type(missionCommands))
-logi("R0 type(RadioCommandDialogsPanel)=" .. type(RadioCommandDialogsPanel))
-logi("R0 type(_G.RadioCommandDialogsPanel)=" .. type(_G and _G.RadioCommandDialogsPanel))
-logi(
-    "R0 package.loaded.RadioCommandDialogsPanel="
-        .. type(package and package.loaded and package.loaded["RadioCommandDialogsPanel"])
-)
-
--- R1 -------------------------------------------------------------------------------------
-local DIRECT_NAME = "PB probe: direct"
-
-local function findPanel()
-    -- Deliberately no require(): that would load a fresh, never-rendered copy into this
-    -- state and give a false positive.
-    return RadioCommandDialogsPanel
-        or (_G and _G.RadioCommandDialogsPanel)
-        or (package and package.loaded and package.loaded["RadioCommandDialogsPanel"])
+-- Code run in the mission scripting state: register one item whose callback bumps a global.
+local function registerCode(label)
+    return string.format(
+        [==[
+PB_F10_COUNTS = PB_F10_COUNTS or {}
+PB_F10_COUNTS[%q] = 0
+missionCommands.addCommand(%q, nil, function()
+    PB_F10_COUNTS[%q] = PB_F10_COUNTS[%q] + 1
+    if env then env.info("PB-F10-PROBE callback FIRED " .. %q) end
+end)
+return "registered"
+]==],
+        label, label, label, label, label
+    )
 end
 
-local function insertDirect(when)
-    try("R1 insert@" .. when, function()
-        local panel = findPanel()
-        if type(panel) ~= "table" then
-            return "panel not reachable", type(panel)
-        end
-        local menuOther = panel.getDataParameter("menuOther")
-        local items = menuOther.submenu.items
-        for _, item in ipairs(items) do
-            if item.name == DIRECT_NAME then
-                return "already present", #items
+local function probeStates()
+    for _, state in ipairs(STATES) do
+        local ok, result = dostring(state, "return 'pong'")
+        logi("S1 " .. state .. " ping -> ok=" .. tostring(ok) .. " result=" .. describe(result))
+        if ok then
+            local _, visible = dostring(
+                state,
+                "return 'missionCommands=' .. type(missionCommands) .. ' a_do_script=' .. type(a_do_script)"
+                    .. " .. ' env=' .. type(env) .. ' trigger=' .. type(trigger)"
+            )
+            logi("S2 " .. state .. " " .. tostring(visible))
+
+            if type(visible) == "string" and visible:find("missionCommands=function")
+                or type(visible) == "string" and visible:find("missionCommands=table")
+            then
+                local rOk, r = dostring(state, registerCode("PB probe: " .. state .. " direct"))
+                logi("S3 " .. state .. " direct register -> ok=" .. tostring(rOk) .. " result=" .. describe(r))
+                if rOk then
+                    table.insert(registered, { state = state, how = "direct" })
+                end
+            end
+
+            if type(visible) == "string" and visible:find("a_do_script=function") then
+                local code = "return a_do_script(" .. string.format("%q", registerCode("PB probe: " .. state .. " via a_do_script")) .. ")"
+                local rOk, r = dostring(state, code)
+                logi("S3 " .. state .. " a_do_script register -> ok=" .. tostring(rOk) .. " result=" .. describe(r))
+                if rOk then
+                    table.insert(registered, { state = state, how = "a_do_script" })
+                end
             end
         end
-        table.insert(items, {
-            name = DIRECT_NAME,
-            command = {
-                perform = function(self, parameters)
-                    logi("R1 DIRECT perform FIRED params=" .. describe(parameters))
-                end,
-            },
-        })
-        return "inserted", #items
-    end)
+    end
 end
 
--- R2 / R3 --------------------------------------------------------------------------------
-local BRIDGED_REGISTER = [[a_do_script("missionCommands.addCommand('PB probe: bridged', nil, ]]
-    .. [[function() env.info('PB-F10-PROBE R2 BRIDGED callback FIRED') end)")]]
-
-local function probeBridges()
-    try("R2 dostring_in(mission, return tostring(missionCommands))", function()
-        return net.dostring_in("mission", "return tostring(missionCommands)")
-    end)
-    try("R2 dostring_in(mission, return tostring(a_do_script))", function()
-        return net.dostring_in("mission", "return tostring(a_do_script)")
-    end)
-    try("R2 dostring_in(mission, register via a_do_script)", function()
-        return net.dostring_in("mission", BRIDGED_REGISTER)
-    end)
-    try("R3 a_do_script direct register", function()
-        return a_do_script(
-            "missionCommands.addCommand('PB probe: a_do_script', nil, "
-                .. "function() env.info('PB-F10-PROBE R3 A_DO_SCRIPT callback FIRED') end)"
-        )
-    end)
+local function pollCounts()
+    for _, reg in ipairs(registered) do
+        local state, how = reg.state, reg.how
+        local code = "local out = {} for k, v in pairs(PB_F10_COUNTS or {}) do "
+            .. "out[#out + 1] = k .. '=' .. v end return table.concat(out, '; ')"
+        if how == "a_do_script" then
+            code = "return a_do_script(" .. string.format("%q", code) .. ")"
+        end
+        local ok, count = dostring(state, code)
+        local key = state .. "/" .. how
+        if count ~= lastCounts[key] then
+            logi("S4 " .. key .. " count -> ok=" .. tostring(ok) .. " value=" .. describe(count))
+            lastCounts[key] = count
+        end
+    end
 end
 
 -- Callbacks ------------------------------------------------------------------------------
 function probe.onSimulationStart()
-    logi("onSimulationStart")
-    insertDirect("onSimulationStart")
-    probeBridges()
+    logi("onSimulationStart; net.dostring_in=" .. type(net.dostring_in))
+    registered = {}
+    lastCounts = {}
+    nextPollAt = 0
+    probeStates()
 end
 
-function probe.onShowRadioMenu(a_h)
-    logi("R4 onShowRadioMenu a_h=" .. describe(a_h))
-    -- Re-insert in case initialize()/clearSomeMenu() reset the table after mission start.
-    insertDirect("onShowRadioMenu")
+function probe.onSimulationFrame()
+    local now = DCS.getRealTime()
+    if now < nextPollAt then
+        return
+    end
+    nextPollAt = now + POLL_INTERVAL_S
+    pollCounts()
 end
 
 function probe.onRadioCommand(command_message)
-    logi("R4 onRadioCommand msg=" .. describe(command_message))
+    logi("S5 onRadioCommand msg=" .. describe(command_message))
 end
 
 function probe.onSimulationStop()
@@ -145,4 +157,4 @@ function probe.onSimulationStop()
 end
 
 DCS.setUserCallbacks(probe)
-logi("R0 callbacks set")
+logi("loaded (run 2: state-name sweep)")
