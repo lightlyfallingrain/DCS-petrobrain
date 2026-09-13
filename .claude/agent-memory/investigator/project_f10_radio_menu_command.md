@@ -21,8 +21,7 @@ the bridge works, but only behind the user-machine opt-in.
 **How to apply:** For any Hook→mission-scripting need (F10 input, outText, trigger flags), use
 `"scripting"` via `dostring_in`, not `a_do_script`. Poll only between `onSimulationStart` and
 `onSimulationStop`, because `onSimulationFrame` also fires between missions. Still open: the
-minimal opt-in set (run 2 enabled all six state names plus `"gui"`), multiplayer group scoping,
-and `onRadioCommand` for built-in commands (it doesn't fire for mission-registered items; moot for this route). A static-read trap: `getDataParameter` in
+minimal opt-in set (run 2 enabled all six state names plus `"gui"`) and `onRadioCommand` for built-in commands (it doesn't fire for mission-registered items; moot for this route). A static-read trap: `getDataParameter` in
 `RadioCommandDialogsPanel.lua` looked promising but is unreachable from Hooks. Check the Lua state
 before designing around a GUI module. Full findings:
 `aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md` Findings 7–11.
