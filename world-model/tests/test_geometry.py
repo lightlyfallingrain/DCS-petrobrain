@@ -6,6 +6,7 @@ vertex/edge, polygon wound both ways) -- see
 
 import pytest
 
+from coordinates import wgs84_to_dcs
 from geometry import (
     bbox_of,
     bearing_deg,
@@ -14,6 +15,11 @@ from geometry import (
     distance_point_segment,
     orientation_label,
     point_in_polygon,
+    polygon_contains,
+    ring_area_m2,
+    signed_side_of_polyline,
+    simplify_polyline,
+    simplify_ring,
 )
 
 # --- distance_point_point ---
@@ -170,3 +176,164 @@ def test_bbox_of_single_point() -> None:
 def test_bbox_of_empty_raises() -> None:
     with pytest.raises(ValueError):
         bbox_of([])
+
+
+# --- simplify_polyline (osm-landcover-optimization, Design D3) -------------
+
+
+def test_simplify_polyline_drops_point_within_tolerance() -> None:
+    # (5, 0.1) is only 0.1m off the (0,0)-(10,0) line.
+    result = simplify_polyline([(0.0, 0.0), (5.0, 0.1), (10.0, 0.0)], tol_m=1.0)
+    assert result == [(0.0, 0.0), (10.0, 0.0)]
+
+
+def test_simplify_polyline_keeps_point_beyond_tolerance() -> None:
+    result = simplify_polyline([(0.0, 0.0), (5.0, 0.1), (10.0, 0.0)], tol_m=0.05)
+    assert result == [(0.0, 0.0), (5.0, 0.1), (10.0, 0.0)]
+
+
+def test_simplify_polyline_fewer_than_3_points_is_unchanged() -> None:
+    assert simplify_polyline([(0.0, 0.0), (1.0, 1.0)], tol_m=1.0) == [
+        (0.0, 0.0),
+        (1.0, 1.0),
+    ]
+    assert simplify_polyline([], tol_m=1.0) == []
+
+
+# --- simplify_ring (osm-landcover-optimization, Design D3) -----------------
+
+
+def test_simplify_ring_drops_near_collinear_point_and_keeps_closure() -> None:
+    # A 10x10 square with one extra vertex 0.05m off the bottom edge.
+    ring = [
+        (0.0, 0.0),
+        (5.0, 0.05),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+        (0.0, 0.0),
+    ]
+    result = simplify_ring(ring, tol_m=1.0)
+    assert result is not None
+    assert result[0] == result[-1]
+    assert result == [
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+        (0.0, 0.0),
+    ]
+
+
+def test_simplify_ring_degenerate_below_3_vertices_returns_none() -> None:
+    assert simplify_ring([(0.0, 0.0), (1.0, 1.0), (0.0, 0.0)], tol_m=1.0) is None
+
+
+def test_simplify_ring_accepts_open_ring_input() -> None:
+    # Same square, not explicitly closed on input.
+    ring = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    result = simplify_ring(ring, tol_m=1.0)
+    assert result is not None
+    assert result[0] == result[-1]
+    assert len(result) == 5
+
+
+# --- ring_area_m2 (osm-landcover-optimization, Design D3) ------------------
+
+
+def test_ring_area_m2_rectangle() -> None:
+    rectangle = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+    assert ring_area_m2(rectangle) == pytest.approx(50.0)
+
+
+def test_ring_area_m2_triangle() -> None:
+    triangle = [(0.0, 0.0), (4.0, 0.0), (0.0, 3.0)]
+    assert ring_area_m2(triangle) == pytest.approx(6.0)
+
+
+def test_ring_area_m2_winding_order_does_not_matter() -> None:
+    ccw = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+    cw = list(reversed(ccw))
+    assert ring_area_m2(ccw) == pytest.approx(ring_area_m2(cw))
+
+
+def test_ring_area_m2_fewer_than_3_vertices_is_zero() -> None:
+    assert ring_area_m2([(0.0, 0.0), (1.0, 1.0)]) == 0.0
+
+
+# --- polygon_contains (osm-landcover-optimization, Design substitution 2) --
+
+_OUTER_SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+_HOLE_SQUARE = [(3.0, 3.0), (6.0, 3.0), (6.0, 6.0), (3.0, 6.0)]
+
+
+def test_polygon_contains_point_inside_outer_and_outside_hole() -> None:
+    assert polygon_contains((1.0, 1.0), _OUTER_SQUARE, [_HOLE_SQUARE]) is True
+
+
+def test_polygon_contains_point_inside_hole_is_not_contained() -> None:
+    assert polygon_contains((5.0, 5.0), _OUTER_SQUARE, [_HOLE_SQUARE]) is False
+
+
+def test_polygon_contains_point_outside_outer_is_not_contained() -> None:
+    assert polygon_contains((20.0, 20.0), _OUTER_SQUARE, [_HOLE_SQUARE]) is False
+
+
+def test_polygon_contains_with_no_holes_matches_point_in_polygon() -> None:
+    assert polygon_contains((5.0, 5.0), _OUTER_SQUARE, []) is True
+
+
+# --- signed_side_of_polyline (osm-landcover-optimization, Design D5) -------
+
+
+def test_signed_side_of_polyline_opposite_sides_have_opposite_signs() -> None:
+    line = [(0.0, 0.0), (10.0, 0.0)]
+    above = signed_side_of_polyline((5.0, 5.0), line)
+    below = signed_side_of_polyline((5.0, -5.0), line)
+    assert above > 0
+    assert below < 0
+    assert above == pytest.approx(-below)
+
+
+def test_signed_side_of_polyline_convex_shared_vertex_pseudo_normal() -> None:
+    # A left turn at (10, 0): east then north. The closest point to `p` is
+    # the shared vertex itself (tied distance to both adjacent segments),
+    # so the angle-weighted pseudo-normal, not either segment's own normal
+    # alone, must decide the sign.
+    points = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
+    side = signed_side_of_polyline((12.0, -2.0), points)
+    assert side == pytest.approx(-2.0 * (2**0.5))
+
+
+def test_signed_side_of_polyline_concave_shared_vertex_pseudo_normal() -> None:
+    # The mirrored, opposite-turning-direction case: a right turn at
+    # (10, 0). Same tied-distance-to-vertex setup, opposite sign.
+    points = [(0.0, 0.0), (10.0, 0.0), (10.0, -10.0)]
+    side = signed_side_of_polyline((12.0, 2.0), points)
+    assert side == pytest.approx(2.0 * (2**0.5))
+
+
+def test_signed_side_of_polyline_raises_for_fewer_than_2_points() -> None:
+    with pytest.raises(ValueError):
+        signed_side_of_polyline((0.0, 0.0), [(1.0, 1.0)])
+
+
+def test_signed_side_of_polyline_coastline_control_point() -> None:
+    """D5's correctness gate: a real-geography, north-to-south Mediterranean
+    coastline pushed through the real `wgs84_to_dcs` transform, not a
+    hand-derived sign claim -- this is what actually proves the DCS
+    x-north/z-east axis flip lands the "sea is to the west" reading
+    correctly, rather than trusting the derivation on paper."""
+    theatre = "Syria"
+    coastline_lonlat = [(35.75, 35.60), (35.75, 35.45)]  # (lon, lat), north to south
+    coastline_dcs = [wgs84_to_dcs(theatre, lat, lon) for lon, lat in coastline_lonlat]
+
+    sea_point = wgs84_to_dcs(theatre, 35.52, 35.70)  # west of the coastline
+    land_point = wgs84_to_dcs(theatre, 35.52, 35.80)  # east of the coastline
+
+    sea_side = signed_side_of_polyline(sea_point, coastline_dcs)
+    land_side = signed_side_of_polyline(land_point, coastline_dcs)
+
+    # D1: the point is to the geographic left (land) when cross_dcs < 0.
+    assert land_side < 0
+    assert sea_side > 0
