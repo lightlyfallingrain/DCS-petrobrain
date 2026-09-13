@@ -260,8 +260,8 @@ def nearest_feature(
 
     `provenance_geometry`, if given, restricts candidates to features whose
     `provenance["geometry"]` equals it -- e.g. `query/describe.py` uses this
-    to answer `nearest_road` (DCS-only) and `nearest_road_osm` (OSM-only)
-    separately even though both share `kind == "road"`.
+    to answer `nearest_road` restricted to DCS-only candidates, since
+    `kind == "road"` features can in principle carry other provenance values.
     """
     radii = [r for r in _EXPANDING_RADII_M if r <= max_radius_m]
     if not radii or radii[-1] < max_radius_m:

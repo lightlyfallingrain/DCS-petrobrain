@@ -42,8 +42,9 @@ for line continuation. No `PYTHONPATH` is needed; the `tools/` scripts add `src`
 
 **Result:** one file, `syria-theatre.osm.pbf`: OpenStreetMap data for the seven countries the
 Syria theatre touches, cut down to the theatre's area and merged. Job (b) reads it via
-`--osm-pbf`. It adds settlement *outlines* (DCS only gives centre points) plus extra roads, water
-and named places. The world model still builds without it; you just lose that layer.
+`--osm-pbf`. It adds settlement *outlines* (DCS only gives centre points) plus water, landcover,
+coastline and named places -- **not roads**: DCS's own roadnet (`--routes`) is the sole road
+source (see §3.5). The world model still builds without it; you just lose that layer.
 
 Pick a working directory for the raw OSM files (e.g. `/mnt/f/dcs-world-model/syria/raw/osm`)
 and run everything below from there.

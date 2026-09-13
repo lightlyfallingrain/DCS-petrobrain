@@ -54,6 +54,26 @@ not evidence they are noise the way a tiny mapped `landuse=grass` sliver is.
 `SIMPLIFY_TOLERANCE_M` (30 m) applies to every ring (outer and kept holes)
 and to every line -- see `geometry.simplify_ring`/`simplify_polyline`.
 
+**Independent per-ring simplification can strand a hole outside its outer
+ring (review finding, osm-landcover-optimization).** `simplify_ring` is
+called once for the outer ring and once independently per kept hole;
+Douglas-Peucker only ever removes vertices (never moves or adds one), so
+each simplified ring stays close to *its own* original line, but nothing
+constrains the relationship between two independently-simplified rings
+afterward -- a hole whose boundary runs close to the outer ring can, after
+simplification, end up partly outside it. `_ingest_ring` checks this after
+simplifying: every simplified hole vertex against the simplified outer
+ring, via `geometry.point_in_polygon`. A hole that stays contained is kept
+as simplified. One that doesn't falls back to a *second* check -- the
+hole's unsimplified geometry against the outer ring's unsimplified
+geometry (not the simplified outer: since a simplified ring's vertices are
+always a subset of its unsimplified ring's, re-checking that same subset
+against the same simplified outer could never newly pass) -- and is kept
+unsimplified if that succeeds, or dropped entirely if it doesn't. Either
+non-simplified outcome is a counted `OsmIngestStats` field
+(`holes_kept_via_unsimplified_fallback` / `holes_dropped_not_contained_after_simplify`),
+per this module's own "never a silent drop" convention below.
+
 A way/area whose tags match no classification rule, or whose geometry
 degenerates below the minimum vertex count (before ever reaching the store)
 at any stage, is always a counted skip on `OsmIngestStats`, never a silent
@@ -67,6 +87,7 @@ from coordinates import wgs84_to_dcs
 from geometry import (
     Point,
     distance_point_point,
+    point_in_polygon,
     ring_area_m2,
     simplify_polyline,
     simplify_ring,
@@ -96,7 +117,7 @@ SIMPLIFY_TOLERANCE_M = 30.0
 # byte-for-byte unchanged. A change to `OsmIngestStats`' fields also
 # requires a bump, because the cache stores it (`osm_cache.writer.
 # finalize_cache`/`osm_cache.reader.load_cached_stats`).
-CLASSIFIER_VERSION = 2
+CLASSIFIER_VERSION = 3
 
 #: `place=*` values a *node* classifies as a named settlement point. Other
 #: `place` values (`hamlet`, `isolated_dwelling`, `suburb`, `neighbourhood`,
@@ -178,6 +199,8 @@ class OsmIngestStats:
     holes_kept: int = 0
     holes_dropped_below_min_area: int = 0
     holes_dropped_degenerate_after_simplify: int = 0
+    holes_kept_via_unsimplified_fallback: int = 0
+    holes_dropped_not_contained_after_simplify: int = 0
     vertices_before_simplify: int = 0
     vertices_after_simplify: int = 0
 
@@ -426,6 +449,22 @@ def _ingest_line(
     )
 
 
+def _ring_vertices_contained(ring: list[Point], outer: list[Point]) -> bool:
+    """`True` iff every vertex of the closed ring `ring` lies inside (or on
+    the boundary of) the closed ring `outer`, per `geometry.point_in_polygon`.
+
+    A cheap, vertex-only approximation of full ring containment -- it does
+    not detect an edge crossing `outer`'s boundary between two vertices
+    that are each individually inside -- but sufficient to catch the
+    concrete failure mode the module docstring's "Independent per-ring
+    simplification" note describes, at negligible cost given hole vertex
+    counts stay small after simplification (and the unsimplified fallback
+    ring is only ever this expensive for the rare hole that fails the
+    first check)."""
+    vertices = ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else ring
+    return all(point_in_polygon(v, outer) for v in vertices)
+
+
 def _ingest_ring(
     ring: OsmRing,
     kind: str,
@@ -487,8 +526,31 @@ def _ingest_ring(
         if simplified_hole is None:
             stats.holes_dropped_degenerate_after_simplify += 1
             continue
-        simplified_holes.append(simplified_hole)
-        stats.holes_kept += 1
+        if _ring_vertices_contained(simplified_hole, simplified_outer):
+            simplified_holes.append(simplified_hole)
+            stats.holes_kept += 1
+            continue
+        # Independent simplification of the outer ring and this hole let
+        # the hole's boundary drift outside the outer ring (module
+        # docstring's "Independent per-ring simplification" note). Since
+        # `simplify_ring` only ever drops vertices (never moves or adds
+        # one), `simplified_hole`'s vertices are a subset of `hole`'s --
+        # re-checking that same subset against `simplified_outer` can
+        # never newly pass once it has failed, so the fallback check is
+        # against the *unsimplified* outer instead: does the hole, at full
+        # resolution, still sit inside the outer ring at full resolution
+        # (i.e. was this genuinely a valid hole before either ring was
+        # simplified)? If so, keep the unsimplified hole paired with the
+        # simplified outer -- still more accurate than dropping it, even
+        # though the two rings are no longer simplified to the same
+        # degree. Otherwise drop the hole. Either way, counted -- never a
+        # silent drop.
+        if _ring_vertices_contained(hole, outer):
+            simplified_holes.append(hole)
+            stats.holes_kept += 1
+            stats.holes_kept_via_unsimplified_fallback += 1
+        else:
+            stats.holes_dropped_not_contained_after_simplify += 1
 
     stats.vertices_after_simplify += len(simplified_outer) + sum(
         len(h) for h in simplified_holes
