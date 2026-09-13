@@ -38,6 +38,23 @@ if printf '%s\n' "$STAGED" | grep -q '^aircraft-layer/'; then
     run "aircraft-layer pytest" pytest aircraft-layer/tests -q
 fi
 
+# Lua syntax (parse-only, Lua 5.1 = the version DCS embeds) for staged aircraft-layer Lua files.
+STAGED_LUA=$(printf '%s\n' "$STAGED" | grep -E '^aircraft-layer/.*\.lua$' || true)
+if [ -n "$STAGED_LUA" ]; then
+    if command -v luac5.1 >/dev/null 2>&1; then
+        while IFS= read -r f; do
+            [ -f "$f" ] && run "aircraft-layer luac5.1 $f" luac5.1 -p "$f"
+        done <<< "$STAGED_LUA"
+    else
+        FAIL=1
+        OUT="$OUT
+
+## aircraft-layer Lua syntax — FAIL
+luac5.1 not installed; needed to syntax-check staged DCS Lua before commit. Install Lua 5.1
+(WSL/Debian: sudo apt install lua5.1). Files: $STAGED_LUA"
+    fi
+fi
+
 if printf '%s\n' "$STAGED" | grep -q '^body-layer/'; then
     run "body-layer ruff format" ruff format --check body-layer/src body-layer/tests
     run "body-layer ruff check" ruff check body-layer/src body-layer/tests
