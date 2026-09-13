@@ -52,12 +52,13 @@ import time
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from build.ingest_beacons import BeaconIngestStats, ingest_beacons
 from build.ingest_junctions import JunctionIngestStats, ingest_junctions
 from build.ingest_osm import (
+    CLASSIFIER_VERSION,
     OsmIngestStats,
     ingest_osm,
     ingest_osm_nodes_batch,
@@ -83,6 +84,16 @@ from dcs_data.towns import parse_towns_lua
 from elevation.dem import SrtmTile
 from osm.features import OsmNode, OsmWay, load_features
 from osm.pbf import stream_features as stream_features_from_pbf
+from osm_cache.hashing import sha256_file
+from osm_cache.models import OsmCacheMeta, cache_meta_matches
+from osm_cache.paths import osm_cache_store_path, osm_cache_tmp_path
+from osm_cache.reader import iter_cached_features, load_cache_meta, load_cached_stats
+from osm_cache.schema import OSM_CACHE_SCHEMA_VERSION
+from osm_cache.writer import (
+    finalize_cache,
+    insert_cached_features,
+    open_osm_cache_for_populate,
+)
 from probe_store.models import ChunkStatus
 from probe_store.paths import probe_store_path
 from probe_store.reader import load_chunk_elevation_window
@@ -123,6 +134,13 @@ _PROBE_GRID_SPACING_M = 500.0
 # `world-model/docs/M7_RUN_INSTRUCTIONS.md`'s Stage 2 section.
 DEFAULT_SRTM_GRID_SPACING_M = 1000.0
 _TOTAL_STAGES = 8
+
+# How many `StoredFeature` rows `osm_pbf_path`'s cache-hit fast path reads
+# from `<region>-osm-cache.sqlite` (and re-inserts via `store.writer.
+# insert_features`) per batch -- deliberately the same order of magnitude as
+# `osm.pbf._INGEST_BATCH_ELEMENTS`, so a cache-hit build commits to the base
+# store in roughly the same number of transactions a cache-miss build does.
+_OSM_CACHE_READ_BATCH_SIZE = 50_000
 
 logger = logging.getLogger(__name__)
 
@@ -318,57 +336,142 @@ def build_region(
                 ),
             )
             with _stage("OSM overlay (.osm.pbf)", 3):
-                # Streams the file in bounded batches rather than parsing it
-                # into one whole-file `OsmFeatureSet` first -- at
-                # `syria-full` scale (~8.6M ways kept) that reproduced a
-                # memory blowup severe enough to stall and require killing
-                # the run; see `plans/osm-streaming-ingest/plan.md`. Each
-                # batch's features are classified and committed immediately
-                # (a separate SQLite transaction per batch, not one atomic
-                # transaction for the whole stage) into one running
-                # `OsmIngestStats` shared by every batch. Safe because
-                # `open_for_build` always deletes-and-recreates `out_path`
-                # from scratch, so a crash mid-stage never leaves stale
-                # partial data mistaken for a complete build -- the next
-                # build overwrites the file entirely rather than resuming it.
-                osm_stats = OsmIngestStats()
-
-                def _flush_nodes(nodes: list[OsmNode]) -> None:
-                    node_features = ingest_osm_nodes_batch(
-                        nodes,
-                        region.theatre,
-                        region.centre_x,
-                        region.centre_z,
-                        region.half_extent_x_m,
-                        region.half_extent_z_m,
-                        osm_source_id,
-                        osm_stats,
-                    )
-                    insert_features(conn, node_features)
-                    for f in node_features:
-                        report.feature_counts[f.kind] += 1
-
-                def _flush_ways(ways: list[OsmWay]) -> None:
-                    way_features = ingest_osm_ways_batch(
-                        ways,
-                        region.theatre,
-                        region.centre_x,
-                        region.centre_z,
-                        region.half_extent_x_m,
-                        region.half_extent_z_m,
-                        osm_source_id,
-                        osm_stats,
-                    )
-                    insert_features(conn, way_features)
-                    for f in way_features:
-                        report.feature_counts[f.kind] += 1
-
-                relations_skipped, ways_skipped_unresolved_nodes = (
-                    stream_features_from_pbf(osm_pbf_path, _flush_nodes, _flush_ways)
+                # M-osm-classified-cache: before parsing anything, check
+                # whether a valid classified-feature cache already exists
+                # for this exact `.osm.pbf` (by content hash, not path/mtime)
+                # + classifier rules + cache schema + region bbox. On a hit,
+                # skip the ~25-30+ minute pyosmium-parse-plus-`_classify_way`
+                # pass entirely and copy pre-classified rows straight into
+                # the fresh base store instead. See
+                # `plans/osm-classified-cache/plan.md`.
+                cache_path = osm_cache_store_path(out_path)
+                cached_meta = load_cache_meta(cache_path)
+                expected_meta = OsmCacheMeta(
+                    pbf_sha256=sha256_file(osm_pbf_path),
+                    pbf_size_bytes=osm_pbf_path.stat().st_size,
+                    classifier_version=CLASSIFIER_VERSION,
+                    cache_schema_version=OSM_CACHE_SCHEMA_VERSION,
+                    region_name=region.name,
+                    centre_x=region.centre_x,
+                    centre_z=region.centre_z,
+                    half_extent_x_m=region.half_extent_x_m,
+                    half_extent_z_m=region.half_extent_z_m,
+                    built_at=built_at,
                 )
-                osm_stats.relations_skipped = relations_skipped
-                osm_stats.ways_skipped_unresolved_nodes = ways_skipped_unresolved_nodes
-                report.osm_stats = osm_stats
+
+                if cached_meta is not None and cache_meta_matches(
+                    cached_meta, expected_meta
+                ):
+                    logger.info(
+                        "osm_cache: %s matches current .osm.pbf/classifier/"
+                        "region -- serving OSM overlay from cache, skipping "
+                        "the parse",
+                        cache_path,
+                    )
+                    cache_conn = sqlite3.connect(f"file:{cache_path}?mode=ro", uri=True)
+                    try:
+                        osm_stats = load_cached_stats(cache_conn)
+                        for batch in iter_cached_features(
+                            cache_conn, _OSM_CACHE_READ_BATCH_SIZE
+                        ):
+                            retagged = [
+                                replace(f, source_id=osm_source_id) for f in batch
+                            ]
+                            insert_features(conn, retagged)
+                            for f in retagged:
+                                report.feature_counts[f.kind] += 1
+                    finally:
+                        cache_conn.close()
+                    report.osm_stats = osm_stats
+                else:
+                    # Cache miss (absent, or any invalidation-key field
+                    # mismatched) -- streams the file in bounded batches
+                    # rather than parsing it into one whole-file
+                    # `OsmFeatureSet` first -- at `syria-full` scale (~8.6M
+                    # ways kept) that reproduced a memory blowup severe
+                    # enough to stall and require killing the run; see
+                    # `plans/osm-streaming-ingest/plan.md`. Each batch's
+                    # features are classified and committed immediately (a
+                    # separate SQLite transaction per batch, not one atomic
+                    # transaction for the whole stage) into one running
+                    # `OsmIngestStats` shared by every batch. Safe because
+                    # `open_for_build` always deletes-and-recreates
+                    # `out_path` from scratch, so a crash mid-stage never
+                    # leaves stale partial data mistaken for a complete
+                    # build -- the next build overwrites the file entirely
+                    # rather than resuming it.
+                    #
+                    # Every flushed batch is also written to the OSM cache
+                    # under population at `tmp_path` -- one extra
+                    # `insert_cached_features` call per batch, riding along
+                    # on the one required pass over the file rather than a
+                    # second pass, so a cache-miss build's cost is
+                    # unchanged except for this write and the `sha256_file`
+                    # read above.
+                    osm_stats = OsmIngestStats()
+                    tmp_path = osm_cache_tmp_path(out_path)
+                    cache_populate_conn = open_osm_cache_for_populate(tmp_path)
+
+                    def _flush_nodes(nodes: list[OsmNode]) -> None:
+                        node_features = ingest_osm_nodes_batch(
+                            nodes,
+                            region.theatre,
+                            region.centre_x,
+                            region.centre_z,
+                            region.half_extent_x_m,
+                            region.half_extent_z_m,
+                            osm_source_id,
+                            osm_stats,
+                        )
+                        insert_features(conn, node_features)
+                        insert_cached_features(cache_populate_conn, node_features)
+                        for f in node_features:
+                            report.feature_counts[f.kind] += 1
+
+                    def _flush_ways(ways: list[OsmWay]) -> None:
+                        way_features = ingest_osm_ways_batch(
+                            ways,
+                            region.theatre,
+                            region.centre_x,
+                            region.centre_z,
+                            region.half_extent_x_m,
+                            region.half_extent_z_m,
+                            osm_source_id,
+                            osm_stats,
+                        )
+                        insert_features(conn, way_features)
+                        insert_cached_features(cache_populate_conn, way_features)
+                        for f in way_features:
+                            report.feature_counts[f.kind] += 1
+
+                    try:
+                        relations_skipped, ways_skipped_unresolved_nodes = (
+                            stream_features_from_pbf(
+                                osm_pbf_path, _flush_nodes, _flush_ways
+                            )
+                        )
+                        osm_stats.relations_skipped = relations_skipped
+                        osm_stats.ways_skipped_unresolved_nodes = (
+                            ways_skipped_unresolved_nodes
+                        )
+                        finalize_cache(
+                            cache_populate_conn,
+                            tmp_path,
+                            cache_path,
+                            expected_meta,
+                            osm_stats,
+                        )
+                    except BaseException:
+                        # `finalize_cache` never ran, so nothing exists yet
+                        # at `cache_path` -- the next build correctly sees
+                        # "no cache". Close the population connection so the
+                        # abandoned `.tmp` file isn't left with an open
+                        # handle; the file itself is disk-usage noise, not a
+                        # correctness hazard (see `osm_cache.writer`'s
+                        # module docstring).
+                        cache_populate_conn.close()
+                        raise
+                    report.osm_stats = osm_stats
         elif osm_cache_path is not None and osm_cache_path.exists():
             osm_source_id = insert_source(
                 conn,

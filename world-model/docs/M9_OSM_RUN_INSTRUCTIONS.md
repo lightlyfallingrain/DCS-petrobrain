@@ -162,6 +162,21 @@ Measure and record:
   test_measure_m7_stage4_perf.py`'s measurement approach) — a real risk this milestone carries
   forward, not a formality.
 
+**OSM classified-feature cache (`plans/osm-classified-cache/plan.md`).** The first build above
+against a given `syria-theatre.osm.pbf` also populates
+`data/world-model/syria-full-osm-cache.sqlite`, a persistent sibling of `syria-full.sqlite` that
+survives the base store's delete-and-recreate rebuild -- a few seconds/minutes on top of the OSM
+stage above, not a second full pass over the file (it rides along on the same
+`stream_features`/`_classify_way` pass). A **subsequent** build against the *same*
+`syria-theatre.osm.pbf` content, the same `build.ingest_osm.CLASSIFIER_VERSION`, and the same
+region bbox hits this cache and finishes the OSM stage in low minutes instead of the ~25-30+
+minutes above -- the log line `osm_cache: ... matches current .osm.pbf/classifier/region --
+serving OSM overlay from cache, skipping the parse` confirms a hit. Re-clipping/re-merging the
+extract, bumping `CLASSIFIER_VERSION`, or changing the region's centre/half-extents invalidates
+the cache automatically (each is part of the cache's invalidation key -- see the plan). To force a
+rebuild deliberately without changing any of those, delete
+`data/world-model/syria-full-osm-cache.sqlite` before rebuilding.
+
 ## 6. Record the result
 
 Write a dated `world-model/research/` note (extract coverage, skip counts, store growth,
