@@ -12,3 +12,5 @@
 - [OSM classified-cache reviewed, approved](project_osm_classified_cache_approved.md) — atomicity except-block relies on canonical path never being written, not active cleanup; verify this reasoning directly, not just that tests pass.
 - [Junctions-streaming-fix reviewed, minor fix](project_junctions_streaming_fix_minor_fix.md) — feature_layer_bbox deviation verified genuine; watch for tracemalloc calls whose traced value is computed but never asserted.
 - [F10-crew-commands reviewed, minor fix](project_f10_crew_commands_minor_fix.md) — reported "109 passed" was wrong; a UDP-order-dependent test failed 4/4 runs when actually run.
+- [OSM-landcover-optimization reviewed, minor fixes](project_osm_landcover_optimization_minor_fixes.md) — missing ROADMAP entry (planned but silently dropped); independent ring/hole simplification has no post-check topology guard.
+- [Bounded magnitude isn't optional severity](feedback_bounded_magnitude_isnt_optional_severity.md) — a small worst-case doesn't downgrade a finding that violates the module's own stated invariant; check invariant violation first, magnitude second.
