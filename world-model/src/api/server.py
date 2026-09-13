@@ -58,6 +58,11 @@ stdlib `dataclasses.asdict()` -- every dataclass involved
 dataclasses as field types, so `asdict()` recurses through all of it
 correctly and the result round-trips through `json.dumps` with no custom
 `to_dict` method needed anywhere in `query/`.
+
+**osm-landcover-optimization**: no code change here -- `PositionDescription`
+gained `nearest_coastline`/`inside_landcover` and lost `nearest_road_osm`
+(Design D6), and `asdict()` picks up both changes automatically, same as
+every earlier field addition to that dataclass.
 """
 
 from __future__ import annotations

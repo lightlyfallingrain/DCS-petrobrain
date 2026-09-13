@@ -5,8 +5,9 @@ Four rules define what "position understanding" means at this stage (see
 
 1. Every geographic claim carries its provenance and its positional
    uncertainty, side by side -- never collapsed into one undocumented fact.
-2. Where DCS and OSM both answer, DCS wins and the disagreement is
-   *reported*, not hidden (`nearest_road` vs `nearest_road_osm`).
+2. Where DCS and OSM overlap, DCS wins; OSM augments facts DCS's own layers
+   do not carry at all (settlement extents, landcover, coastline, water
+   bodies), rather than disputing a DCS-native layer's own answer.
 3. Absence is reported as absence -- a `None` field, never a guess.
 4. No natural language. Structured data only.
 
@@ -86,6 +87,46 @@ plan's "Risks & Unknowns" calls out as the main new risk the two-store
 split introduces. Either check failing is treated identically: `DETACH`
 and fall back to base-only, never propagate the error up to
 `describe_position`'s own caller.
+
+**osm-landcover-optimization status (Design D6)**: `nearest_road_osm` is
+**removed** -- it had zero consumers, and an always-`None` field would read
+under rule 3 as "no OSM road nearby" rather than the truth, "this layer does
+not exist by design" (OSM roads are dropped from ingest entirely; see
+`build.ingest_osm`'s module docstring). `nearest_settlement`/`nearest_water`
+are unchanged fields and queries -- they now only ever answer from the new
+classifier's narrower `settlement`/`water` kinds (built-up/place polygons;
+river/lake/reservoir geometry), so no code here changed, only what the
+underlying rows mean. `inside_settlement`'s *query* is unchanged
+(`store.reader.containing_polygons`, holes honoured as before) but it now
+picks among multiple containing polygons with an explicit tie-break
+(`_preferred_settlement`): prefer a named polygon, then the smallest
+`area_m2` -- e.g. a small named village nested inside a larger unnamed
+built-up sprawl polygon answers with the village. `SettlementInfo`/
+`WaterInfo`/`NamedPlaceInfo` gain a `subtype` field carrying the narrower
+classification through (`built_up`/`city`/`town`/`village`;
+`river`/`lake`/`reservoir`/`river_area`; `peak`/`dam`/a place value/`None`
+for DCS-native towns). Two new fields:
+
+- `nearest_coastline`: the nearest `kind="coastline"` line (same 30 km
+  default radius every other `nearest_feature` field uses), plus which side
+  of it `(x, z)` falls on (`"sea"` or `"land"`) via
+  `geometry.signed_side_of_polyline` -- see that function's docstring and
+  Design D5 for the DCS axis-flip sign convention. **Unreliable within
+  `position_uncertainty_m` of the line** -- callers should hedge near the
+  coast, not treat `side` as exact there (Design D5's coastline risk note).
+- `inside_landcover`: the smallest-area polygon (`inner_rings` holes
+  honoured, same as `inside_settlement`) among `landcover` and `settlement`
+  rows that carry a `landcover_class` tag, containing `(x, z)`. **`None`
+  means "no mapped landcover (open ground or simply unmapped)", never
+  "confirmed open ground" and never "this layer does not exist"** -- the
+  same M6 ridge/valley-style honesty note applies here: a store with real
+  `landcover`/`settlement` rows built and still answering `None` at some
+  position is a real, meaningful answer (nothing OSM mapped there), not
+  missing data.
+
+`query.search.PLACE_KINDS` is untouched -- peaks and dams are `named_place`
+rows like any DCS town, so `find_place_by_name` already finds them with no
+code change.
 """
 
 import sqlite3
@@ -93,7 +134,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from coordinates import dcs_to_wgs84
-from geometry import distance_point_point
+from geometry import distance_point_point, signed_side_of_polyline
 from probe_store.reader import chunk_status as probe_chunk_status
 from probe_store.reader import grid_spacing_m as probe_grid_spacing_m
 from probe_store.reader import sample_probe_grid
@@ -158,8 +199,14 @@ class RoadInfo:
 
 @dataclass(frozen=True)
 class SettlementInfo:
+    """`subtype` (osm-landcover-optimization) is `"built_up"` for an
+    unnamed built-up `landuse` polygon, or `"city"`/`"town"`/`"village"` for
+    a named place-area polygon -- see `build.ingest_osm`'s D2 "Areas" rules
+    2-3."""
+
     name: str | None
     distance_m: float
+    subtype: str | None
     provenance: str
     confidence: str
     position_uncertainty_m: float
@@ -167,8 +214,13 @@ class SettlementInfo:
 
 @dataclass(frozen=True)
 class WaterInfo:
+    """`subtype` (osm-landcover-optimization) is `"river"` (a line) or
+    `"lake"`/`"reservoir"`/`"river_area"` (a polygon) -- see `build.
+    ingest_osm`'s D2 "Areas" rule 1 and "Lines" section."""
+
     name: str | None
     distance_m: float
+    subtype: str | None
     provenance: str
     confidence: str
     position_uncertainty_m: float
@@ -176,9 +228,44 @@ class WaterInfo:
 
 @dataclass(frozen=True)
 class NamedPlaceInfo:
+    """`subtype` (osm-landcover-optimization) is `"peak"`, `"dam"`, a
+    `place=*` value (`city`/`town`/`village`/...), or `None` for a
+    DCS-native `towns.lua` entry (which carries no subtype at all)."""
+
     name: str
     distance_m: float
+    subtype: str | None
     provenance: str
+    position_uncertainty_m: float
+
+
+@dataclass(frozen=True)
+class CoastlineInfo:
+    """The nearest coastline line's structured facts (osm-landcover-
+    optimization, Design D6). `side` is `"sea"` or `"land"` -- see the
+    module docstring's status note and `geometry.signed_side_of_polyline`
+    for the sign convention; unreliable within `position_uncertainty_m` of
+    the line itself."""
+
+    distance_m: float
+    side: str
+    provenance: str
+    confidence: str
+    position_uncertainty_m: float
+
+
+@dataclass(frozen=True)
+class LandcoverInfo:
+    """The smallest-area `landcover`/built-up-`settlement` polygon
+    containing `(x, z)` (osm-landcover-optimization, Design D6). `None` on
+    `PositionDescription.inside_landcover` means "no mapped landcover" --
+    see the module docstring's status note before treating that as
+    "confirmed open ground" or "layer absent"."""
+
+    landcover_class: str
+    name: str | None
+    provenance: str
+    confidence: str
     position_uncertainty_m: float
 
 
@@ -266,10 +353,11 @@ class PositionDescription:
     elevation: ElevationInfo
     surface_type: SurfaceTypeInfo
     nearest_road: RoadInfo | None
-    nearest_road_osm: RoadInfo | None
     nearest_settlement: SettlementInfo | None
     inside_settlement: SettlementInfo | None
     nearest_water: WaterInfo | None
+    nearest_coastline: CoastlineInfo | None
+    inside_landcover: LandcoverInfo | None
     nearby_ridges: TerrainLineInfo | None
     nearby_valleys: TerrainLineInfo | None
     nearest_junction: JunctionInfo | None
@@ -309,9 +397,24 @@ def _settlement_info(feature: StoredFeature, distance: float) -> SettlementInfo:
     return SettlementInfo(
         name=feature.name,
         distance_m=distance,
+        subtype=feature.subtype,
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+    )
+
+
+def _preferred_settlement(candidates: list[StoredFeature]) -> StoredFeature | None:
+    """`inside_settlement`'s tie-break rule (Design D6): among every
+    `settlement` polygon containing the point, prefer a named one, then the
+    smallest `area_m2` -- e.g. a small named village polygon nested inside a
+    larger unnamed built-up sprawl polygon should answer with the village,
+    not the sprawl."""
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda f: (f.name is None, f.tags.get("area_m2", float("inf"))),
     )
 
 
@@ -319,9 +422,42 @@ def _water_info(feature: StoredFeature, distance: float) -> WaterInfo:
     return WaterInfo(
         name=feature.name,
         distance_m=distance,
+        subtype=feature.subtype,
         provenance=_provenance_str(feature),
         confidence=_confidence_str(feature),
         position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+    )
+
+
+def _coastline_info(
+    match: tuple[StoredFeature, float] | None, x: float, z: float
+) -> CoastlineInfo | None:
+    if match is None:
+        return None
+    feature, distance = match
+    side_value = signed_side_of_polyline((x, z), feature.geometry)
+    # D5: the point is to the geographic left (land) when cross_dcs < 0.
+    side = "land" if side_value < 0 else "sea"
+    return CoastlineInfo(
+        distance_m=distance,
+        side=side,
+        provenance=_provenance_str(feature),
+        confidence=_confidence_str(feature),
+        position_uncertainty_m=feature.position_uncertainty_m or 0.0,
+    )
+
+
+def _landcover_info(candidates: list[StoredFeature]) -> LandcoverInfo | None:
+    mapped = [f for f in candidates if f.tags.get("landcover_class") is not None]
+    if not mapped:
+        return None
+    smallest = min(mapped, key=lambda f: f.tags.get("area_m2", float("inf")))
+    return LandcoverInfo(
+        landcover_class=smallest.tags["landcover_class"],
+        name=smallest.name,
+        provenance=_provenance_str(smallest),
+        confidence=_confidence_str(smallest),
+        position_uncertainty_m=smallest.position_uncertainty_m or 0.0,
     )
 
 
@@ -488,9 +624,6 @@ def describe_position(
     nearest_road = _road_info(
         nearest_feature(conn, ["road"], x, z, provenance_geometry="dcs")
     )
-    nearest_road_osm = _road_info(
-        nearest_feature(conn, ["road"], x, z, provenance_geometry="osm")
-    )
 
     settlement_match = nearest_feature(conn, ["settlement"], x, z)
     nearest_settlement = (
@@ -499,15 +632,27 @@ def describe_position(
         else None
     )
 
-    inside_matches = containing_polygons(conn, ["settlement"], x, z)
+    inside_settlement_matches = containing_polygons(conn, ["settlement"], x, z)
+    preferred_settlement = _preferred_settlement(inside_settlement_matches)
     inside_settlement = (
-        _settlement_info(inside_matches[0], 0.0) if inside_matches else None
+        _settlement_info(preferred_settlement, 0.0)
+        if preferred_settlement is not None
+        else None
     )
 
     water_match = nearest_feature(conn, ["water"], x, z)
     nearest_water = (
         _water_info(water_match[0], water_match[1]) if water_match is not None else None
     )
+
+    nearest_coastline = _coastline_info(
+        nearest_feature(conn, ["coastline"], x, z), x, z
+    )
+
+    inside_landcover_matches = containing_polygons(
+        conn, ["landcover", "settlement"], x, z
+    )
+    inside_landcover = _landcover_info(inside_landcover_matches)
 
     nearby_ridges = _terrain_line_info(nearest_feature(conn, ["ridge"], x, z))
     nearby_valleys = _terrain_line_info(nearest_feature(conn, ["valley"], x, z))
@@ -529,6 +674,7 @@ def describe_position(
             NamedPlaceInfo(
                 name=feature.name or "",
                 distance_m=_point_distance(x, z, feature),
+                subtype=feature.subtype,
                 provenance=_provenance_str(feature),
                 position_uncertainty_m=feature.position_uncertainty_m or 0.0,
             )
@@ -584,10 +730,11 @@ def describe_position(
         elevation=elevation,
         surface_type=surface_type,
         nearest_road=nearest_road,
-        nearest_road_osm=nearest_road_osm,
         nearest_settlement=nearest_settlement,
         inside_settlement=inside_settlement,
         nearest_water=nearest_water,
+        nearest_coastline=nearest_coastline,
+        inside_landcover=inside_landcover,
         nearby_ridges=nearby_ridges,
         nearby_valleys=nearby_valleys,
         nearest_junction=nearest_junction,

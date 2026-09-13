@@ -9,6 +9,8 @@ import random
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from geometry import distance_point_point, distance_point_polyline, point_in_polygon
 from store.models import ElevationGrid, StoredFeature, SurfaceGrid
 from store.reader import (
@@ -218,6 +220,72 @@ def test_containing_polygons_finds_point_inside_and_not_outside(tmp_path: Path) 
 
         assert len(inside) == 1 and inside[0].name == "Square Town"
         assert outside == []
+    finally:
+        conn.close()
+
+
+# --- inner_rings (holes, osm-landcover-optimization) ------------------
+
+
+def _ringed_polygon() -> StoredFeature:
+    """A 100x100 outer square with a 30x30 hole in the middle
+    (30,30)-(60,60) -- the fixture both `containing_polygons` and
+    `nearest_feature`/`_distance_to_feature`'s hole-aware tests below share."""
+    return StoredFeature(
+        kind="landcover",
+        geom_type="Polygon",
+        geometry=[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)],
+        name=None,
+        subtype="forest",
+        tags={
+            "area_m2": 9100.0,
+            "inner_rings": [[[30.0, 30.0], [60.0, 30.0], [60.0, 60.0], [30.0, 60.0]]],
+        },
+        source_id=None,
+        source_ref=None,
+        provenance={"geometry": "osm"},
+        confidence={"geometry": "medium"},
+        position_uncertainty_m=1300.0,
+    )
+
+
+def test_containing_polygons_excludes_a_point_inside_a_hole(tmp_path: Path) -> None:
+    conn = _build_synthetic_store(tmp_path, [_ringed_polygon()])
+    try:
+        outside_hole = containing_polygons(conn, ["landcover"], 10.0, 10.0)
+        inside_hole = containing_polygons(conn, ["landcover"], 45.0, 45.0)
+
+        assert len(outside_hole) == 1
+        assert inside_hole == []
+    finally:
+        conn.close()
+
+
+def test_nearest_feature_reports_zero_distance_outside_the_hole(
+    tmp_path: Path,
+) -> None:
+    conn = _build_synthetic_store(tmp_path, [_ringed_polygon()])
+    try:
+        match = nearest_feature(conn, ["landcover"], 10.0, 10.0)
+        assert match is not None
+        _, distance = match
+        assert distance == 0.0
+    finally:
+        conn.close()
+
+
+def test_nearest_feature_measures_distance_to_the_hole_ring_when_inside_it(
+    tmp_path: Path,
+) -> None:
+    conn = _build_synthetic_store(tmp_path, [_ringed_polygon()])
+    try:
+        # Dead centre of the hole -- nearest hole edge is 15m away in any
+        # direction; must not report 0.0 (that would mean "inside the
+        # polygon"), and must not report distance to the *outer* ring.
+        match = nearest_feature(conn, ["landcover"], 45.0, 45.0)
+        assert match is not None
+        _, distance = match
+        assert distance == pytest.approx(15.0)
     finally:
         conn.close()
 
