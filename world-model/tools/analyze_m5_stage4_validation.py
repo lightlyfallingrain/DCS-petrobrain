@@ -220,9 +220,8 @@ def _spot_check_table(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 "nearest_road_dcs_m": result.nearest_road.distance_m
                 if result.nearest_road
                 else None,
-                "nearest_road_osm_m": result.nearest_road_osm.distance_m
-                if result.nearest_road_osm
-                else None,
+                # nearest_road_osm removed (osm-landcover-optimization,
+                # Design D6): OSM roads are dropped from ingest entirely.
                 "nearest_settlement": result.nearest_settlement.name
                 if result.nearest_settlement
                 else None,
