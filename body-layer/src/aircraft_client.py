@@ -38,6 +38,14 @@ absent" state. `get_petrovich_wheel_latest` is an ordinary `get_*` read
 `get_petrovich_indication_latest`'s shape exactly, just against
 `list_indication(10)`'s wheel-state feed instead of `list_indication(6)`'s
 classification feed.
+
+`get_f10_commands` (`plans/f10-crew-commands/plan.md`) is this seam's
+first *inbound* read -- `GET /f10_commands/poll` drains the aircraft
+layer's F10-command queue, so unlike every other `get_*` method here, its
+empty state is `[]`, not `None` (the response is always a JSON list, never
+`null`). It still raises `AircraftLayerError` on transport/parse failure,
+the same posture as every other `get_*` -- only the *empty* state differs
+from the `/latest`-style endpoints.
 """
 
 from __future__ import annotations
@@ -146,6 +154,24 @@ class AircraftLayerClient:
         a real behavioral gap the caller needs to know about (see the
         module docstring)."""
         self._post_json("/command/petrovich_search", {"mode": mode})
+
+    def get_f10_commands(self) -> list[dict[str, Any]]:
+        """`GET /f10_commands/poll` -> drains the aircraft layer's F10
+        radio-menu command queue (`aircraft-layer/src/collector/
+        f10_command_receiver.py`, `plans/f10-crew-commands/plan.md`),
+        returning every pending selection as a list of dicts (see
+        `aircraft-layer/src/schema/f10_command.py`'s `F10CommandEvent.
+        to_dict`, i.e. `{"command", "received_wall_clock_s"}`), oldest
+        first. Returns `[]` when nothing is pending -- see the module
+        docstring for why this is `[]`, not `None`, unlike the `get_*`
+        methods above. Raises `AircraftLayerError` on any transport/parse
+        failure, same as every other `get_*` method."""
+        result = self._get_json("/f10_commands/poll")
+        if not isinstance(result, list):
+            raise AircraftLayerError(
+                f"expected a JSON list from /f10_commands/poll, got {type(result).__name__}"
+            )
+        return result
 
     def _get_json(self, path: str) -> Any:
         url = f"{self.base_url}{path}"
