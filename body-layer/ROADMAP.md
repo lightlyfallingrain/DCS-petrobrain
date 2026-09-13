@@ -281,26 +281,24 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   dod-check). Next-milestone impact: none on the BL sequence; it adds a second `CrewConsole` input
   surface that BL-10's SRS transport can follow.
 
-- [ ] **F10 Watch Nearest: reply wording and what "watch" should do.** Live 2026-09-13 it replied
-  "Watching CONTACT_1." — right action, but it breaks the contact-report principle (unit type and
-  where it is, no spoken ids; `body-layer/CLAUDE.md`, `_contact_report_text`). The deeper question
-  is **user decision pending**: `set_attention(..., "watch")` only changes body-layer bookkeeping
-  (more position-projection iterations, "Being watched." in descriptions, situation-report
-  preference); it has no DCS-side and no spoken effect. Decide whether watching should drive real
-  behaviour (e.g. more frequent position callouts for that contact, or cueing DCS Petrovich), or
-  whether the item should leave the menu until it does.
+- [>] **F10 command refinement and specification — deferred until the full pipeline works.**
+  User direction 2026-09-13: "All the commands need refinement and specifications. We first need
+  the full pipeline to work, then refine everything." Keep Watch Nearest / Scan Forward / Cancel
+  Task as they are; only the Watch Nearest reply wording was fixed (below). Open points recorded
+  from the live test, for when refinement starts — not to be picked up before then:
+  - What "watch" should *do*: `set_attention(..., "watch")` only changes body-layer bookkeeping
+    (more position-projection iterations, "Being watched." in descriptions, situation-report
+    preference); no DCS-side and no spoken effect.
+  - A separate "Observation Off" F10 item firing the AI wheel's OBSERV OFF (Scan Forward started DCS
+    Petrovich's scan; Cancel Task didn't stop it). Button not yet identified — BL-6 recorded only
+    3001/3015; toggling `OBSERV.` back on costs ~10 s of gyro alignment. Cancel Task stays its own
+    item.
+  - What Cancel Task cancels once an F10 command creates tasks.
 
-- [ ] **F10 "Observation Off" item (separate from Cancel Task).** Live 2026-09-13: Scan Forward
-  started DCS AI Petrovich's forward scan, and Cancel Task did not stop it — Cancel Task only
-  cancels body-layer's own pending task. User direction: a new, separate F10 item that fires the AI
-  wheel's OBSERV OFF, leaving Cancel Task as its own item. Needs recon first: which AI-wheel
-  button/command turns observation off (BL-6 only recorded 3001 menu-open and 3015 search,
-  `plans/bl6-commands-inspect-adapt/plan.md`). Note BL-6's finding that toggling `OBSERV.` costs
-  ~10 s of gyro alignment when switched back on.
-
-- [ ] **F10 Cancel Task: define what it cancels once F10 creates tasks.** Correct today ("no pending
-  task" — no `--crew-text`/F10 path creates a `PendingIntent` yet). Kept as its own menu item per
-  user direction; revisit its semantics when an F10 command starts creating tasks.
+- [~] **F10 Watch Nearest reply in contact-report format** (`fix/f10-watch-nearest-readback`). Live
+  2026-09-13 it replied "Watching CONTACT_1."; now `"Watching <unit type>, <clock> o'clock, <range>
+  km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
+  spoken id. Typed `watch <id>` readback unchanged.
 
 - [>] **Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:
   the new contact-report format (`belief/speech.py`'s `render_contact_report`) has a

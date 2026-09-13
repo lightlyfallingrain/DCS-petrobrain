@@ -186,6 +186,18 @@ def render_readback(attention_level: Attention, contact_id: str) -> OutgoingSpee
     return OutgoingSpeech(text=text, template="readback")
 
 
+def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
+    """The F10 "Watch Nearest" readback (`plans/f10-crew-commands/plan.md`).
+    Unlike a typed `watch <id>`, the player named no contact, so the readback
+    identifies it the way a contact report does -- `"Watching <unit
+    type>[, <clock> o'clock, <range> km][ <semantic fact>]."` via the shared
+    `_contact_report_text`, no id spoken (see module docstring's "Contact
+    report format" note). `facts` is `belief.tools.describe_contact`'s."""
+    return OutgoingSpeech(
+        text=f"Watching {_contact_report_text(facts)}", template="readback"
+    )
+
+
 #: `class`-level `OP_*` buckets -> a human word, for the contact report's
 #: unit-type field. See module docstring's "Contact report format" note.
 #: Every `OP_*` value `perception.object_model` actually assigns (checked

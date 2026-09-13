@@ -66,10 +66,11 @@ from belief.speech import (
     UrgentCall,
     render_contact_report,
     render_readback,
+    render_watch_nearest_readback,
     route_event,
 )
 from belief.tasks import TaskStore
-from belief.tools import cancel_task, get_contacts, set_attention
+from belief.tools import cancel_task, describe_contact, get_contacts, set_attention
 from belief.utterance import PartialParse, PlayerUtterance, parse_utterance
 
 #: Printed once at session startup (`logger.py`'s `main()`), mirroring
@@ -231,9 +232,12 @@ class CrewConsole:
         if contact_id is None:
             return ["no contact to watch"]
         found = set_attention(self.store, contact_id, "watch", source="player")
-        if not found:
+        result = describe_contact(
+            self.store, contact_id, now_sim, enrichment=self.enrichment
+        )
+        if not found or result is None:
             return [f"no such contact: {contact_id}"]
-        return [render_readback("watch", contact_id).text]
+        return [render_watch_nearest_readback(result["facts"]).text]
 
     def _handle_scan_forward(self) -> list[str]:
         """The bare AI-Wheel trigger (`aircraft_client.
