@@ -174,3 +174,48 @@ for what each one found and fixed.
   (five files, not just `test_enrichment.py`) hit `AttributeError` until patched — a recurrence of
   the "duck-typed fixture, real attribute access" pattern this project's `belief/enrichment.py`
   module docstring itself already calls out for `SettlementInfo`/`WaterInfo`/`TerrainLineInfo`.
+
+### Review round 1 fixes
+
+Addressed 3 of the review's 4 required fixes (the `ROADMAP.md` entry is deliberately left to the
+orchestrator at merge time, per this session's task instructions — not a disagreement with the
+review, just a different owner/timing for that one item).
+
+- **`store/reader.py:263`** — `nearest_feature`'s docstring no longer names the removed
+  `nearest_road_osm` field; reworded to describe only `nearest_road`'s DCS-only
+  `provenance_geometry="dcs"` restriction (confirmed against `query/describe.py:625`, the field's
+  one real caller).
+- **`RUN.md:45`** — §2's intro no longer claims OSM contributes "extra roads"; it now names what
+  OSM actually still contributes (water/landcover/coastline/named places) and points at §3.5 for
+  the DCS-only road story. Re-read §2–§3 end to end; found no other stale statement (§3.3's stage
+  table and §3.4's cache description already didn't mention roads).
+- **Hole/outer-ring topology after independent simplification** (`build/ingest_osm.py`
+  `_ingest_ring`, `geometry/__init__.py`) — added a post-simplification containment check, using
+  Design D3's existing primitives (`geometry.point_in_polygon`, wrapped in a new
+  `_ring_vertices_contained` helper: every hole vertex checked individually against the outer
+  ring). **Design choice not fully spelled out by the review, worth recording**: the *fallback*
+  check (deciding whether to keep the hole's *unsimplified* geometry when the simplified pairing
+  fails) cannot re-check the unsimplified hole against the *simplified* outer ring — proved this by
+  construction before implementing: `simplify_ring` only ever drops vertices (Douglas-Peucker never
+  moves or adds one), so a simplified ring's vertex set is always a literal subset of its
+  unsimplified ring's. Re-checking that subset against the same fixed outer ring can never newly
+  pass once the superset already failed on a shared vertex — so a fallback check against
+  `simplified_outer` would be structurally dead code, always agreeing with the first check. The
+  fallback instead checks the hole's unsimplified geometry against the outer ring's own
+  *unsimplified* geometry (the ground-truth pairing, as OSM's source topology actually shipped it)
+  — this can genuinely differ from the first check's outcome, and is what the two new tests in
+  `tests/test_ingest_osm.py`
+  (`test_hole_kept_unsimplified_when_simplified_hole_leaves_simplified_outer`,
+  `test_hole_dropped_when_neither_simplified_nor_unsimplified_is_contained`) exercise, using a small
+  hand-constructed outer square with a 20m outward bump (within `SIMPLIFY_TOLERANCE_M`, so
+  Douglas-Peucker drops it) and a hole whose vertices sit in the resulting gap between the
+  simplified and unsimplified outer boundary. Two new counted `OsmIngestStats` fields
+  (`holes_kept_via_unsimplified_fallback`, `holes_dropped_not_contained_after_simplify`) make both
+  outcomes visible in `tools/build_world_model.py`'s existing summary print (a bare dataclass
+  `repr()`, so no separate change was needed there) — per the module's own "never a silent drop"
+  convention, now also covering this case in its module docstring. `CLASSIFIER_VERSION` bumped 2 →
+  3 (the `OsmIngestStats` shape changed, and the module docstring's own comment above
+  `CLASSIFIER_VERSION` requires a bump whenever that happens, since `osm_cache` persists the stats
+  dataclass). `tools/validate_osm_landcover.py`'s Stage 6 diagnostic dict (a manually curated subset
+  of `OsmIngestStats` fields, not the two new ones) was deliberately left unchanged — optional, not
+  adjacent to the required fix, and out of scope for this pass.
