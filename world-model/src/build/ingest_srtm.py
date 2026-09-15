@@ -36,11 +36,11 @@ this module.
 """
 
 import logging
-import time
 from dataclasses import dataclass
 
 from coordinates import dcs_to_wgs84
 from elevation.dem import SrtmTile, select_tile
+from progress import ThrottledProgress
 from store.models import ElevationGrid
 
 logger = logging.getLogger(__name__)
@@ -50,11 +50,13 @@ logger = logging.getLogger(__name__)
 # See `store/schema.py`'s version-3 note.
 GRID_PROVENANCE_SRTM = "srtm"
 
-# How often the row loop below logs progress, in rows. A full-theatre grid
-# is on the order of millions of cells (see this module's docstring); without
-# periodic feedback, this stage looks indistinguishable from a hang for
-# however long it actually takes.
-_PROGRESS_LOG_INTERVAL_ROWS = 50
+# How often the row loop below logs progress, in seconds -- migrated from a
+# fixed every-50-rows interval to this project's standard time-based
+# throttle (see `progress.py`): per-row cost is dominated by `pyproj`
+# transforms and tile lookups, roughly constant here, but a count-based
+# interval is still the wrong default to keep reaching for (see
+# `plans/osm-landcover-optimization/progress-logging.md`).
+_PROGRESS_LOG_INTERVAL_S = 30.0
 
 
 @dataclass
@@ -100,20 +102,14 @@ def ingest_srtm_grid(
     sampled = 0
     void_or_uncovered = 0
     tiles_used: set[tuple[float, float]] = set()
-    started_at = time.monotonic()
+    progress = ThrottledProgress(
+        logger, "ingest_srtm", total=n_rows, interval_s=_PROGRESS_LOG_INTERVAL_S
+    )
 
     for row in range(n_rows):
-        if row % _PROGRESS_LOG_INTERVAL_ROWS == 0 and row > 0:
-            elapsed_s = time.monotonic() - started_at
-            logger.info(
-                "ingest_srtm: row %d/%d (%.1f%%, %d sampled, %d void/uncovered, %.1fs elapsed)",
-                row,
-                n_rows,
-                100.0 * row / n_rows,
-                sampled,
-                void_or_uncovered,
-                elapsed_s,
-            )
+        progress.maybe_log(
+            done=row, sampled=sampled, void_or_uncovered=void_or_uncovered
+        )
         x = origin_x + row * spacing_m
         for col in range(n_cols):
             z = origin_z + col * spacing_m
