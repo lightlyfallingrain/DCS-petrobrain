@@ -110,6 +110,7 @@ from probe_store.writer import (
     upsert_chunk_coverage,
     upsert_grid_samples,
 )
+from progress import ThrottledProgress
 from roadnet.junctions import DEFAULT_JUNCTION_MIN_DEGREE, DEFAULT_JUNCTION_TOLERANCE_M
 from store.chunks import CHUNK_SIZE_M
 from store.models import Region, Source, StoredFeature
@@ -164,6 +165,15 @@ _TOTAL_STAGES = 8
 # `osm.pbf._INGEST_BATCH_ELEMENTS`, so a cache-hit build commits to the base
 # store in roughly the same number of transactions a cache-miss build does.
 _OSM_CACHE_READ_BATCH_SIZE = 50_000
+
+# How often the cache-hit read loop and the SRTM tile-loading loop below log
+# progress, in seconds -- this project's standard interval (see
+# `progress.py`). Both loops previously had no progress reporting at all
+# (see `plans/osm-landcover-optimization/progress-logging.md`'s audit): each
+# batch/tile is individually fast (measured, not assumed -- see the plan),
+# but neither loop bounded its own *total* silent duration, which grows
+# with cache/tile-set size.
+_PROGRESS_LOG_INTERVAL_S = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +416,27 @@ def build_region(
                     cache_conn = sqlite3.connect(f"file:{cache_path}?mode=ro", uri=True)
                     try:
                         osm_stats = load_cached_stats(cache_conn)
+                        # `osm_stats`' per-kind counts (recorded by the
+                        # build that originally populated the cache) sum to
+                        # the cache's exact row count, so this total is not
+                        # itself an estimate -- only the *rate* used for the
+                        # ETA is (see `progress.format_progress`'s
+                        # `estimated` flag, not used here since `done`/
+                        # `total` are exact counts).
+                        total_cached_features = (
+                            osm_stats.named_places
+                            + osm_stats.water_features
+                            + osm_stats.coastline_features
+                            + osm_stats.settlement_features
+                            + osm_stats.landcover_features
+                        )
+                        cache_read_progress = ThrottledProgress(
+                            logger,
+                            "osm_cache_read",
+                            total=total_cached_features,
+                            interval_s=_PROGRESS_LOG_INTERVAL_S,
+                        )
+                        inserted = 0
                         for batch in iter_cached_features(
                             cache_conn, _OSM_CACHE_READ_BATCH_SIZE
                         ):
@@ -415,6 +446,8 @@ def build_region(
                             insert_features(conn, retagged)
                             for f in retagged:
                                 report.feature_counts[f.kind] += 1
+                            inserted += len(retagged)
+                            cache_read_progress.maybe_log(done=inserted)
                     finally:
                         cache_conn.close()
                     report.osm_stats = osm_stats
@@ -650,11 +683,27 @@ def build_region(
                         "see build.ingest_srtm module docstring.",
                     ),
                 )
-                tiles = [SrtmTile.from_file(p) for p in existing_srtm_tile_paths]
                 srtm_origin_x, srtm_origin_z, _, srtm_n_rows, srtm_n_cols = (
                     probe_grid_for_region(region, spacing_m=srtm_grid_spacing_m)
                 )
-                with _stage(f"SRTM elevation grid ({len(tiles)} tile(s))", 6):
+                with _stage(
+                    f"SRTM elevation grid ({len(existing_srtm_tile_paths)} tile(s))", 6
+                ):
+                    # Loading the tiles themselves (previously done *before*
+                    # this stage even logged "starting", so a slow disk
+                    # could go silent here before this stage's own progress
+                    # logging ever got a chance to run -- see
+                    # `plans/osm-landcover-optimization/progress-logging.md`).
+                    tile_load_progress = ThrottledProgress(
+                        logger,
+                        "ingest_srtm.load_tiles",
+                        total=len(existing_srtm_tile_paths),
+                        interval_s=_PROGRESS_LOG_INTERVAL_S,
+                    )
+                    tiles = []
+                    for i, p in enumerate(existing_srtm_tile_paths):
+                        tiles.append(SrtmTile.from_file(p))
+                        tile_load_progress.maybe_log(done=i + 1)
                     srtm_grid, srtm_stats = ingest_srtm_grid(
                         tiles,
                         region.theatre,
