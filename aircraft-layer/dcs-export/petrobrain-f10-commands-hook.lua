@@ -165,6 +165,7 @@ missionCommands.addCommand("West", bearing, pbF10Enqueue("scan_bearing_w"))
 missionCommands.addCommand("Northwest", bearing, pbF10Enqueue("scan_bearing_nw"))
 local watch = missionCommands.addSubMenu("Watch", sub)
 missionCommands.addCommand("Nearest", watch, pbF10Enqueue("watch_nearest"))
+missionCommands.addCommand("Nearest Air Defence", watch, pbF10Enqueue("watch_nearest_air_defence"))
 missionCommands.addCommand("Cancel Task", sub, pbF10Enqueue("cancel_task"))
 return "registered"
 ]]

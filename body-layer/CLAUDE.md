@@ -112,8 +112,8 @@ stay mutually exclusive with each other; `--overlay` is valid alongside either.
 
 Add `--f10-commands` alongside `--crew-text` (`plans/f10-crew-commands/plan.md`, vocabulary widened
 by `plans/f10-command-vocabulary/plan.md`) to poll and dispatch player-selected DCS F10 radio-menu
-commands — the 14-token scan/watch/cancel vocabulary (`Scan` -> `Ahead`/`Left`/`Right`/`Full`/eight
-compass `Bearing` items, `Watch` -> `Nearest`, `Cancel Task`) — through `CrewConsole.
+commands — the 15-token scan/watch/cancel vocabulary (`Scan` -> `Ahead`/`Left`/`Right`/`Full`/eight
+compass `Bearing` items, `Watch` -> `Nearest`/`Nearest Air Defence`, `Cancel Task`) — through `CrewConsole.
 handle_f10_command`, the same output funnel typed/spoken text already goes through. Only meaningful
 with `--crew-text`; defaults off, a true no-op when absent, same additive posture as `--overlay`.
 See `aircraft-layer/WORKFLOW.md`'s "Deploy the F10 commands Hook script"
@@ -434,7 +434,7 @@ against a live DCS session as of authorship.
   was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
   `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
   `tasks: TaskStore | None` + `handle_f10_command` (`plans/f10-crew-commands/plan.md`, vocabulary
-  widened to 14 tokens and made non-hollow by `plans/f10-command-vocabulary/plan.md` Stage 6) are
+  widened to 15 tokens and made non-hollow by `plans/f10-command-vocabulary/plan.md` Stage 6) are
   `CrewConsole`'s second, non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
   loop drains player-selected DCS F10 radio-menu tokens (`aircraft_client.get_f10_commands`,
   `GET /f10_commands/poll`) and dispatches each through `handle_f10_command`, the same `_print`

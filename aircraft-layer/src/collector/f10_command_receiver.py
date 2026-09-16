@@ -69,6 +69,7 @@ ALLOWED_COMMANDS: Final[tuple[str, ...]] = (
     "scan_bearing_w",
     "scan_bearing_nw",
     "watch_nearest",
+    "watch_nearest_air_defence",
     "cancel_task",
 )
 

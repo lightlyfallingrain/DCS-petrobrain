@@ -17,6 +17,7 @@ import pytest
 
 from aircraft_client import AircraftLayerError
 from belief import enrichment as enrichment_module
+from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.decay import LOST_THRESHOLD_S
@@ -136,7 +137,12 @@ def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
 
 
 def _observation_with_ownship_x(
-    *, obs_id: str, t_sim: float, classification_raw: str, ownship_x: float
+    *,
+    obs_id: str,
+    t_sim: float,
+    classification_raw: str,
+    ownship_x: float,
+    classification_level: int = 2,
 ) -> Observation:
     """Same shape as `_observation` above, but with a caller-controlled
     `ownship_at_observation.x` -- see `_enrichment_context`'s docstring for
@@ -155,7 +161,7 @@ def _observation_with_ownship_x(
             x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
         ),
         provenance="test_fixture",
-        classification_level=2,
+        classification_level=classification_level,
     )
 
 
@@ -660,3 +666,91 @@ def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel(
 
     assert lines == ["Scanning ahead."]
     assert overlay_client.pushed == ["Scanning ahead."]
+
+
+def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The air-defence item must pick the nearest *matching* contact, not
+    the nearest contact that happens to match -- a closer tank does not
+    shadow a further SAM."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_SAM",
+                t_sim=0.0,
+                classification_raw="Osa 9A33",
+                ownship_x=2000.0,
+            ),
+            _observation_with_ownship_x(
+                obs_id="OBS_TANK", t_sim=0.0, classification_raw="T-72", ownship_x=500.0
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    sam = next(c for c in store.contacts if "Osa" in c.classification.value)
+    tank = next(c for c in store.contacts if c.classification.value == "T-72")
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0)
+
+    assert "Osa" in lines[0]
+    assert sam.attention == "watch"
+    # The nearer tank must be untouched -- it was never a candidate.
+    assert tank.attention == "normal"
+
+
+def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_TANK", t_sim=0.0, classification_raw="T-72", ownship_x=500.0
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    # Distinct from the plain "no contact to watch" -- there *is* a contact,
+    # it just isn't air defence, and the crew must hear which.
+    assert console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0) == [
+        "no air defence contact to watch"
+    ]
+
+
+def test_watch_nearest_air_defence_ignores_a_presence_level_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No-omniscience boundary: a contact seen only as "something is there"
+    must never be reported as air defence, even when the underlying object
+    really is a SAM. Petrovich has no basis to make that call yet."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_BLOB",
+                t_sim=0.0,
+                classification_raw=PRESENCE_CLASS,
+                ownship_x=500.0,
+                classification_level=1,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    blob = next(iter(store.contacts))
+    assert blob.classification.level.name.lower() == "presence"
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0) == [
+        "no air defence contact to watch"
+    ]
+    assert blob.attention == "normal"
