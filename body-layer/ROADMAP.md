@@ -20,6 +20,20 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   transport layer" per the BL-4 plan. BL-5's own live sortie exercised `place`/`position`/
   `situation`, not these — unclear whether BL-4's tools have had a live run at all yet.
 
+- [ ] **F10 command vocabulary — the 14-token set and relative-sector re-projection** (merged
+  2026-09-16, `plans/f10-command-vocabulary/`). Live acceptance deferred *by design* rather than
+  by omission: this milestone exists to make the user's next sortie informative, so the sortie
+  itself is its acceptance. Nothing here has run against live DCS. What that sortie must
+  exercise: the new menu tree is navigable (Scan -> Ahead/Left/Right/Full, Scan -> Bearing ->
+  eight compass items, Watch -> Nearest, Cancel Task); relative scans rotate with the nose while
+  Bearing scans do not — including a heading sweep through 0/360 to confirm no wraparound
+  discontinuity; each scan registers a real pending task; **Cancel Task actually cancels
+  something**, which it never could before this milestone; and a failed live trigger still
+  leaves the task registered. Also the milestone's one real calibration gap:
+  `F10_SCAN_RADIUS_M` (3000 m) and `DEFAULT_SCAN_DEADLINE_S` are uncalibrated placeholders and
+  want real numbers from a flight. Full plan in
+  `plans/f10-command-vocabulary/dod-check.md`'s Acceptance Testing Plan.
+
 ## Status
 
 - [x] **BL-0 — Harness and replay.** Body process skeleton, aircraft-layer HTTP client, world-model
