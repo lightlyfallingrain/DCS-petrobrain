@@ -2,8 +2,8 @@
 
 Status: **draft, awaiting user approval — not implemented.** Raised 2026-09-17 from co-pilot-station
 screenshots (`win-mac-sync/from-windows/Screen_260917_0000{55,59,105,125}.jpg`, co-pilot forward /
-left / right / wide; `...{135,138,142,152}.jpg` are the pilot station, out of scope — Petrovich is
-the co-pilot).
+**right** / **left** / wide; `...{135,138,142,152}.jpg` are the pilot station, out of scope —
+Petrovich is the co-pilot).
 
 ## The problem
 
@@ -26,9 +26,9 @@ What the screenshots show, from the co-pilot seat:
 
 - **Forward** (`...55`, `...125`): genuinely good. Wide azimuth, and a steep downward view — the
   nose glazing lets him look well below the horizon.
-- **Left** (`...59`): horizon and mid-distance still visible, but the near ground below is cut off
+- **Right** (`...59`): horizon and mid-distance still visible, but the near ground below is cut off
   by the sill and side console. No steep depression.
-- **Right** (`...105`): more obstructed again — structure fills the near/lower half of the frame,
+- **Left** (`...105`): more obstructed again — structure fills the near/lower half of the frame,
   leaving ground visible only in an upper wedge toward the horizon.
 
 So the missing constraint is **depression as a function of azimuth**: steep looking ahead, shallow
@@ -89,10 +89,16 @@ a mess; they must stay separate predicates that compose.
 
 ## Open questions for the user
 
-1. **Left/right asymmetry.** The right view (`...105`) looks materially more obstructed than the
-   left (`...59`). Model the asymmetry, or keep one symmetric mask for now? Symmetric is simpler
+1. **Left/right asymmetry.** The **left** view (`...105`) looks materially more obstructed than the
+   right (`...59`). Model the asymmetry, or keep one symmetric mask for now? Symmetric is simpler
    and probably adequate at this coarseness; asymmetric is more faithful and costs only a wider
    table.
+
+   Note what asymmetry would mean downstream, since it is not neutral: `scan_left` and
+   `scan_right` would then have genuinely different detection performance, and Petrovich would be
+   measurably worse at finding things to his left. That is either welcome realism or a confusing
+   crew behaviour depending on taste — worth deciding deliberately rather than inheriting it from
+   a table.
 2. **Where the angles come from.** Reading them off these screenshots means inferring from an
    unknown camera FOV and is good to maybe ±10-15°. Acceptable for a first mask given D3, but if
    better evidence is wanted cheaply, a few targeted screenshots at known slew angles — or the
