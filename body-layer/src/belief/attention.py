@@ -9,13 +9,36 @@ future threat-priority lookup (BL-6+), and the plan's Q1 resolves this
 without escalation.
 
 `AttentionArea` is a bearing/range-derived circle (optionally narrowed to
-one of eight cardinal/intercardinal sectors), never a polygon or a
-place-name reference -- `find_place` (turning "the village" into a
-position) is BL-5/BL-6 work this milestone does not build (see the plan's
-"watch_area's place-name gap" risk). `area_contains`'s sector check reads
-`perception.geometry.bearing_deg` from the *area's own center* to the
-candidate position, not from ownship -- an area is a fixed patch of ground,
-its sector should not swing around as ownship moves.
+an angular wedge), never a polygon or a place-name reference -- `find_place`
+(turning "the village" into a position) is BL-5/BL-6 work this milestone
+does not build (see the plan's "watch_area's place-name gap" risk).
+`area_contains`'s wedge check reads `perception.geometry.bearing_deg` from
+the *area's own center* to the candidate position, never from ownship: the
+predicate is pure geometry over absolute values, with no dependency on live
+state.
+
+**Two kinds of area, and the second one moves** (`plans/
+f10-command-vocabulary/plan.md` D1-D3). BL-4's original areas are fixed
+patches of *ground* -- a bearing/range circle, optionally narrowed to one
+of eight cardinal/intercardinal `Sector` wedges, which must not swing
+around as ownship moves. The F10 command vocabulary adds a second kind: an
+ownship-anchored patch of *view*, holding an ownship-relative sector
+(`ahead`/`left`/`right`/`full`, the crew-facing o'clock frame from
+`docs/concept/state-transitions.jpg`) that keeps following the nose through
+a turn, so a standing "watch left" does not freeze to whatever heading was
+held when the player pressed the button.
+
+Both kinds are the same frozen dataclass, and `area_contains` stays a pure
+absolute-geometry predicate for both. The difference lives entirely outside
+this module: an ownship-anchored area additionally carries its
+`relative_sector`, and `logger.py`'s telemetry tick re-projects it -- new
+`center`, new absolute `wedge_deg` -- via `project_relative_area` below,
+before the same tick's contacts are judged against it. That re-projection
+is the *only* thing that makes a relative area track ownship; nothing here
+reads live state. The alternative, giving `area_contains`/
+`effective_attention` an ownship-pose parameter, was rejected in the plan
+(D2): it would churn every one of this module's call sites and make a pure
+geometric predicate depend on live state.
 
 `effective_attention` is the one place a contact's own direct mark and area
 membership are combined into a single value: an explicit `"ignore"` on the
@@ -33,7 +56,7 @@ here would make `contacts.py`'s own import of this module circular.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, Literal
 
 from perception.geometry import GeoPosition, bearing_deg, range_m
@@ -78,6 +101,33 @@ _SECTOR_CENTER_DEG: dict[Sector, float] = {
 #: center exactly tiles the 8 sectors across the full 360 degrees.
 _SECTOR_HALF_WIDTH_DEG: Final[float] = 45.0
 
+#: The crew-facing, ownship-relative sectors from `docs/concept/
+#: state-transitions.jpg` -- the frame a pilot actually speaks in ("scan
+#: left"), as opposed to `Sector`'s compass-absolute one. Unlike `SECTORS`
+#: these deliberately do **not** tile the circle: the spec states "there is
+#: no visibility to rear hemisphere", so `full` spans the forward
+#: hemisphere only and no rear sector is offered.
+RelativeSector = Literal["ahead", "left", "right", "full"]
+
+RELATIVE_SECTORS: Final[tuple[RelativeSector, ...]] = (
+    "ahead",
+    "left",
+    "right",
+    "full",
+)
+
+#: Each relative sector as `(center, half_width)` in **relative bearing
+#: degrees**, 12 o'clock = 0, positive clockwise (so 3 o'clock = +90,
+#: 9 o'clock = -90). Straight from the spec's o'clock bounds: `ahead`
+#: 11-1, `left` 9-11, `right` 1-3, `full` 9-3. One o'clock hour is 30
+#: degrees.
+_RELATIVE_SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = {
+    "ahead": (0.0, 30.0),
+    "left": (-60.0, 30.0),
+    "right": (60.0, 30.0),
+    "full": (0.0, 90.0),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class AttentionArea:
@@ -93,19 +143,92 @@ class AttentionArea:
     source: str
     sector: Sector | None = None
 
+    #: An explicit angular wedge as `(center_bearing, half_width)` in
+    #: **absolute** degrees, taking precedence over `sector` in
+    #: `area_contains`. Exists because the relative sectors are 60/60/60/180
+    #: degree wedges at an arbitrary heading, which no `Sector` literal can
+    #: express (plan D3) -- `sector` keeps its exact original meaning, so no
+    #: BL-4-era caller changes. Set on every re-projection of an
+    #: ownship-anchored area; may also be set directly for a one-off wedge.
+    wedge_deg: tuple[float, float] | None = None
+
+    #: Set iff this is an ownship-anchored area (module docstring's second
+    #: kind). Holds the crew-facing relative sector; `center`/`wedge_deg`
+    #: hold its last *projection* into absolute space, refreshed by
+    #: `project_relative_area` on each telemetry tick. Between ticks the
+    #: projection is stale by one poll interval -- sub-second at the current
+    #: rate, and far below the precision a 60-degree-wide sector implies,
+    #: but it is an approximation, not an exact track.
+    relative_sector: RelativeSector | None = None
+
+
+def _angular_delta_deg(a: float, b: float) -> float:
+    """Smallest absolute angle between two bearings, in degrees (0-180)."""
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def area_wedge_deg(area: AttentionArea) -> tuple[float, float] | None:
+    """`area`'s effective angular wedge as `(center, half_width)` in
+    absolute degrees, or `None` if it has no angular filter at all.
+
+    Precedence (plan D3): an explicit `wedge_deg` wins, then the `sector`
+    literal's fixed 90-degree wedge, then no filter. The explicit form
+    exists for wedges no `Sector` can express -- notably every projection of
+    an ownship-relative sector. An ownship-anchored area that has not been
+    projected yet has `relative_sector` set but no `wedge_deg`, and so
+    matches its full circle until the first tick projects it; that is
+    deliberately permissive rather than empty, since an area that silently
+    matched nothing until a tick arrived would be a confusing failure."""
+    if area.wedge_deg is not None:
+        return area.wedge_deg
+    if area.sector is not None:
+        return _SECTOR_CENTER_DEG[area.sector], _SECTOR_HALF_WIDTH_DEG
+    return None
+
+
+def project_relative_area(
+    area: AttentionArea,
+    ownship_position: GeoPosition,
+    heading_true_deg: float,
+) -> AttentionArea:
+    """Re-anchor an ownship-relative `area` onto ownship's current pose,
+    returning a new frozen `AttentionArea` whose `center` is
+    `ownship_position` and whose `wedge_deg` is `area.relative_sector`
+    rotated by `heading_true_deg` into absolute bearings.
+
+    Returns `area` unchanged when `relative_sector` is `None` -- a fixed
+    patch of ground is never re-anchored (module docstring). Callers may
+    apply this to every area indiscriminately.
+
+    This is the single function that makes a relative area track ownship;
+    see D2 in `plans/f10-command-vocabulary/plan.md` for why the tracking
+    lives here and on `logger.py`'s tick rather than inside
+    `area_contains`."""
+    if area.relative_sector is None:
+        return area
+    relative_center, half_width = _RELATIVE_SECTOR_WEDGE_DEG[area.relative_sector]
+    absolute_center = (heading_true_deg + relative_center) % 360.0
+    return replace(
+        area,
+        center=ownship_position,
+        wedge_deg=(absolute_center, half_width),
+    )
+
 
 def area_contains(area: AttentionArea, position: GeoPosition) -> bool:
     """Whether `position` falls inside `area` -- within `radius_m` of
-    `area.center`, and (if `area.sector` is set) within that sector's
-    90-degree wedge as measured from `area.center`, not from ownship."""
+    `area.center`, and (if `area` has an angular wedge, see
+    `area_wedge_deg`) within that wedge as measured from `area.center`,
+    never from ownship. For an ownship-anchored area, `center`/`wedge_deg`
+    are that area's last projection, so this stays pure absolute geometry
+    for both kinds of area."""
     if range_m(area.center, position) > area.radius_m:
         return False
-    if area.sector is None:
+    wedge = area_wedge_deg(area)
+    if wedge is None:
         return True
-    bearing = bearing_deg(area.center, position)
-    center = _SECTOR_CENTER_DEG[area.sector]
-    delta = abs((bearing - center + 180.0) % 360.0 - 180.0)
-    return delta <= _SECTOR_HALF_WIDTH_DEG
+    center, half_width = wedge
+    return _angular_delta_deg(bearing_deg(area.center, position), center) <= half_width
 
 
 def effective_attention(

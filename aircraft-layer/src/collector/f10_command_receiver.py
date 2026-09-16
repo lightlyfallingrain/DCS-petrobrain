@@ -15,7 +15,7 @@ lifecycle (a blocking receive loop run on a background thread by
 (`ALLOWED_COMMANDS`) before enqueueing.** A malformed or unrecognized
 payload is dropped and logged at debug level, never enqueued -- this keeps
 this loopback socket from becoming a general remote-exec surface even
-though only three fixed strings are ever meaningful downstream
+though only a handful of fixed strings are ever meaningful downstream
 (`belief.crew_console.CrewConsole.handle_f10_command`)."""
 
 from __future__ import annotations
@@ -49,9 +49,26 @@ DEFAULT_PORT = 7794
 #: "Risks & Unknowns" note. Adding a fourth command means adding one
 #: literal here and one `missionCommands.addCommand` call in the Hook
 #: script's registration snippet, nothing else.
+#: The closed token vocabulary, matching the Hook script's static menu tree
+#: one-for-one (`petrobrain-f10-commands-hook.lua`'s `REGISTRATION_CODE`).
+#: `scan_forward` was *replaced* by `scan_ahead` rather than kept as a
+#: synonym (`plans/f10-command-vocabulary/plan.md` D4): nothing persists a
+#: token across a restart, and a hand-maintained allow-list accumulating
+#: dead synonyms is how a vocabulary rots.
 ALLOWED_COMMANDS: Final[tuple[str, ...]] = (
+    "scan_ahead",
+    "scan_left",
+    "scan_right",
+    "scan_full",
+    "scan_bearing_n",
+    "scan_bearing_ne",
+    "scan_bearing_e",
+    "scan_bearing_se",
+    "scan_bearing_s",
+    "scan_bearing_sw",
+    "scan_bearing_w",
+    "scan_bearing_nw",
     "watch_nearest",
-    "scan_forward",
     "cancel_task",
 )
 

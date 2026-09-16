@@ -58,14 +58,14 @@ def test_f10_commands_poll_drains_queue_oldest_first(
 ) -> None:
     server, queue = running_server_with_queue
     queue.push(F10CommandEvent(command="watch_nearest", received_wall_clock_s=1.0))
-    queue.push(F10CommandEvent(command="scan_forward", received_wall_clock_s=2.0))
+    queue.push(F10CommandEvent(command="scan_ahead", received_wall_clock_s=2.0))
 
     status, body = _get(server, "/f10_commands/poll")
 
     assert status == 200
     assert body == [
         {"command": "watch_nearest", "received_wall_clock_s": 1.0},
-        {"command": "scan_forward", "received_wall_clock_s": 2.0},
+        {"command": "scan_ahead", "received_wall_clock_s": 2.0},
     ]
 
 

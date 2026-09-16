@@ -120,6 +120,26 @@ local POLL_INTERVAL_S = 1.0
 --: in that state -- never anything derived from network input. See the
 --: file header for the removeItem-before-addSubMenu idempotency
 --: reasoning.
+--:
+--: The tree is entirely static, built once at registration
+--: (`plans/f10-command-vocabulary/plan.md` D4): DCS radio menus take no
+--: free-text input, so every parameter a command accepts has to be its own
+--: menu item. A dynamically-rebuilt list (e.g. "Watch: T-72, 2 o'clock")
+--: would need collector->Hook menu pushes and `removeItemForGroup` traffic
+--: mid-flight, which is a bigger build and a new in-flight failure
+--: surface; deferred until the first sorties say whether it is wanted.
+--:
+--: Scan offers both sector frames, because both are real asks (user
+--: direction 2026-09-16). The four top-level items are the crew-facing,
+--: ownship-relative sectors from `docs/concept/state-transitions.jpg`
+--: (`ahead` 11-1 o'clock, `left` 9-11, `right` 1-3, `full` 9-3) --
+--: deliberately forward-hemisphere only, matching that spec's "there is no
+--: visibility to rear hemisphere" -- and they track the nose as ownship
+--: manoeuvres, which is what "scan around for threats while flying" means.
+--: The nested Bearing submenu is the compass-absolute frame, for a known
+--: threat direction that must *not* swing as ownship turns. Relative
+--: sectors sit at the top level because in-flight sweeps are the frequent
+--: case and deserve the shorter click path.
 local REGISTRATION_CODE = [[
 PB_F10_QUEUE = PB_F10_QUEUE or {}
 local function pbF10Enqueue(token)
@@ -129,8 +149,22 @@ local function pbF10Enqueue(token)
 end
 pcall(function() missionCommands.removeItem({"Petrovich"}) end)
 local sub = missionCommands.addSubMenu("Petrovich", nil)
-missionCommands.addCommand("Watch Nearest", sub, pbF10Enqueue("watch_nearest"))
-missionCommands.addCommand("Scan Forward", sub, pbF10Enqueue("scan_forward"))
+local scan = missionCommands.addSubMenu("Scan", sub)
+missionCommands.addCommand("Ahead", scan, pbF10Enqueue("scan_ahead"))
+missionCommands.addCommand("Left", scan, pbF10Enqueue("scan_left"))
+missionCommands.addCommand("Right", scan, pbF10Enqueue("scan_right"))
+missionCommands.addCommand("Full", scan, pbF10Enqueue("scan_full"))
+local bearing = missionCommands.addSubMenu("Bearing", scan)
+missionCommands.addCommand("North", bearing, pbF10Enqueue("scan_bearing_n"))
+missionCommands.addCommand("Northeast", bearing, pbF10Enqueue("scan_bearing_ne"))
+missionCommands.addCommand("East", bearing, pbF10Enqueue("scan_bearing_e"))
+missionCommands.addCommand("Southeast", bearing, pbF10Enqueue("scan_bearing_se"))
+missionCommands.addCommand("South", bearing, pbF10Enqueue("scan_bearing_s"))
+missionCommands.addCommand("Southwest", bearing, pbF10Enqueue("scan_bearing_sw"))
+missionCommands.addCommand("West", bearing, pbF10Enqueue("scan_bearing_w"))
+missionCommands.addCommand("Northwest", bearing, pbF10Enqueue("scan_bearing_nw"))
+local watch = missionCommands.addSubMenu("Watch", sub)
+missionCommands.addCommand("Nearest", watch, pbF10Enqueue("watch_nearest"))
 missionCommands.addCommand("Cancel Task", sub, pbF10Enqueue("cancel_task"))
 return "registered"
 ]]
