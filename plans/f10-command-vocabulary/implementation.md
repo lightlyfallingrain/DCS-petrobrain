@@ -113,3 +113,71 @@ coverage Stages 1-5 had not added.
   Structure section for `petrobrain-f10-commands-hook.lua` still said "three fixed items: Watch
   Nearest/Scan Forward/Cancel Task" — directly, genuinely wrong after Stage 5's Hook-script commit,
   same class of staleness as `WORKFLOW.md`'s deploy section the plan did name.
+
+## Review fixes (2026-09-16, addressing plans/f10-command-vocabulary/review.md)
+
+### Files Changed
+- `body-layer/src/belief/contacts.py` — added `ContactStore.get_area(area_id)`, a plain live
+  lookup into `self._areas`. This is the mechanism the fix below resolves a task's area through,
+  instead of trusting `PendingIntent.area`'s captured reference.
+- `body-layer/src/belief/tasks.py` — **Required fix 1.** `TaskStore.tick` now resolves each
+  pending task's area via `store.get_area(task.area.id) or task.area` before calling
+  `area_contains`, instead of reading `task.area` directly. `task.area` (captured once at
+  `tools.scan_area`/`ContactStore.add_area` time) goes stale for a relative-sector area the moment
+  `ContactStore.reproject_relative_areas` first replaces the store's entry via `dataclasses.
+  replace` (a new frozen object, `task.area` still points at the old one) — this was silently
+  turning every `scan_ahead`/`scan_left`/`scan_right`/`scan_full` task's sector filter into "no
+  angular filter at all," per the review's repro. Chose id-based resolution against the live
+  `ContactStore` (already passed into `tick`) over threading a callback or giving `belief/
+  contacts.py` a `belief/tasks.py` import — the latter was explicitly ruled out by the fix's own
+  constraints as a worse layering inversion. The `or task.area` fallback only matters if a
+  still-`pending` task's area id is ever missing from the store, which should not happen —
+  `tools.cancel_task` always cancels the task before removing its area — so it is a documented
+  safety net for an invariant violation, not a path the design relies on.
+  Also updated `PendingIntent.area`'s docstring to say plainly that only `.id` is safe to read
+  directly off a captured reference; anything else (`.center`/`.wedge_deg`) needs live resolution.
+- `body-layer/src/belief/tasks.py` — **Required fix 2.** Extended the module docstring with an
+  "Ownship-anchored areas are a moving patch of view, not ground" section: states that a relative-
+  sector scan's completion predicate means "seen in the sector at *some* tick since the task was
+  created," a genuinely different predicate from the fixed-ground-area case, and explains why (the
+  captured-vs-live-object staleness above) and how `tick` now resolves it.
+- `body-layer/tests/test_tasks.py` — two new tests (below) plus a new `_observation_at` helper
+  (configurable `bearing_deg`, mirroring the existing `_observation`'s bearing=0-only shape) needed
+  to place a contact off-axis for the sector test.
+- `plans/f10-command-vocabulary/plan.md` — **Optional fix 3.** Redrew the "Menu tree (D4)" diagram
+  to include the `Bearing` submenu's 8 compass items (matching the shipped Hook script/
+  `ALLOWED_COMMANDS`/every other doc) and added a "14 leaves total" line under it reconciling the
+  diagram with D4a's "14-token vocabulary below" prose. Added a one-line note under the "Sector
+  bounds" table clarifying it only covers the 4 new relative sectors — the 8 `Bearing` items reuse
+  the pre-existing absolute `Sector` literal and need no new bounds definition.
+
+### Tests Added
+- `test_tick_resolves_relative_scan_area_against_its_live_projection` — the fix's core regression:
+  registers a `relative_sector="left"` area, creates a task over it, reprojects onto heading 0
+  (projecting to absolute bearings [270, 330)), then asserts a contact dead ahead (bearing 0 —
+  inside the old permissive/unprojected circle, outside the projected wedge) does NOT complete the
+  task, while a contact at bearing 300 (inside the projected wedge) does. Would have failed before
+  the fix (the task would have completed on the bearing-0 contact, since `task.area.wedge_deg` was
+  still `None` at tick time).
+- `test_tick_falls_back_to_captured_area_when_the_live_area_is_gone` — exercises the `or task.area`
+  fallback branch directly: removes a still-pending task's area from the store via `remove_area`
+  (bypassing `cancel_task`, which never leaves this state reachable in practice) and confirms
+  `tick` still runs the containment check against the stale reference rather than raising or
+  silently treating the task as unmatched.
+
+### Checks
+**body-layer/**
+- ruff format --check: pass
+- ruff check: pass
+- mypy src --strict (run from `body-layer/`): pass
+- pytest -q: pass (522 passed, +2 from the 520 baseline)
+
+**aircraft-layer/** (untouched by this fix pass; re-verified per CONSTRAINTS)
+- ruff format --check: pass
+- ruff check: pass
+- mypy src --strict: pass
+- pytest -q: pass (109 passed, unchanged)
+
+### Notable Discoveries
+- None beyond the review's own finding — `store.get_area` did not exist yet (only `.areas` and
+  `.remove_area`), so it needed adding rather than reusing something already there.
