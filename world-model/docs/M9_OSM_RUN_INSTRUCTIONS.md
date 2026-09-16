@@ -1,5 +1,21 @@
 # M9 OSM (Geofabrik) full-theatre build — run instructions
 
+**Superseded by `../RUN.md`** for the actual commands to run — that page is the current,
+consolidated job (a)/job (b) procedure and is kept up to date; this document is kept for its
+recon/design narrative only. Three things changed since this document was written, all from
+`plans/osm-landcover-optimization/plan.md`, none reflected below:
+
+- **A new filter step, RUN.md §2.4**: `osmium tags-filter` against the committed
+  `tools/osm_tags_filter.txt`, run once after the merge (§4 below), before job (b) ever reads the
+  file. Cuts the merged extract's node count by roughly 85-87% before parsing even starts.
+- **OSM no longer produces `road` features at all** — DCS's own `.routes` layer is the sole road
+  source now (`query.describe.PositionDescription.nearest_road_osm` is removed, not just always
+  `None`). Any `road`-kind count/example below is stale.
+- **Multipolygon relations now assemble** instead of a silent, counted skip — `osm.pbf`'s
+  `area()` callback (libosmium's two-pass multipolygon manager) produces real ring/hole geometry
+  for `type=multipolygon`/`type=boundary` relations (Lake Assad, city/town/village place areas,
+  forest relations with holes). Any relation-count-as-skip narrative below predates this.
+
 Per `plans/m9-osm-geofabrik/plan.md`'s Design Decision 1 and this project's standing rule
 against running large external processing/full-theatre builds in an agent session: nobody but
 the user runs `osmium-tool`'s clip+merge over the multi-hundred-MB country extracts, or the

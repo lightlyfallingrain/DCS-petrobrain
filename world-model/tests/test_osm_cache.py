@@ -73,7 +73,7 @@ def _populate(tmp_path: Path, final_path: Path) -> None:
     conn = open_osm_cache_for_populate(tmp)
     insert_cached_features(conn, _FEATURES)
     finalize_cache(
-        conn, tmp, final_path, _META, OsmIngestStats(roads=1, named_places=1)
+        conn, tmp, final_path, _META, OsmIngestStats(water_features=1, named_places=1)
     )
 
 
@@ -110,7 +110,7 @@ class TestRoundTrip:
         finally:
             conn.close()
 
-        assert stats == OsmIngestStats(roads=1, named_places=1)
+        assert stats == OsmIngestStats(water_features=1, named_places=1)
 
     def test_load_cache_meta_returns_none_for_absent_path(self, tmp_path: Path) -> None:
         assert load_cache_meta(tmp_path / "does-not-exist.sqlite") is None

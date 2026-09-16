@@ -160,6 +160,67 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   `plans/osm-classified-cache/plan.md`, `plans/osm-classified-cache/review.md` (APPROVED),
   `plans/osm-classified-cache/dod-check.md` (PASS).
 
+- [x] **OSM ingest optimization + landcover split (no M-number — an optimization and data-model
+  change on M9, not a milestone; done 2026-09-16, branch `feature/osm-landcover-optimization`).**
+  Two changes in one branch: a tags pre-filter step that shrinks the `.osm.pbf` before parsing
+  (RUN.md §2.4), and a rework of what OSM contributes — `road` dropped from OSM entirely (DCS
+  `.routes` is authoritative, per root CLAUDE.md), `landcover` and `coastline` added as new kinds,
+  multipolygon relations gain hole support, and every stored ring/line is simplified at
+  `SIMPLIFY_TOLERANCE_M = 30.0` with a `MIN_AREA_M2 = 50_000.0` per-ring floor. New query surface:
+  `describe_position`'s `nearest_coastline` (with a `side` of `"sea"`/`"land"`) and
+  `inside_landcover`; body-layer turns both into crew-facing semantic facts. New `src/geometry/`
+  package holds the ring/polyline primitives.
+
+  Real `syria-full` build (run by the user on Windows against this branch state, 2026-09-15/16,
+  ~60 min wall-clock): `landcover=44811` (`fields` 21428, `forest` 9710, `orchard` 7171,
+  `scrub` 4027, `barren` 2475), `coastline=1269`, `water=5119`, `settlement=26182`,
+  `named_place=23044` (21,862 OSM + 1,182 DCS `towns.lua` — both kinds share `named_place`),
+  `road=14833` (DCS-only, unchanged from M7). Simplification: 8,343,864 → 2,010,767 vertices
+  (24.1% kept) across 12,450 multipolygon relations, `relations_skipped=0`,
+  `ways_skipped_unresolved_nodes=0`. Drops are all counted, per the module's "never a silent
+  drop" convention: `rings_dropped_min_area=183492`, `holes_kept=4575` vs
+  `holes_dropped_below_min_area=36974`, `lines_skipped_unclassified=291933`,
+  `areas_skipped_unclassified=3708`, `unnamed_peaks_dropped=9867`, `unnamed_dams_dropped=689`.
+
+  **`holes_dropped_not_contained_after_simplify=58`** is the number that mattered: the reviewer
+  found (and a re-review corrected) that independently simplifying an outer ring and its holes can
+  strand a hole partly outside its own outer ring, which `store/reader.py`'s `_distance_to_feature`
+  would turn into a fabricated `nearest_feature` distance because it tests holes before the outer
+  ring. The small-extract validation never exercised it; the full theatre hit it 58 times. Class of
+  bug worth remembering: individually-valid transforms composing into an invalid structure — see
+  NOTES.md.
+
+  **Cache-invalidation defect found while reviewing that build's log and fixed here.** The hole fix
+  (`638239a`) changed both `_ingest_ring`'s geometry output and `OsmIngestStats`' fields — two of
+  the conditions the comment above `CLASSIFIER_VERSION` says must force a bump — but left the
+  version at 3, the same value the pre-fix code used. A pre-fix cache would therefore have matched
+  the invalidation key and been served as a hit, silently reinstating the invalid hole geometry the
+  fix removed. (That one transition happens to raise `TypeError` in `load_cached_stats` instead,
+  because the fix also *removed* a stats field — an accident of that change, not the invalidation
+  working; any future `_ingest_ring` geometry change that left stats fields alone would have been
+  served silently.) Bumped to `CLASSIFIER_VERSION = 4` with the rationale recorded inline. The
+  user's own build is unaffected — its cache was written by post-fix code.
+
+  Validation: Stage 6 small-extract control points (Hmeimim relation-derived settlement, sea/land
+  sides west and east of Latakia, Lake Assad reservoir at distance 0) all pass; `latakia-20km`
+  parse+ingest 9.15s cold / 0.07s cached; `describe_position` p99 34 ms at Lake Assad scale.
+  474 world-model + 506 body-layer + 109 aircraft-layer tests pass.
+
+  Not measured, deferred as observability follow-ups (none are correctness gates): full-theatre OSM
+  *parse* time and peak RSS (the validating build hit a warm cache and skipped the parse — Stage 3
+  was a 21.3s read of 99,243 cached rows, so the plan's ~1–1.5 GB / ~2 min estimate stays
+  unverified), largest single post-simplification polygon vertex count (the tiling gate; only the
+  24.1% aggregate is known), `describe_position` p99 at full-theatre scale, and the §2.4 pre-filter
+  node/way counts on the merged file.
+
+  Next-milestone impact: none — all changes are additive except the `road`-from-OSM removal, which
+  restores the DCS-authoritative invariant rather than breaking a consumer (mission-interpreter
+  reads only `nearest_settlement.name`, untyped). Unblocks two previously-blocked follow-ups:
+  landcover-aware detectability in body-layer perception, and a Mission Interpreter place-name
+  fallback to `named_places_within_radius`. See `plans/osm-landcover-optimization/plan.md`,
+  `.../review.md` (APPROVED), `.../dod-check.md` (PASS), `.../implementation.md`, and
+  `research/2026-09-13-osm-landcover-optimization-validation.md`.
+
 ## Backlog (open, unscheduled)
 
 - [>] **Power lines from DCS data — deferred 2026-09-13 (user: not important now).** Wanted as a

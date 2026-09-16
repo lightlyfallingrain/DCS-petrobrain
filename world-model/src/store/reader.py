@@ -21,6 +21,7 @@ from geometry import (
     distance_point_point,
     distance_point_polyline,
     point_in_polygon,
+    polygon_contains,
 )
 
 from .models import ElevationGrid, Region, StoredFeature
@@ -209,6 +210,21 @@ def features_in_bbox(
     return [_row_to_feature(row) for row in conn.execute(query, params)]
 
 
+def _inner_rings(feature: StoredFeature) -> list[list[Point]]:
+    """`feature.tags["inner_rings"]` (osm-landcover-optimization), if
+    present, as `list[list[Point]]` -- stored as plain JSON `[x, z]` pairs
+    (`store.models`'s reserved derived-tag convention), so each pair is
+    re-tupled here rather than assumed to already be a `Point`."""
+    raw = feature.tags.get("inner_rings")
+    if not raw:
+        return []
+    return [[(p[0], p[1]) for p in ring] for ring in raw]
+
+
+def _closed(ring: list[Point]) -> list[Point]:
+    return ring if ring[0] == ring[-1] else [*ring, ring[0]]
+
+
 def _distance_to_feature(x: float, z: float, feature: StoredFeature) -> float:
     point: Point = (x, z)
     if feature.geom_type == "Point":
@@ -216,12 +232,15 @@ def _distance_to_feature(x: float, z: float, feature: StoredFeature) -> float:
     if feature.geom_type == "LineString":
         return distance_point_polyline(point, feature.geometry)
     if feature.geom_type == "Polygon":
+        # A point inside a hole is not contained by the polygon -- its
+        # distance is measured to that hole's own ring, not the outer ring
+        # (`store/models.py`'s `inner_rings` docstring note).
+        for hole in _inner_rings(feature):
+            if point_in_polygon(point, hole):
+                return distance_point_polyline(point, _closed(hole))
         if point_in_polygon(point, feature.geometry):
             return 0.0
-        ring = feature.geometry
-        if ring[0] != ring[-1]:
-            ring = [*ring, ring[0]]
-        return distance_point_polyline(point, ring)
+        return distance_point_polyline(point, _closed(feature.geometry))
     raise ValueError(f"Unknown geom_type {feature.geom_type!r}")
 
 
@@ -241,8 +260,8 @@ def nearest_feature(
 
     `provenance_geometry`, if given, restricts candidates to features whose
     `provenance["geometry"]` equals it -- e.g. `query/describe.py` uses this
-    to answer `nearest_road` (DCS-only) and `nearest_road_osm` (OSM-only)
-    separately even though both share `kind == "road"`.
+    to answer `nearest_road` restricted to DCS-only candidates, since
+    `kind == "road"` features can in principle carry other provenance values.
     """
     radii = [r for r in _EXPANDING_RADII_M if r <= max_radius_m]
     if not radii or radii[-1] < max_radius_m:
@@ -276,12 +295,15 @@ def containing_polygons(
     conn: sqlite3.Connection, kinds: list[str] | None, x: float, z: float
 ) -> list[StoredFeature]:
     """Return every `Polygon` feature of one of `kinds` (or all kinds) whose
-    ring contains `(x, z)`."""
+    ring contains `(x, z)` -- `inner_rings` honoured (osm-landcover-
+    optimization): a point inside a hole is not "contained" by the polygon
+    it is a hole of, even though it is inside the outer ring."""
     candidates = features_in_bbox(conn, kinds, (x, x, z, z))
     return [
         feature
         for feature in candidates
-        if feature.geom_type == "Polygon" and point_in_polygon((x, z), feature.geometry)
+        if feature.geom_type == "Polygon"
+        and polygon_contains((x, z), feature.geometry, _inner_rings(feature))
     ]
 
 

@@ -35,6 +35,44 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ## Cross-cutting / unscoped backlog
 
+- [ ] **Stage 5 road junctions: pathological single-chunk stalls (48 min full-theatre).** Raised
+  2026-09-16 from the `syria-full` build log validating `osm-landcover-optimization`. Stage 5 took
+  2885 s, and a large share of that sat in a handful of chunks: chunk 13867→13868 took 331 s and
+  chunk 14017→14018 took 337 s (one chunk each), with two further ~330-350 s near-stalls around
+  them — roughly 28 of the 48 minutes in a few chunks. This is exactly the gap `b260ee7`
+  (road-junction progress logging) named as remaining: *"nothing is logged during a single slow
+  chunk."* Confirmed in the wild, plus a second symptom — the ETA swings badly during a stall
+  (495 s → 1657 s remaining), so the estimate actively misleads. Two separable pieces of work:
+  (a) log progress *within* a chunk, or at least emit a "chunk N still running, Xs elapsed"
+  heartbeat so a stall is distinguishable from a hang; (b) find out why those specific chunks are
+  so expensive (dense urban road clusters? a union-find degenerate case?) — the fix may be a
+  chunk-splitting heuristic rather than better logging. Not scoped to a milestone; `world-model`.
+
+- [ ] **`syria-full` pipeline logs only 6 of 8 stages.** Raised 2026-09-16 from the same build log.
+  Output goes `[6/8] SRTM elevation grid: done` straight to `Built ...` — `[7/8]` and `[8/8]` never
+  appear. `probe: skipped (probe_output_path not given or not found)` accounts for at most one of
+  them. Either the remaining stages are silent (no `starting`/`done` lines, unlike stages 1-6) or
+  `_TOTAL_STAGES` overcounts. Cosmetic but misleading during a ~1 h build. `world-model`.
+
+- [ ] **SRTM: 131 tiles staged, `tiles_used=79`; 7.4% of points void-or-uncovered.** Raised
+  2026-09-16 from the same build log. The pipeline header reports `SRTM elevation grid (131
+  tile(s))` but `SrtmIngestStats` reports `tiles_used=79` — 52 staged tiles contributed nothing.
+  Separately `points_void_or_uncovered=47484` of `points_expected=639216` (7.4%). The M7 entry
+  already records 92.6% coverage as an accepted result, so this is likely the known gap rather
+  than a regression, but the 131-vs-79 discrepancy is unexplained and worth one look: if the 52
+  unused tiles are outside the region bbox that is fine and the header should say so; if they
+  overlap it, coverage is being lost. `world-model`.
+
+- [ ] **Pin `CLASSIFIER_VERSION` bump discipline with a test.** Raised 2026-09-16. The comment
+  above `CLASSIFIER_VERSION` (`world-model/src/build/ingest_osm.py`) lists the conditions that
+  force a bump; `638239a` met two of them and landed without one, and was caught only by reading a
+  build log weeks later. Nothing mechanically enforces the rule. Options: hash the relevant
+  functions'/dataclass' source and assert the digest matches a pinned value alongside the version
+  (fails loudly on any edit, forcing a conscious bump), or derive the cache key from such a digest
+  instead of a hand-maintained integer. The second is the real fix but changes the invalidation
+  key's shape. `world-model`.
+
+
 - [ ] **Landmark references must be LOS- and knowledge-gated, not ground-truth.** Raised
   2026-09-13, while scoping world-model tactical-landmark enrichment (ridges/valleys,
   settlements, road intersections, other aerial landmarks — see

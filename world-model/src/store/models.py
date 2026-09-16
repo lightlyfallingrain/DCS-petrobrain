@@ -48,6 +48,28 @@ class StoredFeature:
     `{"geometry": "dcs", "name": "osm"}` -- see the project invariant
     against collapsing mixed-source facts into one undocumented value.
     `id` is `None` before insertion.
+
+    **Reserved derived `tags` keys** (osm-landcover-optimization, Design D3;
+    precedent: junction `connecting_road_ids`, terrain `elevation_range_m`):
+    - `inner_rings`: `list[[[x, z], ...], ...]` -- a `Polygon` feature's
+      holes, each its own closed ring in the same `[[x, z], ...]` shape
+      `geometry` uses. A derived tag rather than a new geometry column, so
+      `store.schema.SCHEMA_VERSION` stays unchanged and an existing M8 probe
+      store stays paired with its base store (see the plan's mechanism-
+      substitution note 2). `store.reader.containing_polygons`/
+      `_distance_to_feature` honour it: a point inside a hole is not
+      "contained" by the polygon, and its distance is measured to that
+      hole's own ring.
+    - `area_m2`: `float` -- the ring's unsimplified net area (outer minus
+      kept holes), computed once before simplification (`build.ingest_osm`'s
+      `MIN_AREA_M2` gate) and never recomputed afterwards.
+    - `landcover_class`: `str`, present only on `landcover` rows and
+      built-up/place-area `settlement` rows -- the class `query.describe.
+      describe_position`'s `inside_landcover` reads (`build.ingest_osm`'s D2
+      "Areas" rules 2-4).
+
+    Any future non-OSM producer of holed polygons must reuse `inner_rings`
+    with this exact shape, not invent a second convention.
     """
 
     kind: str

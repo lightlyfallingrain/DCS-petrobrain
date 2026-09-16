@@ -31,6 +31,19 @@ def _fixture_conn(tmp_path: Path) -> sqlite3.Connection:
                 position_uncertainty_m=1300.0,
             ),
             StoredFeature(
+                kind="named_place",
+                geom_type="Point",
+                geometry=[(50000.0, 6000.0)],
+                name="Jabal Test",
+                subtype="peak",
+                tags={},
+                source_id=None,
+                source_ref="node/1",
+                provenance={"geometry": "osm", "name": "osm"},
+                confidence={"geometry": "medium", "name": "medium"},
+                position_uncertainty_m=1300.0,
+            ),
+            StoredFeature(
                 kind="airfield",
                 geom_type="Point",
                 geometry=[(41740.5, 5697.8)],
@@ -89,6 +102,23 @@ def test_find_place_by_name_resolves_known_settlement(tmp_path: Path) -> None:
     assert match.z == 5685.076
     assert match.confidence == 1.0
     assert match.provenance == "dcs"
+
+
+def test_find_place_by_name_finds_a_peak(tmp_path: Path) -> None:
+    """osm-landcover-optimization: peaks (and dams) are stored as
+    `named_place` rows like any DCS town, so `find_place_by_name` finds
+    them with no code change -- `PLACE_KINDS` already includes
+    `named_place` (`query.describe`'s module docstring, D6 status note)."""
+    conn = _fixture_conn(tmp_path)
+    try:
+        results = find_place_by_name(conn, "Jabal Test")
+    finally:
+        conn.close()
+
+    assert len(results) == 1
+    match = results[0]
+    assert match.name == "Jabal Test"
+    assert match.kind == "named_place"
 
 
 def test_find_place_by_name_case_insensitive_substring(tmp_path: Path) -> None:

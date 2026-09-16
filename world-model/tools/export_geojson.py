@@ -40,21 +40,35 @@ _GEOM_TYPE_TO_GEOJSON = {
 }
 
 
-def _feature_to_geojson(feature: StoredFeature, theatre: str) -> dict[str, Any]:
-    lonlat_points = [
-        [lon, lat]
-        for lat, lon in (dcs_to_wgs84(theatre, x, z) for x, z in feature.geometry)
-    ]
+def _points_to_lonlat(points: list[list[float]], theatre: str) -> list[list[float]]:
+    """DCS `[x, z]` points -> WGS84 `[lon, lat]`, in order, no closure
+    handling (callers needing a closed ring use `_ring_to_lonlat`)."""
+    return [[lon, lat] for lat, lon in (dcs_to_wgs84(theatre, x, z) for x, z in points)]
 
+
+def _ring_to_lonlat(ring: list[list[float]], theatre: str) -> list[list[float]]:
+    """`_points_to_lonlat`, closed (repeats the first point as the last --
+    GeoJSON's own convention; `store.reader`'s own ring convention allows
+    either)."""
+    lonlat = _points_to_lonlat(ring, theatre)
+    if lonlat[0] != lonlat[-1]:
+        lonlat.append(lonlat[0])
+    return lonlat
+
+
+def _feature_to_geojson(feature: StoredFeature, theatre: str) -> dict[str, Any]:
     if feature.geom_type == "Point":
-        coordinates: Any = lonlat_points[0]
+        coordinates: Any = _points_to_lonlat(feature.geometry, theatre)[0]
     elif feature.geom_type == "LineString":
-        coordinates = lonlat_points
+        coordinates = _points_to_lonlat(feature.geometry, theatre)
     elif feature.geom_type == "Polygon":
-        ring = lonlat_points
-        if ring[0] != ring[-1]:
-            ring = [*ring, ring[0]]
-        coordinates = [ring]
+        # First ring is the outer boundary; any `inner_rings` (osm-
+        # landcover-optimization) become GeoJSON's own hole rings after it
+        # -- see `store/models.py`'s `StoredFeature` docstring for the
+        # `inner_rings` tag shape this reads.
+        coordinates = [_ring_to_lonlat(feature.geometry, theatre)]
+        for hole in feature.tags.get("inner_rings", []):
+            coordinates.append(_ring_to_lonlat(hole, theatre))
     else:
         raise ValueError(f"Unknown geom_type {feature.geom_type!r}")
 

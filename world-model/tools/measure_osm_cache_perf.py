@@ -111,7 +111,7 @@ def main() -> None:
             cache_tmp_path,
             cache_path,
             _META,
-            OsmIngestStats(roads=_N_FEATURES),
+            OsmIngestStats(water_features=_N_FEATURES),
         )
         populate_cache_ms = (time.monotonic() - start) * 1000.0
 
