@@ -67,6 +67,7 @@ from belief.escalation import (
 )
 from belief.speech import (
     UrgentCall,
+    render_cancel_readback,
     render_contact_report,
     render_readback,
     render_scan_readback,
@@ -83,6 +84,12 @@ from belief.tools import (
 )
 from belief.utterance import PartialParse, PlayerUtterance, parse_utterance
 from perception.geometry import GeoPosition
+
+#: Spoken when "Cancel Task" finds nothing to cancel -- no task store wired
+#: up, or no still-`pending` task. Deliberately not routed through
+#: `speech.render_cancel_readback`: that template says "Copy, stopping",
+#: which would claim an action that did not happen.
+_NOTHING_TO_STOP: str = "nothing to stop"
 
 #: Printed once at session startup (`logger.py`'s `main()`), mirroring
 #: `belief.console.HELP_TEXT`'s role for the debug console.
@@ -417,19 +424,40 @@ class CrewConsole:
         sector: Sector | None = None,
         relative_sector: RelativeSector | None = None,
     ) -> list[str]:
-        """D5's register-then-trigger contract: registers a real
-        `belief.tasks.PendingIntent` via `belief.tools.scan_area` first,
-        *then* fires the live effector (`aircraft_client.
-        trigger_petrovich_search`), wrapped so a failed trigger still
-        leaves the task registered -- mirrors `console.py`'s
-        `_handle_scan_area` handler exactly (see that function), just with
-        `center`/`radius_m`/`reason` all fixed (ownship's own position,
-        `F10_SCAN_RADIUS_M`, `_F10_SCAN_REASON`) instead of player-supplied,
-        since an F10 button carries no bearing/range/free-text the way a
-        typed `scan-area` command does. Exactly one of `sector`/
-        `relative_sector` is set by the caller (`handle_f10_command`'s two
-        lookup tables), never both -- `scan_area`/`ContactStore.add_area`
-        would raise `ValueError` if they were.
+        """Registers a real `belief.tasks.PendingIntent` via `belief.tools.
+        scan_area`, with `center`/`radius_m`/`reason` all fixed (ownship's
+        own position, `F10_SCAN_RADIUS_M`, `_F10_SCAN_REASON`) rather than
+        player-supplied, since an F10 button carries no bearing/range/
+        free-text the way a typed `scan-area` command does. Exactly one of
+        `sector`/`relative_sector` is set by the caller
+        (`handle_f10_command`'s two lookup tables), never both --
+        `scan_area`/`ContactStore.add_area` would raise `ValueError` if
+        they were.
+
+        **Fires no DCS effector, deliberately** (live-test finding
+        2026-09-16). This handler used to call `aircraft_client.
+        trigger_petrovich_search("forward")`, inherited from the hollow
+        pre-`f10-command-vocabulary` `scan_forward` item and never
+        questioned when D5 wrapped a real task around it. That drives DCS
+        Petrovich's **9K113 sight**, which `docs/concept/
+        state-transitions.jpg`'s own glossary assigns to a different verb:
+        *Scan = visual scan for targets*, *Observ = scan with 9K113*. Scan
+        is meant to be this project's own naked-eye/binocular perception
+        (`perception.naked_eye_source`), not the AI wheel. The trigger
+        stays available on `aircraft_client` for a future `Observ` command,
+        which is blocked on the still-unidentified 9K113 OBSERV OFF control
+        (`body-layer/ROADMAP.md`).
+
+        **Known consequence: a scan currently changes attention, not
+        perception.** `perception.visibility`'s naked-eye gate uses a fixed
+        `NAKED_EYE_FOV_HALF_WIDTH_DEG` cone off ownship heading that no
+        command steers, so "scan left" registers an `AttentionArea` and a
+        task but does not change which contacts are detected. Making the
+        scanned sector actually drive perception is backlogged
+        (`todo/todo.md`, "Scan commands should drive naked-eye perception")
+        -- deliberately not done here, per user direction 2026-09-16 to
+        unwire the wrong effector first and model the scan pattern
+        separately.
 
         Requires both `self.enrichment` (for ownship's position) and
         `self.tasks` (to register the task) -- returns a plain one-line
@@ -442,7 +470,11 @@ class CrewConsole:
             return ["no task store configured"]
         ownship = self.enrichment.ownship
         center = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
-        task: PendingIntent = scan_area(
+        # The returned `PendingIntent` is deliberately not bound: the task
+        # exists so `cancel_task` has something to cancel and `TaskStore.
+        # tick` can complete it, and the readback names the sector rather
+        # than the task, so nothing here reads it back.
+        scan_area(
             self.store,
             self.tasks,
             center,
@@ -452,33 +484,55 @@ class CrewConsole:
             sector=sector,
             relative_sector=relative_sector,
         )
-        lines = [render_scan_readback(sector_label).text]
-        if self.aircraft_client is not None:
-            try:
-                self.aircraft_client.trigger_petrovich_search("forward")
-            except AircraftLayerError:
-                logger.warning(
-                    "F10 scan trigger failed (continuing, task %s still registered)",
-                    task.id,
-                    exc_info=True,
-                )
-        return lines
+        return [render_scan_readback(sector_label).text]
+
+    def _describe_task_for_speech(self, task: PendingIntent) -> str | None:
+        """A plain human phrase for `task`, for `speech.render_cancel_
+        readback` -- `"the scan to the left"`, `"the scan north"` -- or
+        `None` when the task's shape yields nothing better than "whatever
+        you last asked for".
+
+        Reads the frame fields (`relative_sector`/`sector`) straight off the
+        task's captured `area`. Unlike the geometry fields, those two are
+        never rewritten by `ContactStore.reproject_relative_areas` -- it
+        replaces `center`/`wedge_deg` only -- so the captured reference is
+        safe to read here, and going through `store.get_area` would return
+        the same frame anyway. (`TaskStore.tick` *does* have to resolve the
+        live area; see its own docstring for why the two differ.)"""
+        if task.kind != "scan_area":
+            return None
+        area = task.area
+        if area.relative_sector is not None:
+            return f"the scan {_RELATIVE_SCAN_LABELS[area.relative_sector]}"
+        if area.sector is not None:
+            return f"the scan {_SECTOR_SCAN_LABELS[area.sector]}"
+        return "the scan"
 
     def _handle_cancel_task(self) -> list[str]:
         """Cancels the most-recently-created still-`pending` task in
         `self.tasks`, regardless of source (plan Decision 3). Every
-        `scan_*` token now registers a real task via `_handle_scan` above
-        (D5, `plans/f10-command-vocabulary/plan.md`), so this is no longer
-        the always-"no pending task" dead path it was before that fix --
-        a scan followed by "Cancel Task" genuinely cancels it."""
+        `scan_*` token registers a real task via `_handle_scan` above (D5,
+        `plans/f10-command-vocabulary/plan.md`), so this is no longer the
+        always-"no pending task" dead path it was before that fix -- a scan
+        followed by "Cancel Task" genuinely cancels it.
+
+        The readback names *what* was cancelled, never the task id
+        (live-test finding 2026-09-16: the player heard `"cancelled task
+        TASK_4"`). See `speech.render_cancel_readback` for why -- the same
+        no-ids-in-speech rule this codebase already applies to contacts."""
+        # Both no-store and nothing-pending say the same thing, and it is
+        # deliberately *not* `render_cancel_readback` -- that template says
+        # "Copy, stopping", which would claim to have stopped something
+        # when nothing was cancelled at all.
         if self.tasks is None:
-            return ["no pending task"]
+            return [_NOTHING_TO_STOP]
         pending = [task for task in self.tasks.tasks if task.status == "pending"]
         if not pending:
-            return ["no pending task"]
+            return [_NOTHING_TO_STOP]
         task = pending[-1]  # most recently created (TaskStore.tasks is insertion order)
+        description = self._describe_task_for_speech(task)
         cancel_task(self.store, self.tasks, task.id)
-        return [f"cancelled task {task.id}"]
+        return [render_cancel_readback(description).text]
 
     def _new_utterance_id(self) -> str:
         self._next_utterance_number += 1
