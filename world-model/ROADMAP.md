@@ -231,17 +231,34 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
     p95 497.7 / p99 803.4 ms), which also retires M7's own open flag that its p99 tail ran "~3x
     M5's baseline".
 
-    **Treat the direction of that comparison as unexplained, not as a win to bank.** This store
-    holds vastly *more* to search than M7's did — M7 dropped OSM entirely, so it had no
-    `landcover`, `settlement`, `water` or `coastline` at all, against today's 77,381 area
-    features plus 8,732 junctions — and `describe_position` additionally gained two new queries
-    (`nearest_coastline`, `inside_landcover`) since. More features and more work per call coming
-    out twice as fast is not self-evidently right. Plausible causes, none verified: R*Tree
-    selectivity improving now that OSM's road soup is gone and DCS `.routes` is the sole road
-    layer; index or query-path changes landed between M7 and now; or simply a different machine
-    or machine state for the two measurements (M7's numbers have no recorded host). Before
-    anyone cites the halving as evidence that a change *made things faster*, re-measure both
-    stores on one host.
+    **The apparent halving against M7 is not a code effect — do not cite it as one.** Resolved
+    2026-09-16 by measuring the *same* milestone's store on both hosts:
+
+    | | Mac | Windows (WSL, store on `/mnt/d`) | ratio |
+    |---|---|---|---|
+    | mean | 53.4 ms | 339.3 ms | 6.4x |
+    | median | 24.5 ms | 151.0 ms | 6.2x |
+    | p95 | 211.6 ms | 1101.4 ms | 5.2x |
+    | p99 | 440.7 ms | 1929.2 ms | 4.4x |
+    | min | 0.31 ms | 27.7 ms | 89x |
+
+    Same store content, same code, ~4.4x apart at p99. **Host variance is several times larger
+    than any delta this milestone could plausibly have caused**, and M7's 803 ms baseline has no
+    recorded host and falls *between* the two — so it cannot support a claim in either
+    direction. Any future `describe_position` latency comparison must name its host and,
+    ideally, re-measure the baseline store on that same host; a bare number is not evidence.
+
+    The `min` row is the diagnostic one. A best-case query does almost no work, so an 89x gap at
+    the floor is near-constant per-query overhead rather than compute — consistent with SQLite's
+    many small reads and lock operations crossing WSL's `drvfs` boundary to a Windows-mounted
+    drive. **Leading hypothesis, not verified**; the cheap test is to copy `syria-full.sqlite`
+    onto the WSL-native filesystem and re-run the same command. Worth doing only if world-model
+    is ever queried *on* the Windows box.
+
+    Operationally it currently is not: per the compute topology, body-layer runs on the Mac and
+    imports world-model in-process, so the Mac column is the production path and the number that
+    matters for the runtime budget. The Windows figures characterise a development-box
+    filesystem penalty, not the deployed query path.
   - *§2.4 pre-filter node/way counts* — still open, upstream of the build log.
 
   **Cross-platform determinism confirmed** as a side effect: every OSM statistic from the Mac build
