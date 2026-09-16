@@ -262,10 +262,13 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
     so nobody re-derives it from the numbers later, or reads the Windows column as a world-model
     regression.
 
-    Operationally none of this is on the deployed path today: per the compute topology,
-    body-layer runs on the Mac and imports world-model in-process, so the Mac column is the
-    production query path and 440.7 ms p99 is the figure the runtime budget has to live with.
-    The Windows column measures a dev-box disk, not the query path.
+    **This is a placement input, not just dev-box trivia.** Body-layer imports world-model
+    in-process, and body-layer's host is *not* pinned — only aircraft-layer (Windows) and local
+    LLM inference (Mac) are. So whichever box runs body-layer is the box that runs every
+    `describe_position` call. Run body on the Mac and the budget is 440.7 ms p99; run it on the
+    Windows box with the store on `D:` and it is 1929 ms, a 4.4x runtime cost decided entirely
+    by where a file sits. If body-layer ever moves to Windows, put `syria-full.sqlite` on one of
+    that box's SSDs first — it is a file copy, not an engineering task.
   - *§2.4 pre-filter node/way counts* — still open, upstream of the build log.
 
   **Cross-platform determinism confirmed** as a side effect: every OSM statistic from the Mac build
