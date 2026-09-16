@@ -261,6 +261,14 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   debounce, silence gate, STT, TTS) is not body-layer work and needs its own plan and Investigator
   pass on SRS's interface.
 
+  **Also owns the rich command vocabulary** (user direction 2026-09-16): the F10 radio menu is
+  deliberately capped at the simple fixed set `f10-command-vocabulary` built, and everything the
+  command half of `docs/concept/state-transitions.jpg` asks for beyond it — `watch <unit>
+  <where>` against a live contact list, waypoint/landmark-anchored scans, the
+  `o'clock-and-distance` location form — is SRS's, not F10's. Those are *rejected* for the radio
+  menu rather than deferred, so this milestone's scope is wider than "swap the transport": that
+  diagram's command half is its requirements input. Do not re-expand the F10 tree instead.
+
 ## Backlog (body-layer)
 
 - [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
