@@ -6,9 +6,12 @@ from __future__ import annotations
 from belief.attention import (
     Attention,
     AttentionArea,
+    RelativeSector,
     Sector,
     area_contains,
+    area_wedge_deg,
     effective_attention,
+    project_relative_area,
 )
 from perception.geometry import GeoPosition
 
@@ -20,6 +23,8 @@ def _area(
     radius_m: float = 1000.0,
     level: Attention = "watch",
     sector: Sector | None = None,
+    relative_sector: RelativeSector | None = None,
+    wedge_deg: tuple[float, float] | None = None,
     source: str = "console",
 ) -> AttentionArea:
     return AttentionArea(
@@ -29,6 +34,8 @@ def _area(
         level=level,
         source=source,
         sector=sector,
+        relative_sector=relative_sector,
+        wedge_deg=wedge_deg,
     )
 
 
@@ -106,3 +113,87 @@ def test_effective_attention_best_of_multiple_areas() -> None:
     level, area_id = effective_attention("normal", position, [weak, strong])
     assert level == "priority"
     assert area_id == "AREA_STRONG"
+
+
+# -- RelativeSector wedge bounds (plan's "Sector bounds" table) -------------
+
+
+def test_relative_sector_wedge_bounds_match_the_plan_table() -> None:
+    # `plans/f10-command-vocabulary/plan.md`'s table, in relative bearing
+    # degrees with 12 o'clock = 0: ahead 11->1 (center 0, half-width 30),
+    # left 9->11 (center -60, half-width 30), right 1->3 (center +60,
+    # half-width 30), full 9->3 (center 0, half-width 90).
+    ownship = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    expected: dict[RelativeSector, tuple[float, float]] = {
+        "ahead": (0.0, 30.0),
+        "left": (-60.0, 30.0),
+        "right": (60.0, 30.0),
+        "full": (0.0, 90.0),
+    }
+    for relative, (expected_center, expected_half_width) in expected.items():
+        area = _area(relative_sector=relative)
+        projected = project_relative_area(area, ownship, heading_true_deg=0.0)
+        assert projected.wedge_deg == (expected_center % 360.0, expected_half_width)
+
+
+# -- project_relative_area ---------------------------------------------------
+
+
+def test_project_relative_area_rotates_by_heading() -> None:
+    ownship = GeoPosition(x=100.0, z=200.0, alt_m=50.0)
+    area = _area(relative_sector="ahead")
+
+    projected = project_relative_area(area, ownship, heading_true_deg=90.0)
+
+    assert projected.center == ownship
+    assert projected.wedge_deg == (90.0, 30.0)
+
+
+def test_project_relative_area_wraps_across_360() -> None:
+    ownship = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    area = _area(relative_sector="left")  # centered -60 relative
+
+    projected = project_relative_area(area, ownship, heading_true_deg=30.0)
+
+    # -60 + 30 = -30 -> wraps to 330.
+    assert projected.wedge_deg == (330.0, 30.0)
+
+
+def test_project_relative_area_returns_fixed_areas_unchanged() -> None:
+    ownship = GeoPosition(x=999.0, z=999.0, alt_m=0.0)
+    area = _area(sector="N")  # no relative_sector -- a fixed ground area
+
+    projected = project_relative_area(area, ownship, heading_true_deg=45.0)
+
+    assert projected is area
+
+
+# -- area_wedge_deg precedence (plan D3) -------------------------------------
+
+
+def test_area_wedge_deg_explicit_wedge_wins_over_sector() -> None:
+    area = _area(sector="N", wedge_deg=(200.0, 15.0))
+    assert area_wedge_deg(area) == (200.0, 15.0)
+
+
+def test_area_wedge_deg_falls_back_to_sector_literal() -> None:
+    area = _area(sector="SE")
+    assert area_wedge_deg(area) == (135.0, 45.0)
+
+
+def test_area_wedge_deg_is_none_with_no_angular_filter() -> None:
+    area = _area()
+    assert area_wedge_deg(area) is None
+
+
+def test_area_wedge_deg_unprojected_relative_area_matches_full_circle() -> None:
+    # An ownship-anchored area that has not yet been projected has
+    # `relative_sector` set but no `wedge_deg` -- deliberately permissive
+    # (matches everywhere) rather than empty, per `area_wedge_deg`'s own
+    # docstring.
+    area = _area(relative_sector="ahead")
+    assert area_wedge_deg(area) is None
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    far_away = GeoPosition(x=-10000.0, z=0.0, alt_m=0.0)
+    wide_area = _area(relative_sector="ahead", radius_m=20000.0, center=center)
+    assert area_contains(wide_area, far_away) is True

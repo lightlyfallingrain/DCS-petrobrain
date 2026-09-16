@@ -332,6 +332,16 @@ class ConsolePerceptionRunner:
             return []
         ownship = OwnshipState.from_telemetry_dict(telemetry)
         self.last_ownship_state = ownship
+        # Ownship-anchored attention areas track the nose, and they must be
+        # re-projected *before* this tick's `ingest`/`tick` so the contacts
+        # ingested below are judged against this tick's heading rather than
+        # the previous one (`plans/f10-command-vocabulary/plan.md` D2). A
+        # no-op (returns 0, touches nothing) when no relative area is
+        # registered, which is the usual case.
+        self.store.reproject_relative_areas(
+            GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m),
+            ownship.heading_true_deg,
+        )
         if self.mission_phase_tracker is not None:
             self.mission_phase_tracker.update(
                 GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)

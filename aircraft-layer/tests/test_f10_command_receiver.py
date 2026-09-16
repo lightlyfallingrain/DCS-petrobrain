@@ -143,7 +143,7 @@ def test_queue_bound_is_respected() -> None:
     port = receiver.port
 
     for _ in range(5):
-        _send(port, {"command": "scan_forward"})
+        _send(port, {"command": "scan_ahead"})
     _run_receiver_briefly(receiver)
 
     assert len(queue.drain_all()) == 2

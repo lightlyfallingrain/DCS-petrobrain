@@ -17,6 +17,7 @@ import pytest
 
 from aircraft_client import AircraftLayerError
 from belief import enrichment as enrichment_module
+from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.decay import LOST_THRESHOLD_S
@@ -136,7 +137,12 @@ def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:
 
 
 def _observation_with_ownship_x(
-    *, obs_id: str, t_sim: float, classification_raw: str, ownship_x: float
+    *,
+    obs_id: str,
+    t_sim: float,
+    classification_raw: str,
+    ownship_x: float,
+    classification_level: int = 2,
 ) -> Observation:
     """Same shape as `_observation` above, but with a caller-controlled
     `ownship_at_observation.x` -- see `_enrichment_context`'s docstring for
@@ -155,7 +161,7 @@ def _observation_with_ownship_x(
             x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
         ),
         provenance="test_fixture",
-        classification_level=2,
+        classification_level=classification_level,
     )
 
 
@@ -484,37 +490,113 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
     assert near_contact.attention == "watch"
 
 
-def test_scan_forward_without_aircraft_client_reports_not_configured() -> None:
+def test_scan_ahead_without_enrichment_reports_not_configured() -> None:
     console = CrewConsole(store=ContactStore())
-    assert console.handle_f10_command("scan_forward", now_sim=0.0) == [
-        "no aircraft-layer connection configured"
+    assert console.handle_f10_command("scan_ahead", now_sim=0.0) == [
+        "no world-model connection configured"
     ]
 
 
-def test_scan_forward_triggers_a_live_search_via_aircraft_client() -> None:
+def test_scan_ahead_without_tasks_reports_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_f10_command("scan_ahead", now_sim=0.0) == [
+        "no task store configured"
+    ]
+
+
+def test_scan_ahead_registers_a_task_and_triggers_a_live_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    tasks = TaskStore()
     client = _RecordingAircraftClient()
     console = CrewConsole(
-        store=ContactStore(),
+        store=store,
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
         aircraft_client=client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+    lines = console.handle_f10_command("scan_ahead", now_sim=0.0)
 
+    assert lines == ["Scanning ahead."]
     assert client.triggered_modes == ["forward"]
-    assert lines == ["scanning forward"]
+    # D5: a real PendingIntent is registered over an ownship-anchored area.
+    assert len(tasks.tasks) == 1
+    task = tasks.tasks[0]
+    assert task.status == "pending"
+    assert task.area.relative_sector == "ahead"
 
 
-def test_scan_forward_degrades_gracefully_on_a_failed_live_trigger() -> None:
+def test_scan_bearing_n_registers_a_task_with_the_absolute_sector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_f10_command("scan_bearing_n", now_sim=0.0)
+
+    assert lines == ["Scanning north."]
+    task = tasks.tasks[0]
+    assert task.area.sector == "N"
+    assert task.area.relative_sector is None
+
+
+def test_scan_registers_task_even_when_the_live_trigger_fails() -> None:
+    """D5's core fix: a failed live trigger must not prevent the task from
+    being registered -- the register-then-trigger ordering means the task
+    already exists by the time the trigger call (and its failure) happens."""
+    store = ContactStore()
+    tasks = TaskStore()
     client = _RecordingAircraftClient()
     client.raise_on_trigger = True
     console = CrewConsole(
-        store=ContactStore(),
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
         aircraft_client=client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+    lines = console.handle_f10_command("scan_full", now_sim=0.0)
 
-    assert lines == ["scan trigger failed"]
+    assert lines == ["Scanning the full forward arc."]
+    assert len(tasks.tasks) == 1
+    assert tasks.tasks[0].status == "pending"
+
+
+def test_scan_then_cancel_task_actually_cancels_it() -> None:
+    """The `cancel_task` docstring's own claim: before this milestone's D5
+    fix, `--crew-text` mode had no command path that ever registered a
+    task, so `cancel_task` was dead in practice. A `scan_*` token now
+    registers one, and `cancel_task` finds it."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
+    )
+
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    task_id = tasks.tasks[0].id
+
+    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+
+    assert lines == [f"cancelled task {task_id}"]
+    assert tasks.get(task_id) is not None
+    resolved = tasks.get(task_id)
+    assert resolved is not None and resolved.status == "cancelled"
 
 
 def test_cancel_task_without_tasks_configured_reports_no_pending_task() -> None:
@@ -567,16 +649,134 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
     assert resolved_task1 is not None and resolved_task1.status == "pending"
 
 
-def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel() -> None:
+def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _RecordingAircraftClient()
     overlay_client = FakeOverlayClient()
     console = CrewConsole(
         store=ContactStore(),
+        tasks=TaskStore(),
+        enrichment=_enrichment_context(monkeypatch),
         aircraft_client=client,  # type: ignore[arg-type]
         overlay_client=overlay_client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+    lines = console.handle_f10_command("scan_ahead", now_sim=0.0)
 
-    assert lines == ["scanning forward"]
-    assert overlay_client.pushed == ["scanning forward"]
+    assert lines == ["Scanning ahead."]
+    assert overlay_client.pushed == ["Scanning ahead."]
+
+
+def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The air-defence item must pick the nearest *matching* contact, not
+    the nearest contact that happens to match -- a closer tank does not
+    shadow a further SAM."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_SAM",
+                t_sim=0.0,
+                classification_raw="Osa 9A33",
+                ownship_x=2000.0,
+            ),
+            _observation_with_ownship_x(
+                obs_id="OBS_TANK", t_sim=0.0, classification_raw="T-72", ownship_x=500.0
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    sam = next(c for c in store.contacts if "Osa" in c.classification.value)
+    tank = next(c for c in store.contacts if c.classification.value == "T-72")
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0)
+
+    assert "Osa" in lines[0]
+    assert sam.attention == "watch"
+    # The nearer tank must be untouched -- it was never a candidate.
+    assert tank.attention == "normal"
+
+
+def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_TANK", t_sim=0.0, classification_raw="T-72", ownship_x=500.0
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    # Distinct from the plain "no contact to watch" -- there *is* a contact,
+    # it just isn't air defence, and the crew must hear which.
+    assert console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0) == [
+        "no air defence contact to watch"
+    ]
+
+
+def test_believed_air_defence_rejects_an_air_defence_value_at_presence_level() -> None:
+    """Isolates the level gate itself, which the end-to-end presence test
+    below cannot: it feeds `_believed_air_defence` a facts dict whose value
+    *would* resolve into an air-defence class but whose level is only
+    `presence`, and asserts it is still rejected.
+
+    That value/level pairing cannot arise from a real contact -- the
+    classification lattice ties value shape to level, so a presence-level
+    claim always holds `PRESENCE_CLASS`. Which is exactly why this test
+    exists at the predicate rather than through the store: the level check
+    is deliberate defensive redundancy, and without a test that can fail
+    when it is deleted, nothing would notice its removal."""
+    console = CrewConsole(store=ContactStore())
+
+    assert console._believed_air_defence(
+        {"classification": {"level": "class", "value": "OP_SRSAM"}}
+    )
+    assert not console._believed_air_defence(
+        {"classification": {"level": "presence", "value": "OP_SRSAM"}}
+    )
+
+
+def test_watch_nearest_air_defence_ignores_a_presence_level_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No-omniscience boundary, end to end: a contact seen only as
+    "something is there" must never be reported as air defence, even when
+    the underlying object really is a SAM.
+
+    Note this passes on the *value* check alone (`parent_class_of
+    (PRESENCE_CLASS)` is `None`) and so would survive deleting the level
+    gate -- the test above is the one that pins the gate itself."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_BLOB",
+                t_sim=0.0,
+                classification_raw=PRESENCE_CLASS,
+                ownship_x=500.0,
+                classification_level=1,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    blob = next(iter(store.contacts))
+    assert blob.classification.level.name.lower() == "presence"
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    assert console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0) == [
+        "no air defence contact to watch"
+    ]
+    assert blob.attention == "normal"
