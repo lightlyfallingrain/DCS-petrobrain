@@ -47,6 +47,40 @@ def _observation(
     )
 
 
+def _observation_at(
+    *,
+    obs_id: str,
+    t_sim: float,
+    bearing_deg: float,
+    range_m: float,
+    classification_raw: str = "Ural truck",
+    classification_level: int = 2,
+) -> Observation:
+    """Like `_observation` but with a configurable `bearing_deg`, for tests
+    that need a contact off a specific relative bearing rather than always
+    dead ahead -- `last_position` is still derived from `bearing_deg`/
+    `range_m` off the observer, never from `derived_world_position`
+    (`belief.association_over_time.implied_position`), so
+    `derived_world_position` here is a deliberately-wrong placeholder that
+    must not affect the result."""
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=bearing_deg,
+        range_m=range_m,
+        ownship_at_observation=_ownship(),
+        derived_world_position=DerivedWorldPosition(
+            x=range_m, z=0.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+        classification_level=classification_level,
+    )
+
+
 def _area(
     *,
     area_id: str = "AREA_1",
@@ -186,3 +220,95 @@ def test_tick_is_idempotent_for_the_same_now_sim() -> None:
     assert second is not None
     assert second.status == "succeeded"
     assert second.result_contact_ids == first_result_ids
+
+
+def test_tick_resolves_relative_scan_area_against_its_live_projection() -> None:
+    """Regression for the review's finding: `TaskStore.tick` must not judge
+    a relative-sector scan task against `PendingIntent.area`'s captured
+    (and, post-reprojection, stale) reference. A "left" scan requested with
+    ownship on heading 0 projects to absolute bearings [270, 330) (`plans/
+    f10-command-vocabulary/plan.md`'s o'clock table: `left` is centered -60
+    degrees relative, 30-degree half-width). A contact dead ahead (bearing
+    0) sits inside the *unprojected* permissive circle but well outside
+    that projected wedge, and must not complete the task; a contact at
+    bearing 300 (inside the wedge) must."""
+    store = ContactStore()
+    tasks = TaskStore()
+    ownship_origin = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+
+    area = store.add_area(
+        center=ownship_origin,
+        radius_m=2000.0,
+        level="watch",
+        source="scan_area",
+        relative_sector="left",
+    )
+    task = tasks.create(
+        kind="scan_area", area=area, created_sim=10.0, deadline_sim=40.0, reason="test"
+    )
+
+    # Reproject onto ownship's current pose (heading 0) -- this is what
+    # replaces the store's area with a new object and is what makes
+    # `task.area` (the captured reference) go stale.
+    store.reproject_relative_areas(
+        ownship_position=ownship_origin, heading_true_deg=0.0
+    )
+    assert task.area is not store.get_area(area.id)
+
+    # Dead ahead: inside the 2000m circle, outside the projected [270, 330)
+    # wedge. Must NOT complete the task.
+    store.ingest(
+        [_observation_at(obs_id="OBS_1", t_sim=15.0, bearing_deg=0.0, range_m=500.0)],
+        now_sim=15.0,
+    )
+    tasks.tick(store, now_sim=15.0)
+    resolved = tasks.get(task.id)
+    assert resolved is not None
+    assert resolved.status == "pending"
+
+    # Inside the projected wedge (bearing 300). Must complete the task.
+    store.ingest(
+        [_observation_at(obs_id="OBS_2", t_sim=16.0, bearing_deg=300.0, range_m=500.0)],
+        now_sim=16.0,
+    )
+    tasks.tick(store, now_sim=16.0)
+    resolved = tasks.get(task.id)
+    assert resolved is not None
+    assert resolved.status == "succeeded"
+    assert resolved.result_contact_ids == [
+        contact.id for contact in store.contacts if contact.last_seen_sim == 16.0
+    ]
+
+
+def test_tick_falls_back_to_captured_area_when_the_live_area_is_gone() -> None:
+    """`TaskStore.tick`'s `store.get_area(task.area.id) or task.area`
+    fallback -- documented as a safety net for an invariant violation, not
+    the intended path (`tools.cancel_task` always cancels the task before
+    removing its area, so a still-`pending` task's area id should never go
+    missing). Directly exercise the fallback branch by removing the area
+    out from under a still-`pending` task without going through
+    `cancel_task`, and confirm `tick` still runs the containment check
+    (against the stale-but-present captured reference) rather than raising
+    or silently treating every task as unmatched."""
+    store = ContactStore()
+    tasks = TaskStore()
+    area = store.add_area(
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=1000.0,
+        level="watch",
+        source="scan_area",
+    )
+    task = tasks.create(
+        kind="scan_area", area=area, created_sim=10.0, deadline_sim=40.0, reason="test"
+    )
+
+    assert store.remove_area(area.id) is True
+
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=15.0, range_m=100.0)], now_sim=15.0
+    )
+    tasks.tick(store, now_sim=15.0)
+
+    resolved = tasks.get(task.id)
+    assert resolved is not None
+    assert resolved.status == "succeeded"

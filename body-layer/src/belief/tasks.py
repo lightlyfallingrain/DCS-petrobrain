@@ -35,7 +35,51 @@ the search.
 **Idempotence.** Calling `tick` repeatedly with the same `now_sim` is a
 no-op after the first call for any task already resolved (`succeeded`/
 `failed`/`cancelled`) -- `tick` only ever touches `pending` tasks, mirroring
-`ContactStore.tick`'s own replay-determinism guarantee."""
+`ContactStore.tick`'s own replay-determinism guarantee.
+
+**Ownship-anchored areas are a moving patch of view, not ground
+(`plans/f10-command-vocabulary/plan.md` D1-D3).** A `scan_area` task
+created over a relative-sector area (`ahead`/`left`/`right`/`full`) does
+not judge contacts against a fixed circle frozen at command-time ownship
+position -- its success predicate genuinely means "was a contact seen
+inside the sector at *some* tick since the task was created," because the
+sector itself tracks ownship's nose via `logger.py`'s per-tick
+`ContactStore.reproject_relative_areas` call. That is a different
+predicate from the fixed-ground-area case, where "inside the area" has one
+fixed meaning for the task's whole life -- and it has a structural
+consequence here too: `PendingIntent.area` is captured *once*, at
+task-creation time (see its own docstring), while `reproject_relative_areas`
+replaces the *store's* entry with a new frozen object (`dataclasses.
+replace`) rather than mutating it in place, so a captured reference goes
+stale the moment the first reprojection after task creation happens. `tick`
+therefore never reads `task.area` directly for its containment check -- it
+re-resolves the *live* area by id first (`ContactStore.get_area
+(task.area.id)`), falling back to the captured reference only if that id is
+no longer registered.
+
+That fallback is reachable, just not from anything a scan command does.
+`tools.cancel_task` cancels the task before removing its area, so the id
+stays live for as long as that task is pending -- but `cancel_task` is not
+the only way an area leaves the store. `tools.unwatch_area` (reached from
+`belief.console`'s `unwatch-area <id>` developer command) calls
+`ContactStore.remove_area` directly with no task awareness at all, and will
+happily strip the area out from under a still-`pending` scan task. The
+fallback then degrades to the captured reference, which for an
+ownship-anchored area means an unprojected one: a permissive circle at the
+position ownship held when the scan was ordered. That is exactly the
+too-permissive completion check this id-resolution exists to prevent, so
+the degradation is graceful only in the sense that it does not crash.
+
+Do not tighten `unwatch_area` into task-awareness on this note alone --
+it is a pre-existing `--console`-only debug path, and no F10 or crew-text
+command can reach it. It is written down because the honest statement is
+"reachable from one debug command, with a known bad-but-bounded outcome",
+not "cannot happen".
+
+Two views of the same object silently drifting apart is a recurring failure
+mode in this codebase (see NOTES.md) -- the fallback above is a safety net,
+not the intended path, and must never be relied on to paper over an
+invariant violation."""
 
 from __future__ import annotations
 
@@ -67,7 +111,16 @@ class PendingIntent:
     """One outstanding (or resolved) `scan_area` request. `area` is the
     `belief.attention.AttentionArea` `tools.scan_area` registered alongside
     this task -- the same object, not a copy, so `cancel_task`'s "remove the
-    area too" (the plan's Decision 3) can read `task.area.id` directly."""
+    area too" (the plan's Decision 3) can read `task.area.id` directly.
+
+    **`task.area.id` is the only field of this reference safe to read
+    directly once the task exists.** For an ownship-anchored area,
+    `ContactStore.reproject_relative_areas` replaces the *store's* entry
+    with a new object on every telemetry tick, and this captured reference
+    is never updated to match -- so `task.area.center`/`.wedge_deg` can be
+    silently stale. Any containment check (`area_contains`) must resolve
+    the live area via `ContactStore.get_area(task.area.id)` first; see
+    `TaskStore.tick` and this module's own docstring."""
 
     id: str
     kind: TaskKind
@@ -145,11 +198,16 @@ class TaskStore:
         for task in self._tasks.values():
             if task.status != "pending":
                 continue
+            # Resolve the live area by id rather than trusting `task.area`
+            # directly -- see `PendingIntent.area`'s docstring and this
+            # module's own docstring on why a captured reference can be
+            # stale for an ownship-anchored area.
+            area = store.get_area(task.area.id) or task.area
             matching = [
                 contact.id
                 for contact in store.contacts
                 if contact.last_seen_sim > task.created_sim
-                and area_contains(task.area, contact.last_position)
+                and area_contains(area, contact.last_position)
             ]
             if matching:
                 task.status = "succeeded"

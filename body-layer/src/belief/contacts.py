@@ -43,7 +43,14 @@ from belief.association_over_time import (
     passes_gate,
     uncertainty_radius_m,
 )
-from belief.attention import Attention, AttentionArea, Sector, effective_attention
+from belief.attention import (
+    Attention,
+    AttentionArea,
+    RelativeSector,
+    Sector,
+    effective_attention,
+    project_relative_area,
+)
 from belief.classification import (
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
@@ -337,11 +344,27 @@ class ContactStore:
         level: Attention,
         source: str,
         sector: Sector | None = None,
+        relative_sector: RelativeSector | None = None,
     ) -> AttentionArea:
         """Register a new `AttentionArea`, minting its `id` the same way
         `_new_contact_id`/`_new_event_id` mint theirs. Returns the stored
         `AttentionArea` (with its minted `id`) so a caller (`tools.
-        watch_area`) can report it back."""
+        watch_area`) can report it back.
+
+        Passing `relative_sector` makes this an ownship-anchored area
+        (`belief.attention`'s module docstring, second kind): `center` is
+        then only its initial projection, replaced on every
+        `reproject_relative_areas` call. `sector` and `relative_sector` are
+        mutually exclusive -- they are two different frames for the same
+        angular filter, and silently letting one win would make the
+        resulting area's behaviour depend on `area_wedge_deg`'s precedence
+        rule rather than on what the caller asked for."""
+        if sector is not None and relative_sector is not None:
+            raise ValueError(
+                "add_area takes sector (compass-absolute) or relative_sector "
+                "(ownship-relative), not both -- they are two frames for the "
+                f"same angular filter, got {sector!r} and {relative_sector!r}"
+            )
         area = AttentionArea(
             id=self._new_area_id(),
             center=center,
@@ -349,9 +372,43 @@ class ContactStore:
             level=level,
             source=source,
             sector=sector,
+            relative_sector=relative_sector,
         )
         self._areas[area.id] = area
         return area
+
+    def reproject_relative_areas(
+        self, ownship_position: GeoPosition, heading_true_deg: float
+    ) -> int:
+        """Re-anchor every ownship-anchored area onto ownship's current
+        pose, returning how many were updated (0 when none are registered,
+        the overwhelmingly common case).
+
+        Called once per telemetry tick from `logger.py`'s `Runner.run_once`,
+        *before* `ingest`/`tick`, so the same tick's contacts are judged
+        against a fresh projection rather than the previous tick's
+        (`plans/f10-command-vocabulary/plan.md` D2). Fixed ground areas are
+        returned unchanged by `project_relative_area`, so this is safe to
+        call with any mix of the two kinds."""
+        updated = 0
+        for area_id, area in self._areas.items():
+            projected = project_relative_area(area, ownship_position, heading_true_deg)
+            if projected is not area:
+                self._areas[area_id] = projected
+                updated += 1
+        return updated
+
+    def get_area(self, area_id: str) -> AttentionArea | None:
+        """Look up a currently-registered `AttentionArea` by id, or `None`
+        if it is not (or no longer) registered. `belief.tasks.TaskStore.
+        tick` uses this to resolve a task's area against its live
+        projection each tick rather than trusting `PendingIntent.area`'s
+        captured reference, which `reproject_relative_areas` above can
+        silently leave stale (it replaces the stored entry via
+        `dataclasses.replace`, a new object, rather than mutating in
+        place) -- see that method's docstring and `belief.tasks`'s module
+        docstring for the full rationale."""
+        return self._areas.get(area_id)
 
     def remove_area(self, area_id: str) -> bool:
         """Unregister an `AttentionArea`. Returns whether `area_id` was

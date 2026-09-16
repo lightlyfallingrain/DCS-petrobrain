@@ -20,6 +20,20 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   transport layer" per the BL-4 plan. BL-5's own live sortie exercised `place`/`position`/
   `situation`, not these — unclear whether BL-4's tools have had a live run at all yet.
 
+- [ ] **F10 command vocabulary — the 15-token set and relative-sector re-projection** (merged
+  2026-09-16, `plans/f10-command-vocabulary/`). Live acceptance deferred *by design* rather than
+  by omission: this milestone exists to make the user's next sortie informative, so the sortie
+  itself is its acceptance. Nothing here has run against live DCS. What that sortie must
+  exercise: the new menu tree is navigable (Scan -> Ahead/Left/Right/Full, Scan -> Bearing ->
+  eight compass items, Watch -> Nearest, Cancel Task); relative scans rotate with the nose while
+  Bearing scans do not — including a heading sweep through 0/360 to confirm no wraparound
+  discontinuity; each scan registers a real pending task; **Cancel Task actually cancels
+  something**, which it never could before this milestone; and a failed live trigger still
+  leaves the task registered. Also the milestone's one real calibration gap:
+  `F10_SCAN_RADIUS_M` (3000 m) and `DEFAULT_SCAN_DEADLINE_S` are uncalibrated placeholders and
+  want real numbers from a flight. Full plan in
+  `plans/f10-command-vocabulary/dod-check.md`'s Acceptance Testing Plan.
+
 ## Status
 
 - [x] **BL-0 — Harness and replay.** Body process skeleton, aircraft-layer HTTP client, world-model
@@ -261,6 +275,14 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   debounce, silence gate, STT, TTS) is not body-layer work and needs its own plan and Investigator
   pass on SRS's interface.
 
+  **Also owns the rich command vocabulary** (user direction 2026-09-16): the F10 radio menu is
+  deliberately capped at the simple fixed set `f10-command-vocabulary` built, and everything the
+  command half of `docs/concept/state-transitions.jpg` asks for beyond it — `watch <unit>
+  <where>` against a live contact list, waypoint/landmark-anchored scans, the
+  `o'clock-and-distance` location form — is SRS's, not F10's. Those are *rejected* for the radio
+  menu rather than deferred, so this milestone's scope is wider than "swap the transport": that
+  diagram's command half is its requirements input. Do not re-expand the F10 tree instead.
+
 ## Backlog (body-layer)
 
 - [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
@@ -281,19 +303,34 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   dod-check). Next-milestone impact: none on the BL sequence; it adds a second `CrewConsole` input
   surface that BL-10's SRS transport can follow.
 
-- [>] **F10 command refinement and specification — deferred until the full pipeline works.**
-  User direction 2026-09-13: "All the commands need refinement and specifications. We first need
-  the full pipeline to work, then refine everything." Keep Watch Nearest / Scan Forward / Cancel
-  Task as they are; only the Watch Nearest reply wording was fixed (below). Open points recorded
-  from the live test, for when refinement starts — not to be picked up before then:
-  - What "watch" should *do*: `set_attention(..., "watch")` only changes body-layer bookkeeping
-    (more position-projection iterations, "Being watched." in descriptions, situation-report
-    preference); no DCS-side and no spoken effect.
-  - A separate "Observation Off" F10 item firing the AI wheel's OBSERV OFF (Scan Forward started DCS
-    Petrovich's scan; Cancel Task didn't stop it). Button not yet identified — BL-6 recorded only
-    3001/3015; toggling `OBSERV.` back on costs ~10 s of gyro alignment. Cancel Task stays its own
-    item.
-  - What Cancel Task cancels once an F10 command creates tasks.
+- [x] **F10 command vocabulary and ownship-relative sectors — command half done, merged
+  (`feature/f10-command-vocabulary`, `plans/f10-command-vocabulary/plan.md`).** Addresses "F10
+  command refinement and specification" below for the command half of `docs/concept/
+  state-transitions.jpg`'s spec — the vocabulary/geometry/wiring half, not the autonomous-behaviour
+  half (deliberately out of scope, see that plan's Scope section). Widens the F10 menu from three
+  flat items to 15 tokens (D4): **Scan** → Ahead/Left/Right/Full (ownship-relative) + eight compass
+  **Bearing** items (absolute), **Watch** → Nearest/Nearest Air Defence, **Cancel Task**;
+  `scan_forward` was *replaced* by `scan_ahead`, not kept as a synonym. **Watch → Nearest Air
+  Defence** (D6) filters on the *believed* classification -- `class`/`type` level resolving into
+  the four air-defence `OP_*` buckets -- so a `presence`-level contact is never matched even when
+  the object really is a SAM; it will honestly report nothing rather than name an unidentified
+  blob as air defence. New ownship-relative `AttentionArea` kind
+  (`belief/attention.py`'s `RelativeSector`/`wedge_deg`/`project_relative_area`) that re-projects
+  onto ownship's current heading every telemetry tick (`ContactStore.reproject_relative_areas`,
+  called from `logger.py`'s `run_once` before `ingest`/`tick`) — a standing "watch left" now tracks
+  the nose through a turn instead of freezing to the heading held when the button was pressed (D1-D3).
+  **D5 fixes the hollowness this backlog item's live test found**: every `scan_*` token now
+  registers a real `belief.tasks.PendingIntent` via `belief.tools.scan_area` *before* firing the live
+  effector, wrapped so a failed trigger still leaves the task registered — `cancel_task` (previously
+  always "no pending task" in `--crew-text` sessions) is no longer dead. What this milestone did
+  **not** do: the spec's `Observ`/`Track` verbs (still blocked — the 9K113 OBSERV OFF control is
+  still not identified, BL-6 recorded only 3001/3015; an Investigator pass is needed before that's
+  plannable) and the spec's autonomous-behaviour half (weapon filtering, classification-upgrade
+  reports, engagement-envelope danger/safe calls, auto-watch-on-engaged, group-as-single-threat,
+  mission-lifecycle reset/debriefing — deferred to design against real sortie feedback, same
+  reasoning that gates BL-8 on real flights). No live-DCS acceptance in this milestone's own DoD —
+  the whole point is to enable the next sortie; that sortie is the acceptance test and feeds the
+  autonomous half. Next-milestone impact: none on the BL-x sequence.
 
 - [x] **F10 Watch Nearest reply in contact-report format — done, merged 2026-09-13 (merge
   `a4e8704`, `fix/f10-watch-nearest-readback`).** Live
