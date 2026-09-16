@@ -249,16 +249,23 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
     ideally, re-measure the baseline store on that same host; a bare number is not evidence.
 
     The `min` row is the diagnostic one. A best-case query does almost no work, so an 89x gap at
-    the floor is near-constant per-query overhead rather than compute — consistent with SQLite's
-    many small reads and lock operations crossing WSL's `drvfs` boundary to a Windows-mounted
-    drive. **Leading hypothesis, not verified**; the cheap test is to copy `syria-full.sqlite`
-    onto the WSL-native filesystem and re-run the same command. Worth doing only if world-model
-    is ever queried *on* the Windows box.
+    the floor is near-constant per-query overhead rather than compute — **and the cause is
+    storage hardware: the Windows `D:` holding that store is a large mechanical HDD, while every
+    other drive on that box is SSD** (user, 2026-09-16). A `describe_position` call needs a
+    handful of random R*Tree and row reads; at ~8-12 ms of seek each, two or three of them land
+    squarely on the observed 27.7 ms floor. An earlier note here blamed WSL's `drvfs` boundary
+    instead — plausible, but it does not explain a floor that high, and the simpler hardware
+    explanation fits the measurement much better.
 
-    Operationally it currently is not: per the compute topology, body-layer runs on the Mac and
-    imports world-model in-process, so the Mac column is the production path and the number that
-    matters for the runtime budget. The Windows figures characterise a development-box
-    filesystem penalty, not the deployed query path.
+    **Not being investigated further** (user direction 2026-09-16): which box runs which service
+    is a placement decision, not a code problem, and the user manages it directly. Recorded only
+    so nobody re-derives it from the numbers later, or reads the Windows column as a world-model
+    regression.
+
+    Operationally none of this is on the deployed path today: per the compute topology,
+    body-layer runs on the Mac and imports world-model in-process, so the Mac column is the
+    production query path and 440.7 ms p99 is the figure the runtime budget has to live with.
+    The Windows column measures a dev-box disk, not the query path.
   - *§2.4 pre-filter node/way counts* — still open, upstream of the build log.
 
   **Cross-platform determinism confirmed** as a side effect: every OSM statistic from the Mac build
