@@ -398,6 +398,18 @@ class ContactStore:
                 updated += 1
         return updated
 
+    def get_area(self, area_id: str) -> AttentionArea | None:
+        """Look up a currently-registered `AttentionArea` by id, or `None`
+        if it is not (or no longer) registered. `belief.tasks.TaskStore.
+        tick` uses this to resolve a task's area against its live
+        projection each tick rather than trusting `PendingIntent.area`'s
+        captured reference, which `reproject_relative_areas` above can
+        silently leave stale (it replaces the stored entry via
+        `dataclasses.replace`, a new object, rather than mutating in
+        place) -- see that method's docstring and `belief.tasks`'s module
+        docstring for the full rationale."""
+        return self._areas.get(area_id)
+
     def remove_area(self, area_id: str) -> bool:
         """Unregister an `AttentionArea`. Returns whether `area_id` was
         found."""

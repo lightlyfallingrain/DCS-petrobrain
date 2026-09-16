@@ -14,3 +14,4 @@
 - [F10-crew-commands reviewed, minor fix](project_f10_crew_commands_minor_fix.md) — reported "109 passed" was wrong; a UDP-order-dependent test failed 4/4 runs when actually run.
 - [OSM-landcover-optimization reviewed, minor fixes](project_osm_landcover_optimization_minor_fixes.md) — missing ROADMAP entry (planned but silently dropped); independent ring/hole simplification has no post-check topology guard.
 - [Bounded magnitude isn't optional severity](feedback_bounded_magnitude_isnt_optional_severity.md) — a small worst-case doesn't downgrade a finding that violates the module's own stated invariant; check invariant violation first, magnitude second.
+- [F10-command-vocabulary reviewed, NEEDS REVISION](project_f10_command_vocabulary_needs_revision.md) — TaskStore.tick reads a captured AttentionArea reference that reprojection never refreshes; check for this "value lives in two places, one is frozen at capture" pattern.

@@ -100,10 +100,23 @@ degraded result if the trigger fails. This is also what makes `cancel_task` non-
     │   ├── Ahead          -> scan_ahead
     │   ├── Left           -> scan_left
     │   ├── Right          -> scan_right
-    │   └── Full           -> scan_full
+    │   ├── Full           -> scan_full
+    │   └── Bearing
+    │       ├── North      -> scan_bearing_n
+    │       ├── Northeast  -> scan_bearing_ne
+    │       ├── East       -> scan_bearing_e
+    │       ├── Southeast  -> scan_bearing_se
+    │       ├── South      -> scan_bearing_s
+    │       ├── Southwest  -> scan_bearing_sw
+    │       ├── West       -> scan_bearing_w
+    │       └── Northwest  -> scan_bearing_nw
     ├── Watch
     │   └── Nearest        -> watch_nearest
     └── Cancel Task        -> cancel_task
+
+14 leaves total: 4 relative scans + 8 compass-absolute `Bearing` scans (the existing absolute
+`Sector` literal, unchanged) + `Watch: Nearest` + `Cancel Task` -- matching D4a's "14-token
+vocabulary below."
 
 `scan_forward` is replaced by `scan_ahead`, not aliased: the token vocabulary is a fixed
 allow-list checked at the receiver (`collector.f10_command_receiver.ALLOWED_COMMANDS`), nothing
@@ -118,6 +131,11 @@ is how vocabularies rot.
 | `left`  | 9 → 11 | −60° | 30° |
 | `right` | 1 → 3  | +60° | 30° |
 | `full`  | 9 → 3  | 0° | 90° |
+
+Only the four new ownship-relative sectors get a bounds table -- the eight `Bearing` submenu
+items reuse the pre-existing compass-absolute `Sector` literal (`belief/attention.py`'s
+`_SECTOR_CENTER_DEG`/`_SECTOR_HALF_WIDTH_DEG`) unchanged, so they need no new bounds definition
+here.
 
 The spec's "there is no visibility to rear hemisphere" is consistent with `full` spanning only
 the forward hemisphere. Rear sectors are deliberately not offered.
