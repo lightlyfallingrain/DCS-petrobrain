@@ -42,6 +42,12 @@ Mission Interpreter and Petrobrain Runtime modules do not exist yet — do not c
 When asked to plan a feature or resolve a design question:
 
 1. **Understand the goal** — restate it in one sentence to confirm your understanding
+1a. **Weigh value against effort before committing to a design.** If the ask is technically
+    challenging and the effort looks disproportionate to what it actually buys the project, say so
+    *before* producing a full plan — the challenge, why the value is smaller than it appears, and
+    cheaper alternatives or a later milestone where it would cost far less. See `AGENTS.md`'s
+    "Effort/Value Check" for the full rule. This is the role best placed to catch it: the cost is
+    visible while designing, and invisible once implementation has started.
 2. **Identify unverified DCS-internals dependencies** — if the plan depends on DCS file formats, coordinate/projection behavior, scripting-API availability, or any other claim not already confirmed in `world-model/research/`, invoke the `investigator` agent to resolve it **before** finalizing the plan. Do this proactively — do not wait for the user to ask, and do not plan around an assumption you could instead verify. Skip this step only when the relevant fact is already recorded in `world-model/research/` or `docs/concept/`.
 3. **Identify affected modules** — list every module/file that will change or be created
 3a. **Before designing new behavior, systematically investigate existing mechanisms governing

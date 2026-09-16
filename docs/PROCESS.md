@@ -45,6 +45,10 @@ Prefer the existing stack. New dependencies must be justified (purpose, safety, 
 
 Stop and ask when: architectural tradeoff is unclear, tests require rewriting, new dependency is needed, or scope significantly changes.
 
+For a request that is technically challenging, also weigh value created against effort spent and
+flag a bad trade before building — see `AGENTS.md`'s "Effort/Value Check" for what to cover and
+when it applies (kept there, not restated here, because that file is always in context).
+
 ## Engineering Notes
 
 Maintain `NOTES.md` for non-obvious findings: bugs, perf bottlenecks, framework quirks, chosen solutions, workarounds.
