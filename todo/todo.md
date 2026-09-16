@@ -35,6 +35,42 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ## Cross-cutting / unscoped backlog
 
+- [ ] **Scan commands should drive naked-eye perception, and the naked-eye FOV is a 9K113 number.**
+  Raised 2026-09-16 from the first live F10 test of `f10-command-vocabulary`. Two coupled defects,
+  both in `body-layer`:
+
+  1. **A scan changes attention, not perception.** `perception/visibility.py`'s naked-eye gate uses
+     a fixed `NAKED_EYE_FOV_HALF_WIDTH_DEG` cone off ownship heading that no command steers, so
+     "scan left" registers an `AttentionArea` and a `PendingIntent` but does not change which
+     contacts are detected. It raises attention on things the fixed cone already found. The 9K113
+     trigger removed on 2026-09-16 (`fix/scan-naked-eye-not-9k113`) was the only observable effect
+     a scan had, and it was the wrong organ — so scan is now honest but perceptually inert until
+     this is built.
+  2. **The cone's value is borrowed from the wrong instrument.** `NAKED_EYE_FOV_HALF_WIDTH_DEG =
+     60.0` comes from the **9K113's angular limits** (user, 2026-09-16) — correct for the sight,
+     not for a human looking through cockpit glass. The constant's own docstring does not say this;
+     it justifies 60° only as "should model an actual scanning arc", contrasted against
+     `association.py`'s 90°, which reads as reasoned when it is actually inherited. The real
+     naked-eye/binocular arc is unestablished: `docs/concept/state-transitions.jpg` says
+     "visibility limits from cockpit: TBD" and only fixes that there is no rear-hemisphere
+     visibility. Note the mismatch this already causes — the command sectors `left` (−90..−30) and
+     `right` (+30..+90) each fall half outside the 60° cone, and `full` (±90) exceeds it entirely.
+
+  What the full version looks like, per the spec diagram: a steered cone that follows the commanded
+  sector for the task's duration, plus the diagram's default-state sweep (`ahead → left → ahead →
+  right`), dwell time per sector, and naked-eye vs binocular tier varying with how long Petrovich
+  has been looking somewhere. That needs a dwell/attention scheduler that does not exist. Fixing
+  (2) is a prerequisite for (1) being meaningful — steering a cone whose width is wrong just aims
+  the wrong shape.
+
+  Deliberately deferred by user direction 2026-09-16 ("write entry in backlog for full pattern
+  simulation, but for now simply remove 9K113 trigger"). Do not fix (2) alone as a quick constant
+  change either — the honest value is unknown, and replacing one unsourced number with another
+  unsourced number is not progress; it wants the same treatment as the other uncalibrated
+  perception constants (`visibility.py`'s tier thresholds), i.e. a real basis or a live-sortie
+  calibration.
+
+
 - [ ] **Stage 5 road junctions: pathological single-chunk stalls — CONFIRMED DATA-DEPENDENT.** Raised
   2026-09-16 from the `syria-full` build log validating `osm-landcover-optimization`. Stage 5 took
   2885 s, and a large share of that sat in a handful of chunks: chunk 13867→13868 took 331 s and

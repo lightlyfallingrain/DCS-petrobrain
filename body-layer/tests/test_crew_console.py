@@ -508,9 +508,14 @@ def test_scan_ahead_without_tasks_reports_not_configured(
     ]
 
 
-def test_scan_ahead_registers_a_task_and_triggers_a_live_search(
+def test_scan_ahead_registers_a_task_and_fires_no_dcs_effector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Scan is this project's own naked-eye/binocular perception, not DCS
+    Petrovich's 9K113 sight -- `docs/concept/state-transitions.jpg`'s
+    glossary keeps *Scan* and *Observ* as separate verbs, and a live test
+    on 2026-09-16 found Scan driving the 9K113. The task must still be
+    registered; only the effector call is gone."""
     store = ContactStore()
     tasks = TaskStore()
     client = _RecordingAircraftClient()
@@ -524,8 +529,10 @@ def test_scan_ahead_registers_a_task_and_triggers_a_live_search(
     lines = console.handle_f10_command("scan_ahead", now_sim=0.0)
 
     assert lines == ["Scanning ahead."]
-    assert client.triggered_modes == ["forward"]
-    # D5: a real PendingIntent is registered over an ownship-anchored area.
+    # Regression guard: re-wiring any DCS effector to Scan is the bug this
+    # fix removed. `Observ`/`Track` are where the 9K113 belongs.
+    assert client.triggered_modes == []
+    # A real PendingIntent is still registered over an ownship-anchored area.
     assert len(tasks.tasks) == 1
     task = tasks.tasks[0]
     assert task.status == "pending"
@@ -549,10 +556,13 @@ def test_scan_bearing_n_registers_a_task_with_the_absolute_sector(
     assert task.area.relative_sector is None
 
 
-def test_scan_registers_task_even_when_the_live_trigger_fails() -> None:
-    """D5's core fix: a failed live trigger must not prevent the task from
-    being registered -- the register-then-trigger ordering means the task
-    already exists by the time the trigger call (and its failure) happens."""
+def test_scan_never_calls_the_aircraft_layer_even_if_it_would_fail() -> None:
+    """Replaces a D5-era test that asserted a *failed* trigger still left
+    the task registered. There is no trigger on this path any more, so that
+    ordering guarantee has nothing to protect; what is worth pinning now is
+    the stronger property that the aircraft layer is not called at all. The
+    double is armed to raise, so any reintroduced call fails loudly here
+    rather than silently driving the 9K113 in flight."""
     store = ContactStore()
     tasks = TaskStore()
     client = _RecordingAircraftClient()
@@ -569,6 +579,7 @@ def test_scan_registers_task_even_when_the_live_trigger_fails() -> None:
     lines = console.handle_f10_command("scan_full", now_sim=0.0)
 
     assert lines == ["Scanning the full forward arc."]
+    assert client.triggered_modes == []
     assert len(tasks.tasks) == 1
     assert tasks.tasks[0].status == "pending"
 
@@ -593,23 +604,26 @@ def test_scan_then_cancel_task_actually_cancels_it() -> None:
 
     lines = console.handle_f10_command("cancel_task", now_sim=1.0)
 
-    assert lines == [f"cancelled task {task_id}"]
+    # Names what was stopped, never the task id (live-test finding
+    # 2026-09-16: the player heard "cancelled task TASK_4").
+    assert lines == ["Copy, stopping the scan ahead."]
+    assert task_id not in lines[0]
     assert tasks.get(task_id) is not None
     resolved = tasks.get(task_id)
     assert resolved is not None and resolved.status == "cancelled"
 
 
-def test_cancel_task_without_tasks_configured_reports_no_pending_task() -> None:
+def test_cancel_task_without_tasks_configured_reports_nothing_to_stop() -> None:
     console = CrewConsole(store=ContactStore())
-    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["no pending task"]
+    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["nothing to stop"]
 
 
-def test_cancel_task_reports_no_pending_task_when_none_pending() -> None:
+def test_cancel_task_reports_nothing_to_stop_when_none_pending() -> None:
     store = ContactStore()
     tasks = TaskStore()
     console = CrewConsole(store=store, tasks=tasks)
 
-    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["no pending task"]
+    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["nothing to stop"]
 
 
 def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
@@ -642,7 +656,10 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
 
     lines = console.handle_f10_command("cancel_task", now_sim=2.0)
 
-    assert lines == [f"cancelled task {task2.id}"]
+    # This task was built directly with no sector on its area, so the
+    # phrase falls back to the bare kind rather than naming a sector.
+    assert lines == ["Copy, stopping the scan."]
+    assert task2.id not in lines[0]
     resolved_task2 = tasks.get(task2.id)
     resolved_task1 = tasks.get(task1.id)
     assert resolved_task2 is not None and resolved_task2.status == "cancelled"
@@ -780,3 +797,24 @@ def test_watch_nearest_air_defence_ignores_a_presence_level_contact(
         "no air defence contact to watch"
     ]
     assert blob.attention == "normal"
+
+
+def test_cancel_task_names_a_bearing_scan_by_its_compass_word() -> None:
+    """The absolute-sector half of the cancel readback. `_describe_task_for_
+    speech` reads a different field for these (`area.sector`, not
+    `area.relative_sector`), so a relative-scan test alone would not cover
+    it."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
+    )
+
+    console.handle_f10_command("scan_bearing_se", now_sim=0.0)
+    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+
+    assert lines == ["Copy, stopping the scan southeast."]
