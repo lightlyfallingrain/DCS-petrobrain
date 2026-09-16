@@ -55,13 +55,31 @@ stale the moment the first reprojection after task creation happens. `tick`
 therefore never reads `task.area` directly for its containment check -- it
 re-resolves the *live* area by id first (`ContactStore.get_area
 (task.area.id)`), falling back to the captured reference only if that id is
-no longer registered (which should not happen for a still-`pending` task:
-`tools.cancel_task` always cancels the task before removing its area, so a
-pending task's area id stays live for as long as the task itself is
-pending). Two views of the same object silently drifting apart is a
-recurring failure mode in this codebase (see NOTES.md) -- the fallback
-above is a safety net for an invariant violation, not the intended path,
-and must never be relied on to paper over one."""
+no longer registered.
+
+That fallback is reachable, just not from anything a scan command does.
+`tools.cancel_task` cancels the task before removing its area, so the id
+stays live for as long as that task is pending -- but `cancel_task` is not
+the only way an area leaves the store. `tools.unwatch_area` (reached from
+`belief.console`'s `unwatch-area <id>` developer command) calls
+`ContactStore.remove_area` directly with no task awareness at all, and will
+happily strip the area out from under a still-`pending` scan task. The
+fallback then degrades to the captured reference, which for an
+ownship-anchored area means an unprojected one: a permissive circle at the
+position ownship held when the scan was ordered. That is exactly the
+too-permissive completion check this id-resolution exists to prevent, so
+the degradation is graceful only in the sense that it does not crash.
+
+Do not tighten `unwatch_area` into task-awareness on this note alone --
+it is a pre-existing `--console`-only debug path, and no F10 or crew-text
+command can reach it. It is written down because the honest statement is
+"reachable from one debug command, with a known bad-but-bounded outcome",
+not "cannot happen".
+
+Two views of the same object silently drifting apart is a recurring failure
+mode in this codebase (see NOTES.md) -- the fallback above is a safety net,
+not the intended path, and must never be relied on to paper over an
+invariant violation."""
 
 from __future__ import annotations
 
