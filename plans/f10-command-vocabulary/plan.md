@@ -71,7 +71,20 @@ angular filter. `sector` keeps its exact current meaning, so no existing caller 
 fixed trees with no free-text input. Every item is known at load time; no collector→Hook menu
 pushes, no `removeItemForGroup` traffic mid-flight. A dynamically-rebuilt contact list (the
 spec's `watch <unit> <where>`) is a materially bigger build with a new in-flight failure
-surface, and is left for after the first sorties.
+surface.
+
+**D4a — the richer command forms are SRS's, not F10's (user direction 2026-09-16).** The
+dynamic contact list above, waypoint/landmark-anchored scans, and the spec's
+`o'clock-and-distance` location form are *not* deferred pending sortie evidence — they are
+**rejected for F10 outright** and belong to BL-10/SRS, where free speech makes them natural and
+a fixed radio menu never could. "A somewhat simple set via F10 comms menu will suffice."
+
+This matters beyond this milestone in two ways. First, the 14-token vocabulary below is the
+*target* set, not a stepping stone toward a richer menu — nobody should later expand the F10
+tree on the "we deferred this until after the sorties" rationale, because that rationale is now
+void. Second, it sharpens BL-10's brief: SRS is not merely swapping BL-5a's typed stand-ins for
+a real adapter, it inherits the whole command half of
+`docs/concept/state-transitions.jpg` as its requirements input.
 
 **D5 — `scan_*` registers a real `PendingIntent` *and* fires the effector.** The current
 handler does only the latter. `belief.tools.scan_area` is pure and DCS-I/O free by design (its
