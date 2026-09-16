@@ -304,7 +304,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   surface that BL-10's SRS transport can follow.
 
 - [x] **F10 command vocabulary and ownship-relative sectors — command half done, merged
-  (`feature/f10-command-vocabulary`, `plans/f10-command-vocabulary/plan.md`).** Addresses "F10
+  2026-09-16, merge `1a9189c` (`feature/f10-command-vocabulary`,
+  `plans/f10-command-vocabulary/plan.md`).** Addresses "F10
   command refinement and specification" below for the command half of `docs/concept/
   state-transitions.jpg`'s spec — the vocabulary/geometry/wiring half, not the autonomous-behaviour
   half (deliberately out of scope, see that plan's Scope section). Widens the F10 menu from three
