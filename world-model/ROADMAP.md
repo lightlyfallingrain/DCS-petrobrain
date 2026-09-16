@@ -67,8 +67,12 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   `latakia-20km.sqlite` and confirmed the deviation's fix (MIN/MAX query prevents silent
   skipping of roads outside region bbox). Wall-clock time for Stage 5 may increase (roads
   are re-fetched once per chunk that overlaps them) but completion instead of OOM is the
-  fundamental win. User's next real `syria-full` rebuild (to be run separately after merge)
-  is the natural follow-up validation, not a DoD/merge gate. See `plans/junctions-streaming-fix/plan.md`,
+  fundamental win. **Follow-up validation now done:** the user's `syria-full` rebuild of
+  2026-09-15/16 completed Stage 5 in 2,885 s over 24,600 chunks (8,732 junctions kept) with no
+  OOM — the fix holds at full theatre scale. That run also exposed a separate problem the
+  streaming fix does not address: a handful of chunks take 330+ s each (~28 of the 48 minutes),
+  with nothing logged during a single slow chunk and a badly swinging ETA. Filed to
+  `todo/todo.md`. See `plans/junctions-streaming-fix/plan.md`,
   `plans/junctions-streaming-fix/review.md`, `plans/junctions-streaming-fix/dod-check.md`,
   and `plans/junctions-streaming-fix/implementation.md`.
 
@@ -161,7 +165,8 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   `plans/osm-classified-cache/dod-check.md` (PASS).
 
 - [x] **OSM ingest optimization + landcover split (no M-number — an optimization and data-model
-  change on M9, not a milestone; done 2026-09-16, branch `feature/osm-landcover-optimization`).**
+  change on M9, not a milestone; done 2026-09-16, merged 2026-09-16, merge `b9d7c17`, branch
+  `feature/osm-landcover-optimization`).**
   Two changes in one branch: a tags pre-filter step that shrinks the `.osm.pbf` before parsing
   (RUN.md §2.4), and a rework of what OSM contributes — `road` dropped from OSM entirely (DCS
   `.routes` is authoritative, per root CLAUDE.md), `landcover` and `coastline` added as new kinds,
