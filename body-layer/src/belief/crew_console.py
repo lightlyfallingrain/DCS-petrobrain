@@ -51,11 +51,13 @@ detector exists."""
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import RelativeSector, Sector
+from belief.classification import parent_class_of
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
@@ -143,6 +145,26 @@ _RELATIVE_SCAN_LABELS: dict[RelativeSector, str] = {
 #: half of the F10 scan vocabulary. Token suffixes match `Sector`'s own
 #: literals lowercased, so this table is also how the token string is
 #: parsed (no separate regex needed).
+#: The `OP_*` buckets that count as air defence for the F10 "Watch ->
+#: Nearest Air Defence" item, resolved via `belief.classification.
+#: parent_class_of`. Exactly the air-defence entries in
+#: `perception.object_model`'s profile table: the two gun systems
+#: (`OP_SPAAG` Shilka, `OP_ZU23`) and the two SAM tiers (`OP_SRSAM` for
+#: SA-3/8/9/13/15, `OP_MRSAM` for SA-6). Kept here rather than in
+#: `object_model` because "which classes a *crew command* treats as air
+#: defence" is a command-vocabulary question, not a property of the object
+#: model -- a future `watch armour` would add its own set the same way.
+_AIR_DEFENCE_OP_CLASSES: frozenset[str] = frozenset(
+    {"OP_SPAAG", "OP_ZU23", "OP_SRSAM", "OP_MRSAM"}
+)
+
+#: The classification lattice levels at which an air-defence claim is
+#: actually *known* rather than guessed -- `belief.classification.
+#: SpecificityLevel`'s `CLASS` and `TYPE`, lowercased as
+#: `tools._classification_facts` reports them.
+_KNOWN_CLASS_LEVELS: frozenset[str] = frozenset({"class", "type"})
+
+
 _BEARING_SCAN_TOKENS: dict[str, Sector] = {
     "scan_bearing_n": "N",
     "scan_bearing_ne": "NE",
@@ -279,6 +301,8 @@ class CrewConsole:
             )
         elif token == "watch_nearest":
             lines = self._handle_watch_nearest(now_sim)
+        elif token == "watch_nearest_air_defence":
+            lines = self._handle_watch_nearest(now_sim, air_defence_only=True)
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         else:
@@ -286,37 +310,97 @@ class CrewConsole:
         self._print(lines)
         return lines
 
-    def _nearest_contact_id(self, now_sim: float) -> str | None:
-        """The currently-nearest contact by range, for the F10 "Watch
-        Nearest" item. New glue logic, not a rediscovery of existing
-        selection logic -- `belief.tools`/`belief.attention` have no
-        "nearest by range" helper today, only `_highest_attention_contact`'s
+    def _believed_air_defence(self, facts: dict[str, object]) -> bool:
+        """Whether this contact is *believed* to be air defence -- the
+        predicate behind the F10 "Watch -> Nearest Air Defence" item.
+
+        **Reads the folded classification belief, never DCS ground truth**
+        (this project's no-omniscience invariant, `belief.percept`'s module
+        docstring). A contact is air defence here only if Petrovich's held
+        claim has actually resolved that far: the claim's lattice level must
+        be `class` or `type` (`_KNOWN_CLASS_LEVELS`), and its value must
+        resolve through `belief.classification.parent_class_of` into
+        `_AIR_DEFENCE_OP_CLASSES`.
+
+        A `presence`-level contact -- "something is there", the naked-eye
+        channel's `lowres` tier -- is therefore **never** matched, even if
+        the thing really is an SA-8. That is the correct behaviour, not a
+        gap to close later: the crew has no basis to call it air defence
+        yet, and answering "nearest air defence" with an unidentified blob
+        would be exactly the fabricated-knowledge failure the invariant
+        exists to prevent. The honest consequence is that this command can
+        report nothing while an unidentified SAM sits in plain sight."""
+        classification = facts.get("classification")
+        if not isinstance(classification, dict):
+            return False
+        level = classification.get("level")
+        if not isinstance(level, str) or level not in _KNOWN_CLASS_LEVELS:
+            return False
+        value = classification.get("value")
+        if not isinstance(value, str):
+            return False
+        return parent_class_of(value) in _AIR_DEFENCE_OP_CLASSES
+
+    def _nearest_contact_id(
+        self,
+        now_sim: float,
+        predicate: Callable[[dict[str, object]], bool] | None = None,
+    ) -> str | None:
+        """The currently-nearest contact by range, for the F10 "Watch"
+        items. New glue logic, not a rediscovery of existing selection
+        logic -- `belief.tools`/`belief.attention` have no "nearest by
+        range" helper today, only `_highest_attention_contact`'s
         attention-tier-then-phase selection, a different question. Requires
         `self.enrichment` (range comes from `facts["relative_now"]
         ["range_m"]`, BL-3) -- returns `None` when it is unset or no
-        contact has a resolvable range."""
+        contact has a resolvable range.
+
+        `predicate`, when given, restricts the search to contacts whose
+        `facts` it accepts (`_believed_air_defence` for the air-defence
+        item). It filters *before* the nearest-by-range comparison, so the
+        result is the nearest matching contact, not "the nearest contact,
+        if it happens to match"."""
         if self.enrichment is None:
             return None
         nearest_id: str | None = None
         nearest_range_m: float | None = None
         for result in get_contacts(self.store, now_sim, enrichment=self.enrichment):
-            relative_now = result["facts"].get("relative_now")
+            facts = result["facts"]
+            if predicate is not None and not predicate(facts):
+                continue
+            relative_now = facts.get("relative_now")
             if not isinstance(relative_now, dict):
                 continue
             range_m = relative_now.get("range_m")
             if not isinstance(range_m, float):
                 continue
             if nearest_range_m is None or range_m < nearest_range_m:
-                contact_id = result["facts"]["id"]
+                contact_id = facts["id"]
                 assert isinstance(contact_id, str)
                 nearest_range_m = range_m
                 nearest_id = contact_id
         return nearest_id
 
-    def _handle_watch_nearest(self, now_sim: float) -> list[str]:
-        contact_id = self._nearest_contact_id(now_sim)
+    def _handle_watch_nearest(
+        self, now_sim: float, *, air_defence_only: bool = False
+    ) -> list[str]:
+        """The F10 "Watch -> Nearest" and "Watch -> Nearest Air Defence"
+        items. The two differ only in the selection predicate; everything
+        after it -- `set_attention`, the readback -- is shared, since what
+        "watch this" *means* does not change with how the contact was
+        picked. The empty-result wording does differ: "no air defence
+        contact" is a materially different statement from "no contact",
+        and collapsing them would let the crew hear the wrong one."""
+        contact_id = self._nearest_contact_id(
+            now_sim,
+            predicate=self._believed_air_defence if air_defence_only else None,
+        )
         if contact_id is None:
-            return ["no contact to watch"]
+            return [
+                "no air defence contact to watch"
+                if air_defence_only
+                else "no contact to watch"
+            ]
         found = set_attention(self.store, contact_id, "watch", source="player")
         result = describe_contact(
             self.store, contact_id, now_sim, enrichment=self.enrichment

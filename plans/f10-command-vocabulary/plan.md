@@ -79,7 +79,7 @@ dynamic contact list above, waypoint/landmark-anchored scans, and the spec's
 **rejected for F10 outright** and belong to BL-10/SRS, where free speech makes them natural and
 a fixed radio menu never could. "A somewhat simple set via F10 comms menu will suffice."
 
-This matters beyond this milestone in two ways. First, the 14-token vocabulary below is the
+This matters beyond this milestone in two ways. First, the 15-token vocabulary below is the
 *target* set, not a stepping stone toward a richer menu — nobody should later expand the F10
 tree on the "we deferred this until after the sorties" rationale, because that rationale is now
 void. Second, it sharpens BL-10's brief: SRS is not merely swapping BL-5a's typed stand-ins for
@@ -111,12 +111,29 @@ degraded result if the trigger fails. This is also what makes `cancel_task` non-
     │       ├── West       -> scan_bearing_w
     │       └── Northwest  -> scan_bearing_nw
     ├── Watch
-    │   └── Nearest        -> watch_nearest
-    └── Cancel Task        -> cancel_task
+    │   ├── Nearest              -> watch_nearest
+    │   └── Nearest Air Defence  -> watch_nearest_air_defence
+    └── Cancel Task              -> cancel_task
 
-14 leaves total: 4 relative scans + 8 compass-absolute `Bearing` scans (the existing absolute
-`Sector` literal, unchanged) + `Watch: Nearest` + `Cancel Task` -- matching D4a's "14-token
-vocabulary below."
+15 leaves total: 4 relative scans + 8 compass-absolute `Bearing` scans (the existing absolute
+`Sector` literal, unchanged) + `Watch: Nearest`/`Watch: Nearest Air Defence` + `Cancel Task` --
+matching D4a's "15-token vocabulary below."
+
+**D6 — `Watch: Nearest Air Defence` filters on *believed* classification, never ground truth**
+(user request 2026-09-16; the spec's `watch <unit type> <where>` form, narrowed to the one unit
+type worth a dedicated button). A contact qualifies only if its folded classification claim has
+resolved to `class` or `type` level *and* `belief.classification.parent_class_of` puts it in
+`_AIR_DEFENCE_OP_CLASSES` -- the four air-defence buckets in `perception.object_model`'s profile
+table (`OP_SPAAG`, `OP_ZU23`, `OP_SRSAM`, `OP_MRSAM`).
+
+A `presence`-level contact ("something is there", the naked-eye channel's `lowres` tier) is
+therefore never matched, **even when the object really is a SAM**. That is the correct
+behaviour, not a gap: the crew has no basis to call an unidentified blob air defence, and
+answering the question anyway would be precisely the fabricated-knowledge failure the
+no-omniscience invariant exists to prevent. The honest consequence, which a sortie will feel: 
+this command can report "no air defence contact to watch" while an unidentified SAM sits in
+plain sight. The empty result is also worded distinctly from the plain `Watch: Nearest` item's,
+since "no air defence contact" and "no contact" are materially different statements.
 
 `scan_forward` is replaced by `scan_ahead`, not aliased: the token vocabulary is a fixed
 allow-list checked at the receiver (`collector.f10_command_receiver.ALLOWED_COMMANDS`), nothing
