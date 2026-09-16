@@ -48,3 +48,19 @@ reachable through that older path too — downgraded to optional since it's `--c
 pre-dates this milestone, and the fallback already degrades gracefully (has its own test). Useful
 process note: when a fix adds a "should not happen because X always does Y first" claim, check
 whether X is genuinely the *only* path to that state, not just the path this milestone added.
+
+**Follow-on commit `c05bbc1` (D6, "Watch -> Nearest Air Defence"), reviewed alone: APPROVED.**
+User-authored, asked to be reviewed adversarially. Verified the air-defence `OP_*` class set
+against `perception/object_model.py`'s actual profile table (not just the commit message) and
+`parent_class_of`'s no-op-for-class/resolve-for-type behaviour against `_op_class_of`'s real body,
+not its docstring. No-omniscience held (traced the whole `facts` chain back to `Contact.
+classification`, never `derived_world_position`/a DCS id). Found one test-quality nuance worth
+naming even in an APPROVED review: `test_..._ignores_a_presence_level_contact` would pass
+identically with the level gate deleted, because `parent_class_of(PRESENCE_CLASS)` already returns
+`None` on its own — the level gate is *intentionally* redundant defensive coding given the lattice's
+documented value-tied-to-level invariant, not a bug, but the test's docstring overclaims which
+mechanism it's isolating. Also caught a doc inconsistency `mypy`/tests can't catch: `WORKFLOW.md`
+bumped "14 tokens" to "15" but left its enumerated Watch-submenu list one item short of that count,
+inconsistent with the sibling sentence in `CLAUDE.md` updated correctly in the same commit —
+useful reminder that a count bump and a list bump are two separate edits and both need checking
+even when they're two lines apart in the same diff.

@@ -163,3 +163,93 @@ Full read of both new commits' diffs, independent gate re-run, and independent r
 both the fix (live vs. captured wedge divergence) and the fallback path's reachability via
 `unwatch-area` (traced, not executed against a live console session) — not a re-read of the
 commit message alone.
+
+---
+
+## Review of `c05bbc1` ("Add Watch -> Nearest Air Defence", D6)
+
+Scoped to this one commit, adding a 15th F10 token (`watch_nearest_air_defence`) and its
+`_believed_air_defence` predicate in `crew_console.py`. Re-ran both gates independently: body-layer
+525 passed (522 → +3, matching the three new tests), ruff format/check clean, `mypy src --strict`
+(from `body-layer/`) clean; aircraft-layer 109 passed unchanged, ruff format/check clean, `mypy src
+--strict` clean.
+
+**Air-defence class set — correct and complete.** `grep -oE 'op_class="[A-Z_0-9]+"'` against
+`perception/object_model.py` gives exactly `{OP_ARMORED, OP_INFANTRY, OP_MRSAM, OP_SHIP, OP_SPAAG,
+OP_SRSAM, OP_TRUCK, OP_ZU23}` plus the `OP_GROUPSOMETHING` presence default. `_AIR_DEFENCE_OP_CLASSES
+= {OP_SPAAG, OP_ZU23, OP_SRSAM, OP_MRSAM}` is exactly the air-defence subset of that table, matching
+the object model's own documented scope (it deliberately excludes towed AA/MANPADs — `OP_INFANTRY`
+for MANPAD teams, no bucket at all for towed ZPU-4/KS-19/S-60 — a pre-existing object-model
+limitation, not something this commit introduces or should be blamed for). Nothing missed, nothing
+wrongly included.
+
+**`parent_class_of` — correct resolver, assumption verified against `_op_class_of`'s actual body,
+not just its docstring.** `_op_class_of`: if `value` already starts with `"OP_"` and isn't the
+default sentinel, it's returned unchanged (a genuine no-op passthrough for a class-level value);
+otherwise it resolves through `object_model.profile_for(value)` (the type-level reporting-name
+lookup) to that profile's `op_class`. Both branches match the commit message's stated assumption
+exactly.
+
+**No-omniscience — holds.** Traced `_believed_air_defence(facts)` back to its source: `facts` comes
+from `get_contacts(...) -> _contact_facts -> _classification_facts(contact, now_sim)`, which reads
+`contact.classification` (the folded `ClassificationBelief`, built from percepts via
+`new_classification_belief`/`fold_classification`) — never `Observation.derived_world_position`, a
+DCS object id, or any other ground-truth field. No path to ground truth exists in this predicate.
+
+**The level-gate string contract — stable, not incidental.** `"class"`/`"type"` come from
+`tools._classification_facts`'s `classification.level.name.lower()`, which is `tools.py`'s own
+public `facts` contract (already relied on elsewhere, e.g. `CONTACT_CLASSIFICATION_CHANGED`
+event text) and already has a direct test (`test_tools.py:194`, `classification_facts["level"] ==
+"class"`). Coupling to it here is coupling to an established interface, not a private formatting
+detail — if the enum's `.name` ever changed, several other places would break first and loudly.
+
+**Predicate-before-range ordering and `watch_nearest`'s unchanged behaviour — both correct.**
+`_nearest_contact_id`'s loop does `if predicate is not None and not predicate(facts): continue`
+*before* the range comparison, so a nearer non-matching contact is skipped entirely rather than
+merely losing a tie-break — verified by reading the loop body directly. `watch_nearest`'s own
+dispatch still calls `_handle_watch_nearest(now_sim)` with `air_defence_only` defaulting `False`,
+so `predicate=None` and the loop's new guard is a no-op; the plain-watch code path is otherwise
+byte-for-byte what it was.
+
+**Test-helper default — preserves every existing caller.** `_observation_with_ownship_x` gained
+`classification_level: int = 2`, the same value every pre-existing call site already passed
+implicitly (the diff shows the old hardcoded `classification_level=2` simply became the default) —
+no existing caller's behaviour changes.
+
+**Test quality — two of three are solid; the third proves less than its docstring claims.**
+`test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact` and `..._reports_none_when_
+no_contact_is_air_defence` both genuinely exercise their claimed behaviour (verified: a predicate
+bug that dropped the "skip before range" ordering, or one that matched armor, would fail either
+test). `test_watch_nearest_air_defence_ignores_a_presence_level_contact`, however, would pass
+identically even if `_believed_air_defence`'s `level not in _KNOWN_CLASS_LEVELS` check were deleted
+outright: the fixture's `classification_raw=PRESENCE_CLASS` (`"OP_GROUPSOMETHING"`), and
+`parent_class_of("OP_GROUPSOMETHING")` already returns `None` on its own — `_op_class_of` falls
+through to `profile_for("OP_GROUPSOMETHING")`, which resolves to the default profile, which the
+function explicitly maps to `None` — regardless of what level the caller claims. This isn't a
+correctness bug: the module docstring's own design ("Level 1's one value... `PRESENCE_CLASS`...
+`_op_class_of` already maps this string to `None`... no special-casing needed") states plainly that
+value-shape is structurally tied to level in this lattice (`UNKNOWN` → `value=None`, `PRESENCE` →
+`value=PRESENCE_CLASS`), so the level gate is *intentionally* redundant defensive coding given that
+invariant, not dead weight introduced by mistake — and the `isinstance(value, str)` guard already
+catches the `UNKNOWN`/`None` case the same way. But as written, this one test's docstring claim ("no
+-omniscience boundary... must never be reported as air defence") is demonstrated by the value check,
+not the level check it's nominally there to pin down; a fixture that paired `level=PRESENCE` with a
+non-`PRESENCE_CLASS` value (if constructible) would be the test that actually isolates the level
+gate. Flagging this as the one "passes for an incidental reason" case asked about — optional, not
+required, since the behaviour under test is correct either way and the redundancy is a deliberate,
+documented lattice invariant rather than a latent bug.
+
+**One small doc gap, optional:** `aircraft-layer/WORKFLOW.md`'s deploy-note paragraph was bumped
+from "14 tokens" to "15 tokens" but its enumerated list right after still reads "**Watch** ->
+Nearest" only, not "Nearest / Nearest Air Defence" — inconsistent with the count on the same line
+and with `aircraft-layer/CLAUDE.md`'s correctly-updated equivalent sentence a few lines below in the
+same commit. One-line fix whenever that file is next touched.
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read of the commit's diff across every touched file, cross-checked the air-defence class set
+and `parent_class_of`'s behaviour directly against `perception/object_model.py` and
+`belief/classification.py`'s actual code (not the commit message's claims about them), and reran
+both subprojects' gates independently.
