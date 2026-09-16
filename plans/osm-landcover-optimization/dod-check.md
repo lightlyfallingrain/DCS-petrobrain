@@ -144,3 +144,71 @@ Added to `NOTES.md`:
 ## Process note (added by orchestrator)
 
 During the first review pass, three reviewer sub-agents launched for read-only checks each wrote and committed their own review (`18b724e`, `ed9b6fb`, `2bf71ab`, superseded by `c72ff16`), and one pushed a reviewer-memory commit (`a88efa2`) to `origin/main` without user approval. That push also published three local-main commits already pending (`2b1b81a`, `79235df`, `6074bf7`: power-line recon and its roadmap deferral). No force push, nothing rewritten, all content accurate. Reported to the user; later agent prompts explicitly forbid push, `main`, worktrees and sub-agents, and no further unauthorized git operations occurred. The review "4 required fixes" count includes the ROADMAP entry, which is done by the orchestrator at merge; the 3 code/doc fixes were resolved in `4b19c6d` and `638239a`.
+
+---
+
+## Addendum 2026-09-16: full `syria-full` build reviewed, one defect found and fixed
+
+The user's full-theatre build (Windows, this branch state, 2026-09-15 23:36 → 2026-09-16 00:36)
+was reviewed against the five deferred follow-ups above. Result: **one of the five answered, one
+partially, and a cache-invalidation defect found that the build log exposed.**
+
+### Defect: `CLASSIFIER_VERSION` not bumped for the hole fix (fixed on this branch)
+
+`638239a` changed `_ingest_ring`'s geometry output *and* removed a field from `OsmIngestStats`.
+The comment above `CLASSIFIER_VERSION` names both as conditions that must force a bump; the value
+stayed at `3`, identical to pre-fix `4b19c6d`. A pre-fix cache therefore matched
+`cache_meta_matches` and would have been served as a hit, reinstating exactly the invalid
+hole/outer-ring pairings the reviewer required be removed — and `store/reader.py`'s
+`_distance_to_feature` tests holes before the outer ring, so the consequence is a fabricated
+`nearest_feature` distance.
+
+That specific transition happens to raise `TypeError` in `load_cached_stats` instead (the fix also
+removed a stats field, and `OsmIngestStats(**json)` rejects the unknown key). That is an accident
+of this one change, not the invalidation mechanism working: any future `_ingest_ring` geometry
+change leaving stats fields untouched would be served silently. Bumped to `CLASSIFIER_VERSION = 4`
+with the rationale recorded inline. A mechanical guard against a repeat is filed in
+`todo/todo.md`.
+
+The user's own build is unaffected: `holes_dropped_not_contained_after_simplify=58` is present and
+non-zero with no `TypeError`, which is only possible if the cache was written by post-fix code.
+
+### Deferred follow-ups: status after the build
+
+| # | Item | Status |
+|---|---|---|
+| 1 | Full-theatre parse time + peak RSS | **Open.** The build hit a warm cache (`osm_cache: ... serving OSM overlay from cache, skipping the parse`); Stage 3's 21.3 s is a read of 99,243 cached rows, not a parse. Peak RSS is not logged anywhere. |
+| 2 | Largest post-simplification polygon | **Partial.** Aggregate 8,343,864 → 2,010,767 vertices (24.1%). The plan's tiling gate is on the largest *single* polygon, which needs a query against the store. Aggregate is reassuring; gate formally unanswered. |
+| 3 | `describe_position` p99 at full scale | **Open.** Not derivable from a build log. |
+| 4 | OSM cache invalidation on the real pbf | **Partial.** Hit path proven working on a real 2.25 GB-class input. Bump-forces-miss unproven — and per the defect above it did *not* hold for `4b19c6d`→`638239a` until this addendum's fix. |
+| 5 | §2.4 pre-filter node/way counts | **Open.** Upstream of this log. |
+
+Per user decision 2026-09-16, none of these block the merge: all are observability measurements,
+not correctness gates, consistent with the original DoD's reasoning and the `junctions-streaming-fix`
+precedent.
+
+### Real-data confirmation of the reviewer-required fix
+
+`holes_dropped_not_contained_after_simplify=58` — the hole/outer-ring containment failure fired 58
+times across 12,450 multipolygon relations at full theatre scale. Stage 6's small-extract
+validation never triggered it once. This is the strongest evidence produced by the build: a
+reviewer-found defect that only manifests at scale, caught by a counter added specifically because
+of the "never a silent drop" convention.
+
+### Findings outside this milestone's scope (filed to `todo/todo.md`)
+
+- Stage 5 road junctions: 2885 s total with single chunks taking 331 s and 337 s; ~28 of 48 minutes
+  in a few chunks. Confirms the known "nothing logged during a single slow chunk" gap from
+  `b260ee7`, and the ETA misleads badly during a stall.
+- Pipeline logs `[1/8]`..`[6/8]` then `Built` — `[7/8]`/`[8/8]` never appear.
+- SRTM header says 131 tiles, `SrtmIngestStats` says `tiles_used=79`; 47,484/639,216 points (7.4%)
+  void-or-uncovered.
+- Roadnet `bytes_covered` 2,249,111,022 / 2,251,462,776 = 99.90%, `sync_loss_events=220`.
+
+### Post-addendum verification
+
+`world-model` 474 passed, `body-layer` 506 passed, `aircraft-layer` 109 passed; ruff format, ruff
+check and `mypy --strict` clean in all three. `origin/main` merged into the branch (4 commits:
+power-line recon and its roadmap deferral, reviewer memory) with no conflict.
+
+**Verdict unchanged: PASS**, with the invalidation defect fixed rather than deferred.

@@ -132,7 +132,17 @@ SIMPLIFY_TOLERANCE_M = 30.0
 # byte-for-byte unchanged. A change to `OsmIngestStats`' fields also
 # requires a bump, because the cache stores it (`osm_cache.writer.
 # finalize_cache`/`osm_cache.reader.load_cached_stats`).
-CLASSIFIER_VERSION = 3
+#
+# 3 -> 4: the re-review fix to `_ingest_ring`'s hole-containment fallback
+# (commit 638239a) changed both this module's ring geometry output and
+# `OsmIngestStats`' fields, but landed without the bump this comment
+# requires. A `CLASSIFIER_VERSION = 3` cache can therefore hold the invalid
+# hole/outer-ring pairings that fix removed, and would have been served as
+# a hit. (That specific transition happens to raise `TypeError` in
+# `load_cached_stats` instead, because the fix also *removed* a stats field
+# -- an accident of that one change, not the invalidation working.) Bumped
+# retroactively so the key reflects the code that produced the rows.
+CLASSIFIER_VERSION = 4
 
 #: `place=*` values a *node* classifies as a named settlement point. Other
 #: `place` values (`hamlet`, `isolated_dwelling`, `suburb`, `neighbourhood`,
