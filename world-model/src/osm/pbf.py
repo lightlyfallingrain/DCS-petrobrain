@@ -44,18 +44,52 @@ with a single accumulate-everything callback and an effectively-unbounded
 batch size, so its existing public signature/behaviour is unchanged and
 `tests/test_osm_pbf.py`'s pre-existing correctness tests still pass as-is.
 See `plans/osm-streaming-ingest/plan.md`.
+
+**Area assembly (osm-landcover-optimization)**: `_FeatureCollector` also
+defines `area()`, which makes `apply_file` run libosmium's two-pass
+multipolygon manager automatically (fixture-verified against the installed
+pyosmium 4.3.1/libosmium 2.20.0 -- see the plan's "Context verified for this
+plan" section) -- no separate manager object, no second explicit pass coded
+here. A closed tagged way is delivered to *both* `way()` and `area()`; a
+`type=multipolygon`/`type=boundary` relation is delivered to `area()` only
+(never `way()`). Areas are buffered and flushed in their own batches
+(`_INGEST_BATCH_AREAS`, smaller than `_INGEST_BATCH_ELEMENTS` -- an area's
+ring geometry is far more vertex-heavy per object than a bare node/way).
+
+**`KeyFilter`**: `stream_features`/`load_features` pass
+`osmium.filter.KeyFilter(*_CLASSIFIER_TAG_KEYS)` to `apply_file`, restricting
+which elements reach `node()`/`way()`/`area()`/`relation()` at all (an
+untagged, or tagged-but-irrelevant, way/node is never handed to Python --
+fixture-verified: location resolution and multipolygon assembly are
+unaffected, they still see every element in the file regardless of the
+filter). This is the second, in-process filter alongside job (a)'s
+`osmium tags-filter` pre-filter (`tools/osm_tags_filter.txt`) -- additive,
+not a replacement; see the plan's mechanism-substitution note 3.
+
+**`relation()`'s `multipolygon_relations_seen` vs `relations_skipped`**: a
+relation reaching `relation()` (i.e. one whose own tags passed `KeyFilter`)
+is counted as `multipolygon_relations_seen` when its `type` tag is
+`"multipolygon"` or `"boundary"` -- libosmium's default area manager
+assembles both of those relation types into areas (fixture-verified: a
+`type=boundary` relation with a matching tag produced an `area()` call just
+like a `type=multipolygon` one). Any other relation type that still passed
+the tag filter (e.g. `type=site`) is not assembled into geometry by this
+module and is counted as `relations_skipped`, preserving the "unsupported
+construct, not a silent drop" precedent for that name.
 """
 
 import logging
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import osmium
+import osmium.filter
 import osmium.osm
 
-from osm.features import OsmFeatureSet, OsmNode, OsmWay
+from osm.features import OsmArea, OsmFeatureSet, OsmNode, OsmRing, OsmWay
 
 logger = logging.getLogger(__name__)
 
@@ -81,29 +115,68 @@ _PROGRESS_LOG_INTERVAL_ELEMENTS = 500_000
 # `syria-full` run.
 _INGEST_BATCH_ELEMENTS = 50_000
 
+# Same idea as `_INGEST_BATCH_ELEMENTS`, but for areas: deliberately smaller,
+# because one `OsmArea` can carry thousands of ring vertices (a large forest
+# or reservoir relation), unlike a node/way's handful of fields -- see
+# `plans/osm-landcover-optimization/plan.md` Implementation Plan step 1.
+_INGEST_BATCH_AREAS = 5_000
+
+# The tag keys `KeyFilter` restricts `node()`/`way()`/`area()`/`relation()`
+# callbacks to -- must stay a superset of everything `build.ingest_osm`'s
+# classifier reads (mirrors `tools/osm_tags_filter.txt`'s role for job (a)'s
+# `osmium tags-filter` pre-filter, one layer further in). Fixture-verified
+# not to affect location resolution or multipolygon assembly (see module
+# docstring).
+_CLASSIFIER_TAG_KEYS = ("landuse", "natural", "place", "waterway", "water")
+
+# Relation `type` tag values libosmium's default area manager assembles into
+# areas (fixture-verified against a `type=boundary` relation, not just
+# `type=multipolygon`) -- see the module docstring's `relation()` note.
+_AREA_ASSEMBLED_RELATION_TYPES = frozenset({"multipolygon", "boundary"})
+
+
+@dataclass(frozen=True)
+class StreamFeaturesResult:
+    """`stream_features`'s summary counts, returned once `apply_file` (and
+    the trailing `flush()`) has completed -- a small named result rather
+    than a growing positional tuple, since osm-landcover-optimization added
+    a third count alongside the two `M9`/streaming-ingest-fix already
+    returned."""
+
+    relations_skipped: int
+    ways_skipped_unresolved_nodes: int
+    multipolygon_relations_seen: int
+
 
 class _FeatureCollector(osmium.SimpleHandler):
-    """Buffers tagged nodes and geometry-resolved ways in bounded-size
-    batches during one `apply_file` pass, flushing each batch to a
-    caller-supplied callback once it reaches `batch_size`. Not part of the
-    public API -- use `stream_features` or `load_features`."""
+    """Buffers tagged nodes, geometry-resolved ways, and assembled areas in
+    bounded-size batches during one `apply_file` pass, flushing each batch
+    to a caller-supplied callback once it reaches its own batch size. Not
+    part of the public API -- use `stream_features` or `load_features`."""
 
     def __init__(
         self,
         on_nodes: Callable[[list[OsmNode]], None],
         on_ways: Callable[[list[OsmWay]], None],
+        on_areas: Callable[[list[OsmArea]], None],
         batch_size: int,
+        area_batch_size: int,
     ) -> None:
         super().__init__()
         self._on_nodes = on_nodes
         self._on_ways = on_ways
+        self._on_areas = on_areas
         self._batch_size = batch_size
+        self._area_batch_size = area_batch_size
         self._node_buffer: list[OsmNode] = []
         self._way_buffer: list[OsmWay] = []
+        self._area_buffer: list[OsmArea] = []
         self.relations_skipped = 0
+        self.multipolygon_relations_seen = 0
         self.ways_skipped_unresolved_nodes = 0
         self._nodes_kept_total = 0
         self._ways_kept_total = 0
+        self._areas_kept_total = 0
         self._elements_seen = 0
         self._started_at = time.monotonic()
 
@@ -113,10 +186,12 @@ class _FeatureCollector(osmium.SimpleHandler):
             return
         elapsed_s = time.monotonic() - self._started_at
         logger.info(
-            "osm.pbf: %d elements seen (%d tagged nodes, %d ways kept, %.1fs elapsed)",
+            "osm.pbf: %d elements seen (%d tagged nodes, %d ways kept, "
+            "%d areas kept, %.1fs elapsed)",
             self._elements_seen,
             self._nodes_kept_total,
             self._ways_kept_total,
+            self._areas_kept_total,
             elapsed_s,
         )
 
@@ -139,6 +214,12 @@ class _FeatureCollector(osmium.SimpleHandler):
 
     def way(self, w: osmium.osm.Way) -> None:
         self._log_progress_if_due()
+        if len(w.tags) == 0:
+            # Under `KeyFilter`, a way with no tags at all should never
+            # reach this callback (fixture-verified) -- this is a defensive
+            # backstop, not the primary filtering mechanism, so a way is
+            # never materialized into a `points` list for nothing.
+            return
         points: list[tuple[float, float]] = []
         for node_ref in w.nodes:
             if not node_ref.location.valid():
@@ -153,44 +234,91 @@ class _FeatureCollector(osmium.SimpleHandler):
             self._on_ways(self._way_buffer)
             self._way_buffer = []
 
+    def area(self, a: osmium.osm.Area) -> None:
+        # Not `_log_progress_if_due()`'d -- an area is always derived from a
+        # way or relation already counted via `way()`/`relation()` above;
+        # counting it again here would double-count `_elements_seen`.
+        rings: list[OsmRing] = []
+        for outer in a.outer_rings():
+            outer_points = [
+                (node_ref.location.lat, node_ref.location.lon) for node_ref in outer
+            ]
+            inner_rings = [
+                [(node_ref.location.lat, node_ref.location.lon) for node_ref in inner]
+                for inner in a.inner_rings(outer)
+            ]
+            rings.append(OsmRing(outer=outer_points, inners=inner_rings))
+        self._area_buffer.append(
+            OsmArea(
+                id=a.orig_id(),
+                from_way=a.from_way(),
+                tags={tag.k: tag.v for tag in a.tags},
+                rings=rings,
+            )
+        )
+        self._areas_kept_total += 1
+        if len(self._area_buffer) >= self._area_batch_size:
+            self._on_areas(self._area_buffer)
+            self._area_buffer = []
+
     def relation(self, r: osmium.osm.Relation) -> None:
         self._log_progress_if_due()
-        self.relations_skipped += 1
+        if r.tags.get("type") in _AREA_ASSEMBLED_RELATION_TYPES:
+            self.multipolygon_relations_seen += 1
+        else:
+            self.relations_skipped += 1
 
     def flush(self) -> None:
-        """Flush any leftover partial batch below `batch_size` for both
-        nodes and ways -- must be called once after `apply_file` returns, or
-        the tail of the file silently vanishes."""
+        """Flush any leftover partial batch below batch size for nodes,
+        ways, and areas -- must be called once after `apply_file` returns,
+        or the tail of the file silently vanishes."""
         if self._node_buffer:
             self._on_nodes(self._node_buffer)
             self._node_buffer = []
         if self._way_buffer:
             self._on_ways(self._way_buffer)
             self._way_buffer = []
+        if self._area_buffer:
+            self._on_areas(self._area_buffer)
+            self._area_buffer = []
 
 
 def stream_features(
     pbf_path: Path,
     on_nodes: Callable[[list[OsmNode]], None],
     on_ways: Callable[[list[OsmWay]], None],
+    on_areas: Callable[[list[OsmArea]], None],
     batch_size: int = _INGEST_BATCH_ELEMENTS,
-) -> tuple[int, int]:
+    area_batch_size: int = _INGEST_BATCH_AREAS,
+) -> StreamFeaturesResult:
     """Parse one pre-clipped, pre-merged `.osm.pbf` file at `pbf_path`,
-    calling `on_nodes`/`on_ways` with each batch of up to `batch_size` kept
-    nodes/ways as they are collected -- bounded peak memory, independent of
-    the file's total element count, unlike `load_features`'s old
-    accumulate-everything behaviour.
+    calling `on_nodes`/`on_ways`/`on_areas` with each batch of up to
+    `batch_size`/`area_batch_size` kept nodes/ways/areas as they are
+    collected -- bounded peak memory, independent of the file's total
+    element count, unlike `load_features`'s old accumulate-everything
+    behaviour.
 
     Uses `locations=True, idx="sparse_mem_array"` so pyosmium's C++ side
     resolves way-node geometry inline via a memory-efficient index, not a
-    naive Python dict -- see the module docstring.
+    naive Python dict -- see the module docstring. `filters=
+    [osmium.filter.KeyFilter(*_CLASSIFIER_TAG_KEYS)]` restricts which
+    elements reach the Python callbacks at all -- see the module docstring.
 
-    Returns `(relations_skipped, ways_skipped_unresolved_nodes)`.
+    Returns a `StreamFeaturesResult`.
     """
-    collector = _FeatureCollector(on_nodes, on_ways, batch_size)
-    collector.apply_file(str(pbf_path), locations=True, idx="sparse_mem_array")
+    collector = _FeatureCollector(
+        on_nodes, on_ways, on_areas, batch_size, area_batch_size
+    )
+    key_filter = osmium.filter.KeyFilter(*_CLASSIFIER_TAG_KEYS)
+    collector.apply_file(
+        str(pbf_path), locations=True, idx="sparse_mem_array", filters=[key_filter]
+    )
     collector.flush()
-    return collector.relations_skipped, collector.ways_skipped_unresolved_nodes
+    return StreamFeaturesResult(
+        relations_skipped=collector.relations_skipped,
+        ways_skipped_unresolved_nodes=collector.ways_skipped_unresolved_nodes,
+        multipolygon_relations_seen=collector.multipolygon_relations_seen,
+    )
 
 
 def load_features(pbf_path: Path) -> OsmFeatureSet:
@@ -207,12 +335,19 @@ def load_features(pbf_path: Path) -> OsmFeatureSet:
     """
     nodes: list[OsmNode] = []
     ways: list[OsmWay] = []
-    relations_skipped, ways_skipped_unresolved_nodes = stream_features(
-        pbf_path, nodes.extend, ways.extend, batch_size=sys.maxsize
+    areas: list[OsmArea] = []
+    result = stream_features(
+        pbf_path,
+        nodes.extend,
+        ways.extend,
+        areas.extend,
+        batch_size=sys.maxsize,
+        area_batch_size=sys.maxsize,
     )
     return OsmFeatureSet(
         nodes=nodes,
         ways=ways,
-        relations_skipped=relations_skipped,
-        ways_skipped_unresolved_nodes=ways_skipped_unresolved_nodes,
+        areas=areas,
+        relations_skipped=result.relations_skipped,
+        ways_skipped_unresolved_nodes=result.ways_skipped_unresolved_nodes,
     )

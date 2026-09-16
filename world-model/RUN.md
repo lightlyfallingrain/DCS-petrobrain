@@ -42,8 +42,9 @@ for line continuation. No `PYTHONPATH` is needed; the `tools/` scripts add `src`
 
 **Result:** one file, `syria-theatre.osm.pbf`: OpenStreetMap data for the seven countries the
 Syria theatre touches, cut down to the theatre's area and merged. Job (b) reads it via
-`--osm-pbf`. It adds settlement *outlines* (DCS only gives centre points) plus extra roads, water
-and named places. The world model still builds without it; you just lose that layer.
+`--osm-pbf`. It adds settlement *outlines* (DCS only gives centre points) plus water, landcover,
+coastline and named places -- **not roads**: DCS's own roadnet (`--routes`) is the sole road
+source (see §3.5). The world model still builds without it; you just lose that layer.
 
 Pick a working directory for the raw OSM files (e.g. `/mnt/f/dcs-world-model/syria/raw/osm`)
 and run everything below from there.
@@ -88,22 +89,41 @@ Turkey–Syria border).
 ```bash
 osmium merge syria-clipped.osm.pbf lebanon-clipped.osm.pbf israel-and-palestine-clipped.osm.pbf \
     jordan-clipped.osm.pbf iraq-clipped.osm.pbf turkey-clipped.osm.pbf cyprus-clipped.osm.pbf \
+    -o syria-theatre-unfiltered.osm.pbf --overwrite
+```
+
+### 2.4 Pre-filter to the tags the pipeline actually uses
+
+Cuts parse time and file size by dropping everything the classifier (`build/ingest_osm.py`)
+never looks at -- roads, buildings, and dozens of other tags. Filtered once, after the merge, so
+this is one command over one file; `osmium tags-filter` re-adds any way/node a kept relation
+references, so multipolygons (Lake Assad, city/town/village place areas) stay complete.
+
+```bash
+osmium tags-filter syria-theatre-unfiltered.osm.pbf \
+    -e <repo>/world-model/tools/osm_tags_filter.txt \
     -o syria-theatre.osm.pbf --overwrite
 ```
 
-### 2.4 Check it
+`<repo>` is this repository's root. Note: `tags-filter` holds about 2-3 GB of ID tables in memory
+regardless of input size -- fine on a 15 GB+ box, worth knowing before you run it on something
+smaller.
+
+### 2.5 Check it
 
 ```bash
 osmium fileinfo -e syria-theatre.osm.pbf | head -30
 ```
 
-Look at `Number of nodes` / `Number of ways`: tens of millions of nodes and several million ways
-(the 2026-09-11 extracts gave ~69 M nodes, ~8.2 M ways, 476 MB). Don't judge by the `Bounding box`
-line: `--strategy=smart` pulls in whole relations such as national borders, so the data box
-reaches far beyond the clip box (23.6–48.0°E, 27.0–40.0°N for that file). That's expected. The
-per-country `*-clipped.osm.pbf` files can be deleted afterwards.
+Filtered counts should be roughly a quarter of `syria-theatre-unfiltered.osm.pbf`'s node count and
+a few percent of its way count (the 2026-09-13 Syria/Turkey clips: ~13%/~29% of nodes, ~3%/~6% of
+ways survived the filter). Don't judge by the `Bounding box` line: `--strategy=smart` pulls in
+whole relations such as national borders, so the data box reaches far beyond the clip box
+(23.6–48.0°E, 27.0–40.0°N for the 2026-09-11 unfiltered extract). That's expected. The
+per-country `*-clipped.osm.pbf` files and `syria-theatre-unfiltered.osm.pbf` can be deleted
+afterwards.
 
-**Refreshing the data later:** redo 2.1–2.3. The next world-model build notices the new file
+**Refreshing the data later:** redo 2.1–2.4. The next world-model build notices the new file
 automatically (see "OSM cache" in 3.4) and re-processes it once.
 
 ---
@@ -155,7 +175,7 @@ no new line at all during a progress-logging stage is worth reporting.
 |---|---|---|
 | 1 | `towns.lua` | — (fast) |
 | 2 | `beacons.lua` | — (fast) |
-| 3 | `OSM overlay (.osm.pbf)` | `osm.pbf: N elements seen...` every ~10–20 s. Tens of minutes on the first run; low minutes when the OSM cache hits (3.4) |
+| 3 | `OSM overlay (.osm.pbf)` | `osm.pbf: N elements seen (N tagged nodes, N ways kept, N areas kept, Ns elapsed)` every ~10–20 s. Low minutes on the first run against the pre-filtered file (§2.4 cuts this from the old "tens of minutes" — a 20 km region's OSM stage measured well under a minute end to end during validation); low minutes when the OSM cache hits too (3.4) |
 | 4 | `Syria.routes (N bytes)` | — (reads the 2.25 GB road file) |
 | 5 | `road junctions` | `ingest_junctions: R roads, N chunks ...` once, then `chunk i/N (x%, J junctions kept, Ts elapsed, ~Ts remaining)` at most every 30 s. The remaining-time figure is rough, since chunk cost varies a lot |
 | 6 | `SRTM elevation grid (N tile(s))` | `ingest_srtm: row i/N (...)` every 50 rows |
@@ -190,8 +210,12 @@ for kind, n in conn.execute("SELECT kind, COUNT(*) FROM feature GROUP BY kind OR
 EOF
 ```
 
-`road`, `junction`, `settlement`, `named_place` and `water` should all be non-zero with every
-input given. Then spot-check a known place (section 4).
+`road`, `junction`, `settlement`, `named_place`, `water`, `landcover` and `coastline` should all be
+non-zero with every input given. **`road` is DCS-only** (`Syria.routes`) — OSM no longer
+contributes `road` rows at all (dropped from ingest entirely; DCS's own roadnet is authoritative).
+`landcover` (forest/orchard/fields/scrub/barren polygons) and `coastline` (the shoreline, as its
+own kind, separate from `water`) are new as of the osm-landcover-optimization milestone. Then
+spot-check a known place (section 4).
 
 ### Small regions
 
@@ -265,9 +289,11 @@ $V/ruff check world-model/src world-model/tests
 **A layer is missing from the built store**: its input flag was omitted or the path was wrong;
 missing inputs are reported as skipped, not errors. Check the summary and row counts (3.5).
 
-**Stage 3 takes tens of minutes again although nothing changed**: the OSM cache missed. Look for
-the `osm_cache:` log line; a changed `.osm.pbf`, a classifier update in the code, or a region
-change all invalidate it by design.
+**Stage 3 takes as long as a fresh parse again although nothing changed**: the OSM cache missed.
+Look for the `osm_cache:` log line; a changed `.osm.pbf`, a classifier update in the code, or a
+region change all invalidate it by design. (A fresh parse against the §2.4-filtered file is itself
+now low minutes, not the old "tens of minutes" against an unfiltered extract — but it's still far
+slower than a cache hit.)
 
 **Elevation looks wrong at a region's edge**: usually a real terrain-resolution mismatch between
 SRTM and DCS, not a bug. See `research/2026-09-03-m4-dcs-elevation.md`.

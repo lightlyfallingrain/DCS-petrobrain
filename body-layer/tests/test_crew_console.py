@@ -102,6 +102,8 @@ class _FakeDescription:
     nearest_water: _FakeInfo | None = None
     nearby_ridges: _FakeInfo | None = None
     nearby_valleys: _FakeInfo | None = None
+    inside_landcover: object | None = None
+    nearest_coastline: object | None = None
 
 
 def _enrichment_context(monkeypatch: pytest.MonkeyPatch) -> EnrichmentContext:

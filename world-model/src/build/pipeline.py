@@ -64,6 +64,7 @@ from build.ingest_osm import (
     CLASSIFIER_VERSION,
     OsmIngestStats,
     ingest_osm,
+    ingest_osm_areas_batch,
     ingest_osm_nodes_batch,
     ingest_osm_ways_batch,
 )
@@ -85,7 +86,7 @@ from build.region import RegionDefinition
 from dcs_data.beacons import parse_beacons_lua
 from dcs_data.towns import parse_towns_lua
 from elevation.dem import SrtmTile
-from osm.features import OsmNode, OsmWay, load_features
+from osm.features import OsmArea, OsmNode, OsmWay, load_features
 from osm.pbf import stream_features as stream_features_from_pbf
 from osm_cache.hashing import sha256_file
 from osm_cache.models import OsmCacheMeta, cache_meta_matches
@@ -237,8 +238,15 @@ def build_region(
     bounded to one spatial tile's worth of features at a time rather than
     the whole `road` layer in one `store.reader.all_features` call, since a
     `syria-full`-scale combined DCS+OSM road layer OOM'd the old whole-layer
-    approach. See `roadnet.junctions`'s module docstring for the
-    clustering/degree design and Stage 2's real-data validation numbers.
+    approach. **osm-landcover-optimization**: this stage now sees DCS-sourced
+    `road` features only -- no code change here (it still reads
+    `kind="road"`), but `build.ingest_osm` no longer classifies anything as
+    `road` at all (roads are dropped from OSM ingest entirely; DCS's own
+    `.routes` layer is authoritative), so junction detection's candidate
+    pool is smaller and single-provenance now. See `roadnet.junctions`'s
+    module docstring for the clustering/degree design and Stage 2's
+    real-data validation numbers (measured before this change, against a
+    combined DCS+OSM road layer).
 
     `srtm_tile_paths` (M7 Stage 2), if given and non-empty, ingests SRTM as
     the region's **primary** `elevation` grid (`provenance="srtm"`,
@@ -452,15 +460,32 @@ def build_region(
                         for f in way_features:
                             report.feature_counts[f.kind] += 1
 
-                    try:
-                        relations_skipped, ways_skipped_unresolved_nodes = (
-                            stream_features_from_pbf(
-                                osm_pbf_path, _flush_nodes, _flush_ways
-                            )
+                    def _flush_areas(areas: list[OsmArea]) -> None:
+                        area_features = ingest_osm_areas_batch(
+                            areas,
+                            region.theatre,
+                            region.centre_x,
+                            region.centre_z,
+                            region.half_extent_x_m,
+                            region.half_extent_z_m,
+                            osm_source_id,
+                            osm_stats,
                         )
-                        osm_stats.relations_skipped = relations_skipped
+                        insert_features(conn, area_features)
+                        insert_cached_features(cache_populate_conn, area_features)
+                        for f in area_features:
+                            report.feature_counts[f.kind] += 1
+
+                    try:
+                        result = stream_features_from_pbf(
+                            osm_pbf_path, _flush_nodes, _flush_ways, _flush_areas
+                        )
+                        osm_stats.relations_skipped = result.relations_skipped
+                        osm_stats.multipolygon_relations_seen = (
+                            result.multipolygon_relations_seen
+                        )
                         osm_stats.ways_skipped_unresolved_nodes = (
-                            ways_skipped_unresolved_nodes
+                            result.ways_skipped_unresolved_nodes
                         )
                         finalize_cache(
                             cache_populate_conn,

@@ -38,6 +38,15 @@ M8 adds the probe-then-base fallback control-point test
 outside`) plus the "absent probe store behaves exactly as before" and
 "no probe store at all reports coverage honestly" checks -- see
 `plans/m8-incremental-store/plan.md`'s Implementation Plan step 3.
+
+osm-landcover-optimization (Design D6) adds: `nearest_road_osm`'s removal
+(`PositionDescription` no longer has the attribute at all); `inside_landcover`'s
+smallest-area precedence and its "a point inside a hole with nothing else
+mapped there answers None" case; `inside_settlement`'s named-over-unnamed
+tie-break; and `nearest_coastline.side` on both sides of a synthetic
+coastline. These use their own small, self-contained fixture
+(`_fixture_conn_landcover`) rather than `_fixture_conn`'s ARP-centred one, to
+keep the new polygons' coordinates simple to reason about by hand.
 """
 
 import sqlite3
@@ -648,3 +657,227 @@ def test_describe_position_no_probe_store_reports_coverage_honestly(
 
     assert result.elevation.coverage == "no_probe_store"
     assert result.surface_type.coverage == "no_probe_store"
+
+
+# --- osm-landcover-optimization (Design D6) ---------------------------
+
+
+def _landcover_feature(
+    geometry: list[tuple[float, float]],
+    landcover_class: str,
+    area_m2: float,
+    inner_rings: list[list[list[float]]] | None = None,
+) -> StoredFeature:
+    tags: dict[str, object] = {"landcover_class": landcover_class, "area_m2": area_m2}
+    if inner_rings is not None:
+        tags["inner_rings"] = inner_rings
+    return StoredFeature(
+        kind="landcover",
+        geom_type="Polygon",
+        geometry=geometry,
+        name=None,
+        subtype=landcover_class,
+        tags=tags,
+        source_id=None,
+        source_ref=None,
+        provenance={"geometry": "osm", "name": "osm"},
+        confidence={"geometry": "medium", "name": "medium"},
+        position_uncertainty_m=1300.0,
+    )
+
+
+def _settlement_feature(
+    geometry: list[tuple[float, float]],
+    name: str | None,
+    subtype: str,
+    area_m2: float,
+) -> StoredFeature:
+    return StoredFeature(
+        kind="settlement",
+        geom_type="Polygon",
+        geometry=geometry,
+        name=name,
+        subtype=subtype,
+        tags={"area_m2": area_m2},
+        source_id=None,
+        source_ref=None,
+        provenance={"geometry": "osm", "name": "osm"},
+        confidence={"geometry": "medium", "name": "medium"},
+        position_uncertainty_m=1300.0,
+    )
+
+
+def _fixture_conn_landcover(tmp_path: Path) -> sqlite3.Connection:
+    """A small, self-contained store (not the ARP-centred `_fixture_conn`)
+    covering D6's new/changed `describe_position` fields: a forest polygon
+    with a hole and a smaller nested fields polygon (smallest-area
+    precedence + hole-with-nothing-mapped), an unnamed-but-larger settlement
+    overlapping a named-but-smaller one (named-over-unnamed precedence), and
+    a coastline line (side-of-line)."""
+    conn = open_for_build(tmp_path / "landcover_fixture.sqlite")
+    insert_region(
+        conn,
+        Region(
+            name="landcover-test-region",
+            theatre="Syria",
+            centre_x=0.0,
+            centre_z=0.0,
+            half_extent_x_m=10000.0,
+            half_extent_z_m=10000.0,
+            built_at="2026-09-13T00:00:00+00:00",
+        ),
+    )
+    insert_features(
+        conn,
+        [
+            # A 200x200 forest with a 30x30 hole at (60,60)-(90,90).
+            _landcover_feature(
+                geometry=[(0.0, 0.0), (200.0, 0.0), (200.0, 200.0), (0.0, 200.0)],
+                landcover_class="forest",
+                area_m2=40000.0,
+                inner_rings=[[[60.0, 60.0], [90.0, 60.0], [90.0, 90.0], [60.0, 90.0]]],
+            ),
+            # A small fields polygon nested inside the forest, away from
+            # the hole -- smaller area, should win at a point inside both.
+            _landcover_feature(
+                geometry=[(20.0, 20.0), (50.0, 20.0), (50.0, 50.0), (20.0, 50.0)],
+                landcover_class="fields",
+                area_m2=900.0,
+            ),
+            # A small, unnamed settlement...
+            _settlement_feature(
+                geometry=[
+                    (300.0, 300.0),
+                    (320.0, 300.0),
+                    (320.0, 320.0),
+                    (300.0, 320.0),
+                ],
+                name=None,
+                subtype="built_up",
+                area_m2=400.0,
+            ),
+            # ...nested inside a larger, but *named*, settlement -- named
+            # must win despite being the bigger polygon (D6's tie-break
+            # order is named-first, area second, not the reverse).
+            _settlement_feature(
+                geometry=[
+                    (280.0, 280.0),
+                    (360.0, 280.0),
+                    (360.0, 360.0),
+                    (280.0, 360.0),
+                ],
+                name="Big Village",
+                subtype="village",
+                area_m2=6400.0,
+            ),
+            StoredFeature(
+                kind="coastline",
+                geom_type="LineString",
+                geometry=[(2000.0, 400.0), (2000.0, 600.0)],
+                name=None,
+                subtype=None,
+                tags={},
+                source_id=None,
+                source_ref="way/1",
+                provenance={"geometry": "osm", "name": "osm"},
+                confidence={"geometry": "medium", "name": "medium"},
+                position_uncertainty_m=1300.0,
+            ),
+        ],
+    )
+    return conn
+
+
+def test_describe_position_has_no_nearest_road_osm_attribute() -> None:
+    """`nearest_road_osm` is removed from `PositionDescription` entirely --
+    not left present-but-always-`None` (Design D6's rationale: an
+    always-`None` field would read as "no OSM road nearby" rather than the
+    truth, "this layer does not exist by design")."""
+    from dataclasses import fields
+
+    from query.describe import PositionDescription
+
+    field_names = {f.name for f in fields(PositionDescription)}
+    assert "nearest_road_osm" not in field_names
+
+
+def test_describe_position_inside_landcover_prefers_smallest_area(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn_landcover(tmp_path)
+    try:
+        # (35, 35) is inside both the 200x200 forest and the nested 30x30
+        # fields polygon -- the smaller one must win.
+        result = describe_position(conn, "Syria", 35.0, 35.0)
+    finally:
+        conn.close()
+
+    assert result.inside_landcover is not None
+    assert result.inside_landcover.landcover_class == "fields"
+
+
+def test_describe_position_inside_landcover_hole_with_nothing_mapped_is_none(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn_landcover(tmp_path)
+    try:
+        # (75, 75) is inside the forest's hole (60,60)-(90,90) and outside
+        # every other mapped polygon -- None means "nothing mapped here",
+        # not "confirmed open ground" (module docstring's honesty note).
+        result = describe_position(conn, "Syria", 75.0, 75.0)
+    finally:
+        conn.close()
+
+    assert result.inside_landcover is None
+
+
+def test_describe_position_inside_settlement_prefers_named_over_unnamed(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn_landcover(tmp_path)
+    try:
+        # (310, 310) is inside both the small unnamed built-up polygon and
+        # the larger named "Big Village" polygon -- named wins even though
+        # it is the bigger of the two.
+        result = describe_position(conn, "Syria", 310.0, 310.0)
+    finally:
+        conn.close()
+
+    assert result.inside_settlement is not None
+    assert result.inside_settlement.name == "Big Village"
+
+
+def test_describe_position_nearest_coastline_side_both_sides(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn_landcover(tmp_path)
+    try:
+        west_of_line = describe_position(conn, "Syria", 1900.0, 500.0)
+        east_of_line = describe_position(conn, "Syria", 2100.0, 500.0)
+    finally:
+        conn.close()
+
+    assert west_of_line.nearest_coastline is not None
+    assert east_of_line.nearest_coastline is not None
+    assert west_of_line.nearest_coastline.side != east_of_line.nearest_coastline.side
+    assert {
+        west_of_line.nearest_coastline.side,
+        east_of_line.nearest_coastline.side,
+    } == {
+        "sea",
+        "land",
+    }
+
+
+def test_describe_position_nearest_coastline_absent_beyond_search(
+    tmp_path: Path,
+) -> None:
+    conn = _fixture_conn_landcover(tmp_path)
+    try:
+        # Well beyond the 30km default search radius from the coastline at
+        # x=2000.
+        result = describe_position(conn, "Syria", -40000.0, -40000.0)
+    finally:
+        conn.close()
+
+    assert result.nearest_coastline is None
