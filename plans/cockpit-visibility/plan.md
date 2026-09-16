@@ -87,7 +87,38 @@ constraints that intersect:
 Effective visibility is the intersection. Building either as though it subsumes the other produces
 a mess; they must stay separate predicates that compose.
 
-## Open questions for the user
+## Decisions (user, 2026-09-17)
+
+**D5 — Symmetric mask.** One table, mirrored across the centreline. The left station is genuinely
+more obstructed than the right in the screenshots, but modelling that would make `scan_left` and
+`scan_right` differ in detection performance, and symmetric is adequate at this coarseness. If a
+sortie ever makes the asymmetry feel wrong, widening the table is the cheap change — the mechanism
+does not assume symmetry, only the populated values do.
+
+**D6 — Per-station mask.** The mask is keyed by crew station rather than being global, even though
+only the co-pilot is populated now. Petrovich is the co-pilot; the pilot screenshots
+(`...135/138/142/152`) exist and a pilot/wingman perspective is a live future direction
+(`todo/todo.md`'s parked "wingman brain"). Keying it now costs one dict level; retrofitting a
+station dimension through a gate that assumed a single global mask costs much more.
+
+**D7 — Angles derived from the screenshots, corrected for attitude.** Accepted as a first pass at
+roughly ±10-15°, per D3's mechanism/calibration split.
+
+**The attitude correction is not optional bookkeeping — it biases every number by a constant.** The
+screenshots were taken at roughly **5° nose down** (typical cruise, user 2026-09-17). The mask is
+body-relative (D1), so its angles must be measured from the **airframe boresight** — the centre of
+the view — not from the visible horizon. At 5° nose down the world horizon sits ~5° *above*
+boresight in the image, so any angle read off relative to the horizon line is 5° too shallow as a
+body-frame depression limit, uniformly, in every screenshot.
+
+Read from image centre where possible. Where the horizon is the only usable reference, subtract the
+5° pitch explicitly and say so in the derivation note. Record the assumed pitch alongside the table
+so a future re-derivation from fresh captures at a different attitude can correct consistently
+rather than silently inheriting this one's.
+
+## Open questions — all resolved
+
+Kept for the record; see D5-D7 above.
 
 1. **Left/right asymmetry.** The **left** view (`...105`) looks materially more obstructed than the
    right (`...59`). Model the asymmetry, or keep one symmetric mask for now? Symmetric is simpler
