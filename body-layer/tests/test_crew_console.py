@@ -484,37 +484,113 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
     assert near_contact.attention == "watch"
 
 
-def test_scan_forward_without_aircraft_client_reports_not_configured() -> None:
+def test_scan_ahead_without_enrichment_reports_not_configured() -> None:
     console = CrewConsole(store=ContactStore())
-    assert console.handle_f10_command("scan_forward", now_sim=0.0) == [
-        "no aircraft-layer connection configured"
+    assert console.handle_f10_command("scan_ahead", now_sim=0.0) == [
+        "no world-model connection configured"
     ]
 
 
-def test_scan_forward_triggers_a_live_search_via_aircraft_client() -> None:
+def test_scan_ahead_without_tasks_reports_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_f10_command("scan_ahead", now_sim=0.0) == [
+        "no task store configured"
+    ]
+
+
+def test_scan_ahead_registers_a_task_and_triggers_a_live_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    tasks = TaskStore()
     client = _RecordingAircraftClient()
     console = CrewConsole(
-        store=ContactStore(),
+        store=store,
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
         aircraft_client=client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+    lines = console.handle_f10_command("scan_ahead", now_sim=0.0)
 
+    assert lines == ["Scanning ahead."]
     assert client.triggered_modes == ["forward"]
-    assert lines == ["scanning forward"]
+    # D5: a real PendingIntent is registered over an ownship-anchored area.
+    assert len(tasks.tasks) == 1
+    task = tasks.tasks[0]
+    assert task.status == "pending"
+    assert task.area.relative_sector == "ahead"
 
 
-def test_scan_forward_degrades_gracefully_on_a_failed_live_trigger() -> None:
+def test_scan_bearing_n_registers_a_task_with_the_absolute_sector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_f10_command("scan_bearing_n", now_sim=0.0)
+
+    assert lines == ["Scanning north."]
+    task = tasks.tasks[0]
+    assert task.area.sector == "N"
+    assert task.area.relative_sector is None
+
+
+def test_scan_registers_task_even_when_the_live_trigger_fails() -> None:
+    """D5's core fix: a failed live trigger must not prevent the task from
+    being registered -- the register-then-trigger ordering means the task
+    already exists by the time the trigger call (and its failure) happens."""
+    store = ContactStore()
+    tasks = TaskStore()
     client = _RecordingAircraftClient()
     client.raise_on_trigger = True
     console = CrewConsole(
-        store=ContactStore(),
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
         aircraft_client=client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+    lines = console.handle_f10_command("scan_full", now_sim=0.0)
 
-    assert lines == ["scan trigger failed"]
+    assert lines == ["Scanning the full forward arc."]
+    assert len(tasks.tasks) == 1
+    assert tasks.tasks[0].status == "pending"
+
+
+def test_scan_then_cancel_task_actually_cancels_it() -> None:
+    """The `cancel_task` docstring's own claim: before this milestone's D5
+    fix, `--crew-text` mode had no command path that ever registered a
+    task, so `cancel_task` was dead in practice. A `scan_*` token now
+    registers one, and `cancel_task` finds it."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
+    )
+
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    task_id = tasks.tasks[0].id
+
+    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+
+    assert lines == [f"cancelled task {task_id}"]
+    assert tasks.get(task_id) is not None
+    resolved = tasks.get(task_id)
+    assert resolved is not None and resolved.status == "cancelled"
 
 
 def test_cancel_task_without_tasks_configured_reports_no_pending_task() -> None:
@@ -567,16 +643,20 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
     assert resolved_task1 is not None and resolved_task1.status == "pending"
 
 
-def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel() -> None:
+def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client = _RecordingAircraftClient()
     overlay_client = FakeOverlayClient()
     console = CrewConsole(
         store=ContactStore(),
+        tasks=TaskStore(),
+        enrichment=_enrichment_context(monkeypatch),
         aircraft_client=client,  # type: ignore[arg-type]
         overlay_client=overlay_client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_forward", now_sim=0.0)
+    lines = console.handle_f10_command("scan_ahead", now_sim=0.0)
 
-    assert lines == ["scanning forward"]
-    assert overlay_client.pushed == ["scanning forward"]
+    assert lines == ["Scanning ahead."]
+    assert overlay_client.pushed == ["Scanning ahead."]

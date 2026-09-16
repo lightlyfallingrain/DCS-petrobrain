@@ -110,11 +110,13 @@ overlay copy only, never on the printed/stdout copy) — verbatim, i.e. exactly 
 would actually say, a radio-callout feed rather than a debug mirror. `--console` and `--crew-text`
 stay mutually exclusive with each other; `--overlay` is valid alongside either.
 
-Add `--f10-commands` alongside `--crew-text` (`plans/f10-crew-commands/plan.md`) to poll and
-dispatch player-selected DCS F10 radio-menu commands — Watch Nearest / Scan Forward / Cancel Task —
-through `CrewConsole.handle_f10_command`, the same output funnel typed/spoken text already goes
-through. Only meaningful with `--crew-text`; defaults off, a true no-op when absent, same additive
-posture as `--overlay`. See `aircraft-layer/WORKFLOW.md`'s "Deploy the F10 commands Hook script"
+Add `--f10-commands` alongside `--crew-text` (`plans/f10-crew-commands/plan.md`, vocabulary widened
+by `plans/f10-command-vocabulary/plan.md`) to poll and dispatch player-selected DCS F10 radio-menu
+commands — the 14-token scan/watch/cancel vocabulary (`Scan` -> `Ahead`/`Left`/`Right`/`Full`/eight
+compass `Bearing` items, `Watch` -> `Nearest`, `Cancel Task`) — through `CrewConsole.
+handle_f10_command`, the same output funnel typed/spoken text already goes through. Only meaningful
+with `--crew-text`; defaults off, a true no-op when absent, same additive posture as `--overlay`.
+See `aircraft-layer/WORKFLOW.md`'s "Deploy the F10 commands Hook script"
 section for the DCS-side half of this channel (including its `autoexec.cfg` opt-in) — UNVERIFIED
 against a live DCS session as of authorship.
 
@@ -431,20 +433,29 @@ against a live DCS session as of authorship.
   `belief.speech` produced, since the prefix is an overlay-display concern, not a change to what
   was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
   `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
-  `tasks: TaskStore | None` + `handle_f10_command` (`plans/f10-crew-commands/plan.md`) are
+  `tasks: TaskStore | None` + `handle_f10_command` (`plans/f10-crew-commands/plan.md`, vocabulary
+  widened to 14 tokens and made non-hollow by `plans/f10-command-vocabulary/plan.md` Stage 6) are
   `CrewConsole`'s second, non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
   loop drains player-selected DCS F10 radio-menu tokens (`aircraft_client.get_f10_commands`,
   `GET /f10_commands/poll`) and dispatches each through `handle_f10_command`, the same `_print`
-  funnel `handle_line`/`drain_events` already use. Three tokens: `watch_nearest` (a new
+  funnel `handle_line`/`drain_events` already use, via two lookup tables (`_RELATIVE_SCAN_TOKENS`,
+  `_BEARING_SCAN_TOKENS`) rather than a 14-branch if/elif. `watch_nearest` (a new
   `_nearest_contact_id` helper — nearest contact by `facts["relative_now"]["range_m"]`, requires
   `enrichment` — plus `set_attention`; its readback, `speech.render_watch_nearest_readback`, speaks
-  `"Watching <contact report>."` via `_contact_report_text` since the player named no id), `scan_forward` (the bare
-  `aircraft_client.trigger_petrovich_search("forward")` trigger, not `belief.tools.scan_area` — an
-  F10 button has no geometry/reason to supply one), `cancel_task` (cancels the most-recently-created
-  still-`pending` task in `self.tasks`, regardless of source — currently always reports "no pending
-  task" in `--crew-text` sessions, since no command path there creates a `PendingIntent` yet).
-  `tasks` mirrors `aircraft_client`'s own reserved-field pattern; `logger.py` wires it to the same
-  `ConsolePerceptionRunner.tasks` instance its poll loop already ticks.
+  `"Watching <contact report>."` via `_contact_report_text` since the player named no id) is
+  unchanged. `scan_ahead`/`scan_left`/`scan_right`/`scan_full` and the eight `scan_bearing_*`
+  tokens replace the old hollow `scan_forward` (D4 — not kept as a synonym): `_handle_scan`
+  registers a real `belief.tools.scan_area` `PendingIntent` over an ownship-anchored (relative
+  tokens) or compass-absolute (bearing tokens) `AttentionArea` centered on ownship's own position
+  at radius `F10_SCAN_RADIUS_M` (an uncalibrated placeholder, same debt class as
+  `DEFAULT_SCAN_DEADLINE_S`), *then* fires `aircraft_client.trigger_petrovich_search("forward")`
+  wrapped in its own `try`/`except` (D5) — a failed live trigger no longer prevents the task from
+  being registered, which is also what makes `cancel_task` (cancels the most-recently-created
+  still-`pending` task in `self.tasks`, regardless of source) non-hollow in `--crew-text` sessions
+  for the first time. Each scan speaks a fixed readback (`speech.render_scan_readback`,
+  `"Scanning <sector label>."`). `tasks` mirrors `aircraft_client`'s own reserved-field pattern;
+  `logger.py` wires it to the same `ConsolePerceptionRunner.tasks` instance its poll loop already
+  ticks.
 - `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
   Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
   Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into

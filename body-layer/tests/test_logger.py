@@ -37,6 +37,7 @@ from logger import (
     format_observation_line,
 )
 from perception import association
+from perception.geometry import GeoPosition
 from perception.source import Observation, OwnshipState
 from store.writer import open_for_build
 
@@ -596,3 +597,33 @@ def test_repl_thread_builds_its_own_enrichment_connection(
     assert len(lines) == 2
     for line in lines:
         assert "requires live ownship telemetry" not in line
+
+
+def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
+    # `plans/f10-command-vocabulary/plan.md` D2/D3: `run_once` must
+    # re-project every ownship-anchored area onto *this* tick's telemetry
+    # before ingesting/ticking contacts, so a scan area actually tracks the
+    # nose rather than lagging one poll behind.
+    telemetry = _telemetry_dict()  # heading_true_rad=0.0, x=5000.0, z=8000.0
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    store = ContactStore()
+    area = store.add_area(
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=5000.0,
+        level="watch",
+        source="scan_area",
+        relative_sector="ahead",
+    )
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([_make_observation(ownship)])],
+        store=store,
+    )
+
+    runner.run_once()
+
+    projected = next(a for a in store.areas if a.id == area.id)
+    assert projected.center == GeoPosition(
+        x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
+    )
+    assert projected.wedge_deg == (0.0, 30.0)

@@ -186,6 +186,17 @@ def render_readback(attention_level: Attention, contact_id: str) -> OutgoingSpee
     return OutgoingSpeech(text=text, template="readback")
 
 
+def render_scan_readback(sector_label: str) -> OutgoingSpeech:
+    """The F10 "Scan" family's readback (`plans/f10-command-vocabulary/
+    plan.md` Stage 6) -- fixed phrasing, mirroring `render_readback`'s "fast
+    and identical every time" posture rather than `render_watch_nearest_
+    readback`'s contact-derived one, since a scan has no contact to
+    describe yet. `sector_label` is a plain human phrase for the sector
+    scanned (`"ahead"`, `"to the left"`, `"north"`, ...) -- `crew_console.py`
+    owns the token -> label mapping, this function only formats it."""
+    return OutgoingSpeech(text=f"Scanning {sector_label}.", template="readback")
+
+
 def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
     """The F10 "Watch Nearest" readback (`plans/f10-crew-commands/plan.md`).
     Unlike a typed `watch <id>`, the player named no contact, so the readback

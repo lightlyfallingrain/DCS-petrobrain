@@ -782,3 +782,50 @@ def test_unacknowledged_events_and_acknowledge_event_round_trip() -> None:
 def test_acknowledge_event_returns_false_for_unknown_id() -> None:
     store = ContactStore()
     assert store.acknowledge_event("EVENT_999") is False
+
+
+def test_add_area_rejects_sector_and_relative_sector_together() -> None:
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    try:
+        store.add_area(
+            center=center,
+            radius_m=500.0,
+            level="watch",
+            source="console",
+            sector="N",
+            relative_sector="ahead",
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for sector + relative_sector")
+
+
+def test_reproject_relative_areas_updates_only_relative_areas() -> None:
+    store = ContactStore()
+    fixed = store.add_area(
+        center=GeoPosition(x=500.0, z=0.0, alt_m=0.0),
+        radius_m=1000.0,
+        level="watch",
+        source="console",
+        sector="N",
+    )
+    relative = store.add_area(
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=1000.0,
+        level="watch",
+        source="scan_area",
+        relative_sector="ahead",
+    )
+
+    ownship_position = GeoPosition(x=100.0, z=200.0, alt_m=50.0)
+    updated = store.reproject_relative_areas(ownship_position, heading_true_deg=90.0)
+
+    assert updated == 1
+    # The fixed area is untouched.
+    assert store.areas[0] == fixed
+    # The relative area was re-anchored onto ownship's new pose.
+    projected_relative = next(a for a in store.areas if a.id == relative.id)
+    assert projected_relative.center == ownship_position
+    assert projected_relative.wedge_deg == (90.0, 30.0)
