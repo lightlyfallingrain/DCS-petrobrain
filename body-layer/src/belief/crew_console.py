@@ -55,6 +55,7 @@ from dataclasses import dataclass, field
 from typing import TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.attention import RelativeSector, Sector
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
@@ -66,12 +67,20 @@ from belief.speech import (
     UrgentCall,
     render_contact_report,
     render_readback,
+    render_scan_readback,
     render_watch_nearest_readback,
     route_event,
 )
-from belief.tasks import TaskStore
-from belief.tools import cancel_task, describe_contact, get_contacts, set_attention
+from belief.tasks import PendingIntent, TaskStore
+from belief.tools import (
+    cancel_task,
+    describe_contact,
+    get_contacts,
+    scan_area,
+    set_attention,
+)
 from belief.utterance import PartialParse, PlayerUtterance, parse_utterance
+from perception.geometry import GeoPosition
 
 #: Printed once at session startup (`logger.py`'s `main()`), mirroring
 #: `belief.console.HELP_TEXT`'s role for the debug console.
@@ -99,6 +108,71 @@ _UTTERANCE_ID_PREFIX = "UTTERANCE"
 #: so a plain text prefix is the only available distinction.
 _URGENT_OVERLAY_PREFIX = "!! "
 
+#: The radius (meters) an F10 scan command's `AttentionArea`/`PendingIntent`
+#: is registered with (`plans/f10-command-vocabulary/plan.md` Stage 6). An
+#: F10 button carries no player-supplied geometry the way a typed
+#: `scan-area <bearing> <range> <radius> <reason>` command does (`console.py`'s
+#: `_handle_scan_area`), so this is an uncalibrated placeholder pending live
+#: sortie feedback -- same debt class as `belief.tools.
+#: DEFAULT_SCAN_DEADLINE_S` and `perception.visibility.py`'s tier constants,
+#: not a derived or justified figure.
+F10_SCAN_RADIUS_M: float = 3000.0
+
+#: `scan_ahead`/`scan_left`/`scan_right`/`scan_full` -> `belief.attention.
+#: RelativeSector` -- the ownship-relative half of the F10 scan vocabulary
+#: (`plans/f10-command-vocabulary/plan.md` D1/D4). Also doubles as the
+#: readback's spoken sector phrase.
+_RELATIVE_SCAN_TOKENS: dict[str, RelativeSector] = {
+    "scan_ahead": "ahead",
+    "scan_left": "left",
+    "scan_right": "right",
+    "scan_full": "full",
+}
+
+#: Spoken phrasing for `_RELATIVE_SCAN_TOKENS`' sectors -- `render_scan_
+#: readback`'s `sector_label` argument. `"full"` reads as "the full forward
+#: arc" rather than the bare token, since "scanning full" alone reads oddly.
+_RELATIVE_SCAN_LABELS: dict[RelativeSector, str] = {
+    "ahead": "ahead",
+    "left": "to the left",
+    "right": "to the right",
+    "full": "the full forward arc",
+}
+
+#: `scan_bearing_n`/... -> `belief.attention.Sector` -- the compass-absolute
+#: half of the F10 scan vocabulary. Token suffixes match `Sector`'s own
+#: literals lowercased, so this table is also how the token string is
+#: parsed (no separate regex needed).
+_BEARING_SCAN_TOKENS: dict[str, Sector] = {
+    "scan_bearing_n": "N",
+    "scan_bearing_ne": "NE",
+    "scan_bearing_e": "E",
+    "scan_bearing_se": "SE",
+    "scan_bearing_s": "S",
+    "scan_bearing_sw": "SW",
+    "scan_bearing_w": "W",
+    "scan_bearing_nw": "NW",
+}
+
+#: Spoken phrasing for `_BEARING_SCAN_TOKENS`' sectors -- full compass words,
+#: not the two/three-letter literal, matching `_RELATIVE_SCAN_LABELS`'
+#: register.
+_SECTOR_SCAN_LABELS: dict[Sector, str] = {
+    "N": "north",
+    "NE": "northeast",
+    "E": "east",
+    "SE": "southeast",
+    "S": "south",
+    "SW": "southwest",
+    "W": "west",
+    "NW": "northwest",
+}
+
+#: Every F10 scan command's fixed `belief.tools.scan_area` reason (Stage 6)
+#: -- an F10 button supplies no free-text justification the way a typed
+#: `scan-area` command's trailing `reason` argument does.
+_F10_SCAN_REASON = "F10 scan command"
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,23 +194,21 @@ class CrewConsole:
     #: BL-6's `Console.aircraft_client` equivalent (`plans/
     #: bl6-commands-inspect-adapt/plan.md`), wired by `logger.py`'s
     #: `main()` in the `--crew-text` branch for parity with `--console`'s
-    #: own wiring. **Reserved, not yet consumed by any command here** -- no
-    #: player-facing `scan_area`-equivalent utterance exists this
-    #: milestone (`belief.console.Console`'s `scan-area`/`task-status`/
-    #: `cancel-task` are debug-console-only), so this field currently has
-    #: no reader. Kept as a `None`-default optional field anyway, matching
-    #: `enrichment`'s own None-means-unchanged pattern, so a future
-    #: player-facing scan command has a client to reach for without a
-    #: second wiring pass through `logger.py`.
+    #: own wiring. Read by `_handle_scan` (`plans/f10-command-vocabulary/
+    #: plan.md` Stage 6) to fire the live `trigger_petrovich_search` call
+    #: after a scan's `PendingIntent` is registered -- `None` (the default)
+    #: means a scan still registers belief-state, it just never fires a
+    #: live search.
     aircraft_client: AircraftLayerClient | None = None
     #: BL-6's `belief.tasks.TaskStore` (`plans/f10-crew-commands/plan.md`,
     #: mirroring `aircraft_client`'s own reserved-field pattern above) --
-    #: `handle_f10_command`'s `cancel_task` handler is this field's first
-    #: reader. `logger.py`'s `--crew-text` branch wires this to the same
-    #: `ConsolePerceptionRunner.tasks` instance its poll loop already
-    #: ticks (`TaskStore.tick`), the same store `--console`'s `Console.
-    #: tasks` reads/mutates. `None` (the default) means the F10 "Cancel
-    #: Task" item always reports "no pending task" rather than raising.
+    #: `_handle_scan`'s registration call and `_handle_cancel_task` are
+    #: this field's readers. `logger.py`'s `--crew-text` branch wires this
+    #: to the same `ConsolePerceptionRunner.tasks` instance its poll loop
+    #: already ticks (`TaskStore.tick`), the same store `--console`'s
+    #: `Console.tasks` reads/mutates. `None` (the default) means every
+    #: `scan_*` token reports "no task store configured" and "Cancel Task"
+    #: always reports "no pending task", rather than raising.
     tasks: TaskStore | None = None
     #: In-cockpit text overlay mirror (`plans/overlay-speech-callouts/
     #: plan.md`), mirroring `logger.ConsolePerceptionRunner.overlay_client`'s
@@ -181,18 +253,32 @@ class CrewConsole:
 
     def handle_f10_command(self, token: str, now_sim: float) -> list[str]:
         """Dispatches one player-selected F10 radio-menu token (`plans/
-        f10-crew-commands/plan.md`) -- `logger.py`'s `--crew-text
+        f10-command-vocabulary/plan.md`) -- `logger.py`'s `--crew-text
         --f10-commands` poll loop calls this once per token drained from
         `aircraft_client.get_f10_commands`, the same post-`drain_events`
-        hook point as every other spoken-output path. A fixed dispatch
-        table of three verbs; an unrecognized token returns `[]` without
-        printing anything -- aircraft-layer's `F10CommandReceiver` already
-        filters to its own `ALLOWED_COMMANDS`, so this branch is
-        defensive, not a real path in practice."""
-        if token == "watch_nearest":
+        hook point as every other spoken-output path. The 14-token
+        vocabulary (`aircraft-layer`'s `F10CommandReceiver.ALLOWED_COMMANDS`)
+        is dispatched via two lookup tables (`_RELATIVE_SCAN_TOKENS`,
+        `_BEARING_SCAN_TOKENS`) rather than a 14-branch if/elif, matching
+        `belief.utterance`'s own ordered-table idiom for a fixed, closed
+        vocabulary. An unrecognized token returns `[]` without printing
+        anything -- aircraft-layer's `F10CommandReceiver` already filters to
+        its own `ALLOWED_COMMANDS`, so this branch is defensive, not a real
+        path in practice."""
+        if token in _RELATIVE_SCAN_TOKENS:
+            relative_sector = _RELATIVE_SCAN_TOKENS[token]
+            lines = self._handle_scan(
+                now_sim,
+                relative_sector=relative_sector,
+                sector_label=_RELATIVE_SCAN_LABELS[relative_sector],
+            )
+        elif token in _BEARING_SCAN_TOKENS:
+            sector = _BEARING_SCAN_TOKENS[token]
+            lines = self._handle_scan(
+                now_sim, sector=sector, sector_label=_SECTOR_SCAN_LABELS[sector]
+            )
+        elif token == "watch_nearest":
             lines = self._handle_watch_nearest(now_sim)
-        elif token == "scan_forward":
-            lines = self._handle_scan_forward()
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         else:
@@ -239,34 +325,68 @@ class CrewConsole:
             return [f"no such contact: {contact_id}"]
         return [render_watch_nearest_readback(result["facts"]).text]
 
-    def _handle_scan_forward(self) -> list[str]:
-        """The bare AI-Wheel trigger (`aircraft_client.
-        trigger_petrovich_search("forward")`), not `belief.tools.
-        scan_area` -- `scan_area`'s full form needs real geometry and a
-        real justification an F10 button cannot supply (plan Decision 3);
-        fabricating placeholder values for those fields would be exactly
-        the kind of invented-not-derived body behavior this project's
-        brief warns against."""
-        if self.aircraft_client is None:
-            return ["no aircraft-layer connection configured"]
-        try:
-            self.aircraft_client.trigger_petrovich_search("forward")
-            return ["scanning forward"]
-        except AircraftLayerError:
-            logger.warning(
-                "F10 scan-forward trigger failed (continuing)", exc_info=True
-            )
-            return ["scan trigger failed"]
+    def _handle_scan(
+        self,
+        now_sim: float,
+        *,
+        sector_label: str,
+        sector: Sector | None = None,
+        relative_sector: RelativeSector | None = None,
+    ) -> list[str]:
+        """D5's register-then-trigger contract: registers a real
+        `belief.tasks.PendingIntent` via `belief.tools.scan_area` first,
+        *then* fires the live effector (`aircraft_client.
+        trigger_petrovich_search`), wrapped so a failed trigger still
+        leaves the task registered -- mirrors `console.py`'s
+        `_handle_scan_area` handler exactly (see that function), just with
+        `center`/`radius_m`/`reason` all fixed (ownship's own position,
+        `F10_SCAN_RADIUS_M`, `_F10_SCAN_REASON`) instead of player-supplied,
+        since an F10 button carries no bearing/range/free-text the way a
+        typed `scan-area` command does. Exactly one of `sector`/
+        `relative_sector` is set by the caller (`handle_f10_command`'s two
+        lookup tables), never both -- `scan_area`/`ContactStore.add_area`
+        would raise `ValueError` if they were.
+
+        Requires both `self.enrichment` (for ownship's position) and
+        `self.tasks` (to register the task) -- returns a plain one-line
+        message without raising when either is unset, the same graceful-
+        degradation shape `_handle_watch_nearest` already follows for a
+        missing `enrichment`."""
+        if self.enrichment is None:
+            return ["no world-model connection configured"]
+        if self.tasks is None:
+            return ["no task store configured"]
+        ownship = self.enrichment.ownship
+        center = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+        task: PendingIntent = scan_area(
+            self.store,
+            self.tasks,
+            center,
+            F10_SCAN_RADIUS_M,
+            _F10_SCAN_REASON,
+            now_sim,
+            sector=sector,
+            relative_sector=relative_sector,
+        )
+        lines = [render_scan_readback(sector_label).text]
+        if self.aircraft_client is not None:
+            try:
+                self.aircraft_client.trigger_petrovich_search("forward")
+            except AircraftLayerError:
+                logger.warning(
+                    "F10 scan trigger failed (continuing, task %s still registered)",
+                    task.id,
+                    exc_info=True,
+                )
+        return lines
 
     def _handle_cancel_task(self) -> list[str]:
         """Cancels the most-recently-created still-`pending` task in
-        `self.tasks`, regardless of source (plan Decision 3) -- since
-        `_handle_scan_forward` above deliberately never creates a
-        `PendingIntent`, and `--crew-text` mode has no other command path
-        that creates one either, this currently always reports "no
-        pending task" in practice; kept anyway since it becomes real the
-        moment any future command path creates one while running in
-        `--crew-text` mode (see the plan's Risks note)."""
+        `self.tasks`, regardless of source (plan Decision 3). Every
+        `scan_*` token now registers a real task via `_handle_scan` above
+        (D5, `plans/f10-command-vocabulary/plan.md`), so this is no longer
+        the always-"no pending task" dead path it was before that fix --
+        a scan followed by "Cancel Task" genuinely cancels it."""
         if self.tasks is None:
             return ["no pending task"]
         pending = [task for task in self.tasks.tasks if task.status == "pending"]

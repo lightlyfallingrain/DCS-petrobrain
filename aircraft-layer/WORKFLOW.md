@@ -81,12 +81,16 @@ that applies to every DCS session and every installed Hook script, ED-
 labeled "OBSOLETE and UNSAFE!!!" in its own docs (already accepted for the
 overlay/search-trigger channels).
 
-This registers three items under **F10 -> Other -> Petrovich**: "Watch
-Nearest", "Scan Forward", "Cancel Task". Selecting one sends one UDP
-datagram to loopback port 7794 -- distinct from Export.lua's listener
-(7790), the overlay Hook's listener (7792), and Export.lua's inbound
-command listener (7793) -- picked up by the collector's
-`F10CommandReceiver` and served from `GET /f10_commands/poll` (see "Run
+This registers a menu tree under **F10 -> Other -> Petrovich** (widened from
+the original three flat items to 14 tokens by `plans/
+f10-command-vocabulary/plan.md`'s D4 menu tree): **Scan** -> Ahead / Left /
+Right / Full / **Bearing** -> North/Northeast/East/Southeast/South/
+Southwest/West/Northwest, **Watch** -> Nearest, and **Cancel Task**.
+Selecting one sends one UDP datagram to loopback port 7794 -- distinct from
+Export.lua's listener (7790), the overlay Hook's listener (7792), and
+Export.lua's inbound command listener (7793) -- picked up by the
+collector's `F10CommandReceiver` and served from `GET /f10_commands/poll`
+(see "Run
 the collector" below). If the menu never appears, or `dcs.log` shows no
 `PetrobrainF10Commands` lines (or shows a registration failure), that is
 exactly what Stage 4's live check is for; this deploy step alone does not
@@ -98,11 +102,13 @@ the collector" below): send a datagram by hand and confirm
 script running at all --
 
 ```
-python3 -c "import socket, json; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(json.dumps({'command': 'scan_forward'}).encode(), ('127.0.0.1', 7794))"
+python3 -c "import socket, json; socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(json.dumps({'command': 'scan_ahead'}).encode(), ('127.0.0.1', 7794))"
 ```
 
-(swap `'scan_forward'` for `'watch_nearest'`/`'cancel_task'` to exercise
-the other two). This is the cheapest possible correctness check for the
+(swap `'scan_ahead'` for any other token in `collector.f10_command_receiver.
+ALLOWED_COMMANDS` -- `scan_left`/`scan_right`/`scan_full`/`scan_bearing_n`/
+.../`watch_nearest`/`cancel_task` -- to exercise the rest). This is the
+cheapest possible correctness check for the
 whole collector -> `GET /f10_commands/poll` -> body-layer path before ever
 touching the live Hook script -- see `plans/f10-crew-commands/plan.md`
 Stage 2.
