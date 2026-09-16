@@ -224,9 +224,24 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
     figure Stage 6's extract-scale validation had named. Still under the "tens of thousands"
     threshold, so no tiling — but at ~1.5x margin, not ~6x. See `world-model/CLAUDE.md`'s corrected
     paragraph.
-  - *`describe_position` p99 at full-theatre scale* — still open. Deliberately not run here:
-    `tools/measure_m7_stage4_perf.py`'s own docstring puts measuring the real `syria-full.sqlite`
-    on the user's side of the execution boundary, not just building it.
+  - *`describe_position` p99 at full-theatre scale* — **answered** (user-run
+    `tools/measure_m7_stage4_perf.py latency --region syria-full`, 348 points: 8 control + 300
+    random + 40 boundary): mean 53.4 ms, median 24.5 ms, p95 211.6 ms, **p99 440.7 ms**, max
+    551.3 ms. Every quantile is roughly half M7's recorded baseline (mean 136.8 / median 52.4 /
+    p95 497.7 / p99 803.4 ms), which also retires M7's own open flag that its p99 tail ran "~3x
+    M5's baseline".
+
+    **Treat the direction of that comparison as unexplained, not as a win to bank.** This store
+    holds vastly *more* to search than M7's did — M7 dropped OSM entirely, so it had no
+    `landcover`, `settlement`, `water` or `coastline` at all, against today's 77,381 area
+    features plus 8,732 junctions — and `describe_position` additionally gained two new queries
+    (`nearest_coastline`, `inside_landcover`) since. More features and more work per call coming
+    out twice as fast is not self-evidently right. Plausible causes, none verified: R*Tree
+    selectivity improving now that OSM's road soup is gone and DCS `.routes` is the sole road
+    layer; index or query-path changes landed between M7 and now; or simply a different machine
+    or machine state for the two measurements (M7's numbers have no recorded host). Before
+    anyone cites the halving as evidence that a change *made things faster*, re-measure both
+    stores on one host.
   - *§2.4 pre-filter node/way counts* — still open, upstream of the build log.
 
   **Cross-platform determinism confirmed** as a side effect: every OSM statistic from the Mac build
