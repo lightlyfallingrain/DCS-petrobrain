@@ -73,11 +73,93 @@ sector filter across a reprojection.
   by the stale 6-leaf diagram. (Optional: the actually-shipped behavior and every other doc are
   already correct and consistent with each other; only the plan's own tree diagram is stale.)
 
-### Verdict
+### Verdict (original round)
 NEEDS REVISION
 
-### Review Confidence
+### Review Confidence (original round)
 Full read — read the complete diff for every touched file, reran both subprojects' format/lint/
 type/test gates directly rather than trusting the reported numbers, and reproduced the task/area
 staleness bug with a standalone repro script against the actual code rather than inferring it from
 reading alone.
+
+---
+
+## Re-review (`eac1000`, `ece3c94`)
+
+Re-read both new commits in full, re-ran both subprojects' gates independently, and reproduced the
+fix's claimed behavior with a standalone repro script rather than trusting the commit message.
+
+**Required fix 1 (stale captured area voiding the sector filter) — confirmed fixed.**
+`ContactStore.get_area(area_id)` is a straight dict lookup against the live `self._areas`.
+`TaskStore.tick` now does `area = store.get_area(task.area.id) or task.area` before the containment
+check, replacing the old `area_contains(task.area, ...)`. I reproduced it directly: after
+`reproject_relative_areas` on a `left`-sector task with heading 0, `store.get_area(task.area.id)`
+has `wedge_deg=(300.0, 30.0)` while `task.area.wedge_deg` is still `None`; `area_contains` against
+the live area correctly returns `False` for a dead-ahead contact that the stale captured area would
+have wrongly accepted (`True`) — matching the coordinator's report exactly.
+
+*Checked every other reader of a task's `area`, not just `tick`* — this was the first thing asked
+to verify, since a captured-reference bug fixed in one spot but not another is the same class of
+bug one level over. Grepped `tools.py`/`crew_console.py`/`console.py`/`tasks.py` for every
+`task.area`/`.area.` access: `tools.cancel_task` reads only `task.area.id` (to call
+`store.remove_area`, itself id-based, not geometry-based); `console.py`'s `_handle_task_status`
+and `_handle_scan_area`'s readback print only `task.area.id`, never `.center`/`.sector`/
+`.wedge_deg`; `tools.get_task_status` returns the `PendingIntent` unchanged but nothing downstream
+reads its area's geometry. `tick`'s containment check was the only geometry-reading site — the fix
+is complete, not partial.
+
+**Required fix 2 (tasks.py docstring) — confirmed done and accurate.** The new module-docstring
+section ("Ownship-anchored areas are a moving patch of view, not ground") and the tightened
+`PendingIntent.area` docstring ("only `.id` is safe to read directly") both match the actual
+mechanism now in place — verified against the code above line by line, not just read as prose.
+
+**Optional fix 3 (plan.md menu-tree diagram) — confirmed done**, redrawn to 14 leaves with the
+`Bearing` submenu and a note reconciling it with D4a's "14-token" prose.
+
+**The `or task.area` fallback's "should not happen" claim — reachable, but by a pre-existing,
+out-of-scope path, and the fix already handles it gracefully.** The docstring says the fallback
+should never trigger for a pending task "since `tools.cancel_task` always cancels the task before
+removing its area" — but `cancel_task` is not the only path that can remove an `AttentionArea`.
+`belief.console.Console`'s pre-existing `unwatch-area <id>` debug command (`tools.unwatch_area` →
+`store.remove_area`) removes any area by id directly, with no awareness of `TaskStore` at all. If a
+`--console` operator runs `unwatch-area` on the id printed by a still-pending scan task's own
+`_handle_scan_area` readback (`"scan task {id} created (area {area.id})"`), the area vanishes while
+the task stays `pending`, and the next `tick` genuinely hits the fallback branch — not merely a
+hypothetical invariant violation. That said: (1) this is unreachable from the F10 path this
+milestone actually built — `unwatch-area` is `--console`-only, pre-dates this milestone, and no F10
+token or `_handle_scan` code path calls it; (2) the fallback's actual behavior when triggered is
+exactly what `test_tick_falls_back_to_captured_area_when_the_live_area_is_gone` already exercises
+and asserts — it degrades gracefully (uses the stale-but-present captured geometry, doesn't raise,
+doesn't drop the task) rather than crashing or silently discarding the task; that test would have
+passed identically before this fix too, since `tick` always used `task.area` directly pre-fix, so it's
+confirming the new code path's graceful-degradation shape, not a behavior change. Net: the
+docstring's "should not happen" is a slight overstatement of the invariant's actual scope (it holds
+for every path this milestone touches, not for the pre-existing `unwatch-area` command), but the
+runtime behavior is already correct and tested for the case where it's wrong. Recording this as
+optional, not required — narrow the docstring's claim to name `cancel_task` as "the only
+task-lifecycle path that removes an area" rather than implying no path can, whenever `tasks.py` is
+next touched.
+
+**Test quality — both new tests would genuinely have failed/behaved differently pre-fix.**
+`test_tick_resolves_relative_scan_area_against_its_live_projection`: under the old
+`area_contains(task.area, ...)` code, `task.area.wedge_deg` is `None` at the point `tick` runs (the
+captured reference is never projected), so the dead-ahead contact at bearing 0 would have matched
+the permissive full-circle fallback and the task would have wrongly reported `succeeded` after the
+*first* `ingest`/`tick` — the test's first assertion (`status == "pending"`) is a genuine regression
+guard, not incidental. `test_tick_falls_back_to_captured_area_when_the_live_area_is_gone` exercises
+the new `get_area`-miss branch specifically (confirmed above it wouldn't have distinguished old vs.
+new code, since old code always used the captured reference) — legitimate coverage of the new
+fallback branch's shape, correctly not claimed as a regression test for the original bug.
+
+Gates re-confirmed independently: body-layer 522 passed (520 → +2, matching the two new
+`test_tasks.py` cases), ruff format/check clean, `mypy src --strict` (from `body-layer/`) clean;
+aircraft-layer 109 passed unchanged, ruff format/check clean, `mypy src --strict` clean.
+
+### Final Verdict
+APPROVED
+
+### Review Confidence (re-review)
+Full read of both new commits' diffs, independent gate re-run, and independent reproduction of
+both the fix (live vs. captured wedge divergence) and the fallback path's reachability via
+`unwatch-area` (traced, not executed against a live console session) — not a re-read of the
+commit message alone.

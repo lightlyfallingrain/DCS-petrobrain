@@ -1,6 +1,6 @@
 ---
-name: project-f10-command-vocabulary-needs-revision
-description: f10-command-vocabulary reviewed NEEDS REVISION — captured-object staleness bug where TaskStore.tick reads a frozen AttentionArea reference that reprojection never updates.
+name: project-f10-command-vocabulary-review-cycle
+description: f10-command-vocabulary review cycle — required fix (captured AttentionArea staleness in TaskStore.tick) found, fixed, re-reviewed and APPROVED.
 metadata:
   type: project
 ---
@@ -34,3 +34,17 @@ blind spot worth checking for on any future "value X lives in two places" design
 See also [[feedback_bounded_magnitude_isnt_optional_severity]] — this was flagged as a required
 fix despite reading like a subtle edge case, because it violates the plan's own D1-D3 invariant
 for the one consumer (task completion) the plan's own Risks section had flagged as needing care.
+
+**Re-review outcome (same session, commits `eac1000`/`ece3c94`): APPROVED.** Fix was a
+`ContactStore.get_area(id)` lookup + `TaskStore.tick` resolving `store.get_area(task.area.id) or
+task.area` instead of trusting the captured reference. Verified the fix closes the divergence for
+every reader of a task's area, not just `tick` — grepped for all `task.area.*` accesses first
+before accepting the fix as complete, since a captured-reference bug fixed in one spot but not
+another (same bug, one level over) is a real risk with this pattern. Also traced (did not just
+accept the commit message's claim) that the docstring's "the fallback should never trigger" is
+slightly overstated: `belief.console.Console`'s pre-existing, out-of-scope `unwatch-area` debug
+command also removes an `AttentionArea` directly, independent of `TaskStore`, so the fallback is
+reachable through that older path too — downgraded to optional since it's `--console`-only,
+pre-dates this milestone, and the fallback already degrades gracefully (has its own test). Useful
+process note: when a fix adds a "should not happen because X always does Y first" claim, check
+whether X is genuinely the *only* path to that state, not just the path this milestone added.
