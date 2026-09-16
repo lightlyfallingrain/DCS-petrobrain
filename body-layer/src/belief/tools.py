@@ -94,7 +94,13 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Literal, TypedDict
 
-from belief.attention import Attention, AttentionArea, Sector, effective_attention
+from belief.attention import (
+    Attention,
+    AttentionArea,
+    RelativeSector,
+    Sector,
+    effective_attention,
+)
 from belief.contacts import Contact, ContactStore
 from belief.decay import (
     Certainty,
@@ -471,6 +477,7 @@ def watch_area(
     level: Attention = "watch",
     sector: Sector | None = None,
     source: str = "console",
+    relative_sector: RelativeSector | None = None,
 ) -> AttentionArea:
     """Register a new `belief.attention.AttentionArea` (BL-4). `center` is
     an already-resolved `GeoPosition` -- turning a bearing/range pair (or,
@@ -482,7 +489,12 @@ def watch_area(
     here). Returns the stored `AttentionArea`, including its store-minted
     `id`, so the caller can report it back to the user."""
     return store.add_area(
-        center=center, radius_m=radius_m, level=level, source=source, sector=sector
+        center=center,
+        radius_m=radius_m,
+        level=level,
+        source=source,
+        sector=sector,
+        relative_sector=relative_sector,
     )
 
 
@@ -793,6 +805,7 @@ def scan_area(
     now_sim: float,
     deadline_s: float = DEFAULT_SCAN_DEADLINE_S,
     sector: Sector | None = None,
+    relative_sector: RelativeSector | None = None,
 ) -> PendingIntent:
     """Ask Petrovich to search, and register what "found something relevant"
     would mean for that ask -- BL-6 (`plans/bl6-commands-inspect-adapt/
@@ -820,6 +833,7 @@ def scan_area(
         level="watch",
         source="scan_area",
         sector=sector,
+        relative_sector=relative_sector,
     )
     kind: TaskKind = "scan_area"
     return tasks.create(

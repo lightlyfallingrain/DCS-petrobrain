@@ -18,10 +18,10 @@ def test_from_dict_parses_command() -> None:
 
 
 def test_to_dict_round_trips() -> None:
-    event = F10CommandEvent(command="scan_forward", received_wall_clock_s=1000.0)
+    event = F10CommandEvent(command="scan_ahead", received_wall_clock_s=1000.0)
 
     assert event.to_dict() == {
-        "command": "scan_forward",
+        "command": "scan_ahead",
         "received_wall_clock_s": 1000.0,
     }
 
