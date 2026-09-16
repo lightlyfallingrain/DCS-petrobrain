@@ -725,12 +725,38 @@ def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(
     ]
 
 
+def test_believed_air_defence_rejects_an_air_defence_value_at_presence_level() -> None:
+    """Isolates the level gate itself, which the end-to-end presence test
+    below cannot: it feeds `_believed_air_defence` a facts dict whose value
+    *would* resolve into an air-defence class but whose level is only
+    `presence`, and asserts it is still rejected.
+
+    That value/level pairing cannot arise from a real contact -- the
+    classification lattice ties value shape to level, so a presence-level
+    claim always holds `PRESENCE_CLASS`. Which is exactly why this test
+    exists at the predicate rather than through the store: the level check
+    is deliberate defensive redundancy, and without a test that can fail
+    when it is deleted, nothing would notice its removal."""
+    console = CrewConsole(store=ContactStore())
+
+    assert console._believed_air_defence(
+        {"classification": {"level": "class", "value": "OP_SRSAM"}}
+    )
+    assert not console._believed_air_defence(
+        {"classification": {"level": "presence", "value": "OP_SRSAM"}}
+    )
+
+
 def test_watch_nearest_air_defence_ignores_a_presence_level_contact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No-omniscience boundary: a contact seen only as "something is there"
-    must never be reported as air defence, even when the underlying object
-    really is a SAM. Petrovich has no basis to make that call yet."""
+    """No-omniscience boundary, end to end: a contact seen only as
+    "something is there" must never be reported as air defence, even when
+    the underlying object really is a SAM.
+
+    Note this passes on the *value* check alone (`parent_class_of
+    (PRESENCE_CLASS)` is `None`) and so would survive deleting the level
+    gate -- the test above is the one that pins the gate itself."""
     store = ContactStore()
     store.ingest(
         [
