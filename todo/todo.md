@@ -35,6 +35,24 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ## Cross-cutting / unscoped backlog
 
+- [ ] **`console.py`'s typed `scan-area` still drives the 9K113.** Found by review 2026-09-17,
+  while checking the F10-path fix (`89b8b1d`). `body-layer/src/belief/console.py:548` calls
+  `aircraft_client.trigger_petrovich_search("forward")` under the name "Scan" — the identical
+  semantic mismatch just removed from `crew_console._handle_scan`, where *Scan* is naked-eye
+  perception and *Observ* is the 9K113 (`docs/concept/state-transitions.jpg`'s glossary).
+
+  Left out of `89b8b1d` deliberately: it is pre-existing, `--console`-only (a developer debug
+  tool), and no crew or F10 path reaches it, so folding it in would have expanded a reviewed
+  commit's scope for no in-flight benefit. But it is not merely mechanical either — `scan-area`
+  is the *typed* command that takes explicit geometry, so "what should it trigger instead" has a
+  real answer to pick: nothing at all (matching the F10 path), or a future `Observ` once that
+  verb exists. Decide that when `console.py` is next touched, rather than copying the F10 fix
+  blindly.
+
+  Until then the repo contains two paths named "scan" that do different things, which is exactly
+  the kind of contradictory precedent a future reader would follow in the wrong direction.
+
+
 - [ ] **Scan commands should drive naked-eye perception, and the naked-eye FOV is a 9K113 number.**
   Raised 2026-09-16 from the first live F10 test of `f10-command-vocabulary`. Two coupled defects,
   both in `body-layer`:
