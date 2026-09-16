@@ -85,7 +85,7 @@ This registers a menu tree under **F10 -> Other -> Petrovich** (widened from
 the original three flat items to 15 tokens by `plans/
 f10-command-vocabulary/plan.md`'s D4 menu tree): **Scan** -> Ahead / Left /
 Right / Full / **Bearing** -> North/Northeast/East/Southeast/South/
-Southwest/West/Northwest, **Watch** -> Nearest, and **Cancel Task**.
+Southwest/West/Northwest, **Watch** -> Nearest/Nearest Air Defence, and **Cancel Task**.
 Selecting one sends one UDP datagram to loopback port 7794 -- distinct from
 Export.lua's listener (7790), the overlay Hook's listener (7792), and
 Export.lua's inbound command listener (7793) -- picked up by the
