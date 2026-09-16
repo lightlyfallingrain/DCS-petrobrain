@@ -211,12 +211,29 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   parse+ingest 9.15s cold / 0.07s cached; `describe_position` p99 34 ms at Lake Assad scale.
   474 world-model + 506 body-layer + 109 aircraft-layer tests pass.
 
-  Not measured, deferred as observability follow-ups (none are correctness gates): full-theatre OSM
-  *parse* time and peak RSS (the validating build hit a warm cache and skipped the parse — Stage 3
-  was a 21.3s read of 99,243 cached rows, so the plan's ~1–1.5 GB / ~2 min estimate stays
-  unverified), largest single post-simplification polygon vertex count (the tiling gate; only the
-  24.1% aggregate is known), `describe_position` p99 at full-theatre scale, and the §2.4 pre-filter
-  node/way counts on the merged file.
+  **Follow-ups, updated 2026-09-16 after a second `syria-full` build (Mac, cold cache, full
+  log at `world-model/syria-full-build.log`):**
+
+  - *OSM parse time* — **answered: 87.2 s**, against a plan estimate of ~2 min. That build genuinely
+    parsed (no cache-hit line; it then wrote a 119 MB `syria-full-osm-cache.sqlite`), unlike the
+    2026-09-15 Windows run whose 21.3 s Stage 3 was a warm-cache read of 99,243 rows.
+  - *Peak RSS* — still unmeasured; nothing in the pipeline logs it. The plan's ~1–1.5 GB estimate
+    stands unverified.
+  - *Largest post-simplification polygon (the tiling gate)* — **answered, and it corrects an earlier
+    claim**: Atatürk Baraj Gölü at 13,097 outer + 127 hole = 13,224 vertices, 3.9x the Lake Assad
+    figure Stage 6's extract-scale validation had named. Still under the "tens of thousands"
+    threshold, so no tiling — but at ~1.5x margin, not ~6x. See `world-model/CLAUDE.md`'s corrected
+    paragraph.
+  - *`describe_position` p99 at full-theatre scale* — still open. Deliberately not run here:
+    `tools/measure_m7_stage4_perf.py`'s own docstring puts measuring the real `syria-full.sqlite`
+    on the user's side of the execution boundary, not just building it.
+  - *§2.4 pre-filter node/way counts* — still open, upstream of the build log.
+
+  **Cross-platform determinism confirmed** as a side effect: every OSM statistic from the Mac build
+  is byte-identical to the Windows one — same 44,811 landcover, same
+  `holes_dropped_not_contained_after_simplify=58`, same 8,343,864 → 2,010,767 vertices — from a
+  fresh parse on a different OS. Same for the SRTM stats (47,484 void, `tiles_used=79`). Nothing
+  in the ingest path is platform- or iteration-order-dependent.
 
   Next-milestone impact: none — all changes are additive except the `road`-from-OSM removal, which
   restores the DCS-authoritative invariant rather than breaking a consumer (mission-interpreter

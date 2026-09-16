@@ -35,7 +35,7 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ## Cross-cutting / unscoped backlog
 
-- [ ] **Stage 5 road junctions: pathological single-chunk stalls (48 min full-theatre).** Raised
+- [ ] **Stage 5 road junctions: pathological single-chunk stalls — CONFIRMED DATA-DEPENDENT.** Raised
   2026-09-16 from the `syria-full` build log validating `osm-landcover-optimization`. Stage 5 took
   2885 s, and a large share of that sat in a handful of chunks: chunk 13867→13868 took 331 s and
   chunk 14017→14018 took 337 s (one chunk each), with two further ~330-350 s near-stalls around
@@ -47,6 +47,21 @@ Prioritize any open task here over any other task in this file or roadmap files.
   heartbeat so a stall is distinguishable from a hang; (b) find out why those specific chunks are
   so expensive (dense urban road clusters? a union-find degenerate case?) — the fix may be a
   chunk-splitting heuristic rather than better logging. Not scoped to a milestone; `world-model`.
+
+  **Update 2026-09-16 — reproduced on a second machine, at the identical chunk indices.** A Mac
+  `syria-full` build hit exactly the same four chunks (13867, 13868, 14017, 14018) that stalled on
+  Windows, at ~170 s each versus Windows' ~330 s. Same indices, different OS and different CPU, so
+  this is a property of the *data in those chunks*, not of the machine — which makes (b) tractable:
+  those four chunk bounding boxes can be extracted and profiled directly rather than hunted for.
+  They cost ~680 s of the Mac run's 1,038 s total, so fixing them is most of Stage 5's wall-clock.
+  Stage 5 overall was much faster on the Mac (1,038 s vs 2,885 s), as were roadnet (444 s vs 670 s)
+  and SRTM (4.4 s vs 11.3 s).
+
+  Unrelated caveat when reading `world-model/syria-full-build.log`: it contains a 2.5-hour wall-clock
+  gap mid-Stage-5 that is **not** a stall. The host slept. The progress lines' own `elapsed` counter
+  advanced only 201 s across it, because `ingest_junctions`/`roadnet.routes` both use
+  `time.monotonic()`, which on macOS does not tick during system sleep. Wall-clock timestamps and
+  logged elapsed disagree by design there.
 
 - [ ] **`syria-full` pipeline logs only 6 of 8 stages.** Raised 2026-09-16 from the same build log.
   Output goes `[6/8] SRTM elevation grid: done` straight to `Built ...` — `[7/8]` and `[8/8]` never
