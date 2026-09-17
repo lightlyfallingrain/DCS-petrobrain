@@ -251,15 +251,16 @@ Windows/DCS/SRS environment):
 
 ### Unresolved
 
-- **Does the Mi-24P expose an SRS-visible intercom channel at all**, single-player, AI gunner
-  seat? This is the single biggest open question and blocks any commitment to the `--unitId`
-  ICS-targeting path. Needs: the user to paste the content of
-  `forum.dcs.world/topic/292935-mi-24p-spu-8-in-dcs-bios-and-srs-simple-radio-functionality/`
-  (blocked from automated fetch), and/or the live test in "Reproducible Test" step 3 above.
+- ~~**Does the Mi-24P expose an SRS-visible intercom channel at all**~~ — **RESOLVED, yes.** See
+  the addendum below: stock SRS's `SR.exportRadioMI24P` declares an Intercom radio at 100.0 MHz,
+  modulation 2. The wiki-derived inference in the Findings above was wrong.
 - **Whether `--freqs`/`--modulations` are actually required/consulted when `--unitId` targets
-  intercom**, or whether unitId alone is sufficient — I only read the CLI-parsing layer
-  (`Options` class), not `ExternalAudioClient`'s connection/transmit logic, which is a separate
-  file I did not fetch this session.
+  intercom**, or whether unitId alone is sufficient — still open, though `--modulations INTERCOM`
+  is now confirmed to be an accepted value (addendum below). I only read the CLI-parsing layer
+  (`Options` class), not `ExternalAudioClient`'s connection/transmit logic.
+- **How to discover the player's DCS unit ID at runtime**, which `--unitId` needs for intercom
+  scoping (it defaults to `1000u`). Likely already available via the aircraft layer's
+  `LoGetWorldObjects`/`is_ownship` path — verify, do not assume.
 - **Windows-side TTS latency** — no number exists yet; the PowerShell snippet above is the way to
   get one. Don't assume it beats or loses to the Mac's ~0.6-0.8s without that measurement.
 - **Audio quality/intelligibility of any of the tested voices**, including whether `say -v Daniel`
@@ -272,3 +273,78 @@ Windows/DCS/SRS environment):
   `SND_ASYNC`, whether it competes/ducks against DCS's own game audio or SRS's audio mixer) — no
   Windows access this session; first real test happens whenever the `POST /audio/play` endpoint is
   built and exercised live.
+
+---
+
+## Addendum, 2026-09-17: the Mi-24P intercom question is RESOLVED — the path exists
+
+Two sources, obtained after the main finding above was written, close the single biggest open
+question. The Mi-24P **does** have an SRS-visible intercom channel, and `DCS-SR-ExternalAudio.exe`
+**does** accept `INTERCOM` as a modulation.
+
+### 1. The Mi-24P's SRS radio export declares an intercom radio
+
+The user supplied the content of
+`forum.dcs.world/topic/292935-mi-24p-spu-8-in-dcs-bios-and-srs-simple-radio-functionality/`
+(the thread that 403'd on automated fetch). It contains SRS's `SR.exportRadioMI24P` function,
+posted February 2022 by `gnomechild` and refined by `Sapper31`, whose first radio slot is:
+
+```lua
+_data.radios[1].name = "Intercom"
+_data.radios[1].freq = 100.0
+_data.radios[1].modulation = 2 --Special intercom modulation
+_data.radios[1].volume = 1.0
+_data.radios[1].volMode = 0
+```
+
+Crucially, `gnomechild` states the same support "is already included in the release" — their PR
+was not merged *because SRS had already shipped official Mi-24 support*. So this is not a
+community patch a user must install; it is what stock SRS does for this airframe.
+
+This directly contradicts the inference in the main finding above that drew on SRS's wiki listing
+intercom support only for L-39/UH-1H/SA342. **That inference was wrong.** The wiki list is not a
+statement of which airframes have an intercom radio in their export; the Mi-24P has one, at
+**100.0 MHz, modulation 2**.
+
+Note also `_data.capabilities.intercomHotMic = false` and the PTT branch setting
+`_data.selected = 0` on a half-press of the two-stage trigger — those govern the *player's*
+transmit path, not reception, and are irrelevant to injecting audio the player merely hears.
+
+### 2. `--modulations INTERCOM` and `--unitId` are the documented intercom-injection path
+
+The `Options` class help text for `--modulations` reads "Modulation AM or FM comma separated",
+which does not mention intercom — but SRS's own release notes and documentation state that
+`--unitId` "sets the Unit ID of the transmitter - if you set this to the same as an aircraft you
+can then communicate over intercom with that aircraft," added specifically to allow intercom over
+external audio. The help string is simply stale relative to the feature.
+
+`--unitId` defaults to `1000u`, so it must be set explicitly to the player's actual DCS unit ID
+for intercom scoping to work. Discovering that unit ID at runtime is a real, unsolved sub-problem
+for this project: the aircraft layer already reads `LoGetWorldObjects` and flags ownship
+(`is_ownship`), so the id is very likely already available on a channel this project owns —
+**verify before designing around it.**
+
+### Revised outlook for the SRS slice
+
+The likely invocation is:
+
+```
+DCS-SR-ExternalAudio.exe --text "..." --freqs 100.0 --modulations INTERCOM \
+    --coalition <n> --unitId <player unit id> --name "Petrovich"
+```
+
+Still to verify live (nothing here removes the need for the "Reproducible Test" steps):
+
+- that `--modulations INTERCOM` parses (help text omits it; behaviour inferred from release notes).
+- whether `--freqs 100.0` must match the export's intercom frequency exactly, or is ignored when
+  the modulation is INTERCOM.
+- whether the player *receives* intercom regardless of SPU-8 selector position (expected — in SRS
+  `selected` governs transmit, not receive — but unconfirmed for this airframe).
+- that this works in **single-player** against a locally-hosted SRS server with an AI gunner,
+  which is this project's only supported configuration.
+
+**What this does not change:** the first slice's recommendation stands unaltered. Local playback
+via `POST /audio/play` remains the right first step — it is independent of SRS entirely, needs no
+server running, and is the sink that proves the whole text-to-audible path end to end. The SRS
+sink is now a known-reachable second sink rather than a speculative one, which is exactly the
+question this addendum was needed to settle.
