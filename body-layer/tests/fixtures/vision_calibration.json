@@ -1,0 +1,142 @@
+{
+  "_comment": "Ground-truth calibration dataset for perception/visibility.py, graded by reading the 23 screenshots in win-mac-sync/from-windows/target acquisition screenshots/ directly (win-mac-sync/ is gitignored -- this fixture is the durable, versioned transcription of what those images show). See plans/vision-range-calibration/plan.md and body-layer/research/2026-09-17-vision-range-calibration.md for the full narrative. `object_type` values are the unit labels as displayed on the DCS F10 map for these screenshots, not verified raw LoGetWorldObjects `object_type` strings (no live probe/log was captured this session) -- see the research doc's 'object_type provenance' note for which entries this causes to fall through to object_model.DEFAULT_SIZE_M/DEFAULT_OP_CLASS today, including two (T-62, BMD1) the plan's own prose describes as correctly-sized that do not actually resolve given this transcription. Grade vocabulary: 'nothing' / 'marginal_speck' / 'speck_no_class' (presence achieved, class not) / 'class_recognizable' / 'type_recognizable'; null means that optic was not photographed at that range/bearing. Records are designed to accept new rows (closer range, longer range, other theatres/weather) without a format change -- see 'Capture request for Pass 2' in the plan.",
+  "records": [
+    {
+      "complex": "A",
+      "range_m": 1890,
+      "bearing_deg_mag": 274,
+      "date": "2020-06-01",
+      "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
+      "objects": [
+        {"object_type": "ZIL-135", "size_m": 6.0},
+        {"object_type": "BTR-70", "size_m": 7.0},
+        {"object_type": "AK-74", "size_m": 1.8},
+        {"object_type": "AK", "size_m": 1.8},
+        {"object_type": "AK", "size_m": 1.8}
+      ],
+      "grades": {
+        "naked_eye": "nothing",
+        "binocular": "speck_no_class",
+        "9k113_wide": "class_recognizable",
+        "9k113_narrow": "class_recognizable"
+      },
+      "source_images": [
+        "0 naked eye.jpg",
+        "0 binocular.jpg",
+        "0 9K113 wide.jpg",
+        "0 9K113 narrow.jpg",
+        "0 9K113 narrow distance tool.jpg",
+        "0 about 2km.jpg"
+      ],
+      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better."
+    },
+    {
+      "complex": "B",
+      "range_m": 2420,
+      "bearing_deg_mag": 355,
+      "date": "2020-06-01",
+      "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
+      "objects": [
+        {"object_type": "T-62", "size_m": 7.0},
+        {"object_type": "SA-10SR", "size_m": 9.0},
+        {"object_type": "SA-10SR", "size_m": 9.0},
+        {"object_type": "SA-10C2", "size_m": 9.0},
+        {"object_type": "SA-10TR", "size_m": 9.0},
+        {"object_type": "SA-15", "size_m": 9.0},
+        {"object_type": "Smerch", "size_m": 6.0},
+        {"object_type": "Smerch", "size_m": 6.0},
+        {"object_type": "BM-27", "size_m": 6.0},
+        {"object_type": "BM-27", "size_m": 6.0},
+        {"object_type": "HL B8M1", "size_m": 5.0},
+        {"object_type": "HL B8M1", "size_m": 5.0},
+        {"object_type": "BMD1", "size_m": 7.0}
+      ],
+      "grades": {
+        "naked_eye": "nothing",
+        "binocular": "speck_no_class",
+        "9k113_wide": "speck_no_class",
+        "9k113_narrow": "class_recognizable"
+      },
+      "source_images": [
+        "1 group naked eye.jpg",
+        "1 group binocular.jpg",
+        "1 group 9K113 wide.jpg",
+        "1 group 9K113 narrow.jpg",
+        "1 group at 2.5 km.jpg"
+      ],
+      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better."
+    },
+    {
+      "complex": "B",
+      "range_m": 955,
+      "bearing_deg_mag": 340,
+      "date": "2020-06-01",
+      "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
+      "objects": [
+        {"object_type": "T-62", "size_m": 7.0},
+        {"object_type": "SA-10SR", "size_m": 9.0},
+        {"object_type": "SA-10SR", "size_m": 9.0},
+        {"object_type": "SA-10C2", "size_m": 9.0},
+        {"object_type": "SA-10TR", "size_m": 9.0},
+        {"object_type": "SA-15", "size_m": 9.0},
+        {"object_type": "Smerch", "size_m": 6.0},
+        {"object_type": "Smerch", "size_m": 6.0},
+        {"object_type": "BM-27", "size_m": 6.0},
+        {"object_type": "BM-27", "size_m": 6.0},
+        {"object_type": "HL B8M1", "size_m": 5.0},
+        {"object_type": "HL B8M1", "size_m": 5.0},
+        {"object_type": "BMD1", "size_m": 7.0}
+      ],
+      "grades": {
+        "naked_eye": "marginal_speck",
+        "binocular": "speck_no_class",
+        "9k113_wide": "type_recognizable",
+        "9k113_narrow": "type_recognizable"
+      },
+      "source_images": [
+        "2 and 3 naked eye.jpg",
+        "3 binocular group at left.jpg",
+        "3 group 9K113 wide.jpg",
+        "3 group 9K113 narrow.jpg",
+        "3 group at 1km.jpg",
+        "3 unit right of group 9K113 wide.jpg",
+        "unit right of group 9K113 narrow.jpg"
+      ],
+      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better."
+    },
+    {
+      "complex": "B",
+      "range_m": 895,
+      "bearing_deg_mag": 59,
+      "date": "2020-06-01",
+      "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
+      "objects": [
+        {"object_type": "T-62", "size_m": 7.0},
+        {"object_type": "SA-10SR", "size_m": 9.0},
+        {"object_type": "SA-10SR", "size_m": 9.0},
+        {"object_type": "SA-10C2", "size_m": 9.0},
+        {"object_type": "SA-10TR", "size_m": 9.0},
+        {"object_type": "SA-15", "size_m": 9.0},
+        {"object_type": "Smerch", "size_m": 6.0},
+        {"object_type": "Smerch", "size_m": 6.0},
+        {"object_type": "BM-27", "size_m": 6.0},
+        {"object_type": "BM-27", "size_m": 6.0},
+        {"object_type": "HL B8M1", "size_m": 5.0},
+        {"object_type": "HL B8M1", "size_m": 5.0},
+        {"object_type": "BMD1", "size_m": 7.0}
+      ],
+      "grades": {
+        "naked_eye": "marginal_speck",
+        "binocular": "speck_no_class",
+        "9k113_wide": null,
+        "9k113_narrow": null
+      },
+      "source_images": [
+        "2 and 3 naked eye.jpg",
+        "2 binocular unit at 12 oclock.jpg",
+        "2 1 km.jpg"
+      ],
+      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better. Not photographed through the 9K113 sight at this bearing (a different, closer sub-unit of the cluster was ranged instead -- see the naked-eye/binocular frame instead of a sight frame for this row)."
+    }
+  ]
+}
