@@ -21,6 +21,12 @@ that `GET /f10_commands/poll` drains -- the first channel running the
 opposite direction (Hook script -> collector, not collector -> Hook/
 Export.lua) alongside the two write paths above.
 
+An `AudioPlaybackSender` (BL-10 first slice, `plans/tts-voice-output/
+plan.md`) is constructed the same way as `text_sender`/`command_sender`
+for `POST /audio/play`, this pipeline's third inbound/write path -- unlike
+those two, it has no host/port (it plays audio directly on this box via
+`winsound`, no loopback UDP peer involved).
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
@@ -38,6 +44,7 @@ import time
 from api.server import DEFAULT_HOST as API_DEFAULT_HOST
 from api.server import DEFAULT_PORT as API_DEFAULT_PORT
 from api.server import TelemetryAPIServer
+from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     F10CommandQueue,
     PetrovichIndicationCache,
@@ -142,6 +149,8 @@ def main() -> None:
         target=f10_command_receiver.serve_forever, daemon=True
     )
     f10_command_receiver_thread.start()
+    audio_sender = AudioPlaybackSender()
+    audio_sender.open()
 
     collector = CollectorServer(
         cache,
@@ -165,6 +174,7 @@ def main() -> None:
         petrovich_wheel_cache=petrovich_wheel_cache,
         command_sender=command_sender,
         f10_command_queue=f10_command_queue,
+        audio_sender=audio_sender,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -183,6 +193,7 @@ def main() -> None:
         text_sender.close()
         command_sender.close()
         f10_command_receiver.close()
+        audio_sender.close()
 
 
 if __name__ == "__main__":
