@@ -27,8 +27,15 @@ exception).
 - **`--target aircraft-layer`** POSTs the WAV (base64, `{"audio_b64", "urgent"}`) to a running
   aircraft-layer collector's `POST /audio/play`, which plays it through `winsound` on the Windows
   box.
-- SRS ICS injection (`DCS-SR-ExternalAudio.exe`) is **deliberately deferred** to a follow-on slice
-  — see the recon's "Unresolved" list (Mi-24P's SPU-8 ICS visibility to SRS is unconfirmed).
+- SRS ICS injection (`DCS-SR-ExternalAudio.exe --modulations INTERCOM --unitId <player unit id>`)
+  is **deliberately deferred** to a follow-on slice. Note the recon's main body doubts the Mi-24P
+  has an SRS-visible intercom at all — **its two addenda correct that**: stock SRS does declare an
+  Intercom radio for this airframe (100.0 MHz, modulation 2), so the path is known-reachable rather
+  than speculative. Read the addenda, not just the Findings section. ICS is also the *only*
+  acceptable target (user constraint): the player stays on the mission frequency and the SPU-8
+  selects one source at a time, so frequency injection is rejected rather than held as a fallback.
+  See `ROADMAP.md` in this directory for that slice's full requirements, including the
+  always-available-regardless-of-selector property it has to satisfy.
 
 ## Tech stack
 
