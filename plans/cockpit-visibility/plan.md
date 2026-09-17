@@ -160,6 +160,10 @@ Protocol, from the **co-pilot** seat:
 Four readings plus the cutoff populate the whole table. For reference at 100 m AGL, the current
 table predicts the nearest visible ground at ~100 m ahead and ~370 m abeam.
 
+**RESOLVED 2026-09-17 — both signs confirmed by the user:** right bank positive / left negative,
+and pitch up positive / down negative. Both match the standard convention the implementation
+assumed, so no code change was needed. The original note follows.
+
 **Also worth 10 seconds on that sortie: confirm the pitch/bank sign convention.** The
 implementation assumes standard aviation signs (positive pitch = nose up, positive bank = right
 wing down), and no `aircraft-layer/research/` note pins what `LoGetADIPitchBankYaw` actually
