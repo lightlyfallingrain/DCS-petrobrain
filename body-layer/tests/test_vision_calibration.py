@@ -1,45 +1,38 @@
-"""Regression tests for `tests/fixtures/vision_calibration.json` --
-`plans/vision-range-calibration/plan.md` Pass 1.
+"""Regression tests for `tests/fixtures/vision_calibration.json`.
 
-**No behaviour change this pass** (plan's "No constant changes this pass",
-user decision 2026-09-17): `perception/visibility.py` and
-`perception/naked_eye_source.py` are untouched. This file exists to pin
-what that unchanged code computes today against the 23-screenshot
-ground-truth set, so a future edit to those modules' constants shows up as
-a diff here rather than silently drifting, and so the known
-code-vs-ground-truth divergence this milestone exists to document is
-visible from the test file alone, not just from the research doc's prose.
+The fixture carries two source sets. The **authoritative** one
+(`source_set == "png-2026-09-17"`, `authoritative == True`) is a nine-range
+ladder -- 503 m to 8.89 km, one 12-unit complex, four optics per range,
+each range's ground truth taken from an F10 ruler frame -- captured as
+lossless PNGs and graded from native-resolution crops. The other
+(`jpeg-2026-09-17`) is the earlier compressed-JPEG set, kept for provenance
+and deliberately excluded from every assertion below: its artefacts hid
+roughly one tier of detail, which is exactly why a first pass concluded
+that class was never resolvable at any range.
 
-Three things, matching the plan's "Regression tests" section exactly:
+`visibility.py`'s three angular-radius constants were derived *from* the
+authoritative rows on 2026-09-17, so these tests are a conformance check on
+that derivation, not an independent confirmation of it. What they are for
+is the next edit, not this one: the moment someone changes
+`LOWRES`/`MEDRES`/`HIRES_ANGULAR_RADIUS_RAD`, `BINOCULAR_RANGE_MULTIPLIER`
+or `NAKED_EYE_RANGE_CAP_M`, `test_computed_tier_matches_ground_truth` fails
+and names the range that stopped matching what the screenshots show.
 
-1. `test_fixture_is_well_formed` -- the fixture loads, every record has the
-   required keys, `objects` is non-empty, `grades` only uses the defined
-   vocabulary (or `null`), and `object_model.profile_for` does not raise on
-   any referenced `object_type` (a smoke check against a typo'd unit name,
-   not a classification-correctness claim -- `profile_for` always returns a
-   profile, falling back to `object_model.DEFAULT_SIZE_M`/`DEFAULT_OP_CLASS`
-   for an unmatched type rather than raising, so this only catches
-   structural mistakes like an empty string).
-2. `test_pin_todays_achieved_tier` -- for every record with a non-null
-   `binocular` grade, pins `visibility._achieved_tier(range_m, size_m)`
-   (using the *largest* recorded `size_m` in that record's `objects` list --
-   the easiest-to-classify object, so if it doesn't resolve to a tier,
-   nothing smaller in the group does either) to whatever tier the code
-   actually returns today. A pin, not a correctness claim: its only job is
-   to fail the moment someone edits `visibility.py`'s constants without
-   updating this test.
-3. `test_known_divergence_binocular_overclaims_class` -- explicitly asserts
-   the documented gap between what `_achieved_tier` computes and what the
-   screenshots showed: at every tested binocular range (895 m-2.42 km,
-   spanning both Complex A and Complex B), ground truth topped out at
-   `speck_no_class` (presence, no class ever resolved) while the code
-   claims `medres` (class) or `hires` (type). This is a normal passing
-   assertion on a *known* mismatch, not `xfail`/`skip` -- see the module
-   docstring above and the plan's Regression tests section for why: a
-   reader must be able to see the disagreement by reading the test, and if
-   Pass 2's retune later makes this assertion wrong, that is the signal
-   Pass 2 succeeded and this test needs deleting/updating as part of that
-   change, not silently rotting green.
+1. `test_fixture_loads_and_has_records` / `test_fixture_record_is_well_formed`
+   -- structural checks: required keys present, `objects` non-empty,
+   `grades` drawn from the defined vocabulary (or `null`).
+2. `test_object_model_resolves_every_object_type` -- smoke check only;
+   `profile_for` never raises, so this catches a typo'd/empty unit name,
+   not a wrong class (see the research doc's `object_type` provenance
+   note).
+3. `test_computed_tier_matches_ground_truth` -- the real assertion.
+   For every authoritative record, `visibility._achieved_tier` must return
+   the tier the screenshots actually show through binoculars at that range.
+4. `test_jpeg_set_is_excluded_and_understates` -- pins *why* the superseded
+   set is excluded, so a future reader does not "fix" the fixture by
+   folding those rows back in: at two of its four ranges the JPEG grade is
+   strictly worse than what the PNG ladder shows at a comparable or longer
+   range, which is only explicable as compression loss.
 """
 
 from __future__ import annotations
@@ -78,6 +71,8 @@ _REQUIRED_RECORD_KEYS: frozenset[str] = frozenset(
         "grades",
         "source_images",
         "conservative_note",
+        "source_set",
+        "authoritative",
     }
 )
 
@@ -116,6 +111,13 @@ def _largest_size_m(record: dict[str, Any]) -> float:
 
 def _record_id(record: dict[str, Any]) -> str:
     return f"{record['complex']}-{record['range_m']}m"
+
+
+def _authoritative_records() -> list[dict[str, Any]]:
+    """The `png-2026-09-17` ladder -- the only rows any threshold claim is
+    allowed to rest on. See the module docstring for why the JPEG set is
+    excluded rather than merged in."""
+    return [r for r in _load_records() if r["authoritative"]]
 
 
 def test_fixture_loads_and_has_records() -> None:
@@ -165,61 +167,79 @@ def test_object_model_resolves_every_object_type(record: dict[str, Any]) -> None
         assert profile.op_class != ""
 
 
-@pytest.mark.parametrize(
-    "record",
-    [r for r in _load_records() if r["grades"]["binocular"] is not None],
-    ids=_record_id,
-)
-def test_pin_todays_achieved_tier(record: dict[str, Any]) -> None:
-    """Pins `_achieved_tier`'s current output for this record -- fails the
-    moment `visibility.py`'s constants change without this test being
-    updated, per the plan's "No constant changes this pass" decision. Not a
-    correctness claim (see module docstring)."""
-    tier, _confidence = visibility._achieved_tier(
-        record["range_m"], _largest_size_m(record)
-    )
+@pytest.mark.parametrize("record", _authoritative_records(), ids=_record_id)
+def test_computed_tier_matches_ground_truth(record: dict[str, Any]) -> None:
+    """`_achieved_tier` must agree with what the screenshots show through
+    binoculars at this range.
 
-    # Pinned today, 2026-09-17, against visibility.py as it stands
-    # (LOWRES/MEDRES/HIRES_ANGULAR_RADIUS_RAD, BINOCULAR_RANGE_MULTIPLIER,
-    # NAKED_EYE_RANGE_CAP_M all unchanged this pass):
-    expected_tier_by_range_m = {
-        1890: "medres",
-        2420: "medres",
-        955: "hires",
-        895: "hires",
-    }
-    assert tier == expected_tier_by_range_m[record["range_m"]]
+    Uses the *largest* recorded `size_m` in the record -- the
+    easiest-to-classify object present, so the group's grade is the grade
+    of its most legible member. The mapping from grade to tier is the
+    lattice `classification.py` already defines: `speck_no_class` is
+    presence (`lowres`), `class_recognizable` is `medres`,
+    `type_recognizable` is `hires`.
 
-
-@pytest.mark.parametrize(
-    "record",
-    [r for r in _load_records() if r["grades"]["binocular"] is not None],
-    ids=_record_id,
-)
-def test_known_divergence_binocular_overclaims_class(record: dict[str, Any]) -> None:
-    """The central finding this milestone exists to document (plan's "The
-    central finding" section): `visibility.py` models binocular
-    observation, and at every binocular-photographed range in this dataset
-    (895 m-2.42 km, both complexes), ground truth topped out at
-    `speck_no_class` -- class was never actually resolved -- while
-    `_achieved_tier` claims `medres` (class) or `hires` (type), 1-2 tiers
-    more than the screenshots support. This assertion is expected to keep
-    passing until Pass 2 retunes the constants; when it does, this test
-    (not `visibility.py`) is what needs updating, and that update is itself
-    the signal Pass 2 succeeded."""
-    ground_truth_grade = record["grades"]["binocular"]
-    assert ground_truth_grade == "speck_no_class", (
-        "this dataset's binocular ground truth never exceeded "
-        "speck_no_class at any tested range -- if a new row's grade is "
-        "better than that, the divergence claim below may no longer hold "
-        "for it and this test needs revisiting, not blind extension"
-    )
-    ground_truth_tier = _tier_for_grade(ground_truth_grade)
+    This is the test that will break when `visibility.py`'s constants are
+    next edited, and the range it names is the range whose ground truth the
+    edit contradicts."""
+    expected_tier = _tier_for_grade(record["grades"]["binocular"])
 
     computed_tier, _confidence = visibility._achieved_tier(
         record["range_m"], _largest_size_m(record)
     )
 
-    assert computed_tier != ground_truth_tier
-    assert ground_truth_tier == "lowres"
-    assert computed_tier in ("medres", "hires")
+    assert computed_tier == expected_tier, (
+        f"at {record['range_m']} m the screenshots show "
+        f"{record['grades']['binocular']!r} ({expected_tier}) through "
+        f"binoculars, but visibility.py computes {computed_tier!r}"
+    )
+
+
+@pytest.mark.parametrize("record", _authoritative_records(), ids=_record_id)
+def test_gate_admits_every_photographed_range(record: dict[str, Any]) -> None:
+    """Every range in the ladder showed at least presence through
+    binoculars, so `check_visibility`'s outer range gate must admit all of
+    them -- including 8.89 km, which the pre-calibration
+    `NAKED_EYE_RANGE_CAP_M` of 5000 m silently rejected.
+
+    Recomputes the gate's own arithmetic rather than calling
+    `check_visibility`, which would also need an ownship pose, a cockpit
+    mask pass and a terrain-LOS database; the range term is the only part
+    this ladder has ground truth for."""
+    size_m = _largest_size_m(record)
+    gate_range_m = min(
+        visibility.NAKED_EYE_RANGE_CAP_M,
+        (size_m / visibility.NAKED_EYE_GATING_ANGULAR_RADIUS_RAD)
+        * visibility.BINOCULAR_RANGE_MULTIPLIER,
+    )
+
+    assert record["range_m"] <= gate_range_m, (
+        f"{record['range_m']} m was photographed and plainly visible, but "
+        f"the gate only reaches {gate_range_m:.0f} m for a {size_m} m object"
+    )
+
+
+def test_jpeg_set_is_excluded_and_understates() -> None:
+    """Pins the reason the `jpeg-2026-09-17` rows are excluded from every
+    threshold claim above, so nobody folds them back in as extra data.
+
+    Both sets photographed the same kind of target complex on flat desert
+    in clear weather. The JPEG set reports `speck_no_class` (presence only)
+    at 955 m and 895 m; the lossless ladder reports `type_recognizable` at
+    1000 m -- a better grade at a *longer* range, which no physical
+    property of the scene explains. Compression loss does."""
+    by_set: dict[str, dict[int, str | None]] = {}
+    for record in _load_records():
+        by_set.setdefault(record["source_set"], {})[record["range_m"]] = record[
+            "grades"
+        ]["binocular"]
+
+    assert by_set["jpeg-2026-09-17"][955] == "speck_no_class"
+    assert by_set["jpeg-2026-09-17"][895] == "speck_no_class"
+    assert by_set["png-2026-09-17"][1000] == "type_recognizable"
+
+    assert all(
+        not r["authoritative"]
+        for r in _load_records()
+        if r["source_set"] == "jpeg-2026-09-17"
+    )

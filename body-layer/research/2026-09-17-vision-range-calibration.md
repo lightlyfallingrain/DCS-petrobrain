@@ -1,3 +1,13 @@
+> **SUPERSEDED 2026-09-17 — this document's central finding is false.**
+> Its grades were read from compressed JPEGs, whose artefacts hid roughly one tier of detail. A
+> lossless screenshot ladder captured the same day
+> (`2026-09-17-vision-range-calibration-pass2.md`) shows binoculars resolving *class* at 1.99 km
+> and *type* at 1.00 km — where this document concluded class was never resolvable at any range
+> down to 895 m. The constants were recalibrated against the lossless set; nothing below drove
+> that change. Kept for provenance and for the lesson in its successor's "Correction to Pass 1"
+> section: a lossy screenshot is not conservative evidence for a perception threshold, it is wrong
+> evidence.
+
 # Vision range calibration — Pass 1: dataset, fixture, divergence pin
 
 Date: 2026-09-17

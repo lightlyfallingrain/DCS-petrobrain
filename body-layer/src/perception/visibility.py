@@ -16,9 +16,22 @@ The numeric value happens to match `extra_eyesight_ratio` (4.0), but this
 project owns the ×4 as "what a crew member sees through binoculars,"
 independent of whatever `extra_eyesight_ratio` actually multiplies in DCS's
 native code. Do not re-derive the defaults below from an unaided-eye
-assumption and "correct" them to be stricter -- the resulting infantry
-~900 m / truck ~3 km / T-72 ~3.5 km ranges are the intended target
-behaviour, confirmed with the user.
+assumption and "correct" them to be stricter: the screenshot ladder
+described under the angular-radius constants below measured *both* the
+unaided view and the zoomed/binocular view of the same targets at the same
+nine ranges, and they differ by roughly two recognition tiers. This module
+is calibrated against the binocular column. Recalibrating it against the
+unaided column would not be a correction, it would be a different
+instrument -- and the place to model that properly is the deferred
+"attention direction and detection cones" milestone, which owns the
+per-optic split (see `body-layer/ROADMAP.md`).
+
+The multiplier survived calibration unchanged, which is itself a result
+worth keeping: reading the ladder as apparent angular size (true angular
+size x magnification) makes the unaided and binocular columns land on the
+*same* tier thresholds, with the optic supplying only the magnification.
+That is why retuning the three angular constants below was enough, and no
+per-optic curve had to be introduced here.
 
 Composes three independent plausibility gates over one
 `association.WorldObjectCandidate` (reused, not duplicated) against one
@@ -89,15 +102,40 @@ from perception.geometry import (
 )
 from perception.source import OwnshipState
 
-#: `HelperAI.lua`'s `min_angular_radius` table (radians), Session 5 Finding
-#: 3. `lowres` is ED's bare-existence threshold ("something is there," no
-#: class implied); `medres`/`hires` are classification tiers; `iff` is the
-#: friend/foe discrimination tier. All four are carried as named constants
-#: so the gating tier is a one-line change, not a redesign, if the default
-#: proves too generous or too strict once live-tested.
-LOWRES_ANGULAR_RADIUS_RAD: Final[float] = 0.0043
-MEDRES_ANGULAR_RADIUS_RAD: Final[float] = 0.008
-HIRES_ANGULAR_RADIUS_RAD: Final[float] = 0.02
+#: Apparent-angular-radius thresholds (radians) per recognition tier,
+#: **calibrated 2026-09-17 against real in-game screenshots** -- see
+#: `body-layer/research/2026-09-17-vision-range-calibration-pass2.md` and
+#: `tests/fixtures/vision_calibration.json`'s `png-2026-09-17` records.
+#: `lowres` is bare existence ("something is there," no class implied);
+#: `medres`/`hires` are the classification tiers; `iff` is friend/foe
+#: discrimination.
+#:
+#: **These are no longer `HelperAI.lua`'s `min_angular_radius` values.**
+#: They started as that table (0.0043 / 0.008 / 0.02, Session 5 Finding 3
+#: of `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
+#: ambient-detection.md`), read backwards into a range threshold by this
+#: project. A nine-range screenshot ladder (503 m to 8.89 km, flat desert,
+#: clear, four optics per range) showed all three were wrong, and wrong in
+#: *both* directions: the classification tiers were far too generous while
+#: the presence tier was too strict. Each value below is now derived from
+#: the observed tier boundary for a 7 m armored vehicle, using this
+#: module's own `size / threshold * BINOCULAR_RANGE_MULTIPLIER` formula:
+#:
+#: * `medres` -- class first resolved at 1990 m, not at 2990 m:
+#:   `7 / 1990 * 4 = 0.0141`. The old 0.008 implied class out to 3.5 km,
+#:   ~1.8x further than observed.
+#: * `hires` -- type first resolved at 1000 m, not at 1500 m:
+#:   `7 / 1000 * 4 = 0.028`. The old 0.02 implied type out to 1.4 km.
+#: * `lowres` -- presence was still unmistakable at 8.89 km, the farthest
+#:   range photographed, so this is an *upper bound* on the threshold, not
+#:   a measured boundary: `7 / 8890 * 4 = 0.00315`, rounded to 0.003
+#:   (9333 m for a 7 m object). The old 0.0043 cut presence off at 6.5 km,
+#:   inside the range where the ladder shows a clear row of contacts.
+#:   **The real presence limit is further out than anything tested** -- a
+#:   longer ladder would push this down again.
+LOWRES_ANGULAR_RADIUS_RAD: Final[float] = 0.003
+MEDRES_ANGULAR_RADIUS_RAD: Final[float] = 0.014
+HIRES_ANGULAR_RADIUS_RAD: Final[float] = 0.028
 #: Not used by this module -- friend/foe discrimination is out of scope
 #: (plan Risks, "no coalition/IFF filtering"). Named anyway so the full
 #: `min_angular_radius` table is visible in one place.
@@ -139,12 +177,28 @@ BINOCULAR_RANGE_MULTIPLIER: Final[float] = 4.0
 #: Finding 5). Raised to match `association.RANGE_CAP_M`, so neither
 #: detection channel is bounded tighter than the other for no reason.
 #:
-#: With this value the size curve does the discriminating -- infantry ~900 m,
-#: truck ~3 km, T-72 ~3.5 km, SA-3 launcher ~4.5 km all fall below the cap --
-#: and only ships are capped. Deliberately un-tuned; the user's instruction
-#: was "raise it, we'll fine-tune later," so treat it as a starting point to
-#: calibrate during live acceptance testing, not a settled number.
-NAKED_EYE_RANGE_CAP_M: Final[float] = 5000.0
+#: **Raised 5000 -> 10000 on 2026-09-17** by the screenshot calibration.
+#: 5000 was the "raise it, we'll fine-tune later" placeholder; the ladder
+#: then showed a row of ground vehicles plainly visible at 8.89 km, so a
+#: 5 km cap was actively suppressing detections the player can see -- the
+#: exact failure the no-omniscience invariant runs in reverse ("if the
+#: player can see a unit, Petrovich should too"). 10000 keeps this a sanity
+#: bound on the formula's output for very large objects (a ship computes
+#: ~133 km from the angular-radius curve alone) without clipping anything
+#: the ladder actually measured.
+#:
+#: Still not a measured limit: nothing was photographed beyond 8.89 km, so
+#: whether real DCS visibility ends at 10 km, 15 km, or further is unknown.
+#: With the calibrated `lowres` threshold a 7 m vehicle reaches 9333 m from
+#: the formula, just inside this cap -- so for ordinary ground vehicles the
+#: size curve still does the discriminating and the cap binds only ships
+#: and other outsized objects.
+#:
+#: Note this no longer matches `association.RANGE_CAP_M` (5000). The two
+#: were aligned when both were guesses; this one now has data behind it and
+#: the other does not, so they are deliberately decoupled rather than
+#: dragged along together.
+NAKED_EYE_RANGE_CAP_M: Final[float] = 10000.0
 
 #: A filter pass here is structurally weaker evidence than a real HelperAI
 #: detection (`association.CONFIDENT_ASSOCIATION_CONFIDENCE = 0.6`) -- there
