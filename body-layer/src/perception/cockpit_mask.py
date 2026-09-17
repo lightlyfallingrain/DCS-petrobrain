@@ -102,26 +102,55 @@ class OcclusionMask:
         return points[-1][1]
 
 
-#: PLACEHOLDER -- commit 1's mechanism-only values, not derived from
-#: anything (plan D3). Deliberately round, easy-to-recognise-as-fake
-#: numbers so nobody mistakes this table for a calibrated one before the
-#: follow-up commit replaces it. Shape mirrors the plan's D2 band table
-#: (steep ahead, shallow abeam, blocked aft) without claiming any of those
-#: bands' real angular width.
-_PLACEHOLDER_CO_PILOT_MASK: Final[OcclusionMask] = OcclusionMask(
+#: **Derivation note (plan D7) -- uncalibrated, first-pass, +/-10-15 deg at
+#: best.** Read off four co-pilot-seat screenshots (`win-mac-sync/
+#: from-windows/Screen_260917_0000{55,59,105,125}.jpg` -- forward/right/
+#: left/wide) at an **assumed pitch of 5 deg nose down** (typical cruise,
+#: user 2026-09-17). Because the mask is body-relative (D1), every angle
+#: below is measured from the **airframe boresight**, not the visible
+#: horizon -- at 5 deg nose down the horizon sits ~5 deg above boresight in
+#: each screenshot, so a horizon-referenced reading would be uniformly 5
+#: deg too shallow as a depression limit. Record this assumed pitch
+#: alongside the table (this comment) so a future re-derivation from a
+#: different attitude corrects consistently rather than silently
+#: inheriting this one's.
+#:
+#: - **0 deg (nose), `...55`/`...125`:** genuinely good -- the chin glazing
+#:   lets the boresight-relative view run steep, estimated ~45 deg down
+#:   before the dash/gunsight assembly starts occluding it.
+#: - **~90 deg (abeam), `...59` (right):** horizon and mid-distance stay
+#:   visible, but the sill/side console cuts off the near ground -- no
+#:   steep depression, estimated ~15 deg.
+#: - **Left (`...105`) is visibly more obstructed** than the right in the
+#:   same screenshot set, consistent with the plan's asymmetry finding --
+#:   not read as a separate number here because D5 keeps one symmetric
+#:   table regardless (see module docstring).
+#: - **Rear hemisphere:** no screenshot evidence either way -- kept at the
+#:   spec diagram's flat "no visibility to rear hemisphere"
+#:   (`docs/concept/state-transitions.jpg`), same `rear_cutoff_deg=100.0`
+#:   commit 1 shipped as a placeholder, now the real, if still coarse,
+#:   value.
+#:
+#: 20/50/80 deg breakpoints are not independently screenshot-derived --
+#: they interpolate between the two anchored readings above (0 deg/~45 and
+#: ~90 deg/~15) on the plan D2 band shape, tapering the last segment toward
+#: the rear cutoff. Treat this table exactly like `visibility.py`'s own
+#: uncalibrated tier constants: a documented starting point for live-sortie
+#: retuning, not a settled number.
+_CO_PILOT_MASK: Final[OcclusionMask] = OcclusionMask(
     breakpoints=(
-        (0.0, 40.0),
-        (20.0, 40.0),
-        (50.0, 20.0),
-        (80.0, 20.0),
-        (100.0, 0.0),
+        (0.0, 45.0),
+        (20.0, 35.0),
+        (50.0, 22.0),
+        (80.0, 15.0),
+        (100.0, 5.0),
     ),
     rear_cutoff_deg=100.0,
 )
 
 #: Per-station occlusion masks (D6). Only `STATION_CO_PILOT` is populated.
 COCKPIT_MASKS: Final[dict[str, OcclusionMask]] = {
-    STATION_CO_PILOT: _PLACEHOLDER_CO_PILOT_MASK,
+    STATION_CO_PILOT: _CO_PILOT_MASK,
 }
 
 
