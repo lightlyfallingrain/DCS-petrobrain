@@ -151,11 +151,14 @@ def test_hires_range_candidate_with_a_known_reporting_name_reaches_type_level() 
 
 
 def test_medres_range_candidate_stays_at_class_level() -> None:
-    # T-72B at 3000 m: beyond the 1400 m hires threshold, still inside the
-    # 3500 m medres threshold and the medres gate -- resolves to class,
-    # unchanged from pre-Stage-6 behaviour.
+    # T-72B at 1500 m: beyond the 1000 m hires threshold, still inside the
+    # 2000 m medres threshold -- resolves to class. Both thresholds moved in
+    # the 2026-09-17 screenshot calibration (hires 1400 -> 1000 m, medres
+    # 3500 -> 2000 m for a 7 m object), which is why this range is 1500 and
+    # not the 3000 it was: 3000 m is now presence-only, matching what the
+    # ladder shows through binoculars at 2.99 km.
     world_objects = {
-        "objects": [_world_object(1, "T-72B", lat_deg=3000.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "T-72B", lat_deg=1500.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 
@@ -207,8 +210,11 @@ def test_lowres_range_candidate_reaches_presence_level() -> None:
 
 
 def test_no_visible_candidates_returns_empty() -> None:
+    # A 6 m truck gates out past 8000 m (6 / 0.003 * 4.0) since the
+    # 2026-09-17 calibration; 6000 m, which used to be beyond the gate, is
+    # now comfortably inside it.
     world_objects = {
-        "objects": [_world_object(1, "Ural-4320", lat_deg=6000.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "Ural-4320", lat_deg=8500.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 

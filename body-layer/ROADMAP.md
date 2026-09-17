@@ -266,81 +266,62 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   end-to-end against a real flight) deliberately deferred, same posture as BL-6's `scan_area` wiring
   gap. Full history: `plans/bl7-mission-phase-relevance/`.
 
-- [~] **Vision range calibration (perception-tier, no BL number — the PB-1.5/`visibility.py`
-  lineage, same class as PB-1.5 itself).** **Pass 1 done (2026-09-17), Pass 2 pending the next
-  sortie** — not fully done. Replaces the load-bearing guesses in `perception/visibility.py` with
-  constants calibrated against what the player can actually see on screen in DCS.
+- [x] **Vision range calibration (perception-tier, no BL number — the PB-1.5/`visibility.py`
+  lineage).** **Done 2026-09-17.** `perception/visibility.py`'s recognition-tier range constants
+  are no longer guesses: they are derived from a nine-range screenshot ladder (503 m to 8.89 km,
+  one 12-unit complex on flat desert, four optics per range, each range's ground truth taken from
+  an F10 ruler frame). Dataset: `body-layer/tests/fixtures/vision_calibration.json`
+  (`png-2026-09-17` records). Derivation and full ladder:
+  `body-layer/research/2026-09-17-vision-range-calibration-pass2.md`.
 
-  **Pass 1 (done, 2026-09-17, `plans/vision-range-calibration/plan.md`):** transcribed the
-  20-screenshot dataset into `body-layer/tests/fixtures/vision_calibration.json`, recorded the
-  central finding and divergence table in `body-layer/research/2026-09-17-vision-range-
-  calibration.md`, and pinned today's `_achieved_tier` output plus the known code-vs-ground-truth
-  divergence in `body-layer/tests/test_vision_calibration.py` — **no constant or behaviour change**
-  (`visibility.py`/`naked_eye_source.py` untouched, user decision). Central finding: binocular
-  never resolves class at any tested range down to 895 m, while today's code claims `medres`/
-  `hires` at all four tested rows. The optic dimension (9K113 wide/narrow) was explicitly deferred
-  to the "Attention direction and detection cones" item below, not built. **Pass 2 (the actual
-  constant retune) is a separate future plan**, gated on a second sortie covering both close-range
-  (200-800 m) and long-range (>2.5 km) frames across all four optics — see the research doc's
-  "Capture request for Pass 2" section. **Read that doc's `object_type` provenance section before
-  planning Pass 2**: `object_model.profile_for` resolves only raw `LoGetWorldObjects` type strings,
-  so the F10 map labels this dataset is transcribed from (`"T-62"`, `"AK-74"`, `"BMD1"`, and the
-  SA-10/SA-15/HL B8M1 units) all fall back to `DEFAULT_SIZE_M = 5.0`. Pass 1 sidestepped this by
-  recording each object's `size_m` in the fixture as independently-known ground truth, which is
-  sound for a pass that changes nothing — but Pass 2 derives thresholds *from* sizes, so it has to
-  resolve the provenance question first or it will calibrate against 5.0 m defaults.
+  **What changed.** `MEDRES_ANGULAR_RADIUS_RAD` 0.008 → 0.014 (class range for a 7 m vehicle
+  3500 m → 2000 m), `HIRES` 0.02 → 0.028 (type 1400 m → 1000 m), `LOWRES` 0.0043 → 0.003
+  (presence 6511 m → 9333 m), `NAKED_EYE_RANGE_CAP_M` 5000 → 10000.
+  `BINOCULAR_RANGE_MULTIPLIER` stayed at 4.0. The old constants were wrong in **both** directions
+  at once — over-claiming classification while under-claiming presence — which is why they read as
+  plausible for so long. Note the cap no longer matches `association.RANGE_CAP_M` (5000):
+  deliberately decoupled, since one number now has data behind it and the other does not.
 
-  **Why now.** Every range constant in `visibility.py` is admitted-unverified: the
-  `min_angular_radius` tiers are ED's table read backwards into a range threshold (this project's
-  own derivation, never validated against ED's real formula), `BINOCULAR_RANGE_MULTIPLIER = 4.0` is
-  a modeling choice, and `NAKED_EYE_RANGE_CAP_M = 5000.0` was raised on the user's "raise it, we'll
-  fine-tune later." The resulting envelope (infantry ~900 m, truck ~3 km, T-72 ~3.5 km, SA-3
-  launcher ~4.5 km) is a first guess, and it drives the single invariant this project exists to
-  protect: **if the player can see a unit, Petrovich should too — and if the player cannot, he must
-  not.** Both directions are omniscience bugs. This also closes the calibration half of the parked
-  "own perception end-to-end" item below, which explicitly deferred these constants to "a milestone
-  that is flying anyway."
+  **The result that made a per-optic model unnecessary.** Read as apparent angular size (true
+  angular size × magnification), the unaided and binocular columns land on the *same* tier
+  thresholds — class at ~0.014 rad from both, agreeing to within 2%. The tiers are properties of
+  the eye; the optic only multiplies the angle. So retuning three constants was sufficient, and
+  the 2026-09-17 decision to defer the per-optic dimension holds. The 9K113 wide/narrow columns
+  are recorded in the fixture as founding evidence for the deferred "attention direction and
+  detection cones" item below, which owns that split.
 
-  **Ground truth available now.** `win-mac-sync/from-windows/target acquisition screenshots/` — a
-  first flat-desert, unobstructed, clear-weather set (Syria, 01/06/2020 0806, ownship ~765 m MSL /
-  ~194 m radar alt, IAS 60). Best-case visibility; the filename prefix (`0`/`1`/`2`/`3`) groups shots
-  of one target group, the suffix names the optic. Four channels per group: **naked eye** (unaided
-  cockpit view), **binocular**, **9K113 wide** and **9K113 narrow** (sight), plus an **F10 map**
-  frame carrying the ruler ground-truth range and the unit roster. Worked example, group `0`: F10
-  ruler reads 274°M / 1.89 km to a group of ZIL-135 + BTR-70 + AK-74 infantry; the naked-eye frame
-  at that range shows **nothing** identifiable, the binocular frame shows **two specks** and no
-  class. Current code would gate that group in at `lowres` (ZIL-135/BTR-70 well inside their ~3 km
-  thresholds) — so the first datapoint already suggests the envelope is too generous, at least for
-  the unaided channel. The screenshots are compressed JPEGs; **real in-game graphics are crisper**,
-  so a judgement of "invisible" from a screenshot is conservative and must be treated as such.
+  **Pass 1 (the same day) reached the opposite conclusion and was wrong.** It graded compressed
+  JPEGs of a similar scene and concluded class was never resolvable through binoculars at any
+  range down to 895 m — recommending `medres`/`hires` be made unreachable. The lossless ladder
+  shows class at 1.99 km and type at 1.00 km. The JPEG rows are kept in the fixture as
+  `authoritative: false`, with `test_jpeg_set_is_excluded_and_understates` pinning the
+  contradiction (a *better* grade at a *longer* range) so nobody folds them back in. Lesson worth
+  carrying: for a perception threshold, a lossy screenshot is not conservative evidence, it is
+  wrong evidence — the codec is part of the instrument.
 
-  **What this milestone owns.**
-  - Extract a calibration dataset from the screenshot set: per (group, optic, target type), the
-    ground-truth range from the F10 ruler and a graded verdict — `nothing` / `speck, no class` /
-    `class recognisable` / `type recognisable`. That grading ladder is the same lattice
-    `classification.py` already uses (presence / class / type), so calibration lands directly on
-    `_achieved_tier`'s thresholds rather than on a new parallel scale.
-  - Decide how the optics map onto channels. Today `visibility.py` models exactly one observer with
-    one flat ×4 binocular multiplier, while the screenshots show four distinct optics with very
-    different envelopes. Whether calibration produces one re-tuned curve or a per-optic set of
-    curves is an **architectural question for the Architect**, not a given — and it collides with
-    the deferred "Attention direction and detection cones" item below, which already anticipates
-    distinct optical modes. Deciding scope between "retune the constants in place" and "introduce
-    an optic dimension" is part of the plan, and the cheaper option should win unless the data
-    forces otherwise.
-  - Land the calibrated constants with their provenance recorded — the module docstring's binocular
-    premise and cap rationale must be rewritten, not left contradicting the new numbers.
-  - Regression tests pinning the calibration datapoints, so a future edit that quietly re-widens the
-    envelope fails a test instead of a sortie.
+  **Still open, deliberately.** `LOWRES` is an upper bound, not a measured boundary — presence was
+  still unmistakable at 8.89 km, the farthest range photographed, so a longer ladder would push it
+  lower again and `NAKED_EYE_RANGE_CAP_M` remains a sanity bound rather than a measurement.
+  Nothing below 503 m, so the unaided type threshold is unmeasured. One condition only (flat
+  desert, unobstructed, clear, one theatre/time/altitude band) — contrast, haze, dusk, night and
+  cluttered backgrounds are untouched, and `min_contrast_f`/`min_fog_transparency` remain
+  unaddressed. Every derivation uses a 7 m armored reference; infantry ranges follow from the
+  formula, not from measurement. All targets were static, and movement is a strong real detection
+  cue this does not model.
 
-  **Known gaps in the data, to be stated in the plan rather than silently assumed away.** The set
-  covers roughly 1–2.5 km only — **no long-range frames yet** (the user says these are still to
-  come), so the far end of the curve and `NAKED_EYE_RANGE_CAP_M` itself cannot be settled in this
-  pass; plan for the dataset to be extended rather than treating this set as final. Flat desert with
-  no obstruction is the best case, so nothing here calibrates contrast, haze, dusk, or cluttered
-  backgrounds (`min_contrast_f` / `min_fog_transparency` remain unaddressed, as
-  `visibility.py`'s docstring already admits). One weather/time-of-day condition, one theatre, one
-  altitude band.
+- [ ] **False contact merge at first sighting, kept alive by `object_id` continuity — surfaced by
+  the vision-range calibration, 2026-09-17.** Two real objects 400 m apart (the canonical mock
+  flight's Ural at x=1400 and Infantry AK at x=1800) now end the flight as **one** contact, where
+  they used to be two. Cause: the calibrated envelope first sees the infantry at ~2 km instead of
+  ~1.6 km, and at that range the naked-eye range bucket is coarse enough that its implied position
+  overlaps the truck's contact — so `ContactStore.ingest` merges instead of founding, and
+  `object_id` continuity then holds the false merge for the rest of the flight even as the range
+  closes and the two separate cleanly. This is exactly the false-merge risk BL-2.6 flagged when
+  the symmetric gate widened; seeing further means every contact now enters the store through a
+  wider-uncertainty door. Pinned by a strict `xfail`,
+  `tests/test_mock_flight_chain.py::test_two_real_objects_stay_two_contacts`, which states the
+  desired behaviour and will fail loudly if a fix lands without updating it. Worth fixing before a
+  longer ladder widens the envelope again.
 
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").

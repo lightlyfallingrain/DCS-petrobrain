@@ -1,5 +1,5 @@
 {
-  "_comment": "Ground-truth calibration dataset for perception/visibility.py, graded by reading the 23 screenshots in win-mac-sync/from-windows/target acquisition screenshots/ directly (win-mac-sync/ is gitignored -- this fixture is the durable, versioned transcription of what those images show). See plans/vision-range-calibration/plan.md and body-layer/research/2026-09-17-vision-range-calibration.md for the full narrative. `object_type` values are the unit labels as displayed on the DCS F10 map for these screenshots, not verified raw LoGetWorldObjects `object_type` strings (no live probe/log was captured this session) -- see the research doc's 'object_type provenance' note for which entries this causes to fall through to object_model.DEFAULT_SIZE_M/DEFAULT_OP_CLASS today, including two (T-62, BMD1) the plan's own prose describes as correctly-sized that do not actually resolve given this transcription. Grade vocabulary: 'nothing' / 'marginal_speck' / 'speck_no_class' (presence achieved, class not) / 'class_recognizable' / 'type_recognizable'; null means that optic was not photographed at that range/bearing. Records are designed to accept new rows (closer range, longer range, other theatres/weather) without a format change -- see 'Capture request for Pass 2' in the plan.",
+  "_comment": "Ground-truth calibration dataset for perception/visibility.py. Two source sets, distinguished by `source_set`/`authoritative`. The AUTHORITATIVE set is 'png-2026-09-17': 52 lossless PNG screenshots in win-mac-sync/from-windows/screenshots/, one Complex C (12 units: SA-3 launcher + SA-3 TR radar, ZU-23 on Ural, ZSU-23-x, BMP-1, BTR-70, T-72B, Ural, BM-21, 3x AK infantry) photographed at nine ranges from 8.89 km in to 503 m, four optics per range plus an F10 ruler frame giving the ground-truth range and bearing. The superseded set is 'jpeg-2026-09-17' (win-mac-sync/from-windows/target acquisition screenshots/): the same kind of scene captured as compressed JPEGs, whose artefacts hid roughly one tier of detail -- kept for provenance, excluded from threshold derivation. Both directories are gitignored, so this fixture is the durable, versioned transcription of what those images show. See body-layer/research/2026-09-17-vision-range-calibration-pass2.md for the derivation. `object_type` values are DCS F10 map display labels, not verified raw LoGetWorldObjects strings -- `size_m` is therefore recorded as independently-known ground truth rather than read back from object_model.profile_for (see the research doc's 'object_type provenance' note). Grade vocabulary: 'nothing' / 'marginal_speck' / 'speck_no_class' (presence achieved, class not) / 'class_recognizable' / 'type_recognizable'; null means that optic was not photographed at that range. Records accept new rows (other theatres, weather, altitudes) without a format change.",
   "records": [
     {
       "complex": "A",
@@ -8,11 +8,26 @@
       "date": "2020-06-01",
       "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
       "objects": [
-        {"object_type": "ZIL-135", "size_m": 6.0},
-        {"object_type": "BTR-70", "size_m": 7.0},
-        {"object_type": "AK-74", "size_m": 1.8},
-        {"object_type": "AK", "size_m": 1.8},
-        {"object_type": "AK", "size_m": 1.8}
+        {
+          "object_type": "ZIL-135",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BTR-70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK-74",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
       ],
       "grades": {
         "naked_eye": "nothing",
@@ -28,7 +43,9 @@
         "0 9K113 narrow distance tool.jpg",
         "0 about 2km.jpg"
       ],
-      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better."
+      "conservative_note": "SUPERSEDED by the png-2026-09-17 set. JPEG-compressed screenshot; the compression demonstrably hid detail the same scene shows in a lossless capture, so these grades understate real in-game visibility by roughly one tier. Kept for provenance, excluded from threshold derivation.",
+      "source_set": "jpeg-2026-09-17",
+      "authoritative": false
     },
     {
       "complex": "B",
@@ -37,19 +54,58 @@
       "date": "2020-06-01",
       "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
       "objects": [
-        {"object_type": "T-62", "size_m": 7.0},
-        {"object_type": "SA-10SR", "size_m": 9.0},
-        {"object_type": "SA-10SR", "size_m": 9.0},
-        {"object_type": "SA-10C2", "size_m": 9.0},
-        {"object_type": "SA-10TR", "size_m": 9.0},
-        {"object_type": "SA-15", "size_m": 9.0},
-        {"object_type": "Smerch", "size_m": 6.0},
-        {"object_type": "Smerch", "size_m": 6.0},
-        {"object_type": "BM-27", "size_m": 6.0},
-        {"object_type": "BM-27", "size_m": 6.0},
-        {"object_type": "HL B8M1", "size_m": 5.0},
-        {"object_type": "HL B8M1", "size_m": 5.0},
-        {"object_type": "BMD1", "size_m": 7.0}
+        {
+          "object_type": "T-62",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "SA-10SR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10SR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10C2",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10TR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-15",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "Smerch",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "Smerch",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-27",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-27",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "HL B8M1",
+          "size_m": 5.0
+        },
+        {
+          "object_type": "HL B8M1",
+          "size_m": 5.0
+        },
+        {
+          "object_type": "BMD1",
+          "size_m": 7.0
+        }
       ],
       "grades": {
         "naked_eye": "nothing",
@@ -64,7 +120,9 @@
         "1 group 9K113 narrow.jpg",
         "1 group at 2.5 km.jpg"
       ],
-      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better."
+      "conservative_note": "SUPERSEDED by the png-2026-09-17 set. JPEG-compressed screenshot; the compression demonstrably hid detail the same scene shows in a lossless capture, so these grades understate real in-game visibility by roughly one tier. Kept for provenance, excluded from threshold derivation.",
+      "source_set": "jpeg-2026-09-17",
+      "authoritative": false
     },
     {
       "complex": "B",
@@ -73,19 +131,58 @@
       "date": "2020-06-01",
       "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
       "objects": [
-        {"object_type": "T-62", "size_m": 7.0},
-        {"object_type": "SA-10SR", "size_m": 9.0},
-        {"object_type": "SA-10SR", "size_m": 9.0},
-        {"object_type": "SA-10C2", "size_m": 9.0},
-        {"object_type": "SA-10TR", "size_m": 9.0},
-        {"object_type": "SA-15", "size_m": 9.0},
-        {"object_type": "Smerch", "size_m": 6.0},
-        {"object_type": "Smerch", "size_m": 6.0},
-        {"object_type": "BM-27", "size_m": 6.0},
-        {"object_type": "BM-27", "size_m": 6.0},
-        {"object_type": "HL B8M1", "size_m": 5.0},
-        {"object_type": "HL B8M1", "size_m": 5.0},
-        {"object_type": "BMD1", "size_m": 7.0}
+        {
+          "object_type": "T-62",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "SA-10SR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10SR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10C2",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10TR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-15",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "Smerch",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "Smerch",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-27",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-27",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "HL B8M1",
+          "size_m": 5.0
+        },
+        {
+          "object_type": "HL B8M1",
+          "size_m": 5.0
+        },
+        {
+          "object_type": "BMD1",
+          "size_m": 7.0
+        }
       ],
       "grades": {
         "naked_eye": "marginal_speck",
@@ -102,7 +199,9 @@
         "3 unit right of group 9K113 wide.jpg",
         "unit right of group 9K113 narrow.jpg"
       ],
-      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better."
+      "conservative_note": "SUPERSEDED by the png-2026-09-17 set. JPEG-compressed screenshot; the compression demonstrably hid detail the same scene shows in a lossless capture, so these grades understate real in-game visibility by roughly one tier. Kept for provenance, excluded from threshold derivation.",
+      "source_set": "jpeg-2026-09-17",
+      "authoritative": false
     },
     {
       "complex": "B",
@@ -111,19 +210,58 @@
       "date": "2020-06-01",
       "conditions": "flat desert, clear, Syria, ownship ~765m MSL / ~194m radar alt, IAS 60",
       "objects": [
-        {"object_type": "T-62", "size_m": 7.0},
-        {"object_type": "SA-10SR", "size_m": 9.0},
-        {"object_type": "SA-10SR", "size_m": 9.0},
-        {"object_type": "SA-10C2", "size_m": 9.0},
-        {"object_type": "SA-10TR", "size_m": 9.0},
-        {"object_type": "SA-15", "size_m": 9.0},
-        {"object_type": "Smerch", "size_m": 6.0},
-        {"object_type": "Smerch", "size_m": 6.0},
-        {"object_type": "BM-27", "size_m": 6.0},
-        {"object_type": "BM-27", "size_m": 6.0},
-        {"object_type": "HL B8M1", "size_m": 5.0},
-        {"object_type": "HL B8M1", "size_m": 5.0},
-        {"object_type": "BMD1", "size_m": 7.0}
+        {
+          "object_type": "T-62",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "SA-10SR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10SR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10C2",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-10TR",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "SA-15",
+          "size_m": 9.0
+        },
+        {
+          "object_type": "Smerch",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "Smerch",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-27",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-27",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "HL B8M1",
+          "size_m": 5.0
+        },
+        {
+          "object_type": "HL B8M1",
+          "size_m": 5.0
+        },
+        {
+          "object_type": "BMD1",
+          "size_m": 7.0
+        }
       ],
       "grades": {
         "naked_eye": "marginal_speck",
@@ -136,7 +274,672 @@
         "2 binocular unit at 12 oclock.jpg",
         "2 1 km.jpg"
       ],
-      "conservative_note": "JPEG-compressed screenshot; real in-game visibility is likely marginally better. Not photographed through the 9K113 sight at this bearing (a different, closer sub-unit of the cluster was ranged instead -- see the naked-eye/binocular frame instead of a sight frame for this row)."
+      "conservative_note": "SUPERSEDED by the png-2026-09-17 set. JPEG-compressed screenshot; the compression demonstrably hid detail the same scene shows in a lossless capture, so these grades understate real in-game visibility by roughly one tier. Kept for provenance, excluded from threshold derivation.",
+      "source_set": "jpeg-2026-09-17",
+      "authoritative": false
+    },
+    {
+      "complex": "C",
+      "range_m": 8890,
+      "bearing_deg_mag": 173,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "marginal_speck",
+        "binocular": "speck_no_class",
+        "9k113_wide": "speck_no_class",
+        "9k113_narrow": "class_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.05.54.91.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.06.11.73.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.06.27.18.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.06.48.07.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.06.59.45.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 6580,
+      "bearing_deg_mag": 174,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "marginal_speck",
+        "binocular": "speck_no_class",
+        "9k113_wide": "speck_no_class",
+        "9k113_narrow": "class_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.08.35.76.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.08.47.81.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.08.58.78.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.09.15.54.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.09.25.91.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 5040,
+      "bearing_deg_mag": 171,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "marginal_speck",
+        "binocular": "speck_no_class",
+        "9k113_wide": "speck_no_class",
+        "9k113_narrow": "class_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.13.02.18.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.13.10.45.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.13.22.14.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.13.53.20.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.14.02.39.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 3990,
+      "bearing_deg_mag": 173,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "marginal_speck",
+        "binocular": "speck_no_class",
+        "9k113_wide": "speck_no_class",
+        "9k113_narrow": "class_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.17.44.53.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.17.53.41.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.18.03.46.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.18.14.18.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.18.22.27.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 2990,
+      "bearing_deg_mag": 170,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "speck_no_class",
+        "binocular": "speck_no_class",
+        "9k113_wide": "speck_no_class",
+        "9k113_narrow": "type_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.19.44.37.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.21.28.19.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.21.36.81.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.21.47.85.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.21.53.16.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 1990,
+      "bearing_deg_mag": 169,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "speck_no_class",
+        "binocular": "class_recognizable",
+        "9k113_wide": "class_recognizable",
+        "9k113_narrow": "type_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.23.09.09.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.23.16.19.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.23.25.92.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.23.40.82.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.23.51.76.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 1500,
+      "bearing_deg_mag": 167,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "speck_no_class",
+        "binocular": "class_recognizable",
+        "9k113_wide": "class_recognizable",
+        "9k113_narrow": "type_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.24.51.18.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.24.57.46.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.25.07.78.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.25.17.95.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.25.32.04.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.25.38.31.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 1000,
+      "bearing_deg_mag": 167,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "speck_no_class",
+        "binocular": "type_recognizable",
+        "9k113_wide": "class_recognizable",
+        "9k113_narrow": "type_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.27.21.94.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.27.30.83.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.27.39.97.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.27.49.29.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.27.55.65.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.27.59.88.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
+    },
+    {
+      "complex": "C",
+      "range_m": 503,
+      "bearing_deg_mag": 167,
+      "date": "2020-06-01",
+      "conditions": "flat desert, unobstructed, clear, Syria, 2020-06-01 ~0802-0825, ownship ~750m MSL / ~195-200m radar alt, hovering to slow forward flight",
+      "source_set": "png-2026-09-17",
+      "authoritative": true,
+      "objects": [
+        {
+          "object_type": "SA-3",
+          "size_m": 8.0
+        },
+        {
+          "object_type": "SA-3 TR",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "ZU23 U",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "ZSU-231",
+          "size_m": 6.5
+        },
+        {
+          "object_type": "BMP1",
+          "size_m": 6.7
+        },
+        {
+          "object_type": "BTR70",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "T72B",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "Ural",
+          "size_m": 6.0
+        },
+        {
+          "object_type": "BM-21",
+          "size_m": 7.0
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        },
+        {
+          "object_type": "AK",
+          "size_m": 1.8
+        }
+      ],
+      "grades": {
+        "naked_eye": "class_recognizable",
+        "binocular": "type_recognizable",
+        "9k113_wide": "type_recognizable",
+        "9k113_narrow": "type_recognizable"
+      },
+      "source_images": [
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.03.71.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.12.29.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.21.65.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.34.74.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.38.34.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.47.52.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.50.51.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.54.20.png",
+        "Digital Combat Simulator  Black Shark Screenshot 2026.09.17 - 15.29.57.35.png"
+      ],
+      "conservative_note": "Lossless PNG capture, graded from native-resolution crops of the original 3840x2160 frames (not from a downscaled view)."
     }
   ]
 }
