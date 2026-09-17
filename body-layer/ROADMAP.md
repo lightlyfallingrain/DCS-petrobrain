@@ -332,10 +332,41 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 - [ ] **BL-9 — Debug visualization.** Not started. Belief-vs-DCS-truth debug view. Arguably worth
   pulling earlier if BL-2/BL-3 turn out hard to reason about textually.
 
-- [ ] **BL-10 — SRS transport wiring (= PB-7 + PB-8, body's half only).** Not started. Swaps BL-5a's
-  typed/printed stand-ins for the real SRS adapter. The adapter itself (SRS client, ICS channel, PTT
-  debounce, silence gate, STT, TTS) is not body-layer work and needs its own plan and Investigator
-  pass on SRS's interface.
+- [~] **BL-10 — SRS transport wiring (= PB-7 + PB-8, body's half only).** **First slice done
+  2026-09-17 (outbound TTS, `plans/tts-voice-output/`); the rest not started.** Swaps BL-5a's
+  typed/printed stand-ins for the real SRS adapter. The adapter itself (SRS client, ICS channel,
+  PTT debounce, silence gate, STT, TTS) is not body-layer work — it now lives in its own
+  `srs-adapter/` sibling subproject (see `srs-adapter/ROADMAP.md` for that subproject's own
+  milestone status).
+
+  **Slice 1 — outbound TTS (stages 1-4 merged; 5-6 pending hardware).** Petrovich's already-
+  generated text is synthesized on the Mac and played as audio. Body-layer's share came to exactly
+  one optional field, `CrewConsole.speech_client`, read by the same `_print` funnel `overlay_client`
+  already uses, plus `logger.py --speech-audio --srs-adapter-url`. **That smallness is the
+  milestone's own stated test of BL-5a, and BL-5a passed it** — the plan said "body changes here
+  should be small; if they are not, BL-5a's interface was drawn in the wrong place."
+  `srs-adapter` owns synthesis (`TTSEngine` protocol + `MacSayEngine`) and delivery
+  (`--target local` plays on the Mac via `afplay`, needing neither Windows nor DCS;
+  `--target aircraft-layer` POSTs WAV bytes to the collector's new `POST /audio/play`, played
+  there by `AudioPlaybackSender` — FIFO for routine lines, urgent lines clear the queue and
+  interrupt in-flight playback). Still unverified, needs the user's hardware: `winsound` playback
+  on Windows and the urgent-interrupt mechanism (stage 5, no DCS needed), then latency and voice
+  acceptability on a real sortie (stage 6).
+
+  **Slice 2 — SRS ICS injection (next, not started).** `DCS-SR-ExternalAudio.exe --modulations
+  INTERCOM --unitId <player unit id>` as a second `AudioSink` inside `srs-adapter`. The recon
+  (`srs-adapter/research/2026-09-17-tts-audio-transport-recon.md`, read its two addenda) confirmed
+  stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz modulation 2, and that
+  `--unitId` exists specifically to allow intercom over external audio. **ICS is the only
+  acceptable target** (user constraint, 2026-09-17): the player must stay on the mission frequency
+  and the SPU-8 selects one source at a time, so a dedicated Petrovich frequency would compete with
+  mission comms rather than layer under them. If the live ICS test fails, this slice *stops* — it
+  does not degrade to a radio frequency, and slice 1's local playback is what ships. One unsolved
+  prerequisite: discovering the player's DCS unit ID at runtime (`--unitId` defaults to 1000);
+  likely already available via the aircraft layer's `LoGetWorldObjects`/`is_ownship` path, unverified.
+
+  **Slice 3 — inbound speech (STT/PTT), not started.** The half that consumes `PlayerUtterance`
+  records from real speech rather than typed input.
 
   **Also owns the rich command vocabulary** (user direction 2026-09-16): the F10 radio menu is
   deliberately capped at the simple fixed set `f10-command-vocabulary` built, and everything the
@@ -467,6 +498,14 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   docs, and calibrate its tier/range constants against "if the player can see a unit, Petrovich
   should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
   flying anyway rather than run standalone. **Do not start without the user's instruction.**
+
+- [ ] **Petrovich's voice has no character — generic English TTS.** Deferred deliberately at
+  BL-10 slice 1 (`plans/tts-voice-output/plan.md` Decision 7) rather than forgotten. macOS `say`
+  ships no Russian-accented English voice (`Milena` is Russian-*language*, a different thing), and
+  solving it would have expanded a slice whose point was "audible at all". Options when picked up:
+  a different local engine with a suitable voice, a trained/cloned voice, or accepting a generic
+  one permanently. Cheap to try in isolation — `srs-adapter --target local --voice <name>` plays a
+  line on the Mac with nothing else running, so voice auditioning costs one command per candidate.
 
 - [ ] **Cross-channel contact duplication — continuity maps are per-channel, not shared.** Found
   2026-09-10 during the object-permanence fix's live acceptance: a real civilian bus was tracked as

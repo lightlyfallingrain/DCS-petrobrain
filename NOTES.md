@@ -34,6 +34,10 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
 
 - **Ruff's isort first-party detection is cwd-dependent and will silently flip-flop without `known-first-party` pinned.** Running `ruff check world-model/src world-model/tests` from the repo root vs. cwd=`world-model/` resolved local packages (`coordinates`, `raster`, `control_points`) into different import-sort buckets, causing the same I001 finding to be "fixed" and recur 3+ times across M1/M2 sessions. Fixed by pinning `[tool.ruff.lint.isort] known-first-party` in `world-model/pyproject.toml` — always verify a lint fix from the *canonical* invocation cwd, not whichever cwd the agent happened to be in.
 
+## External Binaries & CLI Utilities
+
+- **macOS `say` command silently falls back to default voice on unknown `--voice` argument.** Unlike typical CLI tools that error on invalid arguments, `say -v "Nonexistent Voice Name" "text"` exits 0 and produces audio in the system default voice, not an error. Do not rely on voice-name validation via the CLI — invalid voices must be caught in code or accept silent fallback behavior. Confirmed live during BL-10 implementation (2026-09-17). Implication: any voice-selection feature must either (a) validate against `say -v '?'` output before invoking `say`, or (b) accept that an invalid voice name degrades silently to default.
+
 ## External Data & Integration
 
 - **pyosmium's sparse_mem_array index handles geometry resolution in C++, preventing Python-side memory blowup on large extracts.** M9's concern about 646 MB Turkey extracts was resolved by using `osmium.SimpleHandler.apply_file(..., locations=True, idx="sparse_mem_array")`: the index builds in C++ and resolves way-node geometry without materializing a Python dict of tens of millions of (node_id, lat, lon) tuples. A naive approach (Python dict-based node cache) would blow up ~4–5 GB on Turkey's 13M+ nodes; `sparse_mem_array` stays under 100 MB. Any future work parsing large `.osm.pbf` extracts should use this approach; the memory saving is non-negotiable at continental scale (M9 implementation note).
@@ -91,6 +95,8 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
 ## Type Checking & Python Conventions
 
 - **`float ** float` returns `Any` under `mypy --strict` — use `math.pow()` instead.** The `**` exponentiation operator's overloads admit a `complex` result in general, so mypy cannot narrow the return type to `float` even when both operands are `float` and the result is mathematically `float`. Solution: `math.pow(0.5, x)` has an unambiguous `float -> float` signature in typeshed and passes strict checking without surprises. Lesson: any future exponentiation in this codebase should use `math.pow()` proactively rather than triggering a `no-any-return` error later (BL-3 implementation note).
+
+- **Platform-guarded Windows imports must use `if sys.platform == "win32": import ...`, not bare `try: import / except ImportError`.** typeshed's `winsound` stub (and similar Windows-only stubs) report all members as "no attribute" outside `sys.platform == "win32"`, so `mypy --strict` fails even on a bare `try` block that would work at runtime. The static platform check is recognized by mypy and skips type-checking the unreachable branch for non-Windows platforms. Pattern: `if sys.platform == "win32": import winsound; ... _player = _WinsoundPlayer() else: ... _player = NonWindowsStandIn()`, where the stand-in raises `RuntimeError` on any call (the code is never executed on Windows, and never expected to succeed on non-Windows). Confirmed via reproduction on this codebase (BL-10 implementation, `aircraft-layer/src/collector/audio_sender.py`, 2026-09-17).
 
 ## Petrobrain Runtime & Perception
 

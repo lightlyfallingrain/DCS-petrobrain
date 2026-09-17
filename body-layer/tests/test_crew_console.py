@@ -23,6 +23,7 @@ from belief.crew_console import CrewConsole
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import EscalationPayload
+from belief.srs_client import SrsAdapterError
 from belief.tasks import TaskStore
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
@@ -45,6 +46,25 @@ class FakeOverlayClient:
         if text in self._fail_on:
             raise AircraftLayerError("simulated push failure")
         self.pushed.append(text)
+
+
+class FakeSpeechClient:
+    """A `push_speech`-only double, mirroring `FakeOverlayClient` above --
+    used to exercise `CrewConsole.speech_client` (BL-10 first slice,
+    `plans/tts-voice-output/plan.md`). Records `(text, urgent)` pairs so
+    tests can assert `bypass_gate` was threaded through as `push_speech`'s
+    `urgent` argument. `fail_on` names texts that raise `SrsAdapterError`
+    instead of recording, used to exercise `CrewConsole._print`'s per-push
+    isolation for this sink."""
+
+    def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
+        self.pushed: list[tuple[str, bool]] = []
+        self._fail_on = fail_on
+
+    def push_speech(self, text: str, urgent: bool) -> None:
+        if text in self._fail_on:
+            raise SrsAdapterError("simulated push failure")
+        self.pushed.append((text, urgent))
 
 
 class _CapturingBrainClient:
@@ -423,6 +443,105 @@ def test_failed_overlay_push_degrades_without_raising_and_does_not_block_remaini
     # one failed push must not disable the sink for subsequent lines.
     lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
     assert overlay_client.pushed == [f"Watching {contact_id}."]
+    assert lines == [f"Watching {contact_id}."]
+
+
+# -- speech_client (BL-10 first slice, plans/tts-voice-output/plan.md) ------
+
+
+def test_no_speech_push_when_speech_client_is_unset() -> None:
+    # speech_client defaults to None: a true no-op, no AttributeError, no
+    # push attempted -- mirrors overlay_client's own no-op default.
+    store = ContactStore()
+    console = CrewConsole(store=store)
+    lines = console.handle_line("!inject-urgent CONTACT_1 test call", now_sim=0.0)
+    assert lines == ["test call"]
+
+
+def test_readback_pushes_to_speech_client_as_routine() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=store, speech_client=speech_client)  # type: ignore[arg-type]
+
+    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
+
+    assert lines == [f"Watching {contact_id}."]
+    assert speech_client.pushed == [(f"Watching {contact_id}.", False)]
+
+
+def test_drained_lifecycle_event_pushes_to_speech_client_as_routine() -> None:
+    store = ContactStore()
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=store, speech_client=speech_client)  # type: ignore[arg-type]
+
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+
+    spoken = console.drain_events(now_sim=0.0)
+
+    assert len(spoken) == 1
+    assert speech_client.pushed == [(spoken[0], False)]
+
+
+def test_urgent_call_pushes_to_speech_client_as_urgent() -> None:
+    store = ContactStore()
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=store, speech_client=speech_client)  # type: ignore[arg-type]
+
+    lines = console.handle_line(
+        "!inject-urgent CONTACT_1 Missile launch, 9 o'clock! Break right!",
+        now_sim=0.0,
+    )
+
+    assert lines == ["Missile launch, 9 o'clock! Break right!"]
+    # Unlike the overlay sink (which gets a "!! " text prefix), the speech
+    # sink gets the *unmodified* text with urgent=True -- bypass_gate is
+    # threaded straight through as push_speech's urgent argument, not
+    # encoded into the text (plan Decision 3).
+    assert speech_client.pushed == [("Missile launch, 9 o'clock! Break right!", True)]
+
+
+def test_failed_speech_push_degrades_without_raising_and_does_not_block_overlay() -> (
+    None
+):
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    detected_line = "BMP-2."
+
+    overlay_client = FakeOverlayClient()
+    speech_client = FakeSpeechClient(fail_on=frozenset({detected_line}))
+    console = CrewConsole(
+        store=store,
+        overlay_client=overlay_client,  # type: ignore[arg-type]
+        speech_client=speech_client,  # type: ignore[arg-type]
+    )
+
+    # The speech push fails, but the overlay push for the same line must
+    # still succeed -- one sink's failure must not block another's.
+    spoken = console.drain_events(now_sim=0.0)
+    assert spoken == [detected_line]
+    assert overlay_client.pushed == [detected_line]
+    assert speech_client.pushed == []
+
+    # A second, unrelated push in a later call must still go through --
+    # one failed push must not disable the sink for subsequent lines.
+    lines = console.handle_line(f"watch {contact_id}", now_sim=0.0)
+    assert speech_client.pushed == [(f"Watching {contact_id}.", False)]
     assert lines == [f"Watching {contact_id}."]
 
 
