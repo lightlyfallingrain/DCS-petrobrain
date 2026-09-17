@@ -253,41 +253,44 @@ def test_terrain_los_blocked_drops_an_otherwise_visible_candidate(
     assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
 
 
-def test_moderate_azimuth_rejects_a_depression_the_nose_accepts() -> None:
-    """The case that actually discriminates this mask from the azimuth cone
-    it replaced.
+def test_steep_depression_inside_the_old_cone_is_now_rejected() -> None:
+    """The case that discriminates this mask from the azimuth cone it
+    replaced.
 
-    Review (2026-09-17) found three of the four mask integration tests sit in
-    regions where the old `_within_fov` and the new mask agree -- the abeam
-    and rear cases are outside the old +/-60 deg cone, so the old code
-    rejected them too, and the mild-forward case was inside both. Only the
-    bank case would genuinely have failed before. A test that cannot fail
-    against the pre-change code does not demonstrate the change.
+    Review (2026-09-17) found three of the four mask integration tests sat
+    in regions where the old `_within_fov` and the new mask agree -- the
+    abeam and rear cases are outside the old +/-60 deg cone, so the old code
+    rejected them too. A test that cannot fail against the pre-change code
+    does not demonstrate the change.
 
-    Body azimuth 45 deg is *inside* the old cone, so the old gate passed it
-    regardless of elevation; the new mask's interpolated allowance there is
-    ~24 deg, so a 35 deg depression must now be rejected.
+    Body azimuth 30 deg is *inside* the old cone, so the old gate passed it
+    regardless of elevation. The measured mask allows 22 deg of depression
+    flat across 0-60 deg, so the two candidates below -- same azimuth, same
+    horizontal range, differing only in depression -- straddle that limit.
 
-    The two candidates are deliberately at the **same slant range and the
-    same depression**, differing only in azimuth, so the forward control
-    proves the rejection comes from the mask rather than from the
-    angular-radius range gate -- which would also return `None` and would
-    make the assertion pass for the wrong reason.
+    Discriminating on elevation rather than azimuth is deliberate: the
+    measured forward allowance is *constant* out to 60 deg, so azimuth alone
+    separates nothing inside the old cone. Elevation is precisely what the
+    old gate lacked.
     """
     ownship = _ownship(heading_true_deg=0.0)
     horizontal_range = 600.0
-    depression_deg = 35.0
-    drop_m = horizontal_range * math.tan(math.radians(depression_deg))
+    azimuth_deg = 30.0
+    x = horizontal_range * math.cos(math.radians(azimuth_deg))
+    z = horizontal_range * math.sin(math.radians(azimuth_deg))
 
-    ahead = _candidate(
-        "Infantry", x=horizontal_range, z=0.0, alt_m=ownship.alt_m - drop_m
-    )
-    assert check_visibility(ownship, ahead, _FAKE_CONN, _THEATRE) is not None
-
-    off_nose = _candidate(
+    shallow = _candidate(
         "Infantry",
-        x=horizontal_range * math.cos(math.radians(45.0)),
-        z=horizontal_range * math.sin(math.radians(45.0)),
-        alt_m=ownship.alt_m - drop_m,
+        x=x,
+        z=z,
+        alt_m=ownship.alt_m - horizontal_range * math.tan(math.radians(12.0)),
     )
-    assert check_visibility(ownship, off_nose, _FAKE_CONN, _THEATRE) is None
+    assert check_visibility(ownship, shallow, _FAKE_CONN, _THEATRE) is not None
+
+    steep = _candidate(
+        "Infantry",
+        x=x,
+        z=z,
+        alt_m=ownship.alt_m - horizontal_range * math.tan(math.radians(32.0)),
+    )
+    assert check_visibility(ownship, steep, _FAKE_CONN, _THEATRE) is None

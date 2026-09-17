@@ -44,10 +44,17 @@ this project cares about flies above a helicopter at low level, and the
 rotor/roof would make a modelled upper limit fiction anyway (plan D2). This
 falls out of the mechanism for free rather than needing a special case:
 `is_visible` only ever checks `depression_deg <= max_depression_deg`, and
-`depression_deg` for anything above boresight is negative, which is
-trivially `<=` any of this table's (positive) values -- as long as the
+`depression_deg` for anything above boresight is negative, which is `<=`
+every value in this table -- all of which are non-negative. As long as the
 target's azimuth is not past `rear_cutoff_deg`, an above-boresight contact
 always clears the depression check on its own.
+
+That rests on the table staying non-negative, which is not guaranteed by the
+type. The measured rear limit was actually 3 deg *above* boresight (a limit
+of -3), which the mechanism handles correctly on its own -- the comparison is
+signed -- but which would make the paragraph above false. It was simplified
+to 0 by user direction ("good enough"). Anyone reintroducing a negative entry
+must revisit this note, not just the table.
 """
 
 from __future__ import annotations
@@ -102,50 +109,41 @@ class OcclusionMask:
         return points[-1][1]
 
 
-#: **Derivation note (plan D7) -- uncalibrated, first-pass, +/-10-15 deg at
-#: best.** Read off four co-pilot-seat screenshots (`win-mac-sync/
-#: from-windows/Screen_260917_0000{55,59,105,125}.jpg` -- forward/right/
-#: left/wide) at an **assumed pitch of 5 deg nose down** (typical cruise,
-#: user 2026-09-17). Because the mask is body-relative (D1), every angle
-#: below is measured from the **airframe boresight**, not the visible
-#: horizon -- at 5 deg nose down the horizon sits ~5 deg above boresight in
-#: each screenshot, so a horizon-referenced reading would be uniformly 5
-#: deg too shallow as a depression limit. Record this assumed pitch
-#: alongside the table (this comment) so a future re-derivation from a
-#: different attitude corrects consistently rather than silently
-#: inheriting this one's.
+#: **Measured from the co-pilot seat in DCS (user, 2026-09-17).** Replaces
+#: the screenshot-derived first pass, which this measurement shows was wrong
+#: in both directions: the nose was far too permissive (45 deg estimated vs
+#: 22 measured) and the rear cutoff far too tight (100 vs 130). All angles
+#: are **relative to the airframe boresight**, which is the frame the mask
+#: works in (D1), so no attitude correction applies -- unlike the derivation
+#: this supersedes, which had to back out an assumed 5 deg nose-down cruise
+#: attitude from every reading.
 #:
-#: - **0 deg (nose), `...55`/`...125`:** genuinely good -- the chin glazing
-#:   lets the boresight-relative view run steep, estimated ~45 deg down
-#:   before the dash/gunsight assembly starts occluding it.
-#: - **~90 deg (abeam), `...59` (right):** horizon and mid-distance stay
-#:   visible, but the sill/side console cuts off the near ground -- no
-#:   steep depression, estimated ~15 deg.
-#: - **Left (`...105`) is visibly more obstructed** than the right in the
-#:   same screenshot set, consistent with the plan's asymmetry finding --
-#:   not read as a separate number here because D5 keeps one symmetric
-#:   table regardless (see module docstring).
-#: - **Rear hemisphere:** no screenshot evidence either way -- kept at the
-#:   spec diagram's flat "no visibility to rear hemisphere"
-#:   (`docs/concept/state-transitions.jpg`), same `rear_cutoff_deg=100.0`
-#:   commit 1 shipped as a placeholder, now the real, if still coarse,
-#:   value.
+#: - **az 0-60 deg: 22 deg down, flat.** The forward allowance does not
+#:   taper across the nose arc; it is constant out to 60 deg.
+#: - **az 90 deg: 10 deg down**, linear from 60.
+#: - **az 130 deg: 0 deg** -- the boresight plane itself -- linear from 90.
+#:   Measured as 3 deg *up* (i.e. a limit of -3, only contacts above
+#:   boresight visible that far aft); simplified to 0 by the user, "good
+#:   enough", which keeps every table value non-negative and avoids modelling
+#:   a 3-degree sliver at the extreme rear.
+#: - **az 130 deg is the rear cutoff.** Nothing at all beyond it.
 #:
-#: 20/50/80 deg breakpoints are not independently screenshot-derived --
-#: they interpolate between the two anchored readings above (0 deg/~45 and
-#: ~90 deg/~15) on the plan D2 band shape, tapering the last segment toward
-#: the rear cutoff. Treat this table exactly like `visibility.py`'s own
-#: uncalibrated tier constants: a documented starting point for live-sortie
-#: retuning, not a settled number.
+#: The real cockpit is not quite symmetric -- the left side is more
+#: obstructed than the right, visible in the reference screenshots -- but
+#: the user judged the difference insignificant, and D5 keeps one mirrored
+#: table.
+#:
+#: Still approximate: read off a live cockpit view, not derived from the
+#: airframe model. But *measured* rather than inferred, which the screenshot
+#: pass was not. Retune from a fresh measurement, never from a screenshot.
 _CO_PILOT_MASK: Final[OcclusionMask] = OcclusionMask(
     breakpoints=(
-        (0.0, 45.0),
-        (20.0, 35.0),
-        (50.0, 22.0),
-        (80.0, 15.0),
-        (100.0, 5.0),
+        (0.0, 22.0),
+        (60.0, 22.0),
+        (90.0, 10.0),
+        (130.0, 0.0),
     ),
-    rear_cutoff_deg=100.0,
+    rear_cutoff_deg=130.0,
 )
 
 #: Per-station occlusion masks (D6). Only `STATION_CO_PILOT` is populated.
