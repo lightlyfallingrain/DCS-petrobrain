@@ -206,12 +206,28 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         final_t_sim = frames[-1]["telemetry"]["dcs_model_time_s"]
         assert runner.last_t_sim == final_t_sim
 
-        # 20 Hybrid observations (object 101, every poll) + 37 naked-eye
-        # observations (20 for object 101, plus 17 for object 102 from the
-        # frame it first clears the visibility gate onward) -- every one of
-        # those 57 percepts must land in exactly two contacts below, not a
-        # duplicate-contact runaway across so many consecutive polls.
-        assert len(runner.store.observations) == 57
+        # 20 Hybrid observations (object 101, every poll) + 33 naked-eye
+        # observations -- every one of those 53 percepts must land in
+        # exactly two contacts below, not a duplicate-contact runaway across
+        # so many consecutive polls.
+        #
+        # Was 57 before the cockpit occlusion mask (`perception.
+        # cockpit_mask`, 2026-09-17). Object 101 now drops out of the
+        # *naked-eye* channel for the last few polls, which is the mask
+        # working rather than a regression: ownship cruises at 700 m toward
+        # a target at 500 m, so as the horizontal range closes the target's
+        # depression steepens past the co-pilot's measured 22 deg forward
+        # allowance -- 200 m of height difference exceeds 22 deg once the
+        # horizontal range drops below ~495 m, i.e. once ownship passes
+        # x ~ 905 of its 0 -> 1140 run. It goes under the nose, exactly as
+        # it would in the real cockpit.
+        #
+        # The Hybrid channel is deliberately unaffected: the mask gates
+        # `perception.visibility` (naked-eye) only, and Hybrid's own
+        # forward-hemisphere filter in `perception.association` has no
+        # elevation term. Object 102 (further out at x=1800) never closes
+        # enough to be occluded and keeps all 17.
+        assert len(runner.store.observations) == 53
 
         contacts = get_contacts(runner.store, final_t_sim)
         assert len(contacts) == 2
