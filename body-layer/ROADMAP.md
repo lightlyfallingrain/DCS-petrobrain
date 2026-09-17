@@ -20,10 +20,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   transport layer" per the BL-4 plan. BL-5's own live sortie exercised `place`/`position`/
   `situation`, not these — unclear whether BL-4's tools have had a live run at all yet.
 
-- [ ] **F10 command vocabulary — the 15-token set and relative-sector re-projection** (merged
-  2026-09-16, `plans/f10-command-vocabulary/`). Live acceptance deferred *by design* rather than
-  by omission: this milestone exists to make the user's next sortie informative, so the sortie
-  itself is its acceptance. Nothing here has run against live DCS. What that sortie must
+- [~] **F10 command vocabulary — the 15-token set and relative-sector re-projection** (merged
+  2026-09-16, `plans/f10-command-vocabulary/`). **First sortie flown 2026-09-16/17 — partially
+  cleared.** Confirmed live: the menu tree is navigable, scans register real tasks, and
+  `Cancel Task` genuinely cancels. Two defects found and fixed (merge `74f0fff`,
+  `fix/scan-naked-eye-not-9k113`): Scan was driving the 9K113 sight instead of this project's own
+  naked-eye perception, and `Cancel Task` spoke a raw task id. Still unexercised, so this entry
+  stays open: relative-vs-bearing sector rotation through a manoeuvre including a 0/360 wraparound,
+  and the `F10_SCAN_RADIUS_M` / `DEFAULT_SCAN_DEADLINE_S` placeholder calibration — the latter is
+  hard to judge until a scan actually steers perception (`todo/todo.md`). What that sortie must
   exercise: the new menu tree is navigable (Scan -> Ahead/Left/Right/Full, Scan -> Bearing ->
   eight compass items, Watch -> Nearest, Cancel Task); relative scans rotate with the nose while
   Bearing scans do not — including a heading sweep through 0/360 to confirm no wraparound
