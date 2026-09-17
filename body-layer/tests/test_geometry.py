@@ -9,6 +9,7 @@ which are covered by that subproject's own tests.
 
 from __future__ import annotations
 
+import math
 import sqlite3
 
 import pytest
@@ -212,3 +213,100 @@ def test_project_terrain_aware_falls_back_to_flat_when_elevation_unavailable(
     )
 
     assert result == flat
+
+
+# --- body_relative_direction (plans/cockpit-visibility/plan.md D1) ---
+
+
+def test_body_relative_direction_level_unbanked_matches_world_frame() -> None:
+    # Heading/pitch/bank all zero: body frame == world frame, so this must
+    # reduce to plain bearing/elevation.
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+    target = GeoPosition(x=1000.0, z=1000.0, alt_m=500.0)
+
+    result = geometry.body_relative_direction(
+        observer, target, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+
+    assert result.azimuth_deg == pytest.approx(45.0)
+    assert result.elevation_deg == pytest.approx(0.0)
+
+
+def test_body_relative_direction_removes_heading() -> None:
+    # A target dead ahead of a heading-90 (east-pointed) aircraft should
+    # resolve to azimuth 0, whatever its world bearing is.
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+    target = GeoPosition(x=0.0, z=1000.0, alt_m=500.0)  # world bearing: east (90)
+
+    result = geometry.body_relative_direction(
+        observer, target, heading_true_deg=90.0, pitch_deg=0.0, bank_deg=0.0
+    )
+
+    assert result.azimuth_deg == pytest.approx(0.0)
+    assert result.elevation_deg == pytest.approx(0.0)
+
+
+def test_body_relative_direction_target_along_pitched_nose_is_dead_ahead() -> None:
+    # A target exactly along the nose of a nose-up-pitched aircraft (i.e.
+    # its world elevation equals the pitch angle) must resolve to
+    # elevation 0 in the body frame -- this is the case the module
+    # docstring's derivation walkthrough calls out directly.
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    pitch_deg = 20.0
+    horizontal_range = 1000.0
+    target = GeoPosition(
+        x=horizontal_range,
+        z=0.0,
+        alt_m=horizontal_range * math.tan(math.radians(pitch_deg)),
+    )
+
+    result = geometry.body_relative_direction(
+        observer, target, heading_true_deg=0.0, pitch_deg=pitch_deg, bank_deg=0.0
+    )
+
+    assert result.azimuth_deg == pytest.approx(0.0)
+    assert result.elevation_deg == pytest.approx(0.0, abs=1e-6)
+
+
+def test_body_relative_direction_below_horizon_is_negative_elevation() -> None:
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+    target = GeoPosition(x=1000.0, z=0.0, alt_m=0.0)
+
+    result = geometry.body_relative_direction(
+        observer, target, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+
+    assert result.elevation_deg < 0.0
+
+
+def test_body_relative_direction_bank_rotates_elevation_into_azimuth() -> None:
+    # A target dead below the aircraft (world elevation -90) has no
+    # meaningful azimuth when level -- but roll 90 deg right and that same
+    # target should resolve to straight out the right side, elevation ~0:
+    # this is the plan's whole justification for reading bank at all (a
+    # banking helicopter is exactly when a heading-only cone is most
+    # wrong).
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=1000.0)
+    target = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    level = geometry.body_relative_direction(
+        observer, target, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+    banked_right = geometry.body_relative_direction(
+        observer, target, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=90.0
+    )
+
+    assert level.elevation_deg == pytest.approx(-90.0)
+    assert banked_right.azimuth_deg == pytest.approx(90.0)
+    assert banked_right.elevation_deg == pytest.approx(0.0, abs=1e-6)
+
+
+def test_body_relative_direction_rear_hemisphere() -> None:
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+    target = GeoPosition(x=-1000.0, z=0.0, alt_m=500.0)
+
+    result = geometry.body_relative_direction(
+        observer, target, heading_true_deg=0.0, pitch_deg=0.0, bank_deg=0.0
+    )
+
+    assert abs(result.azimuth_deg) == pytest.approx(180.0)

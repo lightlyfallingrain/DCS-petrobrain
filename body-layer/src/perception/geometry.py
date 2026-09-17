@@ -184,6 +184,105 @@ def project_terrain_aware(
     return GeoPosition(x=horizontal_x, z=horizontal_z, alt_m=target_alt_m)
 
 
+@dataclass(frozen=True, slots=True)
+class BodyRelativeDirection:
+    """A target direction expressed in the airframe's own frame rather than
+    world-horizontal -- `plans/cockpit-visibility/plan.md`'s enabling fact
+    for a real cockpit occlusion mask (see `body_relative_direction` below).
+
+    `azimuth_deg` is signed, `(-180, 180]`, clockwise-positive: `0` is
+    straight down the nose, `+90` is directly off the right side, `-90`
+    directly off the left, `180`/`-180` is dead astern.
+
+    `elevation_deg` is signed, positive = above the airframe boresight
+    (roughly the pilot's/co-pilot's forward line of sight), negative =
+    below it. `perception.cockpit_mask` works in *depression* (positive =
+    down), which is simply `-elevation_deg` -- kept as elevation here
+    because that is the natural sign for a rotation result, not to make the
+    caller do the negation twice."""
+
+    azimuth_deg: float
+    elevation_deg: float
+
+
+def body_relative_direction(
+    observer: GeoPosition,
+    target: GeoPosition,
+    *,
+    heading_true_deg: float,
+    pitch_deg: float,
+    bank_deg: float,
+) -> BodyRelativeDirection:
+    """Direction from `observer` to `target`, rotated out of world-horizontal
+    and into the observer airframe's own frame (`plans/cockpit-visibility/
+    plan.md` D1) -- the piece `perception.visibility`'s old `_within_fov`
+    never had: a heading-only azimuth cone treats a target as equally
+    visible whether it is level with the aircraft or far below it, and
+    ignores bank entirely even though rolling toward a target is exactly
+    what opens up a real downward view to that side.
+
+    Pure vector rotation, no state, no I/O -- deliberately kept separate
+    from `perception.cockpit_mask`'s table lookup (`plans/cockpit-
+    visibility/plan.md` D3/point 2: "keep the geometry pure and separately
+    testable from the gate") so the rotation math and the mask shape can
+    each be tested, and later re-derived, independently.
+
+    Derivation: build the observer->target vector in world coordinates
+    (`north`/`east`/`up`, matching this module's DCS `x`=north/`z`=east/
+    `alt_m`=up convention), then remove the airframe's own attitude from it
+    in three steps, innermost-first:
+
+    1. **Yaw** -- rotate `(north, east)` by `-heading_true_deg` about the
+       vertical axis, so `forward0`/`right0` are horizontal components in
+       the airframe's *heading* frame (still ignoring pitch/bank).
+    2. **Pitch** -- rotate `(forward0, up)` by `-pitch_deg` about the
+       (unaffected) right axis, so `forward1`/`up1` are in the airframe's
+       *heading+pitch* frame. A target dead along the nose (wherever the
+       nose is pointed, pitched or not) reduces to `forward1 = range`,
+       `up1 = 0` here -- verified directly in `test_geometry.py`.
+    3. **Bank** -- rotate `(right1, up1)` by `-bank_deg` about the
+       (unaffected) forward axis, completing the transform into the full
+       airframe frame.
+
+    `azimuth_deg`/`elevation_deg` are then read off the resulting
+    `(forward, right, up)` triple with `atan2`, exactly as `bearing_deg`/
+    `elevation_at` read off world coordinates elsewhere in this module.
+
+    Degenerate case: `observer == target` (zero range) returns
+    `azimuth_deg=0.0, elevation_deg=0.0` rather than raising -- `atan2(0, 0)`
+    is well-defined as `0.0` in Python, so this is really just documenting
+    the behaviour, not adding a special case."""
+    delta_x = target.x - observer.x
+    delta_z = target.z - observer.z
+    delta_alt = target.alt_m - observer.alt_m
+
+    north = delta_x
+    east = delta_z
+    up = delta_alt
+
+    heading_rad = math.radians(heading_true_deg)
+    pitch_rad = math.radians(pitch_deg)
+    bank_rad = math.radians(bank_deg)
+
+    # Step 1: remove yaw (heading).
+    forward0 = north * math.cos(heading_rad) + east * math.sin(heading_rad)
+    right0 = -north * math.sin(heading_rad) + east * math.cos(heading_rad)
+    up0 = up
+
+    # Step 2: remove pitch.
+    forward1 = forward0 * math.cos(pitch_rad) + up0 * math.sin(pitch_rad)
+    up1 = -forward0 * math.sin(pitch_rad) + up0 * math.cos(pitch_rad)
+    right1 = right0
+
+    # Step 3: remove bank.
+    right2 = right1 * math.cos(bank_rad) - up1 * math.sin(bank_rad)
+    up2 = right1 * math.sin(bank_rad) + up1 * math.cos(bank_rad)
+
+    azimuth_deg = math.degrees(math.atan2(right2, forward1))
+    elevation_deg = math.degrees(math.atan2(up2, math.hypot(forward1, right2)))
+    return BodyRelativeDirection(azimuth_deg=azimuth_deg, elevation_deg=elevation_deg)
+
+
 def elevation_at(
     conn: sqlite3.Connection, theatre: str, x: float, z: float
 ) -> float | None:
