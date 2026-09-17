@@ -27,9 +27,27 @@ Composes three independent plausibility gates over one
 than `association.py`'s ambiguous-match compromise, since there is no real
 detection here to be ambiguous *about*):
 
-1. **FOV cone** -- `NAKED_EYE_FOV_HALF_WIDTH_DEG` off ownship true heading.
+1. **Cockpit occlusion mask** (`plans/cockpit-visibility/plan.md`,
+   superseding the old flat `NAKED_EYE_FOV_HALF_WIDTH_DEG` azimuth cone --
+   see below) -- `perception.geometry.body_relative_direction` rotates the
+   candidate's direction out of world-horizontal and into the airframe's
+   own frame (heading, pitch, bank all applied), then
+   `perception.cockpit_mask.is_visible` tests it against Petrovich's
+   station's maximum-depression-per-azimuth table plus a hard rear cutoff.
    Orthogonal to the angular-radius check below: look-direction
    plausibility, not detectability range.
+
+   **Not the same gate PB-1.5 shipped.** The old `_within_fov` was a single
+   azimuth cone off ownship *heading* with no elevation term at all -- a
+   contact 90 m below and 60 deg off the nose passed exactly as easily as
+   one on the horizon, which meant Petrovich could report contacts through
+   the fuselage and the floor. It was also parameterized by the wrong
+   instrument: `NAKED_EYE_FOV_HALF_WIDTH_DEG = 60.0` was the 9K113 sight's
+   angular limit (user, 2026-09-16), not anything established about a human
+   looking through cockpit glass -- see `todo/todo.md`'s entry on this. Both
+   defects are fixed by the same replacement: a body-relative depression
+   mask naturally bounds "how far down can he see" as a function of
+   azimuth, which a heading-only cone structurally cannot express.
 2. **Angular-radius recognition-tier range threshold**, replacing an
    invented range-multiplier curve. `HelperAI.lua`'s `min_angular_radius`
    table (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
@@ -61,16 +79,15 @@ from typing import Final
 
 from perception import object_model
 from perception.association import WorldObjectCandidate
-from perception.geometry import GeoPosition, bearing_deg, line_of_sight_clear, range_m
+from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
+from perception.geometry import (
+    GeoPosition,
+    bearing_deg,
+    body_relative_direction,
+    line_of_sight_clear,
+    range_m,
+)
 from perception.source import OwnshipState
-
-#: Half-width of the naked-eye scanning arc from ownship true heading,
-#: degrees. Narrower than `association.py`'s
-#: `FORWARD_HEMISPHERE_HALF_WIDTH_DEG = 90.0` deliberately: Hybrid's window
-#: is a loose plausibility backstop behind a real detection-existence gate;
-#: this one is the *primary* gate here and should model an actual scanning
-#: arc, not just "somewhere plausible."
-NAKED_EYE_FOV_HALF_WIDTH_DEG: Final[float] = 60.0
 
 #: `HelperAI.lua`'s `min_angular_radius` table (radians), Session 5 Finding
 #: 3. `lowres` is ED's bare-existence threshold ("something is there," no
@@ -217,14 +234,24 @@ def check_visibility(
 ) -> VisibilityResult | None:
     """Run `candidate` through all three gates (see module docstring).
     Returns `None` on the first failing gate -- cheap geometric checks
-    (FOV, angular-radius range) before the expensive LOS terrain-sampling
-    check, mirroring `association.associate()`'s own cheap-before-expensive
-    ordering."""
+    (cockpit mask, angular-radius range) before the expensive LOS
+    terrain-sampling check, mirroring `association.associate()`'s own
+    cheap-before-expensive ordering."""
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
 
     candidate_bearing_deg = bearing_deg(observer, target)
-    if not _within_fov(ownship.heading_true_deg, candidate_bearing_deg):
+    body_direction = body_relative_direction(
+        observer,
+        target,
+        heading_true_deg=ownship.heading_true_deg,
+        pitch_deg=ownship.pitch_deg,
+        bank_deg=ownship.bank_deg,
+    )
+    co_pilot_mask = COCKPIT_MASKS[STATION_CO_PILOT]
+    if not is_visible(
+        co_pilot_mask, body_direction.azimuth_deg, body_direction.elevation_deg
+    ):
         return None
 
     candidate_range_m = range_m(observer, target)
@@ -249,8 +276,3 @@ def check_visibility(
         tier=achieved_tier,
         confidence=achieved_confidence,
     )
-
-
-def _within_fov(ownship_heading_deg: float, candidate_bearing_deg: float) -> bool:
-    delta = (candidate_bearing_deg - ownship_heading_deg + 180.0) % 360.0 - 180.0
-    return abs(delta) <= NAKED_EYE_FOV_HALF_WIDTH_DEG

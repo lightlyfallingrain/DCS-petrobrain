@@ -49,6 +49,8 @@ def _telemetry_dict() -> dict[str, Any]:
         "position_y_m": 400.0,
         "position_z_m": 8000.0,
         "heading_true_rad": 0.0,
+        "pitch_rad": 0.0,
+        "bank_rad": 0.0,
         "altitude_msl_m": 350.0,
     }
 
@@ -445,6 +447,8 @@ def _console_telemetry_dict() -> dict[str, Any]:
         "position_y_m": 500.0,
         "position_z_m": 0.0,
         "heading_true_rad": 0.0,
+        "pitch_rad": 0.0,
+        "bank_rad": 0.0,
         "altitude_msl_m": 500.0,
     }
 
