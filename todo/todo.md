@@ -53,40 +53,33 @@ Prioritize any open task here over any other task in this file or roadmap files.
   the kind of contradictory precedent a future reader would follow in the wrong direction.
 
 
-- [ ] **Scan commands should drive naked-eye perception, and the naked-eye FOV is a 9K113 number.**
-  Raised 2026-09-16 from the first live F10 test of `f10-command-vocabulary`. Two coupled defects,
-  both in `body-layer`:
+- [ ] **Scan commands should drive naked-eye perception.** Raised 2026-09-16 from the first live
+  F10 test of `f10-command-vocabulary`; narrowed 2026-09-17 once `cockpit-visibility` shipped.
 
-  1. **A scan changes attention, not perception.** `perception/visibility.py`'s naked-eye gate uses
-     a fixed `NAKED_EYE_FOV_HALF_WIDTH_DEG` cone off ownship heading that no command steers, so
-     "scan left" registers an `AttentionArea` and a `PendingIntent` but does not change which
-     contacts are detected. It raises attention on things the fixed cone already found. The 9K113
-     trigger removed on 2026-09-16 (`fix/scan-naked-eye-not-9k113`) was the only observable effect
-     a scan had, and it was the wrong organ — so scan is now honest but perceptually inert until
-     this is built.
-  2. **The cone's value is borrowed from the wrong instrument.** `NAKED_EYE_FOV_HALF_WIDTH_DEG =
-     60.0` comes from the **9K113's angular limits** (user, 2026-09-16) — correct for the sight,
-     not for a human looking through cockpit glass. The constant's own docstring does not say this;
-     it justifies 60° only as "should model an actual scanning arc", contrasted against
-     `association.py`'s 90°, which reads as reasoned when it is actually inherited. The real
-     naked-eye/binocular arc is unestablished: `docs/concept/state-transitions.jpg` says
-     "visibility limits from cockpit: TBD" and only fixes that there is no rear-hemisphere
-     visibility. Note the mismatch this already causes — the command sectors `left` (−90..−30) and
-     `right` (+30..+90) each fall half outside the 60° cone, and `full` (±90) exceeds it entirely.
+  **A scan changes attention, not perception.** `perception/visibility.py`'s naked-eye gate uses a
+  fixed cockpit occlusion mask (`perception.cockpit_mask`, `plans/cockpit-visibility/plan.md`) that
+  no command steers, so "scan left" registers an `AttentionArea` and a `PendingIntent` but does not
+  change which contacts are detected. It raises attention on things the fixed mask already found.
+  The 9K113 trigger removed on 2026-09-16 (`fix/scan-naked-eye-not-9k113`) was the only observable
+  effect a scan had, and it was the wrong organ — so scan is now honest but perceptually inert
+  until this is built.
 
-  What the full version looks like, per the spec diagram: a steered cone that follows the commanded
-  sector for the task's duration, plus the diagram's default-state sweep (`ahead → left → ahead →
-  right`), dwell time per sector, and naked-eye vs binocular tier varying with how long Petrovich
-  has been looking somewhere. That needs a dwell/attention scheduler that does not exist. Fixing
-  (2) is a prerequisite for (1) being meaningful — steering a cone whose width is wrong just aims
-  the wrong shape.
+  The mask's own mis-sourcing is now fixed — `NAKED_EYE_FOV_HALF_WIDTH_DEG` (the 9K113's angular
+  limit, not a human-through-glass figure) is gone, replaced by a body-relative
+  depression-per-azimuth mask derived from real co-pilot cockpit screenshots
+  (`plans/cockpit-visibility/plan.md` D7 — still uncalibrated, ±10-15° at best, same debt class as
+  `visibility.py`'s own tier constants, but at least sourced from the right thing now).
+
+  What the full version looks like, per the spec diagram: a steered *sub-window* within that mask
+  that follows the commanded sector for the task's duration, plus the diagram's default-state sweep
+  (`ahead → left → ahead → right`), dwell time per sector, and naked-eye vs binocular tier varying
+  with how long Petrovich has been looking somewhere. That needs a dwell/attention scheduler that
+  does not exist. Composes with, not duplicates, the static mask (`plans/cockpit-visibility/plan.md`
+  D4): the mask is what the airframe permits him to see at all, always applies; scan steering is
+  where he is currently looking within that, dynamic. Effective visibility is the intersection.
 
   Deliberately deferred by user direction 2026-09-16 ("write entry in backlog for full pattern
-  simulation, but for now simply remove 9K113 trigger"). Do not fix (2) alone as a quick constant
-  change either — the honest value is unknown, and replacing one unsourced number with another
-  unsourced number is not progress; it wants the same treatment as the other uncalibrated
-  perception constants (`visibility.py`'s tier thresholds), i.e. a real basis or a live-sortie
-  calibration.
+  simulation, but for now simply remove 9K113 trigger").
 
 
 - [ ] **Stage 5 road junctions: pathological single-chunk stalls — CONFIRMED DATA-DEPENDENT.** Raised
