@@ -142,6 +142,12 @@ not the overlay Hook script is actually loaded in DCS, since a missing
 listener is an expected state (DCS not running yet, or running without the
 overlay script) rather than an error.
 
+The collector also constructs an `AudioPlaybackSender` unconditionally (BL-10 first slice,
+`plans/tts-voice-output/plan.md`) — no host/port of its own, since it plays audio directly on
+this box via `winsound` rather than sending anywhere. This is the other end of
+`srs-adapter --target aircraft-layer`'s `POST /audio/play` call (see
+`srs-adapter/CLAUDE.md`).
+
 The collector also opens an `F10CommandReceiver` — a **listener**, not a
 sender, the reverse direction of `TextOverlaySender`/`CommandSender` above —
 on loopback UDP port 7794 by default (`--f10-host`/`--f10-port` to
@@ -213,6 +219,18 @@ field, `503` if the collector wasn't built with a `text_sender` (should not
 happen via `python -m collector`, which always constructs one).
 
 ```
+curl -X POST http://<windows-box-lan-ip>:7791/audio/play -d '{"audio_b64":"<base64 WAV bytes>"}'
+```
+
+Plays a synthesized WAV directly on this box via `winsound` (BL-10 first slice, `plans/
+tts-voice-output/plan.md`) — `200 {"ok": true}` on success (same "attempted the call" contract as
+`/text/push`: the audio was handed to the playback queue, not confirmation it was actually heard),
+`400` on missing/invalid `audio_b64`/`urgent` or non-JSON body, `503` if the collector wasn't
+built with an `audio_sender` (should not happen via `python -m collector`, which always constructs
+one). Normally called by `srs-adapter --target aircraft-layer`, not by hand — see
+`srs-adapter/CLAUDE.md`'s own run command for the full TTS-to-audible-speech path.
+
+```
 curl http://<windows-box-lan-ip>:7791/f10_commands/poll
 ```
 
@@ -224,10 +242,10 @@ call** — unlike every other endpoint on this API, a second concurrent
 poller would silently steal selections from the first; body-layer's
 `--crew-text --f10-commands` is meant to be the only poller.
 
-These write/inbound paths (`/text/push`, `/command/petrovich_search`, and
-this F10 poll's Hook-to-collector feed) are the only parts of this API
-that are not plain read-only telemetry — everything else remains
-read-only.
+These write/inbound paths (`/text/push`, `/command/petrovich_search`,
+`/audio/play`, and this F10 poll's Hook-to-collector feed) are the only
+parts of this API that are not plain read-only telemetry — everything else
+remains read-only.
 
 ## PB-1.5 ambient-detection probe (spike, temporary)
 

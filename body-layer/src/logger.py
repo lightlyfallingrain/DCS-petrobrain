@@ -136,6 +136,18 @@ selects which `belief.escalation.BrainClient` stand-in handles escalated
 utterances (`debug`, the default, prints escalations to stderr for session
 visibility; `null` is silent) -- neither produces spoken output, since no
 real brain exists yet.
+
+**`--speech-audio` (BL-10 first slice, `plans/tts-voice-output/plan.md`)**:
+only meaningful alongside `--crew-text` (a true no-op otherwise, same
+additive posture as `--overlay`/`--f10-commands`). When set, `main()`
+builds a `belief.srs_client.SrsAdapterClient` from `--srs-adapter-url`
+(required together with `--speech-audio`) and passes it as `CrewConsole.
+speech_client`, so every line `CrewConsole` speaks is also synthesized and
+made audible via `srs-adapter`'s `POST /speak` -- the same lines
+`--crew-text --overlay` mirrors to the in-cockpit text overlay, pushed
+through the identical `_print` funnel, just to a different sink and a
+different process (`srs-adapter`, not the aircraft layer). `--overlay` and
+`--speech-audio` are independent and combine freely.
 """
 
 from __future__ import annotations
@@ -158,6 +170,7 @@ from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
+from belief.srs_client import SrsAdapterClient
 from belief.tasks import TaskStore
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
@@ -703,10 +716,31 @@ def main() -> None:
             "no real brain exists yet."
         ),
     )
+    parser.add_argument(
+        "--speech-audio",
+        action="store_true",
+        help=(
+            "synthesize and play every line CrewConsole speaks via "
+            "srs-adapter's POST /speak -- BL-10 first slice, plans/"
+            "tts-voice-output/plan.md. Only meaningful with --crew-text; "
+            "defaults off, a true no-op when absent. Requires "
+            "--srs-adapter-url."
+        ),
+    )
+    parser.add_argument(
+        "--srs-adapter-url",
+        default=None,
+        help=(
+            "srs-adapter base URL, e.g. http://127.0.0.1:7795 -- required "
+            "together with --speech-audio, unused otherwise"
+        ),
+    )
     args = parser.parse_args()
 
     if args.crew_text and args.console:
         parser.error("--crew-text is mutually exclusive with --console")
+    if args.speech_audio and args.srs_adapter_url is None:
+        parser.error("--speech-audio requires --srs-adapter-url")
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
@@ -731,6 +765,11 @@ def main() -> None:
             output=None,
             mission_phase_tracker=mission_phase_tracker,
         )
+        speech_client = (
+            SrsAdapterClient(base_url=args.srs_adapter_url)
+            if args.speech_audio
+            else None
+        )
         crew_console = CrewConsole(
             store=crew_runner.store,
             brain_client=brain_client,
@@ -738,6 +777,7 @@ def main() -> None:
             aircraft_client=aircraft_client,
             tasks=crew_runner.tasks,
             overlay_client=aircraft_client if args.overlay else None,
+            speech_client=speech_client,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(

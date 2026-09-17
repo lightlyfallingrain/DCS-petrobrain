@@ -53,6 +53,21 @@ the body/brain process, on either Windows or Mac (compute topology note in
   `CommandSendError` on a clearly-failed send (see that module's docstring
   for why this write path does not share `/text/push`'s
   never-raises posture).
+- `POST /audio/play` -> the aircraft layer's third inbound/write path
+  (BL-10 first slice, `plans/tts-voice-output/plan.md`). Body
+  `{"audio_b64": "<base64 WAV bytes>", "urgent": bool}`; forwards the
+  decoded bytes to `collector.audio_sender.AudioPlaybackSender.play_audio`,
+  which plays them through `winsound` on this (Windows) box, and responds
+  `200 {"ok": true}` -- same "attempted the call" contract as `/text/push`
+  and `/command/petrovich_search`: a `200` means the audio was handed to
+  the playback queue, never that it was actually heard. `400 {"error": ...}`
+  on a missing/invalid `audio_b64`/`urgent` or non-JSON body; `503
+  {"error": "audio playback not configured"}` if this server was built
+  without an `audio_sender`. Like `/text/push` (and unlike
+  `/command/petrovich_search`), this never propagates a `500` for a
+  playback failure -- `AudioPlaybackSender.play_audio` never raises (plan
+  Decision 5: audio is best-effort display-equivalent output, not a
+  verifiable command).
 
 - `GET /f10_commands/poll` -> drains the collector's `F10CommandQueue`
   (`plans/f10-crew-commands/plan.md`) and returns every pending F10
@@ -86,6 +101,8 @@ the same process as `CollectorServer`, sharing one `TelemetryCache`, one
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -93,6 +110,7 @@ from types import TracebackType
 from typing import Any, Self
 from urllib.parse import urlparse
 
+from collector.audio_sender import AudioPlaybackSender
 from collector.cache import (
     F10CommandQueue,
     PetrovichIndicationCache,
@@ -116,6 +134,7 @@ _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
 _F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
+_AUDIO_PLAY_PATH = "/audio/play"
 
 #: `SearchMode`'s two valid wire values -- checked against the request
 #: body's `mode` field before forwarding to `CommandSender.send_command`.
@@ -160,6 +179,7 @@ def _make_handler(
     f10_command_queue: F10CommandQueue,
     text_sender: TextOverlaySender | None,
     command_sender: CommandSender | None,
+    audio_sender: AudioPlaybackSender | None,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -195,6 +215,9 @@ def _make_handler(
                 return
             if path == _COMMAND_PETROVICH_SEARCH_PATH:
                 self._handle_command_petrovich_search()
+                return
+            if path == _AUDIO_PLAY_PATH:
+                self._handle_audio_play()
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -257,6 +280,51 @@ def _make_handler(
                 return
             self._respond_json(200, {"ok": True})
 
+        def _handle_audio_play(self) -> None:
+            if audio_sender is None:
+                self._respond_json(503, {"error": "audio playback not configured"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw_body = self.rfile.read(length) if length > 0 else b""
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._respond_json(400, {"error": "body must be valid JSON"})
+                return
+            if not isinstance(data, dict):
+                self._respond_json(400, {"error": "body must be a JSON object"})
+                return
+
+            audio_b64 = data.get("audio_b64")
+            if not isinstance(audio_b64, str) or not audio_b64:
+                self._respond_json(
+                    400, {"error": "'audio_b64' must be a non-empty string"}
+                )
+                return
+            try:
+                audio = base64.b64decode(audio_b64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                self._respond_json(
+                    400, {"error": f"'audio_b64' is not valid base64: {exc}"}
+                )
+                return
+            if not audio:
+                self._respond_json(400, {"error": "'audio_b64' decoded to no bytes"})
+                return
+
+            urgent = data.get("urgent", False)
+            if not isinstance(urgent, bool):
+                self._respond_json(400, {"error": "'urgent' must be a boolean"})
+                return
+
+            # Never raises -- see AudioPlaybackSender.play_audio's own
+            # docstring and plan Decision 5 (this is /text/push's
+            # never-raises posture, not /command/petrovich_search's
+            # propagate-500 one).
+            audio_sender.play_audio(audio, urgent)
+            self._respond_json(200, {"ok": True})
+
         def _respond_json(self, status: int, body: Any) -> None:
             payload = json.dumps(body).encode("utf-8")
             self.send_response(status)
@@ -285,6 +353,7 @@ class TelemetryAPIServer:
         petrovich_wheel_cache: PetrovichWheelCache | None = None,
         command_sender: CommandSender | None = None,
         f10_command_queue: F10CommandQueue | None = None,
+        audio_sender: AudioPlaybackSender | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`f10_command_queue` default to a fresh,
@@ -293,10 +362,10 @@ class TelemetryAPIServer:
         # call site (tests included) working unchanged; the corresponding
         # `/latest` (or `/f10_commands/poll`) endpoint on such a server
         # just always answers `null` (or `[]`), same as an empty cache
-        # would. `text_sender`/`command_sender` default to `None` rather
-        # than a real sender for the same reason -- `/text/push`/
-        # `/command/petrovich_search` answer `503` rather than crashing
-        # when they aren't configured.
+        # would. `text_sender`/`command_sender`/`audio_sender` default to
+        # `None` rather than a real sender for the same reason --
+        # `/text/push`/`/command/petrovich_search`/`/audio/play` answer
+        # `503` rather than crashing when they aren't configured.
         self._cache = cache
         self._world_objects_cache = (
             world_objects_cache
@@ -318,6 +387,7 @@ class TelemetryAPIServer:
         )
         self._text_sender = text_sender
         self._command_sender = command_sender
+        self._audio_sender = audio_sender
         self._host = host
         self._port = port
         self._httpd: ThreadingHTTPServer | None = None
@@ -353,6 +423,7 @@ class TelemetryAPIServer:
                 self._f10_command_queue,
                 self._text_sender,
                 self._command_sender,
+                self._audio_sender,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)
