@@ -450,9 +450,10 @@ class CrewConsole:
 
         **Known consequence: a scan currently changes attention, not
         perception.** `perception.visibility`'s naked-eye gate uses a fixed
-        `NAKED_EYE_FOV_HALF_WIDTH_DEG` cone off ownship heading that no
-        command steers, so "scan left" registers an `AttentionArea` and a
-        task but does not change which contacts are detected. Making the
+        cockpit occlusion mask (`perception.cockpit_mask`,
+        `plans/cockpit-visibility/plan.md`) that no command steers, so
+        "scan left" registers an `AttentionArea` and a task but does not
+        change which contacts are detected. Making the
         scanned sector actually drive perception is backlogged
         (`todo/todo.md`, "Scan commands should drive naked-eye perception")
         -- deliberately not done here, per user direction 2026-09-16 to
