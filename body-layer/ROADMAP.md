@@ -266,10 +266,23 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   end-to-end against a real flight) deliberately deferred, same posture as BL-6's `scan_area` wiring
   gap. Full history: `plans/bl7-mission-phase-relevance/`.
 
-- [ ] **Vision range calibration (perception-tier, no BL number — the PB-1.5/`visibility.py`
-  lineage, same class as PB-1.5 itself).** Not started; **this is the next actionable perception
-  milestone.** Replaces the load-bearing guesses in `perception/visibility.py` with constants
-  calibrated against what the player can actually see on screen in DCS.
+- [~] **Vision range calibration (perception-tier, no BL number — the PB-1.5/`visibility.py`
+  lineage, same class as PB-1.5 itself).** **Pass 1 done (2026-09-17), Pass 2 pending the next
+  sortie** — not fully done. Replaces the load-bearing guesses in `perception/visibility.py` with
+  constants calibrated against what the player can actually see on screen in DCS.
+
+  **Pass 1 (done, 2026-09-17, `plans/vision-range-calibration/plan.md`):** transcribed the
+  23-screenshot dataset into `body-layer/tests/fixtures/vision_calibration.json`, recorded the
+  central finding and divergence table in `body-layer/research/2026-09-17-vision-range-
+  calibration.md`, and pinned today's `_achieved_tier` output plus the known code-vs-ground-truth
+  divergence in `body-layer/tests/test_vision_calibration.py` — **no constant or behaviour change**
+  (`visibility.py`/`naked_eye_source.py` untouched, user decision). Central finding: binocular
+  never resolves class at any tested range down to 895 m, while today's code claims `medres`/
+  `hires` at all four tested rows. The optic dimension (9K113 wide/narrow) was explicitly deferred
+  to the "Attention direction and detection cones" item below, not built. **Pass 2 (the actual
+  constant retune) is a separate future plan**, gated on a second sortie covering both close-range
+  (200-800 m) and long-range (>2.5 km) frames across all four optics — see the research doc's
+  "Capture request for Pass 2" section.
 
   **Why now.** Every range constant in `visibility.py` is admitted-unverified: the
   `min_angular_radius` tiers are ED's table read backwards into a range threshold (this project's
