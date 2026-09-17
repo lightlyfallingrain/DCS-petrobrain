@@ -253,3 +253,146 @@ Full read of the commit's diff across every touched file, cross-checked the air-
 and `parent_class_of`'s behaviour directly against `perception/object_model.py` and
 `belief/classification.py`'s actual code (not the commit message's claims about them), and reran
 both subprojects' gates independently.
+
+---
+
+## Review of `89b8b1d` ("Scan drives naked-eye perception, not the 9K113; name what Cancel stops")
+
+Scoped to this one commit — a live-test bug fix on `fix/scan-naked-eye-not-9k113`, not a planned
+milestone stage (`f10-command-vocabulary` has no plan entry for this fix; it corrects two defects
+found on that milestone's first live F10 test). The branch's other commits (`plans/
+cockpit-visibility/plan.md`, a separate not-yet-implemented plan) are explicitly out of scope and
+were not read. Re-ran body-layer's gates independently: `ruff format --check`/`ruff check` clean,
+`mypy src --strict` (from `body-layer/`) clean, 527 passed (526 → +1, matching the commit message).
+aircraft-layer untouched by this commit (only `body-layer/` and `todo/todo.md` changed per `git
+show --stat`), not re-run.
+
+**Defect 1 (Scan firing the 9K113) — effector call genuinely removed from `_handle_scan`, and
+`trigger_petrovich_search` stays intact for a future `Observ`.** The old `if self.aircraft_client is
+not None: try: trigger_petrovich_search("forward") except AircraftLayerError: ...` block is gone
+entirely from `crew_console._handle_scan`; the method now only calls `scan_area` (pure, no DCS I/O)
+and returns the readback. `aircraft_client.trigger_petrovich_search` itself is untouched
+(`src/aircraft_client.py:147`) and still has its own direct unit coverage
+(`test_aircraft_client.py`'s trigger/raises tests) — not broken, just unreferenced from this path
+now, exactly as the commit claims.
+
+**One caller was missed, but it predates this commit and predates the milestone.**
+`console.py`'s typed `scan-area <bearing> <range_m> <radius_m> <reason> [sector]` command (BL-6,
+`plans/bl6-commands-inspect-adapt/plan.md`, its own module docstring's explicit "one deliberate
+exception" note) still calls `aircraft_client.trigger_petrovich_search("forward")` after registering
+the task, and still prints "live Petrovich search triggered (forward)". Given this commit's own
+rationale — the project's glossary (`docs/concept/state-transitions.jpg`) assigns *Scan* to
+naked-eye and *Observ* to the 9K113 — `console.py`'s `scan-area` embodies the identical semantic
+mismatch this commit just removed from the F10 path, under the same verb. It is not a regression
+introduced by `89b8b1d` (it's pre-existing, developer-debug-console-only, and outside the two
+disclosed defects), so I'm not treating it as a required fix for this commit — but it's the kind of
+"every scan path" gap the task asked me to check for, and it's real: a `--console` operator running
+`scan-area` still drives the 9K113 today, unlabeled as such. Worth a backlog entry (`todo/todo.md`)
+the next time `console.py` is touched, so the same live-test surprise doesn't recur through the
+debug console.
+
+**Defect 2 (Cancel Task speaking a task id) — fixed correctly, and the empty-result/`render_
+cancel_readback` split is applied consistently.** `_handle_cancel_task`'s two empty branches (`self.
+tasks is None`; `not pending`) both return the module constant `_NOTHING_TO_STOP` directly, never
+routing through `render_cancel_readback` — correct, since that template unconditionally says "Copy,
+stopping...", which would misreport that something was cancelled when nothing was. The one non-empty
+path builds `description = self._describe_task_for_speech(task)` and returns `render_cancel_readback
+(description).text`. No id is ever interpolated into user-facing text; `task.id` is used only for
+`cancel_task(self.store, self.tasks, task.id)`'s own by-id lookup, not speech.
+
+**`_describe_task_for_speech`'s "safe to read the captured area's frame fields" claim — verified
+directly against `project_relative_area`, and it holds.** `ContactStore.reproject_relative_areas`
+calls `project_relative_area`, which does exactly one thing to a relative-sector area:
+`dataclasses.replace(area, center=ownship_position, wedge_deg=(absolute_center, half_width))`
+(`src/belief/attention.py:211-215`) — `sector` and `relative_sector` are never named in that
+`replace()` call, so they're carried over unchanged on the new object every reprojection produces.
+`AttentionArea`'s own field docstrings confirm the split: `relative_sector` "holds the crew-facing
+relative sector" while `center`/`wedge_deg` hold "its last *projection*... refreshed... on each
+telemetry tick." This is the opposite of the bug class this milestone already shipped once
+(`task.area.center`/`.wedge_deg` going stale, fixed via `TaskStore.tick` resolving `store.get_area`
+in the earlier round above) — here the two fields `_describe_task_for_speech` reads are structurally
+immune to that staleness, not merely believed to be. The claim is accurate, not just plausible.
+
+**`render_cancel_readback(None)` — currently dead code, correctly so, not a broken caller.**
+`_describe_task_for_speech` returns `None` only when `task.kind != "scan_area"`, but
+`belief.tasks.TaskKind = Literal["scan_area"]` (`src/belief/tasks.py:95`) is the type's only member
+today — every `PendingIntent` in the codebase is created with `kind="scan_area"` (`tools.py:838`'s
+default, the only call site), so that branch is unreachable under the current type, not a
+partially-wired caller. `render_cancel_readback` itself still has one live, exercised call site
+(`_handle_cancel_task`'s `render_cancel_readback(description).text`) with `description` always a
+`str` in practice — so the function's `str | None` signature is honest future-proofing for when
+`TaskKind` grows a second member, not present dead weight. No test exercises the `None` branch (of
+either `_describe_task_for_speech` or `render_cancel_readback`), which is a minor, low-value gap
+given the branch is currently unreachable — not required.
+
+**Test rewrites — no coverage lost, and the rewritten assertions would genuinely have failed
+pre-fix.** Confirmed by re-reading the diff line by line:
+- `test_scan_ahead_registers_a_task_and_fires_no_dcs_effector` (renamed from `..._and_triggers_a_
+  live_search`) flips `assert client.triggered_modes == ["forward"]` to `== []` — this would fail
+  against the pre-fix code (which appended `"forward"`), and the task-registration assertions below
+  it are otherwise unchanged, so nothing about D5's original coverage was dropped, only the now-false
+  trigger assertion was corrected.
+- `test_scan_never_calls_the_aircraft_layer_even_if_it_would_fail` (renamed from `..._even_when_the_
+  live_trigger_fails`) keeps `client.raise_on_trigger = True` and adds `assert client.triggered_modes
+  == []`. This is a strictly stronger guard than the original: the original only proved a *failed*
+  trigger didn't kill the task; this proves the aircraft layer is never called at all, and — because
+  the double raises when the (now-absent) call would happen — a reintroduced `trigger_petrovich_
+  search` call fails the test loudly (either via the raised `AircraftLayerError` propagating, or via
+  the `== []` assertion if some future change silently swallowed it) rather than degrading silently.
+  Confirmed no ordering guarantee was quietly dropped: `_handle_scan` still calls `scan_area` before
+  returning, so "task registered regardless" still holds, just with no trigger to protect it from.
+- `test_scan_then_cancel_task_actually_cancels_it` and `test_cancel_task_cancels_the_most_recently_
+  created_pending_task` both flip their id-bearing assertion (`[f"cancelled task {task_id}"]`) to the
+  new phrase, and both added `assert task_id not in lines[0]` (or `task2.id not in lines[0]`) as an
+  explicit negative check — a real regression guard against the exact defect reported, not just a
+  restated implementation detail. The second one exercises the "no sector on the area" fallback
+  (`"Copy, stopping the scan."`, no location word), which is the one path not otherwise covered by
+  the new `test_cancel_task_names_a_bearing_scan_by_its_compass_word` (absolute-sector phrasing) or
+  the relative-sector phrasing already covered by the first. Between the three, both `_describe_task_
+  for_speech` branches that return non-`None` (`relative_sector` set, `sector` set, neither set) are
+  each independently exercised.
+- The two "nothing to stop" tests were renamed and their asserted string changed to `"nothing to
+  stop"` — consistent with the new module constant, not a behavior change beyond the wording itself.
+
+**`_handle_scan`'s new docstring claim ("changes attention, not perception") — verified true of the
+current code, not an assumption.** `perception/visibility.py`'s naked-eye gate uses `NAKED_EYE_FOV_
+HALF_WIDTH_DEG` (`= 60.0`, `Final`) measured off ownship's true heading (`src/perception/
+visibility.py:73,256`) with no parameter anywhere in that module for a commanded sector or an
+`AttentionArea` — nothing in `_handle_scan`'s own call chain (`scan_area` → `ContactStore.add_area`)
+touches `perception/visibility.py` at all. So a scan genuinely only raises `Attention` on contacts
+the fixed cone already finds; it does not change what the cone finds. The `todo/todo.md` entry added
+in this same commit states the same thing and is consistent with the code.
+
+**Invariants.** No-omniscience: unaffected, this commit touches only effector wiring and speech
+templates, no fact derivation. Sim-time determinism: `_handle_cancel_task`/`_handle_scan` remain pure
+functions of `self.store`/`self.tasks`/`now_sim` with no wall-clock or randomness introduced.
+Testability without live DCS: confirmed — every new/changed test uses `_RecordingAircraftClient`,
+never a real socket; `client.raise_on_trigger` proves the "no live effector" claim without any DCS
+connection. `mypy --strict`: clean, independently re-run.
+
+### Required Fixes
+None.
+
+### Optional Refinements
+- `console.py`'s typed `scan-area` command still calls `aircraft_client.trigger_petrovich_search
+  ("forward")` and labels the result "live Petrovich search triggered" — the same Scan/Observ
+  conflation this commit just removed from the F10 path, under the identical verb. Pre-existing,
+  debug-console-only, not introduced by this commit and not one of the two disclosed defects, so not
+  required here — but worth a `todo/todo.md` entry so it doesn't resurface as a second "surprise" the
+  next time someone drives a live search through the debug console expecting "Scan" semantics.
+- No test exercises `_describe_task_for_speech`'s `task.kind != "scan_area"` branch or `render_
+  cancel_readback(None)`. Currently genuinely unreachable given `TaskKind`'s single-member `Literal`,
+  so low value today — revisit only if/when `TaskKind` grows a second member.
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read of the commit's diff across every touched file (`crew_console.py`, `speech.py`,
+`test_crew_console.py`, `todo/todo.md`). Verified the two load-bearing claims against source rather
+than the commit message: `project_relative_area`'s `replace()` call (confirms `sector`/
+`relative_sector` are never rewritten) and `perception/visibility.py`'s naked-eye gate (confirms it
+takes no steerable input). Grepped every caller of `trigger_petrovich_search` and `render_cancel_
+readback` to check for missed effector paths and dead code, not just the two files the commit
+touched. Reran body-layer's format/lint/type/test gates independently; aircraft-layer confirmed
+untouched by `git show --stat` rather than re-run, since the commit does not touch it.

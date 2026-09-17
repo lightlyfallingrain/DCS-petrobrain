@@ -197,6 +197,27 @@ def render_scan_readback(sector_label: str) -> OutgoingSpeech:
     return OutgoingSpeech(text=f"Scanning {sector_label}.", template="readback")
 
 
+def render_cancel_readback(what_was_cancelled: str | None) -> OutgoingSpeech:
+    """The F10 "Cancel Task" readback. `what_was_cancelled` is a plain human
+    phrase for the cancelled task (`"the scan to the left"`, `"the scan
+    north"`), or `None` when the task's shape yields no better description
+    than "whatever you last asked for".
+
+    **Speaks no task id** (live-test finding 2026-09-16: the player heard
+    `"cancelled task TASK_4"`). That is the same rule this module already
+    applies to contacts -- see `_contact_report_text`'s "no id spoken
+    anywhere", added when `watch_nearest` was found speaking `"Watching
+    CONTACT_1"`. A pilot cannot track `TASK_<n>` any better than
+    `CONTACT_<n>` by ear, and the id exists for the console and the task
+    store, not for the crew. `crew_console.py` owns the task -> phrase
+    mapping, this function only formats it."""
+    if what_was_cancelled is None:
+        return OutgoingSpeech(text="Copy, stopping.", template="readback")
+    return OutgoingSpeech(
+        text=f"Copy, stopping {what_was_cancelled}.", template="readback"
+    )
+
+
 def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
     """The F10 "Watch Nearest" readback (`plans/f10-crew-commands/plan.md`).
     Unlike a typed `watch <id>`, the player named no contact, so the readback

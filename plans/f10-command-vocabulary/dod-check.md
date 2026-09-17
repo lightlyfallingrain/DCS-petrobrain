@@ -236,3 +236,49 @@ This is a material change to what the next milestone should be. BL-10's planning
 ✅ **Ready for merge.** All DoD criteria pass. Reviewer approved all work. Acceptance testing is explicitly deferred per plan and will happen in the user's next sortie. No mechanical blockers.
 
 Proceed to merge after user confirms acceptance testing plan is clear and actionable.
+
+---
+
+## Addendum 2026-09-17: first live test, two defects fixed
+
+The milestone's live acceptance — the sortie this whole milestone existed to make informative —
+ran on 2026-09-16/17 and did its job: the menu tree, the belief wiring and `Cancel Task` all
+worked, and two real defects surfaced that no fixture test could have caught.
+
+**Both fixed on `fix/scan-naked-eye-not-9k113` (`89b8b1d`), reviewed and APPROVED (`8e14eec`).**
+
+1. **Scan drove the 9K113 sight.** `_handle_scan` fired
+   `aircraft_client.trigger_petrovich_search("forward")`, inherited from the pre-milestone hollow
+   `scan_forward` item and never questioned when D5 wrapped a real task around it.
+   `docs/concept/state-transitions.jpg`'s own glossary separates *Scan* (visual) from *Observ*
+   (9K113) — the spec was explicit and the implementation contradicted it. The trigger stays on
+   `aircraft_client` for a future `Observ`, which remains blocked on the unidentified OBSERV OFF
+   control.
+2. **`Cancel Task` spoke a task id** ("cancelled task TASK_4"). `speech.py` already established
+   that no id is ever spoken — a pilot cannot track `CONTACT_<n>` by ear, and `TASK_<n>` is no
+   better; the same fix had been applied to `watch_nearest` on 2026-09-13 and `cancel_task` was
+   simply missed. Now names what was stopped.
+
+**Known consequence, accepted by user direction 2026-09-16:** a scan now changes attention but not
+perception, because the naked-eye gate uses a fixed cone no command steers. Backlogged in
+`todo/todo.md` along with the discovery that the cone's own value
+(`NAKED_EYE_FOV_HALF_WIDTH_DEG = 60.0`) is the **9K113's** angular limit rather than anything
+established about a human looking through cockpit glass — its docstring reads as reasoned when it
+is inherited. `plans/cockpit-visibility/plan.md` supersedes that constant properly rather than
+re-guessing it.
+
+**Also filed:** `console.py`'s typed `scan-area` debug command has the same 9K113 mismatch,
+deliberately left out of the reviewed commit's scope (`todo/todo.md`).
+
+**Verification:** body-layer 527 passed (was 526), aircraft-layer 109 untouched, world-model 474
+untouched; ruff format/check and `mypy --strict` clean. Working tree clean.
+
+**Milestone-completion question, revisited:** the original answer was "no downstream impact". The
+live test changes that in one direction worth recording — it established that the naked-eye
+perception channel has no elevation term at all, which is a standing no-omniscience gap
+(Petrovich sees through the fuselage and floor) that predates this milestone and is now planned
+(`plans/cockpit-visibility/plan.md`). That is a finding *about* BL-1/PB-1.5's perception layer,
+surfaced by exercising BL-x's command layer — the inspect-and-adapt checkpoint working as
+intended.
+
+**Verdict: PASS** (addendum).
