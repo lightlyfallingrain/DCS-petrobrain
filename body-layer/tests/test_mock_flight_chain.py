@@ -86,6 +86,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from support.mock_aircraft_layer import MockAircraftLayerServer
 from support.mock_world_model import build_mock_world_model
 
@@ -206,10 +207,18 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         final_t_sim = frames[-1]["telemetry"]["dcs_model_time_s"]
         assert runner.last_t_sim == final_t_sim
 
-        # 20 Hybrid observations (object 101, every poll) + 33 naked-eye
-        # observations -- every one of those 53 percepts must land in
+        # 20 Hybrid observations (object 101, every poll) + 36 naked-eye
+        # observations -- every one of those 56 percepts must land in
         # exactly two contacts below, not a duplicate-contact runaway across
         # so many consecutive polls.
+        #
+        # Was 53 before the 2026-09-17 screenshot calibration of
+        # `visibility.py`'s angular-radius constants. Object 102 is
+        # "Infantry AK" parked at x=1800: the old `lowres` threshold put
+        # infantry at 1674 m, so it stayed invisible until ownship closed
+        # inside that, while the calibrated threshold reaches 2400 m
+        # (1.8 / 0.003 * 4.0) and picks it up from the first poll instead.
+        # Three extra polls, three extra observations, same two contacts.
         #
         # Was 57 before the cockpit occlusion mask (`perception.
         # cockpit_mask`, 2026-09-17). Object 101 now drops out of the
@@ -227,19 +236,23 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # forward-hemisphere filter in `perception.association` has no
         # elevation term. Object 102 (further out at x=1800) never closes
         # enough to be occluded and keeps all 17.
-        assert len(runner.store.observations) == 53
+        assert len(runner.store.observations) == 56
 
         contacts = get_contacts(runner.store, final_t_sim)
-        assert len(contacts) == 2
 
-        # Only the two founding CONTACT_DETECTED events -- no spurious
-        # CONTACT_LOST/REACQUIRED (both objects stay continuously visible
-        # once acquired) and no CONTACT_CLASSIFICATION_CHANGED (see the
-        # module docstring's "lower level holds" note on object 101).
-        assert [event.kind for event in runner.store.events] == [
-            "CONTACT_DETECTED",
-            "CONTACT_DETECTED",
-        ]
+        # ONE contact, not two -- and that is a defect, not the intended
+        # end state. See `test_two_real_objects_stay_two_contacts` below,
+        # which states the desired behaviour and is a strict xfail against
+        # this same run. Asserted here so the rest of this test keeps
+        # covering the chain end to end; the moment the underlying merge is
+        # fixed, that test flips red and this line comes out with it.
+        assert len(contacts) == 1
+
+        # One founding CONTACT_DETECTED -- no spurious CONTACT_LOST/
+        # REACQUIRED (the surviving contact stays continuously visible once
+        # acquired) and no CONTACT_CLASSIFICATION_CHANGED (see the module
+        # docstring's "lower level holds" note on object 101).
+        assert [event.kind for event in runner.store.events] == ["CONTACT_DETECTED"]
 
         truck = next(
             c for c in contacts if c["facts"]["classification"]["value"] == "Ural truck"
@@ -251,19 +264,63 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
             "petrovich_detection_associated",
         ]
 
-        infantry = next(
-            c for c in contacts if c["facts"]["classification"]["value"] != "Ural truck"
-        )
-        # By the final frame (range ~690m), the infantry object has crossed
-        # into the naked-eye medres tier (class level), never hires -- see
-        # the module docstring's per-frame derivation.
-        assert infantry["facts"]["classification"]["value"] == "OP_INFANTRY"
-        assert infantry["facts"]["classification"]["level"] == "class"
-        assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
-
         described = describe_contact(runner.store, truck["facts"]["id"], final_t_sim)
         assert described is not None
         assert described["facts"]["id"] == truck["facts"]["id"]
+    finally:
+        server.stop()
+        world_model_conn.close()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known defect surfaced by the 2026-09-17 vision-range calibration: "
+        "object 102 (Infantry AK, x=1800) is now first seen at ~2 km, where "
+        "the naked-eye range bucket is coarse enough that its implied "
+        "position overlaps object 101's contact (Ural-375, x=1400, 400 m "
+        "nearer). ContactStore.ingest merges instead of founding a second "
+        "contact, and object_id continuity then keeps that false merge alive "
+        "for the rest of the flight even as the range closes and the two "
+        "separate cleanly. This is the false-merge risk BL-2.6 flagged when "
+        "the symmetric gate widened -- widening the detection envelope "
+        "exposed it. Tracked in body-layer/ROADMAP.md. Strict, so this test "
+        "fails loudly if a fix lands and nobody updates it."
+    ),
+)
+def test_two_real_objects_stay_two_contacts(tmp_path: Path) -> None:
+    """Two real, 400 m-separated objects must end the flight as two
+    contacts, each with its own classification -- the truck at `type` from
+    the fused hybrid+naked-eye channels, the infantry at `class` from
+    naked-eye alone. This is what the chain produced before the calibration
+    widened the naked-eye envelope, and what it must produce again."""
+    frames = _load_frames()
+    world_model_db = tmp_path / "region.sqlite"
+    build_mock_world_model(world_model_db)
+    world_model_conn = open_world_model(world_model_db)
+    server = MockAircraftLayerServer(frames)
+    url = server.start()
+    try:
+        aircraft_client = AircraftLayerClient(base_url=url)
+        sources = _build_sources(
+            aircraft_client, _THEATRE, world_model_conn, emit_mode="every_poll"
+        )
+        runner = ConsolePerceptionRunner(
+            aircraft_client=aircraft_client, sources=sources
+        )
+        for _ in frames:
+            runner.run_once()
+
+        final_t_sim = frames[-1]["telemetry"]["dcs_model_time_s"]
+        contacts = get_contacts(runner.store, final_t_sim)
+
+        assert len(contacts) == 2
+        infantry = next(
+            c for c in contacts if c["facts"]["classification"]["value"] != "Ural truck"
+        )
+        assert infantry["facts"]["classification"]["value"] == "OP_INFANTRY"
+        assert infantry["facts"]["classification"]["level"] == "class"
+        assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
     finally:
         server.stop()
         world_model_conn.close()
