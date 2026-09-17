@@ -67,13 +67,37 @@ class OwnshipState:
     """Ownship kinematic state at one instant, in the units `perception`
     works in throughout: DCS x/z metres, altitude metres, true heading in
     **degrees** (not the aircraft-layer wire format's radians -- see
-    `from_telemetry_dict`)."""
+    `from_telemetry_dict`).
+
+    `pitch_deg`/`bank_deg` (`plans/cockpit-visibility/plan.md`) are also
+    degrees, same unit-conversion rule as `heading_true_deg` -- the wire
+    format (`aircraft-layer/src/schema/__init__.py`'s `TelemetrySample.
+    pitch_rad`/`bank_rad`) is radians, this dataclass is not. Unlike
+    heading, neither is wrapped to `[0, 360)`: both are small, signed,
+    physically-bounded angles (nose up/down, roll left/right), and wrapping
+    would corrupt that sign. Both default to `0.0` (level, unbanked) so
+    every existing `OwnshipState(...)` call site -- test fixtures included
+    -- keeps compiling and behaving exactly as before; only
+    `from_telemetry_dict` (a live/replay telemetry read) ever supplies a
+    real, non-zero value.
+
+    Sign convention -- **assumed, not verified against a live DCS sample**
+    (no aircraft-layer research note pins `LoGetADIPitchBankYaw`'s sign):
+    standard aviation convention, positive `pitch_deg` = nose up, positive
+    `bank_deg` = right wing down (rolling right). `perception.geometry.
+    body_relative_direction`, the one consumer, is internally consistent
+    under this convention regardless of whether it turns out to match DCS's
+    own -- if a live sample ever shows the opposite sign, the fix is a
+    single negation at the point this field is read from the wire, not a
+    change to the geometry itself."""
 
     t_sim: float
     x: float
     z: float
     alt_m: float
     heading_true_deg: float
+    pitch_deg: float = 0.0
+    bank_deg: float = 0.0
 
     @staticmethod
     def from_telemetry_dict(data: dict[str, Any]) -> OwnshipState:
@@ -94,6 +118,8 @@ class OwnshipState:
             z=float(data["position_z_m"]),
             alt_m=float(data["altitude_msl_m"]),
             heading_true_deg=math.degrees(float(data["heading_true_rad"])) % 360.0,
+            pitch_deg=math.degrees(float(data["pitch_rad"])),
+            bank_deg=math.degrees(float(data["bank_rad"])),
         )
 
 
