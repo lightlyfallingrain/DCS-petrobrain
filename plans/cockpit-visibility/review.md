@@ -143,3 +143,92 @@ D3 commit split via `git show f0945c2` directly; re-ran `ruff format --check`, `
 "543 passed"; confirmed `_within_fov`/`NAKED_EYE_FOV_HALF_WIDTH_DEG` have no remaining live
 reference via `grep`; hand-checked each of the four new `test_visibility.py` cases against the old
 `_within_fov` logic to determine which would actually have caught the regression.
+
+---
+
+## Re-review: 5fcb387 — "Replace the screenshot-derived mask with measured co-pilot angles"
+
+Post-APPROVED, post-DoD calibration swap: replaces the screenshot-derived table (`(0,45)(20,35)
+(50,22)(80,15)(100,5)`, cutoff 100) with a live-measured one (`(0,22)(60,22)(90,10)(130,0)`, cutoff
+130), all read directly off airframe boresight (no attitude correction needed this time, unlike
+the screenshot pass).
+
+**Calibration-only, confirmed.** `git show 5fcb387 --stat` touches only `cockpit_mask.py`,
+`test_mock_flight_chain.py`, `test_visibility.py`. `geometry.py`, `visibility.py`, `source.py` are
+untouched — D3's split held a second time. Mechanism does not need re-review.
+
+**`test_visibility.py`'s azimuth→elevation pivot — sound, and verified to still fail against the
+pre-mask code.** The measured table is flat (22°) across the whole 0–60° arc, so an azimuth-only
+discriminator inside the old ±60° cone no longer separates anything — correct reasoning. The
+rewritten test (`test_steep_depression_inside_the_old_cone_is_now_rejected`) picks azimuth 30°
+(inside the old cone) and straddles 22° depression (12° passes, 32° rejected). Checked by hand
+against the removed `_within_fov`: azimuth-only, no elevation term, so it would have called both
+candidates visible — the steep case's `assert ... is None` would fail under the old code. Genuinely
+discriminating, not just renamed.
+
+**`test_mock_flight_chain.py`'s 57→53 — re-derived independently, confirmed for the claimed reason.**
+Computed depression at every one of the fixture's 20 frames directly from the fixture JSON
+(ownship `x` 0→1140 north, object 101 at `x=1400, alt=500`, ownship `alt=700`, azimuth 0 the whole
+flight, so `depression = atan2(200, 1400 - ownship_x)`):
+
+```
+frame 15 (x=900):  21.80°  -- visible (< 22)
+frame 16 (x=960):  24.44°  -- blocked (> 22)
+frame 17 (x=1020): 27.76°
+frame 18 (x=1080): 32.01°
+frame 19 (x=1140): 37.57°
+```
+
+Object 101 drops out of the naked-eye channel for exactly frames 16–19 (4 frames), matching the
+commit's own numbers (21.8°/24.4° at x=900/960) exactly, and the crossover point (`~495 m`
+horizontal range, `x≈905`) to within rounding. 20 naked-eye observations (all visible under the old
+45°-flat-nose table) → 16. Object 102 (`x=1800`, same azimuth 0) peaks at `atan2(200, 1800-1140) =
+16.87°` at the closest approach, independently confirmed under the flat 22° allowance the whole
+time — keeps all 17. Total: 20 Hybrid + 16 + 17 = 53. The claimed count is right, and right for the
+claimed reason — not a coincidence landing on the correct number.
+
+**`(130.0, 0.0)` breakpoint is genuinely unreachable, confirmed harmless.** `max_depression_deg`
+returns `None` once `abs_azimuth_deg >= rear_cutoff_deg`, and both are `130.0`, so the interpolation
+branch that would return exactly `0.0` at `az=130` is never reached — the value is only approached
+in the limit as azimuth climbs toward the cutoff from below. Same shape existed in the prior table
+(`(100.0, 5.0)` against `rear_cutoff_deg=100.0`) and was not flagged there either. Not worth a
+required or optional fix: the breakpoint's only job is to anchor the interpolation slope from 90°
+to the cutoff, which it does correctly; a value that can never itself be returned is a normal
+consequence of "cutoff coincides with the table's last point," not a bug. Mentioning here for the
+record, not as a finding.
+
+**Non-negative-table caveat — accurate and correctly placed.** The new docstring paragraph
+appended directly after the "upward visibility... trivially clears" claim it qualifies (same
+location, immediately following). Verified the underlying claim: `is_visible` does a signed
+`depression_deg <= max_depression_deg` comparison, so a negative table entry is handled correctly
+by the mechanism (no crash, no special-casing needed) — but it would falsify the "above-boresight
+always clears" claim (a moderately-above-boresight contact could then be rejected while a
+far-above one passes). The measured -3° rear reading, simplified to 0 by user instruction, is
+exactly the case that would have triggered this — correctly caught and documented rather than
+silently absorbed.
+
+**Derivation comment** — checked line by line against the shipped tuple: `(0,22)(60,22)(90,10)
+(130,0)`/cutoff 130 all match the prose exactly (flat 22° to 60°, 10° at 90°, 0° at 130° cutoff).
+No misstatement found.
+
+**Gates** — re-run from `body-layer/`: `ruff format --check`, `ruff check`, `mypy src --strict`
+(31 files, clean), `pytest -q` → 544 passed, matching the claim.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+None beyond what the base review already recorded (unaffected by this commit).
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read of the commit diff and commit message. Independently re-derived the depression-per-frame
+numbers for both tracked objects straight from `mock_flight_canonical.json` rather than trusting
+the commit message's arithmetic; independently confirmed the `test_visibility.py` rewrite would
+fail against the removed `_within_fov` logic by hand; re-ran all four gates myself.
