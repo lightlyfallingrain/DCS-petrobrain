@@ -120,6 +120,16 @@ See `aircraft-layer/WORKFLOW.md`'s "Deploy the F10 commands Hook script"
 section for the DCS-side half of this channel (including its `autoexec.cfg` opt-in) — UNVERIFIED
 against a live DCS session as of authorship.
 
+Add `--speech-audio --srs-adapter-url URL` alongside `--crew-text` (BL-10 first slice, `plans/
+tts-voice-output/plan.md`) to synthesize and play every line `CrewConsole` speaks via a running
+`srs-adapter` instance's `POST /speak` — the same lines `--overlay` mirrors to the in-cockpit text
+overlay, pushed through the identical `_print` funnel, just to a different sink/process. Only
+meaningful with `--crew-text`; `--speech-audio` requires `--srs-adapter-url` (`parser.error` if
+omitted); defaults off, a true no-op when absent, same additive posture as `--overlay`/
+`--f10-commands`. `--overlay` and `--speech-audio` are independent and combine freely. See
+`srs-adapter/CLAUDE.md` for how to run that process, including its own `--target local` no-other-
+subproject-needed dev path.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
@@ -200,6 +210,14 @@ against a live DCS session as of authorship.
   empty state is `[]`, not `None` (the aircraft layer's response is always
   a JSON list) — it still raises `AircraftLayerError` on transport/parse
   failure like the rest of them.
+- `src/belief/srs_client.py` (BL-10 first slice, `plans/tts-voice-output/plan.md`) —
+  `SrsAdapterClient`, an HTTP client for `srs-adapter`'s `POST /speak` endpoint. This subproject's
+  own, independent copy of the same shape `aircraft_client.py` already has (not an import of
+  anything in `srs-adapter/`, since that subproject must stand alone per root `CLAUDE.md`'s
+  module-independence rule — the world-model seam is the sole sanctioned in-process exception).
+  `push_speech(text, urgent)` raises `SrsAdapterError` on any transport failure, mirroring
+  `push_text_line`'s raise-and-let-the-caller-catch contract — `CrewConsole._print`'s own
+  `try`/`except` is where that failure is meant to be caught.
 - `src/replay.py` — BL-0 replay harness: drives any `PerceptionSource.poll()` over a recorded
   sequence of ownship states, no live DCS/aircraft-layer connection required.
 - `src/belief/` — PB-2's observation-*consumption* package (`perception/` stays observation
@@ -343,7 +361,12 @@ against a live DCS session as of authorship.
   `--overlay` push loop above uses, so one failed poll never stops the loop. `main()`'s
   `--crew-text` branch also now wires `CrewConsole(tasks=crew_runner.tasks, ...)`, the same
   `TaskStore` `ConsolePerceptionRunner.run_once` already ticks — needed for the F10 "Cancel Task"
-  item.
+  item. `--speech-audio --srs-adapter-url URL` (BL-10 first slice, `plans/tts-voice-output/
+  plan.md`, only meaningful with `--crew-text`, same additive-no-op-when-absent posture as
+  `--overlay`/`--f10-commands`) builds a `belief.srs_client.SrsAdapterClient` and wires it as
+  `CrewConsole.speech_client` — independent of `--overlay`'s own `AircraftLayerClient` wiring
+  (a different process, a different URL); `parser.error`s if `--speech-audio` is passed without
+  `--srs-adapter-url`.
 - `src/belief/utterance.py` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`) — the
   deterministic intent parser: `PlayerUtterance`/`PartialParse` (§5/§3.5's shapes, trimmed to what
   this milestone populates) and `parse_utterance`, a small ordered table of `(regex, intent)` pairs
@@ -433,6 +456,14 @@ against a live DCS session as of authorship.
   `belief.speech` produced, since the prefix is an overlay-display concern, not a change to what
   was spoken. `logger.py`'s `--crew-text` branch wires this field the same way `--console`'s own
   `overlay_client` wiring already works: `aircraft_client if args.overlay else None`.
+  `speech_client: SrsAdapterClient | None` (BL-10 first slice, `plans/tts-voice-output/plan.md`) is
+  a third, separate optional-sink field, read by the same `_print` funnel alongside
+  `overlay_client` — `bypass_gate` is threaded straight through as `push_speech`'s `urgent`
+  argument instead of a text prefix (no new signal invented, an injected urgent call is the only
+  line that ever sets it), and a failed speech push is caught by its own `try`/`except
+  SrsAdapterError`, independent of `overlay_client`'s own try/except for the same line — one
+  sink's failure never blocks the other's push. `logger.py`'s `--crew-text --speech-audio` branch
+  wires this to a `belief.srs_client.SrsAdapterClient` built from `--srs-adapter-url`.
   `tasks: TaskStore | None` + `handle_f10_command` (`plans/f10-crew-commands/plan.md`, vocabulary
   widened to 15 tokens and made non-hollow by `plans/f10-command-vocabulary/plan.md` Stage 6) are
   `CrewConsole`'s second, non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
