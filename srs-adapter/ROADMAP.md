@@ -78,10 +78,17 @@ body-side view and the slice numbering both files share.
   intercom audio when the selector happens to sit on an intercom position, SRS is the wrong
   transport for this and local playback (slice 1) remains the delivered capability.
 
-  Reason for cautious optimism, unverified: in SRS, `_data.selected` governs *transmit*, not
-  receive — a client normally hears every radio in its list. So intercom audio should reach the
-  player irrespective of the SPU-8, but that must be confirmed live for this airframe rather than
-  assumed from the general behaviour.
+  In SRS, `_data.selected` governs *transmit*, not receive — a client normally hears every radio in
+  its list. So **outbound** intercom audio should reach the player irrespective of the SPU-8
+  position, which is what this slice needs. Confirm live for this airframe rather than assuming it
+  from the general behaviour.
+
+  **That property covers outbound only, and an earlier note here wrongly implied it settled the
+  channel as a whole** (corrected 2026-09-17 after the user caught it). Inbound — the player
+  talking to Petrovich — requires *transmit* on intercom, which is exactly what `selected`
+  governs, so over SRS it would mean moving the SPU-8 off the mission frequency. That is the
+  constraint this milestone exists to respect. See slice 3 for how the two directions were split
+  as a result.
 
   Also unverified and worth a look at the same time: the Mi-24P's **intercom 1 / intercom 2 power
   switches**. The user's read is that one is likely the ground-crew intercom (the one the radio/ICS
@@ -102,19 +109,40 @@ body-side view and the slice numbering both files share.
   microphone turns every muttered word and every piece of room noise into a candidate command, and
   continuous transcription is the expensive part of the pipeline.
 
-  Note the tension with the always-available requirement in slice 2 above, and resolve it
-  deliberately rather than by accident: **outbound** (Petrovich → player) is always open, while
-  **inbound** (player → Petrovich) is explicitly gated. They are not symmetric, and the PTT that
-  gates inbound must be independent of the SPU-8 selector for the same reason the outbound channel
-  is.
+  Note the deliberate asymmetry with slice 2, and do not "simplify" it away later: **outbound**
+  (Petrovich → player) is always open, while **inbound** (player → Petrovich) is explicitly gated.
+  The PTT that gates inbound must be independent of the SPU-8 selector for the same reason the
+  outbound channel is.
 
-  Unresolved: where that PTT state is read from. Candidates, cheapest first — a DCS keybind whose
-  state the aircraft layer already reads through its existing Export.lua channel (no new input
-  stack, consistent with how F10 commands already arrive); SRS's own PTT (`_data.ptt`, device 738's
-  two-stage trigger), which couples this to SRS and to the selector; or reading the joystick
-  directly outside DCS, which is the most independent but needs an input library this project's
-  stdlib-only rule does not currently allow. Decide during that slice's plan, with an Investigator
-  pass if the DCS-keybind path's readability is not already established.
+  **Transport decision (user, 2026-09-17): the two directions use different transports.** Outbound
+  goes over SRS ICS so Petrovich mixes into the headset like real crew audio; **inbound never
+  touches SRS at all** — the adapter captures the microphone directly. This is not a symmetry
+  failure, it is the resolution of one: SRS can send to the player but offers no clean way to
+  capture the player's voice back out (`DCS-SR-ExternalAudio.exe` is a sender; receiving would mean
+  a headless SRS client joined as a listener plus virtual-cable capture on Windows, with no
+  documented API — by a wide margin the largest build in this milestone). Capturing the mic
+  directly also satisfies the stay-on-mission-frequency constraint absolutely, since inbound then
+  involves no radio stack at all.
+
+  **PTT decision (user, 2026-09-17): a separate DCS keybind on a spare joystick button**, read
+  through the aircraft layer's existing Export.lua channel — the same route F10 commands already
+  arrive by, so no new input stack. Chosen over the cyclic trigger's half-press (device 738, which
+  stock SRS's own export uses for intercom) specifically because a dedicated binding cannot collide
+  with radio transmit, and over reading the joystick directly outside DCS, which would need an
+  input library the stdlib-only rule does not currently allow. Costs the user one binding to set
+  up.
+
+  Still to verify before building: that a bound DCS command's pressed state is actually readable on
+  our own Export.lua channel (F10 commands arrive as discrete events, which is not the same thing
+  as a held-button state) — Investigator pass during this slice's plan, not an assumption.
+
+  Worth recording even though it was not chosen: the Mi-24P's two-stage cyclic trigger already
+  implements exactly this pattern in stock SRS — half-press (`_pilotPTT == 0.5`) forces
+  `_data.selected = 0`, i.e. intercom, *for the duration of the press only*, leaving the SPU-8
+  selection untouched; full press transmits on the selected radio. If the dedicated-keybind path
+  hits trouble, that is the fallback to reach for. Its own caveat: the same export ends with
+  `_data.control = 1` ("HOTAS for now"), and if that makes SRS use its own PTT binding instead of
+  the in-game one, the half-press branch may never be consulted.
 
 ## Backlog
 
