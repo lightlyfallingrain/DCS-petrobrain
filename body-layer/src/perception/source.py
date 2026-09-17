@@ -81,15 +81,32 @@ class OwnshipState:
     `from_telemetry_dict` (a live/replay telemetry read) ever supplies a
     real, non-zero value.
 
-    Sign convention -- **assumed, not verified against a live DCS sample**
-    (no aircraft-layer research note pins `LoGetADIPitchBankYaw`'s sign):
-    standard aviation convention, positive `pitch_deg` = nose up, positive
-    `bank_deg` = right wing down (rolling right). `perception.geometry.
-    body_relative_direction`, the one consumer, is internally consistent
-    under this convention regardless of whether it turns out to match DCS's
-    own -- if a live sample ever shows the opposite sign, the fix is a
-    single negation at the point this field is read from the wire, not a
-    change to the geometry itself."""
+    Sign convention: standard aviation -- positive `pitch_deg` = nose up,
+    positive `bank_deg` = right bank (right wing down).
+
+    **Both signs confirmed against DCS by the user, 2026-09-17** -- "right
+    bank is positive, left bank negative" and "pitch down is negative, up
+    positive". This closed the riskiest open assumption in
+    `plans/cockpit-visibility/`: an inverted *bank* sign would have failed
+    *dangerous* rather than fail-safe, silently swapping which side
+    Petrovich gains visibility on during a turn. (Consistent with the one
+    piece of independent evidence available beforehand: a parked,
+    zero-airspeed telemetry sample reads `pitch_rad=+0.0482` (+2.76 deg),
+    an airframe sitting slightly nose-up on its gear.)
+
+    No unit test can verify this wire contract -- every test necessarily
+    exercises the code's own convention against itself -- so it had to come
+    from a real observation. What the tests *do* pin is that the code stays
+    consistent with the confirmed convention: `test_geometry.py`'s
+    `test_body_relative_direction_bank_rotates_elevation_into_azimuth` at
+    the rotation level, and `test_visibility.py`'s
+    `test_banking_right_lifts_a_right_side_contact_but_banking_left_does_not`
+    at the gate level (the latter deliberately asymmetric, since a
+    directly-below contact rotates the same way under either sign once
+    `is_visible` folds azimuth through `abs()`).
+
+    If a future DCS change ever inverts this, the fix is a single negation
+    where the field is read from the wire, not a change to the geometry."""
 
     t_sim: float
     x: float
