@@ -81,27 +81,28 @@ def _candidate(
 
 
 def test_infantry_just_inside_medres_tier_range_is_visible() -> None:
-    # infantry: size 1.8 m, threshold = 1.8 / 0.008 * 4.0 = 900 m exactly
-    # (plan's Proposed Defaults worked table).
+    # infantry: size 1.8 m, medres threshold = 1.8 / 0.014 * 4.0 = 514.29 m
+    # (recalibrated 2026-09-17 from the screenshot ladder; was 900 m under
+    # the old 0.008 constant).
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=899.0, z=0.0)
+    candidate = _candidate("Infantry", x=513.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
     assert result is not None
-    assert result.range_m == pytest.approx(899.0)
+    assert result.range_m == pytest.approx(513.0)
     assert result.bearing_deg == pytest.approx(0.0)
     assert result.tier == "medres"
     assert result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
 
 
 def test_infantry_well_inside_hires_tier_range_achieves_hires_tier() -> None:
-    # infantry: size 1.8 m, hires threshold = 1.8 / 0.02 * 4.0 = 360 m
-    # (`plans/classification-refinement/plan.md` Stage 6 worked table). The
-    # gate itself stays at `medres` this stage, but a candidate this close
-    # now resolves to the tighter achieved tier.
+    # infantry: size 1.8 m, hires threshold = 1.8 / 0.028 * 4.0 = 257.14 m
+    # (recalibrated 2026-09-17; was 360 m under the old 0.02 constant). A
+    # candidate inside it resolves to the tighter achieved tier regardless
+    # of where the gate itself sits.
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=350.0, z=0.0)
+    candidate = _candidate("Infantry", x=250.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
@@ -112,7 +113,7 @@ def test_infantry_well_inside_hires_tier_range_achieves_hires_tier() -> None:
 
 def test_infantry_just_outside_hires_tier_range_achieves_medres_tier() -> None:
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=361.0, z=0.0)
+    candidate = _candidate("Infantry", x=258.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
@@ -124,8 +125,9 @@ def test_infantry_just_outside_hires_tier_range_achieves_medres_tier() -> None:
 def test_infantry_just_inside_lowres_tier_range_is_visible() -> None:
     # `plans/classification-refinement/plan.md` Stage 7: the gate moved
     # from `medres` to `lowres`. Infantry: size 1.8 m, lowres*4 threshold =
-    # 1.8 / 0.0043 * 4.0 = 1674.42 m -- well below NAKED_EYE_RANGE_CAP_M, so
-    # the size curve (not the cap) still does the discriminating here. A
+    # 1.8 / 0.003 * 4.0 = 2400 m (recalibrated 2026-09-17; was 1674.42 m)
+    # -- well below NAKED_EYE_RANGE_CAP_M, so the size curve (not the cap)
+    # still does the discriminating here. A
     # candidate this far out achieves only the `lowres` (presence) tier.
     ownship = _ownship(heading_true_deg=0.0)
     candidate = _candidate("Infantry", x=1674.0, z=0.0)
@@ -139,26 +141,44 @@ def test_infantry_just_inside_lowres_tier_range_is_visible() -> None:
 
 def test_infantry_just_outside_lowres_tier_range_is_not_visible() -> None:
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=1675.0, z=0.0)
+    candidate = _candidate("Infantry", x=2401.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
     assert result is None
 
 
-def test_ural_truck_gate_now_binds_at_the_range_cap_under_lowres() -> None:
-    # Ural truck: size 6 m, lowres*4 threshold = 6 / 0.0043 * 4.0 =
-    # 5581.4 m, which now exceeds NAKED_EYE_RANGE_CAP_M (5000 m) -- unlike
-    # under the pre-Stage-7 `medres` gate (3000 m threshold, well below the
-    # cap), the cap is now the binding constraint for a truck-sized object,
-    # not the size curve. This is the flattened-size-curve risk the plan's
-    # Risks section calls out for Stage 7, not a regression.
+def test_ural_truck_gate_is_bound_by_the_size_curve_not_the_range_cap() -> None:
+    # Ural truck: size 6 m, lowres*4 threshold = 6 / 0.003 * 4.0 = 8000 m,
+    # comfortably inside NAKED_EYE_RANGE_CAP_M (10000 m since the
+    # 2026-09-17 calibration). Under the old constants this was the
+    # opposite -- a 5581 m threshold against a 5000 m cap, so the cap bound
+    # a truck-sized object and flattened the size curve. Raising the cap
+    # and loosening `lowres` together handed the discriminating back to the
+    # size curve for everything up to ship-sized (see the ship test below,
+    # where the cap still binds and should).
     ownship = _ownship(heading_true_deg=0.0)
-    inside = _candidate("Ural-4320", x=NAKED_EYE_RANGE_CAP_M, z=0.0)
-    beyond = _candidate("Ural-4320", x=NAKED_EYE_RANGE_CAP_M + 100.0, z=0.0)
+    inside = _candidate("Ural-4320", x=7999.0, z=0.0)
+    beyond = _candidate("Ural-4320", x=8001.0, z=0.0)
 
     assert check_visibility(ownship, inside, _FAKE_CONN, _THEATRE) is not None
     assert check_visibility(ownship, beyond, _FAKE_CONN, _THEATRE) is None
+
+
+def test_armored_vehicle_is_visible_at_the_farthest_photographed_range() -> None:
+    # The calibration ladder's outer datapoint: a row of 6-7 m ground
+    # vehicles was plainly visible through binoculars at 8.89 km. The
+    # pre-calibration constants rejected that outright (a 7 m object gated
+    # at 6511 m, and the 5000 m cap cut it shorter still), which is a
+    # no-omniscience violation in the direction that gets overlooked --
+    # Petrovich failing to see what the player can plainly see.
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=8890.0, z=0.0)
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+
+    assert result is not None
+    assert result.tier == "lowres"
 
 
 def test_range_cap_binds_for_every_object_the_size_curve_would_let_run_away() -> None:
