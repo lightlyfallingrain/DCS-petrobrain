@@ -288,6 +288,41 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   menu rather than deferred, so this milestone's scope is wider than "swap the transport": that
   diagram's command half is its requirements input. Do not re-expand the F10 tree instead.
 
+- [x] **Cockpit visibility limits for the naked-eye channel (no BL- number — a perception
+  correctness fix, not a milestone; done, merged 2026-09-17, merge `bd4a4dc`,
+  `feature/cockpit-visibility`).** `perception/visibility.py`'s naked-eye gate was a bare azimuth
+  cone with **no elevation term at all** — a contact 90 m below and 60° off the nose passed as
+  easily as one on the horizon. At 100 m AGL a contact 200 m out sits ~27° below, so this was the
+  normal case, not an edge case: Petrovich saw through the fuselage and floor and reported contacts
+  he could not possibly see. A standing no-omniscience violation, predating the milestone that
+  surfaced it (the first live F10 sortie).
+
+  Replaced by a body-relative occlusion mask (`perception/cockpit_mask.py`): max depression per
+  azimuth band, evaluated in the airframe frame via `geometry.body_relative_direction`, so it
+  follows pitch and bank rather than heading alone — a banking helicopter is exactly when a
+  heading-only cone is most wrong. No aircraft-layer change was needed; `pitch_rad`/`bank_rad` were
+  already on the wire and simply never consumed by `OwnshipState`. Per-station (D6, only the
+  co-pilot populated), symmetric (D5, the real cockpit is slightly asymmetric but the user judged
+  the difference insignificant).
+
+  **Angles are the user's own measurement from the DCS co-pilot seat**, boresight-relative: 22° down
+  flat across az 0–60, 10° at az 90, tapering to 0 at the az 130 rear cutoff. That replaced a
+  screenshot-derived first pass it showed wrong in *both* directions — nose far too permissive
+  (45° vs 22°), rear cutoff far too tight (100° vs 130°). Because D3 mandated splitting mechanism
+  from calibration, that correction was a table swap with the mechanism untouched and not
+  re-reviewed: the split paid for itself within a day.
+
+  Petrovich is now strictly blinder by design, most noticeably close-in abeam and directly below.
+  The mock flight chain drops 57 → 53 observations for exactly that reason (a target 200 m below
+  passes under the nose once horizontal range closes inside ~495 m). 527 → 544 tests.
+
+  **Open risk:** the pitch/bank sign convention is assumed, not verified. Partial evidence supports
+  the pitch sign (a parked sample reads +2.76°, consistent with an airframe sitting nose-up on its
+  gear); none exists for bank. An inverted bank sign **fails dangerous** — it silently swaps which
+  side gains visibility in a turn, and no unit test can catch it, since they all check the code's
+  own convention against itself. Resolved by rolling right once in a real sortie and reading the
+  sign. See `plans/cockpit-visibility/` (plan, review, dod-check, implementation).
+
 ## Backlog (body-layer)
 
 - [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
