@@ -9,7 +9,7 @@ Pass 2's actual retune.
 
 ## Source material
 
-23 screenshots in `win-mac-sync/from-windows/target acquisition screenshots/` (gitignored,
+20 screenshots in `win-mac-sync/from-windows/target acquisition screenshots/` (gitignored,
 read directly during this session — not committed anywhere). Two target complexes, one flight,
 flat desert / clear weather / one altitude band:
 
@@ -64,12 +64,16 @@ worth recording so Pass 2 doesn't have to rediscover it:
   `LoGetWorldObjects` dump was captured this session) — and `"T-62"` is not a raw type key in that
   table, so `reporting_name_for("T-62")` returns `None`, the second pass never runs, and
   `profile_for("T-62")` falls to the 5.0 m default.
-- **`"BMD1"` (no hyphen, matching the F10 label) does not resolve either**, for a related but
-  distinct reason: the raw-table keyword is `"bmd"` (a substring match against the raw
-  `object_type`), and `"bmd1"`.lower() does contain `"bmd"` — so this one *should* match on paper.
-  Confirmed live: `profile_for("BMD1")` in fact returns `OP_ARMORED`/7.0 correctly. (Recorded here
-  to save a future reader re-deriving it, since the T-62 case immediately above looks similar but
-  resolves the opposite way.)
+- **`"BMD1"` (no hyphen, matching the F10 label) does not resolve either** -- same mechanism as
+  `"T-62"` above, not a different one. The `"bmd"` keyword lives in
+  `_REPORTING_NAME_KEYWORD_PROFILES` (the *second*, reporting-name-keyed pass), not in the raw
+  `_KEYWORD_PROFILES` table, so the substring `"bmd"` in `"bmd1"` is never tested against the raw
+  input at all. Reaching that second pass requires `reporting_name_for("BMD1")`, which returns
+  `None` because the raw-type key in `dcs_type_to_reporting_name.tsv` is hyphenated `"BMD-1"`.
+  Reproduced: `profile_for("BMD1")` returns `5.0`/`OP_GROUPSOMETHING`, while `profile_for("BMD-1")`
+  returns `7.0`/`OP_ARMORED`. (An earlier draft of this document claimed the opposite -- that
+  `"BMD1"` resolved correctly via a raw substring match -- corrected 2026-09-17 during review after
+  reproducing the call.)
 - `"AK-74"` / `"AK"` (Complex A infantry) also do not match the `"infantry"`/`"soldier"` keywords
   and fall to the 5.0 m default, contrary to the plan's "1.8 m" figure for infantry — the real
   raw `object_type` for DCS infantry units is a `"Soldier ..."`-style string, which the F10 label

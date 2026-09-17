@@ -1,6 +1,6 @@
 ### Goal
 Land the calibration dataset, fixture, research doc, and regression tests that pin what
-`visibility.py` currently computes against the 23-screenshot ground-truth set in
+`visibility.py` currently computes against the 20-screenshot ground-truth set in
 `win-mac-sync/from-windows/target acquisition screenshots/` — **no constant or behaviour change
 this pass** (user decision, 2026-09-17; see "Settled Decisions" below). The actual retune is Pass
 2, gated on a second sortie the user will fly for both close-range (200-800 m) and long-range

@@ -272,7 +272,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   constants calibrated against what the player can actually see on screen in DCS.
 
   **Pass 1 (done, 2026-09-17, `plans/vision-range-calibration/plan.md`):** transcribed the
-  23-screenshot dataset into `body-layer/tests/fixtures/vision_calibration.json`, recorded the
+  20-screenshot dataset into `body-layer/tests/fixtures/vision_calibration.json`, recorded the
   central finding and divergence table in `body-layer/research/2026-09-17-vision-range-
   calibration.md`, and pinned today's `_achieved_tier` output plus the known code-vs-ground-truth
   divergence in `body-layer/tests/test_vision_calibration.py` — **no constant or behaviour change**
@@ -282,7 +282,13 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   to the "Attention direction and detection cones" item below, not built. **Pass 2 (the actual
   constant retune) is a separate future plan**, gated on a second sortie covering both close-range
   (200-800 m) and long-range (>2.5 km) frames across all four optics — see the research doc's
-  "Capture request for Pass 2" section.
+  "Capture request for Pass 2" section. **Read that doc's `object_type` provenance section before
+  planning Pass 2**: `object_model.profile_for` resolves only raw `LoGetWorldObjects` type strings,
+  so the F10 map labels this dataset is transcribed from (`"T-62"`, `"AK-74"`, `"BMD1"`, and the
+  SA-10/SA-15/HL B8M1 units) all fall back to `DEFAULT_SIZE_M = 5.0`. Pass 1 sidestepped this by
+  recording each object's `size_m` in the fixture as independently-known ground truth, which is
+  sound for a pass that changes nothing — but Pass 2 derives thresholds *from* sizes, so it has to
+  resolve the provenance question first or it will calibrate against 5.0 m defaults.
 
   **Why now.** Every range constant in `visibility.py` is admitted-unverified: the
   `min_angular_radius` tiers are ED's table read backwards into a range threshold (this project's
