@@ -348,3 +348,30 @@ via `POST /audio/play` remains the right first step — it is independent of SRS
 server running, and is the sink that proves the whole text-to-audible path end to end. The SRS
 sink is now a known-reachable second sink rather than a speculative one, which is exactly the
 question this addendum was needed to settle.
+
+### Constraint, 2026-09-17 (user): frequency injection is NOT an acceptable fallback
+
+The main finding above treats frequency-based injection (tune a spare radio to an unused
+frequency, the mechanism DATIS and MOOSE use) as the fallback if ICS does not pan out. **That
+fallback is rejected.** The user's reason is operational, not aesthetic:
+
+> "I need to stay on external mission frequency and MI-24 does not handle multiple channels
+> simultaneously."
+
+The Mi-24P's SPU-8 selects *one* audio source at a time, so a Petrovich frequency would compete
+with the mission frequency the player must stay on, rather than layering under it. Real crew
+intercom does not work that way and neither can this.
+
+Consequences for the SRS slice:
+
+- **ICS is the only acceptable SRS target.** `--modulations INTERCOM --unitId <player unit id>`
+  is not the preferred path among several, it is the path. If it turns out not to work in
+  single-player against an AI gunner seat, the SRS slice does not degrade to a radio frequency —
+  it stops, and local playback (the first slice) stands as the delivered capability.
+- **The live-test steps change accordingly.** "Reproducible Test" step 4 above — the fall back to
+  frequency injection — is void. Step 3's ICS result is now pass/fail for the whole SRS approach.
+- **Discovering the player's unit ID is now load-bearing, not incidental**, since intercom
+  scoping depends on it and there is no frequency-based escape hatch if it proves unobtainable.
+
+This also raises the value of the local-playback sink: it is not merely a stepping stone to SRS,
+it is the guaranteed-deliverable path if intercom injection fails a live test for any reason.
