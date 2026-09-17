@@ -138,6 +138,46 @@ Kept for the record; see D5-D7 above.
    Out of scope now (Petrovich is the co-pilot), but if a future wingman/pilot-perspective ever
    lands, the mask becomes per-station rather than global. Design accordingly now, or ignore?
 
+## Calibration follow-up (user offered to measure, 2026-09-17)
+
+The screenshot-derived table is a first pass at +/-10-15 deg. The user will take real numbers on
+the next sortie. **Measure ranges, not angles** -- the mask converts directly, and a range is
+something the sim gives you without a protractor:
+
+    depression_limit = atan(AGL / horizontal_distance_to_nearest_visible_ground)
+
+Protocol, from the **co-pilot** seat:
+
+1. **Hover** at a known AGL over **flat** ground. A hover pins pitch/bank near-known and steady,
+   which removes exactly the attitude ambiguity that makes the cruise screenshots imprecise; flat
+   ground matters because on a slope you measure the hill, not the fuselage.
+2. Note the horizontal distance to the **nearest ground point still visible** at roughly
+   **0, 30, 60, 90 deg** off the nose.
+3. Note the **rear cutoff** -- how far aft anything is visible at all.
+4. Note anything surprising, e.g. a sector where the sight or a console occludes more than the
+   airframe does.
+
+Four readings plus the cutoff populate the whole table. For reference at 100 m AGL, the current
+table predicts the nearest visible ground at ~100 m ahead and ~370 m abeam.
+
+**Also worth 10 seconds on that sortie: confirm the pitch/bank sign convention.** The
+implementation assumes standard aviation signs (positive pitch = nose up, positive bank = right
+wing down), and no `aircraft-layer/research/` note pins what `LoGetADIPitchBankYaw` actually
+returns. Partial evidence exists -- a parked, zero-airspeed telemetry sample in
+`win-mac-sync/from-windows/collector.log` reads `pitch_rad=0.0482` (+2.76 deg) with
+`bank_rad=-0.0022`, and an airframe sitting slightly nose-up on its gear fits positive-is-nose-up
+better than the inverse -- but that is inference, and it says nothing at all about **bank**, whose
+near-zero value cannot reveal its own sign.
+
+**Why the bank sign specifically matters:** it is the whole reason attitude is read at all. Get it
+backwards and the mask tilts the wrong way in every turn -- Petrovich would see *worse* toward the
+side he is banking into, precisely inverting the behaviour this models. Roll right, read the sign
+of `bank_rad`, done.
+
+Note that no unit test can catch this: the tests exercise the code's own convention consistently,
+so they verify internal coherence, not the external wire contract. It has to come from a real
+sample or a research note.
+
 ## Effort/value
 
 **Value: high.** This removes a standing no-omniscience violation on the channel that produces most
