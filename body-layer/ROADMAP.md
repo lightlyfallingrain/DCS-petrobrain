@@ -316,12 +316,21 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   The mock flight chain drops 57 → 53 observations for exactly that reason (a target 200 m below
   passes under the nose once horizontal range closes inside ~495 m). 527 → 544 tests.
 
-  **Open risk:** the pitch/bank sign convention is assumed, not verified. Partial evidence supports
-  the pitch sign (a parked sample reads +2.76°, consistent with an airframe sitting nose-up on its
-  gear); none exists for bank. An inverted bank sign **fails dangerous** — it silently swaps which
-  side gains visibility in a turn, and no unit test can catch it, since they all check the code's
-  own convention against itself. Resolved by rolling right once in a real sortie and reading the
-  sign. See `plans/cockpit-visibility/` (plan, review, dod-check, implementation).
+  **Risk closed 2026-09-17:** the bank sign convention was the riskiest open assumption here —
+  inverted, it would have failed *dangerous* rather than fail-safe, silently swapping which side
+  Petrovich gains visibility on in a turn, with no unit test able to catch it (they all check the
+  code's own convention against itself). The user confirmed against DCS: **right bank positive,
+  left negative** — the standard convention the implementation assumed. Verified the code behaves
+  accordingly, not merely that it matches a docstring: a right-abeam contact 18.4° below is blocked
+  level, rises to 11.6° *above* boresight under +30° bank, and buries further under −30°. Pitch confirmed
+  the same day ("down is negative, up positive"), also matching — and consistent with that parked
+  sample reading +2.76°. Both signs are now observed rather than assumed.
+
+  Follow-up (`fix/pin-bank-sign-convention`): the gate-level bank test used a contact *directly
+  below*, which rotates to azimuth ±90 under either sign — and `is_visible` folds azimuth through
+  `abs()` — so it passed identically inverted. Added an asymmetric right-abeam case that fails
+  under a sign flip (mutation-verified). The rotation-level geometry test already pinned the sign.
+  See `plans/cockpit-visibility/` (plan, review, dod-check, implementation).
 
 ## Backlog (body-layer)
 

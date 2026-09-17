@@ -294,3 +294,40 @@ def test_steep_depression_inside_the_old_cone_is_now_rejected() -> None:
         alt_m=ownship.alt_m - horizontal_range * math.tan(math.radians(32.0)),
     )
     assert check_visibility(ownship, steep, _FAKE_CONN, _THEATRE) is None
+
+
+def test_banking_right_lifts_a_right_side_contact_but_banking_left_does_not() -> None:
+    """Pins the bank *direction* at the visibility-gate level.
+
+    The sign is already pinned once, in `test_geometry.py`'s
+    `test_body_relative_direction_bank_rotates_elevation_into_azimuth`,
+    which asserts a signed azimuth of +90 and does fail if the rotation's
+    bank sign is inverted (verified by mutation, 2026-09-17). What was *not*
+    covered is this gate: the sibling test here,
+    `test_candidate_rejected_level_becomes_visible_when_banked_toward_it`,
+    uses a contact directly below ownship, which rotates to azimuth ~90
+    under a roll of either sign -- and `is_visible` folds azimuth through
+    `abs()` (D5), so it passes identically with the sign inverted. It proves
+    bank is *read*, not that it is read the right way round.
+
+    This one is asymmetric: the contact sits abeam to the **right** and
+    below, too steep for the abeam allowance when level. Rolling right must
+    lift it into view; rolling left must bury it further. Both the rotation
+    and the mask have to agree on handedness for that to hold.
+
+    The convention itself -- positive bank = right bank -- is the user's,
+    confirmed against DCS on 2026-09-17 (`OwnshipState`). No test can verify
+    that wire contract, which is exactly why the confirmation was needed;
+    these tests only hold the code consistent with it.
+    """
+    # 600 m abeam right, 200 m below: ~18.4 deg depression, past the ~10 deg
+    # the measured table allows at azimuth 90.
+    candidate = _candidate("Infantry", x=0.0, z=600.0, alt_m=300.0)
+
+    level = _ownship(heading_true_deg=0.0, bank_deg=0.0, alt_m=500.0)
+    banked_right = _ownship(heading_true_deg=0.0, bank_deg=30.0, alt_m=500.0)
+    banked_left = _ownship(heading_true_deg=0.0, bank_deg=-30.0, alt_m=500.0)
+
+    assert check_visibility(level, candidate, _FAKE_CONN, _THEATRE) is None
+    assert check_visibility(banked_right, candidate, _FAKE_CONN, _THEATRE) is not None
+    assert check_visibility(banked_left, candidate, _FAKE_CONN, _THEATRE) is None
