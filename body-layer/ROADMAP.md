@@ -266,6 +266,63 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   end-to-end against a real flight) deliberately deferred, same posture as BL-6's `scan_area` wiring
   gap. Full history: `plans/bl7-mission-phase-relevance/`.
 
+- [ ] **Vision range calibration (perception-tier, no BL number — the PB-1.5/`visibility.py`
+  lineage, same class as PB-1.5 itself).** Not started; **this is the next actionable perception
+  milestone.** Replaces the load-bearing guesses in `perception/visibility.py` with constants
+  calibrated against what the player can actually see on screen in DCS.
+
+  **Why now.** Every range constant in `visibility.py` is admitted-unverified: the
+  `min_angular_radius` tiers are ED's table read backwards into a range threshold (this project's
+  own derivation, never validated against ED's real formula), `BINOCULAR_RANGE_MULTIPLIER = 4.0` is
+  a modeling choice, and `NAKED_EYE_RANGE_CAP_M = 5000.0` was raised on the user's "raise it, we'll
+  fine-tune later." The resulting envelope (infantry ~900 m, truck ~3 km, T-72 ~3.5 km, SA-3
+  launcher ~4.5 km) is a first guess, and it drives the single invariant this project exists to
+  protect: **if the player can see a unit, Petrovich should too — and if the player cannot, he must
+  not.** Both directions are omniscience bugs. This also closes the calibration half of the parked
+  "own perception end-to-end" item below, which explicitly deferred these constants to "a milestone
+  that is flying anyway."
+
+  **Ground truth available now.** `win-mac-sync/from-windows/target acquisition screenshots/` — a
+  first flat-desert, unobstructed, clear-weather set (Syria, 01/06/2020 0806, ownship ~765 m MSL /
+  ~194 m radar alt, IAS 60). Best-case visibility; the filename prefix (`0`/`1`/`2`/`3`) groups shots
+  of one target group, the suffix names the optic. Four channels per group: **naked eye** (unaided
+  cockpit view), **binocular**, **9K113 wide** and **9K113 narrow** (sight), plus an **F10 map**
+  frame carrying the ruler ground-truth range and the unit roster. Worked example, group `0`: F10
+  ruler reads 274°M / 1.89 km to a group of ZIL-135 + BTR-70 + AK-74 infantry; the naked-eye frame
+  at that range shows **nothing** identifiable, the binocular frame shows **two specks** and no
+  class. Current code would gate that group in at `lowres` (ZIL-135/BTR-70 well inside their ~3 km
+  thresholds) — so the first datapoint already suggests the envelope is too generous, at least for
+  the unaided channel. The screenshots are compressed JPEGs; **real in-game graphics are crisper**,
+  so a judgement of "invisible" from a screenshot is conservative and must be treated as such.
+
+  **What this milestone owns.**
+  - Extract a calibration dataset from the screenshot set: per (group, optic, target type), the
+    ground-truth range from the F10 ruler and a graded verdict — `nothing` / `speck, no class` /
+    `class recognisable` / `type recognisable`. That grading ladder is the same lattice
+    `classification.py` already uses (presence / class / type), so calibration lands directly on
+    `_achieved_tier`'s thresholds rather than on a new parallel scale.
+  - Decide how the optics map onto channels. Today `visibility.py` models exactly one observer with
+    one flat ×4 binocular multiplier, while the screenshots show four distinct optics with very
+    different envelopes. Whether calibration produces one re-tuned curve or a per-optic set of
+    curves is an **architectural question for the Architect**, not a given — and it collides with
+    the deferred "Attention direction and detection cones" item below, which already anticipates
+    distinct optical modes. Deciding scope between "retune the constants in place" and "introduce
+    an optic dimension" is part of the plan, and the cheaper option should win unless the data
+    forces otherwise.
+  - Land the calibrated constants with their provenance recorded — the module docstring's binocular
+    premise and cap rationale must be rewritten, not left contradicting the new numbers.
+  - Regression tests pinning the calibration datapoints, so a future edit that quietly re-widens the
+    envelope fails a test instead of a sortie.
+
+  **Known gaps in the data, to be stated in the plan rather than silently assumed away.** The set
+  covers roughly 1–2.5 km only — **no long-range frames yet** (the user says these are still to
+  come), so the far end of the curve and `NAKED_EYE_RANGE_CAP_M` itself cannot be settled in this
+  pass; plan for the dataset to be extended rather than treating this set as final. Flat desert with
+  no obstruction is the best case, so nothing here calibrates contrast, haze, dusk, or cluttered
+  backgrounds (`min_contrast_f` / `min_fog_transparency` remain unaddressed, as
+  `visibility.py`'s docstring already admits). One weather/time-of-day condition, one theatre, one
+  altitude band.
+
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
   Standing awareness note while BL-2..BL-7 touch in-mission memory shapes (`Contact`/`ContactStore`,
