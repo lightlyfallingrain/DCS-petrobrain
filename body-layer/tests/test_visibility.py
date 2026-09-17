@@ -251,3 +251,43 @@ def test_terrain_los_blocked_drops_an_otherwise_visible_candidate(
     candidate = _candidate("Infantry", x=500.0, z=0.0)
 
     assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
+
+
+def test_moderate_azimuth_rejects_a_depression_the_nose_accepts() -> None:
+    """The case that actually discriminates this mask from the azimuth cone
+    it replaced.
+
+    Review (2026-09-17) found three of the four mask integration tests sit in
+    regions where the old `_within_fov` and the new mask agree -- the abeam
+    and rear cases are outside the old +/-60 deg cone, so the old code
+    rejected them too, and the mild-forward case was inside both. Only the
+    bank case would genuinely have failed before. A test that cannot fail
+    against the pre-change code does not demonstrate the change.
+
+    Body azimuth 45 deg is *inside* the old cone, so the old gate passed it
+    regardless of elevation; the new mask's interpolated allowance there is
+    ~24 deg, so a 35 deg depression must now be rejected.
+
+    The two candidates are deliberately at the **same slant range and the
+    same depression**, differing only in azimuth, so the forward control
+    proves the rejection comes from the mask rather than from the
+    angular-radius range gate -- which would also return `None` and would
+    make the assertion pass for the wrong reason.
+    """
+    ownship = _ownship(heading_true_deg=0.0)
+    horizontal_range = 600.0
+    depression_deg = 35.0
+    drop_m = horizontal_range * math.tan(math.radians(depression_deg))
+
+    ahead = _candidate(
+        "Infantry", x=horizontal_range, z=0.0, alt_m=ownship.alt_m - drop_m
+    )
+    assert check_visibility(ownship, ahead, _FAKE_CONN, _THEATRE) is not None
+
+    off_nose = _candidate(
+        "Infantry",
+        x=horizontal_range * math.cos(math.radians(45.0)),
+        z=horizontal_range * math.sin(math.radians(45.0)),
+        alt_m=ownship.alt_m - drop_m,
+    )
+    assert check_visibility(ownship, off_nose, _FAKE_CONN, _THEATRE) is None
