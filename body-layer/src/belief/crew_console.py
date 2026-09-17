@@ -74,6 +74,7 @@ from belief.speech import (
     render_watch_nearest_readback,
     route_event,
 )
+from belief.srs_client import SrsAdapterClient, SrsAdapterError
 from belief.tasks import PendingIntent, TaskStore
 from belief.tools import (
     cancel_task,
@@ -251,6 +252,18 @@ class CrewConsole:
     #: separate URL/flag needed, matching `--console --overlay`'s own
     #: wiring.
     overlay_client: AircraftLayerClient | None = None
+    #: Spoken-audio sink (BL-10 first slice, `plans/tts-voice-output/
+    #: plan.md`), mirroring `overlay_client`'s None-means-no-op pattern
+    #: exactly -- a third, separate optional field read by `_print`
+    #: alongside `overlay_client` every time `CrewConsole` produces spoken
+    #: text. `bypass_gate` (already computed for the overlay `"!! "`
+    #: prefix) is threaded straight through as `push_speech`'s `urgent`
+    #: argument -- no new signal invented, matching the plan's Decision 3.
+    #: `logger.py`'s `--crew-text --speech-audio` branch wires this to a
+    #: `belief.srs_client.SrsAdapterClient` built from `--srs-adapter-url`,
+    #: independent of `--overlay`'s own `AircraftLayerClient` wiring (a
+    #: different process, a different URL).
+    speech_client: SrsAdapterClient | None = None
     _next_utterance_number: int = field(default=0, repr=False)
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
@@ -596,23 +609,32 @@ class CrewConsole:
 
     def _print(self, lines: list[str], bypass_gate: bool = False) -> None:
         """Prints each line to `output` (unchanged) and, when
-        `overlay_client` is configured, pushes the same line to the
-        in-cockpit text overlay (`AircraftLayerClient.push_text_line`,
-        `POST /text/push`) -- the single funnel point every path that
-        produces spoken text (`handle_line`, `drain_events`) already goes
-        through, so overlay push needs no separate "what to push and when"
-        logic to write or desync from what's printed. Each push is wrapped
-        in its own `try/except AircraftLayerError`, mirroring `logger.
-        ConsolePerceptionRunner.run_once`'s BL-2.5 push loop's degrade-on-
-        failure shape: a failed push must not raise, must not stop the
-        remaining lines in this batch from being printed/pushed.
+        `overlay_client`/`speech_client` are configured, pushes the same
+        line to the in-cockpit text overlay (`AircraftLayerClient.
+        push_text_line`, `POST /text/push`) and/or the TTS audio pipeline
+        (`SrsAdapterClient.push_speech`, `POST /speak` -- BL-10 first
+        slice, `plans/tts-voice-output/plan.md`) -- the single funnel
+        point every path that produces spoken text (`handle_line`,
+        `drain_events`) already goes through, so neither sink needs a
+        separate "what to push and when" logic to write or desync from
+        what's printed. Each push is wrapped in its own
+        `try/except`, mirroring `logger.ConsolePerceptionRunner.run_once`'s
+        BL-2.5 push loop's degrade-on-failure shape: a failed push must not
+        raise, must not stop the remaining lines in this batch from being
+        printed/pushed/spoken, and must not stop the other sink's own push
+        for the same line.
 
         `bypass_gate` (True only for an injected urgent call, per `plans/
         overlay-speech-callouts/plan.md`'s resolved decision) prepends
         `_URGENT_OVERLAY_PREFIX` to the *pushed* overlay line only -- the
         `output` print path stays exactly the text `belief.speech`
         produced, since this is an overlay-display concern, not a change
-        to what was spoken/printed generally."""
+        to what was spoken/printed generally. For `speech_client`,
+        `bypass_gate` is threaded straight through as `push_speech`'s
+        `urgent` argument instead (plan Decision 3/4: no new signal
+        invented -- an injected urgent call is the only line that ever
+        sets it, and the aircraft-layer's `AudioPlaybackSender` is what
+        actually preempts routine playback for it)."""
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
@@ -625,5 +647,13 @@ class CrewConsole:
                 except AircraftLayerError:
                     logger.warning(
                         "overlay push failed for crew-text line (continuing)",
+                        exc_info=True,
+                    )
+            if self.speech_client is not None:
+                try:
+                    self.speech_client.push_speech(line, urgent=bypass_gate)
+                except SrsAdapterError:
+                    logger.warning(
+                        "speech push failed for crew-text line (continuing)",
                         exc_info=True,
                     )
