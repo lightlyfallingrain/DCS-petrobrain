@@ -38,12 +38,25 @@ body-side view and the slice numbering both files share.
     playback failure being logged and swallowed rather than crashing the chain.
   - [x] **Stage 4 — body-layer wiring.** `SrsAdapterClient` + `CrewConsole.speech_client` +
     `logger.py --speech-audio --srs-adapter-url`.
-  - [ ] **Stage 5 — live Windows verification (needs the Windows box; does NOT need DCS).** Run
-    the collector standalone on Windows with `srs-adapter --target aircraft-layer` on the Mac and
-    confirm three things nothing so far can confirm: that `winsound.PlaySound` actually plays;
-    that urgent preemption genuinely interrupts in-flight audio (the `SND_PURGE`/stop-then-play
-    choice is this slice's main unverified bet); and whether the audio competes or ducks against
-    other sound on the box.
+  - [~] **Stage 5 — live Windows verification.** **Flown 2026-09-18; one pass, one real failure,
+    fix awaiting re-test.**
+    - **Playback works.** `winsound` plays audio on the Windows box, cross-machine, end to end.
+      The transport is proven.
+    - **Urgent preemption did not interrupt.** A long routine line played stubbornly to its end,
+      *then* the urgent line was heard. The queue behind it was correctly discarded.
+    - **Cause**, and it is the exact bet the plan flagged: synchronous
+      `PlaySound(path, SND_FILENAME)` blocks *inside* the Win32 call, and `SND_PURGE` issued from
+      another thread cannot reach it — Windows only purges sounds started asynchronously. The
+      queue-clear worked because it is pure Python and never touched the audio device at all,
+      which is why the failure looked partial rather than total.
+    - **Fix (`fix/audio-urgent-interrupt`):** the player now starts the sound with `SND_ASYNC` and
+      blocks on an interruptible `threading.Event` for the file's own duration (parsed from the
+      WAV header) plus a small margin; `stop` purges *and* sets that event. The blocking contract
+      the worker relies on is unchanged, so no queue logic moved — the plan's decision to isolate
+      the interrupt mechanism in one named function is what made this a contained change.
+    - **Still to re-test:** that the urgent line now cuts the routine one off mid-word. Also still
+      unobserved: whether the audio competes or ducks against other sound on the box, which
+      matters more once SRS is in the mix.
   - [ ] **Stage 6 — live sortie acceptance (needs DCS).** Full `--crew-text --speech-audio` during
     a real flight. Judges what only a human can: whether ~0.6-0.8 s synthesis latency reads as
     crew-like rather than laggy, whether several callouts arriving in one poll queue acceptably,

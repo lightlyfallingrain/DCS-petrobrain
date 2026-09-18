@@ -51,6 +51,7 @@ import queue
 import sys
 import tempfile
 import threading
+import wave
 from typing import Protocol
 
 logger = logging.getLogger(__name__)
@@ -76,23 +77,77 @@ class WavPlayer(Protocol):
         ...
 
 
+#: Added to a WAV's own computed duration before the worker gives up
+#: waiting on asynchronous playback, covering device start-up latency and
+#: rounding. Small enough not to add an audible gap between queued lines.
+_PLAYBACK_MARGIN_S: float = 0.25
+
+#: Used when a file's duration cannot be read (a malformed or non-PCM WAV).
+#: The worker waits this long rather than either returning immediately --
+#: which would overlap the next line -- or blocking forever.
+_PLAYBACK_FALLBACK_S: float = 10.0
+
+
+def wav_duration_s(path: str) -> float | None:
+    """Playback duration of the WAV at `path`, or `None` if it cannot be
+    read (malformed file, unsupported/compressed format).
+
+    Needed because the interrupt mechanism below plays asynchronously: the
+    worker thread has to know how long to wait in an interruptible sleep,
+    since `winsound` offers no "is it still playing" query. Pure stdlib
+    `wave` parsing, no dependency, and cheap -- it reads the header only."""
+    try:
+        with wave.open(path, "rb") as w:
+            rate = w.getframerate()
+            if rate <= 0:
+                return None
+            return w.getnframes() / float(rate)
+    except (wave.Error, OSError, EOFError):
+        return None
+
+
 if sys.platform == "win32":
     import winsound
 
     class _WinsoundPlayer:
-        """`WavPlayer` backed by the stdlib `winsound` module."""
+        """`WavPlayer` backed by the stdlib `winsound` module.
+
+        **Plays asynchronously and waits, rather than playing
+        synchronously** -- this is the stage 5 live-Windows finding
+        (2026-09-18) and the reason Decision 4's original mechanism did not
+        work. `PlaySound(path, SND_FILENAME)` blocks *inside* the Win32
+        call until the sound finishes, and `PlaySound(None, SND_PURGE)`
+        issued from another thread cannot interrupt it: Windows only purges
+        sounds that were started asynchronously. Observed live: the queue
+        cleared correctly (pure Python) while the in-flight line played
+        stubbornly to its end, then the urgent line followed.
+
+        So `play` now starts the sound with `SND_ASYNC` and blocks on an
+        interruptible `threading.Event` for the file's own duration
+        (`wav_duration_s`) plus a small margin. `stop` purges the sound
+        *and* sets that event, so the worker stops waiting immediately
+        instead of sitting out the remaining duration. The blocking
+        contract `WavPlayer.play` promises is preserved -- the worker still
+        serializes routine lines -- but the block is now one this process
+        can break."""
+
+        def __init__(self) -> None:
+            self._done = threading.Event()
 
         def play(self, path: str) -> None:
-            winsound.PlaySound(path, winsound.SND_FILENAME)
+            self._done.clear()
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            duration = wav_duration_s(path)
+            wait_s = (
+                duration + _PLAYBACK_MARGIN_S
+                if duration is not None
+                else _PLAYBACK_FALLBACK_S
+            )
+            self._done.wait(timeout=wait_s)
 
         def stop(self) -> None:
-            # Decision 4's unverified interrupt mechanism -- first real
-            # test is stage 5's live Windows verification. `SND_PURGE`
-            # stops any currently-playing sound started via `PlaySound`;
-            # the fallback if this doesn't behave as expected is closing
-            # and reopening the audio device, or accepting a brief overlap
-            # (plan "Risks & Unknowns").
             winsound.PlaySound(None, winsound.SND_PURGE)
+            self._done.set()
 
 else:
 
