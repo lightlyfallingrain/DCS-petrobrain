@@ -309,8 +309,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   formula, not from measurement. All targets were static, and movement is a strong real detection
   cue this does not model.
 
-- [~] **Group contacts: cardinality and composition as refinable beliefs.** **Interim fix merged
-  2026-09-18 (Stage 0); the model itself is planned and not started.** Plan:
+- [~] **Group contacts: cardinality and composition as refinable beliefs.** **Stages 0-2 done
+  2026-09-18; Stage 3 blocked on a calibration sortie; Stages 4-6 pending.** Plan:
   `plans/group-contact-model/plan.md`. Diagnosis: `plans/contact-merge-undercount/debug.md`.
 
   **The reframe the plan rests on.** The defect and the feature have one cause, and it is not in
@@ -333,11 +333,14 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   fusion logic.
 
   **Stages** (each independently mergeable, suite green):
-  0. ✅ presence-tier merge veto — *merged, interim, two lines with a marked removal point*
-  1. `belief/cardinality.py`, mechanism only — **no behaviour change**, merge criterion is that the
-     existing suite passes untouched
-  2. perception clustering + count emission + veto removal — **the stage that fixes the defect**
-  3. calibration, separate commit — **needs a live sortie**, expect it to land after one
+  0. ✅ presence-tier merge veto — *interim; removed again by Stage 2, as designed*
+  1. ✅ `belief/cardinality.py`, mechanism only — landed as a genuine no-op: all 608 pre-existing
+     tests passed **untouched**, which was its literal merge criterion
+  2. ✅ perception clustering + count emission + veto removal — **the defect is fixed**. The
+     twelve-unit cluster folds to **one** contact carrying `OP_ABOUT15UNITS` at 9 km and splits
+     into six contacts with small exact counts at close range, driven by closing range rather than
+     by oscillating merge/split logic
+  3. ⛔ calibration — **blocked on a live sortie**, and its scope widened in review (see below)
   4. surface it: `facts["cardinality"]`, console, speech's count clause,
      `CONTACT_CARDINALITY_CHANGED`, and fixing count arithmetic that currently conflates contact
      records with unit counts — **the first stage that changes what is heard**
@@ -351,6 +354,27 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   merging falls out with zero new code; stable per-member identity should **never** be built, since
   it needs a within-cluster association the channel cannot support. The tool freeze is **not**
   broken — it pins names, and the new `facts` keys are additively free.
+
+  **Carried forward from Stages 1-2, deliberately** (none are regressions):
+
+  - **Stage 3's scope grew, and the growth is structural rather than tuning.** Clustering splits on
+    `max(radius_a, radius_b)` — single-sided, ≈205 m at 690 m range — while the belief gate
+    re-tests a split child against its parent on `uncertainty_a + uncertainty_b + growth` — both
+    sides summed, ≈410 m. Since `sum ≥ max` always holds, a split whose children sit near the
+    cluster's resolution boundary is re-merged, and that boundary is exactly where a split first
+    becomes possible. So **clustering can be silently undone downstream**, and no amount of
+    cluster-radius tuning fixes it. Two objects 400 m apart consequently stay one contact at
+    690 m, where ≈32° subtended against a 30° clock bucket says the channel can resolve them. The
+    gate's double-budgeting is right for its BL-2.6 purpose (spurious duplicates on slow movers)
+    and wrong for a child perception already separated on positional evidence. **Must not be
+    closed by widening the cluster radius** — that claims less resolution than the channel has,
+    violating the same invariant in the other direction.
+  - **The Stage 0 veto is gone**, so clustering alone now stands between the user and the original
+    defect. Intended, and guarded by the twelve-object regression test, but the next flight is the
+    first with no safety net behind it.
+  - **`_RANGE_BUCKETS_M` has two literal copies** (`naked_eye_source.py`, `clustering.py`), forced
+    by `perception/` being unable to import `belief/`. A shared constants module is the fix;
+    backlog, not blocking.
 
   **Settled by the user 2026-09-18**, all matching the plan's recommendations: build Stages 1-4 and
   decide on Stage 5 afterwards with sorties behind it; attention does **not** survive a split (only
