@@ -76,6 +76,7 @@ def test_situational_header_omits_our_position_without_enrichment() -> None:
 
     header = brain_client.payloads[0].situational_header
     assert header["contact_counts"] == 0
+    assert header["estimated_units"] == 0
     assert "our_position" not in header
 
 
@@ -94,6 +95,7 @@ def test_situational_header_includes_our_position_with_enrichment() -> None:
 
     header = brain_client.payloads[0].situational_header
     assert header["our_position"] == {"x": 111.0, "z": 222.0}
+    assert header["estimated_units"] == 0
 
 
 def test_null_brain_client_produces_no_output_and_no_reply() -> None:

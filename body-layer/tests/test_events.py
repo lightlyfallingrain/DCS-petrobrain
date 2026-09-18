@@ -1,18 +1,21 @@
 """Tests for `belief.events` -- `lifecycle_event_kind` (`plans/pb2-contact-
 memory/plan.md` Stage 2), `classification_event` (`plans/
-classification-refinement/plan.md` Stage 3), and `attention_event_kind`
-(`plans/bl4-attention-events/plan.md`, BL-4). Each transition case gets its
-own test."""
+classification-refinement/plan.md` Stage 3), `attention_event_kind`
+(`plans/bl4-attention-events/plan.md`, BL-4), and `cardinality_event`
+(`plans/group-contact-model/plan.md` Stage 4b). Each transition case gets
+its own test."""
 
 from __future__ import annotations
 
 from belief.classification import ClassificationBelief, SpecificityLevel
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
+    CONTACT_CARDINALITY_CHANGED,
     CONTACT_DETECTED,
     CONTACT_LOST,
     CONTACT_REACQUIRED,
     attention_event_kind,
+    cardinality_event,
     classification_event,
     lifecycle_event_kind,
 )
@@ -114,3 +117,24 @@ def test_any_real_change_emits_contact_attention_changed() -> None:
     assert attention_event_kind("watch", "normal") == CONTACT_ATTENTION_CHANGED
     assert attention_event_kind("watch", "priority") == CONTACT_ATTENTION_CHANGED
     assert attention_event_kind("priority", "ignore") == CONTACT_ATTENTION_CHANGED
+
+
+# --- cardinality_event (`plans/group-contact-model/plan.md` Stage 4b) ------
+
+
+def test_first_tick_with_no_previous_cardinality_emits_nothing() -> None:
+    assert cardinality_event(None, (1, 1)) is None
+    assert cardinality_event(None, (4, 5)) is None
+
+
+def test_unchanged_cardinality_emits_nothing() -> None:
+    assert cardinality_event((1, 1), (1, 1)) is None
+    assert cardinality_event((4, 5), (4, 5)) is None
+
+
+def test_cardinality_interval_change_is_contact_cardinality_changed() -> None:
+    """Both a narrowing (refine) and a widening (contradiction-hull) case
+    fire the event."""
+    assert cardinality_event((1, 1), (2, 2)) == CONTACT_CARDINALITY_CHANGED
+    assert cardinality_event((2, 5), (4, 5)) == CONTACT_CARDINALITY_CHANGED
+    assert cardinality_event((4, 5), (4, float("inf"))) == CONTACT_CARDINALITY_CHANGED

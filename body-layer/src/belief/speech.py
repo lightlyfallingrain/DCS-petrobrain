@@ -116,7 +116,28 @@ no callout can ever say anything else yet. When coalition inference is
 eventually built (`ROADMAP.md` backlog item, unchanged), that work
 reintroduces a coalition token at that point, conditioned on actually having
 one to say -- inferred from unit-type vocabulary and which side's terrain the
-contact sits in, not ground truth."""
+contact sits in, not ground truth.
+
+**Stage 4b -- the count clause (`plans/group-contact-model/plan.md`,
+"Stage 4b design -- speech and events").** A contact whose `Contact.
+cardinality` holds a plural interval speaks a hedged quantity word ahead of
+the unit type -- `"several contacts, ..."`, `"a handful trucks, ..."` (a
+plain phrase-plus-noun concatenation, no "of" inserted -- matches the user's
+own worked example, `"several contacts, eleven o'clock, two kilometres"`,
+verbatim) -- never an exact number (`_cardinality_phrase`); a singular contact (or one with no cardinality fact
+at all) is unaffected, byte-for-byte, by construction (`_contact_report_
+text`'s guard). This vocabulary is deliberately never precise: settled
+decision 2 ("precision only when available and useful") wants a caller
+holding an actual question, and none exists yet -- see `_cardinality_phrase`'s
+docstring. `render_contact_report`, `_render_lifecycle_text`'s
+`CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches, and `render_watch_nearest_
+readback` all gain the clause for free, since all three call `_contact_
+report_text` directly. `CONTACT_CLASSIFICATION_CHANGED` does **not** gain
+it -- it builds its own line directly from `_unit_type_display`, not through
+`_contact_report_text`, by construction rather than an added exclusion (a
+classification-change callout volunteering count chatter on an event about
+something else entirely would be exactly the unrequested cardinality
+narration settled decision 4 warns against)."""
 
 from __future__ import annotations
 
@@ -128,6 +149,7 @@ from belief.attention import Attention
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import (
+    CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_LOST,
@@ -244,7 +266,22 @@ _OP_CLASS_DISPLAY: Final[dict[str, str]] = {
     "OP_SPAAG": "AAA",
     "OP_ZU23": "AAA",
     "OP_SHIP": "ship",
-    "OP_GROUPSOMETHING": "group",
+}
+
+#: `_OP_CLASS_DISPLAY`'s plural sibling, for `_plural_unit_type_display`. See
+#: module docstring's "Stage 4b -- the count clause" note. No
+#: `"OP_GROUPSOMETHING"` entry, for the identical reason `_OP_CLASS_DISPLAY`
+#: has none (Sec 4 of the Stage 4b design): a class-level classification can
+#: never hold that value.
+_OP_CLASS_DISPLAY_PLURAL: Final[dict[str, str]] = {
+    "OP_ARMORED": "armor",  # already a mass noun -- singular form doubles as plural
+    "OP_TRUCK": "trucks",
+    "OP_INFANTRY": "infantry",  # mass noun
+    "OP_SRSAM": "SAMs",
+    "OP_MRSAM": "SAMs",
+    "OP_SPAAG": "AAA",  # mass/acronym -- unchanged
+    "OP_ZU23": "AAA",
+    "OP_SHIP": "ships",
 }
 
 #: Matches a `belief.enrichment.SemanticFact.text` fragment's trailing
@@ -265,6 +302,44 @@ def _unit_type_display(value: object, level: object) -> str:
     if level == "presence":
         return "ground"
     return "contact"
+
+
+def _plural_unit_type_display(value: object, level: object) -> str:
+    """`_unit_type_display`'s plural sibling, used only when
+    `_cardinality_phrase` returns a phrase (see `_contact_report_text`'s
+    guard). Deliberately never pluralizes a `type`-level value (a raw DCS
+    type string, e.g. `"T-72"`) -- see the Stage 4b design's "sayable at
+    every specificity level" note; settled decision 5 keeps wording fixes
+    like inventing a pluralization rule for arbitrary type strings out of
+    this stage. The presence/fallback branch returns `"contacts"`, not
+    `_unit_type_display`'s `"ground"`/`"contact"` split -- a bare "ground"
+    doesn't pluralize sensibly, and "several contacts" is what actually
+    reads right."""
+    if level == "type" and isinstance(value, str) and value:
+        return value
+    if level == "class" and isinstance(value, str) and value:
+        return _OP_CLASS_DISPLAY_PLURAL.get(value, value)
+    return "contacts"
+
+
+def _cardinality_phrase(lo: int, hi: float) -> str | None:
+    """The count clause's vague-only vocabulary (`plans/group-contact-model/
+    plan.md`'s Stage 4b design, Sec 1) -- reads `lo`/`hi` magnitude directly
+    rather than matching a `belief.cardinality.CountBucket` name, since a
+    folded interval (an intersection or a contradiction hull) need not equal
+    any one named bucket. `None` means "no clause at all" (an exactly-one
+    interval); `"a handful"`/`"many"` are the two named exceptions, picked
+    out by ED's own bucket boundaries; everything else plural collapses to
+    the safe default `"several"`, which is never wrong to say about any
+    plural count. This function never returns an exact number -- see the
+    design's "deliberate scope cut" note."""
+    if lo == 1 and hi == 1:
+        return None
+    if lo >= 16:
+        return "many"
+    if lo == 4 and hi <= 5:
+        return "a handful"
+    return "several"
 
 
 def _format_range_km(range_m: float) -> str:
@@ -302,10 +377,34 @@ def _contact_report_text(facts: dict[str, object]) -> str:
     absent/empty, both the module's existing absent-not-null convention. The
     semantic fragment picks the highest-confidence `belief.enrichment.
     SemanticFact`, mirroring `belief.console.format_event_for_overlay`'s own
-    selection (`max(semantic, key=lambda fact: fact["confidence"])`)."""
+    selection (`max(semantic, key=lambda fact: fact["confidence"])`).
+
+    **Count clause (`plans/group-contact-model/plan.md` Stage 4b).** A
+    plural cardinality prepends a hedged quantity word (`"several"`/
+    `"a handful"`/`"many"`, never an exact number -- `_cardinality_phrase`)
+    and switches the unit-type word to its plural form
+    (`_plural_unit_type_display`). This is a branch, not a literal early
+    `return`, because the trailing clock/range/semantic logic below is
+    shared by both branches and must not be duplicated. **Regression guard:
+    on the singular path (`facts["cardinality"]` absent, or present with an
+    exactly-one interval) this calls the exact same `_unit_type_display`
+    with the exact same arguments and executes no new code** -- every
+    existing test in this module is that guard."""
     classification = facts["classification"]
     assert isinstance(classification, dict)
-    text = _unit_type_display(classification.get("value"), classification.get("level"))
+    cardinality = facts.get("cardinality")
+    phrase = None
+    if isinstance(cardinality, dict):
+        phrase = _cardinality_phrase(cardinality["lo"], cardinality["hi"])
+    if phrase is None:
+        text = _unit_type_display(
+            classification.get("value"), classification.get("level")
+        )
+    else:
+        text = (
+            f"{phrase} "
+            f"{_plural_unit_type_display(classification.get('value'), classification.get('level'))}"
+        )
     relative_now = facts.get("relative_now")
     if relative_now is not None:
         assert isinstance(relative_now, dict)
@@ -348,7 +447,12 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
     is no current position to report. `CONTACT_CLASSIFICATION_CHANGED` speaks
     a position-bearing identification line built from the contact's
     *current* `facts["classification"]` via `_unit_type_display` (not the
-    raw `event.classification` enum string)."""
+    raw `event.classification` enum string). `CONTACT_CARDINALITY_CHANGED`
+    (`plans/group-contact-model/plan.md` Stage 4b) gets no template either,
+    joining this pattern -- settled decision 4: a bare cardinality move is
+    not worth interrupting for at this hedged register. The event is real,
+    logged, and visible to `poll_events`/the debug console; it simply never
+    renders to speech."""
     if event.kind == CONTACT_DETECTED or event.kind == CONTACT_REACQUIRED:
         return _contact_report_text(result["facts"])
     if event.kind == CONTACT_LOST:
@@ -367,6 +471,8 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
             assert isinstance(range_m, float)
             return f"unit at {clock} o'clock, {_format_range_km(range_m)} km is {unit_type}."
         return f"unit is {unit_type}."
+    if event.kind == CONTACT_CARDINALITY_CHANGED:
+        return None
     return None
 
 

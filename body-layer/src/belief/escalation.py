@@ -18,7 +18,12 @@ discussion, not a data-model entry, and no code builds that header yet).
 `{contact_counts, our_position}` is the minimal pair the plan's own fallback
 language names; `our_position` is present only when an `EnrichmentContext`
 is supplied (absent-not-null, `belief.tools`' own convention) since a bare
-`ContactStore` has no ownship state of its own to report.
+`ContactStore` has no ownship state of its own to report. `estimated_units`
+(`plans/group-contact-model/plan.md` Stage 4b, Sec 6) is unconditional,
+unlike `our_position` -- unit count needs no ownship data, only
+`belief.tools._estimated_units_lower_bound(store)` -- and `contact_counts`
+keeps its existing bare-int shape (`len(store.contacts)`) rather than being
+reshaped into a dict, matching `get_situation`'s identical reasoning.
 
 **`NullBrainClient`/`DebugPrintBrainClient`.** §3.5: "If the brain does
 nothing within a timeout, body says nothing -- it does not invent a fallback
@@ -38,6 +43,7 @@ from typing import Protocol, TextIO
 
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
+from belief.tools import _estimated_units_lower_bound
 from belief.utterance import PartialParse, PlayerUtterance
 
 
@@ -96,7 +102,10 @@ class DebugPrintBrainClient:
 def _situational_header(
     store: ContactStore, enrichment: EnrichmentContext | None
 ) -> dict[str, object]:
-    header: dict[str, object] = {"contact_counts": len(store.contacts)}
+    header: dict[str, object] = {
+        "contact_counts": len(store.contacts),
+        "estimated_units": _estimated_units_lower_bound(store),
+    }
     if enrichment is not None:
         header["our_position"] = {
             "x": enrichment.ownship.x,
