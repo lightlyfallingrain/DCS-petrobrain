@@ -161,7 +161,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 - [x] **BL-5 — Deterministic tool API (= PB-5, done, merged to main, `288e31d`).**
   `feature/bl5-tool-api`. Formalizes `belief/tools.py`'s functions into a named, documented,
-  fixed twelve-tool surface (`belief/tool_api.py`'s `TOOL_SET: list[ToolSpec]`) a human can hold a
+  fixed tool surface (`belief/tool_api.py`'s `TOOL_SET: list[ToolSpec]`; twelve at BL-5, 15 once BL-6 added `scan_area`/`get_task_status`/`cancel_task`) a human can hold a
   full tactical conversation against by hand, no LLM involved. Nine tools already existed; three
   net-new: `find_place` (new `world-model/src/query/search.py`'s `find_place_by_name`,
   case-insensitive substring match over settlements/named places/airfields/navaids,
