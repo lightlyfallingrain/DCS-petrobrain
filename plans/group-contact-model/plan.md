@@ -347,45 +347,40 @@ is removed. Replace `test_calibration_cluster_merge_undercount.py`'s assertions 
 Turn `test_two_real_objects_stay_two_contacts` into a real assertion. Uses provisional constants;
 does not tune them.
 
-**Stage 3 — calibration, separate commit.** The tier → count-coarseness table (`lowres` clamps to
-`OP_GROUP`; `medres` gives the real bucket; `hires` gives an exact one), the cluster-radius policy
-and its chaining cap, and `NAKED_EYE_MAX_NEW_PER_POLL` re-read as a per-cluster cap. Needs a live
-sortie to confirm; expect to land after one.
+**Stage 3 is split into 3a and 3b** (user direction, 2026-09-18), because as originally written it
+bundled a structural fix that needs no flight with calibration that cannot happen without one — and
+running them in that order would have produced misleading data. **Stage 4 also splits**, because
+cardinality is currently invisible: it is absent from `tools.py`'s facts payload and from
+`console._SHOW_FACT_KEYS`, so a calibration sortie could observe how many *contacts* exist but not
+the count *bucket* on each — which is precisely what 3b calibrates.
 
-**Stage 3 must also close the gate-vs-cluster radius mismatch, which is structural rather than a
-tuning question** (found in review of Stage 2, 2026-09-18, with the numbers worked for the mock
-flight fixture at ~690 m range):
+Running order: **3a → 4a → sortie → 3b → 4b**.
 
-- `perception.clustering` splits two candidates when their real separation exceeds
-  `max(radius_a, radius_b)` — a **single-sided** test, ≈205 m there.
-- `belief.association_over_time.spatial_gate_radius_m` then re-tests a split child against its
-  parent contact using `uncertainty_a + uncertainty_b + growth` — **both sides summed**, ≈410 m
-  before growth.
+**Stage 3a — close the gate-vs-cluster radius mismatch. No sortie needed; must land before one.**
+The structural finding from Stage 2's review, described in full below. Clustering splits on
+`max(radius_a, radius_b)` (single-sided) while the belief gate re-tests a split child against its
+parent on `uncertainty_a + uncertainty_b + growth` (both sides summed), and `sum ≥ max` means a
+split whose children sit near the cluster's resolution boundary is re-merged. **This must land
+before the sortie**, not after: flying while clustering is still being silently undone downstream
+would calibrate a system in which the thing being calibrated is partly defeated, and the numbers
+brought back would be wrong in a way that is hard to detect.
 
-Because `sum ≥ max` for any positive radii, a split whose children sit near the cluster's own
-resolution boundary is re-merged by the gate. That is not an edge case: the resolution boundary is
-exactly where a split first becomes possible, so this is the *common* case, and it means clustering
-can be silently undone downstream. Two real objects 400 m apart therefore stay one contact at
-690 m, where the geometry (≈32° subtended, against the channel's own 30° clock bucket) says the
-channel can resolve them.
+**Stage 4a — make cardinality observable. No sortie needed; must land before one.**
+`facts["cardinality"]` (absent-when-unknown, per `tools.py`'s documented convention) and
+`console._SHOW_FACT_KEYS`. This is the minimum that lets a sortie see what 3b is tuning. Speech is
+deliberately *not* here — hearing counts is 4b, and is not needed to calibrate.
 
-Note where the pessimism actually comes from: the *cluster* radius is an honest model of the
-channel's resolving power. The gate's double-budgeting is legitimate for its original purpose
-(BL-2.6, avoiding spurious duplicates for slow-moving objects) but wrong when applied to a
-child that perception has already separated on positional evidence. Stage 3 must decide how the
-gate treats a percept whose cluster identity says "this is not that" — candidates include
-exempting a freshly-split child from the gate, or making the gate single-sided when the incoming
-percept carries a distinct cluster identity. **Do not close this by widening the cluster radius**;
-that would make the model claim less resolution than the channel has, which violates the same
-invariant in the opposite direction.
+**Stage 3b — calibration, separate commit. Needs the sortie.**
+The tier → count-coarseness table (`lowres` clamps to `OP_GROUP`; `medres` gives the real bucket;
+`hires` gives an exact one), the cluster-radius policy and its chaining cap, and
+`NAKED_EYE_MAX_NEW_PER_POLL` re-read as a per-cluster cap.
 
-**Stage 4 — surface cardinality.** `facts["cardinality"]` (absent-when-unknown, per `tools.py`'s
-documented convention); `console._SHOW_FACT_KEYS`; `speech.py`'s count clause and the
-`OP_GROUPSOMETHING` fix — **singular output must stay byte-identical**, which is the regression
-guard for every existing speech test; `CONTACT_CARDINALITY_CHANGED`; and fixing the count
-arithmetic the survey flagged (`get_situation`'s `contact_counts`, `get_stats`, and
-`escalation._situational_header`'s bare `len(store.contacts)`) to distinguish contact records from
-estimated units.
+**Stage 4b — speech and events. No sortie needed.** (4a already surfaced the facts key and the
+console.) `speech.py`'s count clause and the `OP_GROUPSOMETHING` fix — **singular output must stay
+byte-identical**, which is the regression guard for every existing speech test;
+`CONTACT_CARDINALITY_CHANGED`; and fixing the count arithmetic the survey flagged
+(`get_situation`'s `contact_counts`, `get_stats`, and `escalation._situational_header`'s bare
+`len(store.contacts)`) to distinguish contact records from estimated units.
 
 **Stage 5 — composition.** `belief/composition.py`, `Observation.composition`, per-member folding,
 the over-subscription retraction, `facts["composition"]`, and speech's "three of them tanks … and
