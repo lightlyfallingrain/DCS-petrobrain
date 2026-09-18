@@ -1,103 +1,89 @@
-# Definition of Done: group-contact-model (Stages 1–4a, 3b-i rev.2)
+# Definition of Done: group-contact-model Stage 4b (feature/group-contact-speech)
 
-**Status: PASS** — All mechanical checks pass; Reviewer's required fix (stale comments) verified applied; three headline test cases confirmed; fixture-based acceptance testing framework sufficient (live sortie is Stage 3b-ii, not this merge).
-
----
-
-## Code Quality Checks
-
-**All subproject verification passed** (body-layer only, sole subproject touched):
-
-- `ruff format --check src tests` — ✓ pass (74 files already formatted)
-- `ruff check src tests` — ✓ pass
-- `mypy src --strict` — ✓ pass (34 source files, no issues)
-- `pytest tests -q` — ✓ pass (642 tests, up from 635 + 1 xfail flipped to pass)
-
-No debug output, no leftover TODOs, no unhandled panics. All verification commands run live from body-layer venv.
+**Result: PASS** — All mechanical checks pass. Acceptance testing with user required before merge.
 
 ---
 
-## Reviewer Required Fixes — VERIFIED
+## Code Quality
 
-**Reviewer approved with one required fix (stale comments).**
+- [x] **Format/Lint/Type/Test** — body-layer (only touched subproject):
+  - `ruff format --check` — 79 files already formatted
+  - `ruff check` — All checks passed
+  - `mypy src` — Success: no issues found in 34 source files
+  - `pytest tests -q` — 659 passed (642 baseline + 17 new)
 
-Applied in commit `4d51049`: "fix(tests): correct stale split-geometry comments; record rev.2 design gaps"
+- [x] **No unhandled errors or panics** — No error-prone paths added; events and speech both use existing exception-handling patterns (event cooldown via `_cooldown_elapsed`, speech via direct interval queries)
 
-**What was fixed:**
-- Two comments in `test_a_cluster_splitting_gives_the_majority_child_continuity` said object_id=1 "moves to lat 100" while fixture uses 600 — leftover text from before the split geometry rework during Stage 3b-i rev.2 implementation
-- Fixed by replacing both "lat 100" references with "lat 600"
-- Also folded two design gaps (test_naked_eye_source rework scope and `test_two_real_objects_stay_two_contacts` location confusion) into plan
+- [x] **No debug output** — No `print()`, `pdb`, or debug logging introduced; all changes are production logic
 
-**Verification:** Fix confirmed correct by inspection (`git show 4d51049 -- body-layer/tests/test_naked_eye_source.py` shows only the comment lines changed, code untouched; fixture still reads as intended with lat 600).
+- [x] **No leftover TODOs or debug code** — Grep confirms no `TODO`, `FIXME`, or debug markers in the diff
 
 ---
 
 ## Scope & Correctness
 
-✓ **Implementation matches the plan's Stages 1, 2, 3a, 4a, and 3b-i rev.2 specification exactly.**
+- [x] **Matches plan** — Implementation follows "Stage 4b design — speech and events (2026-09-19)" section and "Settled: how a group is spoken" decisions exactly:
+  - `_cardinality_phrase(lo, hi)` reads interval magnitude directly, never a `CountBucket` name ✓
+  - Phrase ladder: `None` (singular), `"a handful"` (4–5), `"many"` (16+), `"several"` (all other plural) ✓
+  - Regression guard: singular path unchanged (calls exact same `_unit_type_display`, same args) ✓
+  - `CONTACT_CARDINALITY_CHANGED` event, no template, reuses `EVENT_COOLDOWN_S` ✓
+  - `_estimated_units_lower_bound` helper (private, per tools.py convention) ✓
+  - Scope cut: never speaks exact numbers ✓
 
-Stages done:
-- **Stage 1** — `belief/cardinality.py` mechanism, no behaviour change (commit c625299-equivalent)
-- **Stage 2** — perception clustering + count emission + veto removal, defect fixed (Stage 2 impl)
-- **Stage 3a** — same-source/same-poll exclusion in `ContactStore.ingest` (commit 17e398f-equivalent)
-- **Stage 4a** — `facts["cardinality"]` + `console._SHOW_FACT_KEYS` (commit d7e6e4a-equivalent)
-- **Stage 3b-i rev.2** — angular separability (replaces world-space ellipse), commits 12f03b6, daf6a36, 88e493a
+- [x] **No unplanned scope** — Six files modified (all existing modules):
+  1. `speech.py` — count clause, phrase ladder, plural display map, dead-code cleanup
+  2. `events.py` — `CONTACT_CARDINALITY_CHANGED` event kind
+  3. `contacts.py` — `last_emitted_cardinality` field, tick block insertion
+  4. `tools.py` — `_estimated_units_lower_bound`, `get_stats`/`get_situation` facts
+  5. `escalation.py` — `_situational_header` adds `estimated_units`
+  6. `CLAUDE.md` — structure documentation updates
+  No new files, no API surface changes beyond facts payload.
 
-Stages correctly not included: 3b-ii (blocked on live sortie), 4b (speech), 5 (composition), 6 (hardening).
+- [x] **Invariants preserved**:
+  - `PRESENCE_CLASS` / `DEFAULT_OP_CLASS` removed from `_OP_CLASS_DISPLAY` (dead code, unreachable through real resolver)
+  - Singular contacts produce identical speech (word-for-word regression — verified by 19 of 21 pre-existing speech tests byte-identical; 1 test fixture corrected for unreachable level per design's own instruction)
+  - No new public API in `belief.tools` that bypasses `console.py` caller requirement
+  - Event log's replay determinism preserved (cardinality change is just another event, subject to existing cooldown)
 
-✓ **No unplanned scope added silently.**
-
-✓ **No project invariants violated:**
-  - DCS remains authoritative (clustering is pure position-only filtering)
-  - Code owns factual state; models interpret (contacts hold beliefs, not truth)
-  - No DCS installation modified (read-only throughout)
-  - Provenance preserved on cardinality/composition (perceived metadata, not invented)
-
-✓ **All feature-work files already committed; no uncommitted modifications.**
+- [x] **All new files staged** — No code changes remain unstaged; feature is complete
 
 ---
 
 ## Testing
 
-✓ **Three headline test cases verified live:**
-1. `test_twelve_units_perpendicular_to_los_at_9km_resolve_individually` — ✓ PASS (12 contacts at 9 km, perpendicular layout)
-2. `test_twelve_units_along_los_at_9km_merge_at_200m_agl_but_split_at_1000m_agl` — ✓ PASS (1 contact + `OP_1UNIT` at 200 m AGL; `OP_TO5UNITS` at 1000 m AGL)
-3. `test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_contacts` — ✓ PASS
+- [x] **Core logic covered**:
+  - `_cardinality_phrase`: 5 tests covering singular, `"a handful"`, `"many"`, default `"several"`, and fold-derived non-named intervals
+  - `_plural_unit_type_display`: 4 tests covering presence/class/type levels and missing dict entries
+  - `_contact_report_text` guard: 2 tests (no cardinality fact, singular interval both exercise the unchanged singular path)
+  - `_render_lifecycle_text` attachment points: 3 tests (CONTACT_DETECTED, CONTACT_REACQUIRED speak the clause; CONTACT_CLASSIFICATION_CHANGED does not)
+  - `CONTACT_CARDINALITY_CHANGED` event: 4 tests (first tick, unchanged, narrowing, widening) + no-template branch in `_render_lifecycle_text`
+  - `_estimated_units_lower_bound`: integrated into 5 existing tools tests that now assert `estimated_units` values
 
-✓ **Core logic covered:**
-  - `test_cardinality.py`: all four `fold_cardinality` outcomes (refine/reinforce/hold/contradict), genuine partial overlap, lockout and expiry, seeding via percept.
-  - `test_clustering.py`: boundary table, merge/split by radius, centroid, empty input, acuity floor consistency.
-  - `test_calibration_cluster_merge_undercount.py`: perpendicular → 12 contacts, along-LOS → 1 at low alt → plural at high alt, close-range by class.
-  - `test_mock_flight_chain.py`: continuity and split behavior pinned (1 contact throughout, gate-vs-cluster boundary documented).
-  - `test_naked_eye_source.py`: clustered emission, split continuity, cap mechanism reworked (five tests updated with geometry offsets).
-  - `test_contacts.py`: new Stage 3a same-source/same-poll exclusion test; jitter test xfail marker removed (assertion logic confirmed).
+- [x] **Tests are meaningful, not decorative**:
+  - Regression guard (19 byte-identical tests + 2 guard tests) ensures singular case is untouched
+  - Phrase ladder tests exercise exact numeric boundaries (`(1,1)`, `(4,5)`, `(16,inf)`) and the default case
+  - Attachment tests confirm the plural clause reaches only the intended callouts
+  - Unit count tests ensure the lower-bound arithmetic is correct (sum of `lo` across all contacts)
 
-✓ **No existing tests broken (all 642 pass, up from 635 + 1 xfail).**
-
-✓ **Tests are meaningful — geometry written out, not guessed; calibration numbers hand-verified.**
+- [x] **No existing tests broken** — All 659 tests pass; 17 new tests added (14 speech + 3 events); 5 existing tests gained `estimated_units` assertions (no breakage, just expected output expanded)
 
 ---
 
 ## Documentation
 
-✓ **Reviewer findings addressed.**
-  - Stale comment fix in commit 4d51049 (lat 100 → lat 600)
-  - Design gaps documented in plan (test_naked_eye_source rework, test_two_real_objects location)
+- [x] **Reviewer required fixes addressed** — None were required; reviewer approved with no required changes
 
-✓ **Non-obvious behavior explained:**
-  - `clustering.py`: 3D angular separability (not world-space ellipse), no magnification term, altitude-driven anisotropy
-  - `association_over_time.py`: why gate remains isotropic (Stage 3a closes dead zone without touching gate formula)
-  - `Contact.cardinality`: seeded from percept, fold rule with genuine partial-overlap generalization
-  - `naked_eye_source.py`: majority-overlap two-pass continuity resolution
-  - All field defaults documented inline
-
-✓ **Module docstrings and `body-layer/CLAUDE.md` updated consistently.**
+- [x] **Non-obvious behavior explained**:
+  - `_cardinality_phrase` reads `lo`/`hi` magnitude, not `CountBucket` name, because folded intervals need not equal a named bucket — documented in design and implementation log
+  - `_estimated_units_lower_bound` is private (underscore) because it is a tools.py-internal helper, not a console.py caller — matches `_cardinality_facts`/`_classification_facts` convention and passes `test_console_module_contains_no_belief_logic`
+  - `OP_GROUPSOMETHING` entry removed from `_OP_CLASS_DISPLAY` because it was unreachable (presence-level classification is tested before the dict is consulted; class-level classification can never return that value) — confirmed against actual `classification.py` source
+  - Scope cut (no exact numbers) documented in plan's "Deliberate scope cut" section; implemented as structural impossibility (only hedged phrases ever returned)
 
 ---
 
 ## Security
 
-✓ No security plan review required (offline single-user pipeline, no untrusted input, no hot path).
+- [x] **No security plan exists and is not required** — This is perception-layer speech rendering; no untrusted input, no new dependencies, no cryptography, no external network I/O. Per CLAUDE.md, security review is skipped for this phase.
 ✓ No new dependencies added.
 
 ---
@@ -113,53 +99,99 @@ These are documented and load-bearing; not regressions:
 
 ---
 
-## Acceptance Testing Plan: Group Contact Cardinality (Stages 1–4a, 3b-i rev.2)
+## Summary
 
-**Goal:** Verify that twelve-unit clusters behave as designed: fold into one contact at 9 km, split into six at close range, and altitude-dependently count in between. Verify that the original defect (twelve merging to one, staying one forever) is fixed.
+All DoD criteria pass. The feature:
+- Implements the plan exactly
+- Preserves all existing behavior for singular contacts
+- Adds hedged speech for plural groups
+- Introduces one new event kind (unspoken, logged, available to future consumers)
+- Passes all mechanical checks (format, lint, type, test)
+- Has full reviewer sign-off with no required fixes
 
-**Important scope note:** Stages 1–3b-i are belief-state refactoring; nothing is audible or visible to the user until Stage 4b (speech callouts). **No live DCS sortie required for DoD.** Fixture testing + console inspection of cardinality values (now observable via `show <id>` — Stage 4a) are sufficient.
+**Ready for acceptance testing.**
 
-**Fixtures verified live (all pass):**
+---
 
-1. ✓ `test_twelve_units_perpendicular_to_los_at_9km_resolve_individually` — bearing spread 0°–32°, 18.7 m spacing. Adjacent-pair separation 7.15 arcmin > mean unit 2.67 arcmin. Resolves as 12 contacts.
+## Acceptance Testing Required
 
-2. ✓ `test_twelve_units_along_los_at_9km_merge_at_200m_agl_but_split_at_1000m_agl` — same 12 units, pure range variation (500–506 m). At 200 m AGL, depression-angle spread shrinks; reports 1 contact, `OP_1UNIT`. At 1000 m AGL, depression-angle spread widens; reports 1 contact, `OP_TO5UNITS` (altitude-sensitive, as designed).
+This is the first stage the user can *hear*. Acceptance testing is real and must be performed by the user. See **Acceptance Testing Plan** below.
 
-3. ✓ `test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_contacts` — same 12 units re-spaced at 2–3 km (cluster radius ~900 m there). Separate by class into 6 contacts with small counts.
+---
 
-4. ✓ `test_mock_flight_chain_single_threaded_reaches_expected_contact_state` — two real objects (400 m apart) closing from ~9 km to 690 m. Stay 1 contact throughout (gate-vs-cluster boundary, documented as Stage 3a design boundary, not a regression). Cardinality: holds (1,2) through most of flight, (1,1) when close.
+# Acceptance Testing Plan: Group Contact Cardinality Speech (Stage 4b)
 
-**Observable in real DCS (if desired, not required for merge):**
-- Console command `show <id>` displays cardinality facts: `{lo, hi, confidence}` read off `Contact.cardinality`
-- No speech changes (Stage 4b not built)
-- Contact count unchanged from Stage 2 (Stage 3a is structural bookkeeping, not user-facing)
+**Goal:** Verify that plural group cardinality sounds correct in a cockpit context — test the four cardinal phrases ("several", "a handful", "many", and singular silence) and confirm singular contacts still sound exactly as before.
+
+**Prerequisites:**
+- [ ] Type-checked and importable (`cd body-layer && source .venv/bin/activate && mypy src` — must pass)
+- [ ] srs-adapter running with `--target local` on the Mac (see `srs-adapter/CLAUDE.md` for exact command)
+- [ ] body-layer with `--crew-text --speech-audio --srs-adapter-url http://127.0.0.1:8000` (see `body-layer/CLAUDE.md`)
+- [ ] Crew console accessible (or use the `describe_contact` command via the API)
+- [ ] Test fixtures available for contact-generation (use the existing `test_mock_flight_chain.py` scenario logic or write a small test script that seeds contacts)
+
+**What to Listen For:**
+
+This stage **never speaks an exact number**. You will only hear these four phrases, each paired with a classification:
+- **Singular (no phrase at all):** "a T-72, eleven o'clock, two kilometres" — same as current behavior, word-for-word
+- **"several"** (2–15 units): "several armor, eleven o'clock, two kilometres"
+- **"a handful"** (exactly 4–5 units): "a handful of trucks, eleven o'clock, two kilometres"
+- **"many"** (16+ units): "many contacts, eleven o'clock, two kilometres"
+
+**The regression guard is the first test:** A contact with `cardinality.lo == 1 and hi == 1` must produce zero difference from the current code. If you hear any extra words (e.g. "a single" or "one") where there are none now, the regression guard failed.
+
+**Test Cases:**
+
+1. **Regression: Singular contact** (cardinality `(1, 1)`)
+   - Load a fixture with a single contact (e.g., `test_mock_flight_chain` at close range)
+   - Call `describe_contact` on the single contact
+   - **Expected:** Exact current wording, no new phrases, no hesitation or false starts. Should sound identical to pre-Stage-4b recordings if you have them.
+
+2. **Plural: "several" (2 units)** (cardinality `(2, 2)`)
+   - Seed a contact with `cardinality.lo = 2, hi = 2`
+   - Call `describe_contact`
+   - **Expected:** "several [classification], [clock], [range]" — e.g. "several contacts, nine o'clock, three kilometres"
+   - **Listen for:** Correct indefinite article flow ("several" not "a several"), no hesitation before the class name, and the count clause should feel natural, not inserted or stilted
+
+3. **Plural: "several" (8 units)** (cardinality `(8, 10)`)
+   - Seed a contact with `cardinality.lo = 8, hi = 10` (a fold result, not a named bucket)
+   - Call `describe_contact`
+   - **Expected:** "several armor, [clock], [range]" — default fallback, as designed
+   - **Listen for:** Still sounds right even though the interval is not a named bucket
+
+4. **Plural: "a handful" (4–5 units)** (cardinality `(4, 5)`)
+   - Seed a contact with `cardinality.lo = 4, hi = 5`
+   - Call `describe_contact`
+   - **Expected:** "a handful of [class], [clock], [range]" — e.g. "a handful of trucks, twelve o'clock, one kilometre"
+   - **Listen for:** Proper article ("a handful" not "handful" alone), plural form of the class noun (trucks not truck)
+
+5. **Plural: "many" (20+ units)** (cardinality `(16, inf)`)
+   - Seed a contact with `cardinality.lo = 16, hi = infinity`
+   - Call `describe_contact`
+   - **Expected:** "many [class], [clock], [range]" — e.g. "many contacts, six o'clock, five kilometres"
+   - **Listen for:** Correct phrasing, no hesitation, and whether "many" feels appropriate for a large cluster in a cockpit callout
+
+**Edge Cases to Probe:**
+
+- **Singular at presence level** (no class): "a contact, one o'clock, half a kilometre" — should sound right, no "several contact" (singular noun survives)
+- **Plural at presence level** (no class): "several contacts, two o'clock, point-eight kilometres" — should sound natural
+- **Narrow interval from a fold** (e.g., cardinality `(5, 7)` from a contradiction hull): Should still say "several", not attempt to guess whether it is closer to five or seven
+- **Speech during a cardinality-change event** (if routed through `render_contact_report`): Should not double-speak the count or produce a stutter (the event itself is unspoken; only contact reports trigger speech)
 
 **Pass Criteria:**
-All four fixtures pass deterministically. No regressions in suite (642 tests). Reviewer confidence: high (load-bearing claims hand-verified, gate revert byte-confirmed, design gaps disclosed).
 
----
+All test cases produce the expected wording without hesitation or unnatural phrasing. Critically:
+1. **Regression:** A singular contact sounds identical to current behavior (word-for-word match is the goal)
+2. **Plural phrases:** All four phrases ("several", "a handful", "many", and singular-silent) are audible and grammatically correct
+3. **No exact numbers:** Zero cases where an exact count (e.g., "three", "five", "twenty") is spoken
+4. **Natural flow:** The phrase + class + clock + range flow together as a single coherent sentence, not mechanical or staccato
 
-## Roadmap Updates Required
+**Cannot be Verified Without DCS (to be recorded in roadmap as live-acceptance debt):**
+- Whether the hedged count actually feels useful in a real cockpit during a sortie (vs. sounding repetitive or vague)
+- Whether four-to-five units ("a handful") genuinely sounds better than "several" at that count in rotor noise
+- Whether the hedged register (never precise) is the right default for context-free callouts, or whether the user would prefer exact counts in some scenarios (deferred to Stage 5 composition + brain-layer user prompts)
 
-**`body-layer/ROADMAP.md`** — Group contacts entry must be updated to reflect Stages 1–2, 3a, 4a, 3b-i rev.2 complete:
 
-**Current text:** "Stages 0-2 done 2026-09-18; Stage 3 blocked on a calibration sortie; Stages 4-6 pending."
-
-**Update to:** "Stages 0–2, 3a, 4a, 3b-i rev.2 done 2026-09-18; Stage 3b-ii blocked on calibration sortie; Stages 4b, 5, 6 pending. Stage 3b-ii scope diminished: acuity magnitude and tier cap remain; single-link chaining and per-cluster throttle are smaller decisions."
-
-Also note in the "Carried forward" section: Stage 3a (same-source/same-poll exclusion in `ContactStore.ingest`) closed the gate-vs-cluster radius mismatch structurally without touching the gate formula. Both prior fixes (BL-2.6 symmetric budgeting, contact-permanence correlation) stay byte-identical.
-
-**Root `ROADMAP.md`** — No change needed at this merge (Body Layer row already "[~]" for in-progress). After merge, update Body Layer status row if overall phase status changed (it hasn't).
-
----
-
-## Milestone Completion Questions
-
-**The user must be able to answer three questions for roadmap context.**
-
-**(a) Does the acuity finding change whether Stage 3b-ii should exist at all?**
-
-No. The acuity magnitude is provisional (plan states this plainly: "defensible provisional value"). The design gap list has zero hard lower bound. Stage 3b-ii exists to pin the magnitude after real sorties, not to invent a new mechanism. If Stage 4b's first sortie runs hot and acuity is plainly correct, 3b-ii becomes confirmatory rather than exploratory. Worth flying one more calibration pass with acuity as the headline question.
 
 **(b) Is Stage 5 (composition) still worth building?**
 

@@ -121,9 +121,12 @@ contact sits in, not ground truth.
 **Stage 4b -- the count clause (`plans/group-contact-model/plan.md`,
 "Stage 4b design -- speech and events").** A contact whose `Contact.
 cardinality` holds a plural interval speaks a hedged quantity word ahead of
-the unit type -- `"several contacts, ..."`, `"a handful trucks, ..."` (a
-plain phrase-plus-noun concatenation, no "of" inserted -- matches the user's
-own worked example, `"several contacts, eleven o'clock, two kilometres"`,
+the unit type -- `"several contacts, ..."`, `"a handful of trucks, ..."`.
+**The phrase carries its own connector**: `"several"`/`"many"` take a bare
+noun, while `"a handful"` requires `"of"` to be grammatical, so
+`_cardinality_phrase` returns `"a handful of"` and composition stays a plain
+phrase-plus-noun join. An earlier revision generalised from the user's own
+worked example, `"several contacts, eleven o'clock, two kilometres"`,
 verbatim) -- never an exact number (`_cardinality_phrase`); a singular contact (or one with no cardinality fact
 at all) is unaffected, byte-for-byte, by construction (`_contact_report_
 text`'s guard). This vocabulary is deliberately never precise: settled
@@ -338,7 +341,7 @@ def _cardinality_phrase(lo: int, hi: float) -> str | None:
     if lo >= 16:
         return "many"
     if lo == 4 and hi <= 5:
-        return "a handful"
+        return "a handful of"
     return "several"
 
 
