@@ -101,9 +101,11 @@ from belief.attention import (
     Sector,
     effective_attention,
 )
+from belief.cardinality import UNKNOWN
 from belief.contacts import Contact, ContactStore
 from belief.decay import (
     Certainty,
+    cardinality_confidence_at,
     certainty_of,
     classification_confidence_at,
     position_confidence,
@@ -200,6 +202,37 @@ def _classification_facts(contact: Contact, now_sim: float) -> dict[str, object]
     }
 
 
+def _cardinality_facts(contact: Contact, now_sim: float) -> dict[str, object] | None:
+    """`facts.cardinality`'s shape (`plans/group-contact-model/plan.md`
+    Stage 4a) -- `_classification_facts`'s sibling, `{lo, hi, confidence}`
+    read off `Contact.cardinality` the same way that function reads
+    `Contact.classification`: `confidence` through `belief.decay.
+    cardinality_confidence_at` (decaying), `lo`/`hi` straight off the held
+    claim (sticky, never decay -- mirrors `classification.level`). No
+    `bucket_name` key: a folded interval (an intersection or a contradiction
+    hull) need not match any one named `belief.cardinality.CountBucket`, so
+    a name isn't always derivable, and `lo`/`hi` alone already say everything
+    a consumer needs.
+
+    Returns `None` -- omitted from `facts` entirely by the caller, per this
+    module's documented absent-not-null convention -- when the held claim is
+    still the cardinality lattice's root, `belief.cardinality.UNKNOWN`
+    (0, inf): "no cardinality claim at all," the same reading `cardinality.
+    py`'s own docstring gives that interval. Every contact is seeded with a
+    real claim at founding (`OP_1UNIT` when its founding percept carries no
+    count evidence -- see `Contact.cardinality`'s own docstring), so this is
+    reachable only via a contradiction hull wide enough to span everything,
+    not the common case."""
+    cardinality = contact.cardinality
+    if cardinality.lo == UNKNOWN.lo and cardinality.hi == UNKNOWN.hi:
+        return None
+    return {
+        "lo": cardinality.lo,
+        "hi": cardinality.hi,
+        "confidence": cardinality_confidence_at(contact, now_sim),
+    }
+
+
 def _contact_facts(
     contact: Contact,
     now_sim: float,
@@ -225,6 +258,9 @@ def _contact_facts(
         facts["attention_source"] = f"area:{attention_area_id}"
     elif contact.attention_source is not None:
         facts["attention_source"] = contact.attention_source
+    cardinality_facts = _cardinality_facts(contact, now_sim)
+    if cardinality_facts is not None:
+        facts["cardinality"] = cardinality_facts
     if enrichment is not None:
         _add_enrichment_facts(facts, contact, now_sim, store, enrichment)
     return facts

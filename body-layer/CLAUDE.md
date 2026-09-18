@@ -313,11 +313,21 @@ subproject-needed dev path.
   None = None` (BL-3, see `enrichment.py`'s entry below) — `None` (the default) leaves `facts` in
   exactly its pre-BL-3 shape, so existing callers/tests are unaffected; supplied, it adds
   `position.confidence`, `semantic`, `relative_now`, and (where derivable) `motion_when_seen`.
+  `facts["cardinality"]` (`plans/group-contact-model/plan.md` Stage 4a) — `_cardinality_facts`,
+  `_classification_facts`'s sibling: `{lo, hi, confidence}` read off `Contact.cardinality`
+  (`confidence` through `belief.decay.cardinality_confidence_at`, decaying; `lo`/`hi` straight off
+  the held claim, sticky). **Absent from `facts` entirely** (this module's documented
+  absent-not-null convention), not present as `None`, whenever the held claim is still the
+  cardinality lattice's root, `belief.cardinality.UNKNOWN` (0, inf) — every contact is seeded with
+  a real claim at founding, so this is reachable only via a contradiction hull wide enough to span
+  everything, not the common case. No `bucket_name` key: a folded interval (an intersection or a
+  contradiction hull) need not match any one named `CountBucket`, so a name isn't always derivable.
   `console.py` (BL-2 Stage 4) — a line parser + pretty-printer over `tools.py`, owning no belief
   logic of its own; every command (`contacts`, `show <id>`, `history <id>`, `find <text>`,
   `watch <id>`/`unwatch <id>`, `stats`) dispatches 1:1 into a `tools.py` function. `Console` carries
   the same optional `enrichment` field (BL-3), threaded into every dispatch, with the identical
-  no-enrichment-means-no-change guard.
+  no-enrichment-means-no-change guard. `_SHOW_FACT_KEYS` (Stage 4a) gains `"cardinality"`, right
+  after `"classification"`, so `show <id>` prints it whenever `facts` carries it.
   `format_event_for_overlay` (BL-2.5, `plans/dcs-text-panel-output/plan.md`) —
   `"<contact id>: <kind>, <summary>"` for one `belief.events.Event`, reusing
   `tools.describe_contact`'s existing `summary` field rather than new belief-reading logic, and
