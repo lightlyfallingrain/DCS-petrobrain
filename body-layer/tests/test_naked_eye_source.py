@@ -648,7 +648,7 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # this time: 0.0/0.9/1.8, chaining together single-link under Stage
     # 3b-i rev.2's angular predicate the same way `test_clustering.
     # test_chained_cluster_reports_a_plural_count` demonstrates in
-    # isolation. On the second poll object_id=1 alone moves to lat 100 --
+    # isolation. On the second poll object_id=1 alone moves to lat 600 --
     # from `_high_ownship()`'s 200 m AGL, that down-range move genuinely
     # separates it angularly from the group (confirmed by running this
     # test, not assumed -- a down-range-only move at ownship's own altitude
@@ -698,7 +698,7 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # (3-member) and minority (1-member) clusters land on `OP_1UNIT` here
     # (confirmed by running this test), so the count no longer distinguishes
     # them the way it did before Stage 3b-i rev.2. The minority child is the
-    # one that moved to lat 100; the majority child is still near lat 1310.
+    # one that moved to lat 600; the majority child is still near lat 1310.
     majority = next(
         obs
         for obs in second

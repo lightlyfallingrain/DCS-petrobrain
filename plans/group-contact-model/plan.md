@@ -1267,6 +1267,28 @@ boundaries that match what the pilot sees. Stage 5 (composition) gets easier, be
 members are now merged on a criterion that is genuinely about visual overlap, so "some of them are
 tanks" describes a real blob rather than an ellipse artefact.
 
+### Addendum: what rev.2's implementation found that its design missed (2026-09-18)
+
+Recorded so a future stage touching this test surface does not rediscover it.
+
+- **`test_naked_eye_source.py` was absent from the design's test-impact list**, and needed five
+  tests reworked. Cause: its fixtures place candidates at the same bearing and altitude, which
+  under the angular predicate is a *degenerate always-merge* case — the separation is zero by
+  construction. Those fixtures had been exercising the cap, debounce and continuity paths through
+  incidental geometry that the ellipse tolerated and the angular model does not. Any future change
+  to the separability predicate should expect this file to move with it.
+- **`test_two_real_objects_stay_two_contacts` does not exist**, though the design named it as an
+  xfail expected to flip. Review traced it through git history: it was folded into
+  `test_mock_flight_chain_single_threaded_reaches_expected_contact_state` by commit `de5e7eb`,
+  predating this whole ellipse/angular sequence. Not a silent deletion — but the design was written
+  against a test list that was already stale, which is the more useful lesson.
+- **One assertion was dropped without replacement** in
+  `test_a_cluster_splitting_gives_the_majority_child_continuity`: the majority child's
+  `count_bucket == "OP_2UNITS"` check. Under the angular model both the 3-member and 1-member
+  children report `OP_1UNIT`, so the count no longer distinguishes them and the test identifies
+  them by position instead. The test's actual purpose — continuity on split — is unaffected, but
+  the count assertion is genuinely gone rather than relocated.
+
 ### Settled Decisions (user, 2026-09-18) — Stage 3b escalations
 
 6. **Geometry decides, not range.** Twelve units in a row perpendicular to the line of sight
