@@ -120,13 +120,15 @@ class Contact:
     across observations.
 
     `last_position_uncertainty_m` is `last_position`'s own error budget --
-    `belief.association_over_time.uncertainty_radius_m` of whichever percept
-    most recently set `last_position` (the founding percept, or the most
-    recent `record()` call). `association_over_time.spatial_gate_radius_m`
-    sums this with the *incoming* percept's uncertainty; gating on the
-    incoming side alone silently treated `last_position` as exact, which it
-    is not -- see that module's docstring for the live duplication bug this
-    fixes (2026-09-09).
+    `belief.association_over_time.uncertainty_radius_m` (the conservative
+    scalar reduction of that percept's own ellipse, see that function's
+    docstring) of whichever percept most recently set `last_position` (the
+    founding percept, or the most recent `record()` call). `association_
+    over_time.passes_gate` sums this with the *incoming* percept's own
+    ellipse on both axes; gating on the incoming side alone silently
+    treated `last_position` as exact, which it is not -- see that module's
+    docstring for the live duplication bug this fixes (2026-09-09) and for
+    Stage 3b-i's anisotropic gate this field now feeds.
 
     `classification` is `plans/classification-refinement/plan.md` Stage 2's
     addition: the contact's *folded* best classification claim (`belief.
@@ -538,10 +540,10 @@ class ContactStore:
         one old contact correctly produce three separate contacts rather
         than the third silently merging into the second's brand-new one.
 
-        The gate's own radius formulas (`association_over_time.
-        spatial_gate_radius_m`/`passes_gate`) are untouched by this rule --
-        it is association bookkeeping, the same category as
-        `_resolve_continuity`, not a change to the gate's geometry.
+        The gate's own formula (`association_over_time.passes_gate`) is
+        untouched by this rule -- it is association bookkeeping, the same
+        category as `_resolve_continuity`, not a change to the gate's
+        geometry.
 
         Returns the list of `Contact`s touched by this call, one per
         observation processed, in the same order -- a contact may appear

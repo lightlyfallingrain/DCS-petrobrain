@@ -182,19 +182,40 @@ subproject-needed dev path.
   modeling choice, not verified against ED internals (investigator finding, `plans/
   classification-refinement/plan.md` Session 6 addendum Q1) — documented here so a future reader
   does not "correct" it toward an ED semantics that was never established.
-- `src/perception/clustering.py` (`plans/group-contact-model/plan.md` Stage 2) — position-only
-  resolution clustering: `ClusterCandidate`/`Cluster`, `cluster_candidates` (single-link, radius =
-  `naked_eye_cluster_radius_m(range_m)`, no chaining cap yet — Stage 3's job), and
-  `count_bucket_for` (ED's `OP_1UNIT`…`OP_MORETHAN15UNITS` vocabulary, a non-overlapping partition
-  for forward selection, deliberately narrower than `belief.cardinality`'s own — see that module's
-  docstring). `naked_eye_cluster_radius_m` is **moved here, not duplicated**, from what was
-  `belief.association_over_time._naked_eye_uncertainty_m` — the cluster radius and the association
-  gate's own per-percept uncertainty are the same number by construction, and this is the only
-  direction the move can go (`perception/` may never import `belief/`); `association_over_time.
-  uncertainty_radius_m` now imports it from here. A cluster's aggregate classification is its
-  members' shared value when all agree, else degrades to the presence root
-  (`object_model.DEFAULT_OP_CLASS`) — clustering itself is class-agnostic, position-only; class
-  only shapes the *label* a cluster reports, never whether it forms.
+- `src/perception/clustering.py` (`plans/group-contact-model/plan.md` Stage 2, reworked
+  anisotropic by Stage 3b-i) — position-only resolution clustering. **The naked-eye channel's
+  position uncertainty is an ellipse, not a circle**: `naked_eye_ellipse_radii_m(range_m)` returns
+  `EllipseRadii(cross_range_m, down_range_m)` — cross-range is genuine two-point resolving power,
+  acuity-derived (`NAKED_EYE_ACUITY_RAD`, from `perception.visibility.LOWRES_ANGULAR_RADIUS_RAD`,
+  **divided** by `BINOCULAR_RANGE_MULTIPLIER` where `visibility.py` multiplies — the optic resolves
+  4x finer, not just detects 4x further); down-range stays `_range_bucket_width_m` (the `OP_D*`
+  bucket width), kept as a provisional depth-discrimination stand-in, not a reporting-quantisation
+  artefact any more. The old scalar `naked_eye_cluster_radius_m` (`math.hypot`-combining the two
+  axes) is gone — folding them into one number let the down-range term dominate everywhere and made
+  correcting the cross-range angle alone a no-op; see this module's own docstring for the full
+  derivation and its honest, one-sided evidence bound (upper bound ~20.7 arcmin, no lower bound —
+  magnitude is Stage 3b-ii's job, not this stage's). `cluster_candidates(candidates, observer_x,
+  observer_z)` now takes the observer's own position (available at the call site already, no new
+  plumbing) to define the line-of-sight frame each pairwise ellipse test decomposes against
+  (`los_components_m`, `within_ellipse` — also reused by `belief.association_over_time.passes_gate`,
+  one implementation of the projection). Single-link, radius = the larger of each pair's own
+  per-axis radii, no chaining cap yet — Stage 3b-ii's job. **Counting and resolving are different
+  projections of the same ellipse**: a cluster's `count_bucket` comes from `_count_cross_range_
+  subclusters`, *not* `len(members)` and *not* a second single-link pass over the same pairwise
+  test (that is a **provably dead mechanism** — every edge that connected a cluster's members
+  already satisfies `cross <= cross_radius` for that pair, an algebraic consequence of the ellipse
+  formula, so re-testing it single-link always reconnects the whole cluster and always finds
+  exactly one sub-group, for any cluster, any geometry; discovered by implementing it literally as
+  first described — see `plans/group-contact-model/implementation.md`). Instead it quantises each
+  member's cross-range offset from the cluster's own centroid into fixed-width bins (width = the
+  largest member's own cross-range radius) and counts distinct non-empty bins — not pairwise, so a
+  long, down-range-heavy single-link chain can still land its ends in different bins even though
+  every adjacent step individually passed. `count_bucket_for` (ED's `OP_1UNIT`…`OP_MORETHAN15UNITS`
+  vocabulary, a non-overlapping partition for forward selection, deliberately narrower than
+  `belief.cardinality`'s own — see that module's docstring) is otherwise unchanged. A cluster's
+  aggregate classification is its members' shared value when all agree, else degrades to the
+  presence root (`object_model.DEFAULT_OP_CLASS`) — clustering itself is class-agnostic,
+  position-only; class only shapes the *label* a cluster reports, never whether it forms.
 - `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6, clustering added Stage 2 of
   `plans/group-contact-model/plan.md`) — `NakedEyePerceptionSource`, the naked-eye/binocular
   channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s gates and `geometry.py`'s
@@ -297,7 +318,29 @@ subproject-needed dev path.
 
   `association_over_time.py` (percept→contact spatial + class-compatibility
   gating, distinct from `perception/association.py`'s within-one-poll detection→world-object
-  resolution), `decay.py` (per-attribute half-lives, the `certainty` lifecycle ladder —
+  resolution — **the spatial gate went anisotropic at Stage 3b-i** of `plans/
+  group-contact-model/plan.md`, Decision 7: `passes_gate` decomposes the separation between a
+  percept's implied position and `contact.last_position` into cross-range/down-range components
+  against the percept's own `ownship_at_observation` (`perception.clustering.los_components_m`) and
+  tests each axis against `uncertainty_radii_m(percept)`'s ellipse (`perception.clustering.
+  naked_eye_ellipse_radii_m` for naked-eye, an isotropic circle of `SCOPE_UNCERTAINTY_M` for the
+  scope channel — a circle reduces the ellipse test to the old scalar `distance <= radius` test
+  exactly, so every scope-channel gate test predates and is unaffected by this change) plus
+  `contact.last_position_uncertainty_m` and elapsed-time growth on *both* axes. `uncertainty_
+  radius_m` (singular) still exists as a conservative scalar — the larger of the ellipse's two axes
+  — for `Contact.last_position_uncertainty_m`'s own storage, which stays scalar rather than growing
+  a second stored field: the observer position that produced a past reading isn't stored, so there
+  is no recoverable LOS frame for *that* reading's own ellipse, and applying the conservative pad to
+  both of the *current* gate's axes only ever widens it, never narrows it — an accepted
+  approximation, not a precise re-derivation. **Known open regression** (found implementing this
+  stage, not yet fixed): a real object tracked purely by naked-eye through several bearing-bucket
+  requantisations while ownship rotates can still move the implied position's cross-range component
+  by hundreds of metres between polls, now exceeding the (much smaller, acuity-derived) cross-range
+  gate budget where the old clock-bucket-derived one would have absorbed it — `tests/test_
+  contacts.py::test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` is `xfail`ed
+  for this reason; see that test's own marker and `plans/group-contact-model/implementation.md` for
+  why a plain magnitude increase would reopen the Stage 3a/Decision 7 dead zone instead of fixing
+  it), `decay.py` (per-attribute half-lives, the `certainty` lifecycle ladder —
   `observed`/`tracked`/`estimated`/`lost`; `position_confidence` (BL-3) is the numeric,
   continuously-decaying counterpart to that ladder, keyed off `POSITION_HALF_LIFE_S`;
   `classification_confidence_at` (BL-2.6) finally consumes `IDENTITY_HALF_LIFE_S`, which had been

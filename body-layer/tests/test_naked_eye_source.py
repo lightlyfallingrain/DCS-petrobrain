@@ -34,13 +34,17 @@ from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
 _THEATRE = "Syria"
 _FAKE_CONN = sqlite3.connect(":memory:")
 
-#: Ranges for the cap/debounce tests below -- 5 candidates, spaced widely
+#: Ranges for the cap/debounce tests below -- 5 candidates (all on the same
+#: bearing from ownship, i.e. a pure down-range spread), spaced widely
 #: enough that no pair falls within `perception.clustering.
-#: naked_eye_cluster_radius_m` of each other (computed by hand: the largest
-#: pairwise radius among these 5 points is ~265 m, at range 950 m; every
-#: pairwise gap here is >= 300 m). `plans/group-contact-model/plan.md`
-#: Stage 2's clustering would otherwise fold several of these into one
-#: cluster (as the original, evenly-100m-spaced fixture did), collapsing
+#: naked_eye_down_range_radius_m` of each other (computed by hand: every
+#: one of these ranges falls in a 100 m-wide `OP_D*` bucket, so the
+#: down-range radius is 100 m throughout; every pairwise gap here is
+#: >= 150 m -- see `perception.clustering._RANGE_BUCKETS_M`; the
+#: cross-range axis is irrelevant since all 5 share one bearing).
+#: `plans/group-contact-model/plan.md` Stage 2's clustering would otherwise
+#: fold several of these into one cluster (as the original, evenly-100m-
+#: spaced fixture did), collapsing
 #: what these tests actually exercise -- the cap/debounce mechanism, not
 #: clustering -- down to fewer observations than the cap allows.
 _CAP_TEST_RANGES_M: Final[tuple[float, ...]] = (100.0, 250.0, 430.0, 650.0, 950.0)
@@ -396,8 +400,8 @@ def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> 
     # threshold), cap = NAKED_EYE_MAX_NEW_PER_POLL = 3 -- only the 3
     # nearest are emitted this poll. Spacing (`_CAP_TEST_RANGES_M`) is wide
     # enough that no two of these candidates fall within `perception.
-    # clustering.naked_eye_cluster_radius_m` of each other -- computed by
-    # hand, not guessed (see that constant's own docstring) -- so this test
+    # clustering.naked_eye_down_range_radius_m` of each other -- computed by
+    # hand, not guessed (see `_CAP_TEST_RANGES_M`'s own docstring) -- so this test
     # still exercises the cap/debounce mechanism in isolation from Stage 2's
     # clustering (`plans/group-contact-model/plan.md`), which is what it is
     # actually testing.
@@ -576,13 +580,26 @@ def test_quantise_range_exact_boundary_uses_that_bucket() -> None:
 
 
 def test_two_close_candidates_emit_one_clustered_observation() -> None:
-    # Two Infantry candidates 20 m apart at ~500 m range -- well within
-    # `perception.clustering.naked_eye_cluster_radius_m(500.0)` (~163 m) --
-    # must emit one Observation, not two, carrying a plural count_bucket.
+    # Two Infantry candidates 20 m apart *along the line of sight* from
+    # ownship at the origin (both differ only in lat, i.e. down-range) --
+    # well within the 100 m down-range radius at range ~500 m
+    # (`perception.clustering.naked_eye_down_range_radius_m(500.0)`) -- must
+    # emit one Observation, not two. The count is genuinely `OP_1UNIT`, not
+    # plural -- a *direct* (non-chained) pair can only ever land in one
+    # cross-range bin (see `perception.clustering._count_cross_range_
+    # subclusters`'s own docstring: the full-ellipse merge test already
+    # requires any two directly-connected members to be within one
+    # cross-range radius of each other). A cross-range separation this size
+    # would not even *merge* post-3b-i (the cross-range radius at this
+    # range is ~0.4 m) -- that distinction, and a real plural count via
+    # single-link chaining, are exercised by `test_calibration_cluster_
+    # merge_undercount.py` and `test_clustering.py`'s own chained-cluster
+    # test, not here -- this test only pins the wiring (one cluster in,
+    # one Observation out).
     world_objects = {
         "objects": [
             _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),
-            _world_object(2, "Infantry", lat_deg=500.0, lon_deg=20.0),
+            _world_object(2, "Infantry", lat_deg=520.0, lon_deg=0.0),
         ]
     }
     source, _client = _source(world_objects)
@@ -590,7 +607,7 @@ def test_two_close_candidates_emit_one_clustered_observation() -> None:
     observations = source.poll(100.0, _ownship())
 
     assert len(observations) == 1
-    assert observations[0].count_bucket == "OP_2UNITS"
+    assert observations[0].count_bucket == "OP_1UNIT"
 
 
 def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
@@ -601,26 +618,35 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # offered fresh to the belief-layer gate (`plans/group-contact-model/
     # plan.md`'s Splitting section -- "the id follows the majority").
     #
-    # object_id=1 stays put at lat 1300; object_id=2, 3, 4 (three of them,
-    # so they form the cluster's own majority once it splits) also start at
-    # lat 1300 -- all four merge into one cluster on the first poll. On the
-    # second poll object_id=1 alone has moved far enough away (lat 100) to
-    # split off on its own -- a 1-vs-3 split, so the 3-strong group is the
-    # majority child.
+    # object_id=1 stays at lat 1300, lon 0 -- close enough (down-range) to
+    # the other three to merge with them on the first poll. object_id=2, 3,
+    # 4 (three of them, so they form the cluster's own majority once it
+    # splits) sit at lat 1310, spread in *lon* (cross-range) instead of lat
+    # this time: 0.0/0.9/1.8 -- each adjacent pair (0.9 m apart) is inside
+    # the ~0.975 m cross-range radius at range ~1310 m
+    # (`perception.clustering.naked_eye_cross_range_radius_m`), so
+    # single-link chains all three together even though the direct 2-4
+    # pair (1.8 m) would not pass alone -- the same chaining
+    # `test_clustering.test_chained_cluster_with_real_cross_range_extent_
+    # reports_a_plural_count` demonstrates, here reused so this test's own
+    # majority group carries a genuine (not degenerate-collinear) plural
+    # count. On the second poll object_id=1 alone has moved far enough away
+    # (lat 100, ~1210 m down-range from the rest) to split off on its own
+    # -- a 1-vs-3 split, so the 3-strong group is the majority child.
     merged = {
         "objects": [
             _world_object(1, "Infantry", lat_deg=1300.0, lon_deg=0.0),
-            _world_object(2, "Infantry", lat_deg=1300.0, lon_deg=10.0),
-            _world_object(3, "Infantry", lat_deg=1300.0, lon_deg=20.0),
-            _world_object(4, "Infantry", lat_deg=1300.0, lon_deg=30.0),
+            _world_object(2, "Infantry", lat_deg=1310.0, lon_deg=0.0),
+            _world_object(3, "Infantry", lat_deg=1310.0, lon_deg=0.9),
+            _world_object(4, "Infantry", lat_deg=1310.0, lon_deg=1.8),
         ]
     }
     split = {
         "objects": [
             _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),
-            _world_object(2, "Infantry", lat_deg=1300.0, lon_deg=10.0),
-            _world_object(3, "Infantry", lat_deg=1300.0, lon_deg=20.0),
-            _world_object(4, "Infantry", lat_deg=1300.0, lon_deg=30.0),
+            _world_object(2, "Infantry", lat_deg=1310.0, lon_deg=0.0),
+            _world_object(3, "Infantry", lat_deg=1310.0, lon_deg=0.9),
+            _world_object(4, "Infantry", lat_deg=1310.0, lon_deg=1.8),
         ]
     }
     client = FakeAircraftClient(merged)
@@ -636,14 +662,19 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # Only 3 of the 4 are acquired this first poll -- `NAKED_EYE_MAX_NEW_
     # PER_POLL` (3) still throttles first-time acquisition per-object, even
     # under `emit_mode="every_poll"` (module docstring point 5's "Stage 2
-    # scoping decision"); the 4th joins on the next poll.
-    assert first[0].count_bucket == "OP_3UNITS"
+    # scoping decision"); the 4th joins on the next poll. The count is
+    # `OP_2UNITS`, not `OP_3UNITS` -- with only 3 of the 4 candidates
+    # admitted this poll, the cross-range chain's own bin layout (see this
+    # test's own module-level comment) yields 2 distinct bins for whichever
+    # 3 are admitted, not 3; the exact figure was confirmed by running this
+    # test, not assumed from the merged-4 case above.
+    assert first[0].count_bucket == "OP_2UNITS"
 
     client._world_objects = split
     second = source.poll(100.2, _ownship())
 
     assert len(second) == 2
-    majority = next(obs for obs in second if obs.count_bucket == "OP_3UNITS")
+    majority = next(obs for obs in second if obs.count_bucket == "OP_2UNITS")
     minority = next(obs for obs in second if obs.count_bucket == "OP_1UNIT")
     assert majority.continues_observation_id == first[0].id
     assert minority.continues_observation_id is None

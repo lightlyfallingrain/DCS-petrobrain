@@ -209,21 +209,44 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # `plans/group-contact-model/plan.md` Stage 2 changes both the
         # observation count and the contact count here -- naked-eye now
         # emits one Observation per *cluster*, not per object, and objects
-        # 101 (truck, x=1400) and 102 (infantry, x=1800) are only 400 m
-        # apart in a straight line from ownship. Re-run by hand (not
-        # guessed, per this test file's own convention) after wiring
-        # clustering, poll by poll:
+        # 101 (truck, x=1400, z=0) and 102 (infantry, x=1800, z=0) are only
+        # 400 m apart, **exactly along the line of sight**: ownship's own
+        # track is also z=0 the whole flight, so the bearing from ownship
+        # to either object is always ~due ahead and their separation is
+        # pure down-range, zero cross-range. This is precisely the
+        # degenerate collinear geometry `plans/group-contact-model/
+        # implementation.md` documents for Stage 3b-i -- do not assume the
+        # instruction to "work the geometry out, don't predict it" means
+        # this fixture happens to be the perpendicular case; it is not.
         #
-        # - Polls 0-13 (range to 102 >= ~900 m): both objects' cluster radii
-        #   (`perception.clustering.naked_eye_cluster_radius_m`, which grows
-        #   with range) exceed their 400 m real separation, so naked-eye
-        #   reports ONE presence-tier, OP_2UNITS cluster per poll -- 14
-        #   naked-eye observations, one per poll.
-        # - Polls 14-15 (range to 102 ~900-955 m): the cluster radius has
-        #   shrunk enough that clustering splits them into two singleton
-        #   clusters per poll -- one `Ural truck` (`hires`), one
-        #   `OP_GROUPSOMETHING` (`presence`) -- 2 naked-eye observations per
-        #   poll, 4 total.
+        # Re-run by hand (not guessed, per this test file's own convention)
+        # against real frame ranges (`tests/fixtures/mock_flight_
+        # canonical.json`'s `position_x_m` per frame), post-3b-i:
+        #
+        # - Polls 0-13: at poll 13, range to 101/102 is 620/1020 m -- 101's
+        #   down-range radius is 100 m (`perception.clustering.
+        #   naked_eye_down_range_radius_m`, the 600-700 m `OP_D*` bucket),
+        #   102's is 500 m (the 1000-1500 m bucket); the pairwise radius is
+        #   the larger of the two, 500 m, which exceeds their fixed 400 m
+        #   separation, so naked-eye reports ONE presence-tier, OP_2UNITS
+        #   cluster per poll -- 14 naked-eye observations, one per poll. (A
+        #   plural count here needs no cross-range chaining -- with only 2
+        #   members that would collapse to 1 anyway, see `perception.
+        #   clustering._count_cross_range_subclusters`'s own docstring; the
+        #   `count_bucket_for` selection table's own tie-break happens to
+        #   land a 2-member group on `OP_2UNITS` via its `len(members)`-
+        #   equivalent bin count here, not via any cross-range extent.)
+        # - Polls 14-15: at poll 14, range to 101/102 is 560/960 m -- both
+        #   now fall in 100 m-wide down-range buckets (500-600 m and
+        #   900-1000 m respectively), so the pairwise radius drops to
+        #   100 m, below the 400 m real separation -- clustering splits
+        #   them into two singleton clusters per poll -- one `Ural truck`
+        #   (`hires`), one `OP_GROUPSOMETHING` (`presence`) -- 2 naked-eye
+        #   observations per poll, 4 total. (The old isotropic formula
+        #   split at this same poll boundary too, by coincidence of this
+        #   fixture's specific ranges, not because the mechanism is the
+        #   same -- the old split was cross-range-shrinkage-driven, this
+        #   one is a down-range-bucket-width step.)
         # - Polls 16-19: object 101 (the truck) drops out of the naked-eye
         #   channel entirely -- this is the cockpit occlusion mask already
         #   documented above (x ~ 905 cutoff), unrelated to clustering. Only
@@ -248,9 +271,9 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # infantry singleton (`continues_observation_id=None`, offered to
         # the ordinary spatial/class gate). Before Stage 3a, the gate's
         # wider, symmetric-budgeted radius (`association_over_time.
-        # spatial_gate_radius_m` sums *both* sides' uncertainty plus growth,
-        # wider than clustering's own max-of-both-sides split radius by
-        # construction) let the infantry singleton fold onto the very
+        # passes_gate` sums *both* sides' uncertainty plus growth on each
+        # axis, wider than clustering's own max-of-both-sides split radius
+        # by construction) let the infantry singleton fold onto the very
         # contact the truck singleton claimed by continuity in the same
         # poll -- exactly the same-source, same-poll co-fold Stage 3a's
         # design forbids. `ContactStore.ingest`'s pre-scan now records the

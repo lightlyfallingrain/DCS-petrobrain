@@ -1,5 +1,6 @@
 """Tests for `belief.association_over_time` -- the percept->contact gate
-(`plans/pb2-contact-memory/plan.md` Stage 1)."""
+(`plans/pb2-contact-memory/plan.md` Stage 1, gate made anisotropic by
+Stage 3b-i of `plans/group-contact-model/plan.md`)."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from belief.association_over_time import (
     class_compatibility,
     implied_position,
     passes_gate,
+    uncertainty_radii_m,
     uncertainty_radius_m,
 )
 from belief.contacts import Contact
@@ -53,18 +55,29 @@ def test_scope_channel_uses_fixed_uncertainty() -> None:
     assert uncertainty_radius_m(percept) == SCOPE_UNCERTAINTY_M
 
 
-def test_naked_eye_uncertainty_derived_from_quantisation_buckets() -> None:
+def test_naked_eye_ellipse_derived_from_acuity_and_quantisation_bucket() -> None:
     """At range=1000m the percept falls in the `OP_D1000M` bucket, whose
-    width is 1000 - 900 = 100m (`naked_eye_source._RANGE_BUCKETS_M`'s
-    `OP_D900M`->`OP_D1000M` pair). Cross-range is `1000 * sin(15deg)`. Pinned
-    against these real table values, not a re-derivation of the formula."""
+    width is 1000 - 900 = 100m (`perception.clustering._RANGE_BUCKETS_M`'s
+    `OP_D900M`->`OP_D1000M` pair) -- the down-range axis, kept as a
+    depth-discrimination stand-in (Stage 3b-i, `plans/group-contact-model/
+    plan.md`). Cross-range is acuity-derived:
+    `range_m * NAKED_EYE_ACUITY_RAD / BINOCULAR_RANGE_MULTIPLIER`. Pinned
+    against these real constants, not a re-derivation of the formula. The
+    two axes are no longer `math.hypot`'d together -- see `clustering.py`'s
+    module docstring for why."""
     percept = _percept(source=SOURCE_NAKED_EYE_VISUAL_FILTERED, range_m=1000.0)
 
-    expected_cross_range_m = 1000.0 * math.sin(math.radians(15.0))
+    expected_cross_range_m = 1000.0 * 0.003 / 4.0
     expected_down_range_m = 100.0
-    expected = math.hypot(expected_cross_range_m, expected_down_range_m)
 
-    assert uncertainty_radius_m(percept) == expected
+    radii = uncertainty_radii_m(percept)
+    assert radii.cross_range_m == expected_cross_range_m
+    assert radii.down_range_m == expected_down_range_m
+    # The legacy scalar reduction is the larger (never-under-sized) axis --
+    # down-range dominates everywhere in the naked-eye ladder post-3b-i.
+    assert uncertainty_radius_m(percept) == max(
+        expected_cross_range_m, expected_down_range_m
+    )
 
 
 def test_implied_position_matches_bearing_range_from_observer() -> None:

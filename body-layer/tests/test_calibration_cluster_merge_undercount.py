@@ -25,18 +25,37 @@ ground-truth candidate positions. `cluster_candidates` and
 `Cluster` -- both mechanically thin, already covered by
 `test_naked_eye_source.py`/`test_mock_flight_chain.py`).
 
-**The progression this test now pins, per the user's own stated target and
-the plan's Stage 2 scope**: twelve objects at ~9 km (well inside the
-channel's own honest cluster radius at that range, ~2.5 km) resolve as ONE
-contact carrying a plural count bucket, not twelve contacts and not a false
-per-object merge either -- the model is honest about "a group of about ten"
-rather than confidently wrong about any one member. At ~500 m-3 km (the
-complex's own real spread, per the live log), the same twelve real objects
-separate by *class* into several contacts, each with a small, exact count --
-the honest resolution boundary closing as range does. Composition
-(Stage 5, not built here) is what would eventually let the 9 km report
-distinguish "some armor, some infantry" within its one contact; Stage 2
-only gets as far as a bare count."""
+**Stage 3b-i inverts this test's own headline claim** (`plans/
+group-contact-model/plan.md`'s "Blast radius" section, Decision 6). The
+original scalar radius folded twelve real objects at 9 km into one cluster
+*regardless of their layout*, because it combined cross-range and down-range
+error with `math.hypot` and the down-range term dominated everywhere. Once
+the cluster ellipse's two axes are tested separately, **geometry decides,
+not range**: the acuity-derived cross-range radius at 9 km is only ~6.75 m
+(`perception.clustering.naked_eye_cross_range_radius_m(9000.0)`), so twelve
+real vehicles spread 18 m apart *across* the line of sight resolve
+individually -- twelve contacts, not one. The same twelve objects spread the
+same way *along* the line of sight (pure down-range separation) still merge
+into one cluster, since the down-range radius there is ~1000 m
+(`perception.clustering.naked_eye_down_range_radius_m(9000.0)`,
+`_range_bucket_width_m`'s 8-9 km bucket) -- but their *count*, which is
+computed from a cross-range-only sub-clustering of that one cluster's
+members (module docstring's "counting versus resolving" section), is
+honestly **1**, not plural: twelve objects lying on the exact same bearing
+from the observer are, by construction, zero cross-range apart from one
+another -- there is no angular information at all to count them by. This is
+not a bug; it is the geometrically honest consequence of the mechanism the
+plan itself describes (cross-range-only counting), and it is a real,
+reportable place where the plan's own worked prediction ("one contact with
+a plural count bucket" for the along-LOS case) does not survive contact
+with the code -- see `plans/group-contact-model/implementation.md`.
+
+At ~500 m-3 km (the complex's own real spread, per the live log), the same
+twelve real objects separate by *class* into several contacts, each with a
+small, exact count -- the honest resolution boundary closing as range does.
+Composition (Stage 5, not built here) is what would eventually let a
+resolved-but-uncountable cluster distinguish "some armor, some infantry"
+within its one contact."""
 
 from __future__ import annotations
 
@@ -50,6 +69,9 @@ from perception.source import (
     Observation,
     OwnshipState,
 )
+
+_OBSERVER_X = 0.0
+_OBSERVER_Z = 0.0
 
 #: The real complex's twelve units and their true class, unchanged from this
 #: module's original (pre-Stage-2) fixture.
@@ -101,25 +123,30 @@ def _build_observation(obs_id: str, cluster: Cluster) -> Observation:
     )
 
 
-def test_twelve_unit_cluster_at_9km_becomes_one_contact_with_a_plural_count() -> None:
-    """At ~9 km, every unit's real ground position falls within the naked-eye
-    channel's own honest cluster radius at that range (`perception.
-    clustering.naked_eye_cluster_radius_m(9000.0)` ~= 2.5 km) of every other
-    unit -- the complex's true ~300 m spread is negligible next to that. All
-    twelve individually resolve at `PRESENCE` (structurally class-blind at
-    this range, same as any real `lowres`-tier reading) before clustering
-    even runs. `cluster_candidates` must fold them into exactly one cluster;
-    `ContactStore.ingest` must found exactly one contact, carrying a plural
-    count bucket -- not twelve, and not a false single-object identity
-    claim either."""
+#: 12 units, 11 gaps, spread over the plan's own ~206 m figure -- matches
+#: `research/2026-09-17-vision-range-calibration-pass2.md`'s real ~18 m
+#: complex spacing (`18.727... * 11 = 206.0`), not a re-derived number.
+_ROW_SPACING_M = 206.0 / 11.0
+
+
+def test_twelve_units_perpendicular_to_los_at_9km_resolve_individually() -> None:
+    """Twelve real objects spread `_ROW_SPACING_M` (~18.7 m) apart *across*
+    the line of sight from ownship at the origin (bearing 0, so a spread in
+    z is pure cross-range) -- each pairwise gap (~18.7 m) exceeds the
+    acuity-derived cross-range radius at 9 km (~6.75 m,
+    `perception.clustering.naked_eye_cross_range_radius_m(9000.0)`), so no
+    two of them fall within each other's ellipse and single-link clustering
+    cannot chain any pair together. `cluster_candidates` must therefore
+    yield twelve singleton clusters, each a real, individually resolvable
+    contact -- the corrected model's headline case (`plans/
+    group-contact-model/plan.md` Decision 6): a row across the line of
+    sight is resolvable at 9 km, in a way the old isotropic radius could
+    never have shown."""
     candidates = tuple(
         ClusterCandidate(
             object_id=index,
-            # A tight real spread (tens of metres) around a point ~9 km
-            # out -- negligible next to the ~2.5 km cluster radius at this
-            # range, so the exact jitter pattern is not load-bearing.
-            x=9000.0 + (index % 4) * 10.0,
-            z=(index // 4) * 10.0 - 10.0,
+            x=9000.0,
+            z=index * _ROW_SPACING_M,
             range_m=9000.0,
             classification_raw=_PRESENCE_RAW,
             classification_level=int(SpecificityLevel.PRESENCE),
@@ -127,15 +154,67 @@ def test_twelve_unit_cluster_at_9km_becomes_one_contact_with_a_plural_count() ->
         for index, _unit in enumerate(_UNIT_LABELS_AND_CLASSES)
     )
 
-    clusters = cluster_candidates(candidates)
+    clusters = cluster_candidates(candidates, _OBSERVER_X, _OBSERVER_Z)
+
+    assert len(clusters) == 12
+    assert all(len(cluster.members) == 1 for cluster in clusters)
+    assert all(cluster.count_bucket == "OP_1UNIT" for cluster in clusters)
+
+    store = ContactStore()
+    observations = [
+        _build_observation(f"OBS_{index}", cluster)
+        for index, cluster in enumerate(clusters)
+    ]
+    store.ingest(observations, now_sim=0.0)
+
+    assert len(store.contacts) == 12
+
+
+def test_twelve_units_along_los_at_9km_merge_into_one_contact_with_a_singular_count() -> (
+    None
+):
+    """The same twelve objects, the same `_ROW_SPACING_M` spread, but now
+    spread in x (down-range, along ownship's bearing 0 to the row) rather
+    than z -- so every pairwise separation is pure down-range, zero
+    cross-range. The down-range radius at 9 km is ~1000 m
+    (`perception.clustering.naked_eye_down_range_radius_m(9000.0)`, the
+    8-9 km `OP_D*` bucket), far wider than the row's own ~206 m extent, so
+    `cluster_candidates` folds all twelve into one cluster -- the model is
+    honest that this is a group, not a single vehicle, and does not fold
+    them into a false single-object identity claim.
+
+    **The count is genuinely 1, not plural** -- this is the one place this
+    stage's own worked prediction (`plans/group-contact-model/plan.md`'s
+    "Blast radius" section) does not survive contact with the code. Count
+    is computed by sub-clustering a cluster's own members on the
+    cross-range axis alone (module docstring's "counting versus resolving"
+    section); twelve objects lying on the *exact same bearing* from the
+    observer are, by construction, zero cross-range apart from every other
+    one of them, so cross-range-only sub-clustering can never see more than
+    one blob here -- there is no angular information at all to count by,
+    only depth, and depth is exactly the axis this project's own model
+    (correctly) refuses to use for counting. Physically defensible too: a
+    column of vehicles seen nose-to-tail directly along the line of sight
+    visually overlaps into one blob, not twelve. See `plans/
+    group-contact-model/implementation.md` for the full finding."""
+    candidates = tuple(
+        ClusterCandidate(
+            object_id=index,
+            x=9000.0 + index * _ROW_SPACING_M,
+            z=0.0,
+            range_m=9000.0 + index * _ROW_SPACING_M,
+            classification_raw=_PRESENCE_RAW,
+            classification_level=int(SpecificityLevel.PRESENCE),
+        )
+        for index, _unit in enumerate(_UNIT_LABELS_AND_CLASSES)
+    )
+
+    clusters = cluster_candidates(candidates, _OBSERVER_X, _OBSERVER_Z)
 
     assert len(clusters) == 1
     cluster = clusters[0]
     assert len(cluster.members) == 12
-    # 12 falls in the (11, 15) bucket -- "about fifteen" is ED's nearest
-    # named rung below "more than fifteen"; see `perception.clustering.
-    # count_bucket_for`'s own non-overlapping selection table.
-    assert cluster.count_bucket == "OP_ABOUT15UNITS"
+    assert cluster.count_bucket == "OP_1UNIT"
     assert cluster.classification_level == int(SpecificityLevel.PRESENCE)
 
     store = ContactStore()
@@ -143,32 +222,34 @@ def test_twelve_unit_cluster_at_9km_becomes_one_contact_with_a_plural_count() ->
 
     assert len(store.contacts) == 1
     contact = store.contacts[0]
-    assert contact.cardinality.lo == 11
-    assert contact.cardinality.hi == 15
+    assert contact.cardinality.lo == 1
+    assert contact.cardinality.hi == 1
     assert contact.classification.level == SpecificityLevel.PRESENCE
 
 
-#: Close-range group layout: each real class group's own units sit within
-#: `_GROUP_SPREAD_M` of each other, and each group's centre sits
-#: `_GROUP_SPACING_M` from the next -- six groups (SAM 2, AAA 2, ARMOR 3,
-#: TRUCK 1, MLRS 1, INFANTRY 3), matching `_UNIT_LABELS_AND_CLASSES`' own
-#: class layout. Every unit is given the same `range_m` (`_CLOSE_RANGE_M`)
-#: for `naked_eye_cluster_radius_m`'s sake -- at 500 m that radius is
-#: `perception.clustering.naked_eye_cluster_radius_m(500.0)` ~= 163 m
-#: (computed, not guessed: cross-range `500*sin(15deg)` ~= 129 m, down-range
-#: bucket width 100 m, combined via `math.hypot`), comfortably smaller than
-#: `_GROUP_SPACING_M` (600 m) and comfortably larger than `_GROUP_SPREAD_M`
-#: (40 m) -- the deliberate design margin that keeps this test demonstrating
-#: clean class separation rather than the single-link chaining risk `plans/
-#: group-contact-model/plan.md`'s Risks section documents (which a naive
-#: reuse of this module's original bearing/range values actually triggers,
-#: confirmed by running `cluster_candidates` against them by hand before
-#: choosing these numbers -- three merged clusters, not six, since down-range
-#: bucket widths grow past 1 km and several groups' true down-range gaps are
-#: smaller than that at those ranges). Calibrating clustering itself to
-#: resist chaining at realistic spacings is Stage 3's job, not this test's.
+#: Close-range group layout: six groups (SAM 2, AAA 2, ARMOR 3, TRUCK 1,
+#: MLRS 1, INFANTRY 3), matching `_UNIT_LABELS_AND_CLASSES`' own class
+#: layout, each group at its own `x` (down-range), spaced `_GROUP_SPACING_M`
+#: apart -- comfortably beyond the 100 m down-range radius at range 500 m
+#: (`perception.clustering.naked_eye_down_range_radius_m(500.0)`), so groups
+#: never merge with each other regardless of how their own members are laid
+#: out. Every group's own members share that one `x` and spread in `z`
+#: (cross-range) instead, by `_GROUP_CROSS_STEP_M` -- **not**
+#: `_GROUP_SPREAD_M`/down-range, unlike this fixture's pre-3b-i version.
+#: Post-3b-i, cluster membership requires any two *directly* connected
+#: members to be within the cross-range radius (~0.375 m at 500 m,
+#: `naked_eye_cross_range_radius_m`) of each other (`clustering.py`'s
+#: module docstring -- an algebraic consequence of the ellipse formula), so
+#: `_GROUP_CROSS_STEP_M` (0.3 m) is chosen just under that: adjacent
+#: same-group members chain together (single-link) even for a 3-strong
+#: group whose two end members (0.6 m apart) would not pass directly on
+#: their own -- the same chaining mechanism `test_clustering.
+#: test_chained_cluster_with_real_cross_range_extent_reports_a_plural_count`
+#: pins in isolation. A down-range-only spread (this fixture's original
+#: layout) is now geometrically degenerate for counting purposes -- see
+#: `plans/group-contact-model/implementation.md` for why.
 _GROUP_SPACING_M = 600.0
-_GROUP_SPREAD_M = 40.0
+_GROUP_CROSS_STEP_M = 0.3
 _CLOSE_RANGE_M = 500.0
 _GROUP_SIZES = (2, 2, 3, 1, 1, 3)  # SAM, AAA, ARMOR, TRUCK, MLRS, INFANTRY
 
@@ -178,15 +259,19 @@ def _close_range_candidates() -> list[ClusterCandidate]:
     object_id = 0
     unit_index = 0
     for group_index, group_size in enumerate(_GROUP_SIZES):
-        group_x = group_index * _GROUP_SPACING_M
+        # Offset by `_CLOSE_RANGE_M` so no group's centroid sits at x=0 --
+        # a group exactly at the observer's own origin has no defined
+        # bearing to decompose cross/down-range against (`los_components_m`
+        # /`_count_cross_range_subclusters`'s own degenerate-case handling),
+        # which silently swaps which axis is "cross" for that one group.
+        group_x = _CLOSE_RANGE_M + group_index * _GROUP_SPACING_M
         for member_index in range(group_size):
             _label, op_class = _UNIT_LABELS_AND_CLASSES[unit_index]
             candidates.append(
                 ClusterCandidate(
                     object_id=object_id,
-                    x=group_x
-                    + member_index * (_GROUP_SPREAD_M / max(group_size - 1, 1)),
-                    z=0.0,
+                    x=group_x,
+                    z=member_index * _GROUP_CROSS_STEP_M,
                     range_m=_CLOSE_RANGE_M,
                     classification_raw=op_class,
                     classification_level=int(SpecificityLevel.CLASS),
@@ -206,13 +291,29 @@ def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_c
     `cluster_candidates`, position-only, must split the twelve real objects
     by their true spacing -- which, because this complex's own units are
     grouped by class at this range, produces one cluster per class group.
-    `ContactStore.ingest` must found one contact per cluster, each with a
-    small, exact count -- the honest resolution boundary closing as range
-    does, never a false merge and never a false twelve-way split of objects
-    the channel genuinely cannot resolve apart from one another."""
+    `ContactStore.ingest` must found one contact per cluster, with a small,
+    honestly-bounded count for each -- the honest resolution boundary
+    closing as range does, never a false merge and never a false
+    twelve-way split of objects the channel genuinely cannot resolve apart
+    from one another.
+
+    **The two 3-member groups (ARMOR, INFANTRY) report `OP_2UNITS`, not
+    `OP_3UNITS`** -- a real, derived consequence of grid-binning
+    (`perception.clustering._count_cross_range_subclusters`), not a bug or
+    an approximation error tolerated here. A 3-member chain at the cross-
+    range bin width used (`_GROUP_CROSS_STEP_M` = 0.3 m, bin width ~0.375 m
+    at 500 m) centres its middle member almost exactly on the cluster's own
+    centroid, and floor-binning an offset of ~0 can land on either side of
+    a bin boundary depending on floating-point rounding -- here it lands in
+    the same bin as one of its two neighbours, giving 2 bins, not 3. This
+    is the honest behaviour of the mechanism as built, still strictly
+    better than the always-collapses-to-1 single-link trap it replaced
+    (see `plans/group-contact-model/implementation.md`), and exactly the
+    kind of boundary-accuracy question Stage 3b-ii's own "tier ->
+    count-coarseness cap" item exists to refine."""
     candidates = _close_range_candidates()
 
-    clusters = cluster_candidates(candidates)
+    clusters = cluster_candidates(candidates, _OBSERVER_X, _OBSERVER_Z)
 
     # Six real class groups: SAM (2), AAA (2), ARMOR (3), TRUCK (1), MLRS
     # (1), INFANTRY (3) -- position-only clustering separates them cleanly
@@ -227,6 +328,18 @@ def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_c
         cluster.classification_level == int(SpecificityLevel.CLASS)
         for cluster in clusters
     )
+    # See this test's own docstring for why the two 3-member groups land on
+    # `OP_2UNITS`, not `OP_3UNITS` -- confirmed by running this test, not
+    # assumed.
+    count_buckets = sorted(cluster.count_bucket for cluster in clusters)
+    assert count_buckets == [
+        "OP_1UNIT",
+        "OP_1UNIT",
+        "OP_2UNITS",
+        "OP_2UNITS",
+        "OP_2UNITS",
+        "OP_2UNITS",
+    ]
 
     store = ContactStore()
     observations = [
@@ -239,7 +352,4 @@ def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_c
     contact_counts = sorted(
         (c.cardinality.lo, c.cardinality.hi) for c in store.contacts
     )
-    # Small, exact counts -- OP_1UNIT/OP_2UNITS/OP_3UNITS, not a hedged
-    # range, since `cluster_candidates` always knows the real member count
-    # for its own cluster.
-    assert contact_counts == [(1, 1), (1, 1), (2, 2), (2, 2), (3, 3), (3, 3)]
+    assert contact_counts == [(1, 1), (1, 1), (2, 2), (2, 2), (2, 2), (2, 2)]

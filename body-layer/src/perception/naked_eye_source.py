@@ -30,9 +30,11 @@ Each `poll()`:
    admitted `(candidate, result)` pair into `perception.clustering.
    ClusterCandidate` (ground-truth x/z, range, and this candidate's own
    individually-resolved classification claim); `perception.clustering.
-   cluster_candidates` groups them by `perception.clustering.
-   naked_eye_cluster_radius_m` (single-link, no chaining cap yet -- Stage 3's
-   job); `_build_observation` emits exactly one `Observation` per resulting
+   cluster_candidates` groups them anisotropically -- an ellipse, not a
+   circle, against the line of sight from ownship's own position
+   (`perception.clustering.naked_eye_ellipse_radii_m`, Stage 3b-i;
+   single-link, no chaining cap yet -- Stage 3b-ii's job); `_build_observation`
+   emits exactly one `Observation` per resulting
    cluster: bearing/range quantised from the cluster's *centroid*, not any
    one member's own geometry (bearing snapped to the nearest of the 12
    `OP_A1H`...`OP_A12H` clock positions, relative to ownship heading then
@@ -305,7 +307,9 @@ class NakedEyePerceptionSource:
             [
                 self._cluster_candidate(candidate, result)
                 for candidate, result in to_emit
-            ]
+            ],
+            ownship_state.x,
+            ownship_state.z,
         )
         return self._build_observations(
             now_sim, ownship_state, clusters, confidence_by_object_id
