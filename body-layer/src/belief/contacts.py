@@ -70,11 +70,13 @@ from belief.classification import (
 from belief.decay import Certainty, certainty_of, object_id_continuity_valid
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
+    CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     EVENT_COOLDOWN_S,
     Event,
     EventKind,
     attention_event_kind,
+    cardinality_event,
     classification_event,
     lifecycle_event_kind,
 )
@@ -228,6 +230,10 @@ class Contact:
     attention: Attention = "normal"
     attention_source: str | None = None
     last_emitted_attention: Attention | None = None
+    #: `plans/group-contact-model/plan.md` Stage 4b's twin of
+    #: `last_emitted_classification`, for `belief.events.cardinality_event`'s
+    #: comparison -- written only by `ContactStore.tick`, never by `record`.
+    last_emitted_cardinality: tuple[int, float] | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
 
     def record(self, percept: Percept) -> None:
@@ -631,10 +637,15 @@ class ContactStore:
         are deliberately independent).
 
         **Ordering, per contact: lifecycle event first, then classification,
-        then attention** (`plans/classification-refinement/plan.md` Stage 3,
-        extended by `plans/bl4-attention-events/plan.md`) -- a
+        then cardinality, then attention** (`plans/classification-refinement/
+        plan.md` Stage 3, extended by `plans/bl4-attention-events/plan.md`,
+        then `plans/group-contact-model/plan.md` Stage 4b) -- a
         `CONTACT_DETECTED` must precede that same contact's first
         classification refinement or attention change, never follow it.
+        Cardinality sits between classification and attention since both
+        cardinality and classification are identity-shaped beliefs about
+        what/how-many, and attention's own event should still see the
+        contact's fully up-to-date facts first.
 
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
@@ -684,6 +695,27 @@ class ContactStore:
                 )
                 contact.last_event_emitted_sim[CONTACT_CLASSIFICATION_CHANGED] = now_sim
             contact.last_emitted_classification = contact.classification
+
+            current_cardinality = (contact.cardinality.lo, contact.cardinality.hi)
+            cardinality_kind = cardinality_event(
+                contact.last_emitted_cardinality, current_cardinality
+            )
+            if cardinality_kind is not None and self._cooldown_elapsed(
+                contact, CONTACT_CARDINALITY_CHANGED, now_sim
+            ):
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=CONTACT_CARDINALITY_CHANGED,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                        previous_cardinality=contact.last_emitted_cardinality,
+                        cardinality=current_cardinality,
+                    )
+                )
+                contact.last_event_emitted_sim[CONTACT_CARDINALITY_CHANGED] = now_sim
+            contact.last_emitted_cardinality = current_cardinality
 
             current_attention, _area_id = effective_attention(
                 contact.attention, contact.last_position, self.areas

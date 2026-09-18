@@ -83,6 +83,7 @@ EventKind = Literal[
     "CONTACT_REACQUIRED",
     "CONTACT_CLASSIFICATION_CHANGED",
     "CONTACT_ATTENTION_CHANGED",
+    "CONTACT_CARDINALITY_CHANGED",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
@@ -90,6 +91,7 @@ CONTACT_LOST: Final[EventKind] = "CONTACT_LOST"
 CONTACT_REACQUIRED: Final[EventKind] = "CONTACT_REACQUIRED"
 CONTACT_CLASSIFICATION_CHANGED: Final[EventKind] = "CONTACT_CLASSIFICATION_CHANGED"
 CONTACT_ATTENTION_CHANGED: Final[EventKind] = "CONTACT_ATTENTION_CHANGED"
+CONTACT_CARDINALITY_CHANGED: Final[EventKind] = "CONTACT_CARDINALITY_CHANGED"
 
 ClassificationDirection = Literal["refined", "contradicted"]
 
@@ -122,7 +124,16 @@ class Event:
     default-`None`-everywhere-else shape -- only a `CONTACT_ATTENTION_
     CHANGED` event populates them, both holding *effective* attention
     values (`belief.attention.effective_attention`'s result), not
-    necessarily a contact's raw direct mark."""
+    necessarily a contact's raw direct mark.
+
+    `previous_cardinality`/`cardinality` (`plans/group-contact-model/
+    plan.md` Stage 4b) are `previous_classification`/`classification`'s
+    direct sibling, same default-`None`-everywhere-else shape -- only a
+    `CONTACT_CARDINALITY_CHANGED` event populates them. Each is a plain
+    `(lo, hi)` pair, not `belief.cardinality.CardinalityBelief` itself --
+    `Event`'s other belief snapshots above are already plain values, not the
+    belief dataclasses, and a console/debug reader needs nothing richer than
+    the two numbers."""
 
     id: str
     contact_id: str
@@ -134,6 +145,8 @@ class Event:
     direction: ClassificationDirection | None = None
     previous_attention: Attention | None = None
     attention: Attention | None = None
+    previous_cardinality: tuple[int, float] | None = None
+    cardinality: tuple[int, float] | None = None
 
 
 def lifecycle_event_kind(
@@ -191,6 +204,24 @@ def classification_event(
     if current.level > previous.level:
         return "refined"
     return "contradicted"
+
+
+def cardinality_event(
+    previous: tuple[int, float] | None, current: tuple[int, float]
+) -> EventKind | None:
+    """`plans/group-contact-model/plan.md` Stage 4b's twin comparison,
+    `classification_event`'s direct analogue over `Contact.cardinality`'s
+    `(lo, hi)` snapshot instead of a `ClassificationBelief`. Unlike
+    `classification_event`, there is no refine/contradict direction to
+    distinguish -- any change fires `CONTACT_CARDINALITY_CHANGED`, the same
+    flat-comparison shape `attention_event_kind` uses. `previous is None`
+    (a contact's first tick) produces no event, the same first-tick
+    convention every comparison in this module follows."""
+    if previous is None:
+        return None
+    if previous == current:
+        return None
+    return CONTACT_CARDINALITY_CHANGED
 
 
 def attention_event_kind(

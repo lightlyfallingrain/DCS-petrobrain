@@ -514,3 +514,143 @@ stage: 914 insertions, 963 deletions, also net negative.
   design's own tables (perpendicular adjacent-pair separation ~7.15 arcmin vs. the design's
   ~7.1-7.2 range; along-LOS 200 m AGL extent/unit ratio ~0.65 vs. the design's ~0.66; 1000 m AGL
   ratio ~3.2, `n=4`, `OP_TO5UNITS`, matching the design's own table exactly).
+
+---
+
+## Stage 4b — speech and events (2026-09-19)
+
+Implemented on `feature/group-contact-speech`, branched from `main`. All source edits, no new
+files (six pieces per the task, all in existing modules). Verification: `cd body-layer`, its own
+venv, `ruff format`, `ruff check`, `mypy src`, `pytest tests -q`.
+
+### Files Changed
+
+- `body-layer/src/belief/speech.py` — `_cardinality_phrase(lo, hi) -> str | None` (reads interval
+  magnitude directly, never a `CountBucket` name); `_OP_CLASS_DISPLAY_PLURAL` +
+  `_plural_unit_type_display`; `_contact_report_text` gains the guard branch (singular path calls
+  the exact same `_unit_type_display` with the exact same arguments, no new code executed);
+  `_OP_CLASS_DISPLAY["OP_GROUPSOMETHING"]` entry removed (dead code, see Finding below);
+  `_render_lifecycle_text` gains an explicit `CONTACT_CARDINALITY_CHANGED -> None` branch; module
+  docstring gains a "Stage 4b -- the count clause" section.
+- `body-layer/src/belief/events.py` — `CONTACT_CARDINALITY_CHANGED` added to `EventKind` and as a
+  `Final`; `Event` gains `previous_cardinality`/`cardinality: tuple[int, float] | None = None`;
+  `cardinality_event(previous, current) -> EventKind | None`, `classification_event`'s flat-
+  comparison analogue (no refine/contradict direction, mirrors `attention_event_kind`'s shape).
+- `body-layer/src/belief/contacts.py` — `Contact.last_emitted_cardinality: tuple[int, float] |
+  None = None`; `tick()` gains a fourth block, wired **lifecycle -> classification -> cardinality
+  -> attention**, reusing `EVENT_COOLDOWN_S`/`_cooldown_elapsed` unchanged; `tick`'s docstring
+  "Ordering" sentence extended.
+- `body-layer/src/belief/tools.py` — `_estimated_units_lower_bound(store) -> int` (see Finding
+  below for why it is private, not the design's public `estimated_units_lower_bound`); `get_stats`
+  gains `"estimated_units"` as a fourth key; `get_situation` gains `facts["estimated_units"]` as a
+  new top-level sibling key, `contact_counts`'s shape untouched.
+- `body-layer/src/belief/escalation.py` — `_situational_header` gains `header["estimated_units"]`,
+  unconditional (unlike `our_position`, which is gated on `enrichment`); `contact_counts` untouched.
+- `body-layer/CLAUDE.md` — Structure section updated for `speech.py`, `events.py` (folded into the
+  shared `belief/contacts.py` entry, where `events.py` was already documented), and `tools.py`.
+
+### Test-inventory verification (per process step 1b)
+
+- All 21 names in the design's `test_speech.py` regression-guard list exist verbatim; confirmed by
+  direct `grep -n "^def test_"` before touching anything.
+- `test_first_tick_with_no_previous_classification_emits_nothing`, `test_same_level_same_value_
+  emits_nothing` (design's cited mirror templates), and `test_get_stats_counts_observations_
+  contacts_and_events`/`test_get_situation_counts_and_position_summary_with_no_contacts`/`test_get_
+  situation_reports_priority_contact_over_watched_and_visible`/`test_situational_header_omits_our_
+  position_without_enrichment`/`test_situational_header_includes_our_position_with_enrichment`/
+  `test_event_cooldown_suppresses_rapid_reemission_but_not_after_it_elapses` all exist verbatim, as
+  the design claimed.
+- **Mismatch the design did not name and grep found**: `body-layer/tests/test_console.py::
+  test_console_module_contains_no_belief_logic` — a structural check asserting every *public*
+  `belief.tools` function name is referenced somewhere in `console.py`'s source, to keep `console.py`
+  a thin wrapper. The design's `estimated_units_lower_bound` (public, no leading underscore) broke
+  this test immediately, since no `console.py` command was ever meant to call it directly (only
+  `get_stats`/`get_situation`/`escalation.py` consume it). Fixed by renaming it to
+  `_estimated_units_lower_bound`, matching the established convention `_cardinality_facts`/
+  `_classification_facts` already set for tools.py helpers that exist only for other tools.py
+  functions to call — not by touching the test. This is exactly the "file the plan forgot" class of
+  mismatch the task warned is the dangerous one: a passing suite after the six pieces landed would
+  have silently hidden that `console.py`'s own structural invariant had been violated.
+- No other test file touching `speech.py`/`events.py`/`contacts.py`/`tools.py`/`escalation.py` was
+  affected; grepped for `OP_GROUPSOMETHING`/`render_watch_nearest_readback`/`_contact_report_text`/
+  `contact_counts`/`get_stats`/`CONTACT_CARDINALITY_CHANGED`/`last_emitted_cardinality` across
+  `tests/` and `src/` — the hits outside the named files (`test_naked_eye_source.py`,
+  `test_calibration_cluster_merge_undercount.py`, `test_mock_flight_chain.py`, `test_clustering.py`)
+  all reference `OP_GROUPSOMETHING` as a `classification_raw`/`facts["classification"]["value"]`
+  string, never as a class-level `_OP_CLASS_DISPLAY` lookup key — confirmed none of them exercise
+  the removed dict entry.
+
+### Regression-guard result
+
+**19 of the 21 pre-existing `test_speech.py` tests are byte-identical, zero diff.** One
+(`test_render_contact_report_maps_default_op_class_to_display_word`) required a deliberate fixture
+change, documented as a finding below, not a silent edit. All 21 pass.
+
+### Finding: the `OP_GROUPSOMETHING` test exercised the "unreachable" state the design argued away
+
+The design's Sec 4 argued `_OP_CLASS_DISPLAY["OP_GROUPSOMETHING"]` was dead code because
+`classification._op_class_of` excludes `DEFAULT_OP_CLASS` from ever being returned as a class-level
+value through any real resolver path — and explicitly told the implementer to check the two named
+tests against this claim, calling a positive hit "a finding about an existing test building an
+unreachable state, not a reason to keep the dead entry." Running the regression suite confirmed the
+hit: `test_render_contact_report_maps_default_op_class_to_display_word`'s fixture called
+`store.ingest` with a raw `Observation` carrying `classification_raw="OP_GROUPSOMETHING"` and
+`classification_level=2` ("class") directly — `ContactStore`/`Contact.record` take `Observation.
+classification_level` as given, with no `_op_class_of` resolution step in that path at all, so a
+hand-built fixture can trivially construct the state the design's argument said only a real
+resolver could prevent. Per the design's own explicit instruction, the fixture was corrected to
+`classification_level=1` ("presence") — the level `OP_GROUPSOMETHING`/`DEFAULT_OP_CLASS` actually
+occurs at in real classification (`classification.PRESENCE_CLASS` is the same string) — rather than
+kept at the unreachable level, preserving the test's original intent (a common value maps to a
+sensible word, not leaked verbatim) against the level where it actually applies. Expected text
+changed from `"group."` to `"ground."`. This is the one place an existing speech test's expected
+string changed, and it is not the count-clause leaking into the singular case the task's stop
+condition was about — it is the separately-authorized `OP_GROUPSOMETHING` removal, with the design's
+own text anticipating exactly this outcome.
+
+### Tests Added
+
+**`test_speech.py`** (14 new, one per design table row/branch plus the attachment-point cases):
+`test_cardinality_phrase_singular_is_no_clause`, `test_cardinality_phrase_default_is_several`,
+`test_cardinality_phrase_op_to5units_is_a_handful`, `test_cardinality_phrase_lo_16_or_more_is_many`,
+`test_cardinality_phrase_fold_derived_non_named_interval_falls_back_to_several`, `test_plural_unit_
+type_display_presence_level_is_contacts`, `test_plural_unit_type_display_class_level_in_table`,
+`test_plural_unit_type_display_class_level_not_in_table_falls_back_to_raw_value`, `test_plural_unit_
+type_display_type_level_is_unpluralized_raw_value`, `test_contact_report_text_with_no_cardinality_
+fact_matches_singular_text` (the second half of the regression guard), `test_route_event_contact_
+detected_speaks_plural_cardinality_clause`, `test_render_watch_nearest_readback_speaks_plural_
+cardinality_clause`, `test_classification_changed_text_omits_count_clause_even_with_plural_
+cardinality` (the negative case), `test_route_event_cardinality_changed_has_no_template_and_is_not_
+acknowledged`.
+
+**`test_events.py`** (3 new; cooldown suppression left untested per the design's own "optional,
+implementer's call" — `_cooldown_elapsed` is already covered generically):
+`test_first_tick_with_no_previous_cardinality_emits_nothing`, `test_unchanged_cardinality_emits_
+nothing`, `test_cardinality_interval_change_is_contact_cardinality_changed` (both a narrowing and a
+widening case).
+
+**Changed, per §6 (the intended breakage, not a regression)**: `test_get_stats_counts_observations_
+contacts_and_events`, `test_get_situation_counts_and_position_summary_with_no_contacts`, `test_get_
+situation_reports_priority_contact_over_watched_and_visible`, `test_situational_header_omits_our_
+position_without_enrichment`, `test_situational_header_includes_our_position_with_enrichment` — each
+gained an `estimated_units`/`"estimated_units"` assertion, values derived from each fixture's actual
+founding cardinality (all `OP_1UNIT`, since none of those fixtures' observations carry a
+`count_bucket`), not guessed.
+
+### Checks
+
+(body-layer/ only touched)
+- ruff format --check: pass
+- ruff check: pass
+- mypy src: pass (no issues, 34 source files)
+- pytest -q: 659 passed (642 baseline + 17 new: 14 in `test_speech.py`, 3 in `test_events.py`)
+
+### Notable Discoveries
+
+- The `test_console.py` structural-invariant mismatch above is the main one — worth generalizing:
+  any new *public* `belief.tools` function must either get a real `console.py` caller or be named
+  with a leading underscore, regardless of what a design document's prose calls it.
+- `_observation`'s test helper in `test_speech.py` had no `count_bucket` parameter before this
+  stage; adding it (default `None`, preserving every existing call site's behaviour) was the
+  simplest way to found plural-cardinality fixtures without a second helper or bypassing
+  `ContactStore.ingest`.
