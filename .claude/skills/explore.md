@@ -48,10 +48,34 @@ thought of. Save the menus for settling a decision once its shape is understood.
 actually look like when you spot a group at distance — what comes first?" The user reasons fluently
 about the cockpit and the airframe; make that the subject.
 
-**Show something concrete early — it is an elicitation technique, not a deliverable.** A worked
-table of numbers, a draft page, a sample of what Petrovich would say. Observing concrete output is
-what cues recall; several of the examples above arrived exactly that way. A rough thing shown early
-beats a polished thing shown late.
+**Show something concrete early — it is an elicitation technique, not a deliverable.** Observing
+concrete output is what cues recall; several of the examples above arrived exactly that way. A
+rough thing shown early beats a polished thing shown late.
+
+**Build mock-ups, diagrams and thought experiments freely for this** (user direction, 2026-09-18:
+"mock graphics, generated images, imaginary thought experiments, etc. All such things help me
+understand the concept and then process it"). This is not gold-plating — it is the cheapest way to
+get the good input. What works here:
+
+- **Scale diagrams.** An SVG or Canvas drawing of the actual geometry, to scale, with the numbers
+  on it. The angular-separability correction would have surfaced far earlier from one picture of
+  two units at 9 km versus 500 m.
+- **Worked numeric tables.** A handful of rows across the real range of the parameter. Cheap to
+  produce in a `python3` one-liner, and they make a wrong model obvious at a glance.
+- **Mock output.** A transcript of what Petrovich would actually say under design A versus design
+  B. Reading two sample callouts side by side settles arguments that paragraphs do not.
+- **Artifacts** for anything worth interacting with — they are private by default, take one pass,
+  and support zoom, drill-down and both themes. The project status page is the precedent.
+- **Mermaid** for structure and state, inline or in an artifact.
+- **Thought experiments and analogues — offer them, do not only ask for them.** The apple and the
+  orange reframed an entire model. Propose a non-DCS situation with the same shape and let the user
+  correct it; a wrong analogue is often more productive than a question, because correcting it is
+  easier than generating one.
+
+**Honest limit**: there is no image-generation model available here. "Generated images" in practice
+means SVG, Canvas, HTML or Mermaid — which covers geometry, charts, mock interfaces and diagrams,
+but not photographic or artistic renderings. Say so rather than promising a picture that will not
+arrive.
 
 **Follow the tangent.** If they start explaining how the SPU-8 works when asked about audio
 routing, that digression is the point. Domain experts surface constraints by association, not by
