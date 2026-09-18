@@ -195,3 +195,35 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
 - **F10-label-sourced object_type values fail object_model.profile_for resolution when labels diverge from raw DCS type spellings.** Several units in the vision-calibration dataset (T-62, BMD1, AK-74/AK) are labeled via F10-map display names, not verified LoGetWorldObjects raw type strings. These fail `profile_for` lookup: `"T-62"` matches raw-table key `"T-62M"` (with M variant), `"BMD1"` (no hyphen) matches raw key `"BMD-1"` (hyphenated), and small-arms `"AK-74"`/`"AK"` have no match in the reporting-name-keyed second pass. The SA-10/SA-15/HL B8M1 cluster has a pre-existing gap (no keyword table entries at all, falling back to `DEFAULT_SIZE_M=5.0`). When F10 labels are the only available source, the workaround is to record ground-truth `size_m` independently in calibration fixtures rather than relying on `profile_for` — the fixture becomes the durable truth, not the lookup table. This decouples measurement integrity from the fragility of label-to-type matching. Future callers that use F10-labeled objects should follow this pattern: store independent sizes, treat `profile_for` as a cross-check, not the source (vision-range-calibration Pass 1 implementation note and `body-layer/research/2026-09-17-vision-range-calibration.md` object_type provenance section).
 
 - **Calibration dataset design for non-breaking extension: store observed ground-truth directly, not inferred values.** The vision_calibration.json fixture captures each observation's objects, grades (per optic), source images, and conditions, with `size_m` recorded as independently-known real-world size (e.g., `"T-62": 7.0 m`), not looked up from `object_model.profile_for`. This choice was driven by the F10-label fragility noted above, but generalizes: storing what was directly observed (the fixture data) separately from what can be inferred or looked up (profile sizes, classification tiers) keeps the fixture extensible and the measurement chain auditable. New rows (closer range, different theatre, other optics) drop in without format change; the fixture shape is stable across future passes and data sources (vision-range-calibration Pass 1 plan Fixture format section, implementation preserved this pattern).
+
+## Solve the problem in its natural coordinate space
+
+Two full implement-review cycles were spent on a world-space model of a question that is purely
+angular. The naked-eye channel's position uncertainty was first a scalar radius, then an anisotropic
+ellipse (cross-range acuity, down-range bucket width) — both approximations of "what angle do these
+two things subtend at the observer". Stating it directly in angular terms **deleted 144 net lines**
+and removed a tuned constant, because the anisotropy then falls out of the geometry: an airborne
+observer separates a down-range pair by *depression angle*, which no world-space radius can express
+without being told to.
+
+Two tells that a model is in the wrong space, both present here and both visible before the rework:
+
+- **A term whose justification keeps getting replaced.** The down-range radius was first "reporting
+  quantisation", then "depth perception is poor at range". A term that needs a new reason each time
+  someone looks at it is usually standing in for something else.
+- **Constants that cancel or turn out non-binding once restated.** In angular form the optic
+  multiplier cancels out of the comparison entirely, and the acuity floor is provably non-binding
+  for anything the channel detected at all. Both were load-bearing in world space and neither was
+  real — and the second removed a planned calibration sortie's main purpose.
+
+The correction came from the user's lived experience, not from analysis: *"two apples 20 cm apart at
+50 cm are obviously two side by side, and may be one when one sits behind the other"*. Worth
+pairing with `.claude/skills/explore.md` — asking for the non-DCS analogue is what surfaced it.
+
+## A design written against a stale test list produces phantom expectations
+
+Stage 3b-i rev.2's design named a test as an xfail it expected to flip. The test did not exist: it
+had been folded into another test by an earlier, unrelated commit. The design was not careless — it
+was written against a test inventory that had already moved. When a plan specifies "test X should
+now assert Y", confirm X exists at that moment rather than at the moment the surrounding reasoning
+was formed.
