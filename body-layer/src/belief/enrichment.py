@@ -130,6 +130,68 @@ _LANDCOVER_CLASS_TEXTS: dict[str, str] = {
 #: D7 knob a caller might reasonably want to see/tune.
 COAST_FACT_RADIUS_M: Final[float] = 5000.0
 
+#: Maximum distance at which a "near X" landmark fact is worth stating, per
+#: feature kind. Without this, `describe_position` returns the *nearest*
+#: feature of each kind regardless of how far it is, and the crew hears
+#: "near Wadi Hamer (~28700m)" -- 28.7 km is not near anything (observed
+#: live, 2026-09-18).
+#:
+#: **Keyed by kind because the useful radius genuinely differs by what the
+#: landmark is** (user direction, 2026-09-18): a road is a tighter
+#: reference than a village, which is tighter than a mountain or a lake --
+#: you can be 5 km from a mountain and still sensibly be "near" it, but 5 km
+#: from a road means the road tells you nothing about where you are. Those
+#: distinctions are not calibrated yet, so **every kind is 1000 m for now**,
+#: deliberately: one honest placeholder beats five invented numbers. The
+#: table exists so differentiating them later is an edit, not a refactor.
+#:
+#: `COAST_FACT_RADIUS_M` above is deliberately *not* folded in here: the
+#: coast fact makes a different claim ("which side of the coastline are we
+#: on"), which stays meaningful much further out than a landmark reference
+#: does, and its radius was chosen for that reason.
+NEAR_FACT_RADIUS_M: Final[dict[str, float]] = {
+    "settlement": 1000.0,
+    "road": 1000.0,
+    "water": 1000.0,
+    "ridge": 1000.0,
+    "valley": 1000.0,
+}
+
+
+def _within_near_radius(kind: str, distance_m: float) -> bool:
+    """Whether a `near X` fact of this kind is close enough to be worth
+    saying. An unknown kind is admitted rather than dropped -- a missing
+    table entry should degrade to today's ungated behaviour, not silently
+    mute a whole class of fact."""
+    return distance_m <= NEAR_FACT_RADIUS_M.get(kind, float("inf"))
+
+
+def displayable_name(name: str | None) -> str | None:
+    """`name` if it can be shown and spoken, otherwise `None` so the caller
+    falls back to a generic label ("a village", "a wadi").
+
+    **DCS cannot render non-Latin-1 text in its overlay**, so a Syrian
+    place name in Arabic script arrives in the cockpit as blanks or boxes
+    (observed live, 2026-09-18) -- and a TTS voice reading English would
+    make nothing useful of it either. Dropping to the generic label is the
+    honest degradation: "near a wadi" is true, readable and speakable,
+    where the original name is none of those things on this display.
+
+    Not transliteration, deliberately. Romanising Arabic properly needs a
+    library this project's stdlib-only rule does not admit, and a crude
+    character-map transliteration produces names no map agrees with, which
+    is worse than no name at all. The real fix belongs upstream in the
+    world model, which should prefer OSM's `name:en`/`int_name` at ingest
+    where one exists -- recorded in `world-model/ROADMAP.md`. This is the
+    render-time guard that makes the current data usable meanwhile."""
+    if name is None:
+        return None
+    try:
+        name.encode("latin-1")
+    except UnicodeEncodeError:
+        return None
+    return name
+
 
 @dataclass(frozen=True, slots=True)
 class SemanticFact:
@@ -188,8 +250,12 @@ def semantic_facts_for(
     facts: list[SemanticFact] = []
 
     settlement = description.nearest_settlement
-    if settlement is not None:
-        name = settlement.name or _unnamed_settlement_label(settlement.subtype)
+    if settlement is not None and _within_near_radius(
+        "settlement", settlement.distance_m
+    ):
+        name = displayable_name(settlement.name) or _unnamed_settlement_label(
+            settlement.subtype
+        )
         facts.append(
             SemanticFact(
                 text=f"near {name} ({settlement.distance_m:.0f}m)",
@@ -201,7 +267,9 @@ def semantic_facts_for(
 
     inside = description.inside_settlement
     if inside is not None:
-        name = inside.name or _unnamed_settlement_label(inside.subtype)
+        name = displayable_name(inside.name) or _unnamed_settlement_label(
+            inside.subtype
+        )
         facts.append(
             SemanticFact(
                 text=f"inside {name}",
@@ -212,8 +280,8 @@ def semantic_facts_for(
         )
 
     road = description.nearest_road
-    if road is not None:
-        label = road.name or road.subtype or "a road"
+    if road is not None and _within_near_radius("road", road.distance_m):
+        label = displayable_name(road.name) or road.subtype or "a road"
         facts.append(
             SemanticFact(
                 text=f"near {label} ({road.distance_m:.0f}m)",
@@ -224,8 +292,8 @@ def semantic_facts_for(
         )
 
     water = description.nearest_water
-    if water is not None:
-        name = water.name or _unnamed_water_label(water.subtype)
+    if water is not None and _within_near_radius("water", water.distance_m):
+        name = displayable_name(water.name) or _unnamed_water_label(water.subtype)
         facts.append(
             SemanticFact(
                 text=f"near {name} ({water.distance_m:.0f}m)",
@@ -236,7 +304,7 @@ def semantic_facts_for(
         )
 
     ridge = description.nearby_ridges
-    if ridge is not None:
+    if ridge is not None and _within_near_radius("ridge", ridge.distance_m):
         facts.append(
             SemanticFact(
                 text=f"near a ridge line ({ridge.distance_m:.0f}m)",
@@ -247,7 +315,7 @@ def semantic_facts_for(
         )
 
     valley = description.nearby_valleys
-    if valley is not None:
+    if valley is not None and _within_near_radius("valley", valley.distance_m):
         facts.append(
             SemanticFact(
                 text=f"near a valley line ({valley.distance_m:.0f}m)",

@@ -287,6 +287,16 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
 
 ## Backlog (open, unscheduled)
 
+- [ ] **Prefer a Latin-script place name at OSM ingest.** Named places currently store OSM's `name`
+  tag verbatim, so Syrian features arrive in Arabic script — and **DCS cannot render non-Latin-1
+  text**, so they reach the cockpit overlay as blanks (observed live, 2026-09-18). Body-layer now
+  guards at render time (`belief.enrichment.displayable_name` drops an unrenderable name so the
+  caller falls back to "a wadi"/"a village"), which makes the current data usable but loses real
+  information: many of these features *do* have an `name:en` or `int_name` tag carrying a perfectly
+  good romanisation. Fix at ingest: prefer `name:en`, then `int_name`, then `name`, and record which
+  was used. Needs a rebuild to take effect, so it should ride along with the next full-theatre run
+  rather than triggering one.
+
 - [>] **Power lines from DCS data — deferred 2026-09-13 (user: not important now).** Wanted as a
   low-level wire hazard and navigation landmark, but only with exact in-DCS positions (OSM's ~1 km
   offset rules it out as a source). Recon done: `research/2026-09-13-dcs-power-lines-recon.md`.

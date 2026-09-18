@@ -16,8 +16,11 @@ import pytest
 from belief import enrichment
 from belief.contacts import ContactStore
 from belief.enrichment import (
+    NEAR_FACT_RADIUS_M,
     SemanticFact,
     WorldEnrichmentCache,
+    _within_near_radius,
+    displayable_name,
     motion_when_seen,
     relative_geometry,
     semantic_facts_for,
@@ -123,7 +126,10 @@ def test_semantic_facts_for_includes_every_present_field(
         nearest_settlement=_FakeInfo(name="Jableh", distance_m=500.0),
         inside_settlement=_FakeInfo(name="Jableh"),
         nearest_road=_FakeInfo(name="Route 1", subtype="highway", distance_m=50.0),
-        nearest_water=_FakeInfo(name="Mediterranean Sea", distance_m=2000.0),
+        # 700 m, not 2 km: this fixture exists to prove every field yields a
+        # fact, so each feature has to sit inside NEAR_FACT_RADIUS_M. The
+        # gating itself is tested separately below.
+        nearest_water=_FakeInfo(name="Mediterranean Sea", distance_m=700.0),
         nearby_ridges=_FakeInfo(distance_m=800.0),
         nearby_valleys=_FakeInfo(distance_m=900.0),
         inside_landcover=_FakeLandcoverInfo(landcover_class="forest"),
@@ -719,3 +725,55 @@ def test_motion_when_seen_skips_duplicate_positions() -> None:
     contact = store.contacts[0]
 
     assert motion_when_seen(store, contact) is None
+
+
+# --- near-radius gating and non-Latin-1 names (live findings, 2026-09-18) ---
+#
+# Both came out of the first sortie that had Petrovich speaking. He reported
+# "near <Arabic name> (~28700m)" -- a landmark 28.7 km away, named in a script
+# DCS cannot render. Two independent defects in one line.
+
+
+def test_far_settlement_produces_no_near_fact() -> None:
+    """28.7 km is not near anything. Before gating, describe_position's
+    nearest-of-each-kind result was reported regardless of distance."""
+    assert not _within_near_radius("settlement", 28700.0)
+
+
+def test_settlement_just_inside_the_radius_still_counts() -> None:
+    assert _within_near_radius("settlement", 999.0)
+    assert _within_near_radius("settlement", 1000.0)
+
+
+def test_every_gated_kind_shares_todays_placeholder_radius() -> None:
+    """All kinds sit at 1000 m deliberately -- one honest placeholder rather
+    than five invented numbers. This test exists so that differentiating them
+    later is a conscious edit with a visible diff, not an accident."""
+    assert set(NEAR_FACT_RADIUS_M) == {
+        "settlement",
+        "road",
+        "water",
+        "ridge",
+        "valley",
+    }
+    assert set(NEAR_FACT_RADIUS_M.values()) == {1000.0}
+
+
+def test_unknown_kind_is_admitted_rather_than_muted() -> None:
+    """A missing table entry should degrade to the old ungated behaviour, not
+    silently drop a whole class of fact."""
+    assert _within_near_radius("airfield", 50_000.0)
+
+
+def test_arabic_name_is_dropped_so_the_caller_falls_back_to_a_label() -> None:
+    """DCS renders no Arabic; the generic label is the honest degradation."""
+    assert displayable_name("وادي حامر") is None
+
+
+def test_latin1_names_survive_including_accents() -> None:
+    assert displayable_name("Al Qaryatayn") == "Al Qaryatayn"
+    assert displayable_name("Saint-Étienne") == "Saint-Étienne"
+
+
+def test_displayable_name_passes_none_through() -> None:
+    assert displayable_name(None) is None
