@@ -309,19 +309,54 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   formula, not from measurement. All targets were static, and movement is a strong real detection
   cue this does not model.
 
-- [ ] **False contact merge at first sighting, kept alive by `object_id` continuity — surfaced by
-  the vision-range calibration, 2026-09-17.** Two real objects 400 m apart (the canonical mock
-  flight's Ural at x=1400 and Infantry AK at x=1800) now end the flight as **one** contact, where
-  they used to be two. Cause: the calibrated envelope first sees the infantry at ~2 km instead of
-  ~1.6 km, and at that range the naked-eye range bucket is coarse enough that its implied position
-  overlaps the truck's contact — so `ContactStore.ingest` merges instead of founding, and
-  `object_id` continuity then holds the false merge for the rest of the flight even as the range
-  closes and the two separate cleanly. This is exactly the false-merge risk BL-2.6 flagged when
-  the symmetric gate widened; seeing further means every contact now enters the store through a
-  wider-uncertainty door. Pinned by a strict `xfail`,
-  `tests/test_mock_flight_chain.py::test_two_real_objects_stay_two_contacts`, which states the
-  desired behaviour and will fail loudly if a fix lands without updating it. Worth fixing before a
-  longer ladder widens the envelope again.
+- [ ] **Group contacts: cardinality and composition as refinable beliefs.** Raised 2026-09-18 after
+  the first sortie with Petrovich speaking. **This supersedes the narrower "false contact merge"
+  defect** previously recorded here — the merge is not the bug, the frozen structureless result is.
+
+  **Observed live:** the twelve-unit calibration complex produced roughly *five* contacts, and they
+  never separated as the aircraft closed to 500 m. Log, condensed: `ground, 12 o'clock, 9 km` →
+  `unit at 12 o'clock, 3 km is SAM` → `armor, 11 o'clock, 2 km` → `truck, 11 o'clock, 2 km` →
+  `unit at 11 o'clock, 1 km is BM-21` → `infantry, 11 o'clock, 0.5 km`. Twelve real units, five
+  reported. User: *"We cannot merge 9 contacts into one, even if we initially only see one at that
+  location."*
+
+  **The wanted behaviour** (user, 2026-09-18), a design target rather than a bug fix:
+
+  > "there is something" → "oh, it's many somethings" i.e. group → "I can identify 3 tanks and
+  > there's something else" → "3 tanks and maybe ifvs" → "not ifvs, but shilka and two mobile
+  > rocket artillery" → "tanks are T72" → "3 T-72, 1 BMP-2, 2 GRAD"
+
+  Four things that progression requires, none of which the data model has today:
+
+  1. **Cardinality is a belief that refines**, not a constant 1 fixed at first sighting: unknown →
+     "several" → a bounded estimate → exact.
+  2. **Composition is a multiset of sub-claims at mixed specificity** — "3 tanks and something
+     else" is three `class`-level members plus an unresolved remainder, inside *one* contact.
+  3. **Contradiction is expected** — "not ifvs, but shilka and..." retracts a previous claim about
+     part of the group. `belief/classification.py` already models exactly this for a single contact
+     (specificity lattice, contradiction collapses to the deepest common ancestor, re-promotion
+     lockout). The group case may be that same mechanism lifted to cardinality and composition;
+     worth checking before inventing a parallel one.
+  4. **Refinement is per-member** — "tanks are T72" sharpens one subgroup while the rest stays
+     coarse.
+
+  **Why merging at range is right, not wrong.** At 9 km the naked-eye channel genuinely cannot
+  resolve twelve vehicles into twelve positions — reporting twelve contacts would be the
+  omniscience this project exists to prevent. "Something is there, and it is several things" is the
+  honest claim. The defect is that today the honest coarse claim hardens into a permanent wrong
+  one.
+
+  **Danger to design around:** this gate has been fixed twice, in opposite directions. BL-2.6
+  widened it symmetrically to stop one object becoming 8-20 contacts; that widening is what now
+  lets twelve objects become one. A naive tightening resurrects the earlier bug. Both failures are
+  live-observed in this project's history, and any design must keep both regression suites passing.
+
+  **Status:** root-cause analysis in progress on `fix/contact-merge-undercount` (why five and not
+  twelve, whether `object_id` correlation was consulted at all, whether an `object_id` *mismatch*
+  should hard-veto a merge). The group model itself needs an Architect pass and the user's
+  go-ahead — it touches `Contact`, the classification lattice, and every surface that renders a
+  contact. `tests/test_mock_flight_chain.py::test_two_real_objects_stay_two_contacts` remains a
+  strict xfail holding the two-object case.
 
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
