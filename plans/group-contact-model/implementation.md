@@ -387,3 +387,130 @@ Three real findings, in ascending order of consequence:
 - mypy src: pass (no issues, 34 source files)
 - pytest -q: 635 passed, 1 xfailed (634 baseline + 3 new tests − 2 tests folded into the split
   calibration test's replacement... net: +1 passing test, +1 newly-xfailed pre-existing test)
+
+---
+
+### Stage 3b-i rev.2 — the angular separability design (2026-09-18)
+
+Implements `plans/group-contact-model/plan.md`'s "Stage 3b-i rev.2 — the angular separability
+design" section, replacing `c625299`'s world-space ellipse (Stage 3b-i) with a true 3D angular
+predicate. On `feature/group-contact-cardinality`, not yet committed as of this writing (see the
+Implementer's report for the pending commit).
+
+#### Files Changed
+
+- `body-layer/src/perception/clustering.py` — deletion-heavy rewrite. Removed: `EllipseRadii`,
+  `naked_eye_cross_range_radius_m`/`naked_eye_down_range_radius_m`/`naked_eye_ellipse_radii_m`,
+  `los_components_m`, `within_ellipse`, `_count_cross_range_subclusters`, `_RANGE_BUCKETS_M` and
+  its bucket-width helpers (moved to `association_over_time.py`), `NAKED_EYE_ACUITY_RAD`. Added:
+  `angular_separation_rad(observer, a, b)` (`atan2(|cross|, dot)` of the two observer→candidate
+  unit vectors), `angular_size_rad(size_m, slant_range_m)` (`size_m / slant_range_m`), and
+  `_extent_count` (the `floor(extent_rad / unit_rad) + 1` counting rule). `ClusterCandidate` gained
+  `alt_m`/`size_m`; `cluster_candidates`/`_build_cluster` take a `perception.geometry.GeoPosition`
+  observer instead of bare `(observer_x, observer_z)`. Kept untouched: union-find, `_build_cluster`'s
+  classification-aggregation half, `count_bucket_for` and its selection table.
+- `body-layer/src/belief/association_over_time.py` — the spatial gate reverted byte-for-byte to its
+  pre-`c625299` form (confirmed against `git show c625299^:...`): `uncertainty_radius_m`,
+  `spatial_gate_radius_m`, `passes_gate` no longer import anything from `perception.clustering`.
+  `_naked_eye_uncertainty_m` (private), `_RANGE_BUCKETS_M`, and the bucket-width helpers moved back
+  here from `clustering.py`, their pre-Stage-3b-i home.
+- `body-layer/src/perception/naked_eye_source.py` — `_cluster_candidate` now supplies
+  `alt_m`/`size_m` (both already in hand — `candidate.alt_m`, `profile.size_m`); `poll()` builds a
+  `GeoPosition` observer and passes it to `cluster_candidates` instead of `ownship_state.x/z`.
+- `body-layer/CLAUDE.md` — `clustering.py` and `association_over_time.py` Structure entries rewritten
+  for the angular predicate/gate revert.
+- Tests: see below.
+
+#### Tests Added/Changed
+
+- `test_clustering.py` — rewritten around `angular_separation_rad`/`angular_size_rad` directly
+  (coincident-point, 90-degree-separation, size cases), the merge/split pair tests, single-link
+  chaining, a genuine extent/unit plural-count test (replacing the old cross-range grid-binning
+  test), the "two-member cluster always reports `OP_1UNIT`" theorem, and a self-consistency test
+  for the (A) floor at the detection-range limit.
+- `test_calibration_cluster_merge_undercount.py` — the two-row table became **three tests**: the
+  perpendicular case (twelve singleton contacts, unchanged in outcome), and the along-LOS case
+  split into two altitude rows (200 m AGL → one contact, `OP_1UNIT`, confirmed correct and
+  confident, not a shortfall; 1000 m AGL → one contact, `OP_TO5UNITS`, the new test that pins the
+  altitude term). The close-range six-group test's fixture was re-derived (`_GROUP_CROSS_STEP_M`
+  4.0 m, not 0.3 m; ownship at 200 m AGL, not co-altitude with the targets, since two down-range
+  groups at the exact same bearing and altitude as ownship are otherwise degenerately collinear)
+  and re-run rather than predicted: still six clusters `[1,1,2,2,3,3]`, count buckets now
+  `[OP_1UNIT×4, OP_2UNITS×2]` (previously `[OP_1UNIT×2, OP_2UNITS×4]` under grid-binning).
+- `test_mock_flight_chain.py` — re-run, not predicted, per the design's own expectation that this
+  fixture (ownship 700 m MSL over two objects at 500 m — exactly the correction's 400 m/200 m
+  worked case) would change more than Stage 3a did. It did: objects 101/102 separate at *every*
+  range in the fixture (not just the far ones), so the merged-cluster phase across polls 0-13
+  disappears entirely — naked-eye emits 2 observations/poll from poll 0 (not a ramp from 1 to 2 at
+  poll 14), giving 36 naked-eye + 20 Hybrid = **56** total observations (up from 42). Contact count
+  stayed **2** as predicted (Stage 3a's same-source/same-poll exclusion founds `CONTACT_2` at poll 0
+  instead of poll 14). `CONTACT_1`'s cardinality is now `(1, 1)` throughout, never contradicted to
+  the `(1, 2)` hull, since every naked-eye report of it was already a singleton.
+- `test_association_over_time.py` — `test_naked_eye_ellipse_derived_from_acuity_and_quantisation_
+  bucket` reverted to `test_naked_eye_uncertainty_derived_from_quantisation_buckets`, asserting the
+  single scalar again (byte-identical formula to pre-`c625299`).
+- `test_contacts.py` — the `xfail(strict=True)` marker on
+  `test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` deleted, plain
+  `len(store.contacts) == 1` assertion restored; docstring rewritten to record the category-error
+  finding rather than delete it. The gate revert fixed this directly, exactly as the design
+  predicted (not the angular clustering model) — the jitter-vs-budget ratio is a ratio of two
+  angles, invariant under whatever representation computes it, so a shared acuity-derived formula
+  was never going to fix the ~700:1 mismatch; reverting to the quantisation-derived figure budgets
+  the thing that is actually jittering. The two Stage 3a tests in this file were **not touched**.
+- `test_naked_eye_source.py` — five tests needed rework, none anticipated by the design's own §8
+  (a real gap, see below): the cap/debounce fixture (`_CAP_TEST_RANGES_M`) placed all five
+  candidates on the exact same bearing at ownship's own altitude, which is now a degenerate case
+  (zero angular separation regardless of down-range gap) rather than a safe one — fixed by adding a
+  small `lon_deg` (cross-range) cross-offset per candidate, verified pairwise-separable by direct
+  computation rather than guessed, and confirmed to stay within the cockpit mask's forward
+  allowance. `test_a_cluster_splitting_gives_the_majority_child_continuity` needed the same fix
+  plus a genuine altitude difference between ownship and its targets (`_high_ownship`, 200 m AGL) —
+  its original premise (splitting a cluster by moving one member purely down-range) does not work
+  at co-altitude at all under the angular model, and even at 200 m AGL the first attempted split
+  position (lat 100) exceeded the co-pilot mask's 22-degree forward depression allowance and
+  dropped out of visibility entirely, caught only by running the real `poll()` pipeline, not the
+  bare `cluster_candidates` function — moved to lat 600. The test now identifies the majority/
+  minority child by position rather than `count_bucket`, since both land on `OP_1UNIT` under the
+  new counting rule.
+
+#### Checks
+
+(body-layer/ only touched)
+- ruff format --check: pass
+- ruff check: pass
+- mypy src: pass (no issues, 34 source files)
+- pytest -q: 642 passed (up from 635 passed + 1 xfail; the xfail became a pass, and the net gain
+  reflects new tests added across `test_clustering.py`/`test_calibration_cluster_merge_
+  undercount.py` beyond the ones removed)
+
+Net diff for the three `src/` files this stage rewrote: 381 insertions, 525 deletions — negative,
+as the design's own effort/value finding requires. Full diff (src + tests + CLAUDE.md) for this
+stage: 914 insertions, 963 deletions, also net negative.
+
+#### What in the design did not survive contact with the code
+
+- **`test_two_real_objects_stay_two_contacts` does not exist under that name.** The design's §8
+  names it as a strict-`xfail` test expected to flip to passing. No such test exists in the
+  codebase — the nearest candidates are `test_cross_channel_fusion.py::
+  test_two_distinct_nearby_objects_stay_two_contacts` (a different, unrelated fixture, not `xfail`,
+  untouched by this stage per the narrowness guard) and `test_mock_flight_chain.py`'s own
+  single-threaded test, which *is* the fixture the design's reasoning actually describes (ownship
+  700 m MSL, two objects 400 m apart at 500 m) and which changed exactly as predicted. Read as: the
+  design's own prediction about *that geometry's behavior* was correct and confirmed by running the
+  mock-flight-chain test; the specific test name/marker it expected to find was not.
+- **`test_naked_eye_source.py` needed real rework, unanticipated by the design's own §8.** The
+  design's test-impact section names `test_clustering.py`, `test_calibration_cluster_merge_
+  undercount.py`, `test_mock_flight_chain.py`, `test_contacts.py`'s jitter test, and
+  `test_association_over_time.py` — it does not mention `test_naked_eye_source.py` at all. That
+  file's cap/debounce/continuity fixtures place multiple simultaneous candidates on the observer's
+  exact bearing at the observer's own altitude, which the angular model treats as a genuine
+  degenerate case (always merges, any down-range gap) rather than a safe non-clustering-relevant
+  spread. Five tests needed geometry changes; all now pass, and the fixes are narrow (an added
+  cross-offset, one test's split geometry) rather than a redesign, but this is real, reportable
+  scope the design's own blast-radius analysis missed.
+- Everything else in the design's §8 (three calibration tests, the mock-flight re-run, the jitter
+  `xfail` deletion, the (A) floor's provable slackness, the two-member-cluster theorem, the
+  along-LOS altitude sensitivity) matched exactly, including the specific numbers worked in the
+  design's own tables (perpendicular adjacent-pair separation ~7.15 arcmin vs. the design's
+  ~7.1-7.2 range; along-LOS 200 m AGL extent/unit ratio ~0.65 vs. the design's ~0.66; 1000 m AGL
+  ratio ~3.2, `n=4`, `OP_TO5UNITS`, matching the design's own table exactly).

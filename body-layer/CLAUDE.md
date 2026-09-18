@@ -183,39 +183,50 @@ subproject-needed dev path.
   classification-refinement/plan.md` Session 6 addendum Q1) — documented here so a future reader
   does not "correct" it toward an ED semantics that was never established.
 - `src/perception/clustering.py` (`plans/group-contact-model/plan.md` Stage 2, reworked
-  anisotropic by Stage 3b-i) — position-only resolution clustering. **The naked-eye channel's
-  position uncertainty is an ellipse, not a circle**: `naked_eye_ellipse_radii_m(range_m)` returns
-  `EllipseRadii(cross_range_m, down_range_m)` — cross-range is genuine two-point resolving power,
-  acuity-derived (`NAKED_EYE_ACUITY_RAD`, from `perception.visibility.LOWRES_ANGULAR_RADIUS_RAD`,
-  **divided** by `BINOCULAR_RANGE_MULTIPLIER` where `visibility.py` multiplies — the optic resolves
-  4x finer, not just detects 4x further); down-range stays `_range_bucket_width_m` (the `OP_D*`
-  bucket width), kept as a provisional depth-discrimination stand-in, not a reporting-quantisation
-  artefact any more. The old scalar `naked_eye_cluster_radius_m` (`math.hypot`-combining the two
-  axes) is gone — folding them into one number let the down-range term dominate everywhere and made
-  correcting the cross-range angle alone a no-op; see this module's own docstring for the full
-  derivation and its honest, one-sided evidence bound (upper bound ~20.7 arcmin, no lower bound —
-  magnitude is Stage 3b-ii's job, not this stage's). `cluster_candidates(candidates, observer_x,
-  observer_z)` now takes the observer's own position (available at the call site already, no new
-  plumbing) to define the line-of-sight frame each pairwise ellipse test decomposes against
-  (`los_components_m`, `within_ellipse` — also reused by `belief.association_over_time.passes_gate`,
-  one implementation of the projection). Single-link, radius = the larger of each pair's own
-  per-axis radii, no chaining cap yet — Stage 3b-ii's job. **Counting and resolving are different
-  projections of the same ellipse**: a cluster's `count_bucket` comes from `_count_cross_range_
-  subclusters`, *not* `len(members)` and *not* a second single-link pass over the same pairwise
-  test (that is a **provably dead mechanism** — every edge that connected a cluster's members
-  already satisfies `cross <= cross_radius` for that pair, an algebraic consequence of the ellipse
-  formula, so re-testing it single-link always reconnects the whole cluster and always finds
-  exactly one sub-group, for any cluster, any geometry; discovered by implementing it literally as
-  first described — see `plans/group-contact-model/implementation.md`). Instead it quantises each
-  member's cross-range offset from the cluster's own centroid into fixed-width bins (width = the
-  largest member's own cross-range radius) and counts distinct non-empty bins — not pairwise, so a
-  long, down-range-heavy single-link chain can still land its ends in different bins even though
-  every adjacent step individually passed. `count_bucket_for` (ED's `OP_1UNIT`…`OP_MORETHAN15UNITS`
-  vocabulary, a non-overlapping partition for forward selection, deliberately narrower than
-  `belief.cardinality`'s own — see that module's docstring) is otherwise unchanged. A cluster's
-  aggregate classification is its members' shared value when all agree, else degrades to the
-  presence root (`object_model.DEFAULT_OP_CLASS`) — clustering itself is class-agnostic,
-  position-only; class only shapes the *label* a cluster reports, never whether it forms.
+  anisotropic by Stage 3b-i, then reworked again to a true angular predicate by Stage 3b-i rev.2) —
+  position-only resolution clustering. **Separability is a 3D angle subtended at the observer,
+  compared against each candidate's own apparent angular size — not a world-space ellipse.**
+  `angular_separation_rad(observer, a, b)` is the true angle between two observer→candidate unit
+  vectors (`atan2(|cross|, dot)`, stable near zero); `angular_size_rad(size_m, slant_range_m)` is
+  `size_m / slant_range_m`. Two candidates merge when they fail the two-apples criterion
+  `theta_sep >= 0.5 * (theta_size(a) + theta_size(b))` — two discs of angular diameter `d_a`, `d_b`
+  visually overlap exactly when their centre separation is under `(d_a + d_b) / 2` — **or** fail a
+  named floor, `theta_sep * BINOCULAR_RANGE_MULTIPLIER >= LOWRES_ANGULAR_RADIUS_RAD`, provably
+  non-binding for anything `visibility.py` actually admitted (kept as a one-line self-consistency
+  check, not because it ever fires). No new constant and no magnification term — `M`
+  (`BINOCULAR_RANGE_MULTIPLIER`) cancels out of the merge criterion entirely, since both sides are
+  angles scaled by the same optic. This reproduces the old ellipse's anisotropy *for free*, because
+  Petrovich is airborne: a down-range pair separates by depression angle (shrinks with range), a
+  cross-range pair by the full bearing angle — no world-space ellipse required, and no
+  acuity-derived radius shared with the association gate any more (see `belief.
+  association_over_time`'s own docstring on why sharing that formula was Stage 3b-i's real defect).
+  `ClusterCandidate` carries `alt_m`/`size_m` alongside `x`/`z`/`range_m` (no new plumbing — both
+  were already in hand at `naked_eye_source._cluster_candidate`); `cluster_candidates(candidates,
+  observer: perception.geometry.GeoPosition)` takes the observer's full 3D position rather than a
+  bare `(x, z)` pair, since altitude is the term that makes the merge predicate anisotropic at all.
+  Single-link, no chaining cap yet — a later calibration pass's job. **Counting is extent over unit
+  width, with no free parameter**: a cluster's `count_bucket` is `floor(extent_rad / unit_rad) + 1`
+  (`_extent_count`) — `extent_rad` the largest pairwise `angular_separation_rad` among the
+  cluster's own members (its angular diameter), `unit_rad` the mean `angular_size_rad` across those
+  members — literally "how many unit-widths long is this blob, plus one," the same disc geometry as
+  the merge predicate, read as an extent instead of a pairwise test. This replaces the ellipse's
+  grid-binning sub-clustering (`_count_cross_range_subclusters`, a free bin-width parameter and a
+  documented boundary artefact) entirely. `floor`, not `round`, makes "a two-member cluster always
+  reports `OP_1UNIT`" a **theorem** of the merge criterion (two candidates only merge when their
+  separation is under one mean unit width, so `floor(<1) + 1 == 1` always) rather than an artefact.
+  The along-line-of-sight twelve-object case reporting `OP_1UNIT` at 9 km and low altitude is the
+  **correct, confident answer** — at that geometry the column genuinely subtends less than one
+  vehicle's own width — and the *same* ground layout at a higher ownship altitude reports a plural
+  count instead, because depression angle genuinely spreads the column out across a real axis at
+  altitude; no world-space ellipse could produce that altitude-sensitivity. `count_bucket_for` (ED's
+  `OP_1UNIT`…`OP_MORETHAN15UNITS` vocabulary, a non-overlapping partition for forward selection,
+  deliberately narrower than `belief.cardinality`'s own — see that module's docstring) is otherwise
+  unchanged. A cluster's aggregate classification is its members' shared value when all agree, else
+  degrades to the presence root (`object_model.DEFAULT_OP_CLASS`) — clustering itself is
+  class-agnostic, position-only; class only shapes the *label* a cluster reports, never whether it
+  forms. This module's own reporting-quantisation range-bucket table (`_RANGE_BUCKETS_M` and
+  friends) moved back to `belief.association_over_time` — this module has no use for a reporting
+  quantisation of its own any more, only true angular geometry.
 - `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6, clustering added Stage 2 of
   `plans/group-contact-model/plan.md`) — `NakedEyePerceptionSource`, the naked-eye/binocular
   channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s gates and `geometry.py`'s
@@ -318,29 +329,33 @@ subproject-needed dev path.
 
   `association_over_time.py` (percept→contact spatial + class-compatibility
   gating, distinct from `perception/association.py`'s within-one-poll detection→world-object
-  resolution — **the spatial gate went anisotropic at Stage 3b-i** of `plans/
-  group-contact-model/plan.md`, Decision 7: `passes_gate` decomposes the separation between a
-  percept's implied position and `contact.last_position` into cross-range/down-range components
-  against the percept's own `ownship_at_observation` (`perception.clustering.los_components_m`) and
-  tests each axis against `uncertainty_radii_m(percept)`'s ellipse (`perception.clustering.
-  naked_eye_ellipse_radii_m` for naked-eye, an isotropic circle of `SCOPE_UNCERTAINTY_M` for the
-  scope channel — a circle reduces the ellipse test to the old scalar `distance <= radius` test
-  exactly, so every scope-channel gate test predates and is unaffected by this change) plus
-  `contact.last_position_uncertainty_m` and elapsed-time growth on *both* axes. `uncertainty_
-  radius_m` (singular) still exists as a conservative scalar — the larger of the ellipse's two axes
-  — for `Contact.last_position_uncertainty_m`'s own storage, which stays scalar rather than growing
-  a second stored field: the observer position that produced a past reading isn't stored, so there
-  is no recoverable LOS frame for *that* reading's own ellipse, and applying the conservative pad to
-  both of the *current* gate's axes only ever widens it, never narrows it — an accepted
-  approximation, not a precise re-derivation. **Known open regression** (found implementing this
-  stage, not yet fixed): a real object tracked purely by naked-eye through several bearing-bucket
-  requantisations while ownship rotates can still move the implied position's cross-range component
-  by hundreds of metres between polls, now exceeding the (much smaller, acuity-derived) cross-range
-  gate budget where the old clock-bucket-derived one would have absorbed it — `tests/test_
-  contacts.py::test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` is `xfail`ed
-  for this reason; see that test's own marker and `plans/group-contact-model/implementation.md` for
-  why a plain magnitude increase would reopen the Stage 3a/Decision 7 dead zone instead of fixing
-  it), `decay.py` (per-attribute half-lives, the `certainty` lifecycle ladder —
+  resolution — **isotropic and quantisation-derived again, as of Stage 3b-i rev.2** of `plans/
+  group-contact-model/plan.md`, which retires Decision 7. Stage 3b-i made this gate anisotropic and
+  shared `perception.clustering`'s acuity-derived ellipse with it, on the premise that an isotropic
+  gate would reopen the Stage 3a dead zone; that premise didn't hold — Stage 3a closes the dead zone
+  with a same-source/same-poll candidate exclusion in `ContactStore.ingest`, which is
+  radius-independent, so the gate was never obliged to track the cluster's own shape. Sharing the
+  formula was the real defect: this gate asks whether a quantised *report* plausibly refers to a
+  remembered thing (correct magnitude: the channel's own reporting vocabulary — the 30 deg clock
+  bucket, the `OP_D*` range bucket — plus elapsed motion), while clustering's predicate asks whether
+  two *live* candidates are angularly resolvable apart (correct magnitude: optical resolving power,
+  ~one target width) — different questions about different things that a shared formula made look
+  comparable. `passes_gate`/`spatial_gate_radius_m`/`uncertainty_radius_m` are reverted byte-for-byte
+  to their pre-Stage-3b-i form: a scalar `gate_radius_m = uncertainty_radius_m(percept) +
+  contact.last_position_uncertainty_m + GATE_GROWTH_RATE_MPS * elapsed_s`, tested against plain
+  Euclidean `distance_m` (2D, x/z only). `uncertainty_radius_m` is source-derived: naked-eye gets
+  `_naked_eye_uncertainty_m(range_m)` — `math.hypot(range_m * sin(half the 30 deg clock bucket),
+  _range_bucket_width_m(range_m))`, this module's own private function again (moved back from
+  `perception.clustering`, along with the `OP_D*` range-bucket table that feeds it — clustering has
+  no use for a reporting quantisation of its own any more, only true angular geometry, see that
+  module's docstring); everything else gets the fixed `SCOPE_UNCERTAINTY_M`. This revert is also
+  what fixes the Stage 3b-i regression `tests/test_contacts.py::test_naked_eye_bucket_
+  requantisation_does_not_spawn_duplicate_contacts` was `xfail`ed for (now passing, marker removed):
+  the ratio of jitter to budget is a ratio of two angles, invariant under whatever representation
+  computes it, so a shared acuity-derived formula was never going to fix a ~700:1 mismatch against
+  bearing-bucket requantisation jitter — reverting to the quantisation-derived figure budgets the
+  thing that is actually jittering, which is what fixed the bug the first time), `decay.py`
+  (per-attribute half-lives, the `certainty` lifecycle ladder —
   `observed`/`tracked`/`estimated`/`lost`; `position_confidence` (BL-3) is the numeric,
   continuously-decaying counterpart to that ladder, keyed off `POSITION_HALF_LIFE_S`;
   `classification_confidence_at` (BL-2.6) finally consumes `IDENTITY_HALF_LIFE_S`, which had been

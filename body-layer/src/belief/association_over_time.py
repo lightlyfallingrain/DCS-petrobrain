@@ -26,18 +26,17 @@ actual cause was never this gate -- it was `perception.naked_eye_source`
 reporting per-object at a range where the channel cannot resolve
 per-object identity at all. Stage 2 fixes the cause: `naked_eye_source.py`
 now clusters at its own honest resolution limit
-(`perception.clustering.cluster_candidates`, using this module's own
-`uncertainty_radii_m` as the cluster ellipse -- see that module's
-docstring) and emits one presence-or-better-tier `Observation` per
-*cluster*, carrying a `count_bucket`. That report must be allowed to fold
-onto its cluster's existing contact (a cardinality *refine*/*hold*, or a
-*contradiction* if the count genuinely disagrees) the same way any other
-percept does -- a blanket veto would instead found a fresh contact every
-poll for any cluster whose continuity happens to miss, strictly worse than
-before. What survives the interim fix's reasoning, not its mechanism: a
-report carrying zero class evidence must never make a confident 1:1
-identity claim on its own -- Stage 2 honours that by never emitting a
-1:1 per-object claim in the first place, not by refusing to merge one.
+(`perception.clustering.cluster_candidates`) and emits one
+presence-or-better-tier `Observation` per *cluster*, carrying a
+`count_bucket`. That report must be allowed to fold onto its cluster's
+existing contact (a cardinality *refine*/*hold*, or a *contradiction* if the
+count genuinely disagrees) the same way any other percept does -- a blanket
+veto would instead found a fresh contact every poll for any cluster whose
+continuity happens to miss, strictly worse than before. What survives the
+interim fix's reasoning, not its mechanism: a report carrying zero class
+evidence must never make a confident 1:1 identity claim on its own --
+Stage 2 honours that by never emitting a 1:1 per-object claim in the first
+place, not by refusing to merge one.
 
 **This gate is now the exception path, not the common case**
 (`plans/contact-duplication-ambiguity-runaway/plan.md`): `ContactStore.
@@ -49,98 +48,92 @@ correlation didn't resolve or has expired (`belief.decay.
 object_id_continuity_valid`). Nothing in this module's own formulas
 changed for that fix; only how often they get called did.
 
-**Spatial gate -- anisotropic since Stage 3b-i** (`plans/
-group-contact-model/plan.md` Decision 7). The percept's implied position is
-`geometry.project_from_bearing_range(observer, percept.bearing_deg,
-percept.range_m)`, using the percept's own `ownship_at_observation` as the
-observer -- flat, no terrain, per that function's own documented limitation.
-A candidate contact passes the spatial gate when the vector from the
-contact's last-known perceived position to this implied position,
-decomposed into cross-range/down-range components against *that same
-observer's* line of sight (`perception.clustering.los_components_m`), falls
-inside the ellipse whose per-axis radius is:
+**Spatial gate -- isotropic, quantisation-derived** (reverted 2026-09-18 by
+"Stage 3b-i rev.2" of `plans/group-contact-model/plan.md`, §3 -- see below
+for why). The percept's implied position is `geometry.
+project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)`,
+using the percept's own `ownship_at_observation` as the observer -- flat, no
+terrain, per that function's own documented limitation. A candidate contact
+passes the spatial gate when this implied position is within `gate_radius_m`
+of the contact's last-known perceived position:
 
-    cross_budget_m = uncertainty_radii_m(percept).cross_range_m
-        + contact.last_position_uncertainty_m
-        + GATE_GROWTH_RATE_MPS * elapsed_s
-    down_budget_m = uncertainty_radii_m(percept).down_range_m
+    gate_radius_m = uncertainty_radius_m(percept)
         + contact.last_position_uncertainty_m
         + GATE_GROWTH_RATE_MPS * elapsed_s
 
-This is the gate's own instance of the plan's central by-construction
-identity: `perception.clustering.cluster_candidates` and this gate test the
-*same* ellipse, because a cluster radius that is anisotropic while the gate
-that re-tests a split child against its parent stays circular reopens
-exactly the dead zone Stage 3a closed (a circular gate's `sum >= max`
-degenerately re-absorbs any split sitting near the ellipse's own boundary,
-regardless of which axis the split happened on). `contact.last_position_
-uncertainty_m` stays the scalar it always was (see `Contact`'s own
-docstring) -- the observer position that produced it is not stored, so
-there is no LOS frame recoverable for *that* reading's own ellipse. It is
-applied to **both** axes of the current gate as a single conservative pad
-(always the larger of that reading's own two axes, see `uncertainty_
-radius_m` below), which only ever widens the gate relative to a
-hypothetical narrower true value, never narrows it -- an approximation
-accepted explicitly rather than adding a second stored field, per the
-plan's "no new plumbing" finding (`Percept.ownship_at_observation` and
-`OwnshipState` were already in scope at both call sites; nothing new is
-threaded through).
+Both sides' uncertainty are summed -- `contact.last_position` is itself only
+known to within *its own* founding/most-recent percept's uncertainty, not
+exactly, so gating on the incoming percept's uncertainty alone silently
+assumes the stored position is exact. It is not: naked-eye's bucket
+quantisation in particular re-derives a fresh (bearing, range) pair from
+scratch every poll (the buckets are anchored to the *current* heading -- see
+`naked_eye_source._quantise_bearing`), so two consecutive, genuinely
+identical real positions can legitimately quantise to different buckets and
+imply positions up to roughly a full bucket-width apart, not just the
+half-bucket-width `uncertainty_radius_m` models for a single reading. Only
+budgeting the incoming side under-sizes the gate by up to 2x for exactly
+this case -- confirmed live 2026-09-09: a single missed match from this
+under-sizing spawns a duplicate contact, and because that duplicate itself
+then counts as a second candidate for every subsequent percept near the same
+real object, the two-or-more-candidates ambiguity rule above turns one
+missed match into a permanent one-new-contact-per-poll runaway for the rest
+of the contact's session (see `plans/classification-refinement/debug.md`).
+Summing both sides' uncertainty is the minimal correction: it restores the
+gate to the symmetric, standard-radar-fusion shape (both estimates carry
+error, not just the newer one) without touching the ambiguity policy itself.
 
-For a scope-channel percept, whose own ellipse is a circle
-(`cross_range_m == down_range_m == SCOPE_UNCERTAINTY_M`), this reduces
-identically to the old isotropic test -- `cross_budget_m == down_budget_m`
-makes the ellipse a circle again, and `(cross/r)**2 + (down/r)**2 <= 1` is
-algebraically `hypot(cross, down) <= r`, which is exactly `distance_m <=
-r` since cross/down are an orthonormal rotation of the raw (dx, dz) vector.
-Every scope-channel gate test predates this stage and is unaffected by it.
-
-The prior "both sides' uncertainty must be summed, not just the incoming
-side's" fix (2026-09-09, `plans/classification-refinement/debug.md`) is
-preserved exactly -- `contact.last_position_uncertainty_m` is still added
-on top of the incoming percept's own budget on every axis; only the shape
-of what "distance" and "radius" mean changed, not whether both sides pay
-into it.
+**Why this gate is isotropic and quantisation-derived again, not the
+anisotropic acuity-derived ellipse Stage 3b-i built.** Stage 3b-i's Decision
+7 attached this gate's shape to `perception.clustering`'s own cluster
+ellipse on the premise that leaving the gate isotropic would reopen the
+Stage 3a dead zone -- that premise does not hold. Stage 3a closes the dead
+zone with a same-source/same-poll candidate exclusion in `ContactStore.
+ingest` (see that module's docstring), which is **radius-independent**: two
+`Observation`s from one source in one poll can never resolve to the same
+contact, whatever this gate's width. Once that stopped being the gate's job,
+sharing a formula with clustering was revealed as the real defect, not the
+fix: **the cluster predicate and this gate answer different questions about
+different things.** The cluster predicate asks whether Petrovich can tell
+two *live* candidates apart, in one instant, from one observer position --
+its correct magnitude is optical resolving power, about one target width.
+This gate asks whether a quantised *report* plausibly refers to a
+remembered thing -- its correct magnitude is the channel's own reporting
+vocabulary (the 30 deg clock bucket, the `OP_D*` range bucket) plus elapsed
+motion, not optical acuity. Budgeting a quantised report against an acuity
+figure was a category error: it shrank this gate's cross-range budget
+~100x (clock-bucket-derived, ~300-650 m at typical ranges, down to
+acuity-derived, ~1-7 m) while bearing-bucket requantisation jitter stayed
+exactly what it always was (up to a full clock bucket, unchanged by the
+representation), producing a ~700:1 jitter-to-budget mismatch at every
+range and the duplicate-contact regression `test_contacts.
+test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` was
+`xfail`ed for. Reverting this gate to its pre-Stage-3b-i, quantisation-
+derived form fixes that regression directly, by budgeting the thing that is
+actually jittering -- see that test's own (now-passing) assertion.
 
 `elapsed_s` is the time since *that contact's* last observation (not the
 percept's own age), so a contact that has not been seen in a while gets a
-wider, more forgiving gate -- it could plausibly have moved further. Both
-axes' growth term is isotropic (a contact could have moved in any
-direction while unobserved, not preferentially along the old LOS).
-Distance is 2D (x/z only): both channels report ground contacts and
-neither carries a perceived-altitude field precise enough to gate on
-independently of the horizontal position it was derived alongside.
+wider, more forgiving gate -- it could plausibly have moved further. Distance
+is 2D (x/z only): both channels report ground contacts and neither carries a
+perceived-altitude field precise enough to gate on independently of the
+horizontal position it was derived alongside.
 
-`uncertainty_radii_m` is source-derived, not a single tuned constant:
+`uncertainty_radius_m` is source-derived, not a single tuned constant:
 
 - **Naked-eye** (`perception.naked_eye_source.SOURCE_NAKED_EYE_VISUAL_
-  FILTERED`): `perception.clustering.naked_eye_ellipse_radii_m`, derived
-  from that channel's own honest resolving power (cross-range: apparent-
-  angle acuity; down-range: the `OP_D*` range bucket's width, kept as a
-  depth-discrimination stand-in -- see that module's docstring for the full
-  Stage 3b-i derivation, including why the two axes are no longer combined
-  with `math.hypot`). **Moved to `perception/clustering.py`, not
-  duplicated** (`plans/group-contact-model/plan.md` Stage 2, reworked
-  Stage 3b-i): that module's own cluster ellipse and this gate's
-  per-percept uncertainty are the same numbers by construction, so there
-  is exactly one implementation -- see that module's docstring for the
-  full derivation and the import-direction reasoning (`perception/` may
-  not import `belief/`, so the shared function lives on the `perception/`
-  side and this module imports it, same direction as this module's
-  existing `naked_eye_source` imports).
+  FILTERED`): `_naked_eye_uncertainty_m`, derived from that channel's own
+  output quantisation (cross-range error ~= `range_m * sin(half the 30 deg
+  clock bucket)`, down-range error = the width of the `OP_D*` range bucket,
+  combined with `math.hypot`). This function and the range-bucket table it
+  depends on live here, in `belief/` -- their pre-Stage-3b-i home -- since
+  `perception.clustering` no longer has any use for a reporting
+  quantisation of its own (see that module's docstring).
 - **Everything else** (the scope/hybrid channel): a single fixed constant,
-  `SCOPE_UNCERTAINTY_M`, on both axes (an isotropic circle -- see above).
-  This channel does not quantise its geometry the same way (see
-  `hybrid_source.py`), so there is no bucket structure to derive an honest
-  anisotropic figure from. Per the plan: "use a reasonable fixed
-  uncertainty and say so plainly in a comment -- don't overthink it, this
-  gets revisited." This is exactly that placeholder, not a calibrated
-  value.
-
-`uncertainty_radius_m` (singular, scalar) still exists as a conservative
-legacy figure -- the larger of `uncertainty_radii_m`'s two axes -- for
-`Contact.last_position_uncertainty_m`'s own storage (see above on why that
-field stays scalar) and any other caller that only needs one honest,
-never-under-sized number rather than the full ellipse.
+  `SCOPE_UNCERTAINTY_M`. This channel does not quantise its geometry the same
+  way (see `hybrid_source.py`), so there is no bucket width to derive an
+  honest figure from. Per the plan: "use a reasonable fixed uncertainty and
+  say so plainly in a comment -- don't overthink it, this gets revisited."
+  This is exactly that placeholder, not a calibrated value.
 
 **Class-compatibility gate.** Three-valued (`compatible` / `unknown` /
 `incompatible`) because the two channels speak different vocabularies:
@@ -170,16 +163,11 @@ never a bad merge) rather than building a second keyword table here.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Final
 
 from belief.classification import class_compatibility
 from belief.percept import Percept
-from perception.clustering import (
-    EllipseRadii,
-    los_components_m,
-    naked_eye_ellipse_radii_m,
-    within_ellipse,
-)
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED
 
@@ -199,24 +187,91 @@ SCOPE_UNCERTAINTY_M: Final[float] = 300.0
 #: real sessions show whether contacts are gated too tightly or too loosely.
 GATE_GROWTH_RATE_MPS: Final[float] = 20.0
 
+#: Half of naked-eye's 30 deg clock bucket -- the bearing could be anywhere
+#: within +/- this many degrees of the reported clock position. Moved back
+#: here from `perception.clustering` by Stage 3b-i rev.2 (see module
+#: docstring) -- this is a reporting-quantisation figure, not a clustering
+#: one.
+_CLOCK_BUCKET_DEG: Final[float] = 30.0
+_HALF_CLOCK_BUCKET_RAD: Final[float] = math.radians(_CLOCK_BUCKET_DEG / 2.0)
 
-def uncertainty_radii_m(percept: Percept) -> EllipseRadii:
-    """Perceived-position uncertainty ellipse for `percept`, source-derived.
-    See module docstring."""
-    if percept.source == SOURCE_NAKED_EYE_VISUAL_FILTERED:
-        return naked_eye_ellipse_radii_m(percept.range_m)
-    return EllipseRadii(
-        cross_range_m=SCOPE_UNCERTAINTY_M, down_range_m=SCOPE_UNCERTAINTY_M
-    )
+#: The 24 ED range-bucket upper bounds -- moved back here from `perception.
+#: clustering` by Stage 3b-i rev.2 (originally copied from `perception.
+#: naked_eye_source._RANGE_BUCKETS_M` -- kept as an independent literal
+#: copy here rather than importing that module, to avoid this module
+#: depending on `naked_eye_source`).
+_RANGE_BUCKETS_M: Final[tuple[tuple[str, float], ...]] = (
+    ("OP_D100M", 100.0),
+    ("OP_D200M", 200.0),
+    ("OP_D300M", 300.0),
+    ("OP_D400M", 400.0),
+    ("OP_D500M", 500.0),
+    ("OP_D600M", 600.0),
+    ("OP_D700M", 700.0),
+    ("OP_D800M", 800.0),
+    ("OP_D900M", 900.0),
+    ("OP_D1000M", 1000.0),
+    ("OP_D1_1p5k", 1500.0),
+    ("OP_D1p5_2k", 2000.0),
+    ("OP_D2_2p5k", 2500.0),
+    ("OP_D2p5_3k", 3000.0),
+    ("OP_D3_3p5k", 3500.0),
+    ("OP_D3p5_4k", 4000.0),
+    ("OP_D4_4p5k", 4500.0),
+    ("OP_D4p5_5k", 5000.0),
+    ("OP_D5_6k", 6000.0),
+    ("OP_D6_7k", 7000.0),
+    ("OP_D7_8k", 8000.0),
+    ("OP_D8_9k", 9000.0),
+    ("OP_D9_10k", 10000.0),
+    ("OP_D10k", math.inf),
+)
+
+
+def _build_bucket_widths_m() -> tuple[float, ...]:
+    """Precompute each `_RANGE_BUCKETS_M` bucket's width. The last bucket is
+    open-ended (`math.inf` upper bound) and has no true width -- falls back
+    to the previous bucket's width rather than `inf`, which would make the
+    gate radius infinite for anything in the last bucket."""
+    widths: list[float] = []
+    previous_bound_m = 0.0
+    for _name, upper_bound_m in _RANGE_BUCKETS_M:
+        if math.isinf(upper_bound_m):
+            widths.append(widths[-1] if widths else previous_bound_m)
+        else:
+            widths.append(upper_bound_m - previous_bound_m)
+        previous_bound_m = upper_bound_m
+    return tuple(widths)
+
+
+_RANGE_BUCKET_WIDTHS_M: Final[tuple[float, ...]] = _build_bucket_widths_m()
+
+
+def _range_bucket_width_m(range_m: float) -> float:
+    """Width of the `OP_D*` bucket `range_m` falls into."""
+    for index, (_name, upper_bound_m) in enumerate(_RANGE_BUCKETS_M):
+        if range_m <= upper_bound_m:
+            return _RANGE_BUCKET_WIDTHS_M[index]
+    return _RANGE_BUCKET_WIDTHS_M[-1]  # unreachable: last bound is inf
+
+
+def _naked_eye_uncertainty_m(range_m: float) -> float:
+    """The naked-eye channel's own honest position-uncertainty radius at
+    `range_m`, combining cross-range and down-range error via `math.hypot`
+    -- this gate's private figure again as of Stage 3b-i rev.2 (module
+    docstring): no longer shared with `perception.clustering`, which now
+    tests true angular separability instead of a reporting quantisation."""
+    cross_range_m = range_m * math.sin(_HALF_CLOCK_BUCKET_RAD)
+    down_range_m = _range_bucket_width_m(range_m)
+    return math.hypot(cross_range_m, down_range_m)
 
 
 def uncertainty_radius_m(percept: Percept) -> float:
-    """Conservative scalar uncertainty for `percept` -- the larger of its
-    ellipse's two axes. See module docstring's note on why `Contact.
-    last_position_uncertainty_m` stays scalar and why `max` (never
-    under-sized) is the right reduction."""
-    radii = uncertainty_radii_m(percept)
-    return max(radii.cross_range_m, radii.down_range_m)
+    """Perceived-position uncertainty for `percept`, source-derived. See
+    module docstring."""
+    if percept.source == SOURCE_NAKED_EYE_VISUAL_FILTERED:
+        return _naked_eye_uncertainty_m(percept.range_m)
+    return SCOPE_UNCERTAINTY_M
 
 
 def implied_position(percept: Percept) -> GeoPosition:
@@ -230,6 +285,19 @@ def implied_position(percept: Percept) -> GeoPosition:
     return project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)
 
 
+def spatial_gate_radius_m(percept: Percept, contact: Contact, now_sim: float) -> float:
+    """The spatial gate radius for `percept` against `contact` at `now_sim`.
+    See module docstring's formula -- both the incoming percept's own
+    uncertainty and the contact's stored `last_position_uncertainty_m` are
+    budgeted, not just the former."""
+    elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
+    return (
+        uncertainty_radius_m(percept)
+        + contact.last_position_uncertainty_m
+        + GATE_GROWTH_RATE_MPS * elapsed_s
+    )
+
+
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     """Whether `percept` may be merged into `contact` -- the spatial gate and
     the class-compatibility gate must both pass. See module docstring."""
@@ -239,24 +307,7 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
         return False
 
     percept_position = implied_position(percept)
-    observer = percept.ownship_at_observation
-    cross_range_m, down_range_m = los_components_m(
-        observer.x,
-        observer.z,
-        contact.last_position.x,
-        contact.last_position.z,
-        percept_position.x,
-        percept_position.z,
-    )
-
-    percept_radii = uncertainty_radii_m(percept)
-    elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
-    growth_m = GATE_GROWTH_RATE_MPS * elapsed_s
-    cross_budget_m = (
-        percept_radii.cross_range_m + contact.last_position_uncertainty_m + growth_m
-    )
-    down_budget_m = (
-        percept_radii.down_range_m + contact.last_position_uncertainty_m + growth_m
-    )
-
-    return within_ellipse(cross_range_m, down_range_m, cross_budget_m, down_budget_m)
+    dx = percept_position.x - contact.last_position.x
+    dz = percept_position.z - contact.last_position.z
+    distance_m = math.hypot(dx, dz)
+    return distance_m <= spatial_gate_radius_m(percept, contact, now_sim)
