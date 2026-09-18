@@ -1,142 +1,122 @@
 ### Review Summary
 
-Reviewed Stages 1 (`8ea06b6`) and 2 (`ece33ed`) of `plans/group-contact-model/plan.md`, plus the
-docs commit `62d125e`, against the plan's own "Settled Decisions" and the checklist items in the
-review request. Ran body-layer's full verification myself (not trusted from the implementation
-log): `ruff format --check`, `ruff check`, `mypy src` all clean; `pytest tests -q` → **632
-passed**, matching the report.
+Reviewed Stage 3b-i rev.2 (commit `88e493a`, branch `feature/group-contact-cardinality`) against
+`plans/group-contact-model/plan.md`'s "Correction (user, 2026-09-18)" and "Stage 3b-i rev.2" design
+sections, and `plans/group-contact-model/implementation.md`'s matching log entry.
 
-The headline concern is real and worth stating precisely: the plan's central architectural claim
-— "the model's resolution and the channel's resolution are the same number by construction" — is
-**false for the specific case of a split child re-merging against its parent contact**, and this
-is not a minor edge case, it is a structural consequence of two different formulas the plan itself
-built: clustering forms/splits on a **single-sided max** radius, while the belief-layer spatial
-gate re-tests on a **double-sided sum** radius plus a growth term. That gap is baked in by BL-2.6's
-(correct, load-bearing) symmetric-budgeting fix, not by an unresolved calibration constant. I do
-not think this blocks merging Stages 1-2, but it does mean the plan's Stage 3 scope as currently
-written (cluster-radius policy, chaining cap, tier→coarseness table) will not close this gap, and
-that needs to be said explicitly rather than left implicit in a test comment.
+**The two load-bearing claims both check out against the code, not just the design's algebra.**
+
+- **Optic-multiplier cancellation.** `_separable` in `body-layer/src/perception/clustering.py`
+  computes `resolvable = theta_sep >= 0.5 * (theta_size_a + theta_size_b)` — `BINOCULAR_RANGE_
+  MULTIPLIER` never appears in that line. `M` only appears in the (A) floor check
+  (`theta_sep * BINOCULAR_RANGE_MULTIPLIER >= LOWRES_ANGULAR_RADIUS_RAD`), exactly as designed.
+  Confirmed in the code, not just read off the docstring.
+- **(A) is provably non-binding.** Verified `visibility.py`'s admission threshold and the algebraic
+  chain in the design by hand; also directly checked via `test_clustering.py`'s new
+  `test_floor_self_consistency_of_the_detection_floor_at_the_detection_limit`, which places a pair
+  exactly at the detection-range limit and asserts (A) holds — this is the right test for the
+  claim (boundary case, not an interior example). Independently spot-checked the counting formula
+  and two of the three calibration-table numbers by hand-computing the actual geometry in Python
+  (perpendicular 9 km row: adjacent-pair separation 7.15 arcmin vs. mean unit width 2.67 arcmin;
+  along-LOS 200 m AGL: extent 1.71 arcmin, ratio 0.639, count 1; along-LOS 1000 m AGL: extent 8.45
+  arcmin, ratio 3.16, count 4 → `OP_TO5UNITS` via `count_bucket_for`'s boundary table) — all match
+  the design's and the test's own numbers.
+
+**The gate revert is genuine.** `git diff c625299^:.../association_over_time.py 88e493a:.../
+association_over_time.py` shows only docstring/comment changes plus the `_naked_eye_uncertainty_m`
+rename-and-move; `spatial_gate_radius_m` and `passes_gate` show *no* diff hunk at all between
+`c625299^` and `88e493a`, i.e. byte-identical, confirming the implementer's stated verification.
+The premise (Stage 3a's same-source/same-poll exclusion in `ContactStore.ingest` is
+radius-independent) is also confirmed directly by reading that method's own docstring/logic — the
+exclusion keys on `(source, t_sim)`, never on any spatial radius.
+
+**The jitter test.** `test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` has
+had its `xfail(strict=True)` marker removed with no change to the assertion body (verified via
+`git diff c625299 88e493a -- .../test_contacts.py` — only the marker and docstring changed). It
+passes now. The 700:1 ratio-of-angles argument is correct: a dimensionless ratio of two angular
+quantities is invariant under any consistent choice of units/representation, so "expressing both in
+radians instead of metres" could never have closed that gap — only decoupling the gate's magnitude
+from clustering's acuity-derived one could, which is what happened.
+
+**The "test doesn't exist" and "five tests needed rework" disclosures are accurate and, on
+inspection, benign.** `test_two_real_objects_stay_two_contacts` was folded into
+`test_mock_flight_chain_single_threaded_reaches_expected_contact_state` by a *prior*, unrelated
+commit (`de5e7eb`, "presence-tier percepts may not merge into an existing contact", predating even
+`c625299`) — not silently deleted anywhere in this rework's own history. The design's reasoning
+about that geometry is confirmed to describe `test_mock_flight_chain.py`'s surviving test.
+`test_naked_eye_source.py`'s five reworked tests were checked individually (diff below); four are
+mechanical (adding a small cross-range offset so previously-collinear cap/debounce fixtures aren't
+degenerate under the new model, confirmed to stay within the cockpit mask's forward allowance) and
+preserve each test's original intent (cap/debounce mechanics, not clustering). The fifth
+(`test_a_cluster_splitting_gives_the_majority_child_continuity`) is a more substantial rework
+(new `_high_ownship`, moved split geometry, majority/minority identified by position instead of
+`count_bucket` since both now land on `OP_1UNIT`) but still exercises the same continuity-on-split
+behaviour the test's name promises.
+
+**Calibration numbers hand-verified independently** (not just re-run): the third test
+(1000 m AGL → `OP_TO5UNITS`) genuinely pins the altitude term — it is the same ground layout as the
+200 m AGL row with only the observer's altitude changed, and the extent/unit ratio crosses from
+<1 to >3 purely from that change, which only a 3D angular model (not a world-space ellipse) can
+produce.
+
+**Narrowness guard confirmed by `git diff`.** `test_contacts.py`'s two Stage 3a tests are untouched
+(only the jitter test's marker/docstring changed in that file); `test_cross_channel_fusion.py`
+shows zero diff between `c625299` and `88e493a`.
+
+**Counting formula.** `floor(extent_rad / unit_rad) + 1` has no free parameter (both inputs are the
+same two pure functions used by the merge predicate), and "a two-member cluster is always
+`OP_1UNIT`" is a genuine theorem of the merge criterion — a two-member cluster's members only merge
+when `theta_sep < unit_rad` by construction of (S), so `extent_rad < unit_rad` always, and
+`floor(<1) + 1 == 1` unconditionally. `test_floor_a_two_member_cluster_always_reports_one_unit`
+pins this at a realistic near-boundary value (6.9 m vs. a ~7.0 m threshold), not a trivial case.
+
+**Verification run directly** (`body-layer/.venv`, from `body-layer/`):
+- `ruff format --check src tests` — pass (74 files)
+- `ruff check src tests` — pass
+- `mypy src` — pass, no issues, 34 source files
+- `pytest tests -q` — **642 passed**, matching the commit message exactly (up from 635 + 1 xfail)
+
+Documentation (`body-layer/CLAUDE.md`, module docstrings, `plans/group-contact-model/
+implementation.md`) is updated consistently with the code and honestly records both design gaps
+found only by running the suite. Agent-memory entries are correctly placed at the repo-root
+`.claude/agent-memory/` path, not a subproject-nested one.
 
 ### Required Fixes
 
-- **Stage 3's scope in `plans/group-contact-model/plan.md` must be amended to name the gate/cluster
-  radius mismatch as its own work item, not folded silently into "the cluster-radius policy."**
-  Worked the numbers by hand and confirmed against `perception/clustering.py` and
-  `belief/association_over_time.py`: at the mock-flight fixture's closing range (~690 m),
-  `naked_eye_cluster_radius_m(690)` ≈ hypot(690·sin(15°), 100) ≈ **205 m**. Clustering splits two
-  candidates when their real separation exceeds `max(radius_a, radius_b)` ≈ 205 m — a single-sided
-  test. `spatial_gate_radius_m` re-tests a split child against its parent contact using
-  `uncertainty_radius_m(percept) + contact.last_position_uncertainty_m + growth·elapsed_s` — both
-  sides' ~205 m summed, so ≈**410 m before any growth term is even added**. Two objects 400 m apart
-  therefore clear the cluster-split threshold (205 m) but never clear the gate's re-merge threshold
-  (~410 m+). This is not specific to this fixture's numbers: because the gate is definitionally
-  `uncertainty_a + uncertainty_b + growth ≥ max(uncertainty_a, uncertainty_b)`, **any split whose
-  children sit near the cluster's own resolution boundary — which is the common case, since that's
-  exactly when a split first becomes possible — will be re-absorbed by the gate.** Shrinking the
-  Stage-3 cluster-radius constant does not fix this: it only moves the point where clusters start
-  splitting while leaving the gate's ~2x-wider re-test in place, so the dead zone persists at
-  whatever new radius Stage 3 picks. The fix, if one is wanted, has to touch the gate's treatment of
-  a percept that is itself a freshly-split cluster member (e.g. not re-summing the parent's own
-  cluster-derived uncertainty against a child that clustering has already judged separable) —
-  that's a real design decision, not a tuning pass, and Stage 3 as scoped today doesn't cover it.
-  Concretely: add one sentence to the plan's Stage 3 bullet naming this as required scope, or split
-  it into its own stage, so the eventual sortie is aimed at the right question instead of just
-  re-tuning `naked_eye_cluster_radius_m`'s shape.
+- **Stale, self-contradictory fixture comment in `test_a_cluster_splitting_gives_the_majority_
+  child_continuity`** (`body-layer/tests/test_naked_eye_source.py`, lines ~651 and ~701). Two
+  comments say object_id=1 "moves to lat 100" / "is the one that moved to lat 100," but the actual
+  fixture (and the very next line of the same comment block) uses `lat_deg=600.0` — leftover text
+  from before the split geometry was moved from 100 to 600 during this rework. Not functionally
+  wrong (the code is correct; only the prose is stale), but it directly contradicts adjacent text
+  in the same comment and will mislead the next reader trying to reconcile the numbers. Fix by
+  replacing both "lat 100" references with "lat 600."
 
 ### Optional Refinements
 
-- `perception/clustering.py` keeps its own literal copy of `_RANGE_BUCKETS_M`/`_CLOCK_BUCKET_DEG`
-  rather than importing `naked_eye_source.py`'s copy, to avoid a dependency cycle — disclosed
-  candidly in the module docstring, and the right call given the import-direction constraint. Still,
-  two independent literal copies of ED's 24-bucket range table now exist in the codebase (one in
-  `naked_eye_source.py` for output quantisation, one in `clustering.py` for radius derivation); if
-  ED's bucket table is ever revised, both need to change together and nothing enforces that today. A
-  shared private constants module (imported by both, imported by neither's current dependent) would
-  remove the risk cheaply, but this is not worth blocking on now (optional).
-- The physical sanity check requested: 400 m apart at 690 m range subtends ≈32° — almost exactly
-  the channel's own 30° clock-bucket width. The single-sided cluster radius (≈205 m, derived
-  directly from that bucket width) is therefore an honest model of the channel's own resolving
-  power, not an overly pessimistic one. The pessimism, such as it is, comes entirely from the gate's
-  double-budgeting for merge decisions, which is a different (also legitimate) concern — avoiding
-  spurious duplicate contacts for a slow-moving/stationary single object across polls. Worth stating
-  this distinction explicitly in the eventual Stage-3 design note so a future reader doesn't
-  conflate "the cluster radius is too generous" (it isn't) with "the gate re-absorbs splits" (it
-  does).
-
-### Verification of specific checklist items
-
-1. **Stage 1 no-op claim** — verified via `git show 8ea06b6 --stat`: touches only
-   `belief/cardinality.py` (new), `belief/contacts.py`, `belief/decay.py`,
-   `tests/test_cardinality.py`. No pre-existing test file is present in that commit's diff. Claim
-   holds.
-2. **Count ladder vocabulary** — `belief/cardinality.py`'s eight named buckets
-   (`OP_1UNIT`…`OP_MORETHAN15UNITS`) match `aircraft-layer/research/2026-09-08-pb1-5-
-   worldobjects-filter-and-ambient-detection.md` line 442 verbatim by name. The research doc gives
-   names only, not numeric boundaries, so the plan's `(lo, hi)` pairs are a reasonable inference
-   from the names themselves (e.g. "TO5UNITS" → (4,5)), not independently confirmed against ED
-   internals — this is disclosed nowhere as inferred vs. confirmed, but it's a low-risk inference
-   and not worth an investigator pass.
-3. **`fold_cardinality` mirrors `fold_classification`** — all four outcomes present and correctly
-   shaped (refine adopts incoming, reinforce steps confidence toward `_CONFIDENCE_CEILING`, hold
-   returns `held` untouched, contradict collapses to the hull with `confidence=min(...)` and arms
-   the lockout). The added "genuine partial overlap → refine to intersection" branch is **not scope
-   creep** — it's required by the plan's own decision to keep `OP_TO5UNITS (4,5)`/`OP_5TO7UNITS
-   (5,7)`'s boundary overlap "as ED states it" rather than fixing it: without that branch, a count
-   of exactly 5 read twice at different confidence would fall through to the disjoint-contradiction
-   branch (since neither interval contains the other), incorrectly arming a lockout and flooring
-   confidence on two claims that actually agree. Necessary, not gratuitous.
-4. **No new tunable for cluster radius** — confirmed `naked_eye_cluster_radius_m` exists only in
-   `perception/clustering.py`; `belief/association_over_time.py` no longer defines
-   `_naked_eye_uncertainty_m` and imports the moved function instead (`grep` for
-   `_naked_eye_uncertainty_m`/`_CLOCK_BUCKET_DEG` outside `clustering.py` turns up nothing in
-   `belief/`). Import direction is legal (`belief` importing `perception`, same direction
-   `association_over_time.py` already used for `naked_eye_source` constants).
-5. **Stage 0 veto removal** — confirmed gone from `association_over_time.passes_gate`; the
-   module docstring explains why removal is correct now that naked-eye emits per-cluster, not
-   per-object.
-6. **Majority-overlap continuity, determinism** — `_build_observations`' two-pass algorithm
-   (global majority-owner resolution before minting any cluster's `continues_observation_id`)
-   is present and does prevent two children of one split from both inheriting the parent's
-   continuity. Tie-breaking is genuinely deterministic, not dict/set-iteration-order-dependent:
-   `top_id = max(sorted(votes), key=...)` sorts historical ids lexicographically before taking
-   `max`, so ties resolve to the lexicographically smallest id, and `winner_index_for_id` ties
-   resolve to the lowest cluster index via strict `>` comparison in ascending-index iteration
-   order. Cluster order itself is deterministic given deterministic candidate input order (dict
-   insertion order in `cluster_candidates`, following `to_emit`'s own deterministic ordering).
-7. **`WorldEnrichmentCache`** — keyed by `contact_id`, invalidates on structural inequality of
-   `Contact.last_position` (a frozen dataclass). Clustering changes what `last_position` means
-   (now a cluster centroid) but doesn't change the cache's invalidation contract — it will simply
-   invalidate somewhat more often as centroids shift with cluster membership, which is a
-   correctness-safe cost, not a broken assumption.
-8. **Twelve-object results** — reran the suite myself: `test_twelve_unit_cluster_at_9km_becomes_
-   one_contact_with_a_plural_count` asserts `cluster.count_bucket == "OP_ABOUT15UNITS"` for
-   `count_bucket_for(12)`, correct per the non-overlapping selection table (12 ≤ 15, > 10, so
-   `OP_ABOUT15UNITS`; not an off-by-one). The close-range test asserts 6 clusters, member counts
-   `[1, 1, 2, 2, 3, 3]` summing to 12, and 6 contacts with matching `(lo, hi)` cardinality pairs
-   `[(1,1), (1,1), (2,2), (2,2), (3,3), (3,3)]` — matches the reported figures exactly, verified by
-   reading the test and by the passing suite run.
+- `test_a_cluster_splitting_gives_the_majority_child_continuity`'s first-poll `assert first[0].
+  count_bucket == "OP_2UNITS"` was dropped with no replacement (the comment correctly notes the old
+  cross-range-grid-binning-specific value no longer applies and isn't easily replaced with a stable
+  one, since the three-member merged cluster's new extent/unit count wasn't re-derived). Restoring
+  *some* assertion on `first[0].count_bucket` — even a hand-computed exact value — would close a
+  small, self-acknowledged coverage gap on this poll. Low priority: the test's actual purpose
+  (continuity-on-split) is unaffected, and the surrounding calibration/clustering test files
+  already exercise `_extent_count` numerically in isolation.
+- The five test-impact gaps in `test_naked_eye_source.py` and the missing `test_two_real_objects_
+  stay_two_contacts` are both disclosed clearly in commit message and `implementation.md`, but
+  neither the plan's own "Stage 3b-i rev.2" section nor its §8 test-impact list has been updated to
+  record these two gaps for future readers of the design doc itself (only the implementation log
+  has them). Worth a short addendum to the plan if a future stage revisits this design's test
+  surface, but not blocking.
 
 ### Verdict
-
 APPROVED WITH MINOR FIXES
 
-The Stage 1/2 mechanism is sound, correctly scoped (Stage 1 genuinely a no-op, Stage 2 genuinely
-fixes the reported false-merge defect for the twelve-object case), and honestly documented,
-including the one thing I pushed hardest on. The chain-test behaviour (`test_mock_flight_chain.py`
-not splitting into two contacts) is **acceptable to merge as-is** — it is a real, disclosed
-boundary case, not a silently-swept regression, and the underlying mechanism (cardinality hedging
-via hold/contradict rather than a confident false merge or a premature false split) is strictly
-better than pre-existing behaviour. The one required fix is a documentation-level correction to
-`plans/group-contact-model/plan.md`'s Stage 3 scope, not a code change: name the gate-vs-cluster
-radius structural mismatch explicitly as something Stage 3 must address, since the currently-listed
-Stage 3 items (cluster-radius policy, chaining cap, tier→coarseness table, per-cluster
-`NAKED_EYE_MAX_NEW_PER_POLL`) do not touch the gate formula and will not close this gap by
-themselves.
-
 ### Review Confidence
-
-Full read — read the plan, implementation log, prior debug report, all touched source files
-(`clustering.py`, `association_over_time.py`, `cardinality.py`, `contacts.py`'s cardinality
-wiring, `naked_eye_source.py`'s `_build_observations`, `enrichment.py`'s cache), both new test
-modules in full, verified the Stage 1 no-op claim against `git show --stat`, and ran the full
-body-layer verification suite myself rather than trusting the reported numbers.
+Full read. Read both full diffs (`clustering.py`, `association_over_time.py`, `naked_eye_source.py`,
+all five changed test files) in their entirety, independently reproduced the byte-identical gate
+claim via `git diff` between `c625299^` and `88e493a`, independently hand-computed three of the
+design's angular/counting numbers in Python rather than trusting the docstrings, traced the "test
+doesn't exist" claim through full git history to its actual origin commit, and ran the full
+body-layer verification suite myself (ruff format/check, mypy --strict, pytest) rather than trusting
+the reported counts.
