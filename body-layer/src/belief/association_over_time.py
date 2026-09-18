@@ -7,43 +7,37 @@ ground truth). This module resolves a `belief.percept.Percept` against
 truth field. Do not import between the two modules; they answer different
 questions and neither should stand in for the other.
 
-Gate = spatial (hard) **and** class-not-incompatible (hard) **and**
-not-presence-tier (hard, see "Presence-tier veto" below). All three must
-pass for a percept to be a *candidate* merge target; the caller
-(`belief.contacts.ContactStore.ingest`) then applies the plan's Stage 1
-decision rule: exactly one candidate passing every gate -> merge; zero ->
-new contact; **two or more -> new contact** (ambiguity must produce a
-visible duplicate, never a guessed merge -- no best-match/highest-score
-tiebreak exists in this module, by design).
+Gate = spatial (hard) **and** class-not-incompatible (hard). Both must pass
+for a percept to be a *candidate* merge target; the caller (`belief.
+contacts.ContactStore.ingest`) then applies the plan's Stage 1 decision
+rule: exactly one candidate passing every gate -> merge; zero -> new
+contact; **two or more -> new contact** (ambiguity must produce a visible
+duplicate, never a guessed merge -- no best-match/highest-score tiebreak
+exists in this module, by design).
 
-**Presence-tier veto** (fix for the 2026-09-17/18 false-merge defect,
-`plans/contact-merge-undercount/debug.md`): a percept at `belief.
-classification.SpecificityLevel.PRESENCE` (naked-eye's `lowres` tier,
-`classification_level == 1`) never passes this gate -- it always founds a
-new contact (subject to the usual object-permanence shortcut in `belief.
-contacts.ContactStore._resolve_continuity`, which is unconditional on tier
-and still applies once a contact exists to correlate back onto). This is
-not a spatial-radius change and does not touch `uncertainty_radius_m`'s
-formulas or BL-2.6's symmetric-budgeting fix -- both stay exactly as
-tuned. The reason is the class-compatibility gate's own documented
-"`unknown` means neutral, never blocks a merge" posture: that posture is
-safe for the scope channel's rare unresolvable free text (`"Slava
-cruiser"`), but naked-eye's `lowres` tier is *systematically* class-blind
-by construction (`classification_raw` is always `PRESENCE_CLASS`
-/`object_model.DEFAULT_OP_CLASS`, which `_op_class_of` always resolves to
-`None` -- see `belief.classification`'s module docstring on
-`PRESENCE_CLASS`). Letting a percept that structurally carries zero class
-evidence merge into an existing contact purely on the strength of an
-honestly-coarse spatial gate is what let two genuinely different real
-objects (a truck and, 400 m away, an infantryman) collapse into one
-contact at first sighting -- confirmed live with a twelve-object
-calibration cluster collapsing into roughly five contacts the same way.
-Declining to merge a presence-tier percept costs only the rare case where
-the *same* real object is reacquired via the gate (not continuity) while
-still at `lowres` tier after `belief.decay.OBJECT_ID_MEMORY_S` has
-expired -- an accepted, documented degradation (an extra duplicate
-contact, never a bad merge), the same trade the class-compatibility gate's
-own `unknown` posture already accepts elsewhere in this module.
+**The presence-tier veto that used to live here is gone**
+(`plans/group-contact-model/plan.md` Stage 2). It was an interim fix
+(`plans/contact-merge-undercount/debug.md`, landed as its own branch) for
+the false-merge defect a presence-tier percept's structural class-blindness
+caused: with naked-eye still emitting one `Observation` per object, letting
+a zero-class-evidence percept merge on spatial proximity alone let
+genuinely different real objects collapse into one contact. That defect's
+actual cause was never this gate -- it was `perception.naked_eye_source`
+reporting per-object at a range where the channel cannot resolve
+per-object identity at all. Stage 2 fixes the cause: `naked_eye_source.py`
+now clusters at its own honest resolution limit
+(`perception.clustering.cluster_candidates`, using this module's own
+`uncertainty_radius_m` as the cluster radius -- see that module's
+docstring) and emits one presence-or-better-tier `Observation` per
+*cluster*, carrying a `count_bucket`. That report must be allowed to fold
+onto its cluster's existing contact (a cardinality *refine*/*hold*, or a
+*contradiction* if the count genuinely disagrees) the same way any other
+percept does -- a blanket veto would instead found a fresh contact every
+poll for any cluster whose continuity happens to miss, strictly worse than
+before. What survives the interim fix's reasoning, not its mechanism: a
+report carrying zero class evidence must never make a confident 1:1
+identity claim on its own -- Stage 2 honours that by never emitting a
+1:1 per-object claim in the first place, not by refusing to merge one.
 
 **This gate is now the exception path, not the common case**
 (`plans/contact-duplication-ambiguity-runaway/plan.md`): `ContactStore.
@@ -97,15 +91,18 @@ horizontal position it was derived alongside.
 `uncertainty_radius_m` is source-derived, not a single tuned constant:
 
 - **Naked-eye** (`perception.naked_eye_source.SOURCE_NAKED_EYE_VISUAL_
-  FILTERED`): derived from that channel's own output quantisation, reusing
-  its real bucket constants rather than inventing new numbers (per the plan).
-  Cross-range error ~= `range_m * sin(half the 30 deg clock bucket)` (the
-  observation's bearing could be anywhere within +/-15 deg of the reported
-  clock position); down-range error = the width of the `OP_D*` range bucket
-  the observation fell into (the observation's true range could be anywhere
-  within that bucket). The two are combined with `math.hypot` -- a
-  conservative circular radius over two roughly-orthogonal error axes,
-  smaller than summing them and larger than taking either alone.
+  FILTERED`): `perception.clustering.naked_eye_cluster_radius_m`, derived
+  from that channel's own output quantisation (cross-range error ~=
+  `range_m * sin(half the 30 deg clock bucket)`, down-range error = the
+  width of the `OP_D*` range bucket, combined with `math.hypot`). **Moved
+  to `perception/clustering.py`, not duplicated** (`plans/
+  group-contact-model/plan.md` Stage 2): that module's own cluster radius
+  and this gate's per-percept uncertainty are the same number by
+  construction, so there is exactly one implementation -- see that
+  module's docstring for the full derivation and the import-direction
+  reasoning (`perception/` may not import `belief/`, so the shared
+  function lives on the `perception/` side and this module imports it,
+  same direction as this module's existing `naked_eye_source` imports).
 - **Everything else** (the scope/hybrid channel): a single fixed constant,
   `SCOPE_UNCERTAINTY_M`. This channel does not quantise its geometry the same
   way (see `hybrid_source.py`), so there is no bucket width to derive an
@@ -144,10 +141,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Final
 
-from belief.classification import SpecificityLevel, class_compatibility
+from belief.classification import class_compatibility
 from belief.percept import Percept
+from perception.clustering import naked_eye_cluster_radius_m
 from perception.geometry import GeoPosition, project_from_bearing_range
-from perception.naked_eye_source import _CLOCK_BUCKET_DEG, _RANGE_BUCKETS_M
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED
 
 if TYPE_CHECKING:
@@ -166,54 +163,12 @@ SCOPE_UNCERTAINTY_M: Final[float] = 300.0
 #: real sessions show whether contacts are gated too tightly or too loosely.
 GATE_GROWTH_RATE_MPS: Final[float] = 20.0
 
-#: Half of naked-eye's 30 deg clock bucket -- the bearing could be anywhere
-#: within +/- this many degrees of the reported clock position.
-_HALF_CLOCK_BUCKET_RAD: Final[float] = math.radians(_CLOCK_BUCKET_DEG / 2.0)
-
-
-def _build_bucket_widths_m() -> tuple[float, ...]:
-    """Precompute each `_RANGE_BUCKETS_M` bucket's width (upper bound minus
-    the previous bucket's upper bound; the first bucket's implicit lower
-    bound is 0). The last bucket (`OP_D10k`, upper bound `math.inf`) is given
-    the second-to-last bucket's width instead of an infinite one -- a
-    documented fallback, not a real derivation, since an open-ended bucket
-    has no true width."""
-    widths: list[float] = []
-    previous_bound_m = 0.0
-    for _name, upper_bound_m in _RANGE_BUCKETS_M:
-        if math.isinf(upper_bound_m):
-            widths.append(widths[-1] if widths else previous_bound_m)
-        else:
-            widths.append(upper_bound_m - previous_bound_m)
-        previous_bound_m = upper_bound_m
-    return tuple(widths)
-
-
-_RANGE_BUCKET_WIDTHS_M: Final[tuple[float, ...]] = _build_bucket_widths_m()
-
-
-def _range_bucket_width_m(range_m: float) -> float:
-    """Width of the `OP_D*` bucket `range_m` falls into."""
-    for index, (_name, upper_bound_m) in enumerate(_RANGE_BUCKETS_M):
-        if range_m <= upper_bound_m:
-            return _RANGE_BUCKET_WIDTHS_M[index]
-    return _RANGE_BUCKET_WIDTHS_M[-1]  # unreachable: last bound is inf
-
-
-def _naked_eye_uncertainty_m(range_m: float) -> float:
-    """Cross-range + down-range uncertainty implied by naked-eye's own
-    bearing/range quantisation, combined via `math.hypot`. See module
-    docstring."""
-    cross_range_m = range_m * math.sin(_HALF_CLOCK_BUCKET_RAD)
-    down_range_m = _range_bucket_width_m(range_m)
-    return math.hypot(cross_range_m, down_range_m)
-
 
 def uncertainty_radius_m(percept: Percept) -> float:
     """Perceived-position uncertainty for `percept`, source-derived. See
     module docstring."""
     if percept.source == SOURCE_NAKED_EYE_VISUAL_FILTERED:
-        return _naked_eye_uncertainty_m(percept.range_m)
+        return naked_eye_cluster_radius_m(percept.range_m)
     return SCOPE_UNCERTAINTY_M
 
 
@@ -242,20 +197,8 @@ def spatial_gate_radius_m(percept: Percept, contact: Contact, now_sim: float) ->
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
-    """Whether `percept` may be merged into `contact` -- the spatial gate,
-    the class-compatibility gate, and the presence-tier veto must all pass.
-    See module docstring."""
-    # STAGE 0 OF THE GROUP CONTACT MODEL -- DELETE THESE TWO LINES AT STAGE 2.
-    # `plans/group-contact-model/plan.md` removes this veto once perception
-    # clusters at its own resolution limit and emits one presence-tier report
-    # per cluster: that report *must* be allowed to fold onto its contact, and
-    # this veto would block exactly that. Interim only -- it trades an
-    # under-count for an over-count (twelve objects at 9 km become twelve
-    # contacts at twelve positions the channel cannot actually resolve), which
-    # is the better failure of the two but not the right answer.
-    if percept.classification_level <= SpecificityLevel.PRESENCE:
-        return False
-
+    """Whether `percept` may be merged into `contact` -- the spatial gate and
+    the class-compatibility gate must both pass. See module docstring."""
     if class_compatibility(percept.classification_raw, contact.last_class_raw) == (
         "incompatible"
     ):

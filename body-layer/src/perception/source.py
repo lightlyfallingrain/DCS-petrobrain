@@ -204,6 +204,16 @@ class Observation:
     provenance: str
     classification_level: int = _CLASSIFICATION_LEVEL_CLASS_DEFAULT
     continues_observation_id: str | None = None
+    #: `plans/group-contact-model/plan.md` Stage 2 -- the ED count-vocabulary
+    #: bucket name (`perception.clustering.count_bucket_for`) this
+    #: observation's own cluster resolved to, or `None` for any source that
+    #: does not (yet) cluster and so carries no count evidence at all (the
+    #: scope/hybrid channel; `belief.contacts.Contact.record` leaves
+    #: `cardinality` untouched -- a hold, not a claim of exactly one -- when
+    #: this is `None`). Perceived metadata, same footing as `classification_
+    #: level`: a channel's own honest statement of how many real objects one
+    #: report stands for, not a truth field.
+    count_bucket: str | None = None
 
 
 @runtime_checkable

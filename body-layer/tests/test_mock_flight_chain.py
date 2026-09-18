@@ -206,82 +206,93 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         final_t_sim = frames[-1]["telemetry"]["dcs_model_time_s"]
         assert runner.last_t_sim == final_t_sim
 
-        # 20 Hybrid observations (object 101, every poll) + 36 naked-eye
-        # observations -- every one of those 56 percepts must land in
-        # exactly two contacts below, not a duplicate-contact runaway across
-        # so many consecutive polls.
+        # `plans/group-contact-model/plan.md` Stage 2 changes both the
+        # observation count and the contact count here -- naked-eye now
+        # emits one Observation per *cluster*, not per object, and objects
+        # 101 (truck, x=1400) and 102 (infantry, x=1800) are only 400 m
+        # apart in a straight line from ownship. Re-run by hand (not
+        # guessed, per this test file's own convention) after wiring
+        # clustering, poll by poll:
         #
-        # Was 53 before the 2026-09-17 screenshot calibration of
-        # `visibility.py`'s angular-radius constants. Object 102 is
-        # "Infantry AK" parked at x=1800: the old `lowres` threshold put
-        # infantry at 1674 m, so it stayed invisible until ownship closed
-        # inside that, while the calibrated threshold reaches 2400 m
-        # (1.8 / 0.003 * 4.0) and picks it up from the first poll instead.
-        # Three extra polls, three extra observations, same two contacts.
+        # - Polls 0-13 (range to 102 >= ~900 m): both objects' cluster radii
+        #   (`perception.clustering.naked_eye_cluster_radius_m`, which grows
+        #   with range) exceed their 400 m real separation, so naked-eye
+        #   reports ONE presence-tier, OP_2UNITS cluster per poll -- 14
+        #   naked-eye observations, one per poll.
+        # - Polls 14-15 (range to 102 ~900-955 m): the cluster radius has
+        #   shrunk enough that clustering splits them into two singleton
+        #   clusters per poll -- one `Ural truck` (`hires`), one
+        #   `OP_GROUPSOMETHING` (`presence`) -- 2 naked-eye observations per
+        #   poll, 4 total.
+        # - Polls 16-19: object 101 (the truck) drops out of the naked-eye
+        #   channel entirely -- this is the cockpit occlusion mask already
+        #   documented above (x ~ 905 cutoff), unrelated to clustering. Only
+        #   the object-102 singleton cluster remains -- 1 naked-eye
+        #   observation per poll, 4 total.
         #
-        # Was 57 before the cockpit occlusion mask (`perception.
-        # cockpit_mask`, 2026-09-17). Object 101 now drops out of the
-        # *naked-eye* channel for the last few polls, which is the mask
-        # working rather than a regression: ownship cruises at 700 m toward
-        # a target at 500 m, so as the horizontal range closes the target's
-        # depression steepens past the co-pilot's measured 22 deg forward
-        # allowance -- 200 m of height difference exceeds 22 deg once the
-        # horizontal range drops below ~495 m, i.e. once ownship passes
-        # x ~ 905 of its 0 -> 1140 run. It goes under the nose, exactly as
-        # it would in the real cockpit.
+        # Naked-eye: 14 + 4 + 4 = 22. Hybrid: 20 (object 101, every poll,
+        # unaffected -- Hybrid never clusters and has no elevation gate).
+        # 22 + 20 = 42.
         #
-        # The Hybrid channel is deliberately unaffected: the mask gates
-        # `perception.visibility` (naked-eye) only, and Hybrid's own
-        # forward-hemisphere filter in `perception.association` has no
-        # elevation term. Object 102 (further out at x=1800) never closes
-        # enough to be occluded and keeps all 17.
-        assert len(runner.store.observations) == 56
+        # **The split at poll 14 does not produce a second contact.** The
+        # truck singleton is the majority-overlap continuation of the merged
+        # cluster (`_build_observations`' majority-owner check); the
+        # infantry singleton gets `continues_observation_id=None` and is
+        # offered to the ordinary spatial/class gate as a fresh report --
+        # which still folds it onto the same contact.
+        # `association_over_time.spatial_gate_radius_m` sums *both* sides'
+        # uncertainty plus a growth term (the BL-2.6 symmetric-budgeting
+        # fix), which is wider than clustering's own max-of-both-sides
+        # radius by construction -- a 400 m real separation that just
+        # barely split two clusters apart still comfortably passes the
+        # coarser belief gate. This is not a bug: the naked-eye channel
+        # genuinely cannot rule out "one object, not two" at this range even
+        # once its own cluster boundary has crossed, and `belief.
+        # cardinality`'s fold (hold, then contradict-and-hedge once the
+        # split report arrives) is exactly the mechanism built to carry that
+        # honest ambiguity forward rather than force a premature split.
+        # `plans/group-contact-model/plan.md`'s own Risks section names this
+        # exact tension (clustering's radius vs. the gate's radius
+        # disagreeing at a boundary) as Stage 3 calibration work, not
+        # something to force here.
+        assert len(runner.store.observations) == 42
 
         contacts = get_contacts(runner.store, final_t_sim)
 
-        # Two contacts, as there are two real objects. This was ONE contact
-        # between the 2026-09-17 vision calibration and the presence-tier merge
-        # veto: the wider detection envelope made object 102 first visible at a
-        # range where the naked-eye channel is structurally class-blind
-        # (everything is OP_GROUPSOMETHING), so the class gate could not
-        # discriminate and the honestly-wide spatial gate merged two genuinely
-        # different objects. See plans/contact-merge-undercount/debug.md.
-        assert len(contacts) == 2
+        # ONE contact, not two -- see the derivation above. The two real
+        # objects never separate into distinct contacts across this fixture:
+        # they are within the naked-eye channel's own honest resolution
+        # ambiguity (cluster radius) for most of the flight, and even once
+        # clustering itself splits them, the belief-layer spatial gate's
+        # wider, symmetric-budgeted radius still cannot rule out "same
+        # object" at the range this fixture ends at (~690 m, 400 m real
+        # separation). This is the plan's own documented Stage 3 boundary
+        # case, not a regression of the false-merge defect the presence-tier
+        # veto used to guard against -- the difference is that the contact's
+        # `cardinality` (not asserted here -- `tools.py` does not surface it
+        # until Stage 4) now honestly hedges between one and two occupants
+        # instead of confidently asserting either.
+        assert len(contacts) == 1
 
-        # One founding CONTACT_DETECTED per real object -- no spurious
-        # CONTACT_LOST/REACQUIRED (both stay continuously visible once
-        # acquired) and no CONTACT_CLASSIFICATION_CHANGED on object 101 (see
-        # the module docstring's "lower level holds" note).
-        assert [event.kind for event in runner.store.events] == [
-            "CONTACT_DETECTED",
-            "CONTACT_DETECTED",
-        ]
+        # One founding CONTACT_DETECTED -- no spurious CONTACT_LOST/
+        # REACQUIRED (continuously visible once acquired) and no
+        # CONTACT_CLASSIFICATION_CHANGED (see the module docstring's "lower
+        # level holds" note -- unchanged by clustering, since Hybrid's
+        # frame-0 TYPE-level percept still establishes the contact first).
+        assert [event.kind for event in runner.store.events] == ["CONTACT_DETECTED"]
 
-        truck = next(
-            c for c in contacts if c["facts"]["classification"]["value"] == "Ural truck"
-        )
-        assert truck["facts"]["classification"]["level"] == "type"
-        assert truck["facts"]["certainty"] == "observed"
-        assert sorted(truck["facts"]["sources"]) == [
+        contact = contacts[0]
+        assert contact["facts"]["classification"]["value"] == "Ural truck"
+        assert contact["facts"]["classification"]["level"] == "type"
+        assert contact["facts"]["certainty"] == "observed"
+        assert sorted(contact["facts"]["sources"]) == [
             "naked_eye_visual_filtered",
             "petrovich_detection_associated",
         ]
 
-        infantry = next(
-            c for c in contacts if c["facts"]["classification"]["value"] != "Ural truck"
-        )
-        # Presence, not class -- and that is the calibrated behaviour, not a
-        # shortfall. Object 102 is infantry (1.8 m), whose class threshold is
-        # 1.8 / 0.014 * 4 = 514 m since the 2026-09-17 calibration; ownship
-        # ends the fixture ~690 m away, so it never closes enough to resolve a
-        # class. Before that calibration the threshold was 900 m and this
-        # asserted OP_INFANTRY at class level.
-        assert infantry["facts"]["classification"]["level"] == "presence"
-        assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
-
-        described = describe_contact(runner.store, truck["facts"]["id"], final_t_sim)
+        described = describe_contact(runner.store, contact["facts"]["id"], final_t_sim)
         assert described is not None
-        assert described["facts"]["id"] == truck["facts"]["id"]
+        assert described["facts"]["id"] == contact["facts"]["id"]
     finally:
         server.stop()
         world_model_conn.close()
