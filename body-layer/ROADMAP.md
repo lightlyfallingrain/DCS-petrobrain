@@ -309,54 +309,52 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   formula, not from measurement. All targets were static, and movement is a strong real detection
   cue this does not model.
 
-- [ ] **Group contacts: cardinality and composition as refinable beliefs.** Raised 2026-09-18 after
-  the first sortie with Petrovich speaking. **This supersedes the narrower "false contact merge"
-  defect** previously recorded here — the merge is not the bug, the frozen structureless result is.
+- [~] **Group contacts: cardinality and composition as refinable beliefs.** **Interim fix merged
+  2026-09-18 (Stage 0); the model itself is planned and not started.** Plan:
+  `plans/group-contact-model/plan.md`. Diagnosis: `plans/contact-merge-undercount/debug.md`.
 
-  **Observed live:** the twelve-unit calibration complex produced roughly *five* contacts, and they
-  never separated as the aircraft closed to 500 m. Log, condensed: `ground, 12 o'clock, 9 km` →
-  `unit at 12 o'clock, 3 km is SAM` → `armor, 11 o'clock, 2 km` → `truck, 11 o'clock, 2 km` →
-  `unit at 11 o'clock, 1 km is BM-21` → `infantry, 11 o'clock, 0.5 km`. Twelve real units, five
-  reported. User: *"We cannot merge 9 contacts into one, even if we initially only see one at that
-  location."*
+  **The reframe the plan rests on.** The defect and the feature have one cause, and it is not in
+  `belief/`: the pipeline emits one `Observation` per DCS `object_id`, then asks belief to guess
+  which observations are the same object. At 9 km that question is *unanswerable*. BL-2.6 widened
+  the gate, Stage 0 narrowed it, and neither can succeed, because the question is ill-posed at that
+  range. So a `Contact` becomes **a belief about the occupants of one resolution cluster**, not one
+  object — and the cluster radius is the channel's own honest limit
+  (`association_over_time._naked_eye_uncertainty_m`, already computed, already used by the spatial
+  gate). Model resolution and channel resolution become the same number *by construction* rather
+  than by a tunable that can drift, which is the no-omniscience invariant enforced structurally
+  instead of by discipline.
 
-  **The wanted behaviour** (user, 2026-09-18), a design target rather than a bug fix:
+  **Findings that made it cheaper than expected.** DCS's own Petrovich already reports bucketed
+  counts per clock direction (`OP_1UNIT` … `OP_MORETHAN15UNITS`) — the cardinality ladder does not
+  need inventing. Members need **no stable identity**: a member is a `(classification, count)`
+  claim matched across observations by lattice ancestry, and the "and something else" remainder is
+  *derived* (`cardinality.lo − Σ member.count.lo`), never stored. And `fold_classification`
+  generalises to per-member folds, so composition adds matching and delegation rather than new
+  fusion logic.
 
-  > "there is something" → "oh, it's many somethings" i.e. group → "I can identify 3 tanks and
-  > there's something else" → "3 tanks and maybe ifvs" → "not ifvs, but shilka and two mobile
-  > rocket artillery" → "tanks are T72" → "3 T-72, 1 BMP-2, 2 GRAD"
+  **Stages** (each independently mergeable, suite green):
+  0. ✅ presence-tier merge veto — *merged, interim, two lines with a marked removal point*
+  1. `belief/cardinality.py`, mechanism only — **no behaviour change**, merge criterion is that the
+     existing suite passes untouched
+  2. perception clustering + count emission + veto removal — **the stage that fixes the defect**
+  3. calibration, separate commit — **needs a live sortie**, expect it to land after one
+  4. surface it: `facts["cardinality"]`, console, speech's count clause,
+     `CONTACT_CARDINALITY_CHANGED`, and fixing count arithmetic that currently conflates contact
+     records with unit counts — **the first stage that changes what is heard**
+  5. composition — "three of them tanks … and something else"; also suppresses
+     `enrichment.motion_when_seen` for plural cardinality, since a cluster's two most recent
+     implied positions can come from different vehicles and fabricate a heading
+  6. split/merge hardening and docs; may fold into Stage 2
 
-  Four things that progression requires, none of which the data model has today:
+  **Settled by the plan:** no structural split (clusters re-home by majority object overlap, the id
+  follows the majority so history/attention/`PendingIntent` stay pointing at a live contact);
+  merging falls out with zero new code; stable per-member identity should **never** be built, since
+  it needs a within-cluster association the channel cannot support. The tool freeze is **not**
+  broken — it pins names, and the new `facts` keys are additively free.
 
-  1. **Cardinality is a belief that refines**, not a constant 1 fixed at first sighting: unknown →
-     "several" → a bounded estimate → exact.
-  2. **Composition is a multiset of sub-claims at mixed specificity** — "3 tanks and something
-     else" is three `class`-level members plus an unresolved remainder, inside *one* contact.
-  3. **Contradiction is expected** — "not ifvs, but shilka and..." retracts a previous claim about
-     part of the group. `belief/classification.py` already models exactly this for a single contact
-     (specificity lattice, contradiction collapses to the deepest common ancestor, re-promotion
-     lockout). The group case may be that same mechanism lifted to cardinality and composition;
-     worth checking before inventing a parallel one.
-  4. **Refinement is per-member** — "tanks are T72" sharpens one subgroup while the rest stays
-     coarse.
-
-  **Why merging at range is right, not wrong.** At 9 km the naked-eye channel genuinely cannot
-  resolve twelve vehicles into twelve positions — reporting twelve contacts would be the
-  omniscience this project exists to prevent. "Something is there, and it is several things" is the
-  honest claim. The defect is that today the honest coarse claim hardens into a permanent wrong
-  one.
-
-  **Danger to design around:** this gate has been fixed twice, in opposite directions. BL-2.6
-  widened it symmetrically to stop one object becoming 8-20 contacts; that widening is what now
-  lets twelve objects become one. A naive tightening resurrects the earlier bug. Both failures are
-  live-observed in this project's history, and any design must keep both regression suites passing.
-
-  **Status:** root-cause analysis in progress on `fix/contact-merge-undercount` (why five and not
-  twelve, whether `object_id` correlation was consulted at all, whether an `object_id` *mismatch*
-  should hard-veto a merge). The group model itself needs an Architect pass and the user's
-  go-ahead — it touches `Contact`, the classification lattice, and every surface that renders a
-  contact. `tests/test_mock_flight_chain.py::test_two_real_objects_stay_two_contacts` remains a
-  strict xfail holding the two-object case.
+  **Open for the user before implementation:** scope (stop after Stage 4?), attention inheritance
+  on split, whether a split gets its own event kind, over-subscription retraction order, and
+  whether `plans/body-layer/plan.md` §3.6 may be amended with a dated note.
 
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
