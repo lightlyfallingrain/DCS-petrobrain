@@ -352,9 +352,12 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   it needs a within-cluster association the channel cannot support. The tool freeze is **not**
   broken — it pins names, and the new `facts` keys are additively free.
 
-  **Open for the user before implementation:** scope (stop after Stage 4?), attention inheritance
-  on split, whether a split gets its own event kind, over-subscription retraction order, and
-  whether `plans/body-layer/plan.md` §3.6 may be amended with a dated note.
+  **Settled by the user 2026-09-18**, all matching the plan's recommendations: build Stages 1-4 and
+  decide on Stage 5 afterwards with sorties behind it; attention does **not** survive a split (only
+  the majority child keeps the mark — a watch is on a thing the crew picked, and a newly-separated
+  thing was never picked); **no** `CONTACT_SPLIT` event kind (observable as a cardinality narrowing
+  plus a `CONTACT_DETECTED`); over-subscription retracts lowest-confidence claims first; and
+  `plans/body-layer/plan.md` §3.6 gets a dated amendment rather than a rewrite.
 
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").

@@ -423,24 +423,22 @@ rather than a data-model requirement — a simplification of that milestone, not
 
 ---
 
-### Decisions Requiring User Input
+### Settled Decisions (user, 2026-09-18)
 
-1. **Does the majority child inherit the parent's attention mark on a split?** I recommend **no** —
-   a `watch` is on a thing the crew deliberately picked, and a newly-separated thing was never
-   picked. But "I'm watching that group" arguably covers everything that comes out of it, and that
-   reading is defensible. This is a crew-behaviour judgment, not an architecture one.
-2. **Should a split emit its own `CONTACT_SPLIT` event kind?** I recommend **no** — it is already
-   observable as a cardinality narrowing on the parent plus a `CONTACT_DETECTED` on the child, and
-   fewer event kinds is better. But if the crew should *say* "they're separating — two groups now",
-   that wants its own kind rather than being inferred by a consumer.
-3. **Over-subscription retraction order: lowest confidence first (my recommendation) or oldest
-   first?** Confidence-ordered matches the lattice's existing "floor to the lower confidence"
-   posture and matches the user's example, where the newer reading wins. Oldest-first is more
-   conservative. Local and reversible, but it is directly visible in what Petrovich says.
-4. **`plans/body-layer/plan.md` §3.6 is an approved architecture doc whose `contact_group` sketch
-   this plan reinterprets** (from a container with `member_ids` to a perception-limit aggregate with
-   counts). I propose amending §3.6 with a dated note rather than rewriting it. Confirm before I or
-   the Implementer touch that file.
-5. **Stop after Stage 4?** Stages 1–4 deliver cardinality and are a coherent, shippable whole.
-   Stage 5 (composition) is worth its cost, but it is a genuine additional commitment and the user
-   may prefer to fly Stages 1–4 first and decide with real sorties behind them.
+All five resolved, each matching this plan's own recommendation.
+
+1. **Scope: implement Stages 1-4, then decide on Stage 5 with sorties behind it.** Cardinality
+   first; composition is a separate commitment made later, on evidence. Note Stage 3 needs a live
+   flight, so the run is 1 → 2 → sortie → 3 → 4.
+2. **Attention does not survive a split.** Only the majority child keeps the parent's mark: a watch
+   is on a thing the crew deliberately picked, and a newly-separated thing was never picked.
+3. **No `CONTACT_SPLIT` event kind.** A split stays observable as a cardinality narrowing on the
+   parent plus a `CONTACT_DETECTED` on the child. Revisit only if Petrovich should actually *say*
+   "they're separating" — that would want its own kind rather than inference by a consumer.
+4. **Over-subscription retracts lowest-confidence claims first**, matching the lattice's existing
+   "floor to the lower confidence" posture and the user's own example, where the newer reading
+   ("not ifvs, but shilka") wins.
+5. **`plans/body-layer/plan.md` §3.6 may be amended with a dated note**, not rewritten — its
+   `contact_group` sketch is reinterpreted here (container with `member_ids` → perception-limit
+   aggregate with counts) and the original reasoning is worth preserving alongside the change.
+
