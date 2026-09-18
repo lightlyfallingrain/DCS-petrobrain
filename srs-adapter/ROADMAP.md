@@ -38,12 +38,26 @@ body-side view and the slice numbering both files share.
     playback failure being logged and swallowed rather than crashing the chain.
   - [x] **Stage 4 — body-layer wiring.** `SrsAdapterClient` + `CrewConsole.speech_client` +
     `logger.py --speech-audio --srs-adapter-url`.
-  - [ ] **Stage 5 — live Windows verification (needs the Windows box; does NOT need DCS).** Run
-    the collector standalone on Windows with `srs-adapter --target aircraft-layer` on the Mac and
-    confirm three things nothing so far can confirm: that `winsound.PlaySound` actually plays;
-    that urgent preemption genuinely interrupts in-flight audio (the `SND_PURGE`/stop-then-play
-    choice is this slice's main unverified bet); and whether the audio competes or ducks against
-    other sound on the box.
+  - [x] **Stage 5 — live Windows verification. Passed 2026-09-18**, after one real failure and a
+    fix.
+    - **Playback works.** `winsound` plays audio on the Windows box, cross-machine, end to end.
+    - **Urgent preemption failed first time round.** A long routine line played stubbornly to its
+      end, *then* the urgent line was heard, though the queue behind it was correctly discarded.
+      Cause — and it is the exact bet the plan flagged: synchronous
+      `PlaySound(path, SND_FILENAME)` blocks *inside* the Win32 call, and `SND_PURGE` from another
+      thread cannot reach it, because Windows only purges sounds started asynchronously. The
+      queue-clear appeared to work because it is pure Python and never touches the audio device,
+      which is why the failure presented as partial rather than total.
+    - **Fixed and re-tested green** (`fix/audio-urgent-interrupt`): the player starts the sound
+      with `SND_ASYNC` and blocks on an interruptible `threading.Event` for the file's own duration
+      (parsed from the WAV header) plus a margin; `stop` purges *and* sets that event. An urgent
+      line now cuts a routine one off mid-word. The change stayed inside `_WinsoundPlayer` — no
+      queue logic moved, which is the plan's decision to isolate the interrupt mechanism in one
+      named function paying off exactly as intended.
+    - **Still unobserved:** whether the audio ducks or competes against other sound on the box.
+      Deferred rather than chased, because the SPU-8 volume argument below makes it largely an
+      SRS-path question anyway.
+
   - [ ] **Stage 6 — live sortie acceptance (needs DCS).** Full `--crew-text --speech-audio` during
     a real flight. Judges what only a human can: whether ~0.6-0.8 s synthesis latency reads as
     crew-like rather than laggy, whether several callouts arriving in one poll queue acceptably,
@@ -58,6 +72,13 @@ body-side view and the slice numbering both files share.
   which correct the main body**) establishes that stock SRS declares an Intercom radio for the
   Mi-24P at 100.0 MHz modulation 2, and that `--unitId` exists specifically to allow intercom over
   external audio.
+
+  **The SPU-8 volume knob is a second, independent reason to want this** (user, 2026-09-18): on the
+  intercom channel, Petrovich's level becomes adjustable from the cockpit with the control that
+  already exists for exactly that purpose — no separate mixer, no restart, and it works the way a
+  crew intercom is supposed to. Local playback can never offer that; its level is whatever the
+  Windows mixer says. This also largely answers the open ducking question for the local path: not
+  worth chasing, because the SRS path solves the same problem better.
 
   **ICS is the only acceptable target** (user constraint, 2026-09-17): the player must stay on the
   external mission frequency, and the Mi-24P's SPU-8 selects one audio source at a time, so a
@@ -146,9 +167,15 @@ body-side view and the slice numbering both files share.
 
 ## Backlog
 
-- [ ] **Voice character.** Currently a generic English voice. See `body-layer/ROADMAP.md`'s
-  backlog entry for the full note — auditioning candidates costs one `--target local --voice <name>`
-  command each.
+- [ ] **Voice character — accent *and* prosody.** Currently a generic English voice. Two distinct
+  problems, and the second was not obvious until it was heard aloud (user, 2026-09-18): no
+  Russian-accented English voice exists in macOS `say`, **and the delivery is monotonous** — flat
+  pitch and even stress regardless of whether the line is a routine contact report or "break
+  right". Out of scope while the pipeline was being built; worth separating when picked up, since
+  prosody may matter more for believability than accent does, and the two have different fixes
+  (a different engine or voice for accent; SSML, per-line rate/pitch, or an urgency-aware
+  template for prosody). Auditioning candidates costs one `--target local --voice <name>` command
+  each. See `body-layer/ROADMAP.md`'s backlog entry.
 - [ ] **Process supervision.** This is a third long-running process alongside body-layer's
   `logger.py` and aircraft-layer's collector, with no auto-start or health check — the same
   informal, manually-launched posture the other two already have. Worth revisiting once three
