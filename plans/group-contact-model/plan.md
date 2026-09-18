@@ -592,7 +592,8 @@ console.) `speech.py`'s count clause and the `OP_GROUPSOMETHING` fix — **singu
 byte-identical**, which is the regression guard for every existing speech test;
 `CONTACT_CARDINALITY_CHANGED`; and fixing the count arithmetic the survey flagged
 (`get_situation`'s `contact_counts`, `get_stats`, and `escalation._situational_header`'s bare
-`len(store.contacts)`) to distinguish contact records from estimated units.
+`len(store.contacts)`) to distinguish contact records from estimated units. **Full design: "Stage
+4b design — speech and events" below.**
 
 **Stage 5 — composition.** `belief/composition.py`, `Observation.composition`, per-member folding,
 the over-subscription retraction, `facts["composition"]`, and speech's "three of them tanks … and
@@ -1368,3 +1369,384 @@ All five resolved, each matching this plan's own recommendation.
    `contact_group` sketch is reinterpreted here (container with `member_ids` → perception-limit
    aggregate with counts) and the original reasoning is worth preserving alongside the change.
 
+
+---
+
+### Stage 4b design — speech and events (2026-09-19)
+
+Expands the Implementation Plan's one-paragraph Stage 4b sketch into an implementable design,
+against "Settled: how a group is spoken" above, which is binding and not re-litigated here.
+Everything below reads `Contact.cardinality`/`Contact.classification` — the aggregate beliefs
+Stages 1-4a already produce. No per-member breakdown exists yet (that is Stage 5's `composition`),
+so this design can only ever say *one* count about *one* class — "several armor" — never "tanks
+and IFVs." That is the correct shape for what 4b has data for, not a shortfall against Stage 5.
+
+**Deliberate scope cut, stated up front so it is not rediscovered as a gap:** *this stage never
+speaks an exact number.* Settled decision 2 ("precision only when available and useful") describes
+a future capability — a caller that has an actual question in hand ("how many targets remain") and
+therefore knows precision is wanted. No such caller exists yet; `render_contact_report` and the
+lifecycle templates are passive callouts, not answers to a question. Building a "sometimes exact"
+branch here with nothing to drive it would be inventing the trigger condition rather than
+implementing one, and would risk exactly the vague/precise mismatch settled decision 3 forbids by
+accident. **The vocabulary below is designed so every rung stays vague on purpose, and it is
+structurally impossible for it to misfire into a precise count paired with a vague class — because
+it never emits a precise count at all.** Precision is Stage 5's to add, once there is a per-member
+count to be precise *about* and a caller that asked. This is the one place this stage's scope was
+checked against growing past "make five stages of invisible work audible," per the plan's own
+effort/value framing — it does not.
+
+#### 1. The `CountBucket` → phrase ladder, and where it applies
+
+`_cardinality_phrase(lo: int, hi: float) -> str | None`, in `belief/speech.py`:
+
+| held interval | phrase |
+|---|---|
+| `(1, 1)` — `OP_1UNIT`, or any refinement that lands back on exactly one | `None` (no clause at all — see §2) |
+| `lo >= 16` — `OP_MORETHAN15UNITS`, and any wider hull whose floor is that high | `"many"` |
+| `lo == 4 and hi <= 5` — `OP_TO5UNITS` exactly, or a narrower refinement inside it | `"a handful"` |
+| everything else plural — `OP_2UNITS`, `OP_3UNITS`, `OP_5TO7UNITS`, `OP_8TO10UNITS`, `OP_ABOUT15UNITS`, `OP_GROUP`, and any fold-derived interval (an intersection or a contradiction hull) that matches none of the rows above | `"several"` |
+
+This is deliberately **not** a lookup table keyed on `CountBucket.name`. A folded interval need not
+equal any one named bucket (`_cardinality_facts` already documents this for `lo`/`hi`, and
+`fold_cardinality`'s intersection/hull cases are exactly what produces it) — so the function reads
+off `lo`/`hi` magnitude directly, the same way `_cardinality_facts` itself does, rather than trying
+to re-derive a bucket name from an interval that might not have one. The two named exceptions
+(`"a handful"`, `"many"`) are picked out by the exact numeric ranges ED's own bucket boundaries
+describe; everything else — including a not-quite-matching fold result — collapses to the safe
+default `"several"`, which is never wrong to say about any plural count.
+
+**Sayable at every specificity level, by construction.** Because the phrase is always a hedge and
+never a number, it cannot overclaim regardless of whether `Contact.classification` sits at
+`presence`, `class`, or `type` — settled decision 3's pairing rule ("never pair a precise count
+with a vague class, or a vague count with a precise type") is satisfied trivially, since one side of
+that pairing never happens here. A `type`-level contact with a plural cardinality is a real,
+reachable case even before Stage 5 (a naked-eye cluster whose members are all individually
+ground-truth-identified to the same type still clusters and still carries a real member count,
+per `naked_eye_source.py`'s aggregate-label rule) — it speaks `"several T-72"`, not `"3 T-72's"`.
+That grammatical roughness (no plural inflection on a raw DCS type string) is intentional: settled
+decision 5 keeps wording fixes like this out of 4b, and inventing a pluralization rule for arbitrary
+type strings is exactly that class of fix.
+
+#### 2. The regression guard: singular output is a different code path, not a conditional inside one
+
+`facts["cardinality"]` is **absent** (not present, not `None`) whenever `Contact.cardinality` is
+still the lattice root `UNKNOWN` — `_cardinality_facts` already guarantees this. Every contact is
+seeded with a real claim at founding (`OP_1UNIT` when its founding percept carries no count
+evidence), so in practice this fact is present on every contact `_contact_report_text` ever sees.
+
+`_contact_report_text` gains one guard at its top, and nothing else about its existing body changes:
+
+```python
+def _contact_report_text(facts: dict[str, object]) -> str:
+    classification = facts["classification"]
+    assert isinstance(classification, dict)
+    cardinality = facts.get("cardinality")
+    phrase = None
+    if isinstance(cardinality, dict):
+        phrase = _cardinality_phrase(cardinality["lo"], cardinality["hi"])
+    if phrase is None:
+        text = _unit_type_display(classification.get("value"), classification.get("level"))
+    else:
+        text = f"{phrase} {_plural_unit_type_display(classification.get('value'), classification.get('level'))}"
+    # ... everything from here down (relative_now clause, semantic fragment, trailing ".") is
+    # byte-identical to the current function -- unchanged.
+```
+
+`phrase is None` covers both routes back to the old text: no `"cardinality"` fact at all, and a
+present fact whose interval is `(1, 1)`. **On that path the function calls the exact same
+`_unit_type_display` it calls today, with the exact same arguments, and executes no new code.**
+This is the "early return" the task asked for, phrased as a branch rather than a literal early
+`return` only because the trailing clock/range/semantic logic is shared by both branches and must
+not be duplicated — duplicating it would itself be a regression risk (two copies of the
+range-rounding/semantic-fragment logic to keep in sync). The new `_plural_unit_type_display`
+function is never called, and `_cardinality_phrase` is never called with anything that could change
+its result, on the singular path — so every existing `test_speech.py` assertion is the guard, and
+the implementer's job is to run the full existing suite unmodified first and confirm zero diffs
+before writing a single new plural-case test.
+
+`_plural_unit_type_display` is `_unit_type_display`'s plural sibling, used only when `phrase` is not
+`None`:
+
+```python
+_OP_CLASS_DISPLAY_PLURAL: Final[dict[str, str]] = {
+    "OP_ARMORED": "armor",      # already a mass noun -- singular form doubles as plural
+    "OP_TRUCK": "trucks",
+    "OP_INFANTRY": "infantry",  # mass noun
+    "OP_SRSAM": "SAMs",
+    "OP_MRSAM": "SAMs",
+    "OP_SPAAG": "AAA",          # mass/acronym -- unchanged
+    "OP_ZU23": "AAA",
+    "OP_SHIP": "ships",
+}
+
+def _plural_unit_type_display(value: object, level: object) -> str:
+    if level == "type" and isinstance(value, str) and value:
+        return value  # unpluralized on purpose -- see Sec 1's "sayable at every level" note
+    if level == "class" and isinstance(value, str) and value:
+        return _OP_CLASS_DISPLAY_PLURAL.get(value, value)
+    return "contacts"  # presence and unknown/fallback levels both collapse here
+```
+
+The `presence`/fallback branch returning `"contacts"` is what produces the user's own worked
+example verbatim — `"several contacts, eleven o'clock, two kilometres."` — and is a deliberate
+divergence from `_unit_type_display`'s singular-case `"ground"`/`"contact"` split: a bare "ground" or
+"contact" doesn't pluralize sensibly, and "several ground" reads wrong where "several contacts"
+reads right. This divergence is confined to the plural path only; the singular path's `"ground"`
+wording is untouched, per §2's guard.
+
+#### 3. Where the clause attaches
+
+`_contact_report_text` is shared by:
+
+- `render_contact_report` (player-initiated `describe_contact`) — gains the clause.
+- `_render_lifecycle_text`'s `CONTACT_DETECTED`/`CONTACT_REACQUIRED` branches — gain the clause,
+  automatically, since both call `_contact_report_text` directly.
+- `render_watch_nearest_readback` — gains the clause for free, same reason (it calls
+  `_contact_report_text(facts)` and prepends `"Watching "`).
+
+**Does not gain the clause:** `_render_lifecycle_text`'s `CONTACT_CLASSIFICATION_CHANGED` branch.
+It builds its own line (`"unit at {clock} o'clock, {range} km is {unit type}."`) directly from
+`_unit_type_display`, not through `_contact_report_text` — so it is untouched by this stage by
+construction, not by an added exclusion. Leaving it untouched is also the right call on its own
+merits: settled decision 4 says a bare cardinality move is not worth interrupting for, and a
+classification-change callout that also started speaking a count every time would be volunteering
+exactly that kind of unrequested cardinality chatter on an event about something else entirely.
+`render_readback`, `render_scan_readback`, `render_cancel_readback` never touch a contact's facts
+at all and are unaffected.
+
+#### 4. The `OP_GROUPSOMETHING` display-table entry: dead code, not a live collision
+
+Checked against `_unit_type_display`'s actual branch order before writing a fix: `level == "class"`
+is tested *before* `level == "presence"`, and `classification.py`'s `_op_class_of` explicitly
+excludes `object_model.DEFAULT_OP_CLASS` (`"OP_GROUPSOMETHING"`, also `classification.
+PRESENCE_CLASS` — the same string) from ever being returned as a class-level value
+(`if profile.op_class == object_model.DEFAULT_OP_CLASS: return None`). So
+`_OP_CLASS_DISPLAY["OP_GROUPSOMETHING"] = "group"` is **unreachable today**, at both levels: a
+presence-level classification is caught by the `level == "presence"` branch before the dict is ever
+consulted, and a class-level classification can never hold the value `"OP_GROUPSOMETHING"` in the
+first place. The plan's original framing (`OP_GROUPSOMETHING` doubling as a class-level "group"
+token) does not hold up against the actual code path — there is no live mis-statement to fix by
+disambiguating a collision, only a dead table entry to delete.
+
+**Fix: remove the `"OP_GROUPSOMETHING": "group"` line from `_OP_CLASS_DISPLAY`.** Disambiguation of
+"something" vs. "a group of somethings" at presence level is now handled structurally, the way §2
+already does it: a singular presence-level contact still says `"ground"` (unchanged), a plural one
+says `"several contacts"` / `"a handful of contacts"` / `"many contacts"` via
+`_plural_unit_type_display`'s presence/fallback branch. No dict entry does this work; the cardinality
+belief does. `_OP_CLASS_DISPLAY_PLURAL` (§2) correspondingly has no `"OP_GROUPSOMETHING"` entry
+either, for the identical reason.
+
+#### 5. `CONTACT_CARDINALITY_CHANGED`
+
+**Event kind, added to `belief/events.py`:** `CONTACT_CARDINALITY_CHANGED: Final[EventKind] =
+"CONTACT_CARDINALITY_CHANGED"`, joining the closed `EventKind` literal. `Event` gains two more
+optional fields, mirroring `previous_classification`/`classification`'s existing shape exactly (both
+default `None`, populated only by this kind, every other kind's construction site untouched):
+`previous_cardinality: tuple[int, float] | None = None`, `cardinality: tuple[int, float] | None =
+None` (a `(lo, hi)` pair — no reason to invent a richer shape than the two numbers a console/debug
+reader needs, and `CardinalityBelief` itself isn't reused directly since `Event`'s other belief
+snapshots are already plain values, not the belief dataclasses).
+
+**Emit condition, in `belief/contacts.py`'s `ContactStore.tick`:** a new `cardinality_event`
+function in `events.py`, `classification_event`'s direct analogue:
+
+```python
+def cardinality_event(
+    previous: tuple[int, float] | None, current: tuple[int, float]
+) -> EventKind | None:
+    if previous is None:
+        return None  # first tick -- nothing to compare against yet, same posture as
+                      # classification_event's own first-tick case
+    if previous == current:
+        return None
+    return CONTACT_CARDINALITY_CHANGED
+```
+
+`Contact` gains `last_emitted_cardinality: tuple[int, float] | None = None`, `last_emitted_
+classification`'s direct sibling. In `tick()`, insert a fourth block with the **same shape** as the
+existing classification block, in this position: **lifecycle → classification → cardinality →
+attention** (extending the tick docstring's already-documented ordering sentence by one entry,
+inserted between classification and attention since both cardinality and classification are
+identity-shaped beliefs about what/how-many, and attention's own event should still see the
+contact's fully up-to-date facts first):
+
+```python
+current_cardinality = (contact.cardinality.lo, contact.cardinality.hi)
+cardinality_kind = cardinality_event(contact.last_emitted_cardinality, current_cardinality)
+if cardinality_kind is not None and self._cooldown_elapsed(
+    contact, CONTACT_CARDINALITY_CHANGED, now_sim
+):
+    self._events.append(
+        Event(
+            id=self._new_event_id(),
+            contact_id=contact.id,
+            kind=CONTACT_CARDINALITY_CHANGED,
+            t_sim=now_sim,
+            certainty=current_certainty,
+            previous_cardinality=contact.last_emitted_cardinality,
+            cardinality=current_cardinality,
+        )
+    )
+    contact.last_event_emitted_sim[CONTACT_CARDINALITY_CHANGED] = now_sim
+contact.last_emitted_cardinality = current_cardinality
+```
+
+**Cooldown: the existing `EVENT_COOLDOWN_S` / `_cooldown_elapsed` machinery, unchanged, keyed on this
+new kind like every other.** No second suppression mechanism, no new constant — this was already
+the plan's own stated intent ("existing `EVENT_COOLDOWN_S` machinery reused unchanged") and nothing
+in the design above needed a different one. Note `_cooldown_elapsed` only gates *emission*; the
+`last_emitted_cardinality` snapshot updates every tick regardless (identical to every other kind's
+snapshot), so a rapid string of narrow/widen/narrow transitions during one cooldown window is
+correctly collapsed to "whatever it is now" once the cooldown lifts, not replayed.
+
+**`route_event` gives it no template, joining `CONTACT_LOST`/`CONTACT_ATTENTION_CHANGED`'s existing
+pattern.** `_render_lifecycle_text` gains one more `if event.kind == CONTACT_CARDINALITY_CHANGED:
+return None` branch (or simply falls through to the function's existing final `return None`, since
+no other branch matches it — either is fine, the explicit branch is slightly more legible about
+intent and is what should be written). This is settled decision 4's own instruction ("should exist
+as an event but be spoken sparingly, if at all, until composition lands") applied via the module's
+existing no-template mechanism, not a new one: the event is real, logged, visible to `poll_events`/
+the debug console/a future brain, and simply never renders to speech. Per the existing convention a
+kind with no template is **never acknowledged** by `route_event` (it returns `None` before reaching
+`acknowledge_event`) — so an unspoken cardinality change stays in `unacknowledged_events` for
+whatever consumer eventually wants it (the debug console via `get_events`, or a future brain), the
+same posture `CONTACT_LOST` and `CONTACT_ATTENTION_CHANGED` already have.
+
+#### 6. The count-arithmetic fix
+
+Three sites conflate "how many `Contact` records exist" with "how many units we believe exist,"
+per the task's framing. One shared helper, added to `tools.py` next to `get_stats`:
+
+```python
+def estimated_units_lower_bound(store: ContactStore) -> int:
+    """The honest floor on total unit count -- sum of every contact's own
+    cardinality floor (`Contact.cardinality.lo`). Deliberately a lower bound,
+    not a point estimate: summing `.hi` is not meaningful when any contact
+    holds `OP_MORETHAN15UNITS` (`hi == math.inf`), and reporting a floor
+    rather than a guessed midpoint matches this stage's hedged-register
+    posture (Sec 1) -- "at least this many units," never a fabricated precise
+    total."""
+    return sum(contact.cardinality.lo for contact in store.contacts)
+```
+
+- **`get_stats`** (`tools.py`) gains one key: `{"observations": ..., "contacts": ..., "events": ...,
+  "estimated_units": estimated_units_lower_bound(store)}`. `contacts` keeps its existing meaning
+  (record count) unchanged — it is a real, useful number (how many distinct tracked things), just
+  not the same number as unit count, and both are now available side by side rather than the
+  ambiguous single figure standing in for both.
+- **`get_situation`** (`tools.py`) gains `facts["estimated_units"]` as a **new top-level key**, not
+  nested inside `facts["contact_counts"]`. Checked against the existing tests before choosing this
+  shape (`test_get_situation_counts_and_position_summary_with_no_contacts` and others assert
+  `facts["contact_counts"] == {"total": ..., "visible": ..., "watched": ...}` by full dict equality)
+  — nesting the new figure inside that dict would force every one of those exact-equality
+  assertions to change for a fact they are not testing. A sibling top-level key extends `facts`
+  additively, the same absent-not-null-elsewhere convention this module already uses for
+  `mission_phase`/`highest_attention_contact`, and leaves `contact_counts`'s existing shape and every
+  test asserting it untouched. The human `summary` sentence is **not** touched — wording changes to
+  the spoken/summary text are explicitly out of this stage's scope (settled decision 5), and this
+  fix is about the underlying data being right, not about how it reads.
+- **`escalation._situational_header`** gains `header["estimated_units"] = estimated_units_lower_
+  bound(store)`, always present (unlike `our_position`, which is gated on `enrichment` being
+  supplied — unit count needs no ownship data, so it is unconditional). `header["contact_counts"]`
+  keeps its existing bare-int shape (`len(store.contacts)`) rather than being reshaped into a dict —
+  same reasoning as `get_situation` above: `test_situational_header_omits_our_position_without_
+  enrichment` asserts `header["contact_counts"] == 0` directly, and reshaping that key for a fix
+  this task scoped as "add the missing figure," not "restructure the existing one," would be scope
+  creep against its own stated purpose.
+
+#### Test list
+
+The implementer must verify every name below against the actual suite before relying on it (per
+this task's own instruction) — names are given as precisely as this design can make them, but only
+`test_speech.py`'s existing test names (confirmed already, by reading the file directly for this
+design) and `test_tools.py`'s `test_get_stats_counts_observations_contacts_and_events`/
+`test_get_situation_counts_and_position_summary_with_no_contacts`/`test_get_situation_reports_
+priority_contact_over_watched_and_visible` (confirmed the same way) are certain to exist as named.
+The rest are new tests this stage adds and their exact names are the implementer's to choose,
+following each file's existing naming convention.
+
+**Regression guard — must pass unmodified, zero diffs, before any new test is written:**
+
+- The entire existing `test_speech.py` suite (21 tests, confirmed present by direct read for this
+  design): `test_render_readback_for_each_attention_level`,
+  `test_render_readback_template_is_readback`, `test_render_contact_report_returns_none_for_unknown_
+  contact`, `test_render_contact_report_follows_unit_type_clock_range_format`, `test_render_contact_
+  report_maps_op_class_to_display_word`, `test_render_contact_report_maps_default_op_class_to_
+  display_word`, `test_route_event_urgent_call_bypasses_the_gate`, `test_route_event_contact_
+  detected_renders_classification_with_no_id`, `test_route_event_contact_detected_includes_clock_
+  range_when_enriched`, `test_render_contact_report_includes_semantic_fragment_when_enriched`,
+  `test_route_event_auto_acknowledges_a_rendered_event`, `test_route_event_contact_lost_has_no_
+  template_and_is_not_acknowledged`, `test_route_event_contact_reacquired_renders_classification_
+  with_no_id`, `test_route_event_classification_changed_speaks_position_and_new_type`, `test_route_
+  event_classification_changed_omits_range_when_not_enriched`, `test_format_range_km_rounds_to_
+  nearest_half_km_no_trailing_zero`, `test_format_range_km_boundary_cases`, `test_round_enrichment_
+  fragment_rounds_trailing_distance`, `test_round_enrichment_fragment_passes_through_text_without_
+  distance`, `test_route_event_attention_changed_has_no_template_and_is_not_acknowledged`, `test_
+  route_event_returns_none_for_a_vanished_contact`. (Every fixture contact in these tests is founded
+  through the normal `record`/`from_percept` path and so already carries `cardinality == OP_1UNIT`
+  post-Stage-2 — confirm this is actually true of each fixture rather than assuming it; if any
+  fixture's cardinality is not `(1, 1)`, that test's expected text changes and is not a clean
+  regression-guard case.)
+
+**New, `test_speech.py` (Sec 1-4):**
+
+- A plural-cardinality contact report test per phrase row in Sec 1's table: default `"several"`
+  (e.g. cardinality `(2, 2)` or `(3, 3)`), `"a handful"` (`(4, 5)`), `"many"` (`lo >= 16`), and one
+  fold-derived non-named interval (e.g. an intersection like `(4, 7)`) asserting it falls back to
+  `"several"`.
+- One test per `_plural_unit_type_display` branch: presence level → `"contacts"`, a `class`-level
+  value present in `_OP_CLASS_DISPLAY_PLURAL` (e.g. `OP_TRUCK` → `"trucks"`), a `class`-level value
+  absent from the table (fallback to the raw value unchanged), and `type` level (raw string
+  unpluralized).
+- A test that `facts["cardinality"]` absent (root `UNKNOWN`) produces the old singular text —
+  the second half of §2's guard, alongside the `(1, 1)` case already covered by the unmodified
+  regression suite.
+- A `CONTACT_DETECTED`/`CONTACT_REACQUIRED` test with a plural-cardinality fixture, confirming the
+  clause reaches `route_event`'s lifecycle path, not just `render_contact_report` directly.
+- A `render_watch_nearest_readback` test with a plural-cardinality fixture, confirming §3's "for
+  free" claim.
+- A `CONTACT_CLASSIFICATION_CHANGED` test with a plural-cardinality fixture confirming its rendered
+  text is **unchanged** by this stage (still no count clause) — the negative case for §3's "does not
+  gain the clause."
+- `test_render_contact_report_maps_op_class_to_display_word`/`..._maps_default_op_class_to_display_
+  word` (both in the existing/regression list above) should be re-read once `_OP_CLASS_DISPLAY`'s
+  `"OP_GROUPSOMETHING"` entry is removed (§4) to confirm neither test actually exercised that entry
+  (i.e. neither test's fixture uses a class-level `"OP_GROUPSOMETHING"` value, which by §4's own
+  argument should be impossible to construct) — if one does, that is a finding about an existing
+  test building an unreachable state, not a reason to keep the dead entry.
+
+**New, `test_events.py` (§5):**
+
+- `test_first_tick_with_no_previous_cardinality_emits_nothing` — mirrors `test_first_tick_with_no_
+  previous_classification_emits_nothing`.
+- `test_cardinality_interval_change_is_contact_cardinality_changed` — a narrowing (refine) and a
+  widening (contradiction-hull) case, both firing the event; confirm `previous_cardinality`/
+  `cardinality` on the resulting `Event` match.
+- `test_unchanged_cardinality_emits_nothing` — mirrors `test_same_level_same_value_emits_nothing`.
+- Cooldown suppression for this kind is **not** a required new test — `test_contacts.py`'s existing
+  `test_event_cooldown_suppresses_rapid_reemission_but_not_after_it_elapses` already exercises
+  `_cooldown_elapsed` generically (confirmed present); `cardinality_event` reuses that same gate with
+  no kind-specific branching, so a second instance of the same test shape adds confirmation, not
+  coverage. Optional, implementer's call.
+
+**New, `test_speech.py`, for `route_event`'s no-template branch:**
+
+- `test_route_event_cardinality_changed_has_no_template_and_is_not_acknowledged` — mirrors
+  `test_route_event_contact_lost_has_no_template_and_is_not_acknowledged`/`test_route_event_
+  attention_changed_has_no_template_and_is_not_acknowledged`, both confirmed present.
+
+**Changed (breaks on purpose, per §6 — not a regression, the fix this stage makes):**
+
+- `test_get_stats_counts_observations_contacts_and_events` (confirmed present, `test_tools.py`) —
+  its `stats == {"observations": 1, "contacts": 1, "events": 1}` full-dict-equality assertion must
+  gain `"estimated_units": 1`.
+- `test_get_situation_counts_and_position_summary_with_no_contacts` (confirmed present) — add
+  `assert facts["estimated_units"] == 0` alongside the existing `contact_counts` assertion (which
+  stays unchanged, per §6).
+- `test_get_situation_reports_priority_contact_over_watched_and_visible` (confirmed present) — add
+  the equivalent `estimated_units` assertion for its two-contact fixture (value depends on each
+  fixture contact's actual founding cardinality — derive it from the fixture, don't guess).
+- `test_situational_header_omits_our_position_without_enrichment`/`test_situational_header_includes_
+  our_position_with_enrichment` (both confirmed present, `test_escalation.py`) — each gains an
+  `assert header["estimated_units"] == ...` assertion; `header["contact_counts"]`'s existing
+  assertions are unchanged.
