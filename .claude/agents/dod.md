@@ -84,7 +84,33 @@ A feature is done when **all** of the following are true:
 
 Write the passing DoD report to `plans/<featurename>/dod-check.md`, then stage it.
 
-Present the user with an **Acceptance Testing Plan**. The plan must be concrete and executable. Use this structure:
+**First, state the acceptance boundary explicitly: what this feature's fixtures structurally
+cannot reach.** Not more testing — an honest line, so a fixture pass is never mistaken for a
+flight pass.
+
+The worked example: the F10 command vocabulary passed DoD on fixtures (2026-09-16). The sortie the
+next day found two real defects. `Scan` was driving the 9K113 sight instead of this project's own
+naked-eye perception — the code did exactly what it said, against the wrong subsystem, which no
+fixture can detect. And `Cancel Task` spoke a raw task id aloud, which is only a defect when a
+human *hears* it; as text in a log it looks correct. Name that class of gap up front.
+
+**Live verification happens in bursts, and must not gate the work** (user, 2026-09-19). The user's
+DCS testing depends on access to the Windows box, so a milestone often should merge and the next
+one start while its live acceptance is still outstanding. That is deliberate, not sloppiness. So:
+
+- **Never block a merge on live acceptance** that the user cannot currently perform. Say what is
+  verified, say what is not, and let the work continue.
+- **Record the outstanding item in the subproject's live-acceptance debt list** (see
+  `body-layer/ROADMAP.md`'s "Live acceptance debt" section) rather than in a one-off note. That
+  list exists precisely because this caveat kept being logged and never tracked as accumulating
+  risk — it was added after a retro found exactly that.
+- **Distinguish deferred from waived.** A milestone whose plan deliberately scopes live testing out
+  is done. A milestone whose live test is merely *pending the next sortie* is debt, and belongs on
+  the list until a real flight clears it — naming which sortie cleared it.
+- **Batch what a single flight can clear.** Several outstanding items usually share one sortie;
+  saying so turns a scattered set of caveats into one actionable trip.
+
+Then present the user with an **Acceptance Testing Plan**. The plan must be concrete and executable. Use this structure:
 
 ```
 ### Acceptance Testing Plan: <Feature Name>

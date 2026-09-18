@@ -48,6 +48,23 @@ Mission Interpreter and Petrobrain Runtime modules do not exist yet — do not c
 ## Your Process
 
 1. **Get plan context** — run `/plan-summary <featurename>` for a quick overview (goal, modules, stages, open decisions), then read `plans/<featurename>/plan.md` in full
+1b. **Treat the plan's test-impact list as a hypothesis, not a checklist.** Before starting, confirm
+   every test the plan names actually exists, and `grep` the test suite for tests touching the
+   modules you are about to change to find ones the plan did not name. Report both kinds of
+   mismatch rather than silently working around them.
+
+   Worth a minute because it has been wrong in both directions. Stage 3b-i rev.2's design named
+   `test_two_real_objects_stay_two_contacts` as an xfail expected to flip — no such test existed;
+   it had been folded into another test days earlier by an unrelated commit, so the design was
+   written against an inventory that had already moved. In the same stage,
+   `body-layer/tests/test_naked_eye_source.py` needed **five** tests reworked and was not in the
+   list at all, because its same-bearing/same-altitude fixtures became a degenerate case under the
+   new predicate.
+
+   **The missing entry is the dangerous one.** A phantom test is loud — you look, you do not find
+   it. A file the plan forgot is silent: you finish the listed work, the suite passes, and nobody
+   notices that several fixtures stopped exercising what they were written for. That is how
+   coverage disappears without a failing build.
 2. **Build the minimal working version first** — get it compiling and logically correct before adding polish
 3. **Add or update tests** — cover core logic; do not test infrastructure or external dependencies directly
 4. **Run quality checks** — for each subproject touched (`world-model/`, `aircraft-layer/`, `body-layer/`), that subproject's own `ruff format --check`, `ruff check`, and `pytest -q` (per its own `CLAUDE.md` "Commands" section) must all pass before you consider the task done
