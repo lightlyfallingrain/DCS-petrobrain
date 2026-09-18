@@ -1,5 +1,6 @@
 """Synthetic reproduction of the live 2026-09-18 merge-undercount defect --
-`plans/contact-merge-undercount/debug.md`.
+`plans/contact-merge-undercount/debug.md` -- and its actual fix,
+`plans/group-contact-model/plan.md` Stage 2.
 
 A real sortie against a twelve-unit ground calibration complex (SA-3
 launcher + SA-3 TR radar, ZU-23 on a Ural, ZSU-23-4, BMP-1, BTR-70, T-72B,
@@ -9,55 +10,40 @@ narrated log showed several distinct real objects collapsing into one
 contact at first sighting and never separating even as the aircraft closed
 to 500 m.
 
-**Why this is a synthetic `ContactStore.ingest()` test, not a full
-`tests/fixtures/*.json` replay fixture like `test_mock_flight_chain.py`'s**:
-building a twelve-object version of that fixture would require running
-every object's bearing/range through the real naked-eye quantisation and
-visibility-tier formulas across many polls -- expensive to construct and,
-more importantly, no more informative than driving `ContactStore` directly
-with the *already-quantised* readings those formulas would produce for a
-tight cluster at long range. At ~9 km, `NakedEyePerceptionSource`'s own
-30 deg clock bucket and ~1000 m range bucket (`_CLOCK_BUCKET_DEG`,
-`_RANGE_BUCKETS_M` in `perception.naked_eye_source`) collapse any two
-objects within roughly a bucket-width of each other onto the *identical*
-quantised `(bearing_deg, range_m)` pair -- which a twelve-unit complex
-spanning a few hundred metres genuinely does at that range. This fixture
-constructs exactly that: twelve distinct objects (distinct
-`continues_observation_id` chains, mirroring how each real DCS `object_id`
-gets its own persistent chain in `naked_eye_source.py`/`hybrid_source.py`),
-each first sighted with an *identical* long-range, presence-tier reading
-(`classification_raw=object_model.DEFAULT_OP_CLASS`,
-`classification_level=SpecificityLevel.PRESENCE` -- naked-eye's honest
-`lowres`-tier output, structurally class-blind, see `belief.classification`'s
-`PRESENCE_CLASS` docstring), then refining to its own real class and a
-well-separated position as range closes over two more polls -- exactly the
-progression the log shows (a `SAM`/`armor`/`truck`/`BM-21`/`infantry`
-narration replacing an initial run of undifferentiated `ground` callouts).
+**Why this drives `perception.clustering.cluster_candidates` and
+`belief.contacts.ContactStore.ingest` directly, not a full
+`NakedEyePerceptionSource.poll()` replay**: this module's own prior
+docstring already established the precedent -- building a twelve-object
+version of `test_mock_flight_chain.py`'s fixture would require running
+every object's bearing/range through the real visibility-tier formulas
+across many polls, expensive to construct and no more informative than
+driving the real clustering/ingest formulas directly with realistic
+ground-truth candidate positions. `cluster_candidates` and
+`ContactStore.ingest` are the two functions Stage 2's fix actually lives in
+(`naked_eye_source.py`'s own role is just to feed `cluster_candidates` real
+`LoGetWorldObjects` positions and to build one `Observation` per resulting
+`Cluster` -- both mechanically thin, already covered by
+`test_naked_eye_source.py`/`test_mock_flight_chain.py`).
 
-**This test asserts the CURRENT, still-defective behaviour** (a
-characterisation test, not a regression test for a fix that landed) --
-see this module's own docstring note and `plans/contact-merge-undercount/
-debug.md`'s conclusion for why no fix was applied here: the root cause is
-that a presence-tier founding percept carries no class evidence at all, so
-`belief.association_over_time.passes_gate`'s spatial gate is the *only*
-thing deciding whether two simultaneously-indistinguishable real objects
-are "the same contact," and once the first two collapse, every further
-same-cluster object's own founding percept sees only that one, single,
-already-merged candidate -- the "two-or-more candidates never guess-merge"
-safety net can only fire when 2+ *distinct* contacts already exist to be
-ambiguous between, and the very first false merge permanently prevents
-that from happening again for this cluster. Fixing this honestly requires
-a belief shape this codebase does not have yet (group cardinality/
-composition that refines over time, per the user's own stated target
-progression) -- not a gate-tuning change. Once that model exists, this
-test's assertions should be replaced with assertions on the *correct*
-progressive-refinement behaviour, and this docstring updated accordingly."""
+**The progression this test now pins, per the user's own stated target and
+the plan's Stage 2 scope**: twelve objects at ~9 km (well inside the
+channel's own honest cluster radius at that range, ~2.5 km) resolve as ONE
+contact carrying a plural count bucket, not twelve contacts and not a false
+per-object merge either -- the model is honest about "a group of about ten"
+rather than confidently wrong about any one member. At ~500 m-3 km (the
+complex's own real spread, per the live log), the same twelve real objects
+separate by *class* into several contacts, each with a small, exact count --
+the honest resolution boundary closing as range does. Composition
+(Stage 5, not built here) is what would eventually let the 9 km report
+distinguish "some armor, some infantry" within its one contact; Stage 2
+only gets as far as a bare count."""
 
 from __future__ import annotations
 
 from belief.classification import SpecificityLevel
 from belief.contacts import ContactStore
 from perception import object_model
+from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
@@ -65,159 +51,195 @@ from perception.source import (
     OwnshipState,
 )
 
+#: The real complex's twelve units and their true class, unchanged from this
+#: module's original (pre-Stage-2) fixture.
+_UNIT_LABELS_AND_CLASSES: tuple[tuple[str, str], ...] = (
+    ("SA3_LAUNCHER", "OP_SAM"),
+    ("SA3_TR_RADAR", "OP_SAM"),
+    ("ZU23_URAL", "OP_AAA"),
+    ("ZSU23_4", "OP_AAA"),
+    ("BMP1", "OP_ARMOR"),
+    ("BTR70", "OP_ARMOR"),
+    ("T72B", "OP_ARMOR"),
+    ("URAL_TRUCK", "OP_TRUCK"),
+    ("BM21", "OP_MLRS"),
+    ("INFANTRY_1", "OP_INFANTRY"),
+    ("INFANTRY_2", "OP_INFANTRY"),
+    ("INFANTRY_3", "OP_INFANTRY"),
+)
+
 _PRESENCE_RAW = object_model.DEFAULT_OP_CLASS  # "OP_GROUPSOMETHING"
 
 
-def _ownship(t_sim: float, x: float) -> OwnshipState:
-    return OwnshipState(t_sim=t_sim, x=x, z=0.0, alt_m=700.0, heading_true_deg=0.0)
-
-
-def _obs(
-    *,
-    obs_id: str,
-    t_sim: float,
-    x: float,
-    classification_raw: str,
-    classification_level: int,
-    bearing_deg: float,
-    range_m: float,
-    continues_observation_id: str | None,
-) -> Observation:
+def _build_observation(obs_id: str, cluster: Cluster) -> Observation:
+    """The `Observation` `naked_eye_source._build_observation` would emit
+    for `cluster` -- bearing/range are not exercised by these tests (only
+    `ContactStore.ingest`'s cardinality/classification/count handling is),
+    so a fixed, arbitrary bearing/range stands in rather than re-deriving
+    the real quantised geometry."""
     return Observation(
         id=obs_id,
         contact_id=None,
-        t_sim=t_sim,
-        t_wall=t_sim,
+        t_sim=0.0,
+        t_wall=0.0,
         source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
-        classification_raw=classification_raw,
-        bearing_deg=bearing_deg,
-        range_m=range_m,
-        ownship_at_observation=_ownship(t_sim, x),
+        classification_raw=cluster.classification_raw,
+        bearing_deg=0.0,
+        range_m=9000.0,
+        ownship_at_observation=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=700.0, heading_true_deg=0.0
+        ),
         derived_world_position=DerivedWorldPosition(
-            x=99999.0, z=99999.0, confidence=0.5, method="test_fixture"
+            x=cluster.centroid_x,
+            z=cluster.centroid_z,
+            confidence=0.5,
+            method="test_fixture",
         ),
         provenance="test_fixture",
-        classification_level=classification_level,
-        continues_observation_id=continues_observation_id,
+        classification_level=cluster.classification_level,
+        count_bucket=cluster.count_bucket,
     )
 
 
-#: The real complex's twelve units, each `(label, final class, final
-#: bearing offset deg, final range m)` -- final positions spread the twelve
-#: objects across ~300 m of cross-range and ~2.5 km of range, a plausible
-#: real spread for a ground calibration complex approached head-on, per the
-#: live log's clock/range progression (9-10 km down to 0.5 km).
-_UNITS: tuple[tuple[str, str, float, float], ...] = (
-    ("SA3_LAUNCHER", "OP_SAM", -1.0, 3000.0),
-    ("SA3_TR_RADAR", "OP_SAM", -0.5, 3050.0),
-    ("ZU23_URAL", "OP_AAA", 0.0, 2200.0),
-    ("ZSU23_4", "OP_AAA", 0.5, 2150.0),
-    ("BMP1", "OP_ARMOR", 1.0, 2000.0),
-    ("BTR70", "OP_ARMOR", 1.5, 1950.0),
-    ("T72B", "OP_ARMOR", -1.5, 2050.0),
-    ("URAL_TRUCK", "OP_TRUCK", 2.0, 1000.0),
-    ("BM21", "OP_MLRS", -2.0, 1000.0),
-    ("INFANTRY_1", "OP_INFANTRY", 2.5, 500.0),
-    ("INFANTRY_2", "OP_INFANTRY", 3.0, 520.0),
-    ("INFANTRY_3", "OP_INFANTRY", -2.5, 480.0),
-)
+def test_twelve_unit_cluster_at_9km_becomes_one_contact_with_a_plural_count() -> None:
+    """At ~9 km, every unit's real ground position falls within the naked-eye
+    channel's own honest cluster radius at that range (`perception.
+    clustering.naked_eye_cluster_radius_m(9000.0)` ~= 2.5 km) of every other
+    unit -- the complex's true ~300 m spread is negligible next to that. All
+    twelve individually resolve at `PRESENCE` (structurally class-blind at
+    this range, same as any real `lowres`-tier reading) before clustering
+    even runs. `cluster_candidates` must fold them into exactly one cluster;
+    `ContactStore.ingest` must found exactly one contact, carrying a plural
+    count bucket -- not twelve, and not a false single-object identity
+    claim either."""
+    candidates = tuple(
+        ClusterCandidate(
+            object_id=index,
+            # A tight real spread (tens of metres) around a point ~9 km
+            # out -- negligible next to the ~2.5 km cluster radius at this
+            # range, so the exact jitter pattern is not load-bearing.
+            x=9000.0 + (index % 4) * 10.0,
+            z=(index // 4) * 10.0 - 10.0,
+            range_m=9000.0,
+            classification_raw=_PRESENCE_RAW,
+            classification_level=int(SpecificityLevel.PRESENCE),
+        )
+        for index, _unit in enumerate(_UNIT_LABELS_AND_CLASSES)
+    )
 
+    clusters = cluster_candidates(candidates)
 
-def test_twelve_unit_calibration_cluster_stays_twelve_contacts() -> None:
-    """Reproduces the live defect: twelve distinct real objects, first seen
-    together at long range where naked-eye's quantisation makes them
-    positionally indistinguishable and presence-tier classification makes
-    them class-indistinguishable, collapse into far fewer than twelve
-    `Contact`s -- and stay collapsed once `continues_observation_id`
-    continuity locks each object's own re-sightings onto whichever contact
-    its founding percept happened to merge into."""
+    assert len(clusters) == 1
+    cluster = clusters[0]
+    assert len(cluster.members) == 12
+    # 12 falls in the (11, 15) bucket -- "about fifteen" is ED's nearest
+    # named rung below "more than fifteen"; see `perception.clustering.
+    # count_bucket_for`'s own non-overlapping selection table.
+    assert cluster.count_bucket == "OP_ABOUT15UNITS"
+    assert cluster.classification_level == int(SpecificityLevel.PRESENCE)
+
     store = ContactStore()
+    store.ingest([_build_observation("OBS_1", cluster)], now_sim=0.0)
 
-    # Poll 1 (t=0): every unit's founding sighting, all quantised to the
-    # identical long-range presence-tier reading a real naked-eye channel
-    # would emit for a cluster this tight at ~9 km -- see module docstring.
-    founding_ids = {}
-    founding_observations = []
-    for label, _class, _bearing_offset, _range in _UNITS:
-        obs_id = f"{label}_FOUND"
-        founding_ids[label] = obs_id
-        founding_observations.append(
-            _obs(
-                obs_id=obs_id,
-                t_sim=0.0,
-                x=0.0,
-                classification_raw=_PRESENCE_RAW,
-                classification_level=int(SpecificityLevel.PRESENCE),
-                bearing_deg=0.0,
-                range_m=9000.0,
-                continues_observation_id=None,
+    assert len(store.contacts) == 1
+    contact = store.contacts[0]
+    assert contact.cardinality.lo == 11
+    assert contact.cardinality.hi == 15
+    assert contact.classification.level == SpecificityLevel.PRESENCE
+
+
+#: Close-range group layout: each real class group's own units sit within
+#: `_GROUP_SPREAD_M` of each other, and each group's centre sits
+#: `_GROUP_SPACING_M` from the next -- six groups (SAM 2, AAA 2, ARMOR 3,
+#: TRUCK 1, MLRS 1, INFANTRY 3), matching `_UNIT_LABELS_AND_CLASSES`' own
+#: class layout. Every unit is given the same `range_m` (`_CLOSE_RANGE_M`)
+#: for `naked_eye_cluster_radius_m`'s sake -- at 500 m that radius is
+#: `perception.clustering.naked_eye_cluster_radius_m(500.0)` ~= 163 m
+#: (computed, not guessed: cross-range `500*sin(15deg)` ~= 129 m, down-range
+#: bucket width 100 m, combined via `math.hypot`), comfortably smaller than
+#: `_GROUP_SPACING_M` (600 m) and comfortably larger than `_GROUP_SPREAD_M`
+#: (40 m) -- the deliberate design margin that keeps this test demonstrating
+#: clean class separation rather than the single-link chaining risk `plans/
+#: group-contact-model/plan.md`'s Risks section documents (which a naive
+#: reuse of this module's original bearing/range values actually triggers,
+#: confirmed by running `cluster_candidates` against them by hand before
+#: choosing these numbers -- three merged clusters, not six, since down-range
+#: bucket widths grow past 1 km and several groups' true down-range gaps are
+#: smaller than that at those ranges). Calibrating clustering itself to
+#: resist chaining at realistic spacings is Stage 3's job, not this test's.
+_GROUP_SPACING_M = 600.0
+_GROUP_SPREAD_M = 40.0
+_CLOSE_RANGE_M = 500.0
+_GROUP_SIZES = (2, 2, 3, 1, 1, 3)  # SAM, AAA, ARMOR, TRUCK, MLRS, INFANTRY
+
+
+def _close_range_candidates() -> list[ClusterCandidate]:
+    candidates: list[ClusterCandidate] = []
+    object_id = 0
+    unit_index = 0
+    for group_index, group_size in enumerate(_GROUP_SIZES):
+        group_x = group_index * _GROUP_SPACING_M
+        for member_index in range(group_size):
+            _label, op_class = _UNIT_LABELS_AND_CLASSES[unit_index]
+            candidates.append(
+                ClusterCandidate(
+                    object_id=object_id,
+                    x=group_x
+                    + member_index * (_GROUP_SPREAD_M / max(group_size - 1, 1)),
+                    z=0.0,
+                    range_m=_CLOSE_RANGE_M,
+                    classification_raw=op_class,
+                    classification_level=int(SpecificityLevel.CLASS),
+                )
             )
-        )
-    store.ingest(founding_observations, now_sim=0.0)
+            object_id += 1
+            unit_index += 1
+    return candidates
 
-    # Poll 2 (t=30, ownship closed in): each unit's own continuity chain
-    # reports its real, resolved class and a still-fairly-coarse
-    # medium-range position -- still merges via continuity, not the gate,
-    # regardless of what the gate would now say.
-    mid_ids = {}
-    mid_observations = []
-    for label, op_class, bearing_offset, final_range in _UNITS:
-        obs_id = f"{label}_MID"
-        mid_ids[label] = obs_id
-        mid_observations.append(
-            _obs(
-                obs_id=obs_id,
-                t_sim=30.0,
-                x=6000.0,
-                classification_raw=op_class,
-                classification_level=int(SpecificityLevel.CLASS),
-                bearing_deg=bearing_offset,
-                range_m=final_range * 1.5,
-                continues_observation_id=founding_ids[label],
-            )
-        )
-    store.ingest(mid_observations, now_sim=30.0)
 
-    # Poll 3 (t=55, close range, ~500 m-2.5 km per the live log): each
-    # unit's true, well-separated position and class -- still continuity,
-    # still merges onto whatever poll 1 decided, exactly the live report
-    # ("never separate even as the aircraft closes to 500 m").
-    final_observations = []
-    for label, op_class, bearing_offset, final_range in _UNITS:
-        final_observations.append(
-            _obs(
-                obs_id=f"{label}_FINAL",
-                t_sim=55.0,
-                x=8500.0,
-                classification_raw=op_class,
-                classification_level=int(SpecificityLevel.CLASS),
-                bearing_deg=bearing_offset,
-                range_m=final_range,
-                continues_observation_id=mid_ids[label],
-            )
-        )
-    store.ingest(final_observations, now_sim=55.0)
+def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_contacts() -> (
+    None
+):
+    """At the complex's own real close-range spread, each unit individually
+    resolves at its own real class (`CLASS` level -- a real naked-eye
+    channel would achieve at least `medres` this close).
+    `cluster_candidates`, position-only, must split the twelve real objects
+    by their true spacing -- which, because this complex's own units are
+    grouped by class at this range, produces one cluster per class group.
+    `ContactStore.ingest` must found one contact per cluster, each with a
+    small, exact count -- the honest resolution boundary closing as range
+    does, never a false merge and never a false twelve-way split of objects
+    the channel genuinely cannot resolve apart from one another."""
+    candidates = _close_range_candidates()
 
-    # The defect: twelve genuinely distinct real objects collapse to a
-    # single digit number of contacts, never twelve. This count is not a
-    # tuned target -- it is whatever this run of the real, unmodified
-    # `ContactStore`/`association_over_time` code actually produces; if a
-    # future change to the gate/ambiguity mechanism alters it, that is a
-    # real behaviour change worth re-verifying by hand (see module
-    # docstring), not a number to edit blindly to make this test pass again.
-    # Twelve real units, twelve contacts. This asserted 6 when it was written
-    # -- it was built as a reproduction of the false-merge defect, driving
-    # twelve distinctly-identified objects through the real ContactStore and
-    # watching them collapse, matching the roughly five seen in flight.
-    #
-    # The presence-tier merge veto fixed it. Kept, inverted, as the regression
-    # test for that fix: the cluster is exactly the shape that broke, so it is
-    # the right shape to guard.
-    #
-    # Note what this does NOT claim. Twelve contacts at 2-3 km is arguably too
-    # *many* -- a crew member at that range sees "a group", not twelve
-    # individually-tracked things, which is what the group contact model
-    # (body-layer/ROADMAP.md) exists to represent properly. This test pins the
-    # interim behaviour: no false merges. Expect it to change when that model
-    # lands, deliberately and with its own reasoning.
-    assert len(store.contacts) == len(_UNITS)
+    clusters = cluster_candidates(candidates)
+
+    # Six real class groups: SAM (2), AAA (2), ARMOR (3), TRUCK (1), MLRS
+    # (1), INFANTRY (3) -- position-only clustering separates them cleanly
+    # at this spacing (see `_GROUP_SPACING_M`'s own docstring for why).
+    assert len(clusters) == 6
+    assert sum(len(cluster.members) for cluster in clusters) == 12
+    member_counts = sorted(len(cluster.members) for cluster in clusters)
+    assert member_counts == [1, 1, 2, 2, 3, 3]
+    # Every cluster is class-pure at this range -- no cluster degrades to
+    # the presence root, unlike the 9 km case above.
+    assert all(
+        cluster.classification_level == int(SpecificityLevel.CLASS)
+        for cluster in clusters
+    )
+
+    store = ContactStore()
+    observations = [
+        _build_observation(f"OBS_{index}", cluster)
+        for index, cluster in enumerate(clusters)
+    ]
+    store.ingest(observations, now_sim=0.0)
+
+    assert len(store.contacts) == 6
+    contact_counts = sorted(
+        (c.cardinality.lo, c.cardinality.hi) for c in store.contacts
+    )
+    # Small, exact counts -- OP_1UNIT/OP_2UNITS/OP_3UNITS, not a hedged
+    # range, since `cluster_candidates` always knows the real member count
+    # for its own cluster.
+    assert contact_counts == [(1, 1), (1, 1), (2, 2), (2, 2), (3, 3), (3, 3)]

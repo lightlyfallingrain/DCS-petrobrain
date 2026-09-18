@@ -51,7 +51,14 @@ from belief.attention import (
     effective_attention,
     project_relative_area,
 )
-from belief.cardinality import OP_1UNIT, CardinalityBelief, new_cardinality_belief
+from belief.cardinality import (
+    CARDINALITY_CONTRADICTION_LOCKOUT_S,
+    OP_1UNIT,
+    CardinalityBelief,
+    cardinality_belief_from_bucket_name,
+    fold_cardinality,
+    new_cardinality_belief,
+)
 from belief.classification import (
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
@@ -148,11 +155,15 @@ class Contact:
     `cardinality` is `plans/group-contact-model/plan.md` Stage 1's addition:
     the contact's folded best cardinality claim (`belief.cardinality.
     CardinalityBelief`, via `fold_cardinality`) -- `classification`'s direct
-    sibling, same fold-instead-of-overwrite posture. Seeded to `OP_1UNIT` at
-    founding (`from_percept`) so every pre-Stage-2 percept (no `count_bucket`
-    evidence yet) leaves every existing test's observed behaviour identical.
-    `cardinality_lockout_until_sim` is `fold_cardinality`'s one piece of
-    per-contact state, mirroring `classification_lockout_until_sim` exactly.
+    sibling, same fold-instead-of-overwrite posture. Seeded from the founding
+    percept's own `count_bucket` when it carries one (Stage 2: naked-eye's
+    cluster-derived count), or `OP_1UNIT` when it does not (the scope/hybrid
+    channel, which supplies no count evidence at all -- `record` leaves
+    `cardinality` untouched, a hold, whenever a later percept's `count_
+    bucket` is also `None`, rather than treating "no evidence" as "exactly
+    one"). `cardinality_lockout_until_sim` is `fold_cardinality`'s one piece
+    of per-contact state, mirroring `classification_lockout_until_sim`
+    exactly.
 
     `last_emitted_certainty` is Stage 2 (of `plans/pb2-contact-memory/
     plan.md`)'s addition: the `belief.decay.Certainty` this contact held the
@@ -241,6 +252,21 @@ class Contact:
             self.classification_lockout_until_sim = (
                 percept.t_sim + CLASSIFICATION_CONTRADICTION_LOCKOUT_S
             )
+        if percept.count_bucket is not None:
+            incoming_cardinality = cardinality_belief_from_bucket_name(
+                percept.count_bucket, established_sim=percept.t_sim
+            )
+            cardinality_outcome = fold_cardinality(
+                self.cardinality,
+                incoming_cardinality,
+                percept.t_sim,
+                self.cardinality_lockout_until_sim,
+            )
+            self.cardinality = cardinality_outcome.cardinality
+            if cardinality_outcome.contradicted:
+                self.cardinality_lockout_until_sim = (
+                    percept.t_sim + CARDINALITY_CONTRADICTION_LOCKOUT_S
+                )
         self.contributing_observation_ids.append(percept.observation_id)
         self.last_seen_sim = percept.t_sim
         self._extend_or_open_span(percept)
@@ -270,7 +296,13 @@ class Contact:
                 level=SpecificityLevel(percept.classification_level),
                 established_sim=percept.t_sim,
             ),
-            cardinality=new_cardinality_belief(OP_1UNIT, percept.t_sim),
+            cardinality=(
+                cardinality_belief_from_bucket_name(
+                    percept.count_bucket, established_sim=percept.t_sim
+                )
+                if percept.count_bucket is not None
+                else new_cardinality_belief(OP_1UNIT, percept.t_sim)
+            ),
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
         )

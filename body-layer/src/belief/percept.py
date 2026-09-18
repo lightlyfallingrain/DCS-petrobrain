@@ -50,7 +50,12 @@ class Percept:
     reference to an earlier report), never a DCS truth field -- see that
     field's docstring (`perception/source.py`) and `plans/
     contact-duplication-ambiguity-runaway/plan.md`'s Boundary reading
-    section."""
+    section.
+
+    `count_bucket` carries `Observation.count_bucket` through unchanged, for
+    the same reason -- a channel's own honest statement of how many real
+    objects this report stands for, `plans/group-contact-model/plan.md`
+    Stage 2."""
 
     t_sim: float
     source: str
@@ -61,6 +66,7 @@ class Percept:
     observation_id: str
     classification_level: int = 2
     continues_observation_id: str | None = None
+    count_bucket: str | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -79,4 +85,5 @@ def percept_of(observation: Observation) -> Percept:
         observation_id=observation.id,
         classification_level=observation.classification_level,
         continues_observation_id=observation.continues_observation_id,
+        count_bucket=observation.count_bucket,
     )

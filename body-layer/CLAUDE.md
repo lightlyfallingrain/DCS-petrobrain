@@ -182,19 +182,53 @@ subproject-needed dev path.
   modeling choice, not verified against ED internals (investigator finding, `plans/
   classification-refinement/plan.md` Session 6 addendum Q1) — documented here so a future reader
   does not "correct" it toward an ED semantics that was never established.
-- `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6) — `NakedEyePerceptionSource`, the
-  naked-eye/binocular channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s
-  gates and `geometry.py`'s bearing/range, emitting one `Observation` per still-visible candidate
-  per poll. `_classification_for_tier` (BL-2.6 Stage 6) maps `VisibilityResult`'s achieved tier to
-  `(classification_raw, classification_level)` on the classification lattice
-  (`belief.classification.SpecificityLevel`): `hires` -> `reporting_names.reporting_name_for
-  (object_type)` at level `TYPE` (Decision 1, 2026-09-09 — the naked-eye channel's own path to a
-  specific type via ground truth, departing from the architect's original cap-at-class
-  recommendation); `medres` -> the `OP_*` class at level `CLASS` (today's pre-BL-2.6 behaviour);
-  `lowres` -> `classification.PRESENCE_CLASS` at level `PRESENCE` ("something is there," reachable
-  only since Stage 7 moved the gate). Because `hires` values come from ground truth rather than a
-  vocabulary match, "Petrovich can never mis-identify, only fail to identify" now applies to this
-  channel's `hires` tier too, not only to the scope/HelperAI channel.
+- `src/perception/clustering.py` (`plans/group-contact-model/plan.md` Stage 2) — position-only
+  resolution clustering: `ClusterCandidate`/`Cluster`, `cluster_candidates` (single-link, radius =
+  `naked_eye_cluster_radius_m(range_m)`, no chaining cap yet — Stage 3's job), and
+  `count_bucket_for` (ED's `OP_1UNIT`…`OP_MORETHAN15UNITS` vocabulary, a non-overlapping partition
+  for forward selection, deliberately narrower than `belief.cardinality`'s own — see that module's
+  docstring). `naked_eye_cluster_radius_m` is **moved here, not duplicated**, from what was
+  `belief.association_over_time._naked_eye_uncertainty_m` — the cluster radius and the association
+  gate's own per-percept uncertainty are the same number by construction, and this is the only
+  direction the move can go (`perception/` may never import `belief/`); `association_over_time.
+  uncertainty_radius_m` now imports it from here. A cluster's aggregate classification is its
+  members' shared value when all agree, else degrades to the presence root
+  (`object_model.DEFAULT_OP_CLASS`) — clustering itself is class-agnostic, position-only; class
+  only shapes the *label* a cluster reports, never whether it forms.
+- `src/perception/naked_eye_source.py` (PB-1.5, retuned BL-2.6, clustering added Stage 2 of
+  `plans/group-contact-model/plan.md`) — `NakedEyePerceptionSource`, the naked-eye/binocular
+  channel: scans `LoGetWorldObjects` candidates through `visibility.py`'s gates and `geometry.py`'s
+  bearing/range, then — the emission unit since Stage 2 — clusters the admitted candidates via
+  `clustering.cluster_candidates` and emits **one `Observation` per resulting cluster**, not one
+  per candidate. `_classification_for_tier` (BL-2.6 Stage 6) still maps a single candidate's
+  achieved `VisibilityResult` tier to `(classification_raw, classification_level)` on the
+  classification lattice (`belief.classification.SpecificityLevel`) — `hires` ->
+  `reporting_names.reporting_name_for(object_type)` at level `TYPE` (Decision 1, 2026-09-09 — the
+  naked-eye channel's own path to a specific type via ground truth, departing from the architect's
+  original cap-at-class recommendation); `medres` -> the `OP_*` class at level `CLASS`; `lowres` ->
+  `classification.PRESENCE_CLASS` at level `PRESENCE` — but that per-candidate claim now only feeds
+  `clustering.ClusterCandidate`, and a cluster's own aggregate label (identical vs. mixed across its
+  members) is what actually lands on the emitted `Observation`. Because `hires` values come from
+  ground truth rather than a vocabulary match, "Petrovich can never mis-identify, only fail to
+  identify" still applies to a singleton `hires` cluster.
+  `Observation.count_bucket` carries `Cluster.count_bucket` straight through — the ED count
+  vocabulary this channel previously deferred (Decision #5) for lack of a clustering mechanism.
+  Bearing/range are quantised from the cluster's **centroid**, not any one candidate's own
+  position; `derived_world_position` likewise becomes the cluster centroid (a documented meaning
+  change from "one candidate's own ground truth" to "a cluster's mean position"). `_build_
+  observations` resolves `continues_observation_id` by **majority object overlap** across the
+  *whole* poll's clusters at once (not per-cluster in isolation): every member's own persistent
+  `_object_id_to_last_observation_id` entry casts a vote, and only the cluster holding the global
+  majority of votes for a given prior observation inherits it — a cluster splitting into several
+  children never lets more than one of them claim the parent's continuity, per the plan's "the id
+  follows the majority" splitting rule (ties broken deterministically, not physically meaningfully).
+  The presence-tier merge veto that used to live in `belief.association_over_time.passes_gate` is
+  **removed** as of this stage — see that module's own docstring for why a cluster's presence-tier
+  report must be allowed to fold onto its contact, unlike a raw per-object one. `NAKED_EYE_MAX_
+  NEW_PER_POLL` still throttles individual-*object* admission into a poll's candidate pool exactly
+  as before; it does not yet cap cluster size directly (a real cluster larger than the cap
+  under-reports until acquisition catches up over several polls) — re-reading it as a true
+  per-cluster limit is Stage 3's explicit job, not pre-tuned here.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API
   (`GET /telemetry/latest`, `GET /world_objects/latest`, `GET /petrovich_indication/latest`). A
   real network call, unlike the world-model seam. `push_text_line` (BL-2.5,
@@ -238,6 +272,14 @@ subproject-needed dev path.
   fixing a real duplicate-contact bug where the gate budgeted only the incoming percept's
   uncertainty and treated `last_position` as exact, so a stationary object's re-quantised implied
   position could jump a full bucket-width between polls and fail the gate.
+
+  `Contact.cardinality` (`plans/group-contact-model/plan.md` Stage 1, folded Stage 2) is
+  `classification`'s direct sibling — the folded best `belief.cardinality.CardinalityBelief`, via
+  `fold_cardinality` — seeded from the founding percept's own `count_bucket` when one exists
+  (Stage 2's naked-eye clusters) or `OP_1UNIT` when it does not (the scope/hybrid channel, which
+  supplies no count evidence at all; a later percept whose `count_bucket` is also `None` leaves
+  `cardinality` untouched — a hold, never treated as "exactly one"). `Contact.cardinality_lockout_
+  until_sim` mirrors `classification_lockout_until_sim` exactly.
 
   `association_over_time.py` (percept→contact spatial + class-compatibility
   gating, distinct from `perception/association.py`'s within-one-poll detection→world-object
@@ -315,6 +357,25 @@ subproject-needed dev path.
   `decay.classification_confidence_at` (`IDENTITY_HALF_LIFE_S`) — **the level itself never decays**,
   only confidence does; a contact identified as a T-72 two minutes ago does not revert to
   "something," he becomes less sure of it.
+- `src/belief/cardinality.py` (`plans/group-contact-model/plan.md` Stage 1) — `classification.py`'s
+  deliberate sibling: `CountBucket`, ED's own count vocabulary (`OP_1UNIT`…`OP_MORETHAN15UNITS`,
+  verbatim from `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-ambient-
+  detection.md`), plus `UNKNOWN`/`OP_GROUP`. `CardinalityBelief` (`lo`, `hi`, `confidence`,
+  `established_sim`) is `ClassificationBelief`'s field-for-field twin; `fold_cardinality` is its
+  fusion rule, with interval **containment** standing in for the lattice's specificity level:
+  strictly-narrower-and-containing refines, identical reinforces, strictly-wider-and-containing
+  holds, disjoint contradicts (collapses to the interval *hull*, confidence floored, arms
+  `CARDINALITY_CONTRADICTION_LOCKOUT_S` — 30 s, declared separately from `classification.py`'s own
+  lockout though defaulting to the same value, following the `decay.OBJECT_ID_MEMORY_S` precedent).
+  A genuine partial overlap (neither claim contains the other — reachable from `OP_TO5UNITS (4,5)`/
+  `OP_5TO7UNITS (5,7)`'s own deliberate boundary overlap, kept exactly as ED's vocabulary states it
+  rather than "fixed") refines to the intersection, a generalisation this module's own docstring
+  argues for beyond the plan's four named cases. **Counts legitimately change** (a vehicle drives
+  off, one is destroyed) and this model cannot distinguish that from a perception error — both
+  converge identically (widen, then re-narrow after the lockout), an accepted, stated asymmetry.
+  `cardinality_belief_from_bucket_name` resolves a `perception`-emitted `count_bucket` string.
+  `decay.cardinality_confidence_at` (Stage 1) is `classification_confidence_at`'s twin, reusing
+  `IDENTITY_HALF_LIFE_S` rather than declaring a new half-life.
 - `src/logger.py` — the PB-1 deliverable: `PerceptionLogger` polls ownship telemetry + a list of
   `PerceptionSource`s, formats each `Observation` as flat text; fully tested against a fake
   source, tier-agnostic. `main()` is the one place that plugs in the concrete

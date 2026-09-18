@@ -17,7 +17,7 @@ a genuine, un-mocked detectability decision underneath.
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -33,6 +33,17 @@ from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
 
 _THEATRE = "Syria"
 _FAKE_CONN = sqlite3.connect(":memory:")
+
+#: Ranges for the cap/debounce tests below -- 5 candidates, spaced widely
+#: enough that no pair falls within `perception.clustering.
+#: naked_eye_cluster_radius_m` of each other (computed by hand: the largest
+#: pairwise radius among these 5 points is ~265 m, at range 950 m; every
+#: pairwise gap here is >= 300 m). `plans/group-contact-model/plan.md`
+#: Stage 2's clustering would otherwise fold several of these into one
+#: cluster (as the original, evenly-100m-spaced fixture did), collapsing
+#: what these tests actually exercise -- the cap/debounce mechanism, not
+#: clustering -- down to fewer observations than the cap allows.
+_CAP_TEST_RANGES_M: Final[tuple[float, ...]] = (100.0, 250.0, 430.0, 650.0, 950.0)
 
 
 def _ownship() -> OwnshipState:
@@ -383,11 +394,17 @@ def test_continuity_never_cross_tags_two_different_objects() -> None:
 def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> None:
     # 5 simultaneously-new infantry candidates (well within the 900 m
     # threshold), cap = NAKED_EYE_MAX_NEW_PER_POLL = 3 -- only the 3
-    # nearest are emitted this poll.
+    # nearest are emitted this poll. Spacing (`_CAP_TEST_RANGES_M`) is wide
+    # enough that no two of these candidates fall within `perception.
+    # clustering.naked_eye_cluster_radius_m` of each other -- computed by
+    # hand, not guessed (see that constant's own docstring) -- so this test
+    # still exercises the cap/debounce mechanism in isolation from Stage 2's
+    # clustering (`plans/group-contact-model/plan.md`), which is what it is
+    # actually testing.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
-            for i in range(1, 6)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
+            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
         ]
     }
     source, _client = _source(world_objects)
@@ -397,7 +414,7 @@ def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> 
     assert len(observations) == NAKED_EYE_MAX_NEW_PER_POLL
     ranges = [obs.derived_world_position.x for obs in observations]  # type: ignore[union-attr]
     assert ranges == sorted(ranges)
-    assert ranges == [200.0, 300.0, 400.0]
+    assert ranges == list(_CAP_TEST_RANGES_M[:NAKED_EYE_MAX_NEW_PER_POLL])
 
 
 def test_candidates_dropped_by_the_cap_are_not_retried_next_poll() -> None:
@@ -406,8 +423,8 @@ def test_candidates_dropped_by_the_cap_are_not_retried_next_poll() -> None:
     # not retried unless it actually leaves and re-enters the visible set.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
-            for i in range(1, 6)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
+            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
         ]
     }
     source, _client = _source(world_objects)
@@ -469,8 +486,8 @@ def test_every_poll_mode_still_throttles_first_time_acquisition() -> None:
     # every_poll, guarding against instant global awareness.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
-            for i in range(1, 6)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
+            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
         ]
     }
     client = FakeAircraftClient(world_objects)
@@ -494,8 +511,8 @@ def test_every_poll_mode_progressively_acquires_capped_overflow() -> None:
     # rather than an emission cap.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=float(100 + i * 100), lon_deg=0.0)
-            for i in range(1, 6)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
+            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
         ]
     }
     client = FakeAircraftClient(world_objects)
@@ -553,3 +570,80 @@ def test_quantise_range_exact_boundary_uses_that_bucket() -> None:
 
     assert bucket_name == "OP_D1000M"
     assert quantised_m == pytest.approx(1000.0)
+
+
+# --- Stage 2 clustering (plans/group-contact-model/plan.md) -----------------
+
+
+def test_two_close_candidates_emit_one_clustered_observation() -> None:
+    # Two Infantry candidates 20 m apart at ~500 m range -- well within
+    # `perception.clustering.naked_eye_cluster_radius_m(500.0)` (~163 m) --
+    # must emit one Observation, not two, carrying a plural count_bucket.
+    world_objects = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=500.0, lon_deg=20.0),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+    assert observations[0].count_bucket == "OP_2UNITS"
+
+
+def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
+    # Two Infantry candidates close enough to merge at long range, then far
+    # enough apart to split once ownship has closed in -- the majority
+    # child (more of the parent cluster's own members) must inherit
+    # `continues_observation_id`; the minority child must get `None` and be
+    # offered fresh to the belief-layer gate (`plans/group-contact-model/
+    # plan.md`'s Splitting section -- "the id follows the majority").
+    #
+    # object_id=1 stays put at lat 1300; object_id=2, 3, 4 (three of them,
+    # so they form the cluster's own majority once it splits) also start at
+    # lat 1300 -- all four merge into one cluster on the first poll. On the
+    # second poll object_id=1 alone has moved far enough away (lat 100) to
+    # split off on its own -- a 1-vs-3 split, so the 3-strong group is the
+    # majority child.
+    merged = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=1300.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=1300.0, lon_deg=10.0),
+            _world_object(3, "Infantry", lat_deg=1300.0, lon_deg=20.0),
+            _world_object(4, "Infantry", lat_deg=1300.0, lon_deg=30.0),
+        ]
+    }
+    split = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=1300.0, lon_deg=10.0),
+            _world_object(3, "Infantry", lat_deg=1300.0, lon_deg=20.0),
+            _world_object(4, "Infantry", lat_deg=1300.0, lon_deg=30.0),
+        ]
+    }
+    client = FakeAircraftClient(merged)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        emit_mode="every_poll",
+    )
+
+    first = source.poll(100.0, _ownship())
+    assert len(first) == 1
+    # Only 3 of the 4 are acquired this first poll -- `NAKED_EYE_MAX_NEW_
+    # PER_POLL` (3) still throttles first-time acquisition per-object, even
+    # under `emit_mode="every_poll"` (module docstring point 5's "Stage 2
+    # scoping decision"); the 4th joins on the next poll.
+    assert first[0].count_bucket == "OP_3UNITS"
+
+    client._world_objects = split
+    second = source.poll(100.2, _ownship())
+
+    assert len(second) == 2
+    majority = next(obs for obs in second if obs.count_bucket == "OP_3UNITS")
+    minority = next(obs for obs in second if obs.count_bucket == "OP_1UNIT")
+    assert majority.continues_observation_id == first[0].id
+    assert minority.continues_observation_id is None
