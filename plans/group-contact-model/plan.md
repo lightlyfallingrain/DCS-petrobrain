@@ -395,6 +395,196 @@ the ROADMAP/§3.6 amendments. Small; may fold into Stage 2 if it stays trivial.
 
 ---
 
+### Stage 3a design — closing the gate-vs-cluster radius mismatch
+
+Decided 2026-09-18, in response to `plans/group-contact-model/review.md`'s required fix. This is
+the one stage that edits a gate already fixed twice in opposite directions (BL-2.6 widened it,
+`plans/contact-duplication-ambiguity-runaway/` made it the exception path), so the reasoning is
+written out rather than compressed.
+
+#### The mismatch, restated with its numbers
+
+`perception.clustering.cluster_candidates` splits two candidates when their real separation exceeds
+`max(radius_a, radius_b)` — **single-sided**, ≈205 m at 690 m range (`hypot(690·sin 15°, 100)`).
+`belief.association_over_time.spatial_gate_radius_m` then re-tests the split child against the
+parent's contact on `uncertainty_a + uncertainty_b + GATE_GROWTH_RATE_MPS·elapsed_s` — **both sides
+summed**, ≈410 m before growth. Since `a + b + growth ≥ max(a, b)` for any positive radii, a split
+whose children sit near the cluster's own resolution boundary is re-absorbed. That boundary is
+exactly where a split first becomes possible, so this is the common case, not an edge one.
+
+The same arithmetic produces a second, worse symptom that the review's worked example did not
+name: **two clusters from the same poll that were never one contact**. Two same-class clusters
+300 m apart at 690 m are separate clusters (300 > 205) but the second passes the gate against the
+first's brand-new contact (300 < 410) and folds into it — one contact, cardinality reinforced to
+`OP_1UNIT`, a *confident* false merge rather than an honestly hedged one. Any fix aimed only at
+split children leaves this open; it is the same-class hole the plan's "interim fix" section already
+warned about, now reachable through clustering instead of around it.
+
+Both symptoms are one violation of this plan's own invariant: *the model's resolution is the
+channel's resolution by construction*. The channel has already decided these are separate reports;
+belief then decides they might be one thing.
+
+#### Decision
+
+**Two `Observation`s from the same source in the same poll may never resolve to the same contact.
+Enforce that as a candidate exclusion in `belief.contacts.ContactStore.ingest`, not as a change to
+the gate's radius.**
+
+The gate stays exactly what it is — a per-percept geometry-and-class predicate, with BL-2.6's
+symmetric budgeting untouched, byte for byte. What is added is an *association bookkeeping* rule,
+which is the same category as `_resolve_continuity` and belongs beside it.
+
+The rule rests on a property both current sources actually have, and it must be documented as a
+precondition rather than assumed forever: post-Stage-2 naked-eye emits one `Observation` per
+resolution cluster, and two clusters are separable by construction; the scope/hybrid channel emits
+one `Observation` per `object_id`, and two object ids are two real objects. **Neither source can
+emit two reports of the same thing in one poll.** A future source that could would violate this
+rule's premise and must be excluded from it explicitly.
+
+#### Mechanism — exactly what changes
+
+`ContactStore.ingest` only. Roughly fifteen lines plus docstrings.
+
+1. **A read-only pre-scan over the batch, before the existing loop.** For each observation, evaluate
+   `_resolve_continuity` once and memoize the result; record, for every observation that resolves,
+   `claimed[(observation.source, observation.t_sim)].add(contact.id)`. The pre-scan mutates nothing.
+   Its purpose is order-independence: the majority child of a split claims the parent contact before
+   any minority child reaches the gate, regardless of the order clustering happened to emit them in
+   (`cluster_candidates` does not define cluster order, and `naked_eye_source._build_observations`
+   does not sort).
+2. **The existing single-pass loop is otherwise unchanged**, including the order in which
+   `contact.record` runs — so no fold ordering shifts as a side effect of this stage. It consumes
+   the memoized continuity result instead of calling `_resolve_continuity` a second time (using the
+   pre-scan as authority also keeps a contact refreshed mid-batch from changing its own continuity
+   verdict mid-batch).
+3. **The gate branch filters candidates** by `candidate.id not in claimed[(source, t_sim)]` before
+   applying the existing one/zero/two-or-more decision rule. Exclusion happens *before* counting, so
+   a percept whose only candidates are all claimed this poll sees zero and founds — the same
+   outcome the ambiguity rule already produces, through the same code path.
+4. **Whatever contact the observation ends up on — merged or founded — is added to
+   `claimed[(source, t_sim)]`.** Without this, three clusters against one old contact would collapse
+   to two: the third would be excluded from the old contact and merge into the second's brand-new
+   one.
+
+Keying on `(source, t_sim)` rather than on the batch is what preserves cross-channel fusion: the
+whole point of `test_cross_channel_fusion.py`'s same-batch scope + naked-eye cases is that two
+reports from *different* channels in one batch fold into one contact, and they must keep doing so.
+`logger.PerceptionRunner` builds one combined batch per poll across all sources, so source-keying is
+load-bearing, not defensive. `t_sim`-keying costs nothing and keeps the rule correct for any
+multi-poll batch a test or a future replay path might hand in.
+
+No new constant. No new tunable. Nothing for Stage 3b's sortie to calibrate here — which is the
+point of landing it before the sortie.
+
+#### Does the percept need to carry a cluster identity? No.
+
+The perception layer does know more than it currently says — `_build_observations` computes, for a
+minority split child, that another cluster in this same poll claimed its parent's observation id,
+and then throws that away by setting `continues_observation_id=None`, which is indistinguishable
+from "never seen before". Carrying it as a new `Observation.separated_from_observation_id` field was
+the obvious design and is **rejected**: the store can already derive everything the rule needs from
+`source`, `t_sim`, and the observation ids it is holding anyway, and a field would buy only the
+split case while leaving the same-poll false merge above untouched. Given that `Observation` and
+`Percept` just gained `count_bucket` in Stage 2, not adding a second field for a strictly weaker
+rule is the right trade. **`Observation`, `Percept`, `percept_of`, and `naked_eye_source` are all
+unchanged by this stage.**
+
+#### Why the two alternatives from the review are worse
+
+- **"Exempt a freshly-split child from the gate."** Needs a definition of "freshly" (the store has
+  no natural one), needs the new field above to know a child is split at all, and exempting a
+  percept from the *whole* gate also stops it merging onto some genuinely different existing
+  contact it should merge onto — an older, still-estimated contact the child is the reacquisition
+  of. It is a special case bolted onto a general rule, and it covers strictly less than the chosen
+  rule does.
+- **"Make the gate single-sided when the percept carries a distinct cluster identity."** After
+  Stage 2 *every* naked-eye percept carries a distinct cluster identity, so the condition collapses
+  to "naked-eye percepts get a single-sided gate" — which is BL-2.6 reverted for the channel BL-2.6
+  was fixed for. Narrowing the condition to split children only does not rescue it either: halving
+  the radius still re-merges any split at a separation between the cluster radius and the halved
+  gate radius (a 210 m split at 690 m still sits inside ≈205 m + growth), so it closes part of the
+  gap at the cost of touching the one formula that must not be touched. The chosen rule closes all
+  of it and leaves the formula alone.
+
+#### How both prior fixes stay fixed — the argument by inspection
+
+- **BL-2.6 (`plans/classification-refinement/`, symmetric budgeting) is preserved because the
+  radius formula is not edited at all**, and because the new rule is provably a **no-op for any
+  `(source, t_sim)` group of size one**. BL-2.6's live-observed failure was a single slow-moving
+  object whose bucket-quantised implied position shifted between polls, missing an under-sized gate
+  and spawning a duplicate that then poisoned the ambiguity rule. That object produces exactly one
+  observation per poll per source, so its exclusion set is empty on every poll and it sees the full,
+  symmetric, both-sides-summed gate it has today. The failure mode BL-2.6 fixed is *across* polls;
+  this rule constrains only *within* one poll. The two cannot collide.
+- **Object-permanence correlation (`plans/contact-duplication-ambiguity-runaway/`) is untouched
+  because the continuity path is never vetoed.** The pre-scan reads it and records what it claims;
+  it never blocks it. Every percept that resolves by continuity folds exactly as it does today. The
+  gate remains the exception path, and this stage only changes which candidates it may choose from
+  when it is reached.
+- The duplication *runaway* itself needed the gate to be re-entered poll after poll. A contact this
+  rule causes to be founded carries its own continuity from the very next poll (its members' entries
+  in `naked_eye_source._object_id_to_last_observation_id` now point at its own observation), so it
+  never returns to the gate and cannot become a permanent second candidate.
+
+#### What the affected tests assert afterwards
+
+- **`test_calibration_cluster_merge_undercount.py` — unchanged, both tests, and that is the guard.**
+  The 9 km case is one cluster, so the rule cannot apply. The close-range case is six same-poll
+  clusters that already found six contacts because their classes are mutually incompatible; the
+  exclusion is redundant there, not decisive. If either test's assertions move, the rule has been
+  implemented more broadly than designed.
+- **`test_mock_flight_chain.py::test_mock_flight_chain_single_threaded_reaches_expected_contact_state`
+  — this is the test that changes, and the long derivation comment in it must be rewritten, not
+  merely re-numbered.**
+  - Observation count stays **42**: clustering is untouched, the poll-by-poll 14 + 4 + 4 derivation
+    still holds.
+  - Contacts become **2**, not 1. At poll 14 the truck singleton is the majority-overlap
+    continuation and folds onto the existing contact; the infantry singleton reaches the gate, finds
+    that contact already claimed by a same-source, same-poll observation, and founds its own.
+  - Events become **two** `CONTACT_DETECTED` (the founding one, plus the infantry contact at poll
+    14). The implementer must confirm nothing else appears — re-derive poll by poll and run it, per
+    this test file's own stated convention, rather than pasting these figures in.
+  - The truck contact keeps `classification == "Ural truck"` at `type` level, `certainty ==
+    "observed"` (the hybrid channel keeps reporting object 101 every poll even after the cockpit
+    mask drops it from naked-eye), and both sources. The new contact is naked-eye only at the
+    presence root.
+  - Cardinality: the truck contact held `OP_2UNITS` (2,2) through polls 0–13; the poll-14 singleton
+    report is (1,1), which is **disjoint**, so `fold_cardinality` contradicts to the hull **(1,2)**
+    and arms `CARDINALITY_CONTRADICTION_LOCKOUT_S`. Expect it to still read (1,2) at the fixture's
+    end, since the fixture is shorter than the 30 s lockout — verify rather than assume, as the
+    figure depends on the fixture's poll cadence. The new contact is (1,1).
+- **Should the two 400 m-apart objects separate at 690 m? Yes, and the channel's own numbers say so
+  twice over.** In this fixture the separation is *down-range* (x=1400 vs x=1800 on roughly the same
+  line of sight): at that range the `OP_D*` buckets are 100 m wide, so the two objects quantise into
+  four buckets' worth of separation — the channel reports them at plainly different ranges and is
+  not guessing. The transverse case argues the same way: 400 m at 690 m subtends ≈32°, just past the
+  30° clock-bucket width, so they would land in different clock positions. Claiming "these might be
+  one object" when the channel's own output places them in different buckets on the axis that
+  separates them is the model claiming *less* resolution than the channel has — the same
+  no-omniscience invariant this plan is enforcing, violated in the opposite direction. Two contacts
+  is the honest answer.
+- **New unit test in `test_contacts.py`**: two same-source, same-`t_sim` observations, spatially
+  close enough and class-compatible enough to pass the gate against each other, found two contacts;
+  the same two observations with *different* sources still merge into one. That pair pins both
+  halves of the rule, including the source-scoping that keeps cross-channel fusion alive.
+
+#### Deliberate non-goals of this stage
+
+- **A split still registers as a cardinality *contradiction*, not as a known structural event.**
+  Narrowing (2,2) to (1,1) is disjoint, so the parent hedges to (1,2) and locks out for 30 s even
+  though nothing actually contradicted — the group simply became resolvable. Treating a split as a
+  privileged narrowing is a separate decision about `fold_cardinality` that needs evidence, and the
+  hull is honest in the meantime, only hedged. If 3b's sortie shows counts stuck wide after splits,
+  this is the first thing to revisit.
+- **A contact that already holds two continuity chains keeps holding them.** This rule blocks new
+  same-poll co-folds through the gate; it cannot unpick a false merge that happened before it landed
+  or that was assembled one poll at a time. Detecting it (a contact whose folded reports imply more
+  occupants than its cardinality admits) belongs with Stage 3b's sortie and Stage 5's composition
+  work. A flag-gated debug line in `ingest` when two same-source, same-poll observations resolve by
+  continuity to the same contact would surface it cheaply and is worth adding here.
+
+---
+
 ### Risks & Unknowns
 
 - **Cluster churn at boundaries.** An object oscillating near a cluster edge flips membership
