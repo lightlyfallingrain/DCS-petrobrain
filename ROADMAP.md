@@ -39,6 +39,13 @@ Per-layer design docs (status: draft/provisional): `docs/concept/WORLD_MODEL_BUI
 | SRS Adapter | **New subproject, first slice done 2026-09-17: Petrovich is audible.** Outbound TTS works end to end — text in over `POST /speak`, synthesized on the Mac (`say` behind a swappable `TTSEngine` protocol), then either played locally via `afplay` (`--target local`, needs neither Windows nor DCS — the dev path for auditioning voices and wording) or POSTed as WAV to the aircraft-layer collector's new `POST /audio/play` and played there by `winsound` (FIFO queue for routine lines; urgent lines clear the queue and interrupt playback). Body-layer's whole share was one optional field on `CrewConsole`, which is the milestone's own stated test of whether BL-5a drew its interface in the right place — it did. **Unverified pending the user's hardware:** Windows playback and the urgent-interrupt mechanism (no DCS needed), then latency and voice acceptability on a real sortie. **Next:** SRS ICS injection — confirmed reachable (`--modulations INTERCOM --unitId`, and stock SRS does declare an Intercom radio for the Mi-24P), and ICS is the *only* acceptable target since the player must stay on the mission frequency and the SPU-8 selects one source at a time. | [`srs-adapter/ROADMAP.md`](srs-adapter/ROADMAP.md) |
 | Mission Interpreter | **MI-0–MI-6 done — the last planned Mission Interpreter stage.** MI-0, MI-1, MI-1.5, MI-2, MI-3, MI-4 (capable-model synthesis with `qwen3:14b`, merged 2026-09-12), MI-5 (player questions, text console MVP, merged 2026-09-12), and MI-6 (runtime compilation into the compact `RuntimeMissionUnderstanding`, 2026-09-12) complete. Consumed by body-layer's BL-7 (mission phase and relevance, merged 2026-09-13). | [`mission-interpreter/ROADMAP.md`](mission-interpreter/ROADMAP.md) |
 
+## Visual status
+
+A rendered view of everything below — subsystem status, the milestone dependency graph, open work,
+and what is currently blocked on hardware — lives at `docs/status/`, published as a private
+artifact. It is **derived**, never authoritative: if it disagrees with a roadmap file, the page is
+the thing that is wrong. See `docs/status/README.md` for how and when to regenerate it.
+
 ## Keeping this current
 
 Each subproject's `ROADMAP.md` is the source of truth for that subproject's milestone status —

@@ -1,0 +1,1162 @@
+<title>Petrobrain Milestones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root {
+  /* Light: cockpit panel teal on instrument paper, neutrals biased green */
+  --ground: #EDEFEC;
+  --panel: #FFFFFF;
+  --panel-2: #F5F7F3;
+  --rule: #D3D9D1;
+  --rule-soft: #E2E7E0;
+  --ink: #13201D;
+  --ink-2: #48574F;
+  --ink-3: #6E7D74;
+
+  --accent: #1F6F63;          /* Mi-24P cockpit teal */
+  --accent-soft: #D9E9E4;
+  --amber: #A9741B;           /* instrument amber */
+  --amber-soft: #F4E6C8;
+  --red: #A93B30;             /* switch-guard red */
+  --red-soft: #F3DAD6;
+  --slate: #5D6B78;
+  --slate-soft: #DFE5EA;
+
+  --shadow: 0 1px 2px rgba(19,32,29,.06), 0 6px 20px rgba(19,32,29,.05);
+}
+:root:not([data-theme="light"]) {
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0D1412;
+    --panel: #141D1A;
+    --panel-2: #18231F;
+    --rule: #2A3833;
+    --rule-soft: #222E2A;
+    --ink: #E4EBE6;
+    --ink-2: #A3B2AA;
+    --ink-3: #7B8D84;
+
+    --accent: #57B7A5;
+    --accent-soft: #17332D;
+    --amber: #D9A440;
+    --amber-soft: #33290F;
+    --red: #DB6A5C;
+    --red-soft: #351915;
+    --slate: #93A4B2;
+    --slate-soft: #1D262C;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0D1412;
+  --panel: #141D1A;
+  --panel-2: #18231F;
+  --rule: #2A3833;
+  --rule-soft: #222E2A;
+  --ink: #E4EBE6;
+  --ink-2: #A3B2AA;
+  --ink-3: #7B8D84;
+
+  --accent: #57B7A5;
+  --accent-soft: #17332D;
+  --amber: #D9A440;
+  --amber-soft: #33290F;
+  --red: #DB6A5C;
+  --red-soft: #351915;
+  --slate: #93A4B2;
+  --slate-soft: #1D262C;
+
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 24px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 44px;
+}
+
+/* ---- header ---- */
+
+.masthead { display: flex; flex-direction: column; gap: 14px; }
+
+.eyebrow {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.eyebrow .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); display: inline-block; }
+
+h1 {
+  font-family: "Barlow Semi Condensed", ui-sans-serif, sans-serif;
+  font-weight: 700;
+  font-size: clamp(38px, 6vw, 60px);
+  letter-spacing: -.012em;
+  line-height: 1.02;
+  margin: 0;
+  text-wrap: balance;
+}
+.lede {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--ink-2);
+  font-size: 16.5px;
+}
+
+/* ---- counters ---- */
+
+.counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.count { background: var(--panel); padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+.count b {
+  font-family: "Barlow Semi Condensed", sans-serif;
+  font-size: 30px; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.count span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+}
+.count.is-done b { color: var(--accent); }
+.count.is-active b { color: var(--amber); }
+.count.is-open b { color: var(--ink); }
+.count.is-hold b { color: var(--slate); }
+.count.is-block b { color: var(--red); }
+
+/* ---- sections ---- */
+
+section { display: flex; flex-direction: column; gap: 18px; }
+
+h2 {
+  font-family: "Barlow Semi Condensed", sans-serif;
+  font-size: 13px; font-weight: 600;
+  letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+.section-note { margin: -6px 0 0; color: var(--ink-2); max-width: 70ch; font-size: 14.5px; }
+
+/* ---- subsystem cards ---- */
+
+.systems { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 14px; }
+
+.sys {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px 18px 18px;
+  display: flex; flex-direction: column; gap: 10px;
+  box-shadow: var(--shadow);
+}
+.sys h3 {
+  margin: 0;
+  font-family: "Barlow Semi Condensed", sans-serif;
+  font-size: 20px; font-weight: 600; letter-spacing: -.005em;
+}
+.sys .path {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; color: var(--ink-3);
+}
+.bar { height: 5px; border-radius: 3px; background: var(--rule-soft); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.sys .next { font-size: 13.5px; color: var(--ink-2); margin: 0; }
+.sys .next b { color: var(--ink); font-weight: 600; }
+
+/* ---- status chips ---- */
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 4px; white-space: nowrap;
+}
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 1px; background: currentColor; }
+.chip.done   { color: var(--accent); background: var(--accent-soft); }
+.chip.active { color: var(--amber);  background: var(--amber-soft); }
+.chip.open   { color: var(--ink-2);  background: var(--rule-soft); }
+.chip.hold   { color: var(--slate);  background: var(--slate-soft); }
+.chip.block  { color: var(--red);    background: var(--red-soft); }
+
+/* ---- diagram ---- */
+
+.diagram {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 8px 4px;
+  overflow-x: auto;
+  box-shadow: var(--shadow);
+}
+.diagram pre.mermaid { margin: 0; text-align: center; background: transparent; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+/* ---- work table ---- */
+
+.work { display: flex; flex-direction: column; gap: 10px; }
+
+.row {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  gap: 16px;
+  align-items: start;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--rule);
+  border-radius: 8px;
+  padding: 13px 16px;
+}
+.row.s-active { border-left-color: var(--amber); }
+.row.s-open   { border-left-color: var(--ink-3); }
+.row.s-hold   { border-left-color: var(--slate); }
+.row.s-block  { border-left-color: var(--red); }
+
+.row .who {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3); padding-top: 3px;
+}
+.row .what { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.row .what b { font-weight: 600; font-size: 15px; }
+.row .what p { margin: 0; color: var(--ink-2); font-size: 13.5px; max-width: 74ch; }
+.row .what code {
+  font-family: "IBM Plex Mono", monospace; font-size: 12px;
+  background: var(--panel-2); border: 1px solid var(--rule-soft);
+  border-radius: 3px; padding: 0 4px;
+}
+
+@media (max-width: 620px) {
+  .row { grid-template-columns: 1fr; gap: 8px; }
+  .row .who { padding-top: 0; }
+}
+
+/* ---- callout ---- */
+
+.callout {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--red);
+  border-radius: 10px;
+  padding: 20px 22px;
+  display: flex; flex-direction: column; gap: 14px;
+  box-shadow: var(--shadow);
+}
+.callout h3 {
+  margin: 0;
+  font-family: "Barlow Semi Condensed", sans-serif;
+  font-size: 22px; font-weight: 600;
+}
+.callout > p { margin: 0; color: var(--ink-2); max-width: 72ch; }
+.blockers { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.blockers li {
+  display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: baseline;
+  padding-top: 12px; border-top: 1px solid var(--rule-soft);
+}
+.blockers li:first-child { border-top: 0; padding-top: 0; }
+.blockers b { font-weight: 600; }
+.blockers p { margin: 3px 0 0; color: var(--ink-2); font-size: 13.5px; max-width: 70ch; }
+
+footer {
+  color: var(--ink-3);
+  font-size: 13px;
+  border-top: 1px solid var(--rule);
+  padding-top: 18px;
+  max-width: 74ch;
+}
+
+/* ---- interactive affordance ---- */
+
+.sys, .row, .blockers li.bl {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease;
+}
+.sys:hover, .row:hover, .blockers li.bl:hover { border-color: var(--accent); }
+.sys:hover { transform: translateY(-1px); }
+.sys:focus-visible, .row:focus-visible, .blockers li.bl:focus-visible,
+.drawer-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.more {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.sys .more::after, .row .more::after { content: " →"; }
+
+/* ---- drawer ---- */
+
+.scrim {
+  position: fixed; inset: 0;
+  background: rgba(8, 16, 14, .45);
+  backdrop-filter: blur(2px);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease;
+  z-index: 40;
+}
+.scrim.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(560px, 100vw);
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+  box-shadow: -18px 0 48px rgba(0,0,0,.18);
+  transform: translateX(101%);
+  transition: transform .24s cubic-bezier(.32,.72,.3,1);
+  z-index: 50;
+  display: flex; flex-direction: column;
+}
+.drawer.open { transform: translateX(0); }
+
+.drawer-head {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.drawer-head .ht { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.drawer-head .kicker {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+}
+.drawer-head h3 {
+  margin: 0;
+  font-family: "Barlow Semi Condensed", sans-serif;
+  font-size: 27px; font-weight: 600; line-height: 1.1;
+  text-wrap: balance;
+}
+.drawer-close {
+  margin-left: auto; flex: none;
+  background: var(--panel-2); border: 1px solid var(--rule);
+  color: var(--ink-2); border-radius: 6px;
+  width: 30px; height: 30px; line-height: 1;
+  font-size: 17px; cursor: pointer;
+}
+.drawer-close:hover { color: var(--ink); border-color: var(--accent); }
+
+.drawer-body {
+  overflow-y: auto;
+  padding: 20px 24px 40px;
+  display: flex; flex-direction: column; gap: 22px;
+}
+
+.facts {
+  display: grid; grid-template-columns: auto 1fr; gap: 7px 16px;
+  font-size: 13.5px; margin: 0;
+}
+.facts dt {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink-3); padding-top: 3px;
+}
+.facts dd { margin: 0; color: var(--ink); }
+.facts dd code, .drawer-body code {
+  font-family: "IBM Plex Mono", monospace; font-size: 12px;
+  background: var(--panel-2); border: 1px solid var(--rule-soft);
+  border-radius: 3px; padding: 0 4px;
+}
+
+.dsec { display: flex; flex-direction: column; gap: 7px; }
+.dsec h4 {
+  margin: 0;
+  font-family: "Barlow Semi Condensed", sans-serif;
+  font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.dsec p { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 60ch; }
+.dsec p + p { margin-top: 8px; }
+.dsec strong { color: var(--ink); font-weight: 600; }
+
+.dlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.dlist li {
+  display: grid; grid-template-columns: 84px 1fr; gap: 12px; align-items: baseline;
+  font-size: 13.5px; color: var(--ink-2);
+  padding-bottom: 7px; border-bottom: 1px solid var(--rule-soft);
+}
+.dlist li:last-child { border-bottom: 0; padding-bottom: 0; }
+.dlist .st {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+}
+.dlist .st.done { color: var(--accent); }
+.dlist .st.active { color: var(--amber); }
+.dlist .st.open { color: var(--ink-3); }
+.dlist .st.hold { color: var(--slate); }
+.dlist .st.block { color: var(--red); }
+.dlist b { color: var(--ink); font-weight: 600; }
+
+.src {
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-3);
+  border-top: 1px solid var(--rule); padding-top: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer, .scrim, .sys, .row { transition: none; }
+  .sys:hover { transform: none; }
+}
+
+
+/* ---- graph lightbox ---- */
+
+.diagram-wrap { position: relative; }
+.expand {
+  position: absolute; top: 12px; right: 12px; z-index: 2;
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--panel); border: 1px solid var(--rule);
+  color: var(--ink-2); border-radius: 6px;
+  padding: 6px 11px; cursor: pointer;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+}
+.expand:hover { color: var(--ink); border-color: var(--accent); }
+.expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.gv {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--ground);
+  display: flex; flex-direction: column;
+  opacity: 0; pointer-events: none;
+  transition: opacity .18s ease;
+}
+.gv.open { opacity: 1; pointer-events: auto; }
+
+.gv-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  flex: none;
+}
+.gv-bar h3 {
+  margin: 0;
+  font-family: "Barlow Semi Condensed", sans-serif;
+  font-size: 18px; font-weight: 600;
+}
+.gv-bar .hint {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.gv-tools { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.gv-tools button {
+  background: var(--panel-2); border: 1px solid var(--rule);
+  color: var(--ink-2); border-radius: 6px;
+  min-width: 32px; height: 32px; padding: 0 9px;
+  cursor: pointer; font: inherit; font-size: 14px; line-height: 1;
+  font-family: "IBM Plex Mono", monospace;
+}
+.gv-tools button:hover { color: var(--ink); border-color: var(--accent); }
+.gv-tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gv-zoom {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  color: var(--ink-3); min-width: 46px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.gv-stage {
+  flex: 1; overflow: hidden; position: relative;
+  cursor: grab; touch-action: none;
+  background:
+    radial-gradient(circle at 1px 1px, var(--rule-soft) 1px, transparent 0) 0 0 / 22px 22px;
+}
+.gv-stage.dragging { cursor: grabbing; }
+.gv-pan { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.gv-pan svg { display: block; }
+
+@media (prefers-reduced-motion: reduce) { .gv { transition: none; } }
+
+footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">
+      <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
+      <span>Derived from ROADMAP.md · 18 Sep 2026</span>
+      <span>Select any card or row for detail</span>
+    </div>
+    <h1>Petrobrain Milestones</h1>
+    <p class="lede">Four subsystems, eighty-seven tracked items, one question worth answering at a glance:
+      what is actually blocking a crew member who sees, remembers, and talks back.</p>
+  </header>
+
+  <div class="counts">
+    <div class="count is-done"><b>52</b><span>Done</span></div>
+    <div class="count is-active"><b>4</b><span>In progress</span></div>
+    <div class="count is-open"><b>14</b><span>Open</span></div>
+    <div class="count is-hold"><b>5</b><span>Deferred</span></div>
+    <div class="count is-block"><b>3</b><span>Await hardware</span></div>
+  </div>
+
+  <section>
+    <h2>Subsystems</h2>
+    <p class="section-note">Five components, each standing alone with its own dependencies and test suite. Select one to see what it owns, what is finished, and what is genuinely left.</p>
+    <div class="systems">
+
+      <article class="sys" role="button" tabindex="0" data-detail="wm">
+        <h3>World Model</h3>
+        <span class="path">world-model/</span>
+        <div class="bar"><i style="width:97%"></i></div>
+        <span class="chip done">M0–M10 complete</span>
+        <p class="next">All query surfaces serving the Mission Interpreter over HTTP.
+          <b>Next:</b> multi-theatre support — Kola has a real elevation gap above 60°N.</p>
+        <span class="more">Details</span>
+      </article>
+
+      <article class="sys" role="button" tabindex="0" data-detail="al">
+        <h3>Aircraft Layer</h3>
+        <span class="path">aircraft-layer/</span>
+        <div class="bar"><i style="width:88%"></i></div>
+        <span class="chip done">Core complete</span>
+        <p class="next">Live DCS I/O stable since Sept 7; gained an audio write channel this week.
+          <b>Next:</b> measure <code>LoGetWorldObjects</code> FPS cost in flight.</p>
+        <span class="more">Details</span>
+      </article>
+
+      <article class="sys" role="button" tabindex="0" data-detail="mi">
+        <h3>Mission Interpreter</h3>
+        <span class="path">mission-interpreter/</span>
+        <div class="bar"><i style="width:94%"></i></div>
+        <span class="chip done">MI-0–MI-6 complete</span>
+        <p class="next">Last planned stage shipped; consumed by BL-7.
+          <b>Next:</b> MI-5b, a web form for player questions — optional.</p>
+        <span class="more">Details</span>
+      </article>
+
+      <article class="sys" role="button" tabindex="0" data-detail="bl">
+        <h3>Body Layer</h3>
+        <span class="path">body-layer/</span>
+        <div class="bar"><i style="width:78%"></i></div>
+        <span class="chip active">BL-10 in progress</span>
+        <p class="next">BL-0–BL-7 complete: contact memory through mission phase.
+          <b>Next:</b> BL-8 memory interfaces, deliberately held until real flights inform it.</p>
+        <span class="more">Details</span>
+      </article>
+
+      <article class="sys" role="button" tabindex="0" data-detail="srs">
+        <h3>SRS Adapter</h3>
+        <span class="path">srs-adapter/</span>
+        <div class="bar"><i style="width:28%"></i></div>
+        <span class="chip active">Slice 1, stages 1–4</span>
+        <p class="next">Petrovich is audible; merged today.
+          <b>Next:</b> stage 5 on the Windows box, then intercom injection.</p>
+        <span class="more">Details</span>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Dependency map</h2>
+    <p class="section-note">What gates what. The chain that matters right now runs left to right along the
+      bottom: a voice out, then a voice in, then a brain worth talking to.</p>
+
+    <div class="diagram-wrap">
+      <button class="expand" id="gv-open" type="button">Expand graph</button>
+      <div class="diagram">
+<pre class="mermaid">
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 26, "rankSpacing": 46}} }%%
+flowchart LR
+  classDef done   fill:#CFE6DF,stroke:#1F6F63,stroke-width:1px,color:#0F241F;
+  classDef active fill:#F6E3BE,stroke:#A9741B,stroke-width:1.5px,color:#2E2208;
+  classDef open   fill:#E3E7E4,stroke:#6E7D74,stroke-width:1px,color:#1B2622;
+  classDef hold   fill:#DCE3E9,stroke:#5D6B78,stroke-width:1px,color:#18232B,stroke-dasharray:4 3;
+  classDef block  fill:#F2D6D1,stroke:#A93B30,stroke-width:1.5px,color:#2E110D;
+
+  WM["World Model<br/>M0–M10"]:::done
+  AL["Aircraft Layer<br/>DCS I/O"]:::done
+  MI["Mission Interpreter<br/>MI-0–MI-6"]:::done
+
+  BL27["BL-2 … BL-7<br/>contacts → mission phase"]:::done
+  BL5a["BL-5a<br/>text crew interaction"]:::done
+
+  S1["Slice 1<br/>TTS out"]:::active
+  S5["Stage 5<br/>Windows playback"]:::block
+  S6["Stage 6<br/>live sortie"]:::block
+  S2["Slice 2<br/>SRS intercom out"]:::open
+  S3["Slice 3<br/>speech in + PTT"]:::open
+
+  BL8["BL-8<br/>memory interfaces"]:::open
+  BL9["BL-9<br/>debug view"]:::open
+  BRAIN["Brain layer<br/>not started"]:::hold
+
+  WM --> BL27
+  AL --> BL27
+  MI --> BL27
+  BL27 --> BL5a
+  BL5a --> S1
+  S1 --> S5 --> S6
+  S5 --> S2
+  S2 --> S3
+  S3 --> BRAIN
+  BL27 -.->|"needs real flights"| BL8
+  BL27 -.-> BL9
+</pre>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="chip done">Done</span>
+      <span class="chip active">In progress</span>
+      <span class="chip open">Open</span>
+      <span class="chip block">Blocked on hardware</span>
+      <span class="chip hold">Deferred</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="callout">
+      <h3>Waiting on you, not on code</h3>
+      <p>Three items cannot advance without the Windows box or a sortie. Everything downstream of them is
+        idle, which makes these the highest-leverage hour in the project right now.</p>
+      <ul class="blockers">
+        <li class="bl" role="button" tabindex="0" data-detail="stage5">
+          <span class="chip block">Stage 5</span>
+          <div>
+            <b>Windows playback and urgent preemption</b>
+            <p>Collector standalone, no DCS needed. Confirms <code>winsound</code> plays at all, and whether an
+              urgent line genuinely cuts off one already speaking. Gates the intercom slice.</p>
+          </div>
+        </li>
+        <li class="bl" role="button" tabindex="0" data-detail="stage6">
+          <span class="chip block">Stage 6</span>
+          <div>
+            <b>Live sortie acceptance</b>
+            <p>Whether 0.6–0.8 s synthesis latency reads as crew-like, and whether the generic voice is
+              tolerable in the cockpit.</p>
+          </div>
+        </li>
+        <li class="bl" role="button" tabindex="0" data-detail="debt">
+          <span class="chip block">Debt</span>
+          <div>
+            <b>Accumulated live-acceptance debt</b>
+            <p>BL-4's attention tools may never have had a live run; the F10 vocabulary is half-cleared.
+              Both clear on the same flight.</p>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Open work</h2>
+    <p class="section-note">Milestone-level only. The reasoning behind each — why a constant moved, what an
+      earlier pass got wrong — stays in the roadmap files, which remain the source of truth.</p>
+
+    <div class="work">
+
+      <div class="row s-active" role="button" tabindex="0" data-detail="s2">
+        <span class="who">srs-adapter</span>
+        <div class="what">
+          <b>Slice 2 — SRS intercom injection</b>
+          <p>Confirmed reachable: stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz.
+            ICS is the <em>only</em> acceptable target — frequency injection was rejected outright.
+            Open prerequisite: reading the player's DCS unit ID at runtime.</p>
+        </div>
+        <span class="chip open">Next</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="s3">
+        <span class="who">srs-adapter</span>
+        <div class="what">
+          <b>Slice 3 — speech in, gated by a joystick PTT</b>
+          <p>Inbound bypasses SRS entirely and captures the microphone directly. Unverified: whether a bound
+            DCS command's <em>held</em> state is readable on the Export.lua channel — F10 commands arrive as
+            discrete events, which is not the same thing.</p>
+        </div>
+        <span class="chip open">Open</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="merge">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>False contact merge at first sighting</b>
+          <p>Surfaced by the vision calibration: a contact first seen at coarse range can overlap a neighbour,
+            and <code>object_id</code> continuity then holds the false merge for the whole flight. Pinned by a
+            strict xfail.</p>
+        </div>
+        <span class="chip open">Open</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="bl8">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>BL-8 — memory layer interfaces</b>
+          <p>Deliberately last. What is worth remembering is only knowable after BL-2–BL-7 have run for real.</p>
+        </div>
+        <span class="chip open">Gated</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="theatre">
+        <span class="who">world-model</span>
+        <div class="what">
+          <b>Multi-theatre support</b>
+          <p>Architecture already generalises through per-theatre registries. Kola is the real problem: SRTM has
+            no coverage above 60°N, so the elevation source has to change.</p>
+        </div>
+        <span class="chip open">Soon</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="fps">
+        <span class="who">aircraft-layer</span>
+        <div class="what">
+          <b>Measure <code>LoGetWorldObjects</code> FPS cost</b>
+          <p>Still unmeasured in flight, and it runs every poll.</p>
+        </div>
+        <span class="chip open">Open</span>
+      </div>
+
+      <div class="row s-hold" role="button" tabindex="0" data-detail="iff">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Coalition / IFF for contact reports</b>
+          <p>Deferred. Must be <em>inferred</em> from unit-type vocabulary and terrain control, never read from
+            DCS truth — reading it would break the no-omniscience invariant the project exists to protect.</p>
+        </div>
+        <span class="chip hold">Deferred</span>
+      </div>
+
+      <div class="row s-hold" role="button" tabindex="0" data-detail="voice">
+        <span class="who">srs-adapter</span>
+        <div class="what">
+          <b>Voice character</b>
+          <p>Generic English voice today. No Russian-accented English voice exists in macOS <code>say</code>.
+            Auditioning costs one command per candidate on the local path.</p>
+        </div>
+        <span class="chip hold">Backlog</span>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    Generated from <code>ROADMAP.md</code> across five subprojects plus <code>todo/todo.md</code>. This page is a
+    view, never a second source of truth — every status here is derived, and any disagreement with the roadmap
+    files is a bug in this page, not in them.
+  </footer>
+
+</div>
+
+
+<div class="gv" id="gv" hidden>
+  <div class="gv-bar">
+    <h3>Dependency map</h3>
+    <span class="hint">Drag to pan &middot; scroll to zoom</span>
+    <div class="gv-tools">
+      <button type="button" id="gv-out" aria-label="Zoom out">&minus;</button>
+      <span class="gv-zoom" id="gv-pct">100%</span>
+      <button type="button" id="gv-in" aria-label="Zoom in">+</button>
+      <button type="button" id="gv-fit" aria-label="Fit to screen">Fit</button>
+      <button type="button" id="gv-close" aria-label="Close graph">&times;</button>
+    </div>
+  </div>
+  <div class="gv-stage" id="gv-stage">
+    <div class="gv-pan" id="gv-pan"></div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+  <div class="drawer-head">
+    <div class="ht">
+      <span class="kicker" id="drawer-kicker"></span>
+      <h3 id="drawer-title"></h3>
+      <span id="drawer-chip"></span>
+    </div>
+    <button class="drawer-close" id="drawer-close" type="button" aria-label="Close details">&times;</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</aside>
+
+<script>
+const DETAIL = {
+  wm: {
+    kicker: "world-model/", title: "World Model", chip: ["done", "M0-M10 complete"],
+    facts: [["Scope", "Persistent geographic knowledge of a DCS theatre"], ["Authority", "DCS geometry always wins; OSM augments, never overrides"], ["Last full build", "syria-full, 2026-09-15/16, ~60 min end to end"]],
+    sections: [
+      { h: "What it does", p: "Roads, settlements, terrain, elevation, coastline, landcover and road junctions, built offline and served to the Mission Interpreter over HTTP. Line-of-sight was generalised out of body-layer into here, so masking is a point-A-to-point-B primitive rather than something the perception code owns." },
+      { h: "Why it's effectively finished", p: "Every query surface the layers above it need is live. The last full-theatre rebuild validated both the junction-streaming fix and the OSM ingest split in one run — OSM now contributes landcover, coastline, water and named places, and never roads. DCS <code>.routes</code> stays authoritative for those." },
+      { h: "What's actually left", p: "<strong>Multi-theatre support</strong> is the real one, and it is add-entries-and-verify rather than a rewrite — projections and regions are per-theatre registries, not code forks. Per theatre you need verified projection parameters, a region bbox, and a hand-derived raster chart registration. Kola is the exception that needs thought: SRTM has no coverage above 60 degrees north, so its elevation source has to change." },
+      { h: "Unmeasured", p: "Full-theatre OSM parse time and peak memory were never measured — the validating build hit a warm cache and skipped the parse. Stage 5 of that pipeline also has pathological single-chunk stalls. Both are backlog, neither is a correctness gate." }
+    ],
+    items: [["done","M0-M8"],["done","M9 - OSM augmentation"],["done","M10 - road junctions"],["done","LOS query primitive"],["done","HTTP API server"],["open","Multi-theatre (Afghanistan, Caucasus, Kola)"],["hold","Power lines from DCS data"]],
+    src: "world-model/ROADMAP.md"
+  },
+  al: {
+    kicker: "aircraft-layer/", title: "Aircraft Layer", chip: ["done", "Core complete"],
+    facts: [["Scope", "Live DCS I/O pipeline"], ["Shape", "Export.lua &rarr; Windows collector &rarr; LAN API"], ["Stable since", "2026-09-07"]],
+    sections: [
+      { h: "What it does", p: "Telemetry, world objects and Petrovich's own indication text out of DCS; text overlay, F10 radio commands and now audio playback back in. It is the only component that talks to DCS, deliberately — everything above it consumes HTTP." },
+      { h: "Newest addition", p: "<code>POST /audio/play</code> landed with the TTS slice: base64 WAV in, played through <code>winsound</code> by a single worker thread. Routine lines queue FIFO; an urgent line clears the queue and interrupts whatever is already speaking." },
+      { h: "Open: split the export throttle", p: "<code>EXPORT_INTERVAL_S = 0.2</code> is one shared 5 Hz throttle gating all three feeds together. Ground units do not need 5 Hz; self-data may want to stay fast. The fix is two interval constants. Not urgent, because there is no measured cost to react to yet — see below." },
+      { h: "Open: measure the real FPS cost", p: "No quantified per-call cost for <code>LoGetWorldObjects</code> exists at realistic unit counts of 50-200 — only forum folklore. The test is to fly with world-objects export on and off at 5, 2 and 1 Hz and diff frame times. Worth checking at the same time whether being fired at is served by this poll at all; nothing currently reads it for threat detection, and urgent callouts may need their own signal." }
+    ],
+    items: [["done","Core telemetry pipeline"],["done","/world_objects/latest"],["done","/petrovich_indication/latest"],["done","Text overlay write channel"],["done","F10 command inbound channel"],["done","POST /audio/play"],["open","Split the export throttle"],["open","Measure LoGetWorldObjects FPS cost"]],
+    src: "aircraft-layer/ROADMAP.md"
+  },
+  mi: {
+    kicker: "mission-interpreter/", title: "Mission Interpreter", chip: ["done", "MI-0-MI-6 complete"],
+    facts: [["Scope", "Understands one mission, offline, pre-flight"], ["Model", "qwen3:14b for synthesis (MI-4)"], ["Consumer", "body-layer BL-7"]],
+    sections: [
+      { h: "What it does", p: "Takes a <code>.miz</code>, its briefing, the world model and the player's stated intent, and produces a structured Mission Understanding — not prose. Critically, it filters out mission-author-only knowledge (hidden triggers, scripted ambushes) before any of it can reach the crew layer, because Petrovich must never know things the crew could not know." },
+      { h: "Why it's done", p: "MI-6 was the last planned stage: it compiles the full understanding into a compact runtime form that BL-7 consumes for mission phase and relevance. There is no MI-7 in the plan." },
+      { h: "The one open item", p: "MI-5b, a web form for player questions, replacing MI-5's text console. Explicitly future — no design work until the console version proves out in use. Genuinely optional." },
+      { h: "Known gap", p: "Key locations in the compact output carry no position field, so relevance can only be scored against route waypoints, not named mission-critical areas. Documented rather than worked around." }
+    ],
+    items: [["done","MI-0 - real .miz parse"],["done","MI-1 / MI-1.5 - structured extraction"],["done","MI-2 - world enrichment"],["done","MI-3 - understanding schema"],["done","MI-4 - capable-model synthesis"],["done","MI-5 - player questions, console"],["done","MI-6 - runtime compilation"],["open","MI-5b - web form"]],
+    src: "mission-interpreter/ROADMAP.md"
+  },
+  bl: {
+    kicker: "body-layer/", title: "Body Layer", chip: ["active", "BL-10 in progress"],
+    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "Twelve tools, frozen since BL-6"], ["Tests", "600 passing, 1 strict xfail"]],
+    sections: [
+      { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state — never LLM chat history." },
+      { h: "The invariant everything serves", p: "Contact identity is <strong>geometric</strong>, derived from perceived attributes only, never from a DCS object id or any truth field. That is deliberate: it means Petrovich can confuse two identical trucks, which is exactly the fallibility the project exists to model." },
+      { h: "Most recent work", p: "Vision range calibration replaced guessed detection constants with values measured from a nine-range screenshot ladder. The old values were wrong in <em>both</em> directions at once — over-claiming classification while gating out vehicles plainly visible at 8.89 km." },
+      { h: "What's left", p: "BL-8 (memory interfaces) is deliberately last, because what is worth remembering is only knowable after BL-2 through BL-7 have run for real. BL-9 is a debug view. BL-10 is in progress as the SRS work. Plus accumulated live-acceptance debt: BL-4's attention tools may never have had a real sortie." }
+    ],
+    items: [["done","BL-0/BL-1 - harness, observation ingestion"],["done","BL-2 - contact memory and association"],["done","BL-3 - world enrichment"],["done","BL-4 - attention and events"],["done","BL-5 / BL-5a - tool API, text crew"],["done","BL-6 - commands and verification"],["done","BL-7 - mission phase and relevance"],["done","Vision range calibration"],["active","BL-10 - SRS transport"],["open","BL-8 - memory interfaces"],["open","BL-9 - debug visualisation"],["open","False contact merge"]],
+    src: "body-layer/ROADMAP.md"
+  },
+  srs: {
+    kicker: "srs-adapter/", title: "SRS Adapter", chip: ["active", "Slice 1, stages 1-4"],
+    facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Merged today", "f469a56"]],
+    sections: [
+      { h: "Why it exists separately", p: "So neither the body layer nor the aircraft layer grows a TTS dependency. Body and brain deal in text only and never see audio bytes. The seam is HTTP throughout, so no new in-process cross-subproject import was introduced — the world-model import remains the sole sanctioned exception." },
+      { h: "What works today", p: "Text in over <code>POST /speak</code>, synthesized on the Mac by <code>say</code> behind a swappable engine protocol, then either played locally via <code>afplay</code> or POSTed as WAV to the collector and played on Windows. The local path needs neither Windows nor DCS, which makes it the fastest way to audition voices and wording." },
+      { h: "The result that shaped it", p: "Body-layer's entire share came to <strong>one optional field</strong> on <code>CrewConsole</code>. That was the plan's own stated test of whether BL-5a drew its interface in the right place, and it passed." },
+      { h: "Next", p: "Stage 5 on the Windows box, then intercom injection. Note the transports are deliberately asymmetric: outbound goes over SRS intercom, inbound bypasses SRS entirely and captures the microphone directly." }
+    ],
+    items: [["done","Stage 1 - synthesis + local playback"],["done","Stage 2 - collector audio channel"],["done","Stage 3 - cross-machine wiring"],["done","Stage 4 - body-layer sink"],["block","Stage 5 - Windows playback"],["block","Stage 6 - live sortie"],["open","Slice 2 - SRS intercom"],["open","Slice 3 - speech in"],["hold","Voice character"]],
+    src: "srs-adapter/ROADMAP.md"
+  },
+
+  stage5: {
+    kicker: "srs-adapter/ - blocked", title: "Stage 5 - Windows playback", chip: ["block", "Needs the Windows box"],
+    facts: [["Needs", "Windows box only - no DCS"], ["Gates", "Slice 2, and stage 6"], ["Cost", "Roughly one hour"]],
+    sections: [
+      { h: "What it settles", p: "Three things nothing so far can confirm. That <code>winsound.PlaySound</code> actually plays at all. That urgent preemption genuinely interrupts a line already speaking — the interrupt mechanism is this slice's main unverified bet. And whether the audio competes or ducks against other sound on the box, which matters more once SRS is in the mix." },
+      { h: "How", p: "Run the collector standalone on Windows, point <code>srs-adapter --target aircraft-layer</code> at it from the Mac, and POST a few lines. Then queue several long routine lines and fire an urgent one: it should cut the current line off mid-word and drop the backlog entirely." },
+      { h: "If it fails", p: "That is useful, not a setback. The interrupt mechanism is deliberately isolated in a single named function precisely so it can be swapped without touching the queue logic around it." }
+    ],
+    src: "srs-adapter/ROADMAP.md, plans/tts-voice-output/plan.md"
+  },
+  stage6: {
+    kicker: "srs-adapter/ - blocked", title: "Stage 6 - live sortie acceptance", chip: ["block", "Needs a flight"],
+    facts: [["Needs", "DCS, a real sortie"], ["Type", "Acceptance, not a correctness gate"]],
+    sections: [
+      { h: "What only a human can judge", p: "Whether 0.6-0.8 s of synthesis latency reads as crew-like or laggy. Whether several callouts arriving in one poll queue acceptably or feel like a backlog. And whether a generic English voice is tolerable in the cockpit, or whether the missing Russian accent breaks the illusion badly enough to promote that backlog item." },
+      { h: "Why it isn't a gate", p: "Stage 5 already proves the pipeline works. This measures whether it <em>feels</em> right, which is a different question and one no test can answer." }
+    ],
+    src: "srs-adapter/ROADMAP.md"
+  },
+  debt: {
+    kicker: "body-layer/ - debt", title: "Live-acceptance debt", chip: ["block", "Clears on one flight"],
+    facts: [["Tracked since", "2026-09-10"], ["Items", "Two open"]],
+    sections: [
+      { h: "Why this is tracked at all", p: "A milestone can honestly pass on fixture testing when its plan scopes live acceptance out deliberately. This list is for the other kind — acceptance that was <em>deferred</em>, not waived. It was added after a retro found the same caveat being logged repeatedly without anyone tracking it as accumulating risk." },
+      { h: "BL-4's attention and events tools", p: "<code>set_attention</code>, <code>watch_area</code>, <code>get_attention_state</code>, <code>list_events</code>, <code>acknowledge_event</code> — live acceptance was bundled with BL-5's transport layer, but BL-5's own sortie exercised different tools. It is unclear whether these have ever had a live run." },
+      { h: "F10 command vocabulary", p: "Partially cleared by the 2026-09-16/17 sortie: the menu tree works, scans register real tasks, and cancel genuinely cancels. Two defects were found and fixed. Still unexercised: relative-versus-bearing sector rotation through a heading sweep across 0/360, and the placeholder scan radius and deadline constants." }
+    ],
+    src: "body-layer/ROADMAP.md"
+  },
+
+  s2: {
+    kicker: "srs-adapter/", title: "Slice 2 - SRS intercom injection", chip: ["open", "Next up"],
+    facts: [["Mechanism", "DCS-SR-ExternalAudio.exe"], ["Target", "ICS only"], ["Gated on", "Stage 5"]],
+    sections: [
+      { h: "Confirmed reachable", p: "Stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz, modulation 2 — established from the SRS radio export, where the contributor notes their patch was never merged because official Mi-24 support had already shipped. <code>--unitId</code> exists specifically to allow intercom over external audio." },
+      { h: "Why ICS is the only option", p: "The player must stay on the external mission frequency, and the Mi-24P's SPU-8 selects one audio source at a time — so a dedicated Petrovich frequency would <em>compete</em> with mission comms rather than layer beneath them. Frequency injection, the mechanism DATIS and MOOSE use, is therefore rejected outright rather than held as a fallback. <strong>If the live ICS test fails, this slice stops</strong> and local playback is what ships." },
+      { h: "Open prerequisite", p: "Discovering the player's DCS unit ID at runtime. <code>--unitId</code> defaults to 1000 and intercom scoping needs the real value, with no frequency-based escape hatch if it proves unobtainable. Likely already available through the aircraft layer's ownship flag — verify, do not assume." },
+      { h: "Hard requirement", p: "The channel must be available regardless of SPU-8 position. Petrovich is the crew member in front of you; an intercom that goes silent because the pilot selected a radio is not an intercom. Receive is not gated by the selector in SRS, so this should hold — but it is pass/fail for the slice and must be confirmed live." }
+    ],
+    src: "srs-adapter/ROADMAP.md, research/2026-09-17-tts-audio-transport-recon.md"
+  },
+  s3: {
+    kicker: "srs-adapter/", title: "Slice 3 - speech in, PTT-gated", chip: ["open", "Largest remaining"],
+    facts: [["Transport", "Direct mic capture, bypasses SRS"], ["Gate", "Dedicated DCS keybind"]],
+    sections: [
+      { h: "Why inbound bypasses SRS", p: "SRS can send to the player but offers no clean way to capture the player's voice back out. <code>ExternalAudio</code> is a sender; receiving would mean a headless SRS client joined as a listener plus virtual-cable capture on Windows, with no documented API — by a wide margin the largest build in this milestone. Capturing the microphone directly also satisfies the stay-on-mission-frequency constraint absolutely, since inbound then involves no radio stack at all." },
+      { h: "The asymmetry is deliberate", p: "Outbound is always open; inbound is explicitly gated. Do not let a later refactor 'simplify' them into symmetry — they solve different problems." },
+      { h: "Why PTT rather than always-on", p: "An always-listening microphone turns every muttered word and every piece of room noise into a candidate command, and continuous transcription is the expensive part of the pipeline." },
+      { h: "Unverified", p: "Whether a bound DCS command's <em>held</em> state is readable on the Export.lua channel at all. F10 commands arrive as discrete events, which is not the same thing. Fallback if not: the Hind's two-stage cyclic trigger already forces intercom for the duration of a half-press without disturbing the SPU-8 — stock behaviour. Its caveat is that the export ends with <code>control = 1</code>, which may mean SRS never consults that branch." }
+    ],
+    src: "srs-adapter/ROADMAP.md"
+  },
+  merge: {
+    kicker: "body-layer/", title: "False contact merge at first sighting", chip: ["open", "Real defect"],
+    facts: [["Surfaced by", "Vision range calibration"], ["Pinned by", "A strict xfail"], ["Class", "Known since BL-2.6"]],
+    sections: [
+      { h: "What happens", p: "Two real objects 400 m apart — a truck and infantry in the canonical mock flight — end the flight as <strong>one</strong> contact, where they used to be two." },
+      { h: "Why the calibration caused it", p: "The wider detection envelope now first sees the further object at about 2 km instead of 1.6 km. At that range the naked-eye range bucket is coarse enough that its implied position overlaps the nearer contact, so the store merges instead of founding a second contact. Object-id continuity then holds that false merge for the rest of the flight, even as the range closes and the two separate cleanly." },
+      { h: "Why it was predictable", p: "This is exactly the false-merge risk flagged when BL-2.6 widened the symmetric gate. Seeing further means seeing more coarsely first, so every contact now enters the store through a wider-uncertainty door." },
+      { h: "How it's held", p: "A strict xfail states the desired behaviour and will fail loudly if a fix lands without updating it. Worth fixing before a longer screenshot ladder widens the envelope again." }
+    ],
+    src: "body-layer/ROADMAP.md, tests/test_mock_flight_chain.py"
+  },
+  bl8: {
+    kicker: "body-layer/", title: "BL-8 - memory layer interfaces", chip: ["open", "Deliberately gated"],
+    facts: [["Decision", "User, 2026-09-10"], ["Gated on", "BL-2..BL-7 flying for real"]],
+    sections: [
+      { h: "Why it's last", p: "\"The shape of what's worth remembering is only knowable after BL-2 through BL-7 have run for real.\" Building a persistence model before knowing what survives a sortie would be guessing at a schema." },
+      { h: "Standing awareness, not a constraint", p: "Every milestone touching in-mission memory shapes — contacts, the attention area registry — should keep the eventual export boundary in mind. Not as a design constraint yet; just don't shape something in a way that obviously fights it." }
+    ],
+    src: "body-layer/ROADMAP.md"
+  },
+  theatre: {
+    kicker: "world-model/", title: "Multi-theatre support", chip: ["open", "Needed soonish"],
+    facts: [["Raised", "2026-09-13"], ["Shape", "Add entries and verify, not a rewrite"], ["Hard case", "Kola"]],
+    sections: [
+      { h: "Why it's cheap", p: "The architecture already generalises: projections and regions are per-theatre registries, not per-theatre code forks." },
+      { h: "Per-theatre work", p: "Transverse Mercator projection parameters — fitted values exist for every theatre, but each needs live-DCS verification against real coordinate output rather than being trusted blind. A region bbox entry, which is mechanical. And raster chart registration for the F10 paper map, which was hand-derived from control points for Syria and is genuinely manual per theatre." },
+      { h: "Why Kola is different", p: "SRTM has no coverage above 60 degrees north. That is not a parameter change — the elevation source itself has to change for that theatre." }
+    ],
+    src: "world-model/ROADMAP.md"
+  },
+  fps: {
+    kicker: "aircraft-layer/", title: "Measure LoGetWorldObjects FPS cost", chip: ["open", "Unmeasured"],
+    facts: [["Raised", "2026-09-09"], ["Blocks", "Throttle tuning"]],
+    sections: [
+      { h: "The gap", p: "No confirmed, quantified per-call cost exists at realistic unit counts of 50 to 200 — only qualitative forum and Tacview-wiki folklore. It runs on every poll." },
+      { h: "The test", p: "Fly with world-objects export on and off at 5, 2 and 1 Hz, and diff frame times. Until that number exists, splitting the export throttle is tuning against a guess." },
+      { h: "Worth checking at the same time", p: "Whether being fired at is served by this poll rate at all. Nothing currently reads it for threat or launch detection, so the urgent-callout-latency case may want its own dedicated signal rather than a faster poll." }
+    ],
+    src: "aircraft-layer/ROADMAP.md"
+  },
+  iff: {
+    kicker: "body-layer/", title: "Coalition / IFF for contact reports", chip: ["hold", "Deferred"],
+    facts: [["Status", "Do not start without instruction"], ["Blocker", "Terrain-control data doesn't exist yet"]],
+    sections: [
+      { h: "Why it's not simply available", p: "Reading real coalition straight from DCS truth would violate the no-omniscience invariant the belief layer structurally enforces. The perception channel deliberately does no coalition or IFF filtering at all." },
+      { h: "How it must work instead", p: "Coalition has to be <strong>inferred</strong> — from unit-type vocabulary (which types each side is known to field) and from world position (whose controlled terrain the contact sits in). That is a user decision, not an implementation preference." },
+      { h: "What's missing", p: "Terrain-control data does not exist in the world model yet, so half the inference has no input. Not scoped to any milestone." }
+    ],
+    src: "body-layer/ROADMAP.md"
+  },
+  voice: {
+    kicker: "srs-adapter/", title: "Voice character", chip: ["hold", "Backlog"],
+    facts: [["Deferred at", "TTS slice, Decision 7"], ["Cost to try", "One command per candidate"]],
+    sections: [
+      { h: "The situation", p: "Petrovich currently speaks in a generic English voice. macOS <code>say</code> ships no Russian-accented English voice — Milena is a Russian-<em>language</em> voice, which is a different thing entirely." },
+      { h: "Why it was deferred", p: "Solving it would have expanded a slice whose entire point was 'audible at all'. Deferred deliberately and recorded, rather than quietly dropped." },
+      { h: "Options when picked up", p: "A different local engine with a suitable voice, a trained or cloned voice, or accepting a generic one permanently. Auditioning is cheap: the local playback target speaks a line on the Mac with nothing else running, so each candidate costs one command." }
+    ],
+    src: "srs-adapter/ROADMAP.md"
+  }
+};
+
+const scrim = document.getElementById("scrim");
+const drawer = document.getElementById("drawer");
+const dTitle = document.getElementById("drawer-title");
+const dKicker = document.getElementById("drawer-kicker");
+const dChip = document.getElementById("drawer-chip");
+const dBody = document.getElementById("drawer-body");
+let lastFocus = null;
+
+function esc(t) { return String(t); }
+
+function render(d) {
+  dKicker.textContent = d.kicker;
+  dTitle.textContent = d.title;
+  dChip.innerHTML = '<span class="chip ' + d.chip[0] + '">' + esc(d.chip[1]) + '</span>';
+
+  let html = "";
+  if (d.facts && d.facts.length) {
+    html += '<dl class="facts">';
+    d.facts.forEach(f => { html += "<dt>" + f[0] + "</dt><dd>" + f[1] + "</dd>"; });
+    html += "</dl>";
+  }
+  (d.sections || []).forEach(sec => {
+    html += '<div class="dsec"><h4>' + sec.h + "</h4><p>" + sec.p + "</p></div>";
+  });
+  if (d.items && d.items.length) {
+    html += '<div class="dsec"><h4>Items</h4><ul class="dlist">';
+    d.items.forEach(it => {
+      html += '<li><span class="st ' + it[0] + '">' + it[0] + "</span><b>" + it[1] + "</b></li>";
+    });
+    html += "</ul></div>";
+  }
+  if (d.src) html += '<div class="src">Source: ' + d.src + "</div>";
+  dBody.innerHTML = html;
+  dBody.scrollTop = 0;
+}
+
+function openDrawer(key, trigger) {
+  const d = DETAIL[key];
+  if (!d) return;
+  lastFocus = trigger || document.activeElement;
+  render(d);
+  scrim.hidden = false; drawer.hidden = false;
+  requestAnimationFrame(() => { scrim.classList.add("open"); drawer.classList.add("open"); });
+  document.getElementById("drawer-close").focus();
+}
+
+function closeDrawer() {
+  scrim.classList.remove("open"); drawer.classList.remove("open");
+  setTimeout(() => { scrim.hidden = true; drawer.hidden = true; }, 220);
+  if (lastFocus) lastFocus.focus();
+}
+
+document.querySelectorAll("[data-detail]").forEach(el => {
+  el.addEventListener("click", () => openDrawer(el.dataset.detail, el));
+  el.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDrawer(el.dataset.detail, el); }
+  });
+});
+document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+scrim.addEventListener("click", closeDrawer);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !drawer.hidden) closeDrawer(); });
+
+/* ---- graph lightbox: zoom + pan ---- */
+(function () {
+  const gv = document.getElementById("gv");
+  const stage = document.getElementById("gv-stage");
+  const pan = document.getElementById("gv-pan");
+  const pct = document.getElementById("gv-pct");
+  let scale = 1, tx = 0, ty = 0, natural = null, lastFocusG = null;
+
+  function apply() {
+    pan.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+    pct.textContent = Math.round(scale * 100) + "%";
+  }
+
+  function fit() {
+    if (!natural) return;
+    const pad = 48;
+    const sw = stage.clientWidth - pad * 2;
+    const sh = stage.clientHeight - pad * 2;
+    scale = Math.min(sw / natural.w, sh / natural.h);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    tx = (stage.clientWidth - natural.w * scale) / 2;
+    ty = (stage.clientHeight - natural.h * scale) / 2;
+    apply();
+  }
+
+  function zoomAt(factor, cx, cy) {
+    const next = Math.min(6, Math.max(0.15, scale * factor));
+    const r = next / scale;
+    tx = cx - (cx - tx) * r;
+    ty = cy - (cy - ty) * r;
+    scale = next;
+    apply();
+  }
+
+  function open() {
+    const src = document.querySelector(".diagram svg");
+    if (!src) return;
+    lastFocusG = document.activeElement;
+
+    const clone = src.cloneNode(true);
+    clone.removeAttribute("style");
+    let w = src.viewBox && src.viewBox.baseVal && src.viewBox.baseVal.width;
+    let h = src.viewBox && src.viewBox.baseVal && src.viewBox.baseVal.height;
+    if (!w || !h) { const r = src.getBoundingClientRect(); w = r.width; h = r.height; }
+    natural = { w: w, h: h };
+    clone.setAttribute("width", w);
+    clone.setAttribute("height", h);
+    pan.innerHTML = "";
+    pan.appendChild(clone);
+
+    gv.hidden = false;
+    requestAnimationFrame(() => { gv.classList.add("open"); fit(); });
+    document.getElementById("gv-close").focus();
+  }
+
+  function close() {
+    gv.classList.remove("open");
+    setTimeout(() => { gv.hidden = true; pan.innerHTML = ""; }, 180);
+    if (lastFocusG) lastFocusG.focus();
+  }
+
+  document.getElementById("gv-open").addEventListener("click", open);
+  document.getElementById("gv-close").addEventListener("click", close);
+  document.getElementById("gv-fit").addEventListener("click", fit);
+  document.getElementById("gv-in").addEventListener("click",
+    () => zoomAt(1.25, stage.clientWidth / 2, stage.clientHeight / 2));
+  document.getElementById("gv-out").addEventListener("click",
+    () => zoomAt(0.8, stage.clientWidth / 2, stage.clientHeight / 2));
+
+  stage.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = stage.getBoundingClientRect();
+    zoomAt(e.deltaY < 0 ? 1.12 : 0.89, e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+
+  stage.addEventListener("dblclick", e => {
+    const r = stage.getBoundingClientRect();
+    zoomAt(1.6, e.clientX - r.left, e.clientY - r.top);
+  });
+
+  let dragging = false, px = 0, py = 0;
+  stage.addEventListener("pointerdown", e => {
+    dragging = true; px = e.clientX; py = e.clientY;
+    stage.classList.add("dragging");
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    tx += e.clientX - px; ty += e.clientY - py;
+    px = e.clientX; py = e.clientY;
+    apply();
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    stage.classList.remove("dragging");
+    try { stage.releasePointerCapture(e.pointerId); } catch (_) {}
+  }
+  stage.addEventListener("pointerup", endDrag);
+  stage.addEventListener("pointercancel", endDrag);
+
+  window.addEventListener("resize", () => { if (!gv.hidden) fit(); });
+
+  document.addEventListener("keydown", e => {
+    if (gv.hidden) return;
+    if (e.key === "Escape") close();
+    else if (e.key === "+" || e.key === "=") zoomAt(1.25, stage.clientWidth / 2, stage.clientHeight / 2);
+    else if (e.key === "-") zoomAt(0.8, stage.clientWidth / 2, stage.clientHeight / 2);
+    else if (e.key === "0") fit();
+  });
+})();
+</script>
