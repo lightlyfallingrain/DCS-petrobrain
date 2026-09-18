@@ -122,3 +122,120 @@ started. Two commits on `feature/group-contact-cardinality`, branched from `main
   constructs `Contact` directly without a `cardinality` argument, and per this project's own
   feedback memory (`feedback_decouple_fixtures_from_tuned_defaults`), existing tests were not to be
   edited to make Stage 1 pass.
+
+---
+
+### Stage 3a / Stage 4a (2026-09-18)
+
+Stages 3a and 4a only, per instruction (running order `3a → 4a → sortie → 3b → 4b`). Stage 3b
+(calibration) and 4b (speech/events) explicitly not started — 3b needs a live sortie the user must
+fly, 4b was out of scope. Two commits on `feature/group-contact-cardinality`:
+
+- `17e398f` — Stage 3a: same-source/same-poll exclusion in `ContactStore.ingest`.
+- `d7e6e4a` — Stage 4a: `facts["cardinality"]` + `console._SHOW_FACT_KEYS`.
+
+#### Files Changed
+
+**Stage 3a**
+- `body-layer/src/belief/contacts.py` — `ingest` gained a read-only pre-scan over the batch before
+  its existing single-pass loop: `_resolve_continuity` is evaluated once per observation and
+  memoized in `continuity_by_observation_id` (so the main loop never calls it a second time), and
+  every observation that resolves by continuity records its contact id under
+  `claimed[(percept.source, percept.t_sim)]`. The gate branch then filters candidates by
+  `candidate.id not in claimed[claim_key]` before counting how many pass; whichever contact an
+  observation ends up on (continuity, gate merge, or founding) is added to `claimed[claim_key]`
+  before the next observation in the batch is processed. `association_over_time.py` (gate radius
+  formulas, `passes_gate`) is **untouched** — confirmed with `git diff --stat` showing no changes
+  to that file in this commit.
+- `body-layer/tests/test_contacts.py` — two new tests pinning the rule:
+  `test_same_source_same_poll_observations_never_merge` (two same-source, same-`t_sim`, spatially
+  close, class-compatible observations found two contacts) and
+  `test_different_source_same_poll_observations_still_fuse` (the identical geometry, but different
+  sources, still merges into one — the cross-channel-fusion guard).
+- `body-layer/tests/test_mock_flight_chain.py` — the single-threaded chain test's assertions and
+  inline derivation comment rewritten for the new 2-contact outcome (see "What the mock flight
+  chain now produces" below); `test_calibration_cluster_merge_undercount.py` is **unchanged** —
+  confirmed with `git diff --stat` showing no changes to that file in this commit, which is Stage
+  3a's own narrowness guard per the plan.
+- `body-layer/CLAUDE.md` — `contacts.py` Structure entry gained a paragraph describing `ingest`'s
+  pre-scan and the same-source/same-poll rule.
+
+**Stage 4a**
+- `body-layer/src/belief/tools.py` — new `_cardinality_facts(contact, now_sim) -> dict | None`
+  helper, `_classification_facts`'s sibling: returns `{lo, hi, confidence}` (confidence via the
+  already-existing `belief.decay.cardinality_confidence_at`, `lo`/`hi` straight off
+  `Contact.cardinality`), or `None` when the held claim is still `belief.cardinality.UNKNOWN`
+  (0, inf) — the lattice's root, "no cardinality claim at all" per that module's own docstring.
+  Wired into `_contact_facts`: `facts["cardinality"]` is only set when `_cardinality_facts` returns
+  non-`None`, matching this module's documented absent-not-null convention (the same pattern
+  `attention_source`/`motion_when_seen` already use).
+- `body-layer/src/belief/console.py` — `_SHOW_FACT_KEYS` gained `"cardinality"`, placed right after
+  `"classification"`.
+- `body-layer/CLAUDE.md` — `tools.py`/`console.py` Structure entries updated for both additions.
+
+#### Tests Added
+
+- `test_same_source_same_poll_observations_never_merge` — pins the core Stage 3a rule.
+- `test_different_source_same_poll_observations_still_fuse` — pins the rule's source-scoping
+  (keyed on `(source, t_sim)`, not the whole batch), which is what keeps cross-channel fusion
+  working.
+- No new tests for Stage 4a beyond the existing suite exercising `_contact_facts`/`show <id>` —
+  4a is a pure plumbing addition over already-tested `fold_cardinality`/`cardinality_confidence_at`
+  machinery, and `test_mock_flight_chain.py`'s rewritten assertions (below) now directly assert
+  `facts["cardinality"]`'s shape end-to-end, which was judged sufficient coverage rather than
+  adding a redundant unit test.
+
+#### Checks
+
+(body-layer/ only touched)
+- ruff format --check: pass
+- ruff check: pass
+- mypy src: pass (no issues, 34 source files)
+- pytest -q: pass (634 tests; 632 pre-existing + 2 new)
+
+#### `association_over_time.py` confirmation
+
+`git diff --stat` on both commits shows zero lines changed in
+`body-layer/src/belief/association_over_time.py` — `spatial_gate_radius_m` and `passes_gate` are
+byte-identical to before Stage 3a, as required.
+
+#### What the mock flight chain now produces
+
+Re-ran the fixture directly (not guessed) after the Stage 3a change: **2 contacts, 2
+`CONTACT_DETECTED` events, 42 observations** (unchanged from Stage 2 — Stage 3a does not touch
+clustering or observation counts).
+
+- `CONTACT_1` — the truck: Hybrid's frame-0 founding percept, `type`-level `"Ural truck"`, both
+  sources (`naked_eye_visual_filtered`, `petrovich_detection_associated`), `certainty="observed"`.
+  Its `cardinality` held `OP_2UNITS` (2, 2) through polls 0–13 (the merged cluster's own count);
+  poll 14's truck singleton report is `OP_1UNIT` (1, 1) — disjoint from (2, 2) — so
+  `fold_cardinality` contradicts to the hull **(1, 2)** and arms
+  `CARDINALITY_CONTRADICTION_LOCKOUT_S` (30s). Verified live rather than assumed: the fixture's
+  last poll is at t_sim=95.0 (5s/poll, poll 14 at t_sim=70.0), well inside the 30s lockout, so
+  `facts["cardinality"]` still reads `{"lo": 1, "hi": 2, ...}` at the fixture's end. **This is the
+  correct outcome, not a bug to chase** — the contact honestly cannot tell whether it is looking at
+  one occupant or two until the lockout clears and a fresh reading is allowed to re-narrow it; the
+  plan's own Stage 3a design section names this exact hedge as a deliberate non-goal ("a split
+  still registers as a cardinality contradiction, not as a known structural event").
+- `CONTACT_2` — the infantry: founded fresh at poll 14 by the same-source/same-poll exclusion
+  (before Stage 3a this singleton would have folded onto `CONTACT_1` via the wider, symmetric-
+  budgeted spatial gate, in the same poll the truck singleton claimed `CONTACT_1` by continuity).
+  Naked-eye only, presence-level `"OP_GROUPSOMETHING"`, `certainty="observed"`, `cardinality`
+  `OP_1UNIT` (1, 1).
+
+#### What in the design did not survive contact with the code
+
+- Nothing structural. The pre-scan/claimed-set mechanism, the `(source, t_sim)` keying, the
+  exclude-before-counting ordering, and the "add to claimed after resolving" step all matched the
+  design's §"Mechanism — exactly what changes" section as written, and the line count landed close
+  to the design's own "roughly fifteen lines plus docstrings" estimate.
+- One number required live verification rather than trust: the design's own worked derivation
+  flagged the poll-14 lockout-vs-fixture-length question as "verify rather than assume, as the
+  figure depends on the fixture's poll cadence" — confirmed above by actually running the fixture,
+  not by re-deriving the arithmetic by hand.
+- Stage 4a's "absent-when-unknown" convention needed one judgment call the plan left implicit:
+  what counts as "unknown" for a cardinality claim. Resolved by reading `cardinality.py`'s own
+  docstring, which names `UNKNOWN` (0, inf) as the lattice's literal root/"no claim at all" —
+  matched against that exact interval rather than e.g. a low-confidence heuristic, since every
+  contact is seeded with a real claim at founding and `UNKNOWN` is reachable only via a
+  contradiction hull spanning everything.
