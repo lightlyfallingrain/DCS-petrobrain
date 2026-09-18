@@ -535,6 +535,44 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
   flying anyway rather than run standalone. **Do not start without the user's instruction.**
 
+- [ ] **Contact report fine tuning — a running list, appended to as real sorties surface things.**
+  Opened 2026-09-18 from the first flights with TTS live. These are about what Petrovich *says* and
+  how it sounds, not about what he believes; most touch `belief/speech.py` and
+  `belief/enrichment.py` only. Grouped by what they cost.
+
+  **Cheap — wording, in `speech.py`:**
+  - **Spell units out.** "m" and "km" must become "meters" and "kilometers"; TTS does not handle the
+    shorthands. Note `_format_range_km` and `_round_enrichment_fragment` both currently emit them.
+  - **Acronyms need spacing or expansion.** TTS reads "MI-8" as one token and "LR" as letters with
+    no gap. Wanted: "M I 8", "long range". **"SAM" is the exception** — a well-known word TTS
+    already says correctly, so this is a per-token table, not a blanket rule.
+  - **"very close" under 0.5 km.** Replaces a bare range figure at the distance where the exact
+    number stops mattering and the fact of proximity starts to.
+
+  **Cheap — thresholds, in `enrichment.py`:**
+  - **0 m from a feature → "on the road"** (and the same for any feature reference, not just
+    roads).
+  - **Between ~10 m and ~100 m → "next to the road"**, with the side named.
+  - These replace the current "near X (~200m)" shape entirely at short distances. The existing
+    1000 m `NEAR_FACT_RADIUS_M` gate stays above them.
+
+  **Needs world-model support — the one expensive item:**
+  - **"200 meters north of the road"** and **"next to the road, north side"** both need the
+    *direction from the feature to the contact*. `query.describe.RoadInfo` carries `distance_m` and
+    `orientation_deg` (the road's own heading) but **no such bearing**, and neither do
+    `SettlementInfo` or `WaterInfo`. So this is a `describe_position` change in world-model, not a
+    phrasing change in body-layer. Given a bearing *and* the road's existing `orientation_deg`,
+    "which side" falls out; without the bearing, neither does. Sequence this before the two wording
+    items that depend on it rather than half-building them.
+
+  **Needs verification first:**
+  - **Airborne contacts should be called "aircraft" or "helicopter"**, refining to
+    fighter/bomber/attack/transport. Check what actually exists before scoping: whether the
+    perception channel can tell a contact is airborne at all (candidate altitude versus terrain
+    elevation is available to the naked-eye channel, but nothing currently reads it that way), and
+    whether `object_model`'s `OP_*` vocabulary has air classes or needs them. This is plausibly a
+    classification change rather than a speech one, which would put it outside this item.
+
 - [ ] **Petrovich's voice has no character — generic English TTS, and monotonous with it.** Deferred deliberately at
   BL-10 slice 1 (`plans/tts-voice-output/plan.md` Decision 7) rather than forgotten. macOS `say`
   ships no Russian-accented English voice (`Milena` is Russian-*language*, a different thing), and
