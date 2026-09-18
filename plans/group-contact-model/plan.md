@@ -874,6 +874,21 @@ rather than a data-model requirement — a simplification of that milestone, not
 
 ---
 
+### Settled Decisions (user, 2026-09-18) — Stage 3b escalations
+
+6. **Geometry decides, not range.** Twelve units in a row perpendicular to the line of sight
+   resolving as twelve contacts at 9 km is the wanted behaviour; along the line of sight they
+   still merge into one contact carrying a plural count. Accepted with its consequence stated: it
+   partly inverts this plan's motivating example, meaning much of the observed defect was the
+   broken radius rather than a missing group model. **Cardinality still earns its place** — for
+   along-LOS columns, tight formations, and infantry too small to detect individually — but the
+   headline case shrinks, and Stage 5's value should be re-judged after flying rather than assumed.
+7. **The anisotropy extends into the belief gate.** `association_over_time.uncertainty_radius_m`
+   calls `naked_eye_cluster_radius_m` directly, so leaving the gate isotropic would re-open exactly
+   the Stage 3a dead zone. This edits a gate now fixed three times, which is accepted deliberately;
+   the mitigating find is that both call sites already carry the observer position, so it is a
+   signature change with no new plumbing.
+
 ### Settled Decisions (user, 2026-09-18)
 
 All five resolved, each matching this plan's own recommendation.
