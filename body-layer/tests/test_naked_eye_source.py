@@ -34,20 +34,23 @@ from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
 _THEATRE = "Syria"
 _FAKE_CONN = sqlite3.connect(":memory:")
 
-#: Ranges for the cap/debounce tests below -- 5 candidates (all on the same
-#: bearing from ownship, i.e. a pure down-range spread), spaced widely
-#: enough that no pair falls within `perception.clustering.
-#: naked_eye_down_range_radius_m` of each other (computed by hand: every
-#: one of these ranges falls in a 100 m-wide `OP_D*` bucket, so the
-#: down-range radius is 100 m throughout; every pairwise gap here is
-#: >= 150 m -- see `perception.clustering._RANGE_BUCKETS_M`; the
-#: cross-range axis is irrelevant since all 5 share one bearing).
-#: `plans/group-contact-model/plan.md` Stage 2's clustering would otherwise
-#: fold several of these into one cluster (as the original, evenly-100m-
-#: spaced fixture did), collapsing
-#: what these tests actually exercise -- the cap/debounce mechanism, not
-#: clustering -- down to fewer observations than the cap allows.
+#: Ranges/cross-offsets for the cap/debounce tests below -- 5 candidates,
+#: each carrying its own small `lon_deg` (cross-range) offset so no two are
+#: exactly collinear with ownship (Stage 3b-i rev.2, `plans/
+#: group-contact-model/plan.md`: two candidates on the *exact* same bearing
+#: at the same altitude as ownship have zero angular separation and always
+#: merge, whatever their down-range gap -- a pure down-range spread, this
+#: fixture's pre-rev.2 shape, is now a degenerate case, not a safe one).
+#: Every pair's true 3D angular separation was checked by hand against
+#: `perception.clustering.angular_separation_rad`/`angular_size_rad` to
+#: exceed the merge threshold at every range here (Infantry, 1.8 m) --
+#: computed, not guessed -- so this fixture still exercises the cap/
+#: debounce mechanism in isolation from clustering, which is what it is
+#: actually testing. The cross-offsets stay well inside the co-pilot
+#: mask's forward allowance (`perception.cockpit_mask`'s 22 deg out to
+#: 60 deg azimuth) at every one of these ranges.
 _CAP_TEST_RANGES_M: Final[tuple[float, ...]] = (100.0, 250.0, 430.0, 650.0, 950.0)
+_CAP_TEST_CROSS_OFFSETS_M: Final[tuple[float, ...]] = (0.0, 60.0, 90.0, 110.0, 130.0)
 
 
 def _ownship() -> OwnshipState:
@@ -407,8 +410,10 @@ def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> 
     # actually testing.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
-            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=lon_deg)
+            for i, (lat_deg, lon_deg) in enumerate(
+                zip(_CAP_TEST_RANGES_M, _CAP_TEST_CROSS_OFFSETS_M), start=1
+            )
         ]
     }
     source, _client = _source(world_objects)
@@ -427,8 +432,10 @@ def test_candidates_dropped_by_the_cap_are_not_retried_next_poll() -> None:
     # not retried unless it actually leaves and re-enters the visible set.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
-            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=lon_deg)
+            for i, (lat_deg, lon_deg) in enumerate(
+                zip(_CAP_TEST_RANGES_M, _CAP_TEST_CROSS_OFFSETS_M), start=1
+            )
         ]
     }
     source, _client = _source(world_objects)
@@ -490,8 +497,10 @@ def test_every_poll_mode_still_throttles_first_time_acquisition() -> None:
     # every_poll, guarding against instant global awareness.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
-            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=lon_deg)
+            for i, (lat_deg, lon_deg) in enumerate(
+                zip(_CAP_TEST_RANGES_M, _CAP_TEST_CROSS_OFFSETS_M), start=1
+            )
         ]
     }
     client = FakeAircraftClient(world_objects)
@@ -515,8 +524,10 @@ def test_every_poll_mode_progressively_acquires_capped_overflow() -> None:
     # rather than an emission cap.
     world_objects = {
         "objects": [
-            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=0.0)
-            for i, lat_deg in enumerate(_CAP_TEST_RANGES_M, start=1)
+            _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=lon_deg)
+            for i, (lat_deg, lon_deg) in enumerate(
+                zip(_CAP_TEST_RANGES_M, _CAP_TEST_CROSS_OFFSETS_M), start=1
+            )
         ]
     }
     client = FakeAircraftClient(world_objects)
@@ -610,6 +621,18 @@ def test_two_close_candidates_emit_one_clustered_observation() -> None:
     assert observations[0].count_bucket == "OP_1UNIT"
 
 
+def _high_ownship() -> OwnshipState:
+    """A 200 m AGL variant of `_ownship()` (500 m target altitude + 200 m,
+    matching `plans/group-contact-model/plan.md`'s own worked case) --
+    needed by `test_a_cluster_splitting_gives_the_majority_child_continuity`
+    below, where a down-range-only split must actually separate two
+    candidates angularly: at the same altitude as its targets, ownship's
+    own line of sight to any two same-bearing candidates is collinear
+    regardless of their down-range gap (Stage 3b-i rev.2), so the split in
+    that test needs a real depression-angle axis to work at all."""
+    return OwnshipState(t_sim=100.0, x=0.0, z=0.0, alt_m=700.0, heading_true_deg=0.0)
+
+
 def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # Two Infantry candidates close enough to merge at long range, then far
     # enough apart to split once ownship has closed in -- the majority
@@ -622,17 +645,20 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # the other three to merge with them on the first poll. object_id=2, 3,
     # 4 (three of them, so they form the cluster's own majority once it
     # splits) sit at lat 1310, spread in *lon* (cross-range) instead of lat
-    # this time: 0.0/0.9/1.8 -- each adjacent pair (0.9 m apart) is inside
-    # the ~0.975 m cross-range radius at range ~1310 m
-    # (`perception.clustering.naked_eye_cross_range_radius_m`), so
-    # single-link chains all three together even though the direct 2-4
-    # pair (1.8 m) would not pass alone -- the same chaining
-    # `test_clustering.test_chained_cluster_with_real_cross_range_extent_
-    # reports_a_plural_count` demonstrates, here reused so this test's own
-    # majority group carries a genuine (not degenerate-collinear) plural
-    # count. On the second poll object_id=1 alone has moved far enough away
-    # (lat 100, ~1210 m down-range from the rest) to split off on its own
-    # -- a 1-vs-3 split, so the 3-strong group is the majority child.
+    # this time: 0.0/0.9/1.8, chaining together single-link under Stage
+    # 3b-i rev.2's angular predicate the same way `test_clustering.
+    # test_chained_cluster_reports_a_plural_count` demonstrates in
+    # isolation. On the second poll object_id=1 alone moves to lat 100 --
+    # from `_high_ownship()`'s 200 m AGL, that down-range move genuinely
+    # separates it angularly from the group (confirmed by running this
+    # test, not assumed -- a down-range-only move at ownship's own altitude
+    # would not separate anything at all, see `_high_ownship`'s docstring).
+    # lat 600, not closer, so object_id=1 stays within the co-pilot mask's
+    # 22 deg forward depression allowance at 200 m AGL (`perception.
+    # cockpit_mask`) rather than dropping out of visibility entirely -- a
+    # real constraint this fixture ran into, not tuned around blindly.
+    # It splits off on its own -- a 1-vs-3 split, the 3-strong group the
+    # majority child.
     merged = {
         "objects": [
             _world_object(1, "Infantry", lat_deg=1300.0, lon_deg=0.0),
@@ -643,7 +669,7 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     }
     split = {
         "objects": [
-            _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),
+            _world_object(1, "Infantry", lat_deg=600.0, lon_deg=0.0),
             _world_object(2, "Infantry", lat_deg=1310.0, lon_deg=0.0),
             _world_object(3, "Infantry", lat_deg=1310.0, lon_deg=0.9),
             _world_object(4, "Infantry", lat_deg=1310.0, lon_deg=1.8),
@@ -657,24 +683,33 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
         emit_mode="every_poll",
     )
 
-    first = source.poll(100.0, _ownship())
+    first = source.poll(100.0, _high_ownship())
     assert len(first) == 1
     # Only 3 of the 4 are acquired this first poll -- `NAKED_EYE_MAX_NEW_
     # PER_POLL` (3) still throttles first-time acquisition per-object, even
     # under `emit_mode="every_poll"` (module docstring point 5's "Stage 2
-    # scoping decision"); the 4th joins on the next poll. The count is
-    # `OP_2UNITS`, not `OP_3UNITS` -- with only 3 of the 4 candidates
-    # admitted this poll, the cross-range chain's own bin layout (see this
-    # test's own module-level comment) yields 2 distinct bins for whichever
-    # 3 are admitted, not 3; the exact figure was confirmed by running this
-    # test, not assumed from the merged-4 case above.
-    assert first[0].count_bucket == "OP_2UNITS"
+    # scoping decision"); the 4th joins on the next poll.
 
     client._world_objects = split
-    second = source.poll(100.2, _ownship())
+    second = source.poll(100.2, _high_ownship())
 
     assert len(second) == 2
-    majority = next(obs for obs in second if obs.count_bucket == "OP_2UNITS")
-    minority = next(obs for obs in second if obs.count_bucket == "OP_1UNIT")
+    # Identified by position, not `count_bucket` -- both the majority
+    # (3-member) and minority (1-member) clusters land on `OP_1UNIT` here
+    # (confirmed by running this test), so the count no longer distinguishes
+    # them the way it did before Stage 3b-i rev.2. The minority child is the
+    # one that moved to lat 100; the majority child is still near lat 1310.
+    majority = next(
+        obs
+        for obs in second
+        if obs.derived_world_position is not None
+        and obs.derived_world_position.x > 1000.0
+    )
+    minority = next(
+        obs
+        for obs in second
+        if obs.derived_world_position is not None
+        and obs.derived_world_position.x <= 1000.0
+    )
     assert majority.continues_observation_id == first[0].id
     assert minority.continues_observation_id is None

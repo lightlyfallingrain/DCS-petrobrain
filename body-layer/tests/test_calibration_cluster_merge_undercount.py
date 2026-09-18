@@ -1,6 +1,7 @@
 """Synthetic reproduction of the live 2026-09-18 merge-undercount defect --
 `plans/contact-merge-undercount/debug.md` -- and its actual fix,
-`plans/group-contact-model/plan.md` Stage 2.
+`plans/group-contact-model/plan.md` Stage 2, reworked to a true angular
+predicate by Stage 3b-i rev.2.
 
 A real sortie against a twelve-unit ground calibration complex (SA-3
 launcher + SA-3 TR radar, ZU-23 on a Ural, ZSU-23-4, BMP-1, BTR-70, T-72B,
@@ -25,30 +26,20 @@ ground-truth candidate positions. `cluster_candidates` and
 `Cluster` -- both mechanically thin, already covered by
 `test_naked_eye_source.py`/`test_mock_flight_chain.py`).
 
-**Stage 3b-i inverts this test's own headline claim** (`plans/
-group-contact-model/plan.md`'s "Blast radius" section, Decision 6). The
-original scalar radius folded twelve real objects at 9 km into one cluster
-*regardless of their layout*, because it combined cross-range and down-range
-error with `math.hypot` and the down-range term dominated everywhere. Once
-the cluster ellipse's two axes are tested separately, **geometry decides,
-not range**: the acuity-derived cross-range radius at 9 km is only ~6.75 m
-(`perception.clustering.naked_eye_cross_range_radius_m(9000.0)`), so twelve
-real vehicles spread 18 m apart *across* the line of sight resolve
-individually -- twelve contacts, not one. The same twelve objects spread the
-same way *along* the line of sight (pure down-range separation) still merge
-into one cluster, since the down-range radius there is ~1000 m
-(`perception.clustering.naked_eye_down_range_radius_m(9000.0)`,
-`_range_bucket_width_m`'s 8-9 km bucket) -- but their *count*, which is
-computed from a cross-range-only sub-clustering of that one cluster's
-members (module docstring's "counting versus resolving" section), is
-honestly **1**, not plural: twelve objects lying on the exact same bearing
-from the observer are, by construction, zero cross-range apart from one
-another -- there is no angular information at all to count them by. This is
-not a bug; it is the geometrically honest consequence of the mechanism the
-plan itself describes (cross-range-only counting), and it is a real,
-reportable place where the plan's own worked prediction ("one contact with
-a plural count bucket" for the along-LOS case) does not survive contact
-with the code -- see `plans/group-contact-model/implementation.md`.
+**Geometry decides, not range** (`plans/group-contact-model/plan.md`
+Decision 6, confirmed under Stage 3b-i rev.2's angular predicate): twelve
+real objects spread `_ROW_SPACING_M` (~18.7 m) apart *across* the line of
+sight at 9 km resolve individually -- each pairwise angular separation
+(~7.15 arcmin) exceeds the mean unit angular size there (~2.67 arcmin) --
+twelve contacts, not one. The same twelve objects spread the same way
+*along* the line of sight (pure depression-angle separation, since
+Petrovich is airborne) still merge into one cluster at a typical low
+altitude, because the adjacent-pair depression angle shrinks with range and
+ownship height far below the angular unit width -- but **their count is
+now honestly altitude-sensitive, not fixed at 1**: a low pass sees one
+dot; a higher pass over the identical ground layout sees the same column
+spread out across a real depression axis and reports a plural count. See
+`test_twelve_units_along_los_at_9km_...` below for both rows of that table.
 
 At ~500 m-3 km (the complex's own real spread, per the live log), the same
 twelve real objects separate by *class* into several contacts, each with a
@@ -59,10 +50,13 @@ within its one contact."""
 
 from __future__ import annotations
 
+import math
+
 from belief.classification import SpecificityLevel
 from belief.contacts import ContactStore
 from perception import object_model
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
+from perception.geometry import GeoPosition
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
@@ -70,8 +64,7 @@ from perception.source import (
     OwnshipState,
 )
 
-_OBSERVER_X = 0.0
-_OBSERVER_Z = 0.0
+_OBSERVER_ORIGIN = GeoPosition(x=0.0, z=0.0, alt_m=700.0)
 
 #: The real complex's twelve units and their true class, unchanged from this
 #: module's original (pre-Stage-2) fixture.
@@ -91,6 +84,25 @@ _UNIT_LABELS_AND_CLASSES: tuple[tuple[str, str], ...] = (
 )
 
 _PRESENCE_RAW = object_model.DEFAULT_OP_CLASS  # "OP_GROUPSOMETHING"
+
+#: Characteristic size used throughout this fixture -- a 7 m armored
+#: vehicle, `object_model`'s own value for the "t-72"/"bmp"/"btr" family
+#: (`perception/object_model.py`), not re-derived per unit: this fixture is
+#: about the clustering/counting mechanism's geometry, not per-type size
+#: variation (that is exactly the risk `plans/group-contact-model/plan.md`
+#: Stage 3b-i rev.2 section 10 names and defers).
+_SIZE_M = 7.0
+
+#: Ground-truth altitude every fixture unit sits at -- `700.0` ownship minus
+#: `200.0` gives the plan's own "200 m AGL" worked case for the along-LOS
+#: rows below.
+_TARGET_ALT_M = 500.0
+
+
+def _slant_range_m(observer: GeoPosition, x: float, z: float, alt_m: float) -> float:
+    return math.sqrt(
+        (x - observer.x) ** 2 + (z - observer.z) ** 2 + (alt_m - observer.alt_m) ** 2
+    )
 
 
 def _build_observation(obs_id: str, cluster: Cluster) -> Observation:
@@ -132,29 +144,32 @@ _ROW_SPACING_M = 206.0 / 11.0
 def test_twelve_units_perpendicular_to_los_at_9km_resolve_individually() -> None:
     """Twelve real objects spread `_ROW_SPACING_M` (~18.7 m) apart *across*
     the line of sight from ownship at the origin (bearing 0, so a spread in
-    z is pure cross-range) -- each pairwise gap (~18.7 m) exceeds the
-    acuity-derived cross-range radius at 9 km (~6.75 m,
-    `perception.clustering.naked_eye_cross_range_radius_m(9000.0)`), so no
-    two of them fall within each other's ellipse and single-link clustering
-    cannot chain any pair together. `cluster_candidates` must therefore
+    z is pure cross-range/bearing) -- each adjacent pairwise angular
+    separation is ~7.15 arcmin (`angular_separation_rad`), comfortably past
+    the ~2.67 arcmin mean unit angular size there (`angular_size_rad(7.0,
+    9000.0)`), so no two of them merge. `cluster_candidates` must therefore
     yield twelve singleton clusters, each a real, individually resolvable
     contact -- the corrected model's headline case (`plans/
     group-contact-model/plan.md` Decision 6): a row across the line of
-    sight is resolvable at 9 km, in a way the old isotropic radius could
-    never have shown."""
+    sight is resolvable at 9 km."""
+    observer = _OBSERVER_ORIGIN
     candidates = tuple(
         ClusterCandidate(
             object_id=index,
             x=9000.0,
             z=index * _ROW_SPACING_M,
-            range_m=9000.0,
+            alt_m=_TARGET_ALT_M,
+            range_m=_slant_range_m(
+                observer, 9000.0, index * _ROW_SPACING_M, _TARGET_ALT_M
+            ),
+            size_m=_SIZE_M,
             classification_raw=_PRESENCE_RAW,
             classification_level=int(SpecificityLevel.PRESENCE),
         )
         for index, _unit in enumerate(_UNIT_LABELS_AND_CLASSES)
     )
 
-    clusters = cluster_candidates(candidates, _OBSERVER_X, _OBSERVER_Z)
+    clusters = cluster_candidates(candidates, observer)
 
     assert len(clusters) == 12
     assert all(len(cluster.members) == 1 for cluster in clusters)
@@ -170,55 +185,68 @@ def test_twelve_units_perpendicular_to_los_at_9km_resolve_individually() -> None
     assert len(store.contacts) == 12
 
 
-def test_twelve_units_along_los_at_9km_merge_into_one_contact_with_a_singular_count() -> (
+def test_twelve_units_along_los_at_9km_merge_at_200m_agl_but_split_at_1000m_agl() -> (
     None
 ):
     """The same twelve objects, the same `_ROW_SPACING_M` spread, but now
     spread in x (down-range, along ownship's bearing 0 to the row) rather
-    than z -- so every pairwise separation is pure down-range, zero
-    cross-range. The down-range radius at 9 km is ~1000 m
-    (`perception.clustering.naked_eye_down_range_radius_m(9000.0)`, the
-    8-9 km `OP_D*` bucket), far wider than the row's own ~206 m extent, so
-    `cluster_candidates` folds all twelve into one cluster -- the model is
-    honest that this is a group, not a single vehicle, and does not fold
-    them into a false single-object identity claim.
+    than z -- so from a *ground-level* observer every pairwise separation
+    would be pure depth, with no angular information to resolve or count
+    by at all. Petrovich is airborne, though, and depression angle is
+    exactly the axis this angular model does not need a special case for
+    (`plans/group-contact-model/plan.md`'s "Correction (user, 2026-09-18):
+    separability is angular, full stop" and Stage 3b-i rev.2 sections) --
+    ownship's own altitude above the row is the term that decides this
+    case, confirmed here at two altitudes over the identical ground layout
+    rather than predicted:
 
-    **The count is genuinely 1, not plural** -- this is the one place this
-    stage's own worked prediction (`plans/group-contact-model/plan.md`'s
-    "Blast radius" section) does not survive contact with the code. Count
-    is computed by sub-clustering a cluster's own members on the
-    cross-range axis alone (module docstring's "counting versus resolving"
-    section); twelve objects lying on the *exact same bearing* from the
-    observer are, by construction, zero cross-range apart from every other
-    one of them, so cross-range-only sub-clustering can never see more than
-    one blob here -- there is no angular information at all to count by,
-    only depth, and depth is exactly the axis this project's own model
-    (correctly) refuses to use for counting. Physically defensible too: a
-    column of vehicles seen nose-to-tail directly along the line of sight
-    visually overlaps into one blob, not twelve. See `plans/
-    group-contact-model/implementation.md` for the full finding."""
-    candidates = tuple(
+    - **200 m AGL** (ownship at 700 m, row at 500 m): every adjacent pair's
+      depression-angle separation (~0.16 arcmin) is far under the ~2.67
+      arcmin mean unit angular size there, so all twelve merge into one
+      cluster -- and the cluster's own angular extent (~1.71 arcmin) is
+      under one unit width, so the honest count is genuinely **1**, not a
+      shortfall: at this altitude/range the column really does subtend less
+      than one vehicle's own width. `OP_1UNIT` here is a confident, correct
+      report (requirement 6), not a hedge.
+    - **1000 m AGL** (ownship at 1300 m, everything else identical): the
+      same adjacent pairs still merge (their separation grows, but stays
+      under the merge threshold), but the cluster's own angular extent
+      (~8.45 arcmin) now exceeds several unit widths -- `floor(extent /
+      unit) + 1 == 4`, `OP_TO5UNITS`. Identical ground geometry, different
+      ownship altitude, different honest count: no world-space ellipse can
+      produce this, only a true 3D angle that includes the observer's own
+      altitude."""
+    row_candidates = [
+        (9000.0 + index * _ROW_SPACING_M, 0.0, _TARGET_ALT_M)
+        for index, _unit in enumerate(_UNIT_LABELS_AND_CLASSES)
+    ]
+
+    # --- 200 m AGL: merges, and the honest count is 1 -----------------------
+    observer_low = GeoPosition(x=0.0, z=0.0, alt_m=_TARGET_ALT_M + 200.0)
+    candidates_low = tuple(
         ClusterCandidate(
             object_id=index,
-            x=9000.0 + index * _ROW_SPACING_M,
-            z=0.0,
-            range_m=9000.0 + index * _ROW_SPACING_M,
+            x=x,
+            z=z,
+            alt_m=alt,
+            range_m=_slant_range_m(observer_low, x, z, alt),
+            size_m=_SIZE_M,
             classification_raw=_PRESENCE_RAW,
             classification_level=int(SpecificityLevel.PRESENCE),
         )
-        for index, _unit in enumerate(_UNIT_LABELS_AND_CLASSES)
+        for index, (x, z, alt) in enumerate(row_candidates)
     )
 
-    clusters = cluster_candidates(candidates, _OBSERVER_X, _OBSERVER_Z)
+    clusters_low = cluster_candidates(candidates_low, observer_low)
 
-    assert len(clusters) == 1
-    cluster = clusters[0]
-    assert len(cluster.members) == 12
-    assert cluster.count_bucket == "OP_1UNIT"
-    assert cluster.classification_level == int(SpecificityLevel.PRESENCE)
+    assert len(clusters_low) == 1
+    cluster_low = clusters_low[0]
+    assert len(cluster_low.members) == 12
+    assert cluster_low.count_bucket == "OP_1UNIT"
+    assert cluster_low.classification_level == int(SpecificityLevel.PRESENCE)
 
     store = ContactStore()
-    store.ingest([_build_observation("OBS_1", cluster)], now_sim=0.0)
+    store.ingest([_build_observation("OBS_LOW", cluster_low)], now_sim=0.0)
 
     assert len(store.contacts) == 1
     contact = store.contacts[0]
@@ -226,53 +254,72 @@ def test_twelve_units_along_los_at_9km_merge_into_one_contact_with_a_singular_co
     assert contact.cardinality.hi == 1
     assert contact.classification.level == SpecificityLevel.PRESENCE
 
+    # --- 1000 m AGL: still one cluster, but a plural count -------------------
+    observer_high = GeoPosition(x=0.0, z=0.0, alt_m=_TARGET_ALT_M + 1000.0)
+    candidates_high = tuple(
+        ClusterCandidate(
+            object_id=index,
+            x=x,
+            z=z,
+            alt_m=alt,
+            range_m=_slant_range_m(observer_high, x, z, alt),
+            size_m=_SIZE_M,
+            classification_raw=_PRESENCE_RAW,
+            classification_level=int(SpecificityLevel.PRESENCE),
+        )
+        for index, (x, z, alt) in enumerate(row_candidates)
+    )
+
+    clusters_high = cluster_candidates(candidates_high, observer_high)
+
+    assert len(clusters_high) == 1
+    cluster_high = clusters_high[0]
+    assert len(cluster_high.members) == 12
+    assert cluster_high.count_bucket == "OP_TO5UNITS"
+
 
 #: Close-range group layout: six groups (SAM 2, AAA 2, ARMOR 3, TRUCK 1,
 #: MLRS 1, INFANTRY 3), matching `_UNIT_LABELS_AND_CLASSES`' own class
 #: layout, each group at its own `x` (down-range), spaced `_GROUP_SPACING_M`
-#: apart -- comfortably beyond the 100 m down-range radius at range 500 m
-#: (`perception.clustering.naked_eye_down_range_radius_m(500.0)`), so groups
-#: never merge with each other regardless of how their own members are laid
-#: out. Every group's own members share that one `x` and spread in `z`
-#: (cross-range) instead, by `_GROUP_CROSS_STEP_M` -- **not**
-#: `_GROUP_SPREAD_M`/down-range, unlike this fixture's pre-3b-i version.
-#: Post-3b-i, cluster membership requires any two *directly* connected
-#: members to be within the cross-range radius (~0.375 m at 500 m,
-#: `naked_eye_cross_range_radius_m`) of each other (`clustering.py`'s
-#: module docstring -- an algebraic consequence of the ellipse formula), so
-#: `_GROUP_CROSS_STEP_M` (0.3 m) is chosen just under that: adjacent
-#: same-group members chain together (single-link) even for a 3-strong
-#: group whose two end members (0.6 m apart) would not pass directly on
-#: their own -- the same chaining mechanism `test_clustering.
-#: test_chained_cluster_with_real_cross_range_extent_reports_a_plural_count`
-#: pins in isolation. A down-range-only spread (this fixture's original
-#: layout) is now geometrically degenerate for counting purposes -- see
-#: `plans/group-contact-model/implementation.md` for why.
+#: apart. Re-derived for Stage 3b-i rev.2's angular predicate (the old
+#: `_GROUP_CROSS_STEP_M = 0.3 m` chaining spacing was built for the ellipse's
+#: acuity radius, ~0.375 m at 500 m, and is now measured against a mean unit
+#: angular size of ~0.014 rad -- a ~7 m boundary at 500 m -- so this fixture
+#: was re-run, not re-predicted, against the real merge/count mechanism):
+#: `_GROUP_CROSS_STEP_M` (4.0 m) sits comfortably inside that ~7 m merge
+#: boundary, so every group's own members chain together, while
+#: `_GROUP_SPACING_M` (600 m) keeps different groups' angular separation
+#: (dominated by depression angle at this altitude/range, same mechanism as
+#: the along-LOS row above) well past it, so groups never merge with each
+#: other. Ownship sits at `_TARGET_ALT_M + 200.0` (700 m over a 500 m-alt
+#: complex), matching the along-LOS row's own "200 m AGL" case above --
+#: without a real altitude difference between observer and target, distinct
+#: down-range groups sharing `z=0` would be exactly collinear from the
+#: observer and collapse into one cluster regardless of `_GROUP_SPACING_M`,
+#: the same degenerate case the along-LOS row exists to demonstrate.
 _GROUP_SPACING_M = 600.0
-_GROUP_CROSS_STEP_M = 0.3
+_GROUP_CROSS_STEP_M = 4.0
 _CLOSE_RANGE_M = 500.0
 _GROUP_SIZES = (2, 2, 3, 1, 1, 3)  # SAM, AAA, ARMOR, TRUCK, MLRS, INFANTRY
 
 
-def _close_range_candidates() -> list[ClusterCandidate]:
+def _close_range_candidates(observer: GeoPosition) -> list[ClusterCandidate]:
     candidates: list[ClusterCandidate] = []
     object_id = 0
     unit_index = 0
     for group_index, group_size in enumerate(_GROUP_SIZES):
-        # Offset by `_CLOSE_RANGE_M` so no group's centroid sits at x=0 --
-        # a group exactly at the observer's own origin has no defined
-        # bearing to decompose cross/down-range against (`los_components_m`
-        # /`_count_cross_range_subclusters`'s own degenerate-case handling),
-        # which silently swaps which axis is "cross" for that one group.
         group_x = _CLOSE_RANGE_M + group_index * _GROUP_SPACING_M
         for member_index in range(group_size):
             _label, op_class = _UNIT_LABELS_AND_CLASSES[unit_index]
+            z = member_index * _GROUP_CROSS_STEP_M
             candidates.append(
                 ClusterCandidate(
                     object_id=object_id,
                     x=group_x,
-                    z=member_index * _GROUP_CROSS_STEP_M,
-                    range_m=_CLOSE_RANGE_M,
+                    z=z,
+                    alt_m=_TARGET_ALT_M,
+                    range_m=_slant_range_m(observer, group_x, z, _TARGET_ALT_M),
+                    size_m=_SIZE_M,
                     classification_raw=op_class,
                     classification_level=int(SpecificityLevel.CLASS),
                 )
@@ -298,22 +345,16 @@ def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_c
     from one another.
 
     **The two 3-member groups (ARMOR, INFANTRY) report `OP_2UNITS`, not
-    `OP_3UNITS`** -- a real, derived consequence of grid-binning
-    (`perception.clustering._count_cross_range_subclusters`), not a bug or
-    an approximation error tolerated here. A 3-member chain at the cross-
-    range bin width used (`_GROUP_CROSS_STEP_M` = 0.3 m, bin width ~0.375 m
-    at 500 m) centres its middle member almost exactly on the cluster's own
-    centroid, and floor-binning an offset of ~0 can land on either side of
-    a bin boundary depending on floating-point rounding -- here it lands in
-    the same bin as one of its two neighbours, giving 2 bins, not 3. This
-    is the honest behaviour of the mechanism as built, still strictly
-    better than the always-collapses-to-1 single-link trap it replaced
-    (see `plans/group-contact-model/implementation.md`), and exactly the
-    kind of boundary-accuracy question Stage 3b-ii's own "tier ->
-    count-coarseness cap" item exists to refine."""
-    candidates = _close_range_candidates()
+    `OP_3UNITS`** -- confirmed by running this fixture against the real
+    extent/unit count (module docstring's "Counting" section in
+    `clustering.py`), not assumed: a 3-member chain spaced
+    `_GROUP_CROSS_STEP_M` (4.0 m) apart has an angular extent of two gaps
+    (8.0 m across, well inside the merge boundary but past one full mean
+    unit width), giving `floor(extent / unit) + 1 == 2`."""
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=_TARGET_ALT_M + 200.0)
+    candidates = _close_range_candidates(observer)
 
-    clusters = cluster_candidates(candidates, _OBSERVER_X, _OBSERVER_Z)
+    clusters = cluster_candidates(candidates, observer)
 
     # Six real class groups: SAM (2), AAA (2), ARMOR (3), TRUCK (1), MLRS
     # (1), INFANTRY (3) -- position-only clustering separates them cleanly
@@ -335,8 +376,8 @@ def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_c
     assert count_buckets == [
         "OP_1UNIT",
         "OP_1UNIT",
-        "OP_2UNITS",
-        "OP_2UNITS",
+        "OP_1UNIT",
+        "OP_1UNIT",
         "OP_2UNITS",
         "OP_2UNITS",
     ]
@@ -352,4 +393,4 @@ def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_c
     contact_counts = sorted(
         (c.cardinality.lo, c.cardinality.hi) for c in store.contacts
     )
-    assert contact_counts == [(1, 1), (1, 1), (2, 2), (2, 2), (2, 2), (2, 2)]
+    assert contact_counts == [(1, 1), (1, 1), (1, 1), (1, 1), (2, 2), (2, 2)]

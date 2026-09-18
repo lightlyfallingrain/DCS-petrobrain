@@ -28,13 +28,15 @@ Each `poll()`:
    quantisation this module originally did; see that plan for why per-object
    emission was itself the defect). `_cluster_candidate` projects each
    admitted `(candidate, result)` pair into `perception.clustering.
-   ClusterCandidate` (ground-truth x/z, range, and this candidate's own
-   individually-resolved classification claim); `perception.clustering.
-   cluster_candidates` groups them anisotropically -- an ellipse, not a
-   circle, against the line of sight from ownship's own position
-   (`perception.clustering.naked_eye_ellipse_radii_m`, Stage 3b-i;
-   single-link, no chaining cap yet -- Stage 3b-ii's job); `_build_observation`
-   emits exactly one `Observation` per resulting
+   ClusterCandidate` (ground-truth x/z/alt, slant range, characteristic
+   size, and this candidate's own individually-resolved classification
+   claim); `perception.clustering.cluster_candidates` groups them by true
+   3D angular separability at ownship's own position (Stage 3b-i rev.2 --
+   the merge test is the angle subtended at the observer against each
+   candidate's own apparent angular size, not a world-space ellipse; see
+   `clustering.py`'s docstring); single-link, no chaining cap yet --
+   Stage 3b-ii's job. `_build_observation` emits exactly one `Observation`
+   per resulting
    cluster: bearing/range quantised from the cluster's *centroid*, not any
    one member's own geometry (bearing snapped to the nearest of the 12
    `OP_A1H`...`OP_A12H` clock positions, relative to ownship heading then
@@ -303,13 +305,15 @@ class NakedEyePerceptionSource:
         confidence_by_object_id = {
             candidate.object_id: result.confidence for candidate, result in to_emit
         }
+        observer = GeoPosition(
+            x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
+        )
         clusters = cluster_candidates(
             [
                 self._cluster_candidate(candidate, result)
                 for candidate, result in to_emit
             ],
-            ownship_state.x,
-            ownship_state.z,
+            observer,
         )
         return self._build_observations(
             now_sim, ownship_state, clusters, confidence_by_object_id
@@ -396,7 +400,9 @@ class NakedEyePerceptionSource:
             object_id=candidate.object_id,
             x=candidate.x,
             z=candidate.z,
+            alt_m=candidate.alt_m,
             range_m=result.range_m,
+            size_m=profile.size_m,
             classification_raw=classification_raw,
             classification_level=classification_level,
         )
