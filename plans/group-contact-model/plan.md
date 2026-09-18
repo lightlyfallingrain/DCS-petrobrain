@@ -352,6 +352,33 @@ does not tune them.
 and its chaining cap, and `NAKED_EYE_MAX_NEW_PER_POLL` re-read as a per-cluster cap. Needs a live
 sortie to confirm; expect to land after one.
 
+**Stage 3 must also close the gate-vs-cluster radius mismatch, which is structural rather than a
+tuning question** (found in review of Stage 2, 2026-09-18, with the numbers worked for the mock
+flight fixture at ~690 m range):
+
+- `perception.clustering` splits two candidates when their real separation exceeds
+  `max(radius_a, radius_b)` — a **single-sided** test, ≈205 m there.
+- `belief.association_over_time.spatial_gate_radius_m` then re-tests a split child against its
+  parent contact using `uncertainty_a + uncertainty_b + growth` — **both sides summed**, ≈410 m
+  before growth.
+
+Because `sum ≥ max` for any positive radii, a split whose children sit near the cluster's own
+resolution boundary is re-merged by the gate. That is not an edge case: the resolution boundary is
+exactly where a split first becomes possible, so this is the *common* case, and it means clustering
+can be silently undone downstream. Two real objects 400 m apart therefore stay one contact at
+690 m, where the geometry (≈32° subtended, against the channel's own 30° clock bucket) says the
+channel can resolve them.
+
+Note where the pessimism actually comes from: the *cluster* radius is an honest model of the
+channel's resolving power. The gate's double-budgeting is legitimate for its original purpose
+(BL-2.6, avoiding spurious duplicates for slow-moving objects) but wrong when applied to a
+child that perception has already separated on positional evidence. Stage 3 must decide how the
+gate treats a percept whose cluster identity says "this is not that" — candidates include
+exempting a freshly-split child from the gate, or making the gate single-sided when the incoming
+percept carries a distinct cluster identity. **Do not close this by widening the cluster radius**;
+that would make the model claim less resolution than the channel has, which violates the same
+invariant in the opposite direction.
+
 **Stage 4 — surface cardinality.** `facts["cardinality"]` (absent-when-unknown, per `tools.py`'s
 documented convention); `console._SHOW_FACT_KEYS`; `speech.py`'s count clause and the
 `OP_GROUPSOMETHING` fix — **singular output must stay byte-identical**, which is the regression
