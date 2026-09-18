@@ -439,7 +439,12 @@ def test_cardinality_phrase_default_is_several() -> None:
 
 
 def test_cardinality_phrase_op_to5units_is_a_handful() -> None:
-    assert _cardinality_phrase(4, 5) == "a handful"
+    """Carries its own `"of"`. English grammar here is per-phrase, not
+    global: `"several trucks"` and `"many trucks"` are correct with a bare
+    noun, `"a handful trucks"` is not. Keeping the connector in the phrase
+    lets `_contact_report_text` stay a plain phrase-plus-noun join instead
+    of growing a second grammar rule beside the first."""
+    assert _cardinality_phrase(4, 5) == "a handful of"
 
 
 def test_cardinality_phrase_lo_16_or_more_is_many() -> None:
@@ -512,7 +517,7 @@ def test_route_event_contact_detected_speaks_plural_cardinality_clause() -> None
     detected = next(e for e in store.events if e.kind == "CONTACT_DETECTED")
     speech = route_event(store, detected, now_sim=0.0)
     assert speech is not None
-    assert speech.text == "a handful trucks."
+    assert speech.text == "a handful of trucks."
 
 
 def test_render_watch_nearest_readback_speaks_plural_cardinality_clause() -> None:
@@ -534,7 +539,7 @@ def test_render_watch_nearest_readback_speaks_plural_cardinality_clause() -> Non
     result = describe_contact(store, contact_id, now_sim=0.0)
     assert result is not None
     speech = render_watch_nearest_readback(result["facts"])
-    assert speech.text == "Watching a handful trucks."
+    assert speech.text == "Watching a handful of trucks."
 
 
 def _store_with_a_classification_change_and_plural_cardinality() -> ContactStore:
