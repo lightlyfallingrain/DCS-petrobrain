@@ -35,6 +35,43 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ## Cross-cutting / unscoped backlog
 
+- [>] **Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
+  shipped while they were exempt. Deferred until Stage 4b of the group contact model is done**
+  (user, 2026-09-19) — not because the finding is weak, but because interrupting the current run
+  to re-audit would cost more than the risk carries today.
+
+  **Both exempted roles independently reported their own exemption has gone stale**
+  (`/retro`, 2026-09-18). `CLAUDE.md` says: *"Skip performance-reviewer and security for now — this
+  phase is an offline single-user local pipeline with no hot path and no untrusted-input surface
+  yet."* That was written for the World Model Builder's offline phase. It no longer describes where
+  the work happens.
+
+  **Performance reviewer's case:** this week's changes landed in `aircraft-layer` and `body-layer`,
+  which are live runtime paths, not the offline pipeline the exemption describes. Two specific
+  candidates: `AudioPlaybackSender`'s worker thread and queue, which carries an explicit
+  interrupt-*timing* correctness requirement, and `perception.clustering`'s O(n²) single-link pass
+  running **every poll**. Its recommendation is to narrow the exemption's scope to `world-model/`
+  explicitly, so runtime subprojects stop being swept under a phase description they have left.
+
+  **Security's case, which contradicts a judgement already recorded elsewhere:** `POST /audio/play`
+  was merged with the framing *"same severity class as what already exists, not a new category"*
+  (`plans/tts-voice-output/plan.md` Decision 6, relayed to the user as settled). Security disagrees,
+  and the disagreement is about the right axis: the existing unauthenticated endpoints push overlay
+  text and trigger in-sim commands, with effects confined to the **DCS process**. Audio playback
+  reaches the **host OS** — arbitrary content from any LAN device reaching the user's speakers — and
+  audio-play primitives have a history of path/codec-confusion and resource-exhaustion issues that
+  text overlays do not. Its reading is that this crosses the exemption's own stated line, *"no
+  untrusted-input surface yet"*, because the LAN is now an input surface. The earlier framing
+  reasoned about authentication being unchanged; severity is determined by blast radius, which
+  changed.
+
+  **When picked up:** narrow or lift the `CLAUDE.md` exemption, restore both roles to the sequences
+  in `AGENTS.md`, and run a Mode-2 deep analysis on `POST /audio/play` plus a performance pass on
+  the two candidates above. Note the exemption is a *phase* decision — the lesson worth carrying is
+  that it needed a re-scope trigger and had none, which is the same failure shape the retro found
+  in four roles' memory files.
+
+
 - [ ] **`console.py`'s typed `scan-area` still drives the 9K113.** Found by review 2026-09-17,
   while checking the F10-path fix (`89b8b1d`). `body-layer/src/belief/console.py:548` calls
   `aircraft_client.trigger_petrovich_search("forward")` under the name "Scan" — the identical

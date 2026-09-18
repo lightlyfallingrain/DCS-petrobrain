@@ -76,7 +76,32 @@ path. Move these before committing:
 $STRAY_MEMORY"
 fi
 
+# Warn (never block) when a role wrote an artifact but not its memory index. Four of eight roles
+# independently reported this in the 2026-09-18 retro: the artifact gets written, the index that
+# makes it findable next session does not. Debugger wrote no entry for a diagnosis that overturned
+# the roadmap; investigator's entry still said "blocked on a 403" hours after the user resolved it;
+# architect's ellipse-to-angular lesson lived only in plan prose; dod noted a recurring pattern in
+# a dod-check and never indexed it.
+MEM_WARN=""
+check_memory() {
+    local pattern="$1" role="$2" label="$3"
+    if printf '%s\n' "$STAGED" | grep -qE "$pattern"; then
+        if ! printf '%s\n' "$STAGED" | grep -q "^\.claude/agent-memory/$role/"; then
+            MEM_WARN="$MEM_WARN
+  - $label staged, but nothing under .claude/agent-memory/$role/"
+        fi
+    fi
+}
+check_memory '^plans/[^/]+/plan\.md$'           architect    "a plan"
+check_memory '^plans/[^/]+/implementation\.md$' implementer  "an implementation log"
+check_memory '^plans/[^/]+/review\.md$'         reviewer     "a review"
+check_memory '^plans/[^/]+/debug\.md$'          debugger     "a debug report"
+check_memory '^plans/[^/]+/dod-check\.md$'      dod          "a DoD check"
+check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a research finding"
+
 if [ $FAIL -ne 0 ]; then
     printf '{"continue":false,"stopReason":%s}' "$(printf '%s' "$OUT" | jq -Rs .)"
+elif [ -n "$MEM_WARN" ]; then
+    printf '{"continue":true,"systemMessage":%s}' "$(printf 'Agent-memory index not updated:%s\n\nThe artifact is committed either way -- this is a reminder, not a gate. Write the note only if the work taught something a future session would want retrieved; skip it for a typo fix.' "$MEM_WARN" | jq -Rs .)"
 fi
 # All touched subprojects clean (or nothing relevant staged): exit 0 silently, commit proceeds.
