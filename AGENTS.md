@@ -37,6 +37,36 @@ Full per-role responsibilities, priorities, checklists, and output-style detail:
 
 ---
 
+## Explore Before Deciding
+
+**Before an Architect pass on anything consequential, talk to the user first** — a new subsystem, a
+data-model change, a hard-to-reverse decision, or anything touching how Petrovich behaves in the
+cockpit. The procedure is `.claude/skills/explore.md` (`/explore`).
+
+**This cannot be delegated to an agent.** Subagents run in the background with no channel to the
+user; only the main loop can hold a conversation. Treat it as a phase, not a role.
+
+The reason it earns a place in the sequence: the user has lived experience of the aircraft that
+exists in no file here and cannot be recovered by reading more code. Repeatedly on this project the
+decisive constraint arrived *after* implementation began and reversed it — the mission-frequency
+constraint that removed a planned transport, the screenshot-quality finding that invalidated a
+merged calibration, the sentence about how recognition actually unfolds that turned a bug fix into
+a belief model. Each was cheap to hear early and expensive to discover late.
+
+Two things make the conversation work, and both cut against normal habits:
+
+- **Open questions, not `AskUserQuestion` menus.** A menu can only offer what was already thought
+  of, and the valuable input is precisely what was not. Menus are for settling a decision whose
+  shape is already understood, not for finding that shape.
+- **Show something concrete early.** A worked table, a draft, a sample callout. Observing real
+  output is what cues recall — several of this project's most important corrections arrived that
+  way rather than in answer to a question.
+
+**Do not run it on everything.** On routine work it is friction, and friction trains the user to
+skip past it — the same failure the Effort/Value check below guards against.
+
+---
+
 ## Recommended Role Sequences
 
 Full sequences below include Security and Performance Reviewer. **Check the project's
@@ -44,11 +74,14 @@ Full sequences below include Security and Performance Reviewer. **Check the proj
 project phase; that exemption overrides the sequences shown here rather than being restated
 per-sequence.**
 
-- **New feature**: Architect → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
+- **New feature**: *Explore (with the user)* → Architect → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Performance-sensitive feature**: Architect → Security (plan review) → Implementer → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Bug fix**: Debugger → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Performance issue**: Debugger → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Refactor**: Architect → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
+
+*Explore* precedes Architect on consequential work only — see "Explore Before Deciding" above. It is
+a conversation with the user, not a role, and cannot run as a subagent.
 
 ---
 

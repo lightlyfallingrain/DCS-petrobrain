@@ -1,0 +1,76 @@
+---
+name: explore
+description: Dialogue with the user to surface lived-world knowledge before a consequential decision is settled
+type: user-invocable
+---
+
+Hold an open conversation with the user before committing to a design. Usage: `/explore <topic>`, or
+run it unprompted when the trigger below fires.
+
+**Why this exists.** The user flies the Mi-24P. They know what a crew member sounds like, what the
+SPU-8 does under the hand, what a target column looks like at 9 km. That knowledge is not in any
+file here, and it is not retrievable by reading more code. Repeatedly in this project the decisive
+input arrived *after* implementation started — and reversed it:
+
+- Frequency injection was planned around for a whole slice before "I need to stay on the mission
+  frequency and the Mi-24 does not handle multiple channels simultaneously" removed the option.
+- The SPU-8 volume knob became the strongest argument for the SRS path. Nothing in the codebase
+  could have suggested it.
+- A calibration pass was completed, reviewed and merged against compressed screenshots before
+  "I found a way to get good quality screenshots" invalidated its central finding.
+- A contact-merge bug fix was reframed into a whole belief model by one sentence describing how
+  recognition actually unfolds: *"there is something" → "many somethings" → "3 tanks and something
+  else" → "not ifvs, but shilka"*.
+- Two model revisions in, "it's about *angular* distance, not absolute" replaced the resolution
+  model outright — with an apple-and-orange analogue that no amount of code reading would produce.
+
+Every one of those was cheap to hear and expensive to discover late.
+
+## When to run it
+
+Before an Architect pass on anything **consequential**: a new subsystem, a data-model change, a
+decision that is hard to reverse, or anything touching how Petrovich behaves in the cockpit.
+
+**Do not run it on everything.** Applied to routine work it becomes friction and trains the user to
+skip past it — the same failure mode `AGENTS.md`'s Effort/Value check warns about. A bug fix with an
+obvious cause, a refactor, a documentation change: just do the work.
+
+The strongest signal that it was needed is retrospective — if the user's next message after
+implementation starts reverses a design assumption, that phase was skipped.
+
+## How to run it
+
+**Open questions, not menus.** `AskUserQuestion`'s multiple choice is the wrong instrument here: it
+can only surface options already thought of, and the valuable input is precisely what was not
+thought of. Save the menus for settling a decision once its shape is understood.
+
+**Ask about the world, not the software.** Not "should cardinality be a belief?" but "what does it
+actually look like when you spot a group at distance — what comes first?" The user reasons fluently
+about the cockpit and the airframe; make that the subject.
+
+**Show something concrete early — it is an elicitation technique, not a deliverable.** A worked
+table of numbers, a draft page, a sample of what Petrovich would say. Observing concrete output is
+what cues recall; several of the examples above arrived exactly that way. A rough thing shown early
+beats a polished thing shown late.
+
+**Follow the tangent.** If they start explaining how the SPU-8 works when asked about audio
+routing, that digression is the point. Domain experts surface constraints by association, not by
+answering in order.
+
+**Ask what the analogue is.** "Is there a non-DCS situation like this?" produced the apple and the
+orange, which reframed an entire model.
+
+**Probe the physical.** What can the crew actually see, hear, reach, and do — and when. Those are
+the constraints that invalidate designs, and they are invisible from inside the code.
+
+**Stop when it turns speculative.** The value is in lived experience. Once the conversation moves to
+what *might* be nice, the phase is done.
+
+## Capturing it
+
+Write what emerges into the plan or roadmap **as it emerges**, not afterwards — quote the user
+directly where the phrasing carries the reasoning. This project's roadmap entries are load-bearing
+precisely because they preserve *why*, including where an earlier pass was wrong.
+
+Then proceed to Architect with the constraints in hand, and state in the plan which decisions came
+from this conversation rather than from the code.
