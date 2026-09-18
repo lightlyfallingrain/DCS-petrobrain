@@ -874,6 +874,68 @@ rather than a data-model requirement — a simplification of that milestone, not
 
 ---
 
+### Correction (user, 2026-09-18): separability is angular, full stop
+
+This supersedes the world-space ellipse Stage 3b-i implemented. Recorded before Stage 3b-ii so the
+ellipse is not calibrated into permanence.
+
+**The framing.** Whether two units are one contact or two is a question about the **angle between
+them as seen from Petrovich**, compared against the angular size of the targets themselves. The
+user's non-DCS analogue: two apples 20 cm apart at 50 cm are obviously two when side by side, and
+may be one when one sits behind the other — same objects, same separation, different geometry. A
+line of units at 12 o'clock likewise depends only on the angle between them; far enough away, any
+number of units is a single dot.
+
+**The ellipse was an approximation of this, and an unnecessary one.** Computing the true angular
+separation from ownship — in 3D, including ownship's altitude — reproduces the anisotropy for free,
+because **Petrovich is airborne** and a down-range pair separates by *depression angle*. For two
+objects 400 m apart with ownship at 200 m AGL:
+
+| Range | Along the line of sight | Side by side |
+|---|---|---|
+| 9 km | **3.2 arcmin** (one dot) | 153 arcmin |
+| 5 km | 10.2 arcmin (just splits) | 274 arcmin |
+| 2 km | 56.8 arcmin | 679 arcmin |
+| 1 km | 191 arcmin | 1308 arcmin |
+| 500 m | 556 arcmin | 2320 arcmin |
+
+A factor of ~48 at 9 km, collapsing as ownship closes — the same shape the ellipse imposed with two
+hand-chosen radii, but *derived* rather than tuned, and automatically correct for an observer who
+is 200 m up rather than on the ground. It also explains the along-LOS column resolving as the
+aircraft descends or closes, which the ellipse could only reproduce by coincidence.
+
+**What this changes:**
+
+- **Replace the ellipse with a true angular separation test.** `EllipseRadii`,
+  `naked_eye_cross_range_radius_m` / `naked_eye_down_range_radius_m`, `los_components_m` and
+  `within_ellipse` collapse into one angular predicate. The down-range radius stops needing a
+  justification at all, which is a good sign — it was the term whose rationale had already been
+  replaced once.
+- **Angular *size* of the targets belongs in the test too**, not just their separation. Two
+  units whose angular separation is smaller than their own angular size are not resolvable as two.
+  `object_model.size_m` already supplies the size, and `visibility.py` already works in apparent
+  angle.
+- **This likely dissolves the jitter regression.** The 38-contacts failure came from the
+  cross-range budget shrinking ~100x in *world space* while bearing-bucket requantisation jitter
+  stayed constant in world space. In angular space the jitter is a fixed angular quantity (the
+  clock bucket), so the comparison is like-for-like and the mismatch may simply not arise. **Check
+  this before designing a separate jitter budget** — the cheaper fix may already be in hand.
+
+**Counting has its own angular law, and ED's ladder already encodes it.** The user: telling 1 from
+10, or 5 from 30, is easy; 1 from 2, or 20 from 23, is not — and it degrades with distance. That is
+Weber's law over a subitizing floor, and **ED's own count vocabulary already has exactly that
+shape**: exact at the bottom (`OP_1UNIT`, `OP_2UNITS`), widening upward (`OP_TO5UNITS`,
+`OP_5TO7UNITS`, `OP_8TO10UNITS`, `OP_ABOUT15UNITS`, `OP_MORETHAN15UNITS`). So count *precision*
+should fall as both count magnitude and angular crowding rise, and the ladder is the right output
+alphabet for it rather than something to be replaced. This is also the honest answer to "twelve
+along the line of sight reports `OP_1UNIT`": at 9 km that is *correct* — he sees one dot — and the
+model should say so confidently rather than hedging.
+
+**Deferred by the user, recorded so they are not silently assumed away:** occlusion (a near object
+hiding a far one on the same line of sight — the apple and the orange), and shape, colour and
+movement as separability cues. Movement in particular is a strong real-world cue and this model
+currently ignores it entirely.
+
 ### Settled Decisions (user, 2026-09-18) — Stage 3b escalations
 
 6. **Geometry decides, not range.** Twelve units in a row perpendicular to the line of sight
