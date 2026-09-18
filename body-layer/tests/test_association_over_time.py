@@ -1,5 +1,9 @@
 """Tests for `belief.association_over_time` -- the percept->contact gate
-(`plans/pb2-contact-memory/plan.md` Stage 1)."""
+(`plans/pb2-contact-memory/plan.md` Stage 1; made anisotropic by Stage 3b-i
+of `plans/group-contact-model/plan.md`, then reverted to this isotropic,
+quantisation-derived form by Stage 3b-i rev.2 -- see that module's
+docstring for why sharing a formula with `perception.clustering` was the
+defect, not the fix)."""
 
 from __future__ import annotations
 
@@ -55,9 +59,11 @@ def test_scope_channel_uses_fixed_uncertainty() -> None:
 
 def test_naked_eye_uncertainty_derived_from_quantisation_buckets() -> None:
     """At range=1000m the percept falls in the `OP_D1000M` bucket, whose
-    width is 1000 - 900 = 100m (`naked_eye_source._RANGE_BUCKETS_M`'s
+    width is 1000 - 900 = 100m (`association_over_time._RANGE_BUCKETS_M`'s
     `OP_D900M`->`OP_D1000M` pair). Cross-range is `1000 * sin(15deg)`. Pinned
-    against these real table values, not a re-derivation of the formula."""
+    against these real table values, not a re-derivation of the formula.
+    Reverted to this isotropic form by Stage 3b-i rev.2 (`plans/
+    group-contact-model/plan.md`) -- see module docstring."""
     percept = _percept(source=SOURCE_NAKED_EYE_VISUAL_FILTERED, range_m=1000.0)
 
     expected_cross_range_m = 1000.0 * math.sin(math.radians(15.0))

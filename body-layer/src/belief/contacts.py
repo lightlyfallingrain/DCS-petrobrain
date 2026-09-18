@@ -51,6 +51,14 @@ from belief.attention import (
     effective_attention,
     project_relative_area,
 )
+from belief.cardinality import (
+    CARDINALITY_CONTRADICTION_LOCKOUT_S,
+    OP_1UNIT,
+    CardinalityBelief,
+    cardinality_belief_from_bucket_name,
+    fold_cardinality,
+    new_cardinality_belief,
+)
 from belief.classification import (
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
@@ -112,13 +120,15 @@ class Contact:
     across observations.
 
     `last_position_uncertainty_m` is `last_position`'s own error budget --
-    `belief.association_over_time.uncertainty_radius_m` of whichever percept
-    most recently set `last_position` (the founding percept, or the most
-    recent `record()` call). `association_over_time.spatial_gate_radius_m`
-    sums this with the *incoming* percept's uncertainty; gating on the
-    incoming side alone silently treated `last_position` as exact, which it
-    is not -- see that module's docstring for the live duplication bug this
-    fixes (2026-09-09).
+    `belief.association_over_time.uncertainty_radius_m` (the conservative
+    scalar reduction of that percept's own ellipse, see that function's
+    docstring) of whichever percept most recently set `last_position` (the
+    founding percept, or the most recent `record()` call). `association_
+    over_time.passes_gate` sums this with the *incoming* percept's own
+    ellipse on both axes; gating on the incoming side alone silently
+    treated `last_position` as exact, which it is not -- see that module's
+    docstring for the live duplication bug this fixes (2026-09-09) and for
+    Stage 3b-i's anisotropic gate this field now feeds.
 
     `classification` is `plans/classification-refinement/plan.md` Stage 2's
     addition: the contact's *folded* best classification claim (`belief.
@@ -143,6 +153,19 @@ class Contact:
     fresh contradiction (`belief.classification.FoldOutcome.contradicted`),
     read back on every subsequent fold to enforce `belief.classification.
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S`.
+
+    `cardinality` is `plans/group-contact-model/plan.md` Stage 1's addition:
+    the contact's folded best cardinality claim (`belief.cardinality.
+    CardinalityBelief`, via `fold_cardinality`) -- `classification`'s direct
+    sibling, same fold-instead-of-overwrite posture. Seeded from the founding
+    percept's own `count_bucket` when it carries one (Stage 2: naked-eye's
+    cluster-derived count), or `OP_1UNIT` when it does not (the scope/hybrid
+    channel, which supplies no count evidence at all -- `record` leaves
+    `cardinality` untouched, a hold, whenever a later percept's `count_
+    bucket` is also `None`, rather than treating "no evidence" as "exactly
+    one"). `cardinality_lockout_until_sim` is `fold_cardinality`'s one piece
+    of per-contact state, mirroring `classification_lockout_until_sim`
+    exactly.
 
     `last_emitted_certainty` is Stage 2 (of `plans/pb2-contact-memory/
     plan.md`)'s addition: the `belief.decay.Certainty` this contact held the
@@ -180,11 +203,23 @@ class Contact:
     last_position_uncertainty_m: float
     last_class_raw: str
     classification: ClassificationBelief
+    #: Defaults to a freshly-seeded `OP_1UNIT` claim (rather than being a
+    #: required constructor argument) so every existing direct `Contact(...)`
+    #: call site -- test helpers included -- keeps compiling and behaving
+    #: exactly as before (`plans/group-contact-model/plan.md` Stage 1's
+    #: merge criterion: the existing suite passes untouched).
+    #: `established_sim=0.0` here is a construction-time placeholder only;
+    #: `from_percept` immediately re-seeds it at the founding percept's own
+    #: `t_sim` for every contact actually created through `ContactStore`.
+    cardinality: CardinalityBelief = field(
+        default_factory=lambda: new_cardinality_belief(OP_1UNIT, 0.0)
+    )
     contributing_observation_ids: list[str] = field(default_factory=list)
     first_seen_sim: float = 0.0
     last_seen_sim: float = 0.0
     sighting_spans: list[SightingSpan] = field(default_factory=list)
     classification_lockout_until_sim: float | None = None
+    cardinality_lockout_until_sim: float | None = None
     last_emitted_certainty: Certainty | None = None
     #: Stage 3's twin of `last_emitted_certainty`, for `belief.events.
     #: classification_event`'s comparison -- written only by `ContactStore.
@@ -219,6 +254,21 @@ class Contact:
             self.classification_lockout_until_sim = (
                 percept.t_sim + CLASSIFICATION_CONTRADICTION_LOCKOUT_S
             )
+        if percept.count_bucket is not None:
+            incoming_cardinality = cardinality_belief_from_bucket_name(
+                percept.count_bucket, established_sim=percept.t_sim
+            )
+            cardinality_outcome = fold_cardinality(
+                self.cardinality,
+                incoming_cardinality,
+                percept.t_sim,
+                self.cardinality_lockout_until_sim,
+            )
+            self.cardinality = cardinality_outcome.cardinality
+            if cardinality_outcome.contradicted:
+                self.cardinality_lockout_until_sim = (
+                    percept.t_sim + CARDINALITY_CONTRADICTION_LOCKOUT_S
+                )
         self.contributing_observation_ids.append(percept.observation_id)
         self.last_seen_sim = percept.t_sim
         self._extend_or_open_span(percept)
@@ -247,6 +297,13 @@ class Contact:
                 value=percept.classification_raw,
                 level=SpecificityLevel(percept.classification_level),
                 established_sim=percept.t_sim,
+            ),
+            cardinality=(
+                cardinality_belief_from_bucket_name(
+                    percept.count_bucket, established_sim=percept.t_sim
+                )
+                if percept.count_bucket is not None
+                else new_cardinality_belief(OP_1UNIT, percept.t_sim)
             ),
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
@@ -447,24 +504,79 @@ class ContactStore:
         never resolved by a best-match tiebreak -- see
         `association_over_time`'s module docstring.
 
+        **Same-source, same-poll exclusion** (`plans/group-contact-model/
+        plan.md` Stage 3a): two observations sharing both `source` and
+        `t_sim` may never resolve to the same contact via the gate branch
+        above. This rests on a precondition about both current sources that
+        must hold for this rule to be sound, and is not re-checked here --
+        post-Stage-2 naked-eye emits one `Observation` per resolution
+        cluster (two clusters are separable by construction) and the
+        scope/hybrid channel emits one `Observation` per DCS `object_id`
+        (two object ids are two real objects), so **neither source can ever
+        emit two reports of the same thing in one poll**. A future source
+        that could would violate this rule's premise and must be excluded
+        from it explicitly.
+
+        Enforced with a read-only pre-scan over `observations`, before the
+        main loop below: `_resolve_continuity` is evaluated once per
+        observation and memoized (so the main loop never calls it a second
+        time -- calling it twice could let a contact refreshed mid-batch
+        change its own continuity verdict mid-batch), and every observation
+        that resolves by continuity records its contact id under
+        `claimed[(source, t_sim)]`. The pre-scan mutates nothing else. Its
+        purpose is order-independence: the majority child of a split (see
+        `naked_eye_source._build_observations`) claims the parent contact by
+        continuity before any minority child reaches the gate, regardless of
+        the order `cluster_candidates`/`_build_observations` happened to
+        emit them in -- neither defines an order. The main loop then filters
+        gate candidates by `candidate.id not in claimed[(source, t_sim)]`
+        *before* counting how many pass, so a percept whose only candidates
+        are all claimed this poll sees zero and founds a new contact -- the
+        same outcome the ambiguity rule already produces, through the same
+        code path. Whichever contact an observation ends up on -- merged
+        (by continuity or the gate) or founded -- is added to
+        `claimed[(source, t_sim)]` before the next observation in the batch
+        is processed, so three same-poll, same-source observations against
+        one old contact correctly produce three separate contacts rather
+        than the third silently merging into the second's brand-new one.
+
+        The gate's own formula (`association_over_time.passes_gate`) is
+        untouched by this rule -- it is association bookkeeping, the same
+        category as `_resolve_continuity`, not a change to the gate's
+        geometry.
+
         Returns the list of `Contact`s touched by this call, one per
         observation processed, in the same order -- a contact may appear
         more than once if multiple observations in this batch merged into
         it.
         """
+        continuity_by_observation_id: dict[str, Contact | None] = {}
+        claimed: dict[tuple[str, float], set[str]] = {}
+        for observation in observations:
+            percept = percept_of(observation)
+            resolved = self._resolve_continuity(percept, now_sim)
+            continuity_by_observation_id[observation.id] = resolved
+            if resolved is not None:
+                claimed.setdefault((percept.source, percept.t_sim), set()).add(
+                    resolved.id
+                )
+
         touched: list[Contact] = []
         for observation in observations:
             self._observations[observation.id] = observation
             percept = percept_of(observation)
+            claim_key = (percept.source, percept.t_sim)
 
-            contact = self._resolve_continuity(percept, now_sim)
+            contact = continuity_by_observation_id[observation.id]
             if contact is not None:
                 contact.record(percept)
             else:
+                already_claimed = claimed.get(claim_key, set())
                 passing = [
                     candidate
                     for candidate in self._contacts.values()
-                    if passes_gate(percept, candidate, now_sim)
+                    if candidate.id not in already_claimed
+                    and passes_gate(percept, candidate, now_sim)
                 ]
 
                 if len(passing) == 1:
@@ -474,6 +586,7 @@ class ContactStore:
                     contact = Contact.from_percept(self._new_contact_id(), percept)
                     self._contacts[contact.id] = contact
 
+            claimed.setdefault(claim_key, set()).add(contact.id)
             self._observation_id_to_contact_id[observation.id] = contact.id
             touched.append(contact)
         return touched

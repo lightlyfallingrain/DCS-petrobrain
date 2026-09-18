@@ -206,60 +206,73 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         final_t_sim = frames[-1]["telemetry"]["dcs_model_time_s"]
         assert runner.last_t_sim == final_t_sim
 
-        # 20 Hybrid observations (object 101, every poll) + 36 naked-eye
-        # observations -- every one of those 56 percepts must land in
-        # exactly two contacts below, not a duplicate-contact runaway across
-        # so many consecutive polls.
+        # `plans/group-contact-model/plan.md` Stage 2 changes both the
+        # observation count and the contact count here -- naked-eye now
+        # emits one Observation per *cluster*, not per object. Objects 101
+        # (truck, x=1400, z=0) and 102 (infantry, x=1800, z=0) are 400 m
+        # apart, exactly along ownship's own line of sight (ownship's track
+        # is also z=0 the whole flight) -- under Stage 3b-i's world-space
+        # ellipse this was the degenerate collinear case a scalar down-range
+        # radius could not resolve. **Stage 3b-i rev.2's angular predicate
+        # changes this outcome again**: ownship sits at 700 m MSL over a
+        # 500 m-alt pair, i.e. the correction's own worked "400 m pair,
+        # 200 m up" case (`plans/group-contact-model/plan.md`'s
+        # "Correction (user, 2026-09-18)" section) -- depression angle,
+        # not zero cross-range, is what separates them, and it does so at
+        # *every* range in this fixture, not just the far ones. Confirmed by
+        # running the real pipeline poll-by-poll (not guessed, per this test
+        # file's own convention):
         #
-        # Was 53 before the 2026-09-17 screenshot calibration of
-        # `visibility.py`'s angular-radius constants. Object 102 is
-        # "Infantry AK" parked at x=1800: the old `lowres` threshold put
-        # infantry at 1674 m, so it stayed invisible until ownship closed
-        # inside that, while the calibrated threshold reaches 2400 m
-        # (1.8 / 0.003 * 4.0) and picks it up from the first poll instead.
-        # Three extra polls, three extra observations, same two contacts.
+        # - Polls 0-15: naked-eye emits 2 observations every poll -- a
+        #   `Ural truck`/`OP_TRUCK` singleton and an `OP_GROUPSOMETHING`
+        #   presence singleton, never merged. 32 naked-eye observations.
+        # - Polls 16-19: object 101 (the truck) drops out of the naked-eye
+        #   channel entirely -- the cockpit occlusion mask already
+        #   documented above (x ~ 905 cutoff), unrelated to clustering. Only
+        #   the object-102 singleton remains -- 1 naked-eye observation per
+        #   poll, 4 total.
         #
-        # Was 57 before the cockpit occlusion mask (`perception.
-        # cockpit_mask`, 2026-09-17). Object 101 now drops out of the
-        # *naked-eye* channel for the last few polls, which is the mask
-        # working rather than a regression: ownship cruises at 700 m toward
-        # a target at 500 m, so as the horizontal range closes the target's
-        # depression steepens past the co-pilot's measured 22 deg forward
-        # allowance -- 200 m of height difference exceeds 22 deg once the
-        # horizontal range drops below ~495 m, i.e. once ownship passes
-        # x ~ 905 of its 0 -> 1140 run. It goes under the nose, exactly as
-        # it would in the real cockpit.
+        # Naked-eye: 32 + 4 = 36. Hybrid: 20 (object 101, every poll,
+        # unaffected -- Hybrid never clusters and has no elevation gate).
+        # 36 + 20 = 56.
         #
-        # The Hybrid channel is deliberately unaffected: the mask gates
-        # `perception.visibility` (naked-eye) only, and Hybrid's own
-        # forward-hemisphere filter in `perception.association` has no
-        # elevation term. Object 102 (further out at x=1800) never closes
-        # enough to be occluded and keeps all 17.
+        # Because the two objects separate from poll 0 onward, the same-poll
+        # co-fold Stage 3a's exclusion rule guards against (`belief.
+        # contacts.ContactStore.ingest`'s pre-scan, `plans/
+        # group-contact-model/plan.md` Stage 3a) fires at poll 0, not
+        # poll 14: naked-eye's truck singleton spatially matches `CONTACT_1`
+        # (Hybrid's own frame-0 founding percept) in the same batch; the
+        # infantry singleton, same source and same `t_sim`, is excluded from
+        # matching a contact `CONTACT_1`'s truck singleton has already
+        # claimed this poll, so it founds `CONTACT_2` fresh immediately.
+        # `CONTACT_1`'s cardinality is therefore never contradicted -- every
+        # naked-eye report of it is a singleton `OP_1UNIT`, poll after poll,
+        # so it holds `(1, 1)` throughout rather than widening to a
+        # contradiction hull the way a merge-then-split history would.
         assert len(runner.store.observations) == 56
 
         contacts = get_contacts(runner.store, final_t_sim)
 
-        # Two contacts, as there are two real objects. This was ONE contact
-        # between the 2026-09-17 vision calibration and the presence-tier merge
-        # veto: the wider detection envelope made object 102 first visible at a
-        # range where the naked-eye channel is structurally class-blind
-        # (everything is OP_GROUPSOMETHING), so the class gate could not
-        # discriminate and the honestly-wide spatial gate merged two genuinely
-        # different objects. See plans/contact-merge-undercount/debug.md.
+        # TWO contacts. `CONTACT_1` (Hybrid's founding percept, frame 0) is
+        # the truck: both sources, `type`-level `"Ural truck"`. `CONTACT_2`
+        # is the poll-0 infantry singleton, founded fresh by the same-poll
+        # exclusion above: naked-eye only, presence-level
+        # `OP_GROUPSOMETHING`.
         assert len(contacts) == 2
 
-        # One founding CONTACT_DETECTED per real object -- no spurious
-        # CONTACT_LOST/REACQUIRED (both stay continuously visible once
-        # acquired) and no CONTACT_CLASSIFICATION_CHANGED on object 101 (see
-        # the module docstring's "lower level holds" note).
+        # Two founding CONTACT_DETECTED, one per contact -- no spurious
+        # CONTACT_LOST/REACQUIRED (both contacts continuously visible once
+        # acquired) and no CONTACT_CLASSIFICATION_CHANGED (see the module
+        # docstring's "lower level holds" note -- Hybrid's frame-0
+        # TYPE-level percept still establishes the truck contact first, and
+        # the infantry contact never gets a claim higher than presence).
         assert [event.kind for event in runner.store.events] == [
             "CONTACT_DETECTED",
             "CONTACT_DETECTED",
         ]
 
-        truck = next(
-            c for c in contacts if c["facts"]["classification"]["value"] == "Ural truck"
-        )
+        truck = next(c for c in contacts if c["facts"]["id"] == "CONTACT_1")
+        assert truck["facts"]["classification"]["value"] == "Ural truck"
         assert truck["facts"]["classification"]["level"] == "type"
         assert truck["facts"]["certainty"] == "observed"
         assert sorted(truck["facts"]["sources"]) == [
@@ -267,17 +280,24 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
             "petrovich_detection_associated",
         ]
 
-        infantry = next(
-            c for c in contacts if c["facts"]["classification"]["value"] != "Ural truck"
-        )
-        # Presence, not class -- and that is the calibrated behaviour, not a
-        # shortfall. Object 102 is infantry (1.8 m), whose class threshold is
-        # 1.8 / 0.014 * 4 = 514 m since the 2026-09-17 calibration; ownship
-        # ends the fixture ~690 m away, so it never closes enough to resolve a
-        # class. Before that calibration the threshold was 900 m and this
-        # asserted OP_INFANTRY at class level.
+        # `CONTACT_1`'s cardinality: every naked-eye report of the truck is
+        # a singleton `OP_1UNIT`, poll after poll (see the derivation
+        # comment above -- the two real objects never merge under Stage
+        # 3b-i rev.2's angular predicate at this fixture's own geometry), so
+        # `fold_cardinality` never sees a disjoint reading to contradict
+        # against and the contact holds `(1, 1)` throughout -- unlike Stage
+        # 3b-i's ellipse, which merged the pair through poll 13 and
+        # contradicted to the hull `(1, 2)` once they split.
+        truck_cardinality = truck["facts"]["cardinality"]
+        assert (truck_cardinality["lo"], truck_cardinality["hi"]) == (1, 1)
+
+        infantry = next(c for c in contacts if c["facts"]["id"] == "CONTACT_2")
+        assert infantry["facts"]["classification"]["value"] == "OP_GROUPSOMETHING"
         assert infantry["facts"]["classification"]["level"] == "presence"
+        assert infantry["facts"]["certainty"] == "observed"
         assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
+        infantry_cardinality = infantry["facts"]["cardinality"]
+        assert (infantry_cardinality["lo"], infantry_cardinality["hi"]) == (1, 1)
 
         described = describe_contact(runner.store, truck["facts"]["id"], final_t_sim)
         assert described is not None

@@ -188,10 +188,42 @@ Knowledge harvested from feature work and investigation. Short, factual, one ide
 
 - **Storing multipolygon holes as a derived JSON tag preserves schema stability across cache-invalidation boundaries.** Rather than adding a new `inner_rings` geometry column (which would bump `store.schema.SCHEMA_VERSION` and orphan all existing M8 probe-store pairings, since each probe store pins its base store's schema version), holes are stored as `tags["inner_rings"]`, a reserved derived tag alongside existing precedent (`junction.connecting_road_ids`, `terrain.elevation_range_m`). This keeps the base schema at version 3 (unchanged), so existing probe-store pairings remain valid across this milestone. The trade-off: hole rings must be JSON-parsed at query time rather than loaded from a dedicated column, a small price next to the M9 stage's overall parse-time reduction (6.5 s → cache-hit cascades at 0.07 s per repeat run). Pattern: when storing derived relational data from a source that may change (OSM geometry rules, classifier rules), prefer a reserved JSON-tag convention over schema extension, keeping the base schema stable (M9 osm-landcover-optimization plan Design Decision 2, validated in implementation).
 
-## Perception Calibration & Visibility Measurement (Vision Range Calibration, Pass 1)
+## Spatial Gating & Clustering (Group Contact Model, Stages 1–2)
 
-- **Binocular visibility over-claim worsens proportionally as ownship closes — not a flat offset.** Calibration against 20-screenshot ground truth (895m–2.42km, flat desert, clear weather, binocular optic only) showed all tested ranges claim higher tiers than observed: 895m/955m compute `hires` (type recognizable), 1.89km/2.42km compute `medres` (class recognizable), but all binocular ground truth shows only `speck_no_class` (presence without class). The over-claim is not uniform across ranges; it worsens at closer distance (farther points are only one tier over, closer points are two tiers over). This pattern suggests a future constant retune cannot be a simple offset or multiplier; the range-dependent component of the formula requires shape change, not parameter tweak. The fixture and test suite are stable: they pin today's output and explicitly encode the known divergence, ready for Pass 2 data (both close-range 200-800m and long-range >2.5km) to inform what the new formula should look like (vision-range-calibration Pass 1, `body-layer/research/2026-09-17-vision-range-calibration.md` central finding and `body-layer/tests/test_vision_calibration.py` divergence test).
+- **Two different radii in the same pipeline serving different purposes create a structural dead zone.** Group-contact cardinality (BL-x) introduces clustering (single-sided max-radius test for resolving power) upstream of the belief spatial gate (double-sided sum-radius test for temporal smoothing). At 690m with 205m cluster radius and 410m gate radius, a split whose children sit near the cluster boundary is re-absorbed by the gate — a common case, not edge — because `sum(uncertainty_a, uncertainty_b) ≥ max(uncertainty_a, uncertainty_b)` for any positive radii. The two radii serve different purposes (channel resolution vs. temporal coherence), so the divergence is not a bug; the mistake is applying the symmetric gate to a split-child percept that carries explicit cluster identity. Stage 3 must decide gate treatment: exempting freshly-split children, or making the gate single-sided when cluster identity says "this is not that." Document both radii and why they serve different purposes when designing multi-stage spatial pipelines — the asymmetry (single vs. sum) is legitimate tuning, not a sign of error (group-contact-model plan review finding, commit 3f6b1b2).
 
 - **F10-label-sourced object_type values fail object_model.profile_for resolution when labels diverge from raw DCS type spellings.** Several units in the vision-calibration dataset (T-62, BMD1, AK-74/AK) are labeled via F10-map display names, not verified LoGetWorldObjects raw type strings. These fail `profile_for` lookup: `"T-62"` matches raw-table key `"T-62M"` (with M variant), `"BMD1"` (no hyphen) matches raw key `"BMD-1"` (hyphenated), and small-arms `"AK-74"`/`"AK"` have no match in the reporting-name-keyed second pass. The SA-10/SA-15/HL B8M1 cluster has a pre-existing gap (no keyword table entries at all, falling back to `DEFAULT_SIZE_M=5.0`). When F10 labels are the only available source, the workaround is to record ground-truth `size_m` independently in calibration fixtures rather than relying on `profile_for` — the fixture becomes the durable truth, not the lookup table. This decouples measurement integrity from the fragility of label-to-type matching. Future callers that use F10-labeled objects should follow this pattern: store independent sizes, treat `profile_for` as a cross-check, not the source (vision-range-calibration Pass 1 implementation note and `body-layer/research/2026-09-17-vision-range-calibration.md` object_type provenance section).
 
 - **Calibration dataset design for non-breaking extension: store observed ground-truth directly, not inferred values.** The vision_calibration.json fixture captures each observation's objects, grades (per optic), source images, and conditions, with `size_m` recorded as independently-known real-world size (e.g., `"T-62": 7.0 m`), not looked up from `object_model.profile_for`. This choice was driven by the F10-label fragility noted above, but generalizes: storing what was directly observed (the fixture data) separately from what can be inferred or looked up (profile sizes, classification tiers) keeps the fixture extensible and the measurement chain auditable. New rows (closer range, different theatre, other optics) drop in without format change; the fixture shape is stable across future passes and data sources (vision-range-calibration Pass 1 plan Fixture format section, implementation preserved this pattern).
+
+## Solve the problem in its natural coordinate space
+
+Two full implement-review cycles were spent on a world-space model of a question that is purely
+angular. The naked-eye channel's position uncertainty was first a scalar radius, then an anisotropic
+ellipse (cross-range acuity, down-range bucket width) — both approximations of "what angle do these
+two things subtend at the observer". Stating it directly in angular terms **deleted 144 net lines**
+and removed a tuned constant, because the anisotropy then falls out of the geometry: an airborne
+observer separates a down-range pair by *depression angle*, which no world-space radius can express
+without being told to.
+
+Two tells that a model is in the wrong space, both present here and both visible before the rework:
+
+- **A term whose justification keeps getting replaced.** The down-range radius was first "reporting
+  quantisation", then "depth perception is poor at range". A term that needs a new reason each time
+  someone looks at it is usually standing in for something else.
+- **Constants that cancel or turn out non-binding once restated.** In angular form the optic
+  multiplier cancels out of the comparison entirely, and the acuity floor is provably non-binding
+  for anything the channel detected at all. Both were load-bearing in world space and neither was
+  real — and the second removed a planned calibration sortie's main purpose.
+
+The correction came from the user's lived experience, not from analysis: *"two apples 20 cm apart at
+50 cm are obviously two side by side, and may be one when one sits behind the other"*. Worth
+pairing with `.claude/skills/explore.md` — asking for the non-DCS analogue is what surfaced it.
+
+## A design written against a stale test list produces phantom expectations
+
+Stage 3b-i rev.2's design named a test as an xfail it expected to flip. The test did not exist: it
+had been folded into another test by an earlier, unrelated commit. The design was not careless — it
+was written against a test inventory that had already moved. When a plan specifies "test X should
+now assert Y", confirm X exists at that moment rather than at the moment the surrounding reasoning
+was formed.

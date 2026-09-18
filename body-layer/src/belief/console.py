@@ -146,6 +146,7 @@ _ATTENTION_LEVELS: tuple[Attention, ...] = ("ignore", "normal", "watch", "priori
 #: so the block's order is stable regardless of `dict` insertion order.
 _SHOW_FACT_KEYS: tuple[str, ...] = (
     "classification",
+    "cardinality",
     "certainty",
     "visible",
     "last_seen_ago_s",

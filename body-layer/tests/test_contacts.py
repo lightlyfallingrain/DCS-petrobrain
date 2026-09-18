@@ -134,19 +134,37 @@ def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> 
     heading -- two consecutive, genuinely identical real positions can
     legitimately land in different buckets, implying positions up to
     roughly a full bucket-width apart. `association_over_time.
-    spatial_gate_radius_m` used to budget only the *incoming* percept's
-    own uncertainty, silently treating the contact's stored
-    `last_position` as exact -- under-sized by up to 2x for exactly this
-    case. Once a single missed match spawned a second contact for the
-    same real object, every subsequent percept saw two-or-more passing
-    candidates, and `ContactStore.ingest`'s deliberate anti-guessing rule
-    (two-or-more candidates -> new contact, never a tiebreak) turned that
-    one missed match into a permanent one-new-contact-per-poll runaway.
+    passes_gate` used to budget only the *incoming* percept's own
+    uncertainty, silently treating the contact's stored `last_position` as
+    exact -- under-sized by up to 2x for exactly this case. Once a single
+    missed match spawned a second contact for the same real object, every
+    subsequent percept saw two-or-more passing candidates, and
+    `ContactStore.ingest`'s deliberate anti-guessing rule (two-or-more
+    candidates -> new contact, never a tiebreak) turned that one missed
+    match into a permanent one-new-contact-per-poll runaway.
 
     This test drives the same quantisation helpers `naked_eye_source.py`
     itself uses, over a maneuvering-ownship/stationary-target geometry
     empirically confirmed (pre-fix) to trigger the bug, and asserts the
-    real object still resolves to exactly one contact."""
+    real object still resolves to exactly one contact.
+
+    **Was `xfail`ed by Stage 3b-i, fixed by Stage 3b-i rev.2** (`plans/
+    group-contact-model/plan.md`). Stage 3b-i introduced the regression by
+    making this gate share `perception.clustering`'s acuity-derived cross-
+    range radius (~1-7 m at this geometry's ranges) -- a mismatch against
+    bearing-bucket requantisation jitter (up to a full 30 deg clock bucket,
+    unchanged by that move) of roughly 700:1 at every range, confirmed by
+    direct arithmetic in the rev.2 design rather than by re-tuning a
+    magnitude. The fix was not a wider acuity-derived budget (which would
+    have reopened the Stage 3a dead zone `association_over_time`'s
+    docstring describes) -- it was recognizing that this gate and the
+    cluster predicate answer different questions about different things
+    (a quantised *report* against a remembered position, vs. two *live*
+    candidates against each other) and never should have shared a formula.
+    Reverting this gate to its pre-Stage-3b-i, quantisation-derived form
+    (`association_over_time._naked_eye_uncertainty_m`) budgets the thing
+    that is actually jittering -- the clock-bucket requantisation this test
+    drives -- and the regression simply does not arise."""
     from perception.naked_eye_source import _quantise_bearing, _quantise_range_m
 
     target_x, target_z = 0.0, 1200.0
@@ -829,3 +847,74 @@ def test_reproject_relative_areas_updates_only_relative_areas() -> None:
     projected_relative = next(a for a in store.areas if a.id == relative.id)
     assert projected_relative.center == ownship_position
     assert projected_relative.wedge_deg == (90.0, 30.0)
+
+
+# --- Stage 3a: same-source, same-poll exclusion ------------------------------
+#
+# `plans/group-contact-model/plan.md` Stage 3a: two `Observation`s sharing
+# both `source` and `t_sim` may never resolve to the same contact via the
+# gate branch of `ContactStore.ingest`. These two observations are spatially
+# close enough (5 m apart) and class-compatible (identical raw
+# classification) that, absent this rule, the second would pass the ordinary
+# gate against the contact the first just founded.
+
+
+def test_same_source_same_poll_observations_never_merge() -> None:
+    store = ContactStore()
+    first = _observation(
+        obs_id="OBS_1",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    )
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1005.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    )
+
+    store.ingest([first, second], now_sim=10.0)
+
+    # Two contacts, not one -- OBS_2 would pass the ordinary spatial/class
+    # gate against the contact OBS_1 just founded (5 m apart, well inside
+    # SCOPE_UNCERTAINTY_M's radius), but the same-source, same-poll
+    # exclusion removes that contact from OBS_2's candidate set before the
+    # gate is even evaluated, so OBS_2 sees zero candidates and founds its
+    # own contact instead.
+    assert len(store.contacts) == 2
+    assert {contact.id for contact in store.contacts} == {"CONTACT_1", "CONTACT_2"}
+
+
+def test_different_source_same_poll_observations_still_fuse() -> None:
+    store = ContactStore()
+    first = _observation(
+        obs_id="OBS_1",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    )
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1005.0,
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+    )
+
+    store.ingest([first, second], now_sim=10.0)
+
+    # The exclusion is keyed on (source, t_sim), not on the batch/poll alone
+    # -- two *different* sources reporting the same thing in one poll must
+    # still fuse into one contact, which is exactly what cross-channel
+    # fusion (`test_cross_channel_fusion.py`) depends on.
+    assert len(store.contacts) == 1
+    contact = store.contacts[0]
+    assert sorted(contact.contributing_observation_ids) == ["OBS_1", "OBS_2"]
+    assert sorted({span.source for span in contact.sighting_spans}) == [
+        SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    ]
