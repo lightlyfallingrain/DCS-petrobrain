@@ -309,79 +309,58 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   formula, not from measurement. All targets were static, and movement is a strong real detection
   cue this does not model.
 
-- [~] **Group contacts: cardinality and composition as refinable beliefs.** **Stages 0-2 done
-  2026-09-18; Stage 3 blocked on a calibration sortie; Stages 4-6 pending.** Plan:
+- [~] **Group contacts: cardinality and composition as refinable beliefs.** **Stages 0-4a done
+  2026-09-18 on `feature/group-contact-cardinality`; 3b-ii, 4b, 5 and 6 pending.** Plan:
   `plans/group-contact-model/plan.md`. Diagnosis: `plans/contact-merge-undercount/debug.md`.
 
-  **The reframe the plan rests on.** The defect and the feature have one cause, and it is not in
-  `belief/`: the pipeline emits one `Observation` per DCS `object_id`, then asks belief to guess
-  which observations are the same object. At 9 km that question is *unanswerable*. BL-2.6 widened
-  the gate, Stage 0 narrowed it, and neither can succeed, because the question is ill-posed at that
-  range. So a `Contact` becomes **a belief about the occupants of one resolution cluster**, not one
-  object — and the cluster radius is the channel's own honest limit
-  (`association_over_time._naked_eye_uncertainty_m`, already computed, already used by the spatial
-  gate). Model resolution and channel resolution become the same number *by construction* rather
-  than by a tunable that can drift, which is the no-omniscience invariant enforced structurally
-  instead of by discipline.
+  **What the model became, after two reworks.** A `Contact` is a belief about the occupants of one
+  **resolution cluster**, not one object — and separability is **angular**, measured at ownship in
+  3D: two units are separable when the angle between them exceeds half the sum of their own angular
+  sizes (the disc-overlap criterion), with an acuity floor. The user's framing that forced this:
+  *"two apples 20 cm apart at 50 cm are obviously two side by side, and may be one when one sits
+  behind the other"*.
 
-  **Findings that made it cheaper than expected.** DCS's own Petrovich already reports bucketed
-  counts per clock direction (`OP_1UNIT` … `OP_MORETHAN15UNITS`) — the cardinality ladder does not
-  need inventing. Members need **no stable identity**: a member is a `(classification, count)`
-  claim matched across observations by lattice ancestry, and the "and something else" remainder is
-  *derived* (`cardinality.lo − Σ member.count.lo`), never stored. And `fold_classification`
-  generalises to per-member folds, so composition adds matching and delegation rather than new
-  fusion logic.
+  **Two reworks, and why.** Stage 3b-i rev.1 modelled the uncertainty as a world-space **ellipse**
+  (cross-range acuity, down-range bucket width). That was an approximation of the angular reality,
+  and it cost a full implement-review cycle before the user restated the problem in its natural
+  space. rev.2 replaced it with the angular predicate and **deleted 144 net lines of `src/`** —
+  the correction made the code smaller. Before that, the radius itself had been built on half a
+  **30 degree clock bucket**, a *reporting* quantisation mistaken for *resolving* power, roughly 50x
+  too coarse.
 
-  **Stages** (each independently mergeable, suite green):
-  0. ✅ presence-tier merge veto — *interim; removed again by Stage 2, as designed*
-  1. ✅ `belief/cardinality.py`, mechanism only — landed as a genuine no-op: all 608 pre-existing
-     tests passed **untouched**, which was its literal merge criterion
-  2. ✅ perception clustering + count emission + veto removal — **the defect is fixed**. The
-     twelve-unit cluster folds to **one** contact carrying `OP_ABOUT15UNITS` at 9 km and splits
-     into six contacts with small exact counts at close range, driven by closing range rather than
-     by oscillating merge/split logic
-  3. ⛔ calibration — **blocked on a live sortie**, and its scope widened in review (see below)
-  4. surface it: `facts["cardinality"]`, console, speech's count clause,
-     `CONTACT_CARDINALITY_CHANGED`, and fixing count arithmetic that currently conflates contact
-     records with unit counts — **the first stage that changes what is heard**
-  5. composition — "three of them tanks … and something else"; also suppresses
-     `enrichment.motion_when_seen` for plural cardinality, since a cluster's two most recent
-     implied positions can come from different vehicles and fabricate a heading
-  6. split/merge hardening and docs; may fold into Stage 2
+  **Two findings that paid for themselves:**
+  - **The optic multiplier cancels out** of the separability test — both sides are angles through
+    the same optic. Verified in the code, not just the algebra.
+  - **The acuity floor is provably non-binding for anything the channel detected**, since detection
+    is itself an angular-size test against the same constant. So the acuity *magnitude* is not
+    load-bearing for clustering — which **removed Stage 3b-ii's headline reason to fly**.
 
-  **Settled by the plan:** no structural split (clusters re-home by majority object overlap, the id
-  follows the majority so history/attention/`PendingIntent` stay pointing at a live contact);
-  merging falls out with zero new code; stable per-member identity should **never** be built, since
-  it needs a within-cluster association the channel cannot support. The tool freeze is **not**
-  broken — it pins names, and the new `facts` keys are additively free.
+  **Behaviour now** (all fixture-verified): twelve units perpendicular to the line of sight at 9 km
+  → **12 contacts**; the same twelve *along* it at 200 m AGL → **1 contact, `OP_1UNIT`** — correct
+  and confident, he genuinely sees one dot; the same layout at **1000 m AGL → `OP_TO5UNITS`**,
+  because climbing widens the depression-angle spread. Altitude-sensitive counting falls out of
+  geometry with no tuned parameter, which is the clearest evidence the model is right.
 
-  **Carried forward from Stages 1-2, deliberately** (none are regressions):
+  **Stages:** 0 ✅ presence-tier veto (interim, removed by Stage 2 as designed) · 1 ✅ cardinality
+  mechanism (a no-op by merge criterion — 608 pre-existing tests passed untouched) · 2 ✅ clustering,
+  which fixed the live defect · 3a ✅ same-source/same-poll exclusion in `ContactStore.ingest`,
+  radius-independent · 4a ✅ cardinality observable in `facts`/console · 3b-i ✅ angular separability
+  (rev.2) · **3b-ii ⚠ scope now questionable** (see below) · 4b ⛔ speech and events — **the first
+  stage that changes what is heard** · 5 ⛔ composition · 6 ⛔ hardening.
 
-  - **Stage 3's scope grew, and the growth is structural rather than tuning.** Clustering splits on
-    `max(radius_a, radius_b)` — single-sided, ≈205 m at 690 m range — while the belief gate
-    re-tests a split child against its parent on `uncertainty_a + uncertainty_b + growth` — both
-    sides summed, ≈410 m. Since `sum ≥ max` always holds, a split whose children sit near the
-    cluster's resolution boundary is re-merged, and that boundary is exactly where a split first
-    becomes possible. So **clustering can be silently undone downstream**, and no amount of
-    cluster-radius tuning fixes it. Two objects 400 m apart consequently stay one contact at
-    690 m, where ≈32° subtended against a 30° clock bucket says the channel can resolve them. The
-    gate's double-budgeting is right for its BL-2.6 purpose (spurious duplicates on slow movers)
-    and wrong for a child perception already separated on positional evidence. **Must not be
-    closed by widening the cluster radius** — that claims less resolution than the channel has,
-    violating the same invariant in the other direction.
-  - **The Stage 0 veto is gone**, so clustering alone now stands between the user and the original
-    defect. Intended, and guarded by the twelve-object regression test, but the next flight is the
-    first with no safety net behind it.
-  - **`_RANGE_BUCKETS_M` has two literal copies** (`naked_eye_source.py`, `clustering.py`), forced
-    by `perception/` being unable to import `belief/`. A shared constants module is the fix;
-    backlog, not blocking.
+  **Open questions for the next pass, both real rather than rhetorical:**
+  - **Does Stage 3b-ii still justify a sortie?** Its headline purpose was pinning the acuity
+    magnitude, which rev.2 showed is not load-bearing. What remains is the tier → count-coarseness
+    cap and the chaining cap. Consider folding them elsewhere rather than flying for them.
+  - **Is Stage 5 (composition) still worth building?** The angular model resolves the twelve-unit
+    case that originally motivated the whole group model, so the headline example has largely
+    dissolved. Cardinality retains real uses — along-LOS columns, tight formations, infantry below
+    detection size. The user's own instruction was to re-judge this after flying, and that still
+    stands.
 
-  **Settled by the user 2026-09-18**, all matching the plan's recommendations: build Stages 1-4 and
-  decide on Stage 5 afterwards with sorties behind it; attention does **not** survive a split (only
-  the majority child keeps the mark — a watch is on a thing the crew picked, and a newly-separated
-  thing was never picked); **no** `CONTACT_SPLIT` event kind (observable as a cardinality narrowing
-  plus a `CONTACT_DETECTED`); over-subscription retracts lowest-confidence claims first; and
-  `plans/body-layer/plan.md` §3.6 gets a dated amendment rather than a rewrite.
+  **Deferred, recorded so they are not silently assumed away** (user, 2026-09-18): occlusion (a near
+  object hiding a far one on the same line of sight), and shape, colour and movement as
+  separability cues. Movement especially is a strong real-world cue this model ignores entirely.
 
 - [ ] **BL-8 — Memory layer interfaces.** Not started, deliberately last (user decision, 2026-09-10:
   "the shape of what's worth remembering is only knowable after BL-2..BL-7 have run for real").
