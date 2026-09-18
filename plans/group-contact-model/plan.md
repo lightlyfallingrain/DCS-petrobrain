@@ -354,7 +354,9 @@ cardinality is currently invisible: it is absent from `tools.py`'s facts payload
 `console._SHOW_FACT_KEYS`, so a calibration sortie could observe how many *contacts* exist but not
 the count *bucket* on each — which is precisely what 3b calibrates.
 
-Running order: **3a → 4a → sortie → 3b → 4b**.
+Running order: **3a → 3b-i → 4a → sortie → 3b-ii → 4b**. (3b itself split again on 2026-09-18 —
+see Stage 3b below: its resolution rework turned out to be derivable without flying, and flying
+before it lands would repeat the exact mistake the 3a/3b split was made to avoid.)
 
 **Stage 3a — close the gate-vs-cluster radius mismatch. No sortie needed; must land before one.**
 The structural finding from Stage 2's review, described in full below. Clustering splits on
@@ -370,55 +372,220 @@ brought back would be wrong in a way that is hard to detect.
 `console._SHOW_FACT_KEYS`. This is the minimum that lets a sortie see what 3b is tuning. Speech is
 deliberately *not* here — hearing counts is 4b, and is not needed to calibrate.
 
-**Stage 3b — calibration, separate commit. Needs the sortie.**
-The tier → count-coarseness table (`lowres` clamps to `OP_GROUP`; `medres` gives the real bucket;
-`hires` gives an exact one), the cluster-radius policy and its chaining cap, and
-`NAKED_EYE_MAX_NEW_PER_POLL` re-read as a per-cluster cap.
+**Stage 3b — the resolution model. Split into 3b-i (no sortie) and 3b-ii (needs the sortie),**
+for the same reason Stage 3 split: flying before the resolution model is right would measure a
+system whose behaviour is still wrong, and the numbers brought back would be wrong in a way that is
+hard to detect afterwards.
 
 **Stage 3b is not a constant-tuning exercise. The cluster radius is built on the wrong quantity**
 (user, 2026-09-18, and confirmed against the code):
 
 ```python
 cross_range_m = range_m * math.sin(_HALF_CLOCK_BUCKET_RAD)   # half of a 30 deg clock bucket
+down_range_m  = _range_bucket_width_m(range_m)               # an OP_D* bucket's width
+return math.hypot(cross_range_m, down_range_m)
 ```
 
-The term is angular, so it scales with range as it should — but the angle is **15 degrees, half a
-*clock bucket***. That is the channel's **reporting** quantisation, not its **resolving** power,
-and the two are different things: Petrovich can plainly see two dots 2 degrees apart while still
-*reporting* both as "eleven o'clock". Separation should be triggered by **apparent angular
-separation against visual acuity**, in arcminutes, not by how coarsely bearings are named.
+Both terms are **reporting** quantisations — the clock vocabulary and the `OP_D*` vocabulary — not
+**resolving** power, and the two are different things. Petrovich can plainly see two dots 2 degrees
+apart while still *reporting* both as "eleven o'clock", and can plainly see one vehicle is nearer
+than another while reporting both as "8-9 km". Separation should be triggered by what the channel
+can **resolve**, and for the cross-range axis that is **apparent angular separation against visual
+acuity**.
 
-**The existing screenshots already bound the real number.** The calibration complex is ~206 m long
-with twelve units, so roughly 18 m of spacing:
+#### The finding that reorders this whole stage: the term being fixed is not the term that binds
 
-| Range | 18 m subtends | Observed |
-|---|---|---|
-| 8.89 km | 7 arcmin | binocular (x4): ~6-7 distinct specks — countable |
-| 8.89 km | 7 arcmin | naked eye: a marginal smudge — *not* countable |
-| 2.99 km | 21 arcmin | naked eye: a row of dots — countable |
+Correcting the angle alone is a **no-op**, because `math.hypot` lets the down-range term set the
+radius at every range in the ladder:
 
-So unaided separation sits somewhere around **10-20 arcmin of apparent angular separation**. The
-current 15 degrees is 900 arcmin — **off by a factor of roughly 50**. That single wrong quantity
-explains why everything clusters, why two objects 400 m apart at 690 m (32 degrees apart) barely
-separate, and why the gate-vs-cluster dead zone Stage 3a had to close was so wide: both radii were
-derived from it.
+| Range | cross-range, acuity-derived | down-range (`_range_bucket_width_m`) | `hypot` |
+|---|---|---|---|
+| 503 m | 0.4 m | 100 m | 100 m |
+| 2.99 km | 2.2 m | 500 m | 500 m |
+| 8.89 km | 6.7 m | 1000 m | 1000 m |
 
-What this changes for Stage 3b:
+The two axes differ by a factor of ~150 at 9 km. Folding them into one scalar with `hypot` throws
+the anisotropy away and the larger term wins everywhere. **So the real content of 3b-i is not
+"replace a constant" — it is "stop pretending this uncertainty is isotropic."** The uncertainty of
+a bearing-and-range observation is an ellipse elongated along the line of sight; it has always been
+one, and the scalar radius was hiding that as much as the wrong angle was.
 
-- Replace the cross-range term's angle with an **acuity-derived** one, and re-derive everything
-  downstream. The plan's *model resolution = channel resolution by construction* claim stays
-  correct in principle; the construction simply reached for the wrong quantity.
-- **Acuity is probably per-optic.** The binocular column resolved specks the naked eye could not at
-  the same range, which is consistent with `BINOCULAR_RANGE_MULTIPLIER` already modelling
-  magnification elsewhere — apparent separation is true separation times magnification. Decide
-  whether the cluster radius takes the same multiplier `visibility.py` does.
-- **Keep counting and resolving distinct.** ED's own count ladder implies Petrovich reports *how
-  many* at ranges where he cannot track each one separately — six specks are countable without
-  each being locatable to 18 m. The count bucket serves the first; the cluster radius serves the
-  second. They should not share a threshold.
-- The down-range term (`_range_bucket_width_m`) is genuinely a reporting quantisation and may stay
-  as it is — but say so deliberately rather than by omission, since the same conflation could hide
-  there.
+This also revises what Stage 3a's dead zone was about. The plan previously attributed its width to
+the 15-degree angle alone; the down-range term was the larger half of it.
+
+#### Where the acuity constant comes from — and the honest limit of the evidence
+
+**Checked first, before inventing anything** (and this is the answer to "should it simply *be*
+`LOWRES_ANGULAR_RADIUS_RAD`?"):
+
+`perception/visibility.py`'s `LOWRES_ANGULAR_RADIUS_RAD = 0.003` is compared against
+`size_m / range_m * BINOCULAR_RANGE_MULTIPLIER` — i.e. it is a threshold on **apparent angular
+extent**, already including magnification. 0.003 rad = **10.3 arcmin**. More important than the
+number is the *model* that module and `research/2026-09-17-vision-range-calibration-pass2.md`
+established and validated: read as apparent angle, the naked-eye and binocular columns collapse
+onto **one** threshold set (class: 0.0139 vs 0.0141 rad, agreeing to 2%), with the optic supplying
+only the magnification. That is a measured cross-optic result, not an assumption.
+
+**Decision: derive the acuity constant from it rather than introducing an independent number.**
+`perception/clustering.py` importing `perception/visibility.py` is legal — both live in
+`perception/`, unlike the `belief/` direction that forced the `_RANGE_BUCKETS_M` duplication. One
+line, one name:
+
+```python
+NAKED_EYE_ACUITY_RAD: Final[float] = LOWRES_ANGULAR_RADIUS_RAD
+```
+
+The justification is *not* "human two-point resolution equals human minimum detectable size" — for
+a real eye those differ by an order of magnitude in the opposite direction (a high-contrast dot is
+detectable far below the 1-arcmin two-point limit). It is that **neither constant is modelling a
+retina.** 0.003 rad is ten times real foveal acuity precisely because what was graded was a
+*rendered frame*: the binding limit is how much detail DCS puts on screen per unit apparent angle.
+Minimum-detectable-extent and minimum-resolvable-separation are two expressions of that same
+render-side scale, which is why "two blobs one blob-width apart" is the natural criterion here. One
+number, one instrument, one derivation.
+
+**The honest limit, stated plainly rather than dressed up as a derivation.** The versioned evidence
+does **not** pin this value:
+
+- `tests/fixtures/vision_calibration.json` records a per-complex *recognition tier*
+  (`nothing` / `marginal_speck` / `speck_no_class` / `class_recognizable` / `type_recognizable`).
+  It records **no countability or separation grade at all**. The "~6-7 distinct specks" reading is
+  an interpretation of the images, which are gitignored — it is not in the fixture or the research
+  doc, and cannot be re-checked from the repo.
+- The "not countable at 8.89 km, naked eye" datapoint is **confounded and bounds nothing.** At that
+  range a 7 m vehicle subtends 2.7 arcmin unaided, far below the 8-10 arcmin *detection* threshold,
+  while the 18 m spacing subtends 7.0 arcmin. The units are not individually countable there
+  because they are not individually *detectable* — a detection failure, not a resolution failure.
+  It is consistent with any acuity value, including much finer ones.
+- The "6-7 specks from 12 units" binocular reading is confounded the other way: Complex C contains
+  natural pairs (SA-3 launcher + its TR radar, ZU-23 *on* a Ural, 3x AK infantry), so 6-7 blobs is
+  equally explained by real spatial clumping as by resolution merging. The fixture stores no
+  per-object positions, so the two cannot be separated from the repo.
+- The one genuine constraint is an **upper bound**: naked eye at 2.99 km, 18 m spacing = 20.7
+  arcmin apparent, and the row reads as distinct. So acuity ≤ ~20.7 arcmin. There is **no lower
+  bound in the evidence at all.**
+
+10.3 arcmin sits comfortably under that bound and costs no new number, so it is a defensible
+**provisional** value. **The mechanism is settled in 3b-i; the magnitude is not, and 3b-ii owns
+it.** Saying otherwise would move the guesswork somewhere less visible, which is the one outcome
+worse than an open question.
+
+#### Is acuity per-optic? No — and the multiplier must be applied
+
+`visibility.py` models the **binocular** observer, explicitly and by user decision, and its
+docstring forbids re-deriving its constants from an unaided assumption. **Clustering must model the
+same observer**, or Petrovich detects with one instrument and separates with another — he would
+merge things he could plainly see apart at the moment he saw them. The pass-2 result says the
+threshold is a property of the eye and the optic only multiplies the angle, so:
+
+    two candidates are unresolvable when  separation_m / range_m * M  <  acuity
+    cross_range_radius_m = range_m * NAKED_EYE_ACUITY_RAD / BINOCULAR_RANGE_MULTIPLIER
+
+Note the symmetry that is itself an argument the two constants belong together: `visibility.py`
+*multiplies* its range threshold by `M` (see 4x further); clustering *divides* its radius by `M`
+(resolve 4x finer). Both are the same statement that the optic scales apparent angle. No per-optic
+acuity dimension is introduced here, for the same reason the pass-2 calibration did not need one;
+the per-optic split stays with the deferred "attention direction and detection cones" milestone.
+
+#### The down-range term — examined, kept, re-justified
+
+It stays, but **its stated reason was wrong and must change, and it must stop being `hypot`'d.**
+`_range_bucket_width_m` is a reporting quantisation, exactly the conflation being fixed on the
+cross-range axis. The reason it survives is different: **depth discrimination really is terrible at
+range.** Stereopsis is useless past ~100 m and monocular depth cues on flat desert are weak, so a
+genuinely large down-range uncertainty is physically right — the bucket width is approximately the
+right *magnitude* reached for the wrong *reason*. Keep it as an explicit stand-in for
+depth-discrimination uncertainty, documented as provisional magnitude, and let 3b-ii confirm it.
+
+#### Counting versus resolving — the anisotropy gives this for free
+
+The two thresholds separate cleanly once the axes are separate, with **no new constant and no
+invented tier table**:
+
+- **Counting** is pure two-point resolution: how many angularly distinct blobs. It needs the
+  **cross-range axis only.** Six specks in a row are countable without any of them being placeable
+  in depth.
+- **Forming a contact** needs resolution *and* a usable position, so it needs the **full ellipse**,
+  down-range term included.
+
+So: **the count bucket is computed by sub-clustering a cluster's members on the cross-range axis
+alone; cluster membership uses the full ellipse.** Same acuity constant, two projections of it.
+This is what lets one contact honestly say "several of them" — the group-contact model's entire
+point — and it now falls out of geometry instead of a tier→coarseness table. The tier table
+degrades from the primary mechanism to a **cap** on top of the geometric count (a `lowres` cluster
+should not claim an exact number however the geometry counts), which is a much smaller thing for
+3b-ii to calibrate.
+
+#### Blast radius — what each affected assertion becomes
+
+Every one of these encodes behaviour produced by the *current* radius. Re-derive, do not assume.
+
+- **`test_calibration_cluster_merge_undercount.py` inverts.** Its Stage 2 assertion (twelve objects
+  at 9 km → **one** contact with a plural count bucket) is **false** under the corrected model when
+  the complex lies across the line of sight: 18 m spacing vs a 6.7 m cross-range radius resolves
+  all twelve, and all twelve clear detection (7 m vehicle reaches 9333 m). It becomes: a 206 m row
+  **perpendicular** to LOS at 9 km → twelve contacts; the same 206 m line **along** LOS at 9 km →
+  one contact with a plural count bucket. **Geometry, not range, decides** — which is the real
+  lesson and a better test than the one it replaces.
+- **`test_two_real_objects_stay_two_contacts` (strict `xfail`) — outcome is geometry-dependent, so
+  do not predict it.** The two objects are 400 m apart, first seen ~2 km. Cross-range radius at 2 km
+  is 1.5 m, so if that separation is across the LOS it resolves trivially and the `xfail` flips to
+  pass. If it is *along* the LOS, the down-range radius there is 500 m > 400 m and it still merges.
+  Work out the actual approach geometry before touching the marker.
+- **Stage 3a's same-source/same-poll rule becomes *more* load-bearing, not less.** A far finer
+  cross-range radius means clustering splits far more, so there is far more for the belief gate to
+  wrongly re-merge. The rule should still hold, but its cases were chosen near the *old* boundary
+  and must be re-derived at the new one.
+- **The by-construction identity is what makes this consequential.** `belief.association_over_time.
+  uncertainty_radius_m` calls `naked_eye_cluster_radius_m` directly (line 171) — the plan's central
+  claim that the cluster radius and the gate's per-percept uncertainty are *the same number*. If
+  clustering goes anisotropic and the gate stays scalar, that identity breaks and re-opens exactly
+  the dead zone Stage 3a was written to close. **Mitigating fact found while checking:** `Percept`
+  already carries `ownship_at_observation`, and `ownship_state` is already in scope at
+  `naked_eye_source.py`'s `cluster_candidates` call site — so both sides can take the LOS frame
+  **without a data-plumbing change**, only signature changes. That makes moving both together
+  substantially cheaper than it looks, but it does mean 3b-i touches the gate fixed twice already
+  (BL-2.6 widened it; `plans/contact-duplication-ambiguity-runaway/` made it the exception path).
+  **See Decisions Requiring User Input.**
+- **`NAKED_EYE_MAX_NEW_PER_POLL = 3`** — twelve resolved clusters at 9 km take four polls to
+  acquire. `naked_eye_source.py` documents the cap as throttling *objects*, not clusters; re-read it
+  as a per-cluster cap here. Whether four polls reads as natural or as a stutter is a
+  perception-feel question → 3b-ii.
+- **Single-link chaining drops in severity.** It was alarming at a 2.3 km radius; at 6.7 m
+  cross-range it is minor. The down-range axis can still chain a convoy into one cluster, which is
+  arguably *correct*. The chaining cap therefore demotes from "needed" to "confirm whether it is
+  needed at all" → 3b-ii.
+
+#### Stage 3b-i — the resolution rework. No sortie. Derivable now.
+
+1. `NAKED_EYE_ACUITY_RAD` in `perception/clustering.py`, imported from `perception/visibility.py`'s
+   `LOWRES_ANGULAR_RADIUS_RAD`, with the derivation and its one-sided evidence bound written on it.
+2. Replace the scalar `naked_eye_cluster_radius_m` with an anisotropic cross-range / down-range
+   pair; cross-range from acuity and `BINOCULAR_RANGE_MULTIPLIER`, down-range from
+   `_range_bucket_width_m` under its new justification.
+3. Ellipse membership test in `cluster_candidates`, taking the observer position to define the LOS
+   frame (available at the call site already).
+4. Count bucket from cross-range-only sub-clustering.
+5. Re-derive the affected tests above from the new geometry.
+
+**Merge criterion: the suite is green and every re-derived assertion has its geometry written out
+in the test, not just its expected number** — these are the assertions that were previously right
+for the wrong reason.
+
+#### Stage 3b-ii — what genuinely needs the sortie
+
+1. **The acuity magnitude.** The evidence gives an upper bound and no lower bound; only live
+   observation closes that. This is the honest reason to fly.
+2. **The tier → count-coarseness cap** on top of the geometric count.
+3. **The chaining cap** — whether one is needed at all, now that the radius is ~300x finer.
+4. **`NAKED_EYE_MAX_NEW_PER_POLL` as a per-cluster cap**, and whether staged acquisition of a
+   resolved group reads as natural.
+5. **Confirmation that the acuity constant behaves in motion**, against real terrain and clutter
+   rather than a flat-desert still — the condition under which none of the existing evidence was
+   gathered.
+
+Running order is unchanged except that 3b-i joins the pre-sortie group: **3a → 3b-i → 4a → sortie →
+3b-ii → 4b**.
 
 **Stage 4b — speech and events. No sortie needed.** (4a already surfaced the facts key and the
 console.) `speech.py`'s count clause and the `OP_GROUPSOMETHING` fix — **singular output must stay
@@ -667,7 +834,34 @@ unchanged by this stage.**
 
 ---
 
+### Decisions Requiring User Input (raised 2026-09-18 by the Stage 3b rework)
+
+1. **Does Stage 3b-i take the belief gate anisotropic at the same time as clustering, or only
+   clustering?** Recommended: **both together.** The plan's load-bearing claim is that the cluster
+   radius and `association_over_time.uncertainty_radius_m` are the same quantity *by construction*;
+   splitting them re-opens precisely the dead zone Stage 3a exists to close. The cost is that 3b-i
+   then edits a gate already fixed twice in opposite directions. The mitigating find is that
+   `Percept.ownship_at_observation` already carries the observer position, so no data plumbing is
+   needed on either side — only signatures. Escalated rather than decided because it is
+   consequential and not cheaply reversible.
+
+2. **Is "twelve resolved contacts at 9 km" the behaviour you want?** Under the corrected model a
+   206 m row across the line of sight resolves into twelve individual contacts at 9 km, because the
+   modelled observer is the *binocular* one (`visibility.py`'s standing decision) and 18 m at 9 km
+   through 4x is nearly half a degree. That is defensible, but it inverts this plan's own
+   motivating example, and it means **part of the observed defect was the broken radius rather than
+   a missing group model.** Cardinality is still needed — for along-LOS columns, tight formations,
+   and small/infantry targets — but the headline case shrinks. Worth confirming before 3b-i rewrites
+   the regression test around it.
+
+---
+
 ### Second-order effects
+
+The 3b rework **narrows** Stage 5 (composition) and the deferred per-optic "attention direction and
+detection cones" milestone at once: once resolution is modelled as an apparent-angle threshold
+projected onto two axes, adding a second optic is supplying a different magnification rather than a
+new model, and composition inherits a geometric member count instead of needing its own.
 
 Unblocks **BL-8 (memory layer)**: "the group we saw at the crossroads" is a far better memory unit
 than twelve anonymous contact records, and BL-8 was deliberately left last precisely so the shape
