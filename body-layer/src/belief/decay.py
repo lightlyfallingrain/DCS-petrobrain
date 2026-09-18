@@ -175,6 +175,24 @@ def classification_confidence_at(contact: Contact, now_sim: float) -> float:
     )
 
 
+def cardinality_confidence_at(contact: Contact, now_sim: float) -> float:
+    """Numeric cardinality confidence, `(0, 1]`, exponentially decaying with
+    a half-life of `IDENTITY_HALF_LIFE_S` since `contact.cardinality.
+    established_sim` -- `classification_confidence_at`'s direct twin
+    (`plans/group-contact-model/plan.md` Stage 1), reusing the same
+    half-life rather than declaring a new one: how many things are there is
+    an identity claim, the same reasoning `belief.cardinality`'s module
+    docstring gives for reusing `IDENTITY_HALF_LIFE_S` in `fold_cardinality`'s
+    own lockout constant. Decays only the *number*; `contact.cardinality.lo`/
+    `.hi` never decay (the interval stays sticky by design, mirroring
+    `ClassificationBelief.level`). Pure, like every other function in this
+    module -- no ticker, no mutation, no wall-clock."""
+    elapsed_s = max(0.0, now_sim - contact.cardinality.established_sim)
+    return contact.cardinality.confidence * math.pow(
+        0.5, elapsed_s / IDENTITY_HALF_LIFE_S
+    )
+
+
 def object_id_continuity_valid(contact: Contact, now_sim: float) -> bool:
     """Whether a resolved `continues_observation_id` match onto `contact` is
     still trusted, per `OBJECT_ID_MEMORY_S`'s docstring above -- `True`
