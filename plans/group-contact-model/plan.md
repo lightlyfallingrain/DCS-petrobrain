@@ -1289,6 +1289,48 @@ Recorded so a future stage touching this test surface does not rediscover it.
   them by position instead. The test's actual purpose — continuity on split — is unaffected, but
   the count assertion is genuinely gone rather than relocated.
 
+### Settled: how a group is spoken (user, 2026-09-19) — Stage 4b's vocabulary
+
+Explored before implementation by putting three candidate phrasings of the same situation side by
+side. The user chose the **hedged** register throughout, and added a constraint the options did not
+anticipate.
+
+**1. Vague by default. "Several", not "six".** A plural group is *"several contacts, eleven
+o'clock, two kilometres"*. `OP_TO5UNITS` is *"a handful"*, `OP_MORETHAN15UNITS` is *"many"*. The
+count leads the callout, because the number of things is what changes the pilot's decision — but it
+leads as a vague quantity, not a figure.
+
+**2. Precision only when it is both available and useful.** An exact number is spoken when the
+model actually holds one *and* the count matters — the user's example is *"how many targets
+remain"*, where the difference between two and one is the whole point. Precision is not the default
+reward for close range; it is earned by the question being asked.
+
+**3. Count precision must track classification specificity.** This is the constraint the options
+missed, and it is load-bearing. The user's progression:
+
+> *"tanks and IFVs"* → *"2 tanks, IFVs and trucks"* → *"2 T-72's, 2 BMP-2's, trucks"*
+
+Exact counts appear **only** beside firm identification. "Trucks" stays uncounted while "2 T-72's"
+is exact, *in the same sentence*. So the rule is: **never pair a precise count with a vague class,
+or a vague count with a precise type.** A confident "six" attached to "contacts" claims a
+resolution the channel did not have; a vague "several" attached to "T-72" throws away one it did.
+The two ladders — `classification.SpecificityLevel` and the count buckets — must be spoken at
+matching rungs.
+
+Note this mostly *lands* in Stage 5 (composition), since per-member counts are what it describes.
+But it constrains Stage 4b now: the count vocabulary must be designed so that its vague rungs pair
+naturally with `presence`/`class`, and its exact rungs only become reachable at `type`.
+
+**4. Cardinality-change announcements are a non-issue at this register.** With vague buckets, a
+count moving from "several" to "a handful" is not worth interrupting for. The interesting
+progression is *identification* refining, which is Stage 5's. `CONTACT_CARDINALITY_CHANGED` should
+therefore exist as an event but be spoken sparingly, if at all, until composition lands.
+
+**5. The contact-report wording fixes stay out of Stage 4b** (spelling out metres/kilometres,
+acronym spacing, "very close" under 0.5 km). They are the immediate next step, deliberately
+separate, to keep 4b's scope clean and preserve its regression guard that singular output stays
+byte-identical.
+
 ### Settled Decisions (user, 2026-09-18) — Stage 3b escalations
 
 6. **Geometry decides, not range.** Twelve units in a row perpendicular to the line of sight

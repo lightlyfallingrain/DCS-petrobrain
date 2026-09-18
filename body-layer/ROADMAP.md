@@ -538,6 +538,27 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
   flying anyway rather than run standalone. **Do not start without the user's instruction.**
 
+- [ ] **Range should be spoken with uncertainty, like everything else.** Raised 2026-09-19. Petrovich
+  currently states distance flatly — *"two kilometres"* — which makes him sound **more** certain
+  about range than about anything else, exactly backwards for the quantity a human eye judges worst.
+  The user: *"judging distance is never easy, the more distance, the more uncertainty."*
+
+  **The uncertainty already exists and speech discards it.** `naked_eye_source._RANGE_BUCKETS_M` is
+  ED's own ladder and already widens with distance — 100 m steps out to a kilometre
+  (`OP_D100M`…`OP_D1000M`), then `OP_D1_1p5k`, `OP_D1p5_2k`, coarser beyond. `speech._format_range_km`
+  then rounds to the nearest 0.5 km and states the result as if measured. So the bucket width *is*
+  the confidence interval, already computed, already correct, and thrown away at the last step.
+
+  **Deliberately not folded into Stage 4b** (user direction, 2026-09-19, same call as the wording
+  fixes): it is a different quantity needing its own vocabulary, and it touches the **single-contact**
+  callout — the one case Stage 4b must leave byte-identical as its regression guard. Bundling them
+  would remove that guard exactly when the code is changing most.
+
+  **Should reuse Stage 4b's hedging register rather than invent a parallel one.** The same voice that
+  turns six into "several" should turn 2000 m into "about two kilometres" and 9 km into "eight, nine
+  kilometres" — one hedging vocabulary across two quantities. Natural to do alongside the contact
+  report fine-tuning items, since both are callout phrasing in the same module.
+
 - [ ] **Contact report fine tuning — a running list, appended to as real sorties surface things.**
   Opened 2026-09-18 from the first flights with TTS live. These are about what Petrovich *says* and
   how it sounds, not about what he believes; most touch `belief/speech.py` and
