@@ -51,6 +51,7 @@ from belief.attention import (
     effective_attention,
     project_relative_area,
 )
+from belief.cardinality import OP_1UNIT, CardinalityBelief, new_cardinality_belief
 from belief.classification import (
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S,
     ClassificationBelief,
@@ -144,6 +145,15 @@ class Contact:
     read back on every subsequent fold to enforce `belief.classification.
     CLASSIFICATION_CONTRADICTION_LOCKOUT_S`.
 
+    `cardinality` is `plans/group-contact-model/plan.md` Stage 1's addition:
+    the contact's folded best cardinality claim (`belief.cardinality.
+    CardinalityBelief`, via `fold_cardinality`) -- `classification`'s direct
+    sibling, same fold-instead-of-overwrite posture. Seeded to `OP_1UNIT` at
+    founding (`from_percept`) so every pre-Stage-2 percept (no `count_bucket`
+    evidence yet) leaves every existing test's observed behaviour identical.
+    `cardinality_lockout_until_sim` is `fold_cardinality`'s one piece of
+    per-contact state, mirroring `classification_lockout_until_sim` exactly.
+
     `last_emitted_certainty` is Stage 2 (of `plans/pb2-contact-memory/
     plan.md`)'s addition: the `belief.decay.Certainty` this contact held the
     last time `ContactStore.tick` computed one for it, `None` until the
@@ -180,11 +190,23 @@ class Contact:
     last_position_uncertainty_m: float
     last_class_raw: str
     classification: ClassificationBelief
+    #: Defaults to a freshly-seeded `OP_1UNIT` claim (rather than being a
+    #: required constructor argument) so every existing direct `Contact(...)`
+    #: call site -- test helpers included -- keeps compiling and behaving
+    #: exactly as before (`plans/group-contact-model/plan.md` Stage 1's
+    #: merge criterion: the existing suite passes untouched).
+    #: `established_sim=0.0` here is a construction-time placeholder only;
+    #: `from_percept` immediately re-seeds it at the founding percept's own
+    #: `t_sim` for every contact actually created through `ContactStore`.
+    cardinality: CardinalityBelief = field(
+        default_factory=lambda: new_cardinality_belief(OP_1UNIT, 0.0)
+    )
     contributing_observation_ids: list[str] = field(default_factory=list)
     first_seen_sim: float = 0.0
     last_seen_sim: float = 0.0
     sighting_spans: list[SightingSpan] = field(default_factory=list)
     classification_lockout_until_sim: float | None = None
+    cardinality_lockout_until_sim: float | None = None
     last_emitted_certainty: Certainty | None = None
     #: Stage 3's twin of `last_emitted_certainty`, for `belief.events.
     #: classification_event`'s comparison -- written only by `ContactStore.
@@ -248,6 +270,7 @@ class Contact:
                 level=SpecificityLevel(percept.classification_level),
                 established_sim=percept.t_sim,
             ),
+            cardinality=new_cardinality_belief(OP_1UNIT, percept.t_sim),
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
         )
