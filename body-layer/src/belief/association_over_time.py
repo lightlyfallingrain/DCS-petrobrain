@@ -245,6 +245,14 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     """Whether `percept` may be merged into `contact` -- the spatial gate,
     the class-compatibility gate, and the presence-tier veto must all pass.
     See module docstring."""
+    # STAGE 0 OF THE GROUP CONTACT MODEL -- DELETE THESE TWO LINES AT STAGE 2.
+    # `plans/group-contact-model/plan.md` removes this veto once perception
+    # clusters at its own resolution limit and emits one presence-tier report
+    # per cluster: that report *must* be allowed to fold onto its contact, and
+    # this veto would block exactly that. Interim only -- it trades an
+    # under-count for an over-count (twelve objects at 9 km become twelve
+    # contacts at twelve positions the channel cannot actually resolve), which
+    # is the better failure of the two but not the right answer.
     if percept.classification_level <= SpecificityLevel.PRESENCE:
         return False
 
