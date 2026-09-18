@@ -502,24 +502,79 @@ class ContactStore:
         never resolved by a best-match tiebreak -- see
         `association_over_time`'s module docstring.
 
+        **Same-source, same-poll exclusion** (`plans/group-contact-model/
+        plan.md` Stage 3a): two observations sharing both `source` and
+        `t_sim` may never resolve to the same contact via the gate branch
+        above. This rests on a precondition about both current sources that
+        must hold for this rule to be sound, and is not re-checked here --
+        post-Stage-2 naked-eye emits one `Observation` per resolution
+        cluster (two clusters are separable by construction) and the
+        scope/hybrid channel emits one `Observation` per DCS `object_id`
+        (two object ids are two real objects), so **neither source can ever
+        emit two reports of the same thing in one poll**. A future source
+        that could would violate this rule's premise and must be excluded
+        from it explicitly.
+
+        Enforced with a read-only pre-scan over `observations`, before the
+        main loop below: `_resolve_continuity` is evaluated once per
+        observation and memoized (so the main loop never calls it a second
+        time -- calling it twice could let a contact refreshed mid-batch
+        change its own continuity verdict mid-batch), and every observation
+        that resolves by continuity records its contact id under
+        `claimed[(source, t_sim)]`. The pre-scan mutates nothing else. Its
+        purpose is order-independence: the majority child of a split (see
+        `naked_eye_source._build_observations`) claims the parent contact by
+        continuity before any minority child reaches the gate, regardless of
+        the order `cluster_candidates`/`_build_observations` happened to
+        emit them in -- neither defines an order. The main loop then filters
+        gate candidates by `candidate.id not in claimed[(source, t_sim)]`
+        *before* counting how many pass, so a percept whose only candidates
+        are all claimed this poll sees zero and founds a new contact -- the
+        same outcome the ambiguity rule already produces, through the same
+        code path. Whichever contact an observation ends up on -- merged
+        (by continuity or the gate) or founded -- is added to
+        `claimed[(source, t_sim)]` before the next observation in the batch
+        is processed, so three same-poll, same-source observations against
+        one old contact correctly produce three separate contacts rather
+        than the third silently merging into the second's brand-new one.
+
+        The gate's own radius formulas (`association_over_time.
+        spatial_gate_radius_m`/`passes_gate`) are untouched by this rule --
+        it is association bookkeeping, the same category as
+        `_resolve_continuity`, not a change to the gate's geometry.
+
         Returns the list of `Contact`s touched by this call, one per
         observation processed, in the same order -- a contact may appear
         more than once if multiple observations in this batch merged into
         it.
         """
+        continuity_by_observation_id: dict[str, Contact | None] = {}
+        claimed: dict[tuple[str, float], set[str]] = {}
+        for observation in observations:
+            percept = percept_of(observation)
+            resolved = self._resolve_continuity(percept, now_sim)
+            continuity_by_observation_id[observation.id] = resolved
+            if resolved is not None:
+                claimed.setdefault((percept.source, percept.t_sim), set()).add(
+                    resolved.id
+                )
+
         touched: list[Contact] = []
         for observation in observations:
             self._observations[observation.id] = observation
             percept = percept_of(observation)
+            claim_key = (percept.source, percept.t_sim)
 
-            contact = self._resolve_continuity(percept, now_sim)
+            contact = continuity_by_observation_id[observation.id]
             if contact is not None:
                 contact.record(percept)
             else:
+                already_claimed = claimed.get(claim_key, set())
                 passing = [
                     candidate
                     for candidate in self._contacts.values()
-                    if passes_gate(percept, candidate, now_sim)
+                    if candidate.id not in already_claimed
+                    and passes_gate(percept, candidate, now_sim)
                 ]
 
                 if len(passing) == 1:
@@ -529,6 +584,7 @@ class ContactStore:
                     contact = Contact.from_percept(self._new_contact_id(), percept)
                     self._contacts[contact.id] = contact
 
+            claimed.setdefault(claim_key, set()).add(contact.id)
             self._observation_id_to_contact_id[observation.id] = contact.id
             touched.append(contact)
         return touched

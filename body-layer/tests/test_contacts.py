@@ -829,3 +829,74 @@ def test_reproject_relative_areas_updates_only_relative_areas() -> None:
     projected_relative = next(a for a in store.areas if a.id == relative.id)
     assert projected_relative.center == ownship_position
     assert projected_relative.wedge_deg == (90.0, 30.0)
+
+
+# --- Stage 3a: same-source, same-poll exclusion ------------------------------
+#
+# `plans/group-contact-model/plan.md` Stage 3a: two `Observation`s sharing
+# both `source` and `t_sim` may never resolve to the same contact via the
+# gate branch of `ContactStore.ingest`. These two observations are spatially
+# close enough (5 m apart) and class-compatible (identical raw
+# classification) that, absent this rule, the second would pass the ordinary
+# gate against the contact the first just founded.
+
+
+def test_same_source_same_poll_observations_never_merge() -> None:
+    store = ContactStore()
+    first = _observation(
+        obs_id="OBS_1",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    )
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1005.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    )
+
+    store.ingest([first, second], now_sim=10.0)
+
+    # Two contacts, not one -- OBS_2 would pass the ordinary spatial/class
+    # gate against the contact OBS_1 just founded (5 m apart, well inside
+    # SCOPE_UNCERTAINTY_M's radius), but the same-source, same-poll
+    # exclusion removes that contact from OBS_2's candidate set before the
+    # gate is even evaluated, so OBS_2 sees zero candidates and founds its
+    # own contact instead.
+    assert len(store.contacts) == 2
+    assert {contact.id for contact in store.contacts} == {"CONTACT_1", "CONTACT_2"}
+
+
+def test_different_source_same_poll_observations_still_fuse() -> None:
+    store = ContactStore()
+    first = _observation(
+        obs_id="OBS_1",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    )
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=10.0,
+        bearing_deg=0.0,
+        range_m=1005.0,
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+    )
+
+    store.ingest([first, second], now_sim=10.0)
+
+    # The exclusion is keyed on (source, t_sim), not on the batch/poll alone
+    # -- two *different* sources reporting the same thing in one poll must
+    # still fuse into one contact, which is exactly what cross-channel
+    # fusion (`test_cross_channel_fusion.py`) depends on.
+    assert len(store.contacts) == 1
+    contact = store.contacts[0]
+    assert sorted(contact.contributing_observation_ids) == ["OBS_1", "OBS_2"]
+    assert sorted({span.source for span in contact.sighting_spans}) == [
+        SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+    ]

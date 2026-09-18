@@ -258,7 +258,21 @@ subproject-needed dev path.
   *production*): `percept.py` (`Percept`/`percept_of`, the structural no-omniscience boundary —
   belief code never sees `Observation.derived_world_position` or a DCS object id),
   `contacts.py` (`Contact`/`SightingSpan`/`ContactStore` — append-only observation log,
-  `ingest`/`tick`). `Contact.classification` (BL-2.6) is the folded, monotone-non-decreasing best
+  `ingest`/`tick`). `ingest` (`plans/group-contact-model/plan.md` Stage 3a) runs a read-only
+  pre-scan over each batch before its main loop — memoizing `_resolve_continuity` per observation
+  (so the main loop never calls it twice) and recording every continuity-resolved contact id under
+  `claimed[(source, t_sim)]` — then, in the gate branch only, excludes a candidate contact already
+  claimed under that same `(source, t_sim)` key before counting how many candidates pass. This
+  enforces the rule that **two `Observation`s sharing both `source` and `t_sim` may never resolve
+  to the same contact**: post-clustering naked-eye emits one `Observation` per resolution cluster
+  and the scope/hybrid channel emits one per DCS `object_id`, so neither source can ever emit two
+  reports of the same thing in one poll — a documented precondition a future source must satisfy to
+  use this rule, not a re-checked invariant. Keying on `(source, t_sim)` rather than the whole batch
+  is what keeps cross-channel fusion working (a naked-eye and a scope observation of the same thing
+  in one poll must still fold together). The gate's own radius formulas
+  (`association_over_time.spatial_gate_radius_m`/`passes_gate`) are untouched — this is association
+  bookkeeping, the same category as `_resolve_continuity`, not a change to the gate's geometry.
+  `Contact.classification` (BL-2.6) is the folded, monotone-non-decreasing best
   claim (`belief.classification.ClassificationBelief`, via `fold_classification`) and is what
   every user-facing surface reads. `Contact.last_class_raw` is kept **with its exact original
   meaning unchanged** — the most recent percept's raw classification string — because it, not

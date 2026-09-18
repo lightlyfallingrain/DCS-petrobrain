@@ -234,65 +234,90 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # unaffected -- Hybrid never clusters and has no elevation gate).
         # 22 + 20 = 42.
         #
-        # **The split at poll 14 does not produce a second contact.** The
-        # truck singleton is the majority-overlap continuation of the merged
-        # cluster (`_build_observations`' majority-owner check); the
-        # infantry singleton gets `continues_observation_id=None` and is
-        # offered to the ordinary spatial/class gate as a fresh report --
-        # which still folds it onto the same contact.
-        # `association_over_time.spatial_gate_radius_m` sums *both* sides'
-        # uncertainty plus a growth term (the BL-2.6 symmetric-budgeting
-        # fix), which is wider than clustering's own max-of-both-sides
-        # radius by construction -- a 400 m real separation that just
-        # barely split two clusters apart still comfortably passes the
-        # coarser belief gate. This is not a bug: the naked-eye channel
-        # genuinely cannot rule out "one object, not two" at this range even
-        # once its own cluster boundary has crossed, and `belief.
-        # cardinality`'s fold (hold, then contradict-and-hedge once the
-        # split report arrives) is exactly the mechanism built to carry that
-        # honest ambiguity forward rather than force a premature split.
-        # `plans/group-contact-model/plan.md`'s own Risks section names this
-        # exact tension (clustering's radius vs. the gate's radius
-        # disagreeing at a boundary) as Stage 3 calibration work, not
-        # something to force here.
+        # **`plans/group-contact-model/plan.md` Stage 3a changes the contact
+        # count here from Stage 2's ONE to TWO, with the observation count
+        # unchanged at 42** -- Stage 3a is a same-source/same-poll
+        # association rule, not a clustering or gate-radius change, so the
+        # poll-by-poll observation derivation above (unaffected by Stage 3a)
+        # still holds exactly. What changes is which contact poll 14's split
+        # infantry singleton resolves to:
+        #
+        # At poll 14, clustering emits two naked-eye observations in the
+        # same poll: the truck singleton (`continues_observation_id` set,
+        # the majority-overlap continuation of the merged cluster) and the
+        # infantry singleton (`continues_observation_id=None`, offered to
+        # the ordinary spatial/class gate). Before Stage 3a, the gate's
+        # wider, symmetric-budgeted radius (`association_over_time.
+        # spatial_gate_radius_m` sums *both* sides' uncertainty plus growth,
+        # wider than clustering's own max-of-both-sides split radius by
+        # construction) let the infantry singleton fold onto the very
+        # contact the truck singleton claimed by continuity in the same
+        # poll -- exactly the same-source, same-poll co-fold Stage 3a's
+        # design forbids. `ContactStore.ingest`'s pre-scan now records the
+        # truck singleton's continuity claim on `CONTACT_1` before the
+        # infantry singleton reaches the gate; the gate excludes `CONTACT_1`
+        # from its candidates, sees zero, and founds `CONTACT_2` instead.
+        # This is the same "two clusters, two contacts" outcome
+        # `test_calibration_cluster_merge_undercount.py`'s own close-range
+        # case already exercises for mutually-incompatible classes -- here
+        # it fires for the first time on a same-poll split of one *source's*
+        # own prior report.
         assert len(runner.store.observations) == 42
 
         contacts = get_contacts(runner.store, final_t_sim)
 
-        # ONE contact, not two -- see the derivation above. The two real
-        # objects never separate into distinct contacts across this fixture:
-        # they are within the naked-eye channel's own honest resolution
-        # ambiguity (cluster radius) for most of the flight, and even once
-        # clustering itself splits them, the belief-layer spatial gate's
-        # wider, symmetric-budgeted radius still cannot rule out "same
-        # object" at the range this fixture ends at (~690 m, 400 m real
-        # separation). This is the plan's own documented Stage 3 boundary
-        # case, not a regression of the false-merge defect the presence-tier
-        # veto used to guard against -- the difference is that the contact's
-        # `cardinality` (not asserted here -- `tools.py` does not surface it
-        # until Stage 4) now honestly hedges between one and two occupants
-        # instead of confidently asserting either.
-        assert len(contacts) == 1
+        # TWO contacts. `CONTACT_1` (Hybrid's founding percept, frame 0) is
+        # the truck: both sources, `type`-level `"Ural truck"`. `CONTACT_2`
+        # is the poll-14 infantry singleton, founded fresh by the same-poll
+        # exclusion above: naked-eye only, presence-level
+        # `OP_GROUPSOMETHING`.
+        assert len(contacts) == 2
 
-        # One founding CONTACT_DETECTED -- no spurious CONTACT_LOST/
-        # REACQUIRED (continuously visible once acquired) and no
-        # CONTACT_CLASSIFICATION_CHANGED (see the module docstring's "lower
-        # level holds" note -- unchanged by clustering, since Hybrid's
-        # frame-0 TYPE-level percept still establishes the contact first).
-        assert [event.kind for event in runner.store.events] == ["CONTACT_DETECTED"]
+        # Two founding CONTACT_DETECTED, one per contact -- no spurious
+        # CONTACT_LOST/REACQUIRED (both contacts continuously visible once
+        # acquired) and no CONTACT_CLASSIFICATION_CHANGED (see the module
+        # docstring's "lower level holds" note -- Hybrid's frame-0
+        # TYPE-level percept still establishes the truck contact first, and
+        # the infantry contact never gets a claim higher than presence).
+        assert [event.kind for event in runner.store.events] == [
+            "CONTACT_DETECTED",
+            "CONTACT_DETECTED",
+        ]
 
-        contact = contacts[0]
-        assert contact["facts"]["classification"]["value"] == "Ural truck"
-        assert contact["facts"]["classification"]["level"] == "type"
-        assert contact["facts"]["certainty"] == "observed"
-        assert sorted(contact["facts"]["sources"]) == [
+        truck = next(c for c in contacts if c["facts"]["id"] == "CONTACT_1")
+        assert truck["facts"]["classification"]["value"] == "Ural truck"
+        assert truck["facts"]["classification"]["level"] == "type"
+        assert truck["facts"]["certainty"] == "observed"
+        assert sorted(truck["facts"]["sources"]) == [
             "naked_eye_visual_filtered",
             "petrovich_detection_associated",
         ]
 
-        described = describe_contact(runner.store, contact["facts"]["id"], final_t_sim)
+        # `CONTACT_1`'s cardinality: it held `OP_2UNITS` (2, 2) through
+        # polls 0-13 (the merged cluster's own count), and poll 14's truck
+        # singleton report is `OP_1UNIT` (1, 1) -- disjoint from (2, 2), so
+        # `fold_cardinality` contradicts to the hull **(1, 2)** and arms
+        # `CARDINALITY_CONTRADICTION_LOCKOUT_S` (30s). The fixture's last
+        # poll-14-or-later report is at t_sim=95.0 (poll 19, 5s/poll), well
+        # inside the 30s lockout from poll 14's t_sim=70.0, so the hedge is
+        # still held at the fixture's end -- not a bug to "fix" by widening
+        # or narrowing it further; the contact honestly cannot tell whether
+        # it is looking at one occupant or two until the lockout clears and
+        # a fresh reading is allowed to re-narrow it.
+        truck_cardinality = truck["facts"]["cardinality"]
+        assert (truck_cardinality["lo"], truck_cardinality["hi"]) == (1, 2)
+
+        infantry = next(c for c in contacts if c["facts"]["id"] == "CONTACT_2")
+        assert infantry["facts"]["classification"]["value"] == "OP_GROUPSOMETHING"
+        assert infantry["facts"]["classification"]["level"] == "presence"
+        assert infantry["facts"]["certainty"] == "observed"
+        assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
+        infantry_cardinality = infantry["facts"]["cardinality"]
+        assert (infantry_cardinality["lo"], infantry_cardinality["hi"]) == (1, 1)
+
+        described = describe_contact(runner.store, truck["facts"]["id"], final_t_sim)
         assert described is not None
-        assert described["facts"]["id"] == contact["facts"]["id"]
+        assert described["facts"]["id"] == truck["facts"]["id"]
     finally:
         server.stop()
         world_model_conn.close()
