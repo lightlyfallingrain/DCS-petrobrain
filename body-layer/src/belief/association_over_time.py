@@ -7,13 +7,43 @@ ground truth). This module resolves a `belief.percept.Percept` against
 truth field. Do not import between the two modules; they answer different
 questions and neither should stand in for the other.
 
-Gate = spatial (hard) **and** class-not-incompatible (hard). Both must pass
-for a percept to be a *candidate* merge target; the caller (`belief.contacts.
-ContactStore.ingest`) then applies the plan's Stage 1 decision rule: exactly
-one candidate passing both gates -> merge; zero -> new contact; **two or
-more -> new contact** (ambiguity must produce a visible duplicate, never a
-guessed merge -- no best-match/highest-score tiebreak exists in this module,
-by design).
+Gate = spatial (hard) **and** class-not-incompatible (hard) **and**
+not-presence-tier (hard, see "Presence-tier veto" below). All three must
+pass for a percept to be a *candidate* merge target; the caller
+(`belief.contacts.ContactStore.ingest`) then applies the plan's Stage 1
+decision rule: exactly one candidate passing every gate -> merge; zero ->
+new contact; **two or more -> new contact** (ambiguity must produce a
+visible duplicate, never a guessed merge -- no best-match/highest-score
+tiebreak exists in this module, by design).
+
+**Presence-tier veto** (fix for the 2026-09-17/18 false-merge defect,
+`plans/contact-merge-undercount/debug.md`): a percept at `belief.
+classification.SpecificityLevel.PRESENCE` (naked-eye's `lowres` tier,
+`classification_level == 1`) never passes this gate -- it always founds a
+new contact (subject to the usual object-permanence shortcut in `belief.
+contacts.ContactStore._resolve_continuity`, which is unconditional on tier
+and still applies once a contact exists to correlate back onto). This is
+not a spatial-radius change and does not touch `uncertainty_radius_m`'s
+formulas or BL-2.6's symmetric-budgeting fix -- both stay exactly as
+tuned. The reason is the class-compatibility gate's own documented
+"`unknown` means neutral, never blocks a merge" posture: that posture is
+safe for the scope channel's rare unresolvable free text (`"Slava
+cruiser"`), but naked-eye's `lowres` tier is *systematically* class-blind
+by construction (`classification_raw` is always `PRESENCE_CLASS`
+/`object_model.DEFAULT_OP_CLASS`, which `_op_class_of` always resolves to
+`None` -- see `belief.classification`'s module docstring on
+`PRESENCE_CLASS`). Letting a percept that structurally carries zero class
+evidence merge into an existing contact purely on the strength of an
+honestly-coarse spatial gate is what let two genuinely different real
+objects (a truck and, 400 m away, an infantryman) collapse into one
+contact at first sighting -- confirmed live with a twelve-object
+calibration cluster collapsing into roughly five contacts the same way.
+Declining to merge a presence-tier percept costs only the rare case where
+the *same* real object is reacquired via the gate (not continuity) while
+still at `lowres` tier after `belief.decay.OBJECT_ID_MEMORY_S` has
+expired -- an accepted, documented degradation (an extra duplicate
+contact, never a bad merge), the same trade the class-compatibility gate's
+own `unknown` posture already accepts elsewhere in this module.
 
 **This gate is now the exception path, not the common case**
 (`plans/contact-duplication-ambiguity-runaway/plan.md`): `ContactStore.
@@ -114,7 +144,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Final
 
-from belief.classification import class_compatibility
+from belief.classification import SpecificityLevel, class_compatibility
 from belief.percept import Percept
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.naked_eye_source import _CLOCK_BUCKET_DEG, _RANGE_BUCKETS_M
@@ -212,8 +242,12 @@ def spatial_gate_radius_m(percept: Percept, contact: Contact, now_sim: float) ->
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
-    """Whether `percept` may be merged into `contact` -- both the spatial and
-    class-compatibility gates must pass. See module docstring."""
+    """Whether `percept` may be merged into `contact` -- the spatial gate,
+    the class-compatibility gate, and the presence-tier veto must all pass.
+    See module docstring."""
+    if percept.classification_level <= SpecificityLevel.PRESENCE:
+        return False
+
     if class_compatibility(percept.classification_raw, contact.last_class_raw) == (
         "incompatible"
     ):
