@@ -7,9 +7,13 @@ from __future__ import annotations
 import os
 import threading
 import time
+import wave
 from collections.abc import Callable
+from pathlib import Path
 
-from collector.audio_sender import AudioPlaybackSender, WavPlayer
+import pytest
+
+from collector.audio_sender import AudioPlaybackSender, WavPlayer, wav_duration_s
 
 
 class _FakePlayer:
@@ -173,3 +177,55 @@ def test_wav_player_protocol_is_satisfied_by_fake() -> None:
     player: WavPlayer = _FakePlayer()
     assert hasattr(player, "play")
     assert hasattr(player, "stop")
+
+
+# --- wav_duration_s (stage 5 fix, 2026-09-18) -------------------------------
+#
+# `_WinsoundPlayer` now plays asynchronously and waits out the file's own
+# duration in an interruptible sleep, because synchronous `PlaySound` cannot
+# be purged from another thread (observed live on Windows: the routine line
+# played to its end before the urgent one was heard). That makes this duration
+# calculation load-bearing -- if it reads short, a line is cut off; if it reads
+# long, a silent gap opens between queued lines. The real `winsound` call still
+# cannot be tested off-Windows, but this can.
+
+
+def _write_wav(path: Path, *, seconds: float, rate: int = 22050) -> None:
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+
+
+def test_wav_duration_matches_the_written_length(tmp_path: Path) -> None:
+    path = tmp_path / "tone.wav"
+    _write_wav(path, seconds=1.5)
+
+    duration = wav_duration_s(str(path))
+
+    assert duration is not None
+    assert duration == pytest.approx(1.5, abs=0.01)
+
+
+def test_wav_duration_handles_a_non_default_sample_rate(tmp_path: Path) -> None:
+    path = tmp_path / "tone48.wav"
+    _write_wav(path, seconds=0.75, rate=48000)
+
+    duration = wav_duration_s(str(path))
+
+    assert duration is not None
+    assert duration == pytest.approx(0.75, abs=0.01)
+
+
+def test_wav_duration_returns_none_for_a_malformed_file(tmp_path: Path) -> None:
+    """The worker falls back to a fixed wait rather than either returning
+    immediately (which would overlap the next line) or blocking forever."""
+    path = tmp_path / "not-audio.wav"
+    path.write_bytes(b"this is not a RIFF header at all")
+
+    assert wav_duration_s(str(path)) is None
+
+
+def test_wav_duration_returns_none_for_a_missing_file(tmp_path: Path) -> None:
+    assert wav_duration_s(str(tmp_path / "absent.wav")) is None
