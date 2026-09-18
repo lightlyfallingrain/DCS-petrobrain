@@ -22,38 +22,46 @@ Each `poll()`:
    earlier proximity heuristic found necessary via a live sortie,
    `plans/pb1.5-naked-eye-detection/debug.md`).
 2. Runs every candidate through `visibility.check_visibility()`.
-3. **Quantises the surviving geometry to ED's ambient-callout vocabulary**
-   (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
-   ambient-detection.md`, Session 5 Finding 2) before building an
-   `Observation`: bearing snapped to the nearest of the 12 `OP_A1H`...
-   `OP_A12H` clock positions (relative to ownship heading, then expressed
-   back as a true bearing so `Observation.bearing_deg`'s existing
-   true-bearing convention, per `geometry.py`'s module docstring, is
-   preserved), range snapped to the nearest of the 24 `OP_D...` buckets, and
-   `classification_raw` set from `_classification_for_tier` against the
-   achieved `VisibilityResult.tier`
-   (`plans/classification-refinement/plan.md` Stage 6) -- `object_model.py`'s
-   class bucket at `medres`, a specific reporting name (falling back to
-   class) at `hires`. This is the plan's anti-omniscience mechanism at the
-   *output* layer, distinct from and additional to `visibility.py`'s gate at
-   the *input* layer.
-
-   **Scope limit** (plan Decision #5, proceeding on the stated
-   recommendation): only bearing/range/class are quantised per object here.
-   Finding 2's count/formation buckets (`OP_1UNIT`...`OP_MORETHAN15UNITS`,
-   `OP_SINGLE`/`OP_GROUP`) describe an *aggregate* callout across a cluster
-   of objects, which this channel's per-object-id emission model doesn't
-   produce without first building object clustering -- out of scope for v1.
+3. **Clusters the admitted candidates at the channel's own honest
+   resolution limit, then quantises per cluster** (`plans/
+   group-contact-model/plan.md` Stage 2 -- supersedes the per-object
+   quantisation this module originally did; see that plan for why per-object
+   emission was itself the defect). `_cluster_candidate` projects each
+   admitted `(candidate, result)` pair into `perception.clustering.
+   ClusterCandidate` (ground-truth x/z/alt, slant range, characteristic
+   size, and this candidate's own individually-resolved classification
+   claim); `perception.clustering.cluster_candidates` groups them by true
+   3D angular separability at ownship's own position (Stage 3b-i rev.2 --
+   the merge test is the angle subtended at the observer against each
+   candidate's own apparent angular size, not a world-space ellipse; see
+   `clustering.py`'s docstring); single-link, no chaining cap yet --
+   Stage 3b-ii's job. `_build_observation` emits exactly one `Observation`
+   per resulting
+   cluster: bearing/range quantised from the cluster's *centroid*, not any
+   one member's own geometry (bearing snapped to the nearest of the 12
+   `OP_A1H`...`OP_A12H` clock positions, relative to ownship heading then
+   expressed back as a true bearing per `geometry.py`'s convention; range
+   snapped to the nearest of the 24 `OP_D...` buckets); `classification_raw`/
+   `classification_level` and `count_bucket` come straight from the
+   `Cluster` (identical class across every member keeps that class,
+   otherwise degrades to the presence root -- see `clustering.py`'s
+   docstring). ED's `OP_1UNIT`...`OP_MORETHAN15UNITS` count vocabulary
+   (Session 5 Finding 2, `aircraft-layer/research/2026-09-08-pb1-5-
+   worldobjects-filter-and-ambient-detection.md`), previously out of scope
+   (plan Decision #5) for lack of a clustering mechanism, is exactly what
+   `Cluster.count_bucket` now supplies.
 
    **`derived_world_position` is deliberately NOT quantised** -- it carries
-   `candidate`'s exact ground-truth x/z, the same way `HybridPerceptionSource`
-   populates it, because that field is DCS ground truth (`code owns facts`,
-   never fabricated or fuzzed) reserved for future geometry/fusion work
-   (e.g. BL-2's contact memory), not the crew-facing report. The
-   anti-omniscience quantisation applies to the fields that represent what
-   a crew member could actually have perceived and said out loud
-   (`bearing_deg`, `range_m`, `classification_raw`), not to this channel's
-   internal bookkeeping of where the real object actually is.
+   the cluster's centroid, the mean of its members' exact ground-truth x/z
+   (a documented meaning change from "one candidate's own position" to "a
+   cluster's centroid," per the plan's Risks section), because that field is
+   DCS ground truth (`code owns facts`, never fabricated or fuzzed) reserved
+   for future geometry/fusion work, not the crew-facing report. The
+   anti-omniscience quantisation applies to the fields that represent what a
+   crew member could actually have perceived and said out loud
+   (`bearing_deg`, `range_m`, `classification_raw`, `count_bucket`), not to
+   this channel's internal bookkeeping of where the real objects actually
+   are.
 4. **Per-object debounce** (`emit_mode="on_change"`, the default): tracks the
    set of `object_id`s that passed the filter on the *previous* poll. Emits
    one `Observation` only for an `object_id` newly entering the
@@ -93,22 +101,36 @@ Each `poll()`:
    retrying a not-yet-acquired object every poll until the throttle admits
    it. The two sets happen to evolve identically except in that overflow
    case.
-6. **Object-permanence correlation** (`plans/contact-duplication-
-   ambiguity-runaway/plan.md`): a third, independent, **persistent**
-   `_object_id_to_last_observation_id: dict[int, str]` map, keyed by DCS
-   `object_id`, holding the most recently emitted `Observation.id` for that
-   object -- never cleared, including across a `world_objects is None` gap
-   (a collector hiccup is not evidence the real object stopped existing;
-   only the `on_change`/`every_poll` debounce state above resets on that
-   gap). Consulted and updated in `_build_observation` for every object
-   actually emitted this poll: if the object's `object_id` has a prior
-   entry, the new `Observation.continues_observation_id` is set to it,
-   however many polls old that entry is; the entry is then overwritten with
-   this poll's new `Observation.id` either way. `belief.contacts.
-   ContactStore` is the consumer that decides whether to trust this
-   reference (subject to its own expiry check, `belief.decay.
-   object_id_continuity_valid`) -- this module only ever reports "I have
-   seen this object_id emit before, here is that report's id."
+
+   **Stage 2 scoping decision**: this cap still throttles admission of
+   individual *objects* into `to_emit`, exactly as before -- clustering
+   happens strictly after, over whatever `to_emit` this poll's cap allowed
+   through. `NAKED_EYE_MAX_NEW_PER_POLL` therefore does not yet cap
+   *clusters* directly (a real cluster larger than the cap can still only
+   have `NAKED_EYE_MAX_NEW_PER_POLL` of its members admitted in one poll,
+   under-reporting that cluster's true size until acquisition catches up
+   over several polls). Re-reading the cap as a true per-cluster limit is
+   Stage 3's explicit job (`plans/group-contact-model/plan.md`'s
+   Implementation Plan lists it under that stage's calibration work), not
+   pre-tuned here.
+6. **Object-permanence correlation, generalised to clusters** (`plans/
+   contact-duplication-ambiguity-runaway/plan.md`, extended by `plans/
+   group-contact-model/plan.md` Stage 2): a third, independent,
+   **persistent** `_object_id_to_last_observation_id: dict[int, str]` map,
+   keyed by DCS `object_id`, holding the most recently emitted
+   `Observation.id` that object contributed to -- never cleared, including
+   across a `world_objects is None` gap. `_build_observation` resolves each
+   cluster's `continues_observation_id` by **majority object overlap**: every
+   member with a prior map entry casts that entry as a vote, the most common
+   vote wins (ties broken deterministically, lowest observation id string),
+   and every member's entry is then overwritten with this poll's new cluster
+   `Observation.id` regardless of whether it was the winning vote -- a
+   cluster that just absorbed a neighbour, or just split off from one, still
+   correlates its majority onto the contact that cluster's history actually
+   belongs to. `belief.contacts.ContactStore` is the consumer that decides
+   whether to trust this reference (subject to its own expiry check, `belief.
+   decay.object_id_continuity_valid`) -- this module only ever reports "most
+   of this report's members were previously part of this other report."
 """
 
 from __future__ import annotations
@@ -116,12 +138,15 @@ from __future__ import annotations
 import math
 import sqlite3
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
 from aircraft_client import AircraftLayerClient
 from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
+from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
+from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.reporting_names import reporting_name_for
 from perception.source import (
     OBSERVATION_ID_PREFIX_NAKED_EYE,
@@ -277,10 +302,110 @@ class NakedEyePerceptionSource:
         else:
             to_emit = self._acquire_on_change(visible, currently_visible_ids)
 
-        return [
-            self._build_observation(now_sim, ownship_state, candidate, result)
-            for candidate, result in to_emit
+        confidence_by_object_id = {
+            candidate.object_id: result.confidence for candidate, result in to_emit
+        }
+        observer = GeoPosition(
+            x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
+        )
+        clusters = cluster_candidates(
+            [
+                self._cluster_candidate(candidate, result)
+                for candidate, result in to_emit
+            ],
+            observer,
+        )
+        return self._build_observations(
+            now_sim, ownship_state, clusters, confidence_by_object_id
+        )
+
+    def _build_observations(
+        self,
+        now_sim: float,
+        ownship_state: OwnshipState,
+        clusters: list[Cluster],
+        confidence_by_object_id: dict[int, float],
+    ) -> list[Observation]:
+        """One `Observation` per `clusters` entry, resolving majority-overlap
+        continuity (module docstring point 6) across the *whole* batch before
+        minting any of them -- a two-pass split, not per-cluster, so a
+        cluster that splits into several children never lets more than one
+        of them claim the parent's continuity (the plan's "the id follows
+        the majority" rule, `plans/group-contact-model/plan.md`'s Splitting
+        section)."""
+        cluster_votes = [
+            Counter(
+                self._object_id_to_last_observation_id[member.object_id]
+                for member in cluster.members
+                if member.object_id in self._object_id_to_last_observation_id
+            )
+            for cluster in clusters
         ]
+
+        # For every historical observation id any cluster's members trace
+        # back to, find the single cluster index holding the most votes for
+        # it -- ties broken by lowest cluster index, deterministic and
+        # arbitrary (the plan's own documented caveat: the surviving
+        # identity among equally-sized children is physically meaningless,
+        # only deterministic).
+        best_count_for_id: dict[str, int] = {}
+        winner_index_for_id: dict[str, int] = {}
+        for index, votes in enumerate(cluster_votes):
+            for historical_id, count in votes.items():
+                if (
+                    historical_id not in best_count_for_id
+                    or count > best_count_for_id[historical_id]
+                ):
+                    best_count_for_id[historical_id] = count
+                    winner_index_for_id[historical_id] = index
+
+        observations: list[Observation] = []
+        for index, cluster in enumerate(clusters):
+            votes = cluster_votes[index]
+            continues_observation_id: str | None = None
+            if votes:
+                top_id = max(
+                    sorted(votes), key=lambda historical_id: votes[historical_id]
+                )
+                # Only the majority owner of its own top vote inherits it --
+                # a minority split (this cluster's top vote is someone
+                # else's majority) founds fresh instead.
+                if winner_index_for_id[top_id] == index:
+                    continues_observation_id = top_id
+            observations.append(
+                self._build_observation(
+                    now_sim,
+                    ownship_state,
+                    cluster,
+                    confidence_by_object_id,
+                    continues_observation_id,
+                )
+            )
+        return observations
+
+    @staticmethod
+    def _cluster_candidate(
+        candidate: WorldObjectCandidate, result: VisibilityResult
+    ) -> ClusterCandidate:
+        """Project one admitted `(candidate, result)` pair into `perception.
+        clustering`'s own lightweight shape -- ground-truth x/z for the
+        position-only clustering decision, plus this candidate's own
+        individually-derived classification claim (module docstring point 3)
+        for `Cluster`'s aggregate-label logic to consume."""
+        profile = object_model.profile_for(candidate.object_type)
+        classification_raw, classification_level = _classification_for_tier(
+            result.tier, candidate.object_type, profile.op_class
+        )
+        return ClusterCandidate(
+            object_id=candidate.object_id,
+            x=candidate.x,
+            z=candidate.z,
+            alt_m=candidate.alt_m,
+            range_m=result.range_m,
+            size_m=profile.size_m,
+            classification_raw=classification_raw,
+            classification_level=classification_level,
+        )
 
     def _acquire_on_change(
         self,
@@ -339,43 +464,60 @@ class NakedEyePerceptionSource:
         self,
         now_sim: float,
         ownship_state: OwnshipState,
-        candidate: WorldObjectCandidate,
-        result: VisibilityResult,
+        cluster: Cluster,
+        confidence_by_object_id: dict[int, float],
+        continues_observation_id: str | None,
     ) -> Observation:
-        quantised_bearing_deg = _quantise_bearing(
-            ownship_state.heading_true_deg, result.bearing_deg
-        )[0]
-        quantised_range_m = _quantise_range_m(result.range_m)[0]
-        profile = object_model.profile_for(candidate.object_type)
-        classification_raw, classification_level = _classification_for_tier(
-            result.tier, candidate.object_type, profile.op_class
+        """One `Observation` for `cluster` -- `plans/group-contact-model/
+        plan.md` Stage 2: this is the emission unit now, not one per
+        candidate. Bearing/range are quantised from the cluster's centroid
+        (ground-truth mean position of its members), not from any one
+        member's own geometry -- the honest report a crew member could give
+        for a cluster is "that group, over there," not any individual
+        member's exact bearing. `continues_observation_id` is resolved by
+        `_build_observations` across the whole batch, not here -- see that
+        method's docstring."""
+        observer = GeoPosition(
+            x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
+        centroid = GeoPosition(
+            x=cluster.centroid_x, z=cluster.centroid_z, alt_m=ownship_state.alt_m
+        )
+        true_bearing_deg = bearing_deg(observer, centroid)
+        true_range_m = range_m(observer, centroid)
+        quantised_bearing_deg = _quantise_bearing(
+            ownship_state.heading_true_deg, true_bearing_deg
+        )[0]
+        quantised_range_m = _quantise_range_m(true_range_m)[0]
 
         self._observation_count += 1
         observation_id = f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}"
-        continues_observation_id = self._object_id_to_last_observation_id.get(
-            candidate.object_id
+        for member in cluster.members:
+            self._object_id_to_last_observation_id[member.object_id] = observation_id
+
+        confidence = min(
+            confidence_by_object_id[member.object_id] for member in cluster.members
         )
-        self._object_id_to_last_observation_id[candidate.object_id] = observation_id
         return Observation(
             id=observation_id,
             contact_id=None,
             t_sim=now_sim,
             t_wall=time.time(),
             source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
-            classification_raw=classification_raw,
+            classification_raw=cluster.classification_raw,
             bearing_deg=quantised_bearing_deg,
             range_m=quantised_range_m,
             ownship_at_observation=ownship_state,
             derived_world_position=DerivedWorldPosition(
-                x=candidate.x,
-                z=candidate.z,
-                confidence=result.confidence,
+                x=cluster.centroid_x,
+                z=cluster.centroid_z,
+                confidence=confidence,
                 method=_DERIVED_POSITION_METHOD,
             ),
             provenance=PROVENANCE_VISIBILITY_FILTER_ONLY,
-            classification_level=classification_level,
+            classification_level=cluster.classification_level,
             continues_observation_id=continues_observation_id,
+            count_bucket=cluster.count_bucket,
         )
 
 
