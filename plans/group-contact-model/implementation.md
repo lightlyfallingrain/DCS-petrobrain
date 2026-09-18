@@ -239,3 +239,151 @@ clustering or observation counts).
   matched against that exact interval rather than e.g. a low-confidence heuristic, since every
   contact is seeded with a real claim at founding and `UNKNOWN` is reachable only via a
   contradiction hull spanning everything.
+
+---
+
+### Stage 3b-i — the resolution rework (ellipse, not circle)
+
+#### Files Changed
+
+- `body-layer/src/perception/clustering.py` — `naked_eye_cluster_radius_m` (scalar, `math.hypot`)
+  removed; replaced with `EllipseRadii`, `naked_eye_cross_range_radius_m` (acuity-derived, divides
+  by `BINOCULAR_RANGE_MULTIPLIER` where `visibility.py` multiplies), `naked_eye_down_range_radius_m`
+  (unchanged formula, re-justified as a depth-discrimination stand-in, not a reporting artefact),
+  `naked_eye_ellipse_radii_m`. New shared geometry helpers `los_components_m` (decompose a
+  separation vector into cross/down-range against an observer's line of sight to a pair's midpoint)
+  and `within_ellipse` (the quadratic containment test), reused by both this module and the belief
+  gate. `cluster_candidates` gained `observer_x`/`observer_z` parameters and now runs a true
+  elliptical membership test instead of a scalar-radius one. `count_bucket_for`'s caller changed:
+  `_build_cluster` now derives the count from `_count_cross_range_subclusters` (grid-binning a
+  cluster's members' cross-range offsets from its own centroid), not `len(members)` — see "What did
+  not survive contact with the code" below for why a naive single-link version of this function was
+  rejected after being built and proven dead.
+- `body-layer/src/perception/naked_eye_source.py` — `cluster_candidates` call site passes
+  `ownship_state.x, ownship_state.z`; module docstring updated.
+- `body-layer/src/belief/association_over_time.py` — `uncertainty_radius_m` (scalar) kept as a
+  conservative legacy reduction (`max` of the two ellipse axes) for `Contact.last_position_
+  uncertainty_m`'s own storage; new `uncertainty_radii_m` returns the full `EllipseRadii`.
+  `spatial_gate_radius_m` removed (no longer a well-defined single number); `passes_gate` now
+  decomposes the percept-vs-contact separation via `clustering.los_components_m` (LOS frame from
+  `percept.ownship_at_observation`) and tests it via `clustering.within_ellipse` against both
+  sides' per-axis budgets plus isotropic elapsed-time growth. For the scope channel (an isotropic
+  circle, `SCOPE_UNCERTAINTY_M` on both axes) this reduces algebraically to the old scalar
+  `distance <= radius` test exactly — confirmed by inspection, not just by the existing scope-only
+  gate tests staying green untouched.
+- `body-layer/src/belief/contacts.py` — two docstring updates only (both cited
+  `spatial_gate_radius_m`, now `passes_gate`; one paragraph rewritten to describe the anisotropic
+  gate rather than a single scalar).
+- `body-layer/CLAUDE.md` — Structure entries for `clustering.py` and `association_over_time.py`
+  rewritten for the ellipse/anisotropy, including the open gate regression (see below).
+
+#### Tests Added / Changed
+
+- `test_clustering.py` — every geometry re-derived for the down-range-only axis (all candidates on
+  the observer's own bearing, `z=0`), since the module's own low-level merge/split/label mechanics
+  don't need the anisotropy itself to be under test. New
+  `test_chained_cluster_with_real_cross_range_extent_reports_a_plural_count` — the one test in the
+  whole suite that demonstrates the grid-binning count mechanism actually reporting a plural count
+  (3-member single-link chain, cross-range only, bin count 2 not 1) — added specifically because
+  the calibration/naked-eye-source tests below turned out unable to demonstrate it cleanly
+  themselves (see next point).
+- `test_calibration_cluster_merge_undercount.py` — **inverted per the plan's own instruction, but
+  the specific along-LOS prediction did not survive contact with the code** (see below).
+  `test_twelve_unit_cluster_at_9km_becomes_one_contact_with_a_plural_count` split into two: a 206 m
+  row **perpendicular** to LOS at 9 km → **twelve** singleton contacts (cross-range radius ~6.75 m
+  there, 18.7 m spacing resolves every pair); the same row **along** LOS at 9 km → **one** contact,
+  but its count is genuinely `OP_1UNIT`, not plural (see finding below). The close-range six-group
+  test's fixture was rebuilt with real cross-range spread within each group (chained via
+  `_GROUP_CROSS_STEP_M = 0.3 m`, under the ~0.375 m cross radius at 500 m) instead of the original
+  down-range-only layout, which is now geometrically degenerate for counting; the two 3-member
+  groups land on `OP_2UNITS` not `OP_3UNITS` (a real grid-binning boundary effect, documented in
+  the test itself, not a bug).
+- `test_naked_eye_source.py` — `test_two_close_candidates_emit_one_clustered_observation`'s
+  expected count corrected to `OP_1UNIT` (a direct 2-candidate merge can never report more than 1,
+  see below). `test_a_cluster_splitting_gives_the_majority_child_continuity`'s majority-group
+  geometry changed from down-range-only to a cross-range chain (mirroring the new
+  `test_clustering.py` demonstration test) so it exercises a real plural count (`OP_2UNITS`) rather
+  than a degenerate one; both poll assertions re-derived by running the test, not assumed.
+- `test_association_over_time.py` — `test_naked_eye_uncertainty_derived_from_quantisation_buckets`
+  replaced with `test_naked_eye_ellipse_derived_from_acuity_and_quantisation_bucket`, asserting the
+  ellipse's two axes directly (no more `math.hypot`) plus the legacy scalar's `max` reduction.
+- `test_mock_flight_chain.py` — **not predicted, worked out from the fixture's real geometry as
+  instructed.** Objects 101/102 sit at `z=0`, and ownship's own track is `z=0` throughout, so their
+  400 m separation is *exactly* the degenerate along-LOS case, not the perpendicular one — this
+  needed stating explicitly since a careless reading of "don't predict it" could have assumed the
+  opposite. Re-derived poll-by-poll against real frame ranges: the down-range-bucket-width step
+  (500 m → 100 m, crossed at poll 14) splits the pair at the *same* poll boundary the old isotropic
+  formula did, by coincidence of this fixture's specific ranges — total observation/contact counts
+  (42 observations, 2 contacts) are **unchanged**, only the derivation comment's reasoning was
+  rewritten (down-range-bucket-step, not cross-range shrinkage).
+- `test_contacts.py::test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` —
+  marked `xfail(strict=True)`, not deleted or silently weakened. See the load-bearing finding below.
+
+#### What did not survive contact with the code
+
+Three real findings, in ascending order of consequence:
+
+1. **The plan's own along-LOS worked example ("one contact with a plural count bucket") is not
+   achievable for a literally collinear column.** Proven, not just observed for one geometry: any
+   two candidates *directly* connected by the full-ellipse merge test necessarily satisfy
+   `cross_range_m <= cross_radius_m` for that pair (an algebraic consequence of the ellipse
+   equation — the cross term alone can never exceed 1 for a passing pair, regardless of the down
+   term). A cluster is a connected graph of exactly such edges, so a second single-link pass over
+   the same members using the same cross-range test — the mechanism as first described in the plan
+   ("sub-clustering a cluster's members on the cross-range axis alone") — always reconnects the
+   whole cluster and always finds exactly one sub-group, for *any* cluster, *any* geometry. This
+   was discovered by building the single-link version literally as described, then hand-verifying
+   it against the plan's own 9 km along-LOS example and finding count=1, not plural, every time.
+   The mechanism actually implemented (grid-binning a cluster's members' cross-range offsets from
+   its own centroid into fixed-width bins, non-transitive) escapes this trap and can report a real
+   plural count when a cluster has genuine cross-range extent gathered through chaining — but a
+   literally collinear column (zero cross-range separation for every member, e.g. objects strung
+   out exactly along the observer's own bearing) still and correctly reports 1, since there is no
+   cross-range information at all in that geometry to count by. This is arguably the *right* answer
+   physically (a column seen nose-to-tail directly along the line of sight visually overlaps into
+   one blob), but it does mean the plan's own headline "along LOS → plural" phrasing needs revising
+   before Stage 3b-ii treats it as a target to calibrate toward.
+2. **A cluster formed from exactly 2 members can never report a plural count.** A direct
+   consequence of finding 1 above, restricted to the smallest case: two candidates merge only if
+   their cross-range separation is within one cross-range radius of each other, so their offsets
+   from the shared centroid are each at most half that radius — always the same grid bin. Any test
+   wanting to demonstrate a real plural count needs 3+ members and single-link chaining (see
+   `test_clustering.test_chained_cluster_with_real_cross_range_extent_reports_a_plural_count`).
+3. **A load-bearing gate regression, left open, not papered over.** `passes_gate`'s naked-eye
+   cross-range budget shrank from a clock-bucket-derived figure (~300–650 m at the ranges the
+   `test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` regression test
+   exercises) to an acuity-derived one (~1–7 m) — correct for *clustering* (true resolving power),
+   but that same figure also now backs the *gate*'s tolerance for a re-observed object's own
+   bearing-bucket requantisation drifting between polls while ownship manoeuvres, which is a
+   reporting-jitter question, not a resolving-power one. Measured directly (a small script replaying
+   the test's exact geometry): real bucket-driven cross-range jumps up to ~700 m occur at this
+   scenario's ranges, comfortably exceeding even the generous conservative pad `Contact.last_
+   position_uncertainty_m` supplies (~300–500 m, the down-range-dominated `max` reduction). One
+   missed match cascades through the existing two-or-more-candidates ambiguity rule into 38
+   contacts for one real object. **This is not a one-line magnitude fix**: widening the naked-eye
+   ellipse's cross-range radius enough to absorb ~700 m of jitter would need roughly two orders of
+   magnitude more than the current acuity-derived value, which would in turn make clustering unable
+   to resolve the plan's own 9 km headline scenario (12 objects 18.7 m apart) at all — the two
+   uses (true optical resolving power vs. reporting-vocabulary jitter tolerance) are genuinely
+   different physical quantities that happened to share one formula before this stage, and Decision
+   7 explicitly requires the gate and the cluster ellipse to share the same numbers to avoid
+   reopening the Stage 3a dead zone (a gate wider than the cluster's own split boundary re-merges
+   legitimately-resolved objects) — confirmed by working through the counterfactual: restoring a
+   wide clock-bucket-based pad on the *contact's stored side only* would make any nearby
+   split-off object's percept pass that contact's gate too, reopening exactly the ambiguity-cascade
+   this stage's own headline scenario depends on not happening. Resolving this properly needs either
+   a genuinely separate, non-acuity reporting-jitter budget for the gate specifically, or per-axis
+   `Contact` storage (new plumbing, explicitly out of this stage's "no new plumbing" scope) — a
+   design decision for Stage 3b-ii or a fresh escalation, not something to paper over with an
+   untuned constant. Left as a `strict=True` `xfail` with the full reasoning in its marker, per this
+   task's explicit "do not tune the acuity constant's magnitude" instruction — this is not a
+   magnitude problem, and treating it as one would hide the real question.
+
+#### Checks
+
+(body-layer/ only touched)
+- ruff format --check: pass
+- ruff check: pass
+- mypy src: pass (no issues, 34 source files)
+- pytest -q: 635 passed, 1 xfailed (634 baseline + 3 new tests − 2 tests folded into the split
+  calibration test's replacement... net: +1 passing test, +1 newly-xfailed pre-existing test)

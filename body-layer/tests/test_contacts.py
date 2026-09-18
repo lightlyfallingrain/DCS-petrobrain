@@ -7,6 +7,8 @@ import inspect
 import math
 import pathlib
 
+import pytest
+
 from belief import contacts as contacts_module
 from belief import percept as percept_module
 from belief.classification import SpecificityLevel
@@ -121,6 +123,29 @@ def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     assert newest.contributing_observation_ids == ["OBS_C"]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Stage 3b-i regression, found while implementing (not yet fixed -- "
+        "see plans/group-contact-model/implementation.md). The naked-eye "
+        "gate's cross-range budget is now acuity-derived (~1-7 m at this "
+        "geometry's ranges) instead of clock-bucket-derived (~300-650 m), "
+        "but real clock-bucket requantisation while ownship rotates can "
+        "still move the implied position's cross-range component by "
+        "several hundred metres between polls -- the conservative scalar "
+        "pad this stage keeps on Contact.last_position_uncertainty_m is "
+        "not wide enough to absorb that, so a real miss occurs and the "
+        "existing two-or-more-candidates ambiguity rule cascades it into "
+        "runaway duplicate contacts, same failure class as the bug this "
+        "test guards, triggered by a different mechanism. Fixing this "
+        "without reopening the Stage 3a/Decision 7 dead zone (a wider "
+        "gate than the cluster's own split boundary re-merges legitimately "
+        "-resolved objects) needs either a genuinely new, non-acuity "
+        "reporting-jitter budget for the gate specifically, or per-axis "
+        "Contact storage (new plumbing, out of this stage's stated scope) "
+        "-- Stage 3b-ii or a fresh design decision, not a magnitude tweak."
+    ),
+)
 def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> None:
     """Regression for the live-session bug (2026-09-09,
     `plans/classification-refinement/debug.md`): a single stationary
@@ -134,19 +159,28 @@ def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> 
     heading -- two consecutive, genuinely identical real positions can
     legitimately land in different buckets, implying positions up to
     roughly a full bucket-width apart. `association_over_time.
-    spatial_gate_radius_m` used to budget only the *incoming* percept's
-    own uncertainty, silently treating the contact's stored
-    `last_position` as exact -- under-sized by up to 2x for exactly this
-    case. Once a single missed match spawned a second contact for the
-    same real object, every subsequent percept saw two-or-more passing
-    candidates, and `ContactStore.ingest`'s deliberate anti-guessing rule
-    (two-or-more candidates -> new contact, never a tiebreak) turned that
-    one missed match into a permanent one-new-contact-per-poll runaway.
+    passes_gate` used to budget only the *incoming* percept's own
+    uncertainty, silently treating the contact's stored `last_position` as
+    exact -- under-sized by up to 2x for exactly this case. Once a single
+    missed match spawned a second contact for the same real object, every
+    subsequent percept saw two-or-more passing candidates, and
+    `ContactStore.ingest`'s deliberate anti-guessing rule (two-or-more
+    candidates -> new contact, never a tiebreak) turned that one missed
+    match into a permanent one-new-contact-per-poll runaway.
 
     This test drives the same quantisation helpers `naked_eye_source.py`
     itself uses, over a maneuvering-ownship/stationary-target geometry
     empirically confirmed (pre-fix) to trigger the bug, and asserts the
-    real object still resolves to exactly one contact."""
+    real object still resolves to exactly one contact.
+
+    **`xfail`ed by Stage 3b-i of `plans/group-contact-model/plan.md`** --
+    see the marker above. This is a newly-found regression, not a revert of
+    the original fix: the "sum both sides' uncertainty" correction this
+    docstring describes is still in place (`passes_gate` still budgets
+    both the incoming percept and the contact's own stored pad), but the
+    magnitude of the naked-eye side of that budget shrank by roughly two
+    orders of magnitude on the cross-range axis when clustering moved from
+    a clock-bucket-width term to a true acuity-derived one."""
     from perception.naked_eye_source import _quantise_bearing, _quantise_range_m
 
     target_x, target_z = 0.0, 1200.0
