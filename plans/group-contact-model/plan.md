@@ -375,6 +375,51 @@ The tier → count-coarseness table (`lowres` clamps to `OP_GROUP`; `medres` giv
 `hires` gives an exact one), the cluster-radius policy and its chaining cap, and
 `NAKED_EYE_MAX_NEW_PER_POLL` re-read as a per-cluster cap.
 
+**Stage 3b is not a constant-tuning exercise. The cluster radius is built on the wrong quantity**
+(user, 2026-09-18, and confirmed against the code):
+
+```python
+cross_range_m = range_m * math.sin(_HALF_CLOCK_BUCKET_RAD)   # half of a 30 deg clock bucket
+```
+
+The term is angular, so it scales with range as it should — but the angle is **15 degrees, half a
+*clock bucket***. That is the channel's **reporting** quantisation, not its **resolving** power,
+and the two are different things: Petrovich can plainly see two dots 2 degrees apart while still
+*reporting* both as "eleven o'clock". Separation should be triggered by **apparent angular
+separation against visual acuity**, in arcminutes, not by how coarsely bearings are named.
+
+**The existing screenshots already bound the real number.** The calibration complex is ~206 m long
+with twelve units, so roughly 18 m of spacing:
+
+| Range | 18 m subtends | Observed |
+|---|---|---|
+| 8.89 km | 7 arcmin | binocular (x4): ~6-7 distinct specks — countable |
+| 8.89 km | 7 arcmin | naked eye: a marginal smudge — *not* countable |
+| 2.99 km | 21 arcmin | naked eye: a row of dots — countable |
+
+So unaided separation sits somewhere around **10-20 arcmin of apparent angular separation**. The
+current 15 degrees is 900 arcmin — **off by a factor of roughly 50**. That single wrong quantity
+explains why everything clusters, why two objects 400 m apart at 690 m (32 degrees apart) barely
+separate, and why the gate-vs-cluster dead zone Stage 3a had to close was so wide: both radii were
+derived from it.
+
+What this changes for Stage 3b:
+
+- Replace the cross-range term's angle with an **acuity-derived** one, and re-derive everything
+  downstream. The plan's *model resolution = channel resolution by construction* claim stays
+  correct in principle; the construction simply reached for the wrong quantity.
+- **Acuity is probably per-optic.** The binocular column resolved specks the naked eye could not at
+  the same range, which is consistent with `BINOCULAR_RANGE_MULTIPLIER` already modelling
+  magnification elsewhere — apparent separation is true separation times magnification. Decide
+  whether the cluster radius takes the same multiplier `visibility.py` does.
+- **Keep counting and resolving distinct.** ED's own count ladder implies Petrovich reports *how
+  many* at ranges where he cannot track each one separately — six specks are countable without
+  each being locatable to 18 m. The count bucket serves the first; the cluster radius serves the
+  second. They should not share a threshold.
+- The down-range term (`_range_bucket_width_m`) is genuinely a reporting quantisation and may stay
+  as it is — but say so deliberately rather than by omission, since the same conflation could hide
+  there.
+
 **Stage 4b — speech and events. No sortie needed.** (4a already surfaced the facts key and the
 console.) `speech.py`'s count clause and the `OP_GROUPSOMETHING` fix — **singular output must stay
 byte-identical**, which is the regression guard for every existing speech test;
