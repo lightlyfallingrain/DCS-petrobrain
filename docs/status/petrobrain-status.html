@@ -513,20 +513,21 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 18 Sep 2026</span>
+      <span>Derived from ROADMAP.md · 18 Sep 2026, evening</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Four subsystems, eighty-seven tracked items, one question worth answering at a glance:
-      what is actually blocking a crew member who sees, remembers, and talks back.</p>
+    <p class="lede">Five subsystems, ninety-one tracked items, one question worth answering at a glance:
+      what is actually blocking a crew member who sees, remembers, and talks back. He now has a voice,
+      and he counts what he cannot individually resolve.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>52</b><span>Done</span></div>
-    <div class="count is-active"><b>4</b><span>In progress</span></div>
-    <div class="count is-open"><b>14</b><span>Open</span></div>
-    <div class="count is-hold"><b>5</b><span>Deferred</span></div>
-    <div class="count is-block"><b>3</b><span>Await hardware</span></div>
+    <div class="count is-done"><b>56</b><span>Done</span></div>
+    <div class="count is-active"><b>5</b><span>In progress</span></div>
+    <div class="count is-open"><b>24</b><span>Open</span></div>
+    <div class="count is-hold"><b>4</b><span>Deferred</span></div>
+    <div class="count is-block"><b>2</b><span>Await a sortie</span></div>
   </div>
 
   <section>
@@ -549,8 +550,8 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <span class="path">aircraft-layer/</span>
         <div class="bar"><i style="width:88%"></i></div>
         <span class="chip done">Core complete</span>
-        <p class="next">Live DCS I/O stable since Sept 7; gained an audio write channel this week.
-          <b>Next:</b> measure <code>LoGetWorldObjects</code> FPS cost in flight.</p>
+        <p class="next">Live DCS I/O stable since Sept 7; now also plays Petrovich's voice on the
+          Windows box. <b>Next:</b> measure <code>LoGetWorldObjects</code> FPS cost in flight.</p>
         <span class="more">Details</span>
       </article>
 
@@ -567,20 +568,20 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       <article class="sys" role="button" tabindex="0" data-detail="bl">
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
-        <div class="bar"><i style="width:78%"></i></div>
-        <span class="chip active">BL-10 in progress</span>
-        <p class="next">BL-0–BL-7 complete: contact memory through mission phase.
-          <b>Next:</b> BL-8 memory interfaces, deliberately held until real flights inform it.</p>
+        <div class="bar"><i style="width:84%"></i></div>
+        <span class="chip active">Group contacts, 5 of 9 stages</span>
+        <p class="next">BL-0–BL-7 complete. Contacts are now clusters, and separability is angular.
+          <b>Next:</b> Stage 4b — the first stage you can actually <em>hear</em>.</p>
         <span class="more">Details</span>
       </article>
 
       <article class="sys" role="button" tabindex="0" data-detail="srs">
         <h3>SRS Adapter</h3>
         <span class="path">srs-adapter/</span>
-        <div class="bar"><i style="width:28%"></i></div>
-        <span class="chip active">Slice 1, stages 1–4</span>
-        <p class="next">Petrovich is audible; merged today.
-          <b>Next:</b> stage 5 on the Windows box, then intercom injection.</p>
+        <div class="bar"><i style="width:45%"></i></div>
+        <span class="chip active">Slice 1, stages 1–5</span>
+        <p class="next">Petrovich is audible, and urgent calls cut in mid-word.
+          <b>Next:</b> a sortie to judge it, then intercom injection.</p>
         <span class="more">Details</span>
       </article>
 
@@ -605,33 +606,35 @@ flowchart LR
   classDef block  fill:#F2D6D1,stroke:#A93B30,stroke-width:1.5px,color:#2E110D;
 
   WM["World Model<br/>M0–M10"]:::done
-  AL["Aircraft Layer<br/>DCS I/O"]:::done
+  AL["Aircraft Layer<br/>DCS I/O + audio"]:::done
   MI["Mission Interpreter<br/>MI-0–MI-6"]:::done
 
   BL27["BL-2 … BL-7<br/>contacts → mission phase"]:::done
   BL5a["BL-5a<br/>text crew interaction"]:::done
 
-  S1["Slice 1<br/>TTS out"]:::active
-  S5["Stage 5<br/>Windows playback"]:::block
+  GC["Group contacts<br/>stages 0–4a"]:::done
+  GC4B["Stage 4b<br/>counts, spoken"]:::open
+  GC5["Stage 5<br/>composition"]:::hold
+
+  S1["Slice 1<br/>TTS out, stages 1–5"]:::done
   S6["Stage 6<br/>live sortie"]:::block
-  S2["Slice 2<br/>SRS intercom out"]:::open
+  S2["Slice 2<br/>SRS intercom"]:::open
   S3["Slice 3<br/>speech in + PTT"]:::open
 
   BL8["BL-8<br/>memory interfaces"]:::open
-  BL9["BL-9<br/>debug view"]:::open
   BRAIN["Brain layer<br/>not started"]:::hold
 
   WM --> BL27
   AL --> BL27
   MI --> BL27
   BL27 --> BL5a
+  BL27 --> GC
+  GC --> GC4B --> GC5
   BL5a --> S1
-  S1 --> S5 --> S6
-  S5 --> S2
-  S2 --> S3
-  S3 --> BRAIN
+  S1 --> S6
+  S1 --> S2 --> S3 --> BRAIN
   BL27 -.->|"needs real flights"| BL8
-  BL27 -.-> BL9
+  GC4B -.->|"judge after flying"| GC5
 </pre>
       </div>
     </div>
@@ -648,23 +651,16 @@ flowchart LR
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Three items cannot advance without the Windows box or a sortie. Everything downstream of them is
-        idle, which makes these the highest-leverage hour in the project right now.</p>
+      <p>Down from three — the Windows-box work is done and passed. What is left needs a real flight,
+        and the voice test carries the accumulated debt along with it.</p>
       <ul class="blockers">
-        <li class="bl" role="button" tabindex="0" data-detail="stage5">
-          <span class="chip block">Stage 5</span>
-          <div>
-            <b>Windows playback and urgent preemption</b>
-            <p>Collector standalone, no DCS needed. Confirms <code>winsound</code> plays at all, and whether an
-              urgent line genuinely cuts off one already speaking. Gates the intercom slice.</p>
-          </div>
-        </li>
         <li class="bl" role="button" tabindex="0" data-detail="stage6">
-          <span class="chip block">Stage 6</span>
+          <span class="chip block">Sortie</span>
           <div>
-            <b>Live sortie acceptance</b>
-            <p>Whether 0.6–0.8 s synthesis latency reads as crew-like, and whether the generic voice is
-              tolerable in the cockpit.</p>
+            <b>Hear it in the air</b>
+            <p>Whether 0.6–0.8 s of synthesis latency reads as crew-like or laggy, whether callouts queue
+              acceptably under load, and whether a generic voice is tolerable in a loud cockpit. No test
+              can answer any of it.</p>
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="debt">
@@ -672,7 +668,7 @@ flowchart LR
           <div>
             <b>Accumulated live-acceptance debt</b>
             <p>BL-4's attention tools may never have had a live run; the F10 vocabulary is half-cleared.
-              Both clear on the same flight.</p>
+              Both clear on the same flight as the voice test.</p>
           </div>
         </li>
       </ul>
@@ -686,83 +682,101 @@ flowchart LR
 
     <div class="work">
 
-      <div class="row s-active" role="button" tabindex="0" data-detail="s2">
+      <div class="row s-active" role="button" tabindex="0" data-detail="gc4b">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Stage 4b — say the counts out loud</b>
+          <p>Five stages of group-contact work are invisible outside the console until this lands. Adds
+            the count clause to speech and a cardinality-changed event. Singular output must stay
+            byte-identical — that is the regression guard for every existing speech test.</p>
+        </div>
+        <span class="chip open">Next</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="s2">
         <span class="who">srs-adapter</span>
         <div class="what">
           <b>Slice 2 — SRS intercom injection</b>
-          <p>Confirmed reachable: stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz.
-            ICS is the <em>only</em> acceptable target — frequency injection was rejected outright.
-            Open prerequisite: reading the player's DCS unit ID at runtime.</p>
+          <p>Confirmed reachable: stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz. ICS is
+            the <em>only</em> acceptable target — the SPU-8 selects one source at a time, so a dedicated
+            frequency would compete with mission comms. It also makes Petrovich's volume adjustable from
+            the cockpit, which local playback can never do.</p>
         </div>
-        <span class="chip open">Next</span>
+        <span class="chip open">Open</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="s3">
         <span class="who">srs-adapter</span>
         <div class="what">
           <b>Slice 3 — speech in, gated by a joystick PTT</b>
-          <p>Inbound bypasses SRS entirely and captures the microphone directly. Unverified: whether a bound
-            DCS command's <em>held</em> state is readable on the Export.lua channel — F10 commands arrive as
-            discrete events, which is not the same thing.</p>
+          <p>Inbound bypasses SRS entirely and captures the microphone directly, because SRS offers no
+            clean way to get the player's voice back out. Outbound always open, inbound explicitly gated —
+            deliberately asymmetric.</p>
         </div>
         <span class="chip open">Open</span>
       </div>
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="merge">
+      <div class="row s-open" role="button" tabindex="0" data-detail="reports">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>False contact merge at first sighting</b>
-          <p>Surfaced by the vision calibration: a contact first seen at coarse range can overlap a neighbour,
-            and <code>object_id</code> continuity then holds the false merge for the whole flight. Pinned by a
-            strict xfail.</p>
+          <b>Contact report fine tuning</b>
+          <p>A running list from flying with TTS live. Spell out "m" and "km"; space or expand acronyms
+            (SAM is the exception TTS already says correctly); "on the road" at zero distance. One item
+            needs world-model support: "200 metres north of the road" requires a bearing
+            <code>describe_position</code> does not return.</p>
         </div>
         <span class="chip open">Open</span>
       </div>
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="bl8">
-        <span class="who">body-layer</span>
+      <div class="row s-open" role="button" tabindex="0" data-detail="services">
+        <span class="who">cross-cutting</span>
         <div class="what">
-          <b>BL-8 — memory layer interfaces</b>
-          <p>Deliberately last. What is worth remembering is only knowable after BL-2–BL-7 have run for real.</p>
+          <b>One command to start the services</b>
+          <p>Four long-running processes across two machines, each launched by hand. Docker covers at most
+            three of five — <code>winsound</code> and macOS <code>say</code>/<code>afplay</code> are
+            exactly the host facilities two services exist to use.</p>
         </div>
-        <span class="chip open">Gated</span>
+        <span class="chip open">Open</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="theatre">
         <span class="who">world-model</span>
         <div class="what">
           <b>Multi-theatre support</b>
-          <p>Architecture already generalises through per-theatre registries. Kola is the real problem: SRTM has
-            no coverage above 60°N, so the elevation source has to change.</p>
+          <p>Architecture already generalises through per-theatre registries. Kola is the real problem:
+            SRTM has no coverage above 60°N, so the elevation source must change.</p>
         </div>
         <span class="chip open">Soon</span>
       </div>
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="fps">
-        <span class="who">aircraft-layer</span>
-        <div class="what">
-          <b>Measure <code>LoGetWorldObjects</code> FPS cost</b>
-          <p>Still unmeasured in flight, and it runs every poll.</p>
-        </div>
-        <span class="chip open">Open</span>
-      </div>
-
-      <div class="row s-hold" role="button" tabindex="0" data-detail="iff">
+      <div class="row s-open" role="button" tabindex="0" data-detail="bl8">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>Coalition / IFF for contact reports</b>
-          <p>Deferred. Must be <em>inferred</em> from unit-type vocabulary and terrain control, never read from
-            DCS truth — reading it would break the no-omniscience invariant the project exists to protect.</p>
+          <b>BL-8 — memory layer interfaces</b>
+          <p>Deliberately last. What is worth remembering is only knowable after BL-2–BL-7 have run for
+            real.</p>
         </div>
-        <span class="chip hold">Deferred</span>
+        <span class="chip open">Gated</span>
+      </div>
+
+      <div class="row s-hold" role="button" tabindex="0" data-detail="gc5">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Stage 5 — composition</b>
+          <p>"Three of them tanks… and something else." Held deliberately: the angular model resolved the
+            twelve-unit case that motivated the whole group model, so the headline example largely
+            dissolved. Re-judge after flying, not before.</p>
+        </div>
+        <span class="chip hold">Re-judge</span>
       </div>
 
       <div class="row s-hold" role="button" tabindex="0" data-detail="voice">
         <span class="who">srs-adapter</span>
         <div class="what">
-          <b>Voice character</b>
-          <p>Generic English voice today. No Russian-accented English voice exists in macOS <code>say</code>.
-            Auditioning costs one command per candidate on the local path.</p>
+          <b>Voice character — accent and prosody</b>
+          <p>Two problems, not one. No Russian-accented English voice exists in macOS <code>say</code>,
+            and the delivery is monotonous regardless of whether the line is a routine report or "break
+            right". Prosody may matter more than accent.</p>
         </div>
         <span class="chip hold">Backlog</span>
       </div>
@@ -848,39 +862,73 @@ const DETAIL = {
     src: "mission-interpreter/ROADMAP.md"
   },
   bl: {
-    kicker: "body-layer/", title: "Body Layer", chip: ["active", "BL-10 in progress"],
-    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "Twelve tools, frozen since BL-6"], ["Tests", "600 passing, 1 strict xfail"]],
+    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Group contacts, 5 of 9 stages"],
+    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["Tests", "642 passing"]],
     sections: [
-      { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state — never LLM chat history." },
-      { h: "The invariant everything serves", p: "Contact identity is <strong>geometric</strong>, derived from perceived attributes only, never from a DCS object id or any truth field. That is deliberate: it means Petrovich can confuse two identical trucks, which is exactly the fallibility the project exists to model." },
-      { h: "Most recent work", p: "Vision range calibration replaced guessed detection constants with values measured from a nine-range screenshot ladder. The old values were wrong in <em>both</em> directions at once — over-claiming classification while gating out vehicles plainly visible at 8.89 km." },
-      { h: "What's left", p: "BL-8 (memory interfaces) is deliberately last, because what is worth remembering is only knowable after BL-2 through BL-7 have run for real. BL-9 is a debug view. BL-10 is in progress as the SRS work. Plus accumulated live-acceptance debt: BL-4's attention tools may never have had a real sortie." }
+      { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state -- never LLM chat history." },
+      { h: "The invariant everything serves", p: "Contact identity is <strong>perceptual</strong>, never a DCS object id or any truth field. That is deliberate: Petrovich can confuse two identical trucks, which is exactly the fallibility this project exists to model." },
+      { h: "What changed this week", p: "A contact is no longer a belief about one <em>object</em>. It is a belief about the occupants of one <strong>resolution cluster</strong> -- and whether two units are one contact or two is an angular question measured at ownship in 3D, not a distance in world space. That fixed a live defect where twelve real units collapsed into roughly five contacts and never separated." },
+      { h: "What it took", p: "Two reworks of the same stage. The first modelled the uncertainty as a world-space ellipse, which was an approximation of the angular reality; stating it directly <em>deleted</em> 144 net lines. Before that, the radius had been built on half a 30 degree clock bucket -- a reporting quantisation mistaken for resolving power, roughly 50x too coarse." },
+      { h: "What's next", p: "Stage 4b, because it is the first stage that changes anything you can hear. Everything built so far is invisible outside the console." }
     ],
-    items: [["done","BL-0/BL-1 - harness, observation ingestion"],["done","BL-2 - contact memory and association"],["done","BL-3 - world enrichment"],["done","BL-4 - attention and events"],["done","BL-5 / BL-5a - tool API, text crew"],["done","BL-6 - commands and verification"],["done","BL-7 - mission phase and relevance"],["done","Vision range calibration"],["active","BL-10 - SRS transport"],["open","BL-8 - memory interfaces"],["open","BL-9 - debug visualisation"],["open","False contact merge"]],
+    items: [["done","BL-0/BL-1 - harness, observation ingestion"],["done","BL-2 - contact memory and association"],["done","BL-3 - world enrichment"],["done","BL-4 - attention and events"],["done","BL-5 / BL-5a - tool API, text crew"],["done","BL-6 - commands and verification"],["done","BL-7 - mission phase and relevance"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a"],["open","Stage 4b - counts, spoken"],["open","BL-8 - memory interfaces"],["hold","Stage 5 - composition"]],
     src: "body-layer/ROADMAP.md"
   },
   srs: {
-    kicker: "srs-adapter/", title: "SRS Adapter", chip: ["active", "Slice 1, stages 1-4"],
+    kicker: "srs-adapter/", title: "SRS Adapter", chip: ["active", "Slice 1, stages 1-5"],
     facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Merged today", "f469a56"]],
     sections: [
       { h: "Why it exists separately", p: "So neither the body layer nor the aircraft layer grows a TTS dependency. Body and brain deal in text only and never see audio bytes. The seam is HTTP throughout, so no new in-process cross-subproject import was introduced — the world-model import remains the sole sanctioned exception." },
       { h: "What works today", p: "Text in over <code>POST /speak</code>, synthesized on the Mac by <code>say</code> behind a swappable engine protocol, then either played locally via <code>afplay</code> or POSTed as WAV to the collector and played on Windows. The local path needs neither Windows nor DCS, which makes it the fastest way to audition voices and wording." },
       { h: "The result that shaped it", p: "Body-layer's entire share came to <strong>one optional field</strong> on <code>CrewConsole</code>. That was the plan's own stated test of whether BL-5a drew its interface in the right place, and it passed." },
-      { h: "Next", p: "Stage 5 on the Windows box, then intercom injection. Note the transports are deliberately asymmetric: outbound goes over SRS intercom, inbound bypasses SRS entirely and captures the microphone directly." }
+      { h: "Where it stands", p: "Stage 5 passed on the Windows box after one real failure: urgent preemption did not interrupt, because synchronous <code>PlaySound</code> blocks inside the Win32 call and cannot be purged from another thread. Fixed by playing asynchronously and waiting on an interruptible event; re-tested, an urgent line now cuts a routine one off mid-word." },
+      { h: "Next", p: "A sortie to judge latency and voice, then intercom injection. The transports are deliberately asymmetric: outbound over SRS intercom, inbound bypassing SRS entirely to capture the microphone directly." }
     ],
-    items: [["done","Stage 1 - synthesis + local playback"],["done","Stage 2 - collector audio channel"],["done","Stage 3 - cross-machine wiring"],["done","Stage 4 - body-layer sink"],["block","Stage 5 - Windows playback"],["block","Stage 6 - live sortie"],["open","Slice 2 - SRS intercom"],["open","Slice 3 - speech in"],["hold","Voice character"]],
+    items: [["done","Stage 1 - synthesis + local playback"],["done","Stage 2 - collector audio channel"],["done","Stage 3 - cross-machine wiring"],["done","Stage 4 - body-layer sink"],["done","Stage 5 - Windows playback"],["block","Stage 6 - live sortie"],["open","Slice 2 - SRS intercom"],["open","Slice 3 - speech in"],["hold","Voice character"]],
     src: "srs-adapter/ROADMAP.md"
   },
 
-  stage5: {
-    kicker: "srs-adapter/ - blocked", title: "Stage 5 - Windows playback", chip: ["block", "Needs the Windows box"],
-    facts: [["Needs", "Windows box only - no DCS"], ["Gates", "Slice 2, and stage 6"], ["Cost", "Roughly one hour"]],
+  gc4b: {
+    kicker: "body-layer/", title: "Stage 4b - say the counts out loud", chip: ["open", "Next"],
+    facts: [["Blocks", "Everything group-contact being audible"], ["Risk", "Low -- additive"]],
     sections: [
-      { h: "What it settles", p: "Three things nothing so far can confirm. That <code>winsound.PlaySound</code> actually plays at all. That urgent preemption genuinely interrupts a line already speaking — the interrupt mechanism is this slice's main unverified bet. And whether the audio competes or ducks against other sound on the box, which matters more once SRS is in the mix." },
-      { h: "How", p: "Run the collector standalone on Windows, point <code>srs-adapter --target aircraft-layer</code> at it from the Mac, and POST a few lines. Then queue several long routine lines and fire an urgent one: it should cut the current line off mid-word and drop the backlog entirely." },
-      { h: "If it fails", p: "That is useful, not a setback. The interrupt mechanism is deliberately isolated in a single named function precisely so it can be swapped without touching the queue logic around it." }
+      { h: "Why it matters more than it sounds", p: "Five stages of group-contact work -- cardinality as a refining belief, angular clustering, the same-source exclusion rule -- are currently <em>invisible</em> outside the debug console. This is the stage where Petrovich actually says \"a group of six\" instead of naming one thing." },
+      { h: "The regression guard", p: "Singular output must stay <strong>byte-identical</strong>. Every existing speech test is the guard: if a single-unit callout changes by one character, the count clause has leaked into the case that was already right." },
+      { h: "Also in scope", p: "A cardinality-changed event, and fixing count arithmetic that currently conflates contact <em>records</em> with estimated <em>units</em> -- <code>get_situation</code>, <code>get_stats</code> and the situational header all report a bare contact count today, which now means something different." }
     ],
-    src: "srs-adapter/ROADMAP.md, plans/tts-voice-output/plan.md"
+    src: "plans/group-contact-model/plan.md"
+  },
+  gc5: {
+    kicker: "body-layer/", title: "Stage 5 - composition", chip: ["hold", "Re-judge after flying"],
+    facts: [["Status", "Deliberately unresolved"], ["Decided by", "The next sortie"]],
+    sections: [
+      { h: "What it would add", p: "Composition as a multiset of mixed-specificity member claims -- \"three tanks and something else\", refining per member, and retracting when contradicted. The user's own progression: <em>\"3 tanks and maybe ifvs\" &rarr; \"not ifvs, but shilka and two mobile rocket artillery\" &rarr; \"3 T-72, 1 BMP-2, 2 GRAD\"</em>." },
+      { h: "Why it is on hold", p: "The angular model resolved the twelve-unit case that motivated the entire group model, so the headline example largely dissolved. Much of what looked like a missing belief model turned out to be a resolution radius built on the wrong quantity." },
+      { h: "What would still justify it", p: "Cardinality retains real uses the angular fix does not cover: columns along the line of sight, tight formations, and infantry too small to detect individually. Whether those are worth the build is a judgement to make with real callouts behind it, which is exactly what the user asked for." }
+    ],
+    src: "body-layer/ROADMAP.md"
+  },
+  reports: {
+    kicker: "body-layer/", title: "Contact report fine tuning", chip: ["open", "Running list"],
+    facts: [["Opened", "2026-09-18, from flying with TTS"], ["Shape", "Append as things are noticed"]],
+    sections: [
+      { h: "Cheap -- wording", p: "Spell units out: TTS cannot read \"m\" and \"km\". Space or expand acronyms -- \"M I 8\", \"long range\" -- with <strong>SAM as the exception</strong>, since TTS already says it correctly. A blanket rule would break the one case that works. And \"very close\" under 0.5 km, where the exact figure stops mattering." },
+      { h: "Cheap -- thresholds", p: "\"On the road\" at zero distance; \"next to the road\" between roughly 10 and 100 m. These replace the \"near X (~200m)\" shape at short range." },
+      { h: "The expensive one", p: "\"200 metres north of the road\" needs the <em>direction from the feature to the contact</em>. <code>RoadInfo</code> carries a distance and the road's own orientation, but no such bearing -- and neither do the settlement or water records. That makes it a <code>describe_position</code> change in world-model, not a phrasing change, and it gates the two wording items that depend on it." },
+      { h: "Needs checking first", p: "Calling airborne contacts \"aircraft\" or \"helicopter\" may be a <em>classification</em> change rather than a speech one, depending on whether the channel can establish airborne at all and whether the class vocabulary has air types." }
+    ],
+    src: "body-layer/ROADMAP.md"
+  },
+  services: {
+    kicker: "cross-cutting", title: "One command to start the services", chip: ["open", "Gets worse with each service"],
+    facts: [["Today", "Four processes, two machines, launched by hand"], ["Coming", "SRS, a brain layer"]],
+    sections: [
+      { h: "The ask", p: "\"Start services\" as one action, with a manifest saying which service runs on which machine -- today only the aircraft layer is on Windows, but that should not be baked in." },
+      { h: "Why Docker covers at most three of five", p: "Two services exist <em>precisely</em> to use host-OS facilities. The aircraft layer plays audio through <code>winsound</code> to the Windows device and talks to DCS over localhost; the SRS adapter shells out to macOS <code>say</code> and <code>afplay</code>, neither of which a Linux container has. The two it cannot cover are the two that matter during a flight." },
+      { h: "The cheaper alternative", p: "A declarative manifest naming each service, its host, command, env and health check, plus a small stdlib launcher that starts whatever is assigned to the machine it runs on. Same goal, no new dependency, and the existing run scripts fold in as entries." },
+      { h: "Still to decide", p: "Whether reproducible builds justify containerising the three that can be, and startup ordering -- body-layer needs a built world-model database, and the SRS adapter is useless without the aircraft layer reachable." }
+    ],
+    src: "todo/todo.md"
   },
   stage6: {
     kicker: "srs-adapter/ - blocked", title: "Stage 6 - live sortie acceptance", chip: ["block", "Needs a flight"],
@@ -924,17 +972,6 @@ const DETAIL = {
     ],
     src: "srs-adapter/ROADMAP.md"
   },
-  merge: {
-    kicker: "body-layer/", title: "False contact merge at first sighting", chip: ["open", "Real defect"],
-    facts: [["Surfaced by", "Vision range calibration"], ["Pinned by", "A strict xfail"], ["Class", "Known since BL-2.6"]],
-    sections: [
-      { h: "What happens", p: "Two real objects 400 m apart — a truck and infantry in the canonical mock flight — end the flight as <strong>one</strong> contact, where they used to be two." },
-      { h: "Why the calibration caused it", p: "The wider detection envelope now first sees the further object at about 2 km instead of 1.6 km. At that range the naked-eye range bucket is coarse enough that its implied position overlaps the nearer contact, so the store merges instead of founding a second contact. Object-id continuity then holds that false merge for the rest of the flight, even as the range closes and the two separate cleanly." },
-      { h: "Why it was predictable", p: "This is exactly the false-merge risk flagged when BL-2.6 widened the symmetric gate. Seeing further means seeing more coarsely first, so every contact now enters the store through a wider-uncertainty door." },
-      { h: "How it's held", p: "A strict xfail states the desired behaviour and will fail loudly if a fix lands without updating it. Worth fixing before a longer screenshot ladder widens the envelope again." }
-    ],
-    src: "body-layer/ROADMAP.md, tests/test_mock_flight_chain.py"
-  },
   bl8: {
     kicker: "body-layer/", title: "BL-8 - memory layer interfaces", chip: ["open", "Deliberately gated"],
     facts: [["Decision", "User, 2026-09-10"], ["Gated on", "BL-2..BL-7 flying for real"]],
@@ -953,26 +990,6 @@ const DETAIL = {
       { h: "Why Kola is different", p: "SRTM has no coverage above 60 degrees north. That is not a parameter change — the elevation source itself has to change for that theatre." }
     ],
     src: "world-model/ROADMAP.md"
-  },
-  fps: {
-    kicker: "aircraft-layer/", title: "Measure LoGetWorldObjects FPS cost", chip: ["open", "Unmeasured"],
-    facts: [["Raised", "2026-09-09"], ["Blocks", "Throttle tuning"]],
-    sections: [
-      { h: "The gap", p: "No confirmed, quantified per-call cost exists at realistic unit counts of 50 to 200 — only qualitative forum and Tacview-wiki folklore. It runs on every poll." },
-      { h: "The test", p: "Fly with world-objects export on and off at 5, 2 and 1 Hz, and diff frame times. Until that number exists, splitting the export throttle is tuning against a guess." },
-      { h: "Worth checking at the same time", p: "Whether being fired at is served by this poll rate at all. Nothing currently reads it for threat or launch detection, so the urgent-callout-latency case may want its own dedicated signal rather than a faster poll." }
-    ],
-    src: "aircraft-layer/ROADMAP.md"
-  },
-  iff: {
-    kicker: "body-layer/", title: "Coalition / IFF for contact reports", chip: ["hold", "Deferred"],
-    facts: [["Status", "Do not start without instruction"], ["Blocker", "Terrain-control data doesn't exist yet"]],
-    sections: [
-      { h: "Why it's not simply available", p: "Reading real coalition straight from DCS truth would violate the no-omniscience invariant the belief layer structurally enforces. The perception channel deliberately does no coalition or IFF filtering at all." },
-      { h: "How it must work instead", p: "Coalition has to be <strong>inferred</strong> — from unit-type vocabulary (which types each side is known to field) and from world position (whose controlled terrain the contact sits in). That is a user decision, not an implementation preference." },
-      { h: "What's missing", p: "Terrain-control data does not exist in the world model yet, so half the inference has no input. Not scoped to any milestone." }
-    ],
-    src: "body-layer/ROADMAP.md"
   },
   voice: {
     kicker: "srs-adapter/", title: "Voice character", chip: ["hold", "Backlog"],

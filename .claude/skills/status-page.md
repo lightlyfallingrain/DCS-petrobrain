@@ -69,11 +69,15 @@ The artifact already exists. **Republish to the same URL** rather than creating 
 https://claude.ai/code/artifact/922779a3-b18d-46be-bb14-6706c421e9e7
 ```
 
-- Publishing from the session that originally created it: republishing the same file path keeps the
-  URL automatically.
-- **Publishing from any other session: pass that URL as `url`.** Without it a *separate* artifact is
-  created and the user's existing link silently goes stale — the failure mode this section exists
-  to prevent.
+**Always pass the URL as `url`, from every session, without exception.** Artifact identity follows
+the *file path*, not the page — so "republishing the same file keeps the URL" only holds while the
+file stays exactly where it was. It does not survive the file moving.
+
+This failed exactly once, and instructively: the page was first published from a session scratchpad,
+then committed to `docs/status/` and republished from its new home. Same content, same title, same
+session — and a **second artifact** appeared, leaving the user's existing link pointing at a stale
+page. Passing `url` unconditionally costs nothing and removes the whole class of mistake; relying on
+path stability means remembering a precondition that is invisible at the moment it matters.
 - Keep the `description` and `favicon` unchanged; pass a short `label` describing the update.
 
 ## Finishing
