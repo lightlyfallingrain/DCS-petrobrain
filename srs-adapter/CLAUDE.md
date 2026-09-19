@@ -122,6 +122,10 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
 - `tests/test_vocabulary.py` — internal consistency of `vocabulary.py`'s `TOKENS`/`PHRASES` tables
   and its helpers. Cannot assert equality against `body-layer`'s/`aircraft-layer`'s token tables
   directly (module independence) — see that test module's own docstring.
+- `tests/test_command_matcher.py` (Slice 3 Stage 2) — `match_transcript`: exact hits across token
+  families, verb-anchor rejection, the separation check on a measured genuine tie, legal/illegal
+  bearing outcomes, and the derived `VERB_ANCHOR_WORDS`' coverage of alternate spellings
+  (`"never mind"`, `"hey petrovich"`) that a hand-copied verb list would have missed.
 - `tests/test_tts_engine.py` — exercises `MacSayEngine` against the **real** `say` binary, not a
   mock (mirroring `aircraft-layer/tests/test_text_sender.py`'s "real socket, not a double"
   posture) — this project's development machine is a Mac (root `CLAUDE.md` compute-topology
@@ -167,6 +171,16 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   phrasings per token), and helpers (`spoken_phrases`, `token_for_phrase`, `to_gbnf` for
   whisper.cpp's `--grammar`). Keep in sync with those two sources by hand; there is no automated
   check tying the three together.
+- `src/command_matcher.py` (Slice 3 Stage 2, `plans/inbound-speech/plan.md` Decision 4 REVISED) —
+  the transcript -> candidate-token matcher: normalise (`vocabulary.normalize_for_match`) -> verb
+  anchor (`VERB_ANCHOR_WORDS`, derived from `vocabulary.PHRASES`, not hand-copied) -> bearing slot
+  (`vocabulary.parse_bearing`) or phrase match (`vocabulary.normalized_phrase_index`) -> separation
+  check. `match_transcript(text) -> MatchResult` (`token`, `match_ratio`, `verb_anchored`,
+  `ambiguous`, `bearing_degrees`) is everything this subproject hands body-layer about one
+  transcript — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` are the matching constants (behaviour
+  constants — `ACT_FLOOR`/`CONFIRM_FLOOR`/etc — live in body-layer's `belief.voice_commands`, per
+  the plan's constant split). Not wired to an HTTP route yet (`GET /transcripts/poll` is Stage 3);
+  Stage 2 exercises it directly from tests and from body-layer's `!voice` REPL test harness.
 - `tools/stt_bench.py` (Slice 3 Stage 1) — the recognition bench, and the whole slice's stop/go
   gate. Runs whisper.cpp plain and with `--prompt` (and with `--grammar` behind `--with-grammar`) over
   a recorded corpus of the user's own voice, reporting top-1 token accuracy, every confusion pair
