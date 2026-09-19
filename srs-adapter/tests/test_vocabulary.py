@@ -11,12 +11,44 @@ behave as `stt_engine.py`/`tools/stt_bench.py` need them to.
 
 from __future__ import annotations
 
-from vocabulary import PHRASES, TOKENS, spoken_phrases, to_gbnf, token_for_phrase
+from vocabulary import (
+    LEGACY_F10_TOKENS,
+    PHRASES,
+    TOKENS,
+    VOICE_ONLY_TOKENS,
+    spoken_phrases,
+    to_gbnf,
+    token_for_phrase,
+)
 
 
-def test_fifteen_tokens() -> None:
-    assert len(TOKENS) == 15
-    assert len(set(TOKENS)) == 15, "TOKENS must not contain duplicates"
+def test_tokens_is_the_two_groups_with_no_overlap() -> None:
+    """No assertion on how many tokens exist, deliberately.
+
+    An earlier version pinned the count at 15 to guard a mirror of the
+    F10 menu. That obligation is gone -- voice is the primary command
+    surface and the F10 path is being retired, so this vocabulary is
+    expected to grow past it and diverge from it. A count assertion here
+    would now be a counter someone bumps on every addition, which tests
+    nothing. What still matters is structural: the groups are disjoint
+    and nothing is duplicated.
+    """
+    assert TOKENS == LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS
+    assert not set(LEGACY_F10_TOKENS) & set(VOICE_ONLY_TOKENS)
+    assert len(set(TOKENS)) == len(TOKENS), "TOKENS must not contain duplicates"
+
+
+def test_report_and_scan_share_bearings_under_different_verbs() -> None:
+    """The scan/report bearing pair is the confusion the bench must expose.
+
+    These eight pairs differ by one word, and mishearing that word swaps
+    one action for a different one rather than garbling a phrase. Pinning
+    the pairing here means a later edit cannot quietly drop one side and
+    leave the bench unable to measure it.
+    """
+    for suffix in ("n", "ne", "e", "se", "s", "sw", "w", "nw"):
+        assert f"scan_bearing_{suffix}" in LEGACY_F10_TOKENS
+        assert f"report_bearing_{suffix}" in VOICE_ONLY_TOKENS
 
 
 def test_every_token_has_phrases() -> None:

@@ -1,7 +1,20 @@
-"""The 15-token scan/watch/cancel command vocabulary, mirrored for
-`srs-adapter`'s own use (`plans/inbound-speech/plan.md` Stage 1).
+"""The spoken command vocabulary (`plans/inbound-speech/plan.md` Stage 1).
 
-This is a **deliberate, hand-synced duplicate**, not a shared import.
+**This file is the primary command vocabulary, not a mirror of the F10
+menu.** It began as a hand-synced duplicate of that menu, and the
+docstrings and tests here said so; the user's direction on 2026-09-19
+inverted the relationship: *"The F10 menu is only a temporary solution.
+Voice is primary. It's alright if F10 menu goes stale, we'll remove it at
+some point."* So the F10 command set is now the derived, legacy thing,
+and this vocabulary is free to grow past it.
+
+The split below is kept, but only as history rather than an obligation.
+`LEGACY_F10_TOKENS` are the 15 that happen to coincide with the F10 menu
+today, and `VOICE_ONLY_TOKENS` are the ones that never existed there.
+**Divergence between the two is expected and is not a bug** -- do not
+"fix" a mismatch against `aircraft-layer`'s `ALLOWED_COMMANDS` by
+deleting anything here. When the F10 path is removed the split collapses
+and both tuples fold into `TOKENS`.
 `srs-adapter` must stand alone (root `CLAUDE.md`'s module-independence
 rule -- the body-layer<->world-model in-process import is the sole
 sanctioned exception, and this is not it), so it cannot import
@@ -12,9 +25,11 @@ hand-synced with that same crew_console.py source and with the Hook
 script's F10 menu -- this file follows that established precedent (a third
 hand-synced copy) rather than inventing a shared-constants mechanism.
 
-**Keep `TOKENS` and `PHRASES` in sync with `crew_console.py`/
-`f10_command_receiver.py` by hand.** There is no automated check tying the
-three together.
+Nothing here is synced automatically, and as of the direction above
+nothing here needs to be synced at all. Stage 2's matcher and the
+body-layer command path are where these tokens acquire behaviour; that
+path is the one that must cover `TOKENS`, and it is independent of
+whatever the F10 menu still offers.
 
 `PHRASES` is this file's own addition, not mirrored from anywhere -- it is
 the recogniser **bias hint list**: the spoken phrasings a constrained
@@ -28,11 +43,12 @@ phrasings this user actually says and which get misheard.
 
 from __future__ import annotations
 
-#: The 15-token vocabulary, in the same order as `aircraft-layer`'s
-#: `ALLOWED_COMMANDS` and `crew_console.py`'s two lookup tables
-#: concatenated (`_RELATIVE_SCAN_TOKENS` then `_BEARING_SCAN_TOKENS`, then
-#: the two watch tokens and `cancel_task`).
-TOKENS: tuple[str, ...] = (
+#: The 15 tokens that also exist in the legacy F10 radio menu, in that
+#: menu's own order. Kept as a named group for traceability while the F10
+#: path still runs; it carries no obligation to match, since that path is
+#: being retired (see this module's docstring). Expect it to fold into
+#: `TOKENS` when F10 is removed.
+LEGACY_F10_TOKENS: tuple[str, ...] = (
     "scan_ahead",
     "scan_left",
     "scan_right",
@@ -49,6 +65,47 @@ TOKENS: tuple[str, ...] = (
     "watch_nearest_air_defence",
     "cancel_task",
 )
+
+#: Clock positions worth recognising: 8 through 4 the short way round,
+#: i.e. the forward hemisphere. Deliberately not all twelve (user
+#: direction, 2026-09-19). The reason is not recording time but the
+#: project's own no-omniscience rule: Petrovich cannot see behind the
+#: aircraft, so "report six o'clock" names a direction he has nothing to
+#: report about. A command whose only honest answer is "I can't see
+#: there" is not worth teaching a recogniser.
+FORWARD_CLOCK_POSITIONS: tuple[int, ...] = (8, 9, 10, 11, 12, 1, 2, 3, 4)
+
+#: Spoken number words for `FORWARD_CLOCK_POSITIONS`, since a recogniser
+#: transcribes words rather than digits.
+_CLOCK_WORDS: dict[int, str] = {
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+    11: "eleven",
+    12: "twelve",
+}
+
+#: `report_all` and `stop_talking` are flat commands. The `report_bearing_*`
+#: and `report_clock_*` families are the `report <target>` form, enumerated
+#: rather than parsed as a slot because a closed grammar has to list what it
+#: admits. Unit- and group-named targets ("report the tanks") are
+#: deliberately absent: that target set is open, so it cannot be enumerated
+#: into a grammar, and it belongs to free speech once the brain layer exists.
+#: Commands with no F10 equivalent -- the first vocabulary this project
+#: added for voice on its own terms rather than by transcribing a menu.
+VOICE_ONLY_TOKENS: tuple[str, ...] = (
+    ("report_all", "stop_talking")
+    + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
+    + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
+)
+
+#: Every token the recogniser should admit. This, not either subgroup, is
+#: what the grammar, the bench and Stage 2's matcher are built from.
+TOKENS: tuple[str, ...] = LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS
 
 #: Spoken phrasings per token. Every token has at least two phrasings so
 #: the bench (and later, Stage 2's matcher) sees more than one way of
@@ -73,9 +130,54 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "watch nearest air defense",
     ),
     "cancel_task": ("cancel task", "cancel the task", "cancel"),
+    # Voice-only. `report` carries three phrasings because it is the
+    # command most likely to be said casually and differently each time.
+    "report_all": ("report", "report contacts", "what do you see"),
+    # `stop` is the shortest and most safety-critical word here -- it
+    # aborts speech mid-sentence, so a miss leaves Petrovich talking over
+    # something the player needs to hear, and a false positive silences
+    # him for no reason. A single short syllable is also the hardest
+    # thing for a recogniser to catch reliably. The alternates are
+    # recorded so the bench can say which of them actually survives,
+    # rather than committing to "stop" and discovering the problem in
+    # the cockpit.
+    "stop_talking": ("stop", "stop talking", "quiet"),
 }
 
+#: `report <compass>` -- the same eight directions `scan_bearing_*` uses,
+#: under a different verb. The pairing is deliberate: "scan north" and
+#: "report north" differ only in the verb, and confusing them swaps one
+#: action for another rather than merely garbling a word. If the bench
+#: finds that pair unreliable, the fix is a vocabulary change, and Stage 1
+#: is when that is still cheap.
+for _direction, _word in (
+    ("n", "north"),
+    ("ne", "northeast"),
+    ("e", "east"),
+    ("se", "southeast"),
+    ("s", "south"),
+    ("sw", "southwest"),
+    ("w", "west"),
+    ("nw", "northwest"),
+):
+    PHRASES[f"report_bearing_{_direction}"] = (
+        f"report {_word}",
+        f"report bearing {_word}",
+    )
+
+#: `report <clock>` -- one phrasing each, unlike every other token here.
+#: The discriminating content is the number word itself, which one carrier
+#: phrase already isolates; a second carrier would multiply recording time
+#: without adding evidence about the number. Numbers are the accent-fragile
+#: part of this vocabulary, so what matters is takes per number, not
+#: phrasings per number.
+for _position in FORWARD_CLOCK_POSITIONS:
+    PHRASES[f"report_clock_{_position}"] = (
+        f"report {_CLOCK_WORDS[_position]} o'clock",
+    )
+
 assert set(PHRASES) == set(TOKENS), "PHRASES and TOKENS have drifted apart"
+assert not set(LEGACY_F10_TOKENS) & set(VOICE_ONLY_TOKENS), "a token cannot be both"
 
 
 def spoken_phrases() -> tuple[str, ...]:
