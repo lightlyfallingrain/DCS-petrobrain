@@ -80,6 +80,24 @@ page. Passing `url` unconditionally costs nothing and removes the whole class of
 path stability means remembering a precondition that is invisible at the moment it matters.
 - Keep the `description` and `favicon` unchanged; pass a short `label` describing the update.
 
+## Automatic daily refresh
+
+A launchd agent runs `.claude/scripts/status-page-refresh.sh` at 05:00 local, daily. The plist
+template and its install/remove commands are in `.claude/scripts/com.petrobrain.status-page.plist`.
+
+The script does nothing unless there is something to do, and logs which guard stopped it so a quiet
+morning is distinguishable from a broken one: no commits in 24 hours, a dirty working tree or a
+non-main branch (someone is mid-task — never run an agent in a checkout in use), or a missing
+`claude` binary. Output lands in `~/Library/Logs/petrobrain-status-page.log`.
+
+**launchd, not the cloud-routine mechanism**, for three reasons worth keeping: `StartCalendarInterval`
+is local wall-clock, so 05:00 survives DST without intervention where a UTC cron would have drifted
+an hour in October; a job missed while the Mac slept fires on wake; and it runs as the user, which
+is what allows republishing the artifact to the existing URL at all.
+
+Running by hand is still the normal path during a working session — the scheduled job is for days
+nobody regenerates it.
+
 ## Finishing
 
 1. Commit the regenerated `docs/status/petrobrain-status.html` on `main`, with a commit message
