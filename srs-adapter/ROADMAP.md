@@ -123,15 +123,30 @@ body-side view and the slice numbering both files share.
   already-transcribed `PlayerUtterance` records and never sees audio. Full design:
   `plans/inbound-speech/plan.md`.
 
-  - [x] **Stage 1 — the recognition bench. STOP/GO GATE.** `stt_engine.py` (`STTEngine` +
-    `WhisperCliEngine` + `WindowsSpeechEngine`), `vocabulary.py` (a hand-synced mirror of the
-    15-token vocabulary), and `tools/stt_bench.py`. **Not yet run against real recordings** — the
-    corpus is the user's own voice and does not exist yet (`tools/stt_bench.py`'s own docstring has
-    the recording instructions and `--list-prompts`); neither engine's exact CLI/JSON contract was
-    verified against a live binary while building this (no `whisper-cli` and no Windows box in this
-    environment) — both are written from each tool's public documented surface, and the bench run
-    itself is what validates or corrects them. **The stop/go read is still pending** the user
-    recording a corpus and running the bench for real; nothing past this stage should start first.
+  - [x] **Stage 1 — the recognition bench. STOP/GO GATE: PASSED** (2026-09-19, user: *"this
+    clears the gate"*). `stt_engine.py`, `vocabulary.py`, `tools/stt_bench.py`, plus
+    `tools/record_corpus.py` for building the corpus.
+
+    **99.2% top-1 on 252 clips of the user's own voice**, `ggml-small.en` with `--prompt`; the two
+    remaining errors are both safe misses (no match → "say again"), not wrong commands.
+
+    **Accent was never the limiting factor** — every gain came from tooling. 55.6% first run, but
+    that was a recorder bug truncating 0.256s off every clip (sox's output buffer, discarded on
+    terminate), which arrived at the bench dressed as an accent problem. 90.5% once recording was
+    fixed, 98.4% with `--prompt`, 99.2% after collapsing whisper's repetition loops.
+
+    Settled here, with full reasoning in `plans/inbound-speech/plan.md` and
+    `research/2026-09-19-whisper-model-sweep.md`:
+    - **`small.en`**, chosen on unsafe-error count rather than accuracy — lightest model with zero
+      wrong-command errors (`tiny.en` seven, `base.en` two).
+    - **`--prompt`, never `--grammar`**: a grammar cannot decline, so its failures are confident
+      wrong commands (31.7%, including "watch nearest air defence" → "what do you see" at 0.82).
+    - **Confidence bands are viable, but only prompted** — correct 0.82 vs both failures at 0.58
+      and 0.66. This is what Stage 2's "say again" trigger should use.
+
+    Vocabulary grew to 39 tokens during this stage: `report`/`stop`/`say again`, the wake word and
+    `nevermind` for two-tier routing, and numeric bearings as a parsed slot with 5° resolution
+    acting as a checksum on recognition.
   - [ ] Stage 2 — the matcher and the command path, driven by typed text.
   - [ ] Stage 3 — recognition as a service, and body-layer's inbound wiring.
   - [ ] Stage 4 — Windows capture.
