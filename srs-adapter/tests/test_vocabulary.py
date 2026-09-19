@@ -14,6 +14,7 @@ from __future__ import annotations
 from vocabulary import (
     LEGACY_F10_TOKENS,
     PHRASES,
+    ROUTING_TOKENS,
     TOKENS,
     VOICE_ONLY_TOKENS,
     normalize_for_match,
@@ -24,7 +25,7 @@ from vocabulary import (
 )
 
 
-def test_tokens_is_the_two_groups_with_no_overlap() -> None:
+def test_tokens_is_the_groups_with_no_overlap() -> None:
     """No assertion on how many tokens exist, deliberately.
 
     An earlier version pinned the count at 15 to guard a mirror of the
@@ -35,7 +36,7 @@ def test_tokens_is_the_two_groups_with_no_overlap() -> None:
     nothing. What still matters is structural: the groups are disjoint
     and nothing is duplicated.
     """
-    assert TOKENS == LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS
+    assert TOKENS == LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS + ROUTING_TOKENS
     assert not set(LEGACY_F10_TOKENS) & set(VOICE_ONLY_TOKENS)
     assert len(set(TOKENS)) == len(TOKENS), "TOKENS must not contain duplicates"
 
@@ -136,3 +137,41 @@ def test_every_phrase_normalizes_to_a_unique_token() -> None:
     for token in TOKENS:
         for phrase in PHRASES[token]:
             assert index[normalize_for_match(phrase)] == token
+
+
+def test_routing_tokens_are_not_commands() -> None:
+    """Routing tokens must stay separable from dispatchable commands.
+
+    `wake_petrovich` and `cancel_nevermind` are recognised and measured
+    like any other token, but dispatching either as a command would be a
+    bug -- one selects which interpreter handles the transmission, the
+    other retracts it. Keeping them in their own tuple is what lets a
+    consumer tell the two kinds apart without a name-prefix convention.
+    """
+    assert set(ROUTING_TOKENS).isdisjoint(LEGACY_F10_TOKENS)
+    assert set(ROUTING_TOKENS).isdisjoint(VOICE_ONLY_TOKENS)
+    for token in ROUTING_TOKENS:
+        assert token in TOKENS
+        assert PHRASES[token]
+
+
+def test_wake_word_has_bare_and_greeted_forms() -> None:
+    """Both forms get said, often in one sortie, so both must be heard."""
+    phrasings = PHRASES["wake_petrovich"]
+    assert any(p == "petrovich" for p in phrasings)
+    assert any(p.endswith("petrovich") and p != "petrovich" for p in phrasings)
+
+
+def test_stop_and_nevermind_are_distinct_tokens() -> None:
+    """They look similar and behave oppositely in time.
+
+    `stop_talking` interrupts Petrovich the moment it is recognised;
+    `cancel_nevermind` retracts the player's own transmission and can
+    only be acted on once that transmission closes. Collapsing them --
+    or letting normalization fold one onto the other -- would make an
+    interrupt retract a command, or a retraction silence the crew.
+    """
+    assert normalize_for_match("stop") != normalize_for_match("nevermind")
+    index = normalized_phrase_index()
+    assert index[normalize_for_match("stop")] == "stop_talking"
+    assert index[normalize_for_match("nevermind")] == "cancel_nevermind"

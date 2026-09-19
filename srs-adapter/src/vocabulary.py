@@ -98,14 +98,41 @@ _CLOCK_WORDS: dict[int, str] = {
 #: Commands with no F10 equivalent -- the first vocabulary this project
 #: added for voice on its own terms rather than by transcribing a menu.
 VOICE_ONLY_TOKENS: tuple[str, ...] = (
-    ("report_all", "stop_talking")
+    ("report_all", "stop_talking", "say_again")
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
 )
 
-#: Every token the recogniser should admit. This, not either subgroup, is
+#: Tokens that route or retract a transmission rather than commanding
+#: anything (user direction, 2026-09-19). They are listed here because the
+#: recogniser must hear them and the bench must measure them, but nothing
+#: downstream should ever dispatch them as commands -- see each entry's
+#: phrasing note below, and `plans/inbound-speech/plan.md` for the tiering
+#: design they belong to.
+#:
+#: `wake_petrovich` is the tier discriminator: a transmission beginning
+#: with it is free speech for the brain layer, and one without it is a
+#: command matched against this vocabulary. **Its two failure modes are
+#: not symmetric.** A false wake sends a command to the brain, which can
+#: interpret a command phrasing perfectly well -- the cost is latency. A
+#: missed wake sends free speech to the command matcher, which will
+#: fuzzy-match it onto *something* and execute a wrong action. So
+#: detection should lean toward waking, and the bench's job is to say how
+#: often this word survives at all: it is a Russian name spoken with a
+#: Finnish accent, which is the least favourable case in the whole
+#: vocabulary.
+#:
+#: `cancel_nevermind` retracts the transmission it ends. Its existence is
+#: what forbids acting on a command before the transmission closes, since
+#: the last word can withdraw everything before it. `stop_talking` is the
+#: deliberate exception -- it interrupts Petrovich's speech rather than
+#: issuing a command, so it must act on recognition rather than waiting
+#: for release.
+ROUTING_TOKENS: tuple[str, ...] = ("wake_petrovich", "cancel_nevermind")
+
+#: Every token the recogniser should admit. This, not any subgroup, is
 #: what the grammar, the bench and Stage 2's matcher are built from.
-TOKENS: tuple[str, ...] = LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS
+TOKENS: tuple[str, ...] = LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS + ROUTING_TOKENS
 
 #: Spoken phrasings per token. Every token has at least two phrasings so
 #: the bench (and later, Stage 2's matcher) sees more than one way of
@@ -142,6 +169,24 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # rather than committing to "stop" and discovering the problem in
     # the cockpit.
     "stop_talking": ("stop", "stop talking", "quiet"),
+    # Standard aviation practice, and deliberately bidirectional: the
+    # player says it when he missed what Petrovich said, and Petrovich
+    # says it when recognition confidence falls below the band Stage 1's
+    # bench measures. Asking beats both guessing and silence -- a crew
+    # member who did not catch something says so.
+    "say_again": ("say again", "repeat", "repeat that"),
+    # Routing, not commands -- see ROUTING_TOKENS.
+    #
+    # The wake word carries both the bare and the greeted form because a
+    # player says both, often in the same sortie. It is also the one
+    # entry here whose *misses* matter more than its confusions, so the
+    # bench's per-clip listing is worth reading for this token even if
+    # the headline accuracy looks acceptable.
+    "wake_petrovich": ("petrovich", "hey petrovich"),
+    # "disregard" is the formal radio equivalent and costs one more
+    # recording to find out which of the three actually survives this
+    # speaker's accent.
+    "cancel_nevermind": ("nevermind", "never mind", "disregard"),
 }
 
 #: `report <compass>` -- the same eight directions `scan_bearing_*` uses,
