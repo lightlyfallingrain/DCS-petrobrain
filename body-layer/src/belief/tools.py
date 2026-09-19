@@ -616,15 +616,32 @@ def acknowledge_event(store: ContactStore, event_id: str) -> bool:
     return store.acknowledge_event(event_id)
 
 
+def _estimated_units_lower_bound(store: ContactStore) -> int:
+    """The honest floor on total unit count (`plans/group-contact-model/
+    plan.md` Stage 4b, Sec 6) -- sum of every contact's own cardinality
+    floor (`Contact.cardinality.lo`). Deliberately a lower bound, not a
+    point estimate: summing `.hi` is not meaningful when any contact holds
+    `OP_MORETHAN15UNITS` (`hi == math.inf`), and reporting a floor rather
+    than a guessed midpoint matches this stage's hedged-register posture
+    (`belief.speech`'s Stage 4b vocabulary) -- "at least this many units,"
+    never a fabricated precise total."""
+    return sum(contact.cardinality.lo for contact in store.contacts)
+
+
 def get_stats(store: ContactStore) -> dict[str, int]:
     """Observation/contact/event counts -- for measuring stream volume
     live, per the plan's Stage 4 acceptance and the PB-1.5 backlog note on
     needing this for calibration (`plans/pb2-contact-memory/plan.md`'s Risks
-    & Unknowns, "Observation volume under `every_poll`")."""
+    & Unknowns, "Observation volume under `every_poll`"). `estimated_units`
+    (Stage 4b) is a separate figure from `contacts`: `contacts` counts
+    distinct tracked *records*, `estimated_units` is the honest floor on how
+    many units those records represent (`_estimated_units_lower_bound`) --
+    not the same number, both useful side by side."""
     return {
         "observations": len(store.observations),
         "contacts": len(store.contacts),
         "events": len(store.events),
+        "estimated_units": _estimated_units_lower_bound(store),
     }
 
 
@@ -774,6 +791,14 @@ def get_situation(
     reason as `describe_our_position`'s -- this tool has no meaning without
     ownship/world-model access.
 
+    `facts["estimated_units"]` (`plans/group-contact-model/plan.md` Stage
+    4b, Sec 6) is a new top-level key, a sibling of `contact_counts` rather
+    than nested inside it -- `contact_counts` keeps its existing
+    `{total, visible, watched}` shape and meaning unchanged (record counts,
+    not unit counts), verified against the existing exact-dict-equality
+    tests before choosing this shape. `summary` is unchanged -- wording
+    fixes are out of this stage's scope (settled decision 5).
+
     `mission_phase_tracker` (BL-7, optional) adds `facts["mission_phase"]`:
     **absent entirely** when no tracker is supplied (no mission data
     loaded -- the same absent-not-empty convention this module already
@@ -798,6 +823,7 @@ def get_situation(
 
     facts: dict[str, object] = {
         "contact_counts": {"total": total, "visible": visible, "watched": watched},
+        "estimated_units": _estimated_units_lower_bound(store),
         "unacknowledged_events": unacknowledged,
         "our_position_summary": our_position["summary"],
     }

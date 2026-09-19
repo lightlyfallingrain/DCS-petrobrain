@@ -362,7 +362,17 @@ subproject-needed dev path.
   declared since BL-2 and never read — decays `Contact.classification.confidence` only, never
   `.level`, which stays sticky by design — see `classification.py`'s entry below),
   `events.py` (`CONTACT_DETECTED`/`CONTACT_LOST`/
-  `CONTACT_REACQUIRED`/`CONTACT_CLASSIFICATION_CHANGED` derivation). `tools.py` (BL-2 Stage 4) —
+  `CONTACT_REACQUIRED`/`CONTACT_CLASSIFICATION_CHANGED` derivation, `CONTACT_CARDINALITY_CHANGED`
+  added `plans/group-contact-model/plan.md` Stage 4b — `cardinality_event`, `classification_event`'s
+  flat-comparison twin over `Contact.cardinality`'s `(lo, hi)` snapshot rather than a
+  `ClassificationBelief`; `Event.previous_cardinality`/`cardinality` are plain `(lo, hi)` pairs, not
+  `CardinalityBelief` itself. `ContactStore.tick` wires it between the classification and attention
+  blocks — **lifecycle → classification → cardinality → attention** — reusing `EVENT_COOLDOWN_S`/
+  `_cooldown_elapsed` unchanged, no new suppression mechanism; `Contact.last_emitted_cardinality` is
+  `last_emitted_classification`'s direct twin. `belief.speech.route_event` gives this kind no
+  template, joining `CONTACT_LOST`/`CONTACT_ATTENTION_CHANGED`'s pattern — settled decision 4: a bare
+  cardinality move is not worth interrupting for at this stage's hedged register; the event is still
+  logged and visible to `poll_events`/the debug console). `tools.py` (BL-2 Stage 4) —
   the brain-facing query API's body, minus a transport: `get_contacts`/`describe_contact`/
   `get_contact_history`/`find_contact` return `plans/body-layer/plan.md` §3.4's
   `{facts, summary, phrasing_hints}` triple, plus `watch_contact`/`unwatch_contact`/`get_stats`
@@ -380,6 +390,18 @@ subproject-needed dev path.
   a real claim at founding, so this is reachable only via a contradiction hull wide enough to span
   everything, not the common case. No `bucket_name` key: a folded interval (an intersection or a
   contradiction hull) need not match any one named `CountBucket`, so a name isn't always derivable.
+  `_estimated_units_lower_bound` (Stage 4b, Sec 6, private — no `console.py` caller of its own, only
+  `get_stats`/`get_situation`/`escalation._situational_header` consume it, so it follows
+  `_cardinality_facts`/`_classification_facts`'s leading-underscore convention rather than
+  `get_stats`' own public one) — the honest floor on total unit count, `sum(contact.cardinality.lo
+  for contact in store.contacts)`, deliberately a lower bound rather than a point estimate (summing
+  `.hi` is meaningless once any contact holds `OP_MORETHAN15UNITS`, `hi == math.inf`). `get_stats`
+  gains `estimated_units` as a fourth key alongside `observations`/`contacts`/`events` — `contacts`
+  keeps its existing record-count meaning, `estimated_units` is a different, additional figure, not
+  a replacement. `get_situation` gains `facts["estimated_units"]` as a **new sibling top-level key**,
+  not nested inside `facts["contact_counts"]` — that dict's existing `{total, visible, watched}`
+  shape and every exact-equality test asserting it are unchanged; `summary` is untouched (wording
+  fixes are out of this stage's scope, per the design's settled decision 5).
   `console.py` (BL-2 Stage 4) — a line parser + pretty-printer over `tools.py`, owning no belief
   logic of its own; every command (`contacts`, `show <id>`, `history <id>`, `find <text>`,
   `watch <id>`/`unwatch <id>`, `stats`) dispatches 1:1 into a `tools.py` function. `Console` carries
@@ -553,7 +575,35 @@ subproject-needed dev path.
   `type` level. The semantic fragment is the highest-confidence `belief.enrichment.SemanticFact.text`
   among `facts["semantic"]`, mirroring `belief.console.format_event_for_overlay`'s own selection;
   omitted (not "unknown") when no `EnrichmentContext` was supplied or no semantic facts exist, same
-  absent-not-null convention as clock/range. `route_event` accepts `belief.events.Event | UrgentCall`
+  absent-not-null convention as clock/range. **The count clause (`plans/group-contact-model/plan.md`
+  Stage 4b)** — a plural `Contact.cardinality` prepends a hedged quantity word ahead of the unit
+  type: `_cardinality_phrase(lo, hi)` reads interval magnitude directly (never a `CountBucket` name,
+  since a folded interval need not match one) — `None` (no clause) for an exactly-one interval,
+  `"many"` for `lo >= 16`, `"a handful"` for `OP_TO5UNITS` exactly, `"several"` for everything else
+  plural including any non-named fold-derived interval. **Never an exact number** — precision needs
+  a caller holding an actual question, and none exists yet (settled decision 2); this vocabulary is
+  structurally incapable of pairing a precise count with a vague class or vice versa (settled
+  decision 3), since one side of that pairing never happens. `_plural_unit_type_display` is
+  `_unit_type_display`'s plural sibling (`_OP_CLASS_DISPLAY_PLURAL`, its own table, no
+  `"OP_GROUPSOMETHING"` entry either) — `type` level stays unpluralized on purpose (a raw DCS type
+  string has no general pluralization rule, and inventing one is exactly the wording-fix class of
+  work settled decision 5 keeps out of this stage); the presence/fallback branch returns
+  `"contacts"`, not `_unit_type_display`'s `"ground"`/`"contact"` split. `_contact_report_text` gains
+  one guard at its top (`facts.get("cardinality")` → `_cardinality_phrase`); on the singular path
+  (absent, or a `(1, 1)` interval) it calls the exact same `_unit_type_display` with the exact same
+  arguments and executes no new code — the regression guard every pre-existing test in this module
+  is. Reaches `render_contact_report`, `CONTACT_DETECTED`/`CONTACT_REACQUIRED`, and
+  `render_watch_nearest_readback` for free (all three call `_contact_report_text` directly);
+  `CONTACT_CLASSIFICATION_CHANGED` does **not** gain it, by construction — it builds its own line
+  directly from `_unit_type_display`, never through `_contact_report_text` (settled decision 4: a
+  classification-change callout volunteering count chatter on an event about something else would be
+  exactly the unrequested cardinality narration that decision warns against). `_OP_CLASS_
+  DISPLAY["OP_GROUPSOMETHING"]` was **removed** at this stage — dead code, not a live mis-statement:
+  `classification._op_class_of` already excludes `DEFAULT_OP_CLASS` from ever being returned as a
+  class-level value, so a `class`-level classification can never hold that value; a presence-level
+  contact already says `"ground"` unconditionally, which is what disambiguates it now, structurally,
+  not a dict entry. `route_event` gives `CONTACT_CARDINALITY_CHANGED` (`belief.events`) no template
+  either — see that module's own entry above. `route_event` accepts `belief.events.Event | UrgentCall`
   and checks which one it got *before* anything else — an `UrgentCall` (Stage 5's manual bypass-gate
   test harness, constructed only by `crew_console.py`'s `!inject-urgent` command; no real
   threat-detection channel exists) speaks immediately with `bypass_gate=True`, no ack/cooldown
@@ -569,7 +619,10 @@ subproject-needed dev path.
   `BrainClient` (a two-method `Protocol` for a later `ask_player` round trip). `situational_header`
   is a documented stand-in (`{contact_counts, our_position}`, `our_position` present only when an
   `EnrichmentContext` is supplied) — §3.5's "D2 header" is a design discussion, not a data-model
-  entry, and no code builds the real header yet. `NullBrainClient` does nothing (the honest "no
+  entry, and no code builds the real header yet. `estimated_units` (`plans/group-contact-model/
+  plan.md` Stage 4b) is unconditional, unlike `our_position` — `belief.tools.
+  _estimated_units_lower_bound(store)` needs no ownship data; `contact_counts` keeps its existing
+  bare-int shape unchanged. `NullBrainClient` does nothing (the honest "no
   brain yet" behaviour — §3.5: "if the brain does nothing, body says nothing"); `DebugPrintBrainClient`
   additionally prints the payload to stderr for session visibility, still producing no spoken output.
 - `src/belief/crew_console.py` (BL-5a) — `CrewConsole`, the typed-input/printed-output player-facing
@@ -652,6 +705,15 @@ subproject-needed dev path.
   `logger.py` gains `--mission-understanding PATH` to load it. `key_locations` (MI-6's
   `CompactLocation`) carries no position field, so relevance can only be scored against route
   waypoints, not named mission-critical areas — a real, documented gap, not worked around.
+- `tools/speak_samples.py` — a dev acceptance aid, not a test: renders sample crew callouts through
+  `belief.speech`'s real functions and can POST each to a running `srs-adapter --target local` so
+  phrasing is *heard* rather than read. It exists because accepting a speech change through the real
+  `--crew-text` pipeline needs a live aircraft layer and therefore the Windows box, which would gate
+  a phrasing judgement on hardware access. Assertion-free by design — it is for a human ear, which
+  is the one thing the suite cannot be. It found `"a handful trucks"` (a missing connector) on its
+  first run, while every unit test of the phrase itself was passing, because the defect existed only
+  in the composed sentence. Needs both `PYTHONPATH` entries and this subproject's own interpreter,
+  same as the live logger.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a
