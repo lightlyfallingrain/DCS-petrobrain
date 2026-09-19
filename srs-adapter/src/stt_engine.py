@@ -143,11 +143,13 @@ class WhisperCliEngine:
         model_path: str = "",
         grammar_path: str | None = None,
         grammar_penalty: float | None = None,
+        prompt: str | None = None,
     ) -> None:
         self._binary_path = binary_path
         self._model_path = model_path
         self._grammar_path = grammar_path
         self._grammar_penalty = grammar_penalty
+        self._prompt = prompt
 
     @staticmethod
     def is_available(binary_path: str = DEFAULT_WHISPER_BINARY) -> bool:
@@ -189,6 +191,12 @@ class WhisperCliEngine:
                 out_base,
                 "--no-timestamps",
             ]
+            if self._prompt is not None:
+                # Soft bias, unlike --grammar: makes these words more
+                # likely without making anything else impossible, so a
+                # mishearing still comes back looking wrong instead of
+                # arriving as a confident in-vocabulary command.
+                command += ["--prompt", self._prompt]
             if self._grammar_path is not None:
                 # `--grammar-rule` is NOT optional, despite whisper-cli's
                 # own `--help` showing an empty default. Verified against

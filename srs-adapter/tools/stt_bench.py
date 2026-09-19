@@ -106,6 +106,7 @@ from vocabulary import (
     normalized_phrase_index,
     spoken_phrases,
     to_gbnf,
+    to_prompt,
 )
 
 #: `difflib.get_close_matches`' cutoff for mapping raw recognizer text back
@@ -354,6 +355,15 @@ def main() -> None:
     parser.add_argument("--whisper-binary", default="whisper-cli")
     parser.add_argument("--whisper-model", default="")
     parser.add_argument(
+        "--with-grammar",
+        action="store_true",
+        help="also run the constrained-decoding row. Off by default: a "
+        "grammar cannot decline, so a mishearing arrives as a confident "
+        "wrong command rather than a detectable miss (measured at 31.7%% "
+        "on this project's corpus, including 'watch nearest air defence' "
+        "read as 'what do you see' at confidence 0.82)",
+    )
+    parser.add_argument(
         "--grammar-penalty",
         type=float,
         default=None,
@@ -390,10 +400,20 @@ def main() -> None:
         no_grammar_engine = WhisperCliEngine(
             binary_path=args.whisper_binary, model_path=args.whisper_model
         )
-        results = run_engine("whisper.cpp (no grammar)", no_grammar_engine, corpus)
-        print_report("whisper.cpp (no grammar)", results)
+        results = run_engine("whisper.cpp (plain)", no_grammar_engine, corpus)
+        print_report("whisper.cpp (plain)", results)
+
+        prompted_engine = WhisperCliEngine(
+            binary_path=args.whisper_binary,
+            model_path=args.whisper_model,
+            prompt=to_prompt(),
+        )
+        results = run_engine("whisper.cpp (--prompt)", prompted_engine, corpus)
+        print_report("whisper.cpp (--prompt)", results)
         ran_any = True
 
+        if not args.with_grammar:
+            return
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".gbnf", delete=False
         ) as grammar_file:
