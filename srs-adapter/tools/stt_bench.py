@@ -38,6 +38,13 @@ Run `stt_bench.py --list-prompts` to print exactly what to say for every
 token (all of `vocabulary.PHRASES`' phrasings) and where to save each
 recording.
 
+`tools/record_corpus.py` builds that layout for you -- it prompts for each
+phrase in turn, records a fixed window via `sox`, and files the result
+under the right token. Preferred over recording by hand: the corpus is
+over a hundred clips, and hand-recording them reliably thins out toward
+the end, which is where the bearing tokens (the most confusable group)
+happen to sit.
+
 **What to record and how many repetitions:** every phrasing listed for
 every token, at least 3-5 times each, spread across more than one sitting
 if convenient. Ideally with the headset that will actually be used in the
