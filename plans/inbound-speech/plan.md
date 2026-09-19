@@ -516,6 +516,56 @@ friction the user feels at the start of every session.
 
 ---
 
+### Two-tier routing (user direction, 2026-09-19) — DESIGN NOTE, NOT YET PLANNED
+
+A later direction changes the shape of everything after recognition, though not Stage 1 itself.
+Speech is no longer one thing:
+
+- **"(hey,) Petrovich ..."** — free speech, routed to the brain layer for interpretation.
+- **Anything else** — a command, matched against this vocabulary.
+- **"... nevermind"** at the end — retract the whole transmission.
+- **"say again"** — bidirectional, standard aviation practice.
+
+**The decode strategy is already settled by evidence, not preference.** A constrained grammar
+cannot transcribe free speech, so routing cannot happen after a grammar decode. Of the three ways
+out — free-decode then route, decode twice, or a grammar with a permissive free-text branch — the
+last two are ruled out by `research/2026-09-19-whisper-contract-and-grammar-probe.md`: grammar at
+whisper's default penalty scored 50% on a synthetic corpus and collapsed long phrases into
+fragments, so a permissive branch would be worse, and double-decoding doubles latency on a
+push-to-talk path. **Free decode always, route on the transcript, fuzzy-match commands from text**
+— which is what `tools/stt_bench.py` already measures, so Stage 1's numbers apply to the tiered
+design unchanged.
+
+Four consequences, each with a reason:
+
+1. **Wake-word detection must lean toward waking.** The failure modes are not symmetric. A false
+   wake sends a command to the brain, which can interpret a command phrasing perfectly well — the
+   cost is latency. A missed wake sends free speech to the command matcher, which fuzzy-matches it
+   onto *something* and executes a wrong action. Bias the threshold accordingly.
+
+2. **Match the wake word fuzzily, never by equality.** Probed on synthetic speech, `ggml-base.en`
+   returns "Petrovitch" where `ggml-small.en` returns "Petrovich" — and that is before any accent
+   is involved. An equality test would fail open on the more common model.
+
+3. **Nothing may execute before the transmission closes.** "Nevermind" can retract everything said
+   before it, so a command has to wait for PTT release rather than firing as soon as it is
+   recognised. This forbids incremental execution outright.
+
+4. **`stop_talking` is the deliberate exception to (3).** It interrupts Petrovich's speech rather
+   than issuing a command, so waiting for release would defeat it. Two timing rules, and the split
+   is along what the word acts on: `stop` targets Petrovich's output, every command targets the
+   world.
+
+`say again` in the Petrovich→player direction is where Stage 1's confidence distribution is spent:
+below the band, ask instead of guessing or sitting silent. That makes the bench's confidence column
+a source for a real constant rather than a report decoration.
+
+**Not planned here.** The vocabulary and corpus coverage for all of this exist as of Stage 1
+(`wake_petrovich`, `cancel_nevermind`, `say_again`), because re-recording a corpus is the expensive
+part and adding tokens to it now is nearly free. The routing itself, the brain-layer handoff, the
+transmission buffer and the repeat-last-utterance store are Stage 2-and-later work and need their
+own architect pass.
+
 ### Settled Decisions (user, 2026-09-19)
 
 **1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a

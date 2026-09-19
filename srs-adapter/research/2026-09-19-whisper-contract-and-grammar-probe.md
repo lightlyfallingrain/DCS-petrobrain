@@ -79,3 +79,29 @@ confusions.
 Nothing here involves the user's voice, his headset, or his accent, and synthetic `say` audio is
 unrealistically clean. The accent question — the entire point of Stage 1's gate — remains open
 until the real corpus is recorded on the Windows box.
+
+## Addendum: the wake word and the routing tokens
+
+Probed after the two-tier direction (same synthetic-speech caveat — nothing here is the user's
+voice).
+
+| said | `base.en` | `small.en` |
+|---|---|---|
+| "petrovich" | `" Petrovitch."` | `" Petrovich."` |
+| "hey petrovich" | `" Hey, Petrovich."` | `" Hey, Petrovich!"` |
+| "nevermind" | `" Never mind."` | `" Nevermind."` |
+| "say again" | `" Say again."` | `" Say again."` |
+| "petrovich what do you see out there" | full sentence, prefix intact | full sentence, prefix intact |
+
+Three things follow.
+
+**The wake word survives, but its spelling does not.** `base.en` writes "Petrovitch" where
+`small.en` writes "Petrovich". Prefix detection must be fuzzy on spelling; an equality test would
+fail open on the more common model, and that is before any accent is involved.
+
+**"nevermind" splits into two words on one model and not the other**, which is why both spellings
+are carried as phrasings rather than one being treated as canonical.
+
+**Free decode routes cleanly.** The free-speech case transcribed as a complete sentence with the
+prefix intact on both models, confirming that a single unconstrained pass is enough to both detect
+the tier and hand the brain layer usable text — no second decode, no grammar branch.
