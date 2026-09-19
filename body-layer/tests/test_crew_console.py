@@ -25,6 +25,7 @@ from belief.enrichment import EnrichmentContext
 from belief.escalation import EscalationPayload
 from belief.srs_client import SrsAdapterError
 from belief.tasks import TaskStore
+from belief.voice_commands import ACT_FLOOR, CONFIRM_FLOOR, CONFIRM_WINDOW_S
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -939,3 +940,315 @@ def test_cancel_task_names_a_bearing_scan_by_its_compass_word() -> None:
     lines = console.handle_f10_command("cancel_task", now_sim=1.0)
 
     assert lines == ["Copy, stopping the scan southeast."]
+
+
+# --- Stage 2 of plans/inbound-speech/plan.md: handle_transcript ------------
+
+
+def test_handle_transcript_fallthrough_uses_handle_line_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Behaviour #4: `verb_anchored=False` falls through to the exact same
+    path a typed line takes -- proven here by checking the stand-in brain
+    client actually received the escalation, not just that the returned
+    lines happen to match."""
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=ContactStore(), brain_client=brain_client)  # type: ignore[arg-type]
+
+    lines = console.handle_transcript(
+        "completely unrelated free speech",
+        confidence=0.95,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == []
+    assert len(brain_client.payloads) == 1
+    assert brain_client.payloads[0].transcript == "completely unrelated free speech"
+
+
+def test_handle_transcript_acts_above_act_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+
+    lines = console.handle_transcript(
+        "scan ahead",
+        confidence=1.0,
+        token="scan_ahead",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == ["Scanning ahead."]
+    assert len(tasks.tasks) == 1
+
+
+def test_handle_transcript_confirm_band_asks_and_holds_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+
+    lines = console.handle_transcript(
+        "scan ahead",
+        confidence=1.0,
+        token="scan_ahead",
+        match_ratio=combined,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == ["Scan ahead, confirm?"]
+    # Nothing actually executed yet.
+    assert tasks.tasks == []
+
+
+def test_handle_transcript_ambiguous_always_confirms() -> None:
+    console = CrewConsole(store=ContactStore())
+
+    lines = console.handle_transcript(
+        "scan est",
+        confidence=1.0,
+        token="scan_bearing_e",
+        match_ratio=0.99,
+        verb_anchored=True,
+        ambiguous=True,
+        now_sim=0.0,
+    )
+
+    assert lines == ["Scan east, confirm?"]
+
+
+def test_handle_transcript_says_again_below_confirm_floor() -> None:
+    console = CrewConsole(store=ContactStore())
+
+    lines = console.handle_transcript(
+        "garbled",
+        confidence=1.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == ["Say again?"]
+
+
+def test_handle_transcript_confirm_then_affirm_commits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    console.handle_transcript(
+        "scan ahead",
+        confidence=1.0,
+        token="scan_ahead",
+        match_ratio=combined,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    # The affirm answer's own match fields are irrelevant -- the pending
+    # check runs before any of them are consulted.
+    lines = console.handle_transcript(
+        "roger",
+        confidence=0.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+
+    assert lines == ["Scanning ahead."]
+    assert len(tasks.tasks) == 1
+
+
+def test_handle_transcript_confirm_then_negative_discards_silently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    console.handle_transcript(
+        "scan ahead",
+        confidence=1.0,
+        token="scan_ahead",
+        match_ratio=combined,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    lines = console.handle_transcript(
+        "negative",
+        confidence=0.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+
+    assert lines == []
+    assert tasks.tasks == []
+
+
+def test_handle_transcript_confirm_then_unrelated_answer_discards_and_processes_new(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Anything else... discards silently" (Decision 4 Layer 3) discards
+    the *stale question*, not the player's new utterance -- the second
+    transcript here is a fresh, fully-matched command and must still be
+    acted on."""
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    console.handle_transcript(
+        "scan ahead",
+        confidence=1.0,
+        token="scan_ahead",
+        match_ratio=combined,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    lines = console.handle_transcript(
+        "watch nearest",
+        confidence=1.0,
+        token="watch_nearest",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+
+    # Only the fresh command's own effect fired -- the stale "scan ahead"
+    # confirm never silently executed.
+    assert lines == ["no contact to watch"]
+    assert tasks.tasks == []
+
+
+def test_handle_transcript_confirm_expires_after_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    console.handle_transcript(
+        "scan ahead",
+        confidence=1.0,
+        token="scan_ahead",
+        match_ratio=combined,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    lines = console.handle_transcript(
+        "roger",
+        confidence=0.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=CONFIRM_WINDOW_S + 1.0,
+    )
+
+    # The window elapsed -- "roger" is no longer answering anything, and
+    # (verb_anchored=False here) falls through instead of committing.
+    assert lines == []
+    assert tasks.tasks == []
+
+
+def test_handle_transcript_cancel_task_needs_the_higher_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    assert len(tasks.tasks) == 1
+
+    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2  # clears ACT_FLOOR, not ACT_FLOOR_CANCEL
+    lines = console.handle_transcript(
+        "cancel",
+        confidence=1.0,
+        token="cancel_task",
+        match_ratio=combined,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+
+    assert lines == ["Cancel the task, confirm?"]
+    # Not actually cancelled yet.
+    assert tasks.tasks[0].status == "pending"
+
+
+def test_voice_repl_harness_drives_the_same_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+
+    lines = console.handle_line("!voice scan_ahead 1.0 1.0 1 0 scan ahead", now_sim=0.0)
+
+    assert lines == ["Scanning ahead."]
+    assert len(tasks.tasks) == 1
+
+
+def test_voice_repl_harness_no_match_token() -> None:
+    console = CrewConsole(store=ContactStore())
+    lines = console.handle_line("!voice - 0.0 1.0 1 0 garbled nonsense", now_sim=0.0)
+    assert lines == ["Say again?"]
+
+
+def test_voice_repl_harness_reports_usage_on_bad_input() -> None:
+    console = CrewConsole(store=ContactStore())
+    lines = console.handle_line("!voice not enough args", now_sim=0.0)
+    assert lines[0].startswith("usage: !voice")
