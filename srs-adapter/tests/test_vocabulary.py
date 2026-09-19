@@ -13,12 +13,16 @@ from __future__ import annotations
 
 from vocabulary import (
     LEGACY_F10_TOKENS,
+    LEGAL_BEARINGS_DEG,
     PHRASES,
     ROUTING_TOKENS,
     TOKENS,
     VOICE_ONLY_TOKENS,
+    bearing_digits,
+    bearing_phrase,
     normalize_for_match,
     normalized_phrase_index,
+    parse_bearing,
     spoken_phrases,
     to_gbnf,
     token_for_phrase,
@@ -175,3 +179,79 @@ def test_stop_and_nevermind_are_distinct_tokens() -> None:
     index = normalized_phrase_index()
     assert index[normalize_for_match("stop")] == "stop_talking"
     assert index[normalize_for_match("nevermind")] == "cancel_nevermind"
+
+
+def test_bearing_digits_are_always_three() -> None:
+    assert bearing_digits(320) == "three two zero"
+    assert bearing_digits(5) == "zero zero five"
+    assert bearing_digits(0) == "zero zero zero"
+
+
+def test_parse_bearing_accepts_digits_and_words_interchangeably() -> None:
+    """Recognizers mix the two freely, sometimes within one clip."""
+    for text in (
+        "scan bearing three two zero",
+        "scan bearing 320",
+        "scan bearing 3 2 0",
+    ):
+        assert parse_bearing(text).degrees == 320
+
+
+def test_bearing_resolution_rejects_impossible_values() -> None:
+    """The 5 degree step is a checksum, and this is the property it buys.
+
+    Roughly four out of five mishearings land on a number that cannot be
+    a real bearing. Returning those as `heard` without `degrees` lets the
+    caller ask the player to say again rather than turning to a heading
+    nobody said -- a wrong heading flown confidently being much worse
+    than one more readback.
+    """
+    parsed = parse_bearing("scan bearing three two one")
+    assert parsed.degrees is None
+    assert parsed.heard == 321
+
+    assert parse_bearing("scan bearing nine nine nine").degrees is None
+    assert parse_bearing("scan north").heard is None
+
+
+def test_every_legal_bearing_round_trips() -> None:
+    for degrees in LEGAL_BEARINGS_DEG:
+        assert parse_bearing(bearing_phrase("scan", degrees)).degrees == degrees
+
+
+def test_sampled_bearings_cover_every_digit() -> None:
+    """The sample exists to measure per-digit reliability, not per-bearing.
+
+    Numbers are the accent-fragile part of this vocabulary, so a sample
+    that never says "six" would leave a gap the bench cannot see.
+    """
+    spoken = "".join(
+        p for p in PHRASES["scan_bearing_deg"] + PHRASES["report_bearing_deg"]
+    )
+    for digit_name in (
+        "zero",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+    ):
+        assert digit_name in spoken, f"no sampled bearing says {digit_name!r}"
+
+
+def test_bearing_compass_phrasings_are_gone() -> None:
+    """The user does not say "scan bearing north" -- only "scan north".
+
+    Kept as a test because the phrasing looks natural in a table and
+    could easily be reinstated by someone tidying up.
+    """
+    for phrase in spoken_phrases():
+        if "bearing" in phrase:
+            assert any(
+                word in phrase
+                for word in ("zero", "one", "two", "three", "four", "five")
+            ), f"{phrase!r} pairs 'bearing' with a compass word"
