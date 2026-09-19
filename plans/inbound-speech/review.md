@@ -98,7 +98,7 @@ of the stage being solid.
   fields). Worth folding into the plan doc itself so Decision 6 stops reading as authoritative when
   it no longer is, but this is bookkeeping, not a code fix.
 
-### Verdict
+### Verdict (original pass)
 NEEDS REVISION
 
 The verb-anchor leak is the load-bearing safety mechanism the plan spends the most words
@@ -110,7 +110,7 @@ pass in both subprojects, tests are substantive (not decorative) and match the p
 scenarios, module boundaries and the constants split are correctly honored, and scope matches the
 plan's Stage 2 file list exactly.
 
-### Review Confidence
+### Review Confidence (original pass)
 Full read of the diff and both subprojects' new/changed files (`command_matcher.py`,
 `voice_commands.py`, `crew_console.py`'s new methods, `speech.py`'s new renders, and their test
 files), plus the two cited research docs read in full and the plan.md sections named in the task.
@@ -118,3 +118,71 @@ Constants were checked by running the actual code (`match_transcript`, `_verb_an
 against adversarial inputs, not just read. `stt_engine.py`'s large diff (Decision 1 REVISED's
 Windows-engine removal) was skimmed only — it's an earlier, already-settled decision in this same
 branch, not Stage 2's own change, and the plan's own text already records why it was removed.
+
+---
+
+### Follow-up verification (2026-09-19, `aef7f90`)
+
+Re-reviewed both fixes against the working code, not the commit messages.
+
+**Fix 1 — word-sequence scoring.** Read the rewritten `command_matcher.py` in full
+(`_phrase_match_ratio` and the asymmetric `VERB_FLOOR`(0.5) < `MATCH_FLOOR`(0.6) reasoning). Ran
+`match_transcript` live against: all 15 of the original session's false-positive fixtures (`"the
+tanks are on the ridge"`, `"look at that"`, `"watch out"`, `"full house"`, `"he said cancel"`,
+`"report card"`, `"scan me"`, `"stop that"`, etc.) plus the two real-corpus admits
+(`"skin bearing 315"` → `scan_bearing_deg`/315, `"walk ahead"` → `scan_ahead`). Every one of the
+original false positives now resolves to `token=None` (safe "say again"), and both real corpus
+commands resolve correctly — confirms the fix closes the hole without reopening the original
+VERB_FLOOR-tightening regression. Went further than re-checking the named cases: ran an 80-sentence
+adversarial sweep (every anchor-word verb × ten ordinary continuations, e.g. `"look at that
+ridge"`, `"watch out for smoke"`, `"full speed ahead captain"`) — zero unsafe hits (no unambiguous
+non-None token). `"the"` was specifically re-checked: it still anchors at 0.667 as before (verb
+floor untouched by design — the asymmetry argument is that a false anchor is cheap), but
+`"the tanks are on the ridge"` scores 0.083 against its best phrase-table candidate, nowhere near
+`MATCH_FLOOR` — confirmed by direct call, not just trusted from the comment. So "`the` anchoring is
+harmless now" holds: the claim was that the phrase score is the real defence, and that's what's
+actually rejecting it.
+
+**No constant moved quietly to compensate.** Diffed `voice_commands.py` and `command_matcher.py`
+against the pre-fix commit: `MATCH_FLOOR` is untouched at 0.6, `SEPARATION_MIN` untouched at 0.05,
+`ACT_FLOOR`/`ACT_FLOOR_CANCEL`/`CONFIRM_FLOOR`/`CONFIRM_WINDOW_S` all untouched. Only `VERB_FLOOR`
+moved (0.6 → 0.5), and a new `_WORD_REPAIR_FLOOR` (0.5) constant was added as part of the scoring
+algorithm itself, not as a compensating knob.
+
+**The `VERB_FLOOR` = 0.5 reasoning holds**, verified rather than taken on faith: the asymmetry claim
+(false anchor is cheap because the phrase score rejects it anyway; false rejection is unrecoverable)
+is exactly what the 80-sentence sweep and the 15 original fixtures confirm in practice, not just in
+prose.
+
+**Fix 2 — the citation.** `srs-adapter/research/2026-09-19-corpus-bench-results.md` (new, committed
+in `8070d6e`) was read in full: it records mean 0.82 / min 0.60 correct, failures at 0.58 and 0.66,
+under the `--prompt` row specifically — matching `ACT_FLOOR`'s comment exactly, including the new
+"holds only under `--prompt`" caveat the comment now carries. `ACT_FLOOR`'s value itself (0.60) is
+unchanged; only the citation and surrounding prose moved. I cannot independently verify this doc's
+numbers against a raw per-clip log (none is committed), but the citation now points at an actual
+dated research artifact recording the claim as data, which is what was missing before — this
+resolves the specific "unverifiable citation" defect flagged, not a request for raw-log provenance
+that was never asked for.
+
+**Optional items**: both folded in as described — Decision 6's seam table in `plan.md` now carries
+a dated correction note with the real 7-argument shape, and `plan.md`'s Stage 3 entry now has a
+concrete `stop_talking` → `_interrupt_playback` pointer.
+
+**Checks re-run directly** (not trusted from the report): srs-adapter `ruff format --check`/
+`ruff check`/`mypy --strict` (`src` + `tools/stt_bench.py`) all pass, `pytest -q` → 81 passed, 1
+skipped (matches reported). body-layer `ruff format --check`/`ruff check`/`mypy --strict` (run from
+inside `body-layer/`) all pass, `pytest -q` → 705 passed (matches reported).
+
+### Verdict
+APPROVED
+
+Both required fixes verified genuine against the working code and adversarial testing, not just
+against the stated diff or passing tests. No constant moved quietly to paper over the fix. Optional
+items were folded in as described.
+
+### Review Confidence
+Full read of `command_matcher.py`'s rewrite and the new research doc; direct execution of
+`match_transcript` against the original 15 false-positive fixtures, the two real-corpus regression
+cases, and a fresh 80-case adversarial sweep beyond what either party's fixtures covered; diffed
+every touched constant across the fix commits to confirm nothing else moved. Both subprojects' full
+check sequences re-run directly.
