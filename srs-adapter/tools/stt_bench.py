@@ -99,7 +99,14 @@ from stt_engine import (
     WhisperCliEngine,
     WindowsSpeechEngine,
 )
-from vocabulary import PHRASES, TOKENS, spoken_phrases, to_gbnf, token_for_phrase
+from vocabulary import (
+    PHRASES,
+    TOKENS,
+    normalize_for_match,
+    normalized_phrase_index,
+    spoken_phrases,
+    to_gbnf,
+)
 
 #: `difflib.get_close_matches`' cutoff for mapping raw recognizer text back
 #: onto a known phrase, for scoring purposes only. This is deliberately a
@@ -128,21 +135,48 @@ class ClipResult:
     #: whisper.cpp JSON-schema mismatch is visible in the report instead
     #: of silently inflating the confidence columns (review finding).
     confidence_is_placeholder: bool = False
+    #: `True` when the normalized text was a known phrasing verbatim;
+    #: `False` when it only matched after fuzzy repair. See
+    #: `_match_token` for why the difference is reported rather than
+    #: folded into "correct".
+    exact_match: bool = False
 
 
-def _match_token(raw_text: str) -> str | None:
-    """Nearest vocabulary token for `raw_text`, or `None` if nothing is
-    close enough -- see `_MATCH_CUTOFF`'s docstring above for why this is
-    intentionally simpler than Stage 2's real matcher."""
-    normalized = raw_text.strip().lower()
+def _match_token(raw_text: str) -> tuple[str | None, bool]:
+    """`(token, was_exact)` for `raw_text`, or `(None, False)`.
+
+    Normalization (`vocabulary.normalize_for_match`) runs on both sides
+    first, so digits-vs-number-words, trailing punctuation, case and
+    hyphenated compass words do not count as errors -- they are
+    representation differences, not mishearings.
+
+    The fuzzy fallback then does what `_MATCH_CUTOFF`'s docstring
+    describes, but **whether it was needed is reported rather than
+    hidden**. That distinction earns its keep on exactly one case, and it
+    is the most consequential one in this vocabulary: "record three
+    o'clock" is one character-edit from "report three o'clock", so
+    difflib repairs it and scores it correct -- concealing a verb error.
+    Verbs select the action here ("scan north" versus "report north"), so
+    a matcher forgiving enough to repair one would act on the wrong
+    command while the bench reported success. Stage 2's real matcher
+    anchors on the verb and will not make that repair, so counting it as
+    a clean hit here would overstate what the live path can do.
+    """
+    normalized = normalize_for_match(raw_text)
     if not normalized:
-        return None
+        return None, False
+
+    index = normalized_phrase_index()
+    exact = index.get(normalized)
+    if exact is not None:
+        return exact, True
+
     matches = difflib.get_close_matches(
-        normalized, spoken_phrases(), n=1, cutoff=_MATCH_CUTOFF
+        normalized, tuple(index), n=1, cutoff=_MATCH_CUTOFF
     )
     if not matches:
-        return None
-    return token_for_phrase(matches[0])
+        return None, False
+    return index[matches[0]], False
 
 
 def load_corpus(corpus_dir: Path) -> dict[str, list[Path]]:
@@ -206,7 +240,7 @@ def run_engine(
                 )
                 raw_text = ""
                 confidence = 0.0
-            matched = _match_token(raw_text)
+            matched, exact = _match_token(raw_text)
             results.append(
                 ClipResult(
                     expected_token=expected_token,
@@ -216,6 +250,7 @@ def run_engine(
                     confidence=confidence,
                     correct=(matched == expected_token),
                     confidence_is_placeholder=confidence_is_placeholder,
+                    exact_match=exact,
                 )
             )
     return results
@@ -229,7 +264,12 @@ def print_report(engine_label: str, results: list[ClipResult]) -> None:
 
     n = len(results)
     n_correct = sum(1 for r in results if r.correct)
+    n_exact = sum(1 for r in results if r.correct and r.exact_match)
     print(f"Top-1 token accuracy: {n_correct}/{n} ({100.0 * n_correct / n:.1f}%)")
+    print(
+        f"  of which heard verbatim: {n_exact}/{n_correct}"
+        f"  (repaired by fuzzy match: {n_correct - n_exact})"
+    )
 
     confusions: dict[tuple[str, str], list[ClipResult]] = {}
     for r in results:
@@ -253,6 +293,22 @@ def print_report(engine_label: str, results: list[ClipResult]) -> None:
                 print(f"      ... and {len(clips) - _SAMPLES_PER_CONFUSION_PAIR} more")
     else:
         print("\nNo confusions -- every clip matched its expected token.")
+
+    repaired = [r for r in results if r.correct and not r.exact_match]
+    if repaired:
+        print(f"\nRepaired matches ({len(repaired)}) -- scored correct above, but the")
+        print("  recognizer did not return a known phrasing; fuzzy matching bridged")
+        print("  the gap. Read these before trusting the accuracy figure. A wrong")
+        print('  VERB matters most: verbs select the action here ("scan north" vs')
+        print('  "report north"), and Stage 2\'s matcher anchors on the verb, so it')
+        print("  will not make a repair this bench just made:")
+        for clip in repaired[:_SAMPLES_PER_CONFUSION_PAIR]:
+            print(
+                f"      {clip.expected_token}: {clip.raw_text!r} "
+                f"(confidence={clip.confidence:.2f})"
+            )
+        if len(repaired) > _SAMPLES_PER_CONFUSION_PAIR:
+            print(f"      ... and {len(repaired) - _SAMPLES_PER_CONFUSION_PAIR} more")
 
     correct_conf = [r.confidence for r in results if r.correct]
     incorrect_conf = [r.confidence for r in results if not r.correct]

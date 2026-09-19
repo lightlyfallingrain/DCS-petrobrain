@@ -219,3 +219,99 @@ def to_gbnf() -> str:
     """
     alternatives = " | ".join(f'"{phrase}"' for phrase in spoken_phrases())
     return f"root ::= {alternatives}\n"
+
+
+#: Digit -> number-word, for the clock positions this vocabulary uses.
+#: Recognizers transcribe "report three o'clock" as "report 3 o'clock"
+#: (observed on both `ggml-base.en` and `ggml-small.en`, see
+#: `research/2026-09-19-whisper-contract-and-grammar-probe.md`). `PHRASES`
+#: spells the words out because that is what a person says, so something
+#: has to bridge the two representations.
+_DIGIT_WORDS: dict[str, str] = {
+    "1": "one",
+    "2": "two",
+    "3": "three",
+    "4": "four",
+    "5": "five",
+    "6": "six",
+    "7": "seven",
+    "8": "eight",
+    "9": "nine",
+    "10": "ten",
+    "11": "eleven",
+    "12": "twelve",
+}
+
+#: Compass words a recognizer may split or hyphenate ("north west",
+#: "north-west") where this vocabulary writes them solid ("northwest").
+_COMPASS_JOINS: tuple[tuple[str, str], ...] = (
+    ("north east", "northeast"),
+    ("north west", "northwest"),
+    ("south east", "southeast"),
+    ("south west", "southwest"),
+)
+
+#: Apostrophe variants in "o'clock". A recognizer may emit a typographic
+#: apostrophe, a straight one, or drop it entirely.
+_OCLOCK_VARIANTS: tuple[str, ...] = (
+    "o’clock",
+    "o clock",
+    "oclock",
+)
+
+
+def normalize_for_match(text: str) -> str:
+    """Fold recognizer output and a known phrasing onto common ground.
+
+    Applied to **both sides** of a comparison -- raw recognizer text and
+    the `PHRASES` entry it is being matched against -- so the two meet in
+    the middle rather than one being bent toward the other.
+
+    What it folds away is everything observed to differ without carrying
+    meaning: surrounding whitespace and case, trailing punctuation
+    (whisper returns `" Scan left."` where the phrase is `"scan left"`),
+    typographic apostrophes, hyphenated or split compass words, and
+    digits written where this vocabulary spells number words.
+
+    **The digit case is the one that matters.** Without it every
+    `report_clock_*` clip scores as a miss while having been heard
+    perfectly, which on a bench report is indistinguishable from a
+    recognition failure -- precisely the wrong conclusion to hand
+    someone judging whether recognition works on their voice.
+
+    Deliberately conservative: it does not stem, drop filler words, or
+    reorder. Those are matching decisions, and they belong to the matcher
+    that has to decide whether to *act* on a phrase, not to a
+    normalization step shared with scoring.
+    """
+    normalized = text.strip().lower()
+    for variant in _OCLOCK_VARIANTS:
+        normalized = normalized.replace(variant, "o'clock")
+    normalized = normalized.replace("-", " ")
+    normalized = "".join(char for char in normalized if char.isalnum() or char in " '")
+    normalized = " ".join(normalized.split())
+    for split_form, solid in _COMPASS_JOINS:
+        normalized = normalized.replace(split_form, solid)
+    words = [_DIGIT_WORDS.get(word, word) for word in normalized.split()]
+    return " ".join(words)
+
+
+def normalized_phrase_index() -> dict[str, str]:
+    """`normalize_for_match`ed phrasing -> token, for scoring lookups.
+
+    A collision here would mean two tokens becoming indistinguishable
+    after normalization, which would silently make one of them
+    unreachable, so it is an error rather than a last-write-wins dict.
+    """
+    index: dict[str, str] = {}
+    for token in TOKENS:
+        for phrase in PHRASES[token]:
+            key = normalize_for_match(phrase)
+            existing = index.get(key)
+            if existing is not None and existing != token:
+                raise ValueError(
+                    f"normalization collapses {token!r} and {existing!r} "
+                    f"onto the same text {key!r}"
+                )
+            index[key] = token
+    return index
