@@ -118,9 +118,40 @@ body-side view and the slice numbering both files share.
   all, and whether SRS's Mi-24P export reads them, is unknown; `SR.exportRadioMI24P` as quoted in
   the recon reads only the selector at device 455 and the PTT at 738, which suggests it does not.
 
-- [ ] **Slice 3 — inbound speech (STT + PTT).** Not started, and the larger half. **Next priority**
-  (user, 2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body
-  receives already-transcribed `PlayerUtterance` records and never sees audio.
+- [~] **Slice 3 — inbound speech (STT + PTT).** The larger half. **Next priority** (user,
+  2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body receives
+  already-transcribed `PlayerUtterance` records and never sees audio. Full design:
+  `plans/inbound-speech/plan.md`.
+
+  - [x] **Stage 1 — the recognition bench. STOP/GO GATE: PASSED** (2026-09-19, user: *"this
+    clears the gate"*). `stt_engine.py`, `vocabulary.py`, `tools/stt_bench.py`, plus
+    `tools/record_corpus.py` for building the corpus.
+
+    **99.2% top-1 on 252 clips of the user's own voice**, `ggml-small.en` with `--prompt`; the two
+    remaining errors are both safe misses (no match → "say again"), not wrong commands.
+
+    **Accent was never the limiting factor** — every gain came from tooling. 55.6% first run, but
+    that was a recorder bug truncating 0.256s off every clip (sox's output buffer, discarded on
+    terminate), which arrived at the bench dressed as an accent problem. 90.5% once recording was
+    fixed, 98.4% with `--prompt`, 99.2% after collapsing whisper's repetition loops.
+
+    Settled here, with full reasoning in `plans/inbound-speech/plan.md` and
+    `research/2026-09-19-whisper-model-sweep.md`:
+    - **`small.en`**, chosen on unsafe-error count rather than accuracy — lightest model with zero
+      wrong-command errors (`tiny.en` seven, `base.en` two).
+    - **`--prompt`, never `--grammar`**: a grammar cannot decline, so its failures are confident
+      wrong commands (31.7%, including "watch nearest air defence" → "what do you see" at 0.82).
+    - **Confidence bands are viable, but only prompted** — correct 0.82 vs both failures at 0.58
+      and 0.66. This is what Stage 2's "say again" trigger should use.
+
+    Vocabulary grew to 39 tokens during this stage: `report`/`stop`/`say again`, the wake word and
+    `nevermind` for two-tier routing, and numeric bearings as a parsed slot with 5° resolution
+    acting as a checksum on recognition.
+  - [ ] Stage 2 — the matcher and the command path, driven by typed text.
+  - [ ] Stage 3 — recognition as a service, and body-layer's inbound wiring.
+  - [ ] Stage 4 — Windows capture.
+  - [ ] Stage 5 — real PTT through DCS.
+  - [ ] Stage 6 — live sortie acceptance.
 
   **Settled before design (user, 2026-09-19):**
 
