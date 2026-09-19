@@ -274,3 +274,27 @@ def test_no_phrasing_carries_a_filler_article() -> None:
                 assert filler not in words, (
                     f"{token}: {phrase!r} carries filler {filler!r}"
                 )
+
+
+def test_bearing_digit_runs_expand_back_to_words() -> None:
+    """A heard "180" and a spoken "one eight zero" must compare equal.
+
+    Whisper writes spoken digit sequences back as a numeral -- and
+    sometimes as "1.8.0", whose punctuation normalization already
+    removes. Left alone, a bearing heard perfectly scores as a complete
+    miss, which is the same silent failure the clock bridging fixed: a
+    representation difference presenting as a recognition failure, in the
+    one part of the vocabulary where numbers are most fragile anyway.
+    """
+    spoken = normalize_for_match("scan bearing one eight zero")
+    assert normalize_for_match("scan bearing 180") == spoken
+    assert normalize_for_match("Screen bearing 1.8.0").endswith("one eight zero")
+
+
+def test_digit_expansion_only_applies_after_bearing() -> None:
+    """Clock positions stay whole; only bearings are digit sequences.
+
+    "report 12 o'clock" means twelve, not one-two, so the expansion is
+    anchored on the word "bearing" rather than applied to every numeral.
+    """
+    assert normalize_for_match("report 12 o'clock") == "report twelve o'clock"
