@@ -654,6 +654,46 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 - [ ] **BL-2.5 overlay has no dismiss affordance.** Moot while the titled window (with its close
   button) is in effect. Would matter again if the borderless restyle is ever revisited.
 
+- **Detection under real world conditions — weather, light, vegetation.** Raised by the user
+  2026-09-19, not started, no milestone assigned. **The framing matters more than the list:** every
+  detection test so far has been flown in near-perfect visual conditions, which makes the current
+  calibration *an upper bound on what is possible*, not a model of what usually happens. Conditions
+  do not replace it; they multiply down from it.
+
+  That gives the work the same shape as the optics split the detection-cones milestone owns, and
+  the two compose cleanly rather than competing: **optics multiply apparent size up, conditions
+  multiply detectability down, and the three calibrated angular thresholds stay fixed in the
+  middle.** Neither needs a new acuity ladder. This is worth stating before anyone starts, because
+  the obvious alternative — a separate detection model per condition — would throw away a
+  calibration that cost a screenshot campaign and one invalidated merge.
+
+  Four factors, in the order their cost-to-value argues for:
+
+  1. **Vegetation and terrain cover — cheapest by a wide margin, because the data is already
+     here.** Forest and other vegetation make ground detection hard and often impossible. World-model
+     already resolves landcover (`forest`/`orchard`/`scrubland`/`open fields`/`barren`) and it
+     already reaches body through `belief/enrichment.py`'s `inside_landcover` — it simply is not
+     wired to `perception/visibility.py`. Nothing new has to be extracted from DCS. Note the
+     asymmetry this introduces: a contact *in* forest is hard to see, and a contact *against* forest
+     is a different problem again (contrast, factor 4).
+  2. **Light level — dawn, day, dusk, night.** The user: *"light/dark/dusk matters immensely."*
+     Mission time and sun elevation are the inputs; the effect is large and non-linear, and dusk is
+     the interesting case rather than full night, because full night is nearly a binary. Needs a
+     decision on whether Petrovich has any low-light aid at all.
+  3. **Weather — visibility, fog, precipitation, cloud.** **Needs an investigator pass first**: it
+     is unknown what the Export API actually exposes, and how much of mission weather is readable
+     live rather than only from the `.miz`. Do not plan against assumed fields. Worth knowing that
+     ED's own detection model carries `min_contrast_f` and `min_fog_transparency` terms —
+     `perception/visibility.py`'s own docstring already names both as deliberately unaddressed
+     here, so there is prior art to read before inventing a curve.
+  4. **Colour separation and camouflage — explicitly deferred by the user.** It is why units are
+     painted the way they are, and it is the factor that interacts with all three above rather than
+     standing alone. Do not start it with the others.
+
+  **Do not start any of this without the user's instruction** — the note exists so that detection
+  logic written between now and then leaves room for a conditions modifier instead of hard-coding a
+  clear-day assumption, not as a call to build it.
+
 - **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
   started. **Now also owns range uncertainty** (moved here by the user, 2026-09-19), because that
   turned out to be the same kind of problem: a genuine perception limit that differs by optic, not a

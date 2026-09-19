@@ -1,6 +1,17 @@
 """Detectability filter for the naked-eye perception channel --
 `plans/pb1.5-naked-eye-detection/plan.md`.
 
+**These constants are a clear-weather, daylight upper bound, not an
+average case.** Every screenshot the ladder below was calibrated against
+was captured in near-perfect visual conditions, which is the right way to
+fix a ceiling and the wrong way to describe a typical sortie. Vegetation,
+light level and weather all push real detection *below* these figures,
+sometimes to zero -- see `body-layer/ROADMAP.md`, "Detection under real
+world conditions", for the factors and why they are expected to compose
+as a multiplier on top of this rather than as a replacement for it. A
+future conditions term belongs alongside the gates here; the three
+angular thresholds themselves should survive it unchanged.
+
 **Binocular premise, stated plainly so a future reader doesn't "correct"
 these constants downward.** Per the plan's Decision #6 (resolved
 2026-09-09, user-affirmed): this filter models a crew observer using
