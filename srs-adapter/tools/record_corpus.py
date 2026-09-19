@@ -38,11 +38,24 @@ comparison fair: `stt_bench.py` run on Windows scores `WindowsSpeechEngine`
 against the identical audio whisper saw on the Mac, so a difference
 between them is the engine rather than the take.
 
-Controls per take: Enter records, `r` redoes the take just recorded, `s`
-skips the phrase, `q` saves and quits. Progress is resumable -- an
-existing corpus directory is counted on startup, and phrases that already
-have the requested number of takes are skipped, so the corpus can be
-built across several sittings.
+**Space is the push-to-talk key**: press it to start the take, say the
+phrase, press it again to stop. Single keypresses, no Enter. `r` redoes
+the take just recorded, `s` skips the phrase, `q` saves and quits.
+
+Press-to-start/press-to-stop rather than a true hold, because a terminal
+receives no key-release event -- there is no portable way to detect a
+held key. The recording boundaries are what matter and these are the
+same: the clip starts and ends where the speaker decides, not on a timer.
+That is also what makes the corpus resemble live operation, where PTT
+delimits every transmission (`plans/inbound-speech/plan.md`).
+
+A fixed-length window is still available via `--seconds` for anyone who
+prefers it; `--max-seconds` caps a PTT take so a forgotten second press
+cannot record forever.
+
+Progress is resumable -- an existing corpus directory is counted on
+startup, and phrases that already have the requested number of takes are
+skipped, so the corpus can be built across several sittings.
 
 Record the way you will actually fly: the headset you use in the
 cockpit, at a normal speaking level rather than an over-enunciated one.
@@ -53,15 +66,20 @@ that does not survive the aircraft.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import vocabulary
 
 DEFAULT_TAKES = 4
 DEFAULT_SECONDS = 2.5
+#: Hard cap on a push-to-talk take, so a forgotten second keypress cannot
+#: record until the disk fills.
+DEFAULT_MAX_SECONDS = 15.0
 #: whisper.cpp wants 16 kHz mono 16-bit PCM; recording it directly avoids
 #: a resampling step between here and the bench.
 SAMPLE_RATE = 16000
@@ -69,6 +87,115 @@ SAMPLE_RATE = 16000
 
 def _sox_available() -> bool:
     return shutil.which("sox") is not None
+
+
+@contextlib.contextmanager
+def _raw_key_mode() -> Iterator[None]:
+    """Read single keypresses without waiting for Enter.
+
+    `termios`/`tty` on POSIX, nothing needed on Windows (`msvcrt.getch`
+    already reads one key). Uses `cbreak` rather than `raw` deliberately:
+    cbreak leaves signal generation on, so Ctrl-C still interrupts a
+    recording session instead of being swallowed as an ordinary byte.
+    """
+    if sys.platform == "win32" or not sys.stdin.isatty():
+        yield
+        return
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
+def _read_key() -> str:
+    """One keypress, lowercased. `" "` for space, `""` at EOF."""
+    if sys.platform == "win32":
+        import msvcrt
+
+        return msvcrt.getch().decode("latin-1", "replace").lower()
+    char = sys.stdin.read(1)
+    return char.lower() if char else ""
+
+
+def _repair_truncated_wav(path: Path) -> bool:
+    """Rewrite `path`'s header after sox was stopped mid-write.
+
+    Terminating sox leaves the RIFF length field describing a recording
+    that never finished, which some readers reject outright. `sox
+    --ignore-length` exists for exactly this: it reads to end-of-file
+    rather than trusting the header, so re-encoding through it produces a
+    correct one. Cheaper and far more portable than trying to stop sox
+    gracefully -- Windows has no SIGINT to send it.
+    """
+    temp = path.with_suffix(".repair.wav")
+    result = subprocess.run(
+        ["sox", "--ignore-length", str(path), str(temp)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or not temp.exists():
+        temp.unlink(missing_ok=True)
+        return False
+    temp.replace(path)
+    return True
+
+
+def _record_ptt(
+    path: Path,
+    max_seconds: float,
+    driver: str | None = None,
+    device: str | None = None,
+) -> bool:
+    """Record until the next keypress, capped at `max_seconds`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    process = subprocess.Popen(
+        [
+            "sox",
+            "-q",
+            *_input_args(driver, device),
+            "-r",
+            str(SAMPLE_RATE),
+            "-c",
+            "1",
+            "-b",
+            "16",
+            "-e",
+            "signed-integer",
+            str(path),
+            "trim",
+            "0",
+            str(max_seconds),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    print("  \u25cf REC  -- press space to stop", end="", flush=True)
+    _read_key()
+
+    if process.poll() is None:
+        process.terminate()
+        process.wait()
+        truncated = True
+    else:
+        truncated = False
+
+    if not path.exists() or path.stat().st_size == 0:
+        stderr = (process.stderr.read() if process.stderr else "") or ""
+        print(f"\r  sox produced nothing: {stderr.strip()[:160]}", file=sys.stderr)
+        return False
+
+    if truncated and not _repair_truncated_wav(path):
+        print("\r  could not repair the clip header", file=sys.stderr)
+        return False
+    return True
 
 
 def _input_args(driver: str | None, device: str | None) -> list[str]:
@@ -159,8 +286,15 @@ def main() -> int:
     parser.add_argument(
         "--seconds",
         type=float,
-        default=DEFAULT_SECONDS,
-        help=f"length of each recording window (default {DEFAULT_SECONDS})",
+        default=None,
+        help="use a fixed-length window of this many seconds instead of "
+        f"push-to-talk (suggested {DEFAULT_SECONDS})",
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=DEFAULT_MAX_SECONDS,
+        help=f"cap on a push-to-talk take (default {DEFAULT_MAX_SECONDS})",
     )
     parser.add_argument(
         "--input-driver",
@@ -200,39 +334,64 @@ def main() -> int:
 
     total = len(work)
     print(
-        f"{total} takes to record ({args.takes} per phrasing, "
-        f"{args.seconds}s each).\n"
-        "Enter = record, r = redo last, s = skip, q = quit (progress is kept).\n"
+        f"{total} takes to record, {args.takes} per phrasing.\n"
+        + (
+            f"Fixed {args.seconds}s window per take.\n"
+            if args.seconds is not None
+            else "SPACE = push-to-talk: press to start, say it, press to stop.\n"
+        )
+        + "r = redo last, s = skip, q = quit (progress is kept).\n"
         "Use the headset you fly with, and speak as you would in the cockpit.\n"
+        "Check your first clip plays back from the right microphone before\n"
+        "recording the rest -- this tool cannot tell a headset from a webcam.\n"
     )
 
     index = 0
-    while index < len(work):
-        token, phrase, take = work[index]
-        path = args.corpus_dir / token / f"{_slug(phrase)}_{take}.wav"
-        prompt = f'[{index + 1}/{total}] {token}  say: "{phrase}"  > '
-        try:
-            choice = input(prompt).strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("\nStopped. Progress kept.")
-            return 0
+    with _raw_key_mode():
+        while index < len(work):
+            token, phrase, take = work[index]
+            path = args.corpus_dir / token / f"{_slug(phrase)}_{take}.wav"
+            print(
+                f'[{index + 1}/{total}] {token}  say: "{phrase}"  > ',
+                end="",
+                flush=True,
+            )
+            try:
+                choice = _read_key()
+            except KeyboardInterrupt:
+                print("\nStopped. Progress kept.")
+                return 0
 
-        if choice == "q":
-            print("Stopped. Progress kept.")
-            return 0
-        if choice == "s":
-            index += 1
-            continue
-        if choice == "r":
-            index = max(0, index - 1)
-            continue
+            if choice in ("q", "", "\x03"):
+                print("\nStopped. Progress kept.")
+                return 0
+            if choice == "s":
+                print("skipped")
+                index += 1
+                continue
+            if choice == "r":
+                print("redo previous")
+                index = max(0, index - 1)
+                continue
+            if choice != " ":
+                print("(space to record, r redo, s skip, q quit)")
+                continue
 
-        print("  recording...", end="", flush=True)
-        if _record(path, args.seconds, args.input_driver, args.input_device):
-            print(" saved")
-            index += 1
-        else:
-            print("  (not saved -- press Enter to try again)")
+            if args.seconds is not None:
+                print("  recording...", end="", flush=True)
+                ok = _record(path, args.seconds, args.input_driver, args.input_device)
+            else:
+                ok = _record_ptt(
+                    path,
+                    args.max_seconds,
+                    args.input_driver,
+                    args.input_device,
+                )
+            if ok:
+                print("  saved")
+                index += 1
+            else:
+                print("  not saved -- press space to try again")
 
     print(f"\nDone. Corpus at {args.corpus_dir}")
     return 0
