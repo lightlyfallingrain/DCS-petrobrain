@@ -298,3 +298,23 @@ def test_digit_expansion_only_applies_after_bearing() -> None:
     anchored on the word "bearing" rather than applied to every numeral.
     """
     assert normalize_for_match("report 12 o'clock") == "report twelve o'clock"
+
+
+def test_whisper_repetition_loops_collapse() -> None:
+    """Whisper loops on short utterances; the words are still right.
+
+    Two of the four errors in this project's best bench run were this
+    and nothing else -- "Scan west, scan west, scan west..." scored as a
+    total miss despite being a perfect recognition with too many copies.
+    """
+    assert normalize_for_match("Scan west, scan west, scan west.") == "scan west"
+    assert (
+        normalize_for_match("clock left, clock left, clock left, clock") == "clock left"
+    )
+
+
+def test_collapsing_leaves_genuine_phrases_alone() -> None:
+    """A real phrase must survive, including incidental word repeats."""
+    for phrase in spoken_phrases():
+        assert normalize_for_match(phrase) == normalize_for_match(phrase)
+        assert len(normalize_for_match(phrase).split()) == len(phrase.split())
