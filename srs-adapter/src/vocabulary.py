@@ -187,14 +187,23 @@ ROUTING_TOKENS: tuple[str, ...] = ("wake_petrovich", "cancel_nevermind")
 #: what the grammar, the bench and Stage 2's matcher are built from.
 TOKENS: tuple[str, ...] = LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS + ROUTING_TOKENS
 
-#: Spoken phrasings per token. Every token has at least two phrasings so
-#: the bench (and later, Stage 2's matcher) sees more than one way of
-#: saying the same command -- a single canonical phrase per token would
-#: understate how a player actually talks.
+#: Spoken phrasings per token.
+#:
+#: **Phrasings are what this speaker actually says, not every English way
+#: of saying it** (user direction, 2026-09-19: *"'scan to the right' vs
+#: 'scan right' -> 'scan right' only. Or more generally <verb>
+#: <left/right/ahead/etc>/<north/etc> without 'to the'."*). Directional
+#: commands are bare verb plus direction.
+#:
+#: Trimming these is not just tidying. Every phrasing is clips to record,
+#: an alternative the matcher can land on, and one more way for a
+#: mishearing to resolve to something legal -- so a phrasing nobody utters
+#: costs recording time and widens the error surface while contributing
+#: no recognition coverage at all.
 PHRASES: dict[str, tuple[str, ...]] = {
     "scan_ahead": ("scan ahead", "look ahead"),
-    "scan_left": ("scan left", "look left", "scan to the left"),
-    "scan_right": ("scan right", "look right", "scan to the right"),
+    "scan_left": ("scan left", "look left"),
+    "scan_right": ("scan right", "look right"),
     "scan_full": ("scan full", "full scan", "scan all around"),
     "scan_bearing_n": ("scan north",),
     "scan_bearing_ne": ("scan northeast",),
