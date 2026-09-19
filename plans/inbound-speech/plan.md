@@ -831,6 +831,58 @@ The cost is a habit the player has to hold: two orders means two presses. That i
 constraint, but it matches how radio discipline works anyway, and it is enforced by the physical
 control rather than by remembering a rule.
 
+### Command chaining — referring back to an earlier transmission (raised 2026-09-20)
+
+User: *"Command chaining may become needed though, so referring to something that was said just
+earlier."* Not scoped, not built. Recorded now because the decisions above constrain it, and
+because more of it exists already than is obvious.
+
+**It is a different mechanism from the multi-command parsing just declined, and the distinction is
+load-bearing.** That was about splitting one transmission; this is about *carrying context between*
+transmissions. Each transmission still holds exactly one command — PTT still delimits both — but a
+command may refer to a referent established earlier. Nothing about the one-command rule has to bend
+to support it, which is why declining the first does not prejudge this.
+
+**A working instance already exists.** `CrewConsole._pending_confirmation` is precisely this:
+"Scan left, confirm?" followed by "affirm" is a second transmission whose meaning depends entirely
+on the first, resolved against time-bounded state and expiring after `CONFIRM_WINDOW_S`. The
+general case generalises that shape rather than introducing a new one — a referent, a window, and
+an expiry.
+
+The scaffolding is likewise mostly in place, and worth knowing about before anyone builds it fresh:
+
+- `EscalationPayload.awaiting_reply_to` exists and is always `None` today — a field reserved for
+  exactly this conversational-turn link.
+- Utterance ids (`UTTERANCE_<n>`) are already minted per transmission, so a referent has something
+  stable to point at.
+- `PartialParse.referenced_contact_id` / `referenced_contact_candidates` already encode the right
+  posture: a single id **only** when resolution is unambiguous, a candidate list otherwise, and
+  never a guessed single id.
+
+**One architectural constraint, stated before it is violated.** This must **not** live in
+`srs-adapter`'s matcher. That matcher is stateless per transmission by design, and it knows nothing
+about contacts — giving it referent memory would require teaching it the belief state, which is the
+coupling Decision 4 REVISED was written to prevent. Chaining resolves in **body**, where the
+contacts and the dialogue history are, or in the brain once it exists. The adapter's job ends at
+producing a token and a ratio.
+
+**Two properties it will need, both already precedented here:**
+
+- **Referents expire, and can be invalidated early.** The confirm window is 8 s because a
+  confirmation is a tight exchange; a referent like "that one" plausibly lives longer. But it must
+  also die when its subject does — a contact that has gone `lost` cannot still be "that one", and
+  resolving to it would be a small omniscience leak, remembering with more confidence than the
+  belief layer holds.
+- **Ambiguity asks rather than guesses.** "That one" with three recent contacts is the same problem
+  the matcher's separation check already solves by refusing to pick: a near-tie goes to the confirm
+  band regardless of how high either score is. The conversational form of that answer is a
+  question, not a best guess.
+
+**Likely forms, unresearched:** "watch that one", "the second one", "same again", "cancel that",
+"him". Which of these the user actually says is a question for a sortie rather than a design
+session — the same lesson the vocabulary itself learned when phrasings nobody utters were stripped
+out.
+
 ### Settled Decisions (user, 2026-09-19)
 
 **1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a
