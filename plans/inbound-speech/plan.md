@@ -516,6 +516,177 @@ friction the user feels at the start of every session.
 
 ---
 
+### Two-tier routing (user direction, 2026-09-19) — DESIGN NOTE, NOT YET PLANNED
+
+A later direction changes the shape of everything after recognition, though not Stage 1 itself.
+Speech is no longer one thing:
+
+- **"(hey,) Petrovich ..."** — free speech, routed to the brain layer for interpretation.
+- **Anything else** — a command, matched against this vocabulary.
+- **"... nevermind"** at the end — retract the whole transmission.
+- **"say again"** — bidirectional, standard aviation practice.
+
+**The decode strategy is already settled by evidence, not preference.** A constrained grammar
+cannot transcribe free speech, so routing cannot happen after a grammar decode. Of the three ways
+out — free-decode then route, decode twice, or a grammar with a permissive free-text branch — the
+last two are ruled out by `research/2026-09-19-whisper-contract-and-grammar-probe.md`: grammar at
+whisper's default penalty scored 50% on a synthetic corpus and collapsed long phrases into
+fragments, so a permissive branch would be worse, and double-decoding doubles latency on a
+push-to-talk path. **Free decode always, route on the transcript, fuzzy-match commands from text**
+— which is what `tools/stt_bench.py` already measures, so Stage 1's numbers apply to the tiered
+design unchanged.
+
+Four consequences, each with a reason:
+
+1. **Wake-word detection must lean toward waking.** The failure modes are not symmetric. A false
+   wake sends a command to the brain, which can interpret a command phrasing perfectly well — the
+   cost is latency. A missed wake sends free speech to the command matcher, which fuzzy-matches it
+   onto *something* and executes a wrong action. Bias the threshold accordingly.
+
+2. **Match the wake word fuzzily, never by equality.** Probed on synthetic speech, `ggml-base.en`
+   returns "Petrovitch" where `ggml-small.en` returns "Petrovich" — and that is before any accent
+   is involved. An equality test would fail open on the more common model.
+
+3. **Nothing executes before the transmission closes. One rule, no exceptions.** "Nevermind" can
+   retract everything said before it, so every decision waits for PTT release. This forbids
+   incremental execution outright.
+
+4. **`stop` counts only when the whole transmission is the single word "stop"** (user direction,
+   2026-09-19). A "stop" inside a sentence — "stop scanning north", or any ordinary use — is not
+   the stop rule.
+
+   An earlier draft made `stop` an exception to (3), firing the moment it was recognised so
+   barge-in would not wait for release. This rule removes that exception and is better for two
+   reasons. It deletes a whole mechanism: recognising a word mid-stream needs partial decoding of
+   an open transmission, which is a different and harder problem than decoding a closed one. And
+   it removes a false-positive class that would have been genuinely bad — an interrupt that can
+   fire from the middle of a sentence will eventually fire from a sentence that merely contains
+   the word. The latency cost is one PTT release, which is roughly the time it takes to stop
+   speaking anyway.
+
+   `stop_talking` therefore carries exactly one phrasing. Admitting "stop talking" or "quiet" as
+   command phrasings while routing only on a bare "stop" would contradict itself — the longer
+   forms would reach the same behaviour through the command matcher by the back door.
+
+   **Known risk, accepted deliberately:** with no alternates there is no fallback word, and this
+   is the token likeliest to fail. It is one short syllable, and on clean synthetic speech it
+   already returned as "cloud" and "stock". If Stage 1's bench shows it unreliable on the user's
+   own voice, this decision needs revisiting rather than tuning around — which is cheap, since
+   adding a phrasing is a handful of clips rather than a re-recorded corpus.
+
+### Transmission segmentation: PTT delimits clips (user, 2026-09-19)
+
+*"Natural use is to hold PTT while I say a command and question and then release. So that
+different commands/questions arrive as separate audio clips. Second may arrive while first is
+being processed, but they're separate."*
+
+**This is a larger simplification than it appears.** Live speech systems normally have to solve
+endpointing — deciding where one utterance ends and the next begins, usually with voice-activity
+detection, and usually badly in a noisy cockpit. Push-to-talk supplies that boundary exactly:
+press to release is one clip, one transmission, one decision. No VAD, no silence thresholds, no
+partial decoding of an open stream. It is also what makes rule (3) natural rather than a
+restriction — the transmission closes on release because that is literally when the player stops
+speaking.
+
+Consequences for the design:
+
+- **Capture produces discrete, complete WAV clips**, not a stream. This matches what the corpus
+  already is, so Stage 1's measurements transfer to live operation without reinterpretation.
+- **Transmissions queue, and may overlap in processing.** A second clip can arrive while the
+  first is still being recognised or answered. Recognition of separate clips is independent and
+  can run concurrently; what needs ordering is the *response*, since two crew answers talking over
+  each other is worse than one arriving late.
+- **Responses should default to the order asked**, the way a crew member answers questions in the
+  order they were put. A fast command queued behind a slow free-text request waits; that reads as
+  someone working through what was asked rather than as a bug.
+- **`stop` is the one transmission that jumps the queue** — it aborts current speech and clears
+  what is pending, which is the whole point of it. Note this is a *queue-priority* exception, not
+  a resurrection of the mid-stream timing exception removed in (4): it is still recognised only
+  from a closed transmission, and it is now unambiguous by construction, since the entire clip
+  must be that single word.
+
+`say again` in the Petrovich→player direction is where Stage 1's confidence distribution is spent:
+below the band, ask instead of guessing or sitting silent. That makes the bench's confidence column
+a source for a real constant rather than a report decoration.
+
+**Not planned here.** The vocabulary and corpus coverage for all of this exist as of Stage 1
+(`wake_petrovich`, `cancel_nevermind`, `say_again`), because re-recording a corpus is the expensive
+part and adding tokens to it now is nearly free. The routing itself, the brain-layer handoff, the
+transmission buffer and the repeat-last-utterance store are Stage 2-and-later work and need their
+own architect pass.
+
+### Slots, not enumerated phrases — and why the corpus does not follow (2026-09-19)
+
+User proposal: *"instead of constructing corpus for every possible command like 'report three
+o'clock', how about blocks that build sentences: 'report' 'three' 'o'clock'. Then each word is
+swappable within a more general pattern: `<verb> <direction> <etc>`"*.
+
+**Adopted for the grammar and the matcher.** Commands are a product of slots — a verb and a
+target — not a hand-listed set of sentences. This is what keeps 72 legal bearings from becoming
+144 table entries, makes a new target cost one row rather than one row per verb, and gives the
+matcher a verb anchor, which is separately needed: the bench already showed fuzzy matching
+repairing "record three o'clock" into "report three o'clock" and scoring it correct, hiding the
+one error class that swaps an action rather than garbling a word.
+
+**Deliberately NOT adopted for the corpus, which keeps whole utterances.** The reason is validity
+rather than difficulty. What gets deployed is whole utterances — one PTT press, one sentence — so
+a bench predicts live performance only if its clips resemble live transmissions. A corpus of
+isolated words would measure a task nobody ever performs, and its accuracy figure would not
+transfer to the thing being judged. That is the same failure this slice already paid for once,
+where a recording artefact arrived at the bench dressed as an accent problem.
+
+Worth recording what the evidence did and did not show, since the obvious argument here is the
+wrong one. Isolated words are *not* broadly harder for whisper: probed on clean synthetic speech,
+"report", "east", "cancel", "watch", "nearest" and "bearing" all came back correctly on their own.
+One did not — "o'clock" alone returns "A clock" — which would have made isolated-word recording
+actively misleading for the clock tokens specifically. But the case against an isolated-word
+corpus does not rest on that; it rests on measuring the wrong task.
+
+**The combinatorial worry behind the proposal is real, and the answer is a covering set.** The
+corpus records whole utterances chosen so that every slot value appears in a few of them — not
+every combination. Adding a target then costs a handful of clips rather than `verbs x targets`.
+This is already how the numeric bearings are sampled: twelve spoken bearings selected so all ten
+digits are uttered, instead of recording seventy-two.
+
+### Stage 1 result: GATE CLEARED (2026-09-19)
+
+**99.2% top-1 on 252 clips of the user's own voice**, `ggml-small.en` with `--prompt`, two errors,
+both safe misses. The user's call: *"this clears the gate."*
+
+The arc matters as much as the number, because only one step of it was about the speaker:
+
+| | accuracy | what changed |
+|---|---|---|
+| 55.6% | first run | corpus truncated by a recorder bug — **not a voice result** |
+| 90.5% | recorder fixed | buffer, tail capture, pre-roll |
+| 98.4% | `--prompt` | soft vocabulary biasing |
+| 99.2% | repetition collapsing | recovering whisper's own loop artefacts |
+
+Accent was never the limiting factor. Every gain came from tooling.
+
+**Model: `small.en`** (`research/2026-09-19-whisper-model-sweep.md`). Chosen on unsafe-error count
+rather than accuracy: it is the lightest of the four English-only models with **zero wrong-command
+errors**, where `tiny.en` produces seven and `base.en` two. A no-match costs a "say again" the
+player notices; a wrong-but-valid command executes confidently with nothing to flag it, and on a
+two-tier design the worst case routes a whole transmission to the wrong interpreter. Latency does
+not argue against it — 0.50 s median, 1.46 s p90, inside what the Stage 6 card already judged
+crew-like.
+
+**Decoding: `--prompt`, never `--grammar`.** A grammar cannot decline, so every failure becomes a
+confident wrong command: measured here, "watch nearest air defence" read as "what do you see" at
+0.82 confidence, seven times. `--with-grammar` keeps the row available for re-measurement.
+
+**Confidence bands are viable after all, but only prompted.** On the plain row correct and
+incorrect were 0.68 against 0.63 with overlapping ranges — unusable. Prompted, correct runs 0.82
+(min 0.60) and both remaining failures sit at 0.58 and 0.66, so a reject threshold near 0.60 is
+defensible. This is what Decision 4 needed and what Stage 2's "say again" trigger should use,
+alongside match distance.
+
+**Two weak words to watch in the sortie**, both patterned rather than random: `disregard` (the
+redundant third phrasing of `cancel_nevermind`, heard as "This is the card") and `scan` heard as
+"this kind of" — the last survivor of a pattern that dominated earlier runs, and the most-used verb
+in the vocabulary.
+
 ### Settled Decisions (user, 2026-09-19)
 
 **1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a
@@ -558,21 +729,5 @@ both, and label which is which by pressing each binding in turn.
 
 ### Decisions Requiring User Input
 
-1. **Capture process placement.** This plan puts microphone capture in a **second `srs-adapter`
-   process on the Windows box** (boundary-correct: `division-or-responsibility.md` says raw audio
-   never leaves the adapter, and the aircraft layer's contract is DCS I/O). The cheaper alternative
-   is hosting capture in the existing **collector**, which already runs on Windows, already serves
-   HTTP, and already plays audio — saving a whole process at the cost of putting a microphone and
-   raw-audio transit inside a module whose contract excludes both. Recommendation: the separate
-   process. Overrule if the fourth process is the bigger irritation in practice.
-2. **The Stage 1 pass bar.** What top-1 token accuracy on your own voice is good enough to keep
-   going? This is a judgment only you can make, and it should be stated *before* the numbers come
-   in rather than rationalised after. (My suggestion: ≥95% top-1 with clean separation between
-   correct and incorrect confidences, or the ergonomics won't be worth it.)
-3. **Dedicated PTT control vs. sharing the existing trigger.** The investigator surfaced a
-   cheaper option than the plan assumed: arg 738's *half-press* selects intercom specifically,
-   independent of the SPU-8 selector, so **the trigger you already have could be the Petrovich PTT
-   with no new joystick binding** — and it does not reopen the settled "stay on mission frequency"
-   constraint. Against that, it overloads a control that also transmits on SRS, so every time you
-   talk to a human you would also be opening Petrovich's mic. Binding a spare control keeps the two
-   separate at the cost of one more binding. Your call.
+All three are answered — see "Settled Decisions (user, 2026-09-19)" above. Kept as a heading so the
+plan's shape stays readable against the sign-off commit that resolved them; nothing here is open.
