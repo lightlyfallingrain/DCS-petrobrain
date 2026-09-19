@@ -11,11 +11,32 @@ and the corpus ends up thinnest exactly where confusions are most likely.
 So this prompts for each phrase in turn, records a fixed window, writes
 the file to the right place, and lets a bad take be redone on the spot.
 
-Requires `sox` (Homebrew: `brew install sox`), an external binary in the
-same sense whisper-cli is -- deliberately not a Python package, since
+Requires `sox` (Homebrew: `brew install sox`; on Windows, the installer
+from sox.sourceforge.net, which ships `rec.exe`), an external binary in
+the same sense whisper-cli is -- deliberately not a Python package, since
 this subproject is stdlib-only (`srs-adapter/CLAUDE.md`).
 
+    # Mac
     PYTHONPATH=src .venv/bin/python tools/record_corpus.py --corpus-dir <dir>
+
+    # Windows -- stdlib-only and `vocabulary` is too, so no venv is
+    # needed here, unlike most of this repo's entry points
+    set PYTHONPATH=src
+    python tools\\record_corpus.py --corpus-dir <dir>
+
+**Record on the box whose headset you actually fly with.** For this
+project that means Windows, even though the bench that consumes the
+corpus runs on the Mac. The corpus is raw audio -- recording and
+recognition are separate steps joined only by a directory of `.wav`
+files, so they need not happen on the same machine, and the microphone,
+its preamp and the headset's own response are part of what the bench is
+measuring. A corpus captured through a different microphone would score
+a signal chain that never flies.
+
+Recording once and benching on both boxes is also what makes the engine
+comparison fair: `stt_bench.py` run on Windows scores `WindowsSpeechEngine`
+against the identical audio whisper saw on the Mac, so a difference
+between them is the engine rather than the take.
 
 Controls per take: Enter records, `r` redoes the take just recorded, `s`
 skips the phrase, `q` saves and quits. Progress is resumable -- an
@@ -50,13 +71,39 @@ def _sox_available() -> bool:
     return shutil.which("rec") is not None
 
 
-def _record(path: Path, seconds: float) -> bool:
+def _input_args(driver: str | None, device: str | None) -> list[str]:
+    """sox input-source arguments, defaulted per platform.
+
+    `rec` picks the system default input on its own on macOS/Linux. On
+    Windows it needs the `waveaudio` driver named explicitly, and a
+    specific device when the default is not the headset -- which is the
+    common case on a box with a webcam mic, a monitor's mic and a
+    headset all present. `sox -h` lists the drivers; `rec -t waveaudio
+    -d` records from the default one, and a device can be named by index
+    or by substring (`--input-device 1`, `--input-device Headset`).
+    """
+    if driver is None and sys.platform == "win32":
+        driver = "waveaudio"
+    args: list[str] = []
+    if driver is not None:
+        args += ["-t", driver]
+    if device is not None:
+        args += [device]
+    elif driver is not None:
+        args += ["-d"]
+    return args
+
+
+def _record(
+    path: Path, seconds: float, driver: str | None = None, device: str | None = None
+) -> bool:
     """Record one fixed-length take to `path`. False if sox failed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [
             "rec",
             "-q",
+            *_input_args(driver, device),
             "-r",
             str(SAMPLE_RATE),
             "-c",
@@ -105,12 +152,26 @@ def main() -> int:
         default=DEFAULT_SECONDS,
         help=f"length of each recording window (default {DEFAULT_SECONDS})",
     )
+    parser.add_argument(
+        "--input-driver",
+        default=None,
+        help="sox input driver; defaults to waveaudio on Windows, "
+        "sox's own default elsewhere",
+    )
+    parser.add_argument(
+        "--input-device",
+        default=None,
+        help="sox input device (index or name substring). Use when the "
+        "system default input is not the headset you fly with",
+    )
     args = parser.parse_args()
 
     if not _sox_available():
         print(
             "`rec` (from sox) not found. Install it with:\n"
-            "    brew install sox\n"
+            "    macOS:   brew install sox\n"
+            "    Windows: the installer from sox.sourceforge.net, then\n"
+            "             add its directory to PATH (it ships rec.exe)\n"
             "It is an external binary, not a Python dependency.",
             file=sys.stderr,
         )
@@ -157,7 +218,7 @@ def main() -> int:
             continue
 
         print("  recording...", end="", flush=True)
-        if _record(path, args.seconds):
+        if _record(path, args.seconds, args.input_driver, args.input_device):
             print(" saved")
             index += 1
         else:
