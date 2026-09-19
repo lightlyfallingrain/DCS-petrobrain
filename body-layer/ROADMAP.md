@@ -712,11 +712,29 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   - Whether ED models sensor field of view, scan pattern or dwell. That is the cones milestone's
     central mechanism, and the one part with no precedent anywhere in this codebase.
 
-  It is also the best available chance to find what we have **not thought of**, which is the half of
-  a gap analysis that cannot be produced by reading our own code. The standing suspicion is
-  **movement**: a moving vehicle is far more detectable than a static one, it is most of how ground
-  targets are really spotted, and `perception/visibility.py` has no term for it at all — a
-  stationary T-72 and one crossing open ground are currently equally visible at the same range.
+  **Desk pass done 2026-09-19** —
+  `aircraft-layer/research/2026-09-19-ed-native-detection-identification-gap-analysis.md`. Four
+  results worth carrying forward:
+
+  - **The movement suspicion was wrong, and that is useful.** The standing guess was that movement
+    would be our biggest gap against ED — a moving vehicle being far more detectable than a static
+    one, with `visibility.py` having no term for it. **Neither ED nor we model movement or dwell.**
+    So it is not catch-up; if it gets built it is this project's own design choice, and should be
+    argued on crew realism rather than on parity.
+  - **ED never exposes a raw numeric range on any crew-facing channel** — only a 24-bucket range
+    fragment, or nothing. That corroborates rather than merely supports moving range uncertainty
+    into this milestone: ED's own AI crew does not get a number either.
+  - **Weather is live-readable after all.** `world.weather.getFogThickness()` and
+    `getFogVisibilityDistance()` are real getters (DCS 2.9.10+), reversing the assumption that
+    weather was `.miz`-only. They live in the Mission Scripting sandbox rather than `Export.lua`, so
+    they need the Hook → `net.dostring_in` → UDP bridge already proven for F10 commands — untested
+    against the `"mission"` target specifically.
+  - **The formula is still only partly known**, and the next artifact is named: `./Scripts/AI/
+    Detection.lua`, confirmed present in `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` and
+    never fetched. Three grep passes found **zero Lua consumers** of `min_contrast_f`,
+    `min_fog_transparency` or `extra_eyesight_ratio` anywhere in the Mi-24P tree, so the engine-wide
+    script is the likely consumer. **This is the single highest-value thing to read on the Windows
+    box.**
 
   **Not everything ED does is worth copying.** Our tier semantics are this project's own modelling
   choice and are already documented as never verified against ED internals; the goal is a crew
