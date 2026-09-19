@@ -193,7 +193,8 @@ TOKENS: tuple[str, ...] = LEGACY_F10_TOKENS + VOICE_ONLY_TOKENS + ROUTING_TOKENS
 #: of saying it** (user direction, 2026-09-19: *"'scan to the right' vs
 #: 'scan right' -> 'scan right' only. Or more generally <verb>
 #: <left/right/ahead/etc>/<north/etc> without 'to the'."*). Directional
-#: commands are bare verb plus direction.
+#: commands are bare verb plus direction, and filler articles are dropped
+#: throughout -- "watch nearest", not "watch the nearest".
 #:
 #: Trimming these is not just tidying. Every phrasing is clips to record,
 #: an alternative the matcher can land on, and one more way for a
@@ -213,12 +214,12 @@ PHRASES: dict[str, tuple[str, ...]] = {
     "scan_bearing_sw": ("scan southwest",),
     "scan_bearing_w": ("scan west",),
     "scan_bearing_nw": ("scan northwest",),
-    "watch_nearest": ("watch nearest", "watch the nearest"),
+    "watch_nearest": ("watch nearest",),
     "watch_nearest_air_defence": (
         "watch nearest air defence",
         "watch nearest air defense",
     ),
-    "cancel_task": ("cancel task", "cancel the task", "cancel"),
+    "cancel_task": ("cancel task", "cancel"),
     # Voice-only. `report` carries three phrasings because it is the
     # command most likely to be said casually and differently each time.
     "report_all": ("report", "report contacts", "what do you see"),

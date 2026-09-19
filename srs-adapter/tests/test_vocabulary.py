@@ -255,3 +255,22 @@ def test_bearing_compass_phrasings_are_gone() -> None:
                 word in phrase
                 for word in ("zero", "one", "two", "three", "four", "five")
             ), f"{phrase!r} pairs 'bearing' with a compass word"
+
+
+def test_no_phrasing_carries_a_filler_article() -> None:
+    """Phrasings are what this speaker says, not idiomatic English.
+
+    "watch the nearest" and "scan to the right" were both dropped on
+    direction. Each costs clips to record and gives a mishearing one more
+    way to resolve to something legal, while adding no coverage, since
+    the bench can only measure what actually gets uttered. Pinned as a
+    test because articles read as natural and would slip back in the next
+    time somebody extends this table.
+    """
+    for token, phrasings in PHRASES.items():
+        for phrase in phrasings:
+            words = phrase.split()
+            for filler in ("the", "a", "an", "to"):
+                assert filler not in words, (
+                    f"{token}: {phrase!r} carries filler {filler!r}"
+                )
