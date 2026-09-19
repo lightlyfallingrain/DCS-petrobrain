@@ -4,4 +4,8 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-data/corpus/raw/
+# All recorded audio, not just the working set. `retired/` holds takes
+# withdrawn from scoring when a phrasing is dropped -- they are kept on
+# disk deliberately (nothing the user recorded gets deleted) but they are
+# still audio and still belong outside the repo.
+data/corpus/

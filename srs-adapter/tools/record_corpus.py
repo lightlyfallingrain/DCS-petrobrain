@@ -70,6 +70,7 @@ import contextlib
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -80,6 +81,31 @@ DEFAULT_SECONDS = 2.5
 #: Hard cap on a push-to-talk take, so a forgotten second keypress cannot
 #: record until the disk fills.
 DEFAULT_MAX_SECONDS = 15.0
+
+#: Keep recording for this long after the stop key. A speaker presses the
+#: key as the last syllable ends, not after it, so stopping instantly
+#: clips the final word -- and the final word is often the one that
+#: carries the meaning ("scan EAST", "hey PETROVICH").
+DEFAULT_TAIL_SECONDS = 0.6
+
+#: Wait this long after starting sox before telling the speaker to go.
+#: Opening an audio device is not instant -- measured at roughly 0.15s
+#: here -- and anything said during that window is simply not captured.
+#: A clipped first syllable is exactly as fatal as a clipped last one and
+#: harder to spot, since the transcript still looks like a plausible
+#: mishearing rather than an obvious fragment.
+DEFAULT_PREROLL_SECONDS = 0.35
+
+#: sox output buffer, in bytes. **Not a performance tuning knob.** sox
+#: writes in whole buffers, so terminating it discards whatever is still
+#: in the current one; at the default 8192 bytes that is 0.256s of 16 kHz
+#: mono audio silently missing from the end of every take. This cost a
+#: whole corpus once: the first recording session produced clips whose
+#: durations were all exact multiples of 0.256s, ending mid-word with the
+#: trailing energy still above the clip average, and the bench read the
+#: resulting truncations as recognition failures. 1024 bytes caps the
+#: worst-case loss at 0.032s.
+SOX_BUFFER_BYTES = 1024
 #: whisper.cpp wants 16 kHz mono 16-bit PCM; recording it directly avoids
 #: a resampling step between here and the bench.
 SAMPLE_RATE = 16000
@@ -147,18 +173,97 @@ def _repair_truncated_wav(path: Path) -> bool:
     return True
 
 
+#: A clip still carrying this fraction of its own peak amplitude in its
+#: last 0.15s was probably cut mid-word. Calibrated against real clips
+#: rather than guessed: the truncated first corpus measured 0.067-0.125,
+#: a cleanly-ended clip 0.017.
+_TRUNCATION_TAIL_RATIO = 0.05
+
+#: Below this peak amplitude, effectively nothing was captured -- the
+#: wrong input device, a muted headset, or a mic that never opened.
+_SILENT_CLIP_PEAK = 0.05
+
+
+def _clip_stats(path: Path) -> tuple[float, float] | None:
+    """`(peak_amplitude, rms_of_last_0.15s)`, or None if sox failed."""
+
+    def stat(args: list[str], field: str) -> float | None:
+        result = subprocess.run(
+            ["sox", str(path), "-n", *args, "stat"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in result.stderr.splitlines():
+            if field in line:
+                try:
+                    return float(line.split()[-1])
+                except ValueError:
+                    return None
+        return None
+
+    peak = stat([], "Maximum amplitude")
+    tail = stat(["trim", "-0.15"], "RMS     amplitude")
+    if peak is None or tail is None:
+        return None
+    return peak, tail
+
+
+def _clip_warning(path: Path) -> str | None:
+    """A human-readable problem with the take just recorded, or None.
+
+    Two checks, both learned the expensive way. The first corpus was lost
+    to clips cut mid-word, and nothing noticed until bench time -- by
+    which point the session was over and the truncations arrived looking
+    like recognition failures rather than recording ones. Checking here
+    costs milliseconds and catches it while the speaker is still sitting
+    at the keyboard.
+
+    The silence check guards the other way a session can be wasted: this
+    tool cannot tell a headset from a webcam microphone, and a corpus
+    recorded off the wrong input is indistinguishable from bad luck until
+    far too late.
+    """
+    stats = _clip_stats(path)
+    if stats is None:
+        return None
+    peak, tail_rms = stats
+    if peak < _SILENT_CLIP_PEAK:
+        return (
+            "almost no audio in this clip -- is the right microphone "
+            "selected? (--input-device)"
+        )
+    if tail_rms / peak > _TRUNCATION_TAIL_RATIO:
+        return (
+            "this clip still has speech at its very end -- probably cut "
+            "short. Press r to redo, and leave a beat before pressing space."
+        )
+    return None
+
+
 def _record_ptt(
     path: Path,
     max_seconds: float,
     driver: str | None = None,
     device: str | None = None,
+    tail_seconds: float = DEFAULT_TAIL_SECONDS,
+    preroll_seconds: float = DEFAULT_PREROLL_SECONDS,
 ) -> bool:
-    """Record until the next keypress, capped at `max_seconds`."""
+    """Record until the next keypress, capped at `max_seconds`.
+
+    Keeps capturing for `tail_seconds` past the keypress: the speaker
+    releases as the last syllable ends rather than after it, so stopping
+    on the key itself clips the final word. Waits `preroll_seconds`
+    before prompting, so the device is actually open by the time anyone
+    speaks.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen(
         [
             "sox",
             "-q",
+            "--buffer",
+            str(SOX_BUFFER_BYTES),
             *_input_args(driver, device),
             "-r",
             str(SAMPLE_RATE),
@@ -177,8 +282,10 @@ def _record_ptt(
         stderr=subprocess.PIPE,
         text=True,
     )
+    time.sleep(preroll_seconds)
     print("  \u25cf REC  -- press space to stop", end="", flush=True)
     _read_key()
+    time.sleep(tail_seconds)
 
     if process.poll() is None:
         process.terminate()
@@ -195,6 +302,10 @@ def _record_ptt(
     if truncated and not _repair_truncated_wav(path):
         print("\r  could not repair the clip header", file=sys.stderr)
         return False
+
+    warning = _clip_warning(path)
+    if warning is not None:
+        print(f"\n  WARNING: {warning}", file=sys.stderr)
     return True
 
 
@@ -240,6 +351,8 @@ def _record(
         [
             "sox",
             "-q",
+            "--buffer",
+            str(SOX_BUFFER_BYTES),
             *_input_args(driver, device),
             "-r",
             str(SAMPLE_RATE),
@@ -289,6 +402,20 @@ def main() -> int:
         default=None,
         help="use a fixed-length window of this many seconds instead of "
         f"push-to-talk (suggested {DEFAULT_SECONDS})",
+    )
+    parser.add_argument(
+        "--tail-seconds",
+        type=float,
+        default=DEFAULT_TAIL_SECONDS,
+        help="keep recording this long after the stop key "
+        f"(default {DEFAULT_TAIL_SECONDS}) so the last word is not clipped",
+    )
+    parser.add_argument(
+        "--preroll-seconds",
+        type=float,
+        default=DEFAULT_PREROLL_SECONDS,
+        help="wait this long for the audio device to open before "
+        f"prompting (default {DEFAULT_PREROLL_SECONDS})",
     )
     parser.add_argument(
         "--max-seconds",
@@ -386,6 +513,8 @@ def main() -> int:
                     args.max_seconds,
                     args.input_driver,
                     args.input_device,
+                    args.tail_seconds,
+                    args.preroll_seconds,
                 )
             if ok:
                 print("  saved")
