@@ -12,11 +12,22 @@ hands body-layer a resolved `{token, match_ratio}` (plus two booleans this
 module adds, see `MatchResult`'s docstring) so body can decide what to do
 about it without ever seeing a phrase table.
 
-**The verb anchor fires first, and it is the single most important line
-of defence** (Decision 4 Layer 2): if the first normalised word does not
-resemble a known command verb, `match_transcript` stops immediately --
-`verb_anchored=False`, no phrase scoring happens at all. This is what
-stops arbitrary misrecognised speech from resolving to *some* command.
+**The verb anchor fires first, but it is a cheap early-out, not the
+primary defence.** An earlier version of this docstring claimed it was
+the single most important line of defence; live testing against this
+branch found that false. If the first normalised word does not resemble a
+known command verb, `match_transcript` stops immediately --
+`verb_anchored=False`, no phrase scoring happens at all -- which is a real
+saving, but `VERB_ANCHOR_WORDS` is unavoidably full of ordinary English
+words this vocabulary's own verbs happen to be (`look`, `watch`, `report`,
+`scan`, `say`, `stop`, `cancel`, `full`), so an anchored verb is common,
+not rare: `"look at that"`, `"watch out"`, `"report says otherwise"` all
+anchor. **The phrase-sequence score below (`_phrase_match_ratio`) is the
+real defence** -- it is what actually rejects those three, because none
+of them resembles a *word sequence* this vocabulary knows, even though
+their first word does. See that function's docstring for why scoring word
+sequences rather than character streams is what makes ordinary sentences
+fail to score well, without any hand-tuned floor.
 
 **`VERB_ANCHOR_WORDS` is derived from `vocabulary.PHRASES`, not
 hand-copied.** Decision 4 REVISED's own prose gives a verb set --
@@ -68,14 +79,32 @@ from vocabulary import (
     parse_bearing,
 )
 
-#: `difflib.get_close_matches` cutoff for mapping normalised recogniser
-#: text onto a known phrase. **Measured, not guessed**: this is the exact
-#: figure `tools/stt_bench.py`'s own `_MATCH_CUTOFF` uses, and that bench
-#: run is what produced Stage 1's 99.2% top-1 accuracy with zero unsafe
-#: errors on `small.en` + `--prompt` (`research/2026-09-19-whisper-
-#: model-sweep.md`). Reusing the bench's own proven cutoff rather than
-#: inventing a second, unmeasured one.
+#: The floor `_phrase_match_ratio`'s word-sequence score must clear for a
+#: phrase to be a candidate at all. **Measured, not guessed**: this is the
+#: exact figure `tools/stt_bench.py`'s own `_MATCH_CUTOFF` uses, and that
+#: bench run is what produced Stage 1's 99.2% top-1 accuracy with zero
+#: unsafe errors on `small.en` + `--prompt` (`research/2026-09-19-corpus-
+#: bench-results.md`). Reusing the bench's own proven cutoff rather than
+#: inventing a second, unmeasured one -- **note the bench's own matcher
+#: scored whole character strings**, not word sequences, so this figure's
+#: provenance is "the cutoff that worked," not "the cutoff measured
+#: against this exact scoring function." The word-sequence rewrite below
+#: (fixing a verified false-positive command-execution bug, see module
+#: docstring) keeps this same number because it still separates real
+#: mishearings from free speech in the cases checked -- see
+#: `test_command_matcher.py`'s reviewer-verified fixtures.
 MATCH_FLOOR: float = 0.6
+
+#: The per-word character-ratio floor a heard word not already an exact
+#: match must clear to be credited against a remaining phrase word in
+#: `_phrase_match_ratio`'s repair pass. Below this, a heard word is
+#: assumed unrelated to anything left in the phrase and earns nothing --
+#: without this floor, *any* two words share some nonzero character
+#: overlap, which is exactly the mechanism that let whole unrelated
+#: sentences repair their way to a passing score under the old
+#: whole-string scoring. Reviewer-specified and reviewer-verified against
+#: the false-positive/real-mishearing fixture set (module docstring).
+_WORD_REPAIR_FLOOR: float = 0.5
 
 #: The verb-anchor ratio floor (Decision 4 Layer 2 step 2). Stage 1's bench
 #: never separately measured a distribution of verb-only match ratios --
@@ -122,6 +151,14 @@ VERB_ANCHOR_WORDS: frozenset[str] = _derive_verb_anchor_words()
 #: `match_transcript` call would repeat the same dict-build (and raise
 #: for the same collision check) every time for no benefit.
 _PHRASE_INDEX: dict[str, str] = normalized_phrase_index()
+
+#: `_PHRASE_INDEX`'s keys, pre-split into word tuples once -- what
+#: `_phrase_match_ratio` actually compares against. Splitting is cheap,
+#: but there is no reason to redo it on every phrase for every incoming
+#: transcript when the phrase table itself is static.
+_PHRASE_WORDS: dict[str, tuple[str, ...]] = {
+    phrase: tuple(phrase.split()) for phrase in _PHRASE_INDEX
+}
 
 #: The two tokens that take a numeric-bearing slot (`vocabulary.py`'s
 #: "Slots, not enumerated phrases" section) -- `bearing_token ->
@@ -209,6 +246,68 @@ def _bearing_verb_token(verb: str) -> str | None:
     return best_token
 
 
+def _phrase_match_ratio(
+    heard_words: tuple[str, ...], phrase_words: tuple[str, ...]
+) -> float:
+    """Score `heard_words` against one known `phrase_words`, as a
+    **word-sequence** measure rather than a character-stream one -- the
+    fix for a real command-execution bug a reviewer found live on this
+    branch: the previous implementation ran `difflib.SequenceMatcher`
+    over the two *normalised strings*, i.e. character by character, which
+    scores prefix/character overlap between arbitrary sentences and a
+    2-3 word phrase table with no notion of word count at all.
+    `match_transcript("look at that")` scored 0.727 against `scan_ahead`
+    ("look ahead") that way and cleared `MATCH_FLOOR`, which is a false
+    command execution, not spurious noise: `"look"`, `"watch"`,
+    `"report"`, `"scan"`, `"say"`, `"stop"`, `"cancel"` and `"full"` are
+    all both real verbs in this vocabulary and ordinary English words a
+    pilot would say without meaning to command anything.
+
+    Commands are word sequences; scoring them as one is what makes an
+    unrelated sentence fail to resemble a 2-3 word phrase, without any
+    hand-tuned floor beyond `_WORD_REPAIR_FLOOR` below. The algorithm
+    (reviewer-specified, reviewer-verified against a real
+    false-positive/real-mishearing fixture set -- see
+    `test_command_matcher.py`):
+
+    1. `difflib.SequenceMatcher` over the two **word lists** -- each
+       word `heard_words`/`phrase_words` share in the same relative
+       order (an "equal" opcode) scores `1.0`.
+    2. Within each remaining `"replace"` opcode of *equal length* on both
+       sides, each heard word is credited by its own pairwise character
+       ratio against the phrase word at the same position, but only if
+       that ratio clears `_WORD_REPAIR_FLOOR` -- a positional repair
+       ("watch" heard as "wach"), not a search across every remaining
+       phrase word for whichever one happens to look similar (that
+       broader search was tried and still let long irrelevant sentences
+       inflate their score via coincidental short-word overlaps -- see
+       the module's implementation history / `implementation.md`).
+       Unequal-length `"replace"` blocks, and every `"insert"`/`"delete"`
+       opcode, contribute nothing: there is no well-defined "same
+       position" to repair when the two sides padded differently, and
+       extra or missing words are exactly what should count against a
+       match, not be quietly reconciled away.
+    3. Total score divided by `max(len(heard_words), len(phrase_words))`
+       -- so a short phrase buried in a long sentence, or a long
+       ramble scored against a short phrase, is penalised by the extra
+       words either side carries, not just credited for what happened
+       to line up.
+    """
+    matcher = difflib.SequenceMatcher(None, heard_words, phrase_words)
+    score = 0.0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            score += i2 - i1
+        elif tag == "replace" and (i2 - i1) == (j2 - j1):
+            for offset in range(i2 - i1):
+                word_ratio = difflib.SequenceMatcher(
+                    None, heard_words[i1 + offset], phrase_words[j1 + offset]
+                ).ratio()
+                if word_ratio >= _WORD_REPAIR_FLOOR:
+                    score += word_ratio
+    return score / max(len(heard_words), len(phrase_words))
+
+
 def match_transcript(text: str) -> MatchResult:
     """Normalise -> verb anchor -> (bearing slot | phrase match) ->
     separation check. See module and `MatchResult` docstrings for the
@@ -220,7 +319,8 @@ def match_transcript(text: str) -> MatchResult:
 
     verb = words[0]
     if _verb_anchor_ratio(verb) < VERB_FLOOR:
-        # Full stop (Decision 4 Layer 2 step 2) -- nothing downstream is
+        # Cheap early-out (Decision 4 Layer 2 step 2) -- not the primary
+        # defence any more, see module docstring. Nothing downstream is
         # scored at all.
         return MatchResult(token=None, match_ratio=0.0, verb_anchored=False)
 
@@ -242,33 +342,32 @@ def match_transcript(text: str) -> MatchResult:
             # docstring.
             return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
 
-    exact_token = _PHRASE_INDEX.get(normalized)
-    if exact_token is not None:
-        return MatchResult(token=exact_token, match_ratio=1.0, verb_anchored=True)
+    heard_words = tuple(words)
+    best_phrase: str | None = None
+    best_ratio = 0.0
+    second_phrase: str | None = None
+    second_ratio = 0.0
+    for phrase, phrase_words in _PHRASE_WORDS.items():
+        ratio = _phrase_match_ratio(heard_words, phrase_words)
+        if ratio > best_ratio:
+            second_phrase, second_ratio = best_phrase, best_ratio
+            best_phrase, best_ratio = phrase, ratio
+        elif ratio > second_ratio:
+            second_phrase, second_ratio = phrase, ratio
 
-    candidates = difflib.get_close_matches(
-        normalized, tuple(_PHRASE_INDEX), n=2, cutoff=MATCH_FLOOR
-    )
-    if not candidates:
+    if best_phrase is None or best_ratio < MATCH_FLOOR:
         return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
 
-    best_phrase = candidates[0]
-    best_ratio = difflib.SequenceMatcher(None, normalized, best_phrase).ratio()
     best_token = _PHRASE_INDEX[best_phrase]
 
-    if len(candidates) > 1:
-        second_phrase = candidates[1]
+    if second_phrase is not None:
         second_token = _PHRASE_INDEX[second_phrase]
-        if second_token != best_token:
-            second_ratio = difflib.SequenceMatcher(
-                None, normalized, second_phrase
-            ).ratio()
-            if (best_ratio - second_ratio) < SEPARATION_MIN:
-                return MatchResult(
-                    token=best_token,
-                    match_ratio=best_ratio,
-                    verb_anchored=True,
-                    ambiguous=True,
-                )
+        if second_token != best_token and (best_ratio - second_ratio) < SEPARATION_MIN:
+            return MatchResult(
+                token=best_token,
+                match_ratio=best_ratio,
+                verb_anchored=True,
+                ambiguous=True,
+            )
 
     return MatchResult(token=best_token, match_ratio=best_ratio, verb_anchored=True)

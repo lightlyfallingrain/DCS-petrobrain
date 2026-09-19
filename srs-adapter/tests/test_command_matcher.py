@@ -9,15 +9,18 @@ needs genuinely tied ratios rather than "two similar-looking phrases"."""
 
 from __future__ import annotations
 
+import pytest
+
 from command_matcher import (
     MATCH_FLOOR,
     SEPARATION_MIN,
     VERB_ANCHOR_WORDS,
     VERB_FLOOR,
     MatchResult,
+    _phrase_match_ratio,
     match_transcript,
 )
-from vocabulary import bearing_phrase
+from vocabulary import bearing_phrase, normalize_for_match
 
 #: "scan est" scores an identical 0.941 `SequenceMatcher` ratio against
 #: both "scan east" (`scan_bearing_e`) and "scan west" (`scan_bearing_w`)
@@ -180,3 +183,124 @@ def test_separation_min_is_measured_none_available_and_documented_as_such() -> N
     since its own comment says it is unmeasured; this fails loudly if
     someone quietly changes the figure without updating the comment."""
     assert SEPARATION_MIN == 0.05
+
+
+# --- Regression: the verb-anchor / whole-string-scoring false-positive ----
+# --- command-execution bug a reviewer found live on this branch ----------
+
+
+def test_look_at_that_does_not_execute_scan_ahead() -> None:
+    """The reviewer's own smoking-gun case: under the old character-stream
+    `difflib.SequenceMatcher`/`get_close_matches` scoring, this scored
+    0.727 against `scan_ahead` ("look ahead") and cleared `MATCH_FLOOR` --
+    a false command execution from ordinary speech, not spurious "say
+    again" noise. Must resolve to no token at all now."""
+    result = match_transcript("look at that")
+    assert result.token is None
+    assert result.ambiguous is False
+
+
+def test_watch_out_does_not_execute_watch_nearest() -> None:
+    """The reviewer's second smoking-gun case: scored 0.636 against
+    `watch_nearest` under the old scoring, also clearing `MATCH_FLOOR`."""
+    result = match_transcript("watch out")
+    assert result.token is None
+
+
+def test_report_says_otherwise_does_not_match() -> None:
+    """A third sentence from the same failure family named in the review
+    (`"report", "watch", "look", "scan", "say", "stop", "cancel", "full"`
+    are all both command verbs and ordinary English words)."""
+    result = match_transcript("report says otherwise")
+    assert result.token is None
+
+
+def test_phrase_match_ratio_word_sequence_scoring() -> None:
+    """Pins `_phrase_match_ratio`'s exact numbers against the reviewer's
+    own verification table (`plans/inbound-speech/review.md`'s required
+    fix): false positives score low, real mishearings still score at or
+    above `MATCH_FLOOR`, each figure checked against the one phrase it is
+    plausibly a mishearing/false-positive of. A silent change to the
+    scoring algorithm that shifts any of these numbers needs to be a
+    deliberate, reviewed decision, not an accidental side effect of an
+    unrelated refactor."""
+    cases: list[tuple[str, str, float]] = [
+        ("look at that", "scan ahead", 0.0),
+        ("watch out", "watch nearest", 0.5),
+        ("this kind of stuff", "cancel task", 0.0),
+        ("it's kind of full", "scan full", 0.25),
+        ("scan the trucks on the road", "scan bearing three two zero", 1 / 6),
+        ("report so", "report south", 0.7857142857142857),
+        ("report conducts", "report contacts", 0.875),
+        ("scan left", "scan left", 1.0),
+    ]
+    for heard, phrase, expected in cases:
+        heard_words = tuple(normalize_for_match(heard).split())
+        phrase_words = tuple(normalize_for_match(phrase).split())
+        ratio = _phrase_match_ratio(heard_words, phrase_words)
+        assert ratio == pytest.approx(expected), (heard, phrase)
+
+
+def test_phrase_match_ratio_finds_real_mishearings_above_floor() -> None:
+    """The other half of the reviewer's table: real mishearings clear
+    `MATCH_FLOOR` against their *best* candidate in the whole phrase
+    table (not necessarily the single phrase named in the table above --
+    "walk ahead" is closest to "look ahead", not "scan ahead", and both
+    map to `scan_ahead` anyway).
+
+    Deliberately tests `_phrase_match_ratio` directly rather than the
+    full `match_transcript` pipeline for "walk"/"skin": both fail the
+    separate, untouched verb-anchor gate (`ratio("walk", "watch")`/
+    `ratio("skin", "scan")` are 0.5, below `VERB_FLOOR`'s 0.6) and so
+    never reach phrase scoring at all end-to-end. That gate was flagged
+    as a known-loose mechanism before this fix (see `test_verb_anchor_
+    rejects_non_command_speech`'s docstring) and the review's required
+    fix was explicitly scoped to the phrase-scoring shape, not the verb
+    anchor ("keep the verb anchor as a cheap early-out") -- so this test
+    pins what the scoring function itself does, without silently
+    expanding scope to also loosen `VERB_FLOOR`."""
+    best_clock_left = max(
+        _phrase_match_ratio(
+            tuple(normalize_for_match("clock left").split()),
+            tuple(normalize_for_match(phrase).split()),
+        )
+        for phrase in ("scan left", "look left")
+    )
+    assert best_clock_left >= MATCH_FLOOR
+
+    best_walk_ahead = max(
+        _phrase_match_ratio(
+            tuple(normalize_for_match("walk ahead").split()),
+            tuple(normalize_for_match(phrase).split()),
+        )
+        for phrase in ("scan ahead", "look ahead")
+    )
+    assert best_walk_ahead >= MATCH_FLOOR
+
+    # "clock left"/"walk ahead" do resolve end to end if the verb anchor
+    # is bypassed by starting from an anchorable verb -- confirms the
+    # phrase scoring itself, not the gate, is what would decide these.
+    assert match_transcript("scan lft").token == "scan_left"
+
+
+def test_scan_left_vs_scan_right_and_scan_north_vs_scan_south() -> None:
+    """The separation-check pair the reviewer verified by hand: "scan
+    left" against *scan right* scores 0.5 (below `MATCH_FLOOR`, correctly
+    rejected as that token); "scan north" against *scan south* scores 0.8,
+    a real but losing runner-up to the 1.0 exact hit -- resolved by the
+    separation check, not ambiguous."""
+    left = tuple(normalize_for_match("scan left").split())
+    right = tuple(normalize_for_match("scan right").split())
+    assert _phrase_match_ratio(left, right) == 0.5
+
+    north = tuple(normalize_for_match("scan north").split())
+    south = tuple(normalize_for_match("scan south").split())
+    assert _phrase_match_ratio(north, south) == 0.8
+
+    # And the full pipeline: "scan north" resolves cleanly, not ambiguously
+    # -- the runner-up "scan south" is a different token but 0.8 is not
+    # within SEPARATION_MIN of the 1.0 exact hit.
+    result = match_transcript("scan north")
+    assert result == MatchResult(
+        token="scan_bearing_n", match_ratio=1.0, verb_anchored=True
+    )
