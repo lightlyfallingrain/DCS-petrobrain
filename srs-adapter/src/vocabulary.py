@@ -523,3 +523,57 @@ def parse_bearing(text: str) -> BearingParse:
     if value > 359 or value % BEARING_RESOLUTION_DEG != 0:
         return BearingParse(None, value)
     return BearingParse(value, value)
+
+
+#: Framing sentence for `to_prompt`. Whisper's initial prompt conditions
+#: the decoder on *style and domain* as much as on individual words, so
+#: naming the setting does work that a bare word list does not: "this is
+#: helicopter crew intercom" makes clipped imperatives plausible, which
+#: is exactly the register these commands are spoken in.
+_PROMPT_FRAMING = "Helicopter crew intercom, pilot to gunner."
+
+#: Words that carry the domain but are not vocabulary phrasings -- the
+#: ones the decoder is least likely to reach for unprompted. "Petrovich"
+#: is the whole reason this list exists: it is a proper noun, it is the
+#: routing discriminator, and a general-English decoder has no reason to
+#: prefer it over "Petrovitch", "petro which", or anything else.
+_PROMPT_EXTRA_TERMS: tuple[str, ...] = (
+    "Petrovich",
+    "bearing",
+    "o'clock",
+    "contacts",
+    "air defence",
+)
+
+
+def to_prompt(max_phrasings: int = 24) -> str:
+    """An initial prompt biasing whisper toward this vocabulary.
+
+    Unlike `to_gbnf`, this is a **soft** bias: it makes these words more
+    likely without making anything else impossible. That difference is
+    the entire reason this exists. A grammar cannot decline -- when the
+    audio fits nothing, it must still emit something legal, so a
+    mishearing becomes a confident wrong command. Measured on this
+    project's own corpus, constrained decoding turned "watch nearest air
+    defence" into "what do you see" at confidence 0.82, seven times over.
+    A prompted decoder producing "what do you see" for that audio would
+    have to actually hear it that way, and a mishearing still comes back
+    looking wrong, which is what lets fuzzy matching reject it.
+
+    Truncated to `max_phrasings` because the prompt competes with the
+    audio for the decoder's attention and whisper caps it at
+    `n_text_ctx/2` tokens; the full phrase list is neither necessary nor
+    free. Phrasings are sampled across tokens rather than taken in order,
+    so the prompt covers the vocabulary's shape rather than its first
+    third.
+    """
+    sampled: list[str] = []
+    for token in TOKENS:
+        phrasings = PHRASES[token]
+        if phrasings:
+            sampled.append(phrasings[0])
+    if len(sampled) > max_phrasings:
+        step = len(sampled) / max_phrasings
+        sampled = [sampled[int(i * step)] for i in range(max_phrasings)]
+    terms = ", ".join([*sampled, *_PROMPT_EXTRA_TERMS])
+    return f"{_PROMPT_FRAMING} {terms}."
