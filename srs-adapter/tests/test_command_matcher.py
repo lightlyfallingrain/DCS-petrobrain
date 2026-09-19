@@ -33,10 +33,15 @@ def test_verb_floor_and_match_floor_are_the_measured_bench_cutoff() -> None:
     """`MATCH_FLOOR` must stay the exact figure `tools/stt_bench.py`'s own
     `_MATCH_CUTOFF` uses -- that bench run is what produced Stage 1's
     99.2% result, so a silent drift here would mean Stage 2 is no longer
-    matching what was actually measured. `VERB_FLOOR` is documented as
-    reusing the same figure (see `command_matcher.py`'s own comment)."""
+    matching what was actually measured. `VERB_FLOOR` is deliberately
+    *lower* than `MATCH_FLOOR` (0.5 vs 0.6, not the same figure) -- see
+    `command_matcher.py`'s own comment on `VERB_FLOOR` for the asymmetry:
+    a false anchor costs one phrase-scoring pass that almost always
+    rejects it anyway, a false rejection silently discards a command the
+    player actually spoke, so the anchor errs toward admitting."""
     assert MATCH_FLOOR == 0.6
-    assert VERB_FLOOR == MATCH_FLOOR
+    assert VERB_FLOOR == 0.5
+    assert VERB_FLOOR < MATCH_FLOOR
 
 
 def test_exact_phrase_hits_every_token_family() -> None:
@@ -246,19 +251,7 @@ def test_phrase_match_ratio_finds_real_mishearings_above_floor() -> None:
     `MATCH_FLOOR` against their *best* candidate in the whole phrase
     table (not necessarily the single phrase named in the table above --
     "walk ahead" is closest to "look ahead", not "scan ahead", and both
-    map to `scan_ahead` anyway).
-
-    Deliberately tests `_phrase_match_ratio` directly rather than the
-    full `match_transcript` pipeline for "walk"/"skin": both fail the
-    separate, untouched verb-anchor gate (`ratio("walk", "watch")`/
-    `ratio("skin", "scan")` are 0.5, below `VERB_FLOOR`'s 0.6) and so
-    never reach phrase scoring at all end-to-end. That gate was flagged
-    as a known-loose mechanism before this fix (see `test_verb_anchor_
-    rejects_non_command_speech`'s docstring) and the review's required
-    fix was explicitly scoped to the phrase-scoring shape, not the verb
-    anchor ("keep the verb anchor as a cheap early-out") -- so this test
-    pins what the scoring function itself does, without silently
-    expanding scope to also loosen `VERB_FLOOR`."""
+    map to `scan_ahead` anyway)."""
     best_clock_left = max(
         _phrase_match_ratio(
             tuple(normalize_for_match("clock left").split()),
@@ -277,10 +270,57 @@ def test_phrase_match_ratio_finds_real_mishearings_above_floor() -> None:
     )
     assert best_walk_ahead >= MATCH_FLOOR
 
-    # "clock left"/"walk ahead" do resolve end to end if the verb anchor
-    # is bypassed by starting from an anchorable verb -- confirms the
-    # phrase scoring itself, not the gate, is what would decide these.
     assert match_transcript("scan lft").token == "scan_left"
+
+
+def test_skin_bearing_315_matches_end_to_end() -> None:
+    """`"skin bearing 315"` is an **actual whisper transcript from the
+    user's own recorded corpus** (a mishearing of "scan bearing three one
+    five"), not a hypothetical fixture -- see `plans/inbound-speech/
+    review.md`'s follow-up finding. At the old `VERB_FLOOR` (0.6, the same
+    as `MATCH_FLOOR`), `ratio("skin", "scan")` = 0.5 failed to anchor at
+    all, so a command the player really spoke would have silently fallen
+    through as free speech -- a wrong action, not a missed one, and
+    exactly the failure class Stage 1's whole bench exists to avoid.
+    `VERB_FLOOR` was lowered to 0.5 specifically to admit this case."""
+    result = match_transcript("skin bearing 315")
+    assert result == MatchResult(
+        token="scan_bearing_deg",
+        match_ratio=1.0,
+        verb_anchored=True,
+        bearing_degrees=315,
+    )
+
+
+def test_walk_ahead_matches_end_to_end() -> None:
+    """A mishearing of "look ahead"/"scan ahead" (`ratio("walk", "look")`
+    = 0.5) -- the second case the lowered `VERB_FLOOR` was required to
+    admit, alongside `test_skin_bearing_315_matches_end_to_end`'s real
+    corpus case."""
+    result = match_transcript("walk ahead")
+    assert result.token == "scan_ahead"
+    assert result.match_ratio >= MATCH_FLOOR
+
+
+def test_lowering_verb_floor_does_not_reopen_the_false_positives() -> None:
+    """The required check before shipping a looser `VERB_FLOOR`: none of
+    the reviewer's original false-positive fixtures (or the two later
+    additions covering the rest of the ordinary-English-word verb set)
+    may resolve to a token end to end just because more transcripts now
+    clear the anchor."""
+    still_rejected = [
+        "look at that",
+        "watch out",
+        "report says otherwise",
+        "this kind of stuff",
+        "it's kind of full",
+        "the tanks are on the ridge",
+        "scan the trucks on the road",
+    ]
+    for text in still_rejected:
+        result = match_transcript(text)
+        assert result.token is None, text
+        assert result.ambiguous is False, text
 
 
 def test_scan_left_vs_scan_right_and_scan_north_vs_scan_south() -> None:

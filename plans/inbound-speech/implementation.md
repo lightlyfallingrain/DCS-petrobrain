@@ -273,3 +273,42 @@ that run was wrong. Same citation fixed in `body-layer/CLAUDE.md` and
 
 **body-layer/**: `ruff format --check` pass, `ruff check` pass, `mypy src` (from `body-layer/`)
 pass, `pytest -q` pass (705 passed).
+
+---
+
+### Stage 2 follow-up: lower VERB_FLOOR (2026-09-19)
+
+Coordinator flagged that one of the two over-rejected cases from the previous fix's residual gap
+(`"skin bearing 315"`) is not hypothetical — it is an actual whisper transcript from the user's
+own recorded corpus (a mishearing of "scan bearing three one five"), so rejecting it meant a
+command the player really spoke would silently fall through as free speech: a wrong action, not a
+missed one.
+
+**Fix follows from the earlier one.** Now that the phrase score (`_phrase_match_ratio`) is the
+real defence and the verb anchor is a cheap early-out, the two floors guard mistakes of very
+different cost: a false anchor costs one extra phrase-scoring pass that almost always rejects it
+anyway (`"the"` anchors against `"hey"` at 0.667, but `"the tanks are on the ridge"` scores 0.083
+against its best phrase candidate); a false rejection at the anchor is irreversible — it discards
+the transcript before phrase scoring ever runs. `VERB_FLOOR` lowered from 0.6 (`== MATCH_FLOOR`) to
+**0.5**, `MATCH_FLOOR` left untouched at 0.6.
+
+Verified end to end after the change:
+- `"skin bearing 315"` → `scan_bearing_deg`, `bearing_degrees=315`, ratio 1.0.
+- `"walk ahead"` → `scan_ahead`, ratio 0.75.
+- All of the reviewer's original false positives (`"look at that"`, `"watch out"`, `"report says
+  otherwise"`, `"this kind of stuff"`, `"it's kind of full"`, `"the tanks are on the ridge"`,
+  `"scan the trucks on the road"`) still resolve to no token end to end — none reopened.
+
+No need to raise `MATCH_FLOOR` to compensate (would have traded a measured constant for an
+unmeasured one) — not attempted, per the coordinator's explicit stop condition.
+
+`VERB_FLOOR`'s comment and the module docstring were rewritten so the two floors read as a
+deliberate pair (the asymmetry stated explicitly, not just the new number) rather than two
+independent knobs someone could "fix" back to matching later. Added
+`test_skin_bearing_315_matches_end_to_end` (citing corpus provenance directly in the docstring so
+it's harder to delete as "just a fixture"), `test_walk_ahead_matches_end_to_end`, and
+`test_lowering_verb_floor_does_not_reopen_the_false_positives` as a dedicated regression guard.
+
+Checks re-run: srs-adapter (`ruff format --check`/`ruff check`/`mypy src`/`pytest -q`) — 81
+passed, 1 skipped. body-layer (unaffected by this change, re-run anyway per instruction) — 705
+passed.
