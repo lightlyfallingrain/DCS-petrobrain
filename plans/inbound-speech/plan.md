@@ -361,6 +361,57 @@ asymmetry is justified by the direction of the damage rather than by aviation an
 
 ---
 
+### Decision 4 REVISED — the matcher moves to the adapter (2026-09-19, post-Stage-1)
+
+Decision 4 below put the matcher in body-layer (`belief/voice_commands.py`) with the adapter
+sending only `{transcript, confidence}`. **Stage 1 invalidated the premise.** Two findings:
+
+**The vocabulary churns, and body would have been a third copy.** It went from 15 tokens to 39
+during Stage 1, with phrasings added and removed four times in a day. `aircraft-layer` (legacy F10)
+and `srs-adapter` already hold copies; adding body's would mean three hand-synced tables for
+something still moving, with no automated check tying any of them together.
+
+**Normalisation turned out to be recogniser-specific, not domain knowledge.** Whisper writes a
+spoken "one eight zero" back as "180", loops short phrases verbatim, and returns "record" for
+"report". Those rules are facts about whisper, and putting them inside Petrovich's belief layer
+would file knowledge about a transcription tool next to knowledge about contacts and attention.
+A different recogniser would need different rules and body would have to change.
+
+**Revised split.** The adapter owns the vocabulary and turns text into a candidate token;
+body decides what to do about it:
+
+| | `srs-adapter` | `body-layer` |
+| --- | --- | --- |
+| audio → text | yes | never |
+| normalise (whisper quirks) | yes | no |
+| verb anchor, phrase match, separation check | yes | no |
+| act / confirm / say-again bands | no | **yes** |
+| dispatch, readback, escalation | no | **yes** |
+
+Seam payload grows from two fields to four:
+`GET /transcripts/poll` → `[{"transcript": str, "confidence": float, "token": str | null,
+"match_ratio": float, "t_wall": float}]`.
+
+**The division that matters is preserved, and arguably sharpened.** Body still owns every decision
+with crew behaviour in it — whether to act, whether to ask, what to say — and still receives the
+raw transcript, so the unmatched branch falls through to `parse_utterance`/escalation exactly as
+before. What moved is mechanical string-to-token resolution, which was never a belief question.
+Body also never sees audio, unchanged.
+
+**Constants split accordingly.** `VERB_FLOOR`, `MATCH_FLOOR` and `SEPARATION_MIN` are matching
+constants and live in the adapter. `CONFIRM_FLOOR`, `ACT_FLOOR`, `ACT_FLOOR_CANCEL` and
+`CONFIRM_WINDOW_S` are behaviour constants and stay in body. Both sets are still set from Stage 1's
+measured distribution rather than guessed.
+
+**Also superseded by Stage 1, within Decision 4 below:** Layer 1's `--grammar` biasing is replaced
+by `--prompt` (a grammar cannot decline; see the Stage 1 result section). The verb set is no longer
+`{scan, watch, cancel}` — it is `{scan, look, report, watch, cancel, stop, say, repeat}` plus the
+wake word and `nevermind`. And the phrase-table example mapping `"scan zero four five"` to
+`scan_bearing_ne` is wrong twice over: bearings are a parsed slot with 5° resolution, not a compass
+alias, and `"scan to the left"` was dropped as a phrasing the user never says.
+
+---
+
 ### Decision 6 — module boundaries: exactly what crosses each seam
 
 | Seam | Direction | Payload | Notes |
