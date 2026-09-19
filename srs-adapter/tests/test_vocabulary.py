@@ -1,0 +1,59 @@
+"""Tests for `vocabulary.py`'s internal consistency.
+
+This module cannot assert equality against `aircraft-layer`'s
+`ALLOWED_COMMANDS` or `body-layer`'s token tables directly -- `srs-adapter`
+must stand alone (root `CLAUDE.md` module-independence rule), which is
+exactly why `vocabulary.py` is a hand-synced duplicate rather than a
+shared import. What *is* testable here is that this file's own two tables
+(`TOKENS`, `PHRASES`) stay internally consistent, and that its helpers
+behave as `stt_engine.py`/`tools/stt_bench.py` need them to.
+"""
+
+from __future__ import annotations
+
+from vocabulary import PHRASES, TOKENS, spoken_phrases, to_gbnf, token_for_phrase
+
+
+def test_fifteen_tokens() -> None:
+    assert len(TOKENS) == 15
+    assert len(set(TOKENS)) == 15, "TOKENS must not contain duplicates"
+
+
+def test_every_token_has_phrases() -> None:
+    assert set(PHRASES) == set(TOKENS)
+    for token in TOKENS:
+        assert len(PHRASES[token]) >= 1
+
+
+def test_no_phrase_belongs_to_two_tokens() -> None:
+    seen: dict[str, str] = {}
+    for token, phrasings in PHRASES.items():
+        for phrase in phrasings:
+            assert phrase not in seen, (
+                f"phrase {phrase!r} claimed by both {seen.get(phrase)!r} and {token!r}"
+            )
+            seen[phrase] = token
+
+
+def test_spoken_phrases_covers_every_phrase() -> None:
+    all_phrases = spoken_phrases()
+    for phrasings in PHRASES.values():
+        for phrase in phrasings:
+            assert phrase in all_phrases
+
+
+def test_token_for_phrase_round_trips() -> None:
+    for token, phrasings in PHRASES.items():
+        for phrase in phrasings:
+            assert token_for_phrase(phrase) == token
+
+
+def test_token_for_phrase_unknown_returns_none() -> None:
+    assert token_for_phrase("this is not a command") is None
+
+
+def test_to_gbnf_contains_every_phrase() -> None:
+    grammar = to_gbnf()
+    assert grammar.startswith("root ::=")
+    for phrase in spoken_phrases():
+        assert f'"{phrase}"' in grammar
