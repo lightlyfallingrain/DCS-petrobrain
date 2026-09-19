@@ -449,8 +449,8 @@ alias, and `"scan to the left"` was dropped as a phrasing the user never says.
 | DCS Export.lua → collector | in-process/loopback | `ptt_down: bool` on the existing telemetry sample | One boolean. No audio ever. Stage 5. |
 | collector → capture process | loopback HTTP | `GET /ptt/state` → `{"ptt_down": bool, "t": float}` | Windows-local. The capture process does its own edge detection and debounce. |
 | capture process → `srs-adapter` | LAN HTTP, **Mac polls** | `GET /capture/poll` → `{"clip": {"audio_b64", "duration_s", "t_wall"}}` or `{"clip": null}` | The only raw-audio hop, and it is adapter-internal. |
-| `srs-adapter` → body-layer | LAN HTTP, **body polls** | `GET /transcripts/poll` → `[{"transcript": str, "confidence": float, "t_wall": float}]` | **Text only.** Body-layer never sees audio bytes, never sees a WAV path, never learns which engine ran. |
-| body-layer internal | — | `CrewConsole.handle_transcript(text, confidence, now_sim)` → `list[str]` | Routes to `handle_f10_command` on a match; otherwise the existing `handle_line`/`parse_utterance`/escalation path, unchanged. |
+| `srs-adapter` → body-layer | LAN HTTP, **body polls** | `GET /transcripts/poll` → `[{"transcript": str, "confidence": float, "token": str \| null, "match_ratio": float, "verb_anchored": bool, "ambiguous": bool, "t_wall": float}]` | **Text only.** Body-layer never sees audio bytes, never sees a WAV path, never learns which engine ran. **Updated 2026-09-19 (Stage 2 implementation + review):** this row originally read `{"transcript", "confidence", "t_wall"}` with body doing its own matching; Decision 4 REVISED moved the matcher to the adapter (`srs_adapter.command_matcher.MatchResult`) but this table was never updated to match, and the two-field `{token, match_ratio}` shorthand it briefly carried was itself insufficient — `verb_anchored`/`ambiguous` are required, not optional, because `token=None` alone cannot distinguish "not a command attempt" (fallthrough) from "verb-anchored but unresolved" (always say-again) from "ambiguous" (always confirm on the best candidate), three behaviourally distinct outcomes Decision 4's own prose demands. See `plans/inbound-speech/implementation.md`'s Stage 2 section. |
+| body-layer internal | — | `CrewConsole.handle_transcript(transcript, confidence, token, match_ratio, verb_anchored, ambiguous, now_sim)` → `list[str]` | **Updated 2026-09-19** — this row originally read `handle_transcript(text, confidence, now_sim)`, written before Decision 4 REVISED moved matching to the adapter; superseded by the row above. Routes to `handle_f10_command` on a match; otherwise the existing `handle_line`/`parse_utterance`/escalation path, unchanged. |
 
 **The gating split follows `plans/body-layer/plan.md` §1 exactly.** Signal-level (clip shorter than
 `MIN_CLIP_S`, RMS below `ENERGY_FLOOR`) is the **adapter's** and happens before anything crosses to
@@ -491,6 +491,14 @@ by typing. This is where the slice's actual behaviour lives, and it is provable 
 `_poll_transcripts` in the existing `--crew-text` poll thread. Verified by POSTing a Stage 1
 recording and watching Petrovich act and read back. **End-to-end from a WAV file to a spoken
 readback, with no Windows and no DCS in the loop.**
+
+**`stop_talking` dispatch (deferred from Stage 2, review optional-item):** wire it to
+`aircraft-layer`'s existing `collector/audio_sender.py::AudioPlaybackSender._interrupt_playback` —
+already reachable today via `push_speech(text, urgent=True)`, so this is comparatively cheap
+relative to the other voice-only tokens Stage 2 left as no-ops (`report_bearing_*`/
+`report_clock_*`/`scan_bearing_deg` need a query capability that does not exist yet;
+`stop_talking`'s interrupt mechanism already works end to end). Give it real dispatch in
+`CrewConsole` before or alongside the other voice-only tokens.
 
 **Stage 4 — Windows capture. [Win]** (no DCS needed)
 `audio_capture.py` (`FfmpegCapture`, `ClipGate`, `CaptureClipQueue`), `capture_server.py`,

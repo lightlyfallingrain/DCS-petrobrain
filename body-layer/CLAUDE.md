@@ -692,7 +692,9 @@ subproject-needed dev path.
   pending). `ACT_FLOOR`/`CONFIRM_FLOOR`/`CONFIRM_WINDOW_S` are behaviour constants split out from
   Decision 4's original five — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` stay in `srs-adapter`'s
   `command_matcher.py`. `ACT_FLOOR` is grounded in Stage 1's measured confidence distribution
-  (`srs-adapter/research/2026-09-19-whisper-model-sweep.md`); `ACT_FLOOR_CANCEL`/`CONFIRM_FLOOR`/
+  (`srs-adapter/research/2026-09-19-corpus-bench-results.md`, holds only while `--prompt` is in
+  use — the whisper-model-sweep doc has no confidence distribution, a reviewer-caught wrong
+  citation fixed 2026-09-19); `ACT_FLOOR_CANCEL`/`CONFIRM_FLOOR`/
   `CONFIRM_WINDOW_S` are documented-unmeasured placeholders (their own comments say so), pending
   Stage 6 live-sortie data. `PendingConfirmation` is the one piece of state a confirm question needs
   between two calls — owned and mutated by `crew_console.py`, not this module.

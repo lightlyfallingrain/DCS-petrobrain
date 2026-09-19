@@ -197,3 +197,79 @@ REVISED: `srs-adapter` owns matching mechanics, `body-layer` owns act/confirm/sa
   graceful no-op via `handle_f10_command`'s existing defensive `else` branch — a documented gap,
   not a silent one, and consistent with effort/value: building real report-by-bearing dispatch is
   its own feature, not part of "the matcher and the command path."
+
+---
+
+### Stage 2 review fixes (2026-09-19)
+
+Reviewer found the verb-anchor leak reached false command execution (`plans/inbound-speech/
+review.md`), not just spurious "say again" noise, and a wrong research-doc citation on `ACT_FLOOR`.
+Both required fixes addressed; two optional items folded in too.
+
+#### Fix 1 — word-sequence phrase scoring (was: whole-string character scoring)
+
+`srs-adapter/src/command_matcher.py`'s phrase-matching step scored the *whole normalised string*
+character-by-character (`difflib.SequenceMatcher`/`get_close_matches`), which rewards prefix/
+character overlap with no notion of word count. Verified live: `"look at that"` scored 0.727
+against `scan_ahead` and `"watch out"` scored 0.636 against `watch_nearest`, both clearing
+`ACT_FLOOR` at confidences inside Stage 1's measured correct range — a false command execution
+from ordinary speech, since `look`/`watch`/`report`/`scan`/`say`/`stop`/`cancel`/`full` are all
+both real verbs in this vocabulary and ordinary English words.
+
+Replaced with `_phrase_match_ratio`, a word-sequence score (reviewer-specified, reviewer-verified
+against a real false-positive/real-mishearing fixture set): `SequenceMatcher` over word lists,
+exact word matches score 1.0, equal-length `"replace"` opcode blocks get per-word character-ratio
+credit only above `_WORD_REPAIR_FLOOR` (0.5), divided by `max(len(heard), len(phrase))`.
+`MATCH_FLOOR` (0.6) is unchanged and still separates the two classes under the new scoring.
+Confirmed by direct comparison against the reviewer's own verification table (9 of the reviewer's
+12 numbers matched exactly once the algorithm used equal-length-only replace-block pairing rather
+than an unrestricted best-pairwise search across all remaining words — the unrestricted version let
+long irrelevant sentences inflate their score via coincidental short-word overlaps, which is the
+same failure class as the bug being fixed). `test_command_matcher.py` pins the reviewer's exact
+false-positive rejections, the `_phrase_match_ratio` table, and the separation-check pair
+("scan left"/"scan right" at 0.5, "scan north"/"scan south" at 0.8) as regression tests.
+
+**One real, remaining gap found while verifying:** the verb-anchor gate (unchanged by this fix,
+per the reviewer's explicit "keep the verb anchor as a cheap early-out, not the primary defence")
+is loose in *both* directions on short words — it now also *rejects* two of the reviewer's own
+"real mishearing, should still be accepted" examples end-to-end (`"walk ahead"`, `"skin bearing
+315"`), because `ratio("walk", "watch")`/`ratio("skin", "scan")` are 0.5, below `VERB_FLOOR`'s 0.6.
+This is the same short-word fuzzy-matching looseness flagged in Stage 2's original implementation
+notes (`"the"` scoring 0.667 against `"hey"`), just manifesting as an over-rejection here rather
+than an under-rejection. Not fixed — explicitly out of this fix's scope — but the test file
+documents it directly (`test_phrase_match_ratio_finds_real_mishearings_above_floor`'s docstring)
+rather than silently asserting around it, and it is the natural next target if `VERB_FLOOR`/
+`VERB_ANCHOR_WORDS` gets a Stage 6 re-tuning pass.
+
+Updated the module docstring's framing accordingly: the verb anchor "fires first" but is no longer
+claimed to be "the single most important line of defence" — that language now describes
+`_phrase_match_ratio`.
+
+#### Fix 2 — ACT_FLOOR citation
+
+`voice_commands.py`'s `ACT_FLOOR` comment cited `srs-adapter/research/2026-09-19-whisper-model-
+sweep.md`, which has no confidence distribution at all (only accuracy/safe-miss/unsafe-error/
+latency). Repointed at `srs-adapter/research/2026-09-19-corpus-bench-results.md` (committed by the
+user, `8070d6e`), which records the figures as data, and added the caveat the research doc itself
+states: the floor holds **only while `--prompt` is in use** — on the plain/unprompted row, correct
+and incorrect confidence ranges overlap almost entirely and the single most confident answer in
+that run was wrong. Same citation fixed in `body-layer/CLAUDE.md` and
+`tests/test_voice_commands.py`'s docstring.
+
+#### Optional items folded in
+
+- `plans/inbound-speech/plan.md` Decision 6's seam table updated in place (with an inline "Updated
+  2026-09-19" note explaining what changed and why) rather than left stale: both rows now show
+  `token`/`match_ratio`/`verb_anchored`/`ambiguous`, matching what Stage 2 actually built.
+- Added a note to the plan's Stage 3 description: `stop_talking`'s eventual dispatch should reuse
+  `aircraft-layer/src/collector/audio_sender.py`'s existing `_interrupt_playback` (already
+  reachable via `push_speech(..., urgent=True)`) — cheaper than the other voice-only tokens still
+  parked as no-ops, since the interrupt mechanism it needs already works end to end.
+
+#### Checks (re-run after both fixes)
+
+**srs-adapter/**: `ruff format --check` pass, `ruff check` pass, `mypy src` pass, `pytest -q` pass
+(78 passed, 1 skipped).
+
+**body-layer/**: `ruff format --check` pass, `ruff check` pass, `mypy src` (from `body-layer/`)
+pass, `pytest -q` pass (705 passed).
