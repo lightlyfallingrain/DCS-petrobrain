@@ -516,6 +516,46 @@ friction the user feels at the start of every session.
 
 ---
 
+### Settled Decisions (user, 2026-09-19)
+
+**1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a
+separate Windows-side adapter process. The user's reasoning: *"conceptually voice capture is DCS
+interface, though technically we use a workaround and skip DCS. Collector should still do the
+collecting, audio as well as others."* The collector's contract is everything arriving from the
+player-and-aircraft side, and the player's voice is that, even though the audio path bypasses DCS
+for technical reasons. Enabled by a command-line flag, defaulting off — the same additive posture
+`--overlay`, `--f10-commands` and `--speech-audio` already use, so a collector started without it
+behaves exactly as today.
+
+Note this does **not** breach the invariant that matters. `division-or-responsibility.md`'s rule is
+that raw audio never crosses into **body**, and it still does not: audio goes collector → adapter,
+recognition happens in the adapter, and body receives text. What moves is where capture sits, not
+where audio stops.
+
+**2. The Stage 1 pass bar is deliberately not set in advance.** The user cannot know what accuracy
+will feel acceptable until the numbers exist. Recorded as a known risk rather than a gap: judging a
+threshold after seeing results invites rationalising a disappointing number into an acceptable one.
+The mitigation is to report the bench's output in a form that makes the judgement concrete rather
+than statistical — not just top-1 accuracy, but **the actual confusion pairs** and a sample of what
+was heard, so the question becomes *"would I fly with this?"* rather than *"is 91% enough?"*.
+
+**3. PTT binds to the VOIP half-trigger, not the radio-menu one.** The user: *"DCS has half trigger
+radio menu and half trigger voip events. We should bind to the voip one."* These are distinct
+bindable input commands on the Mi-24P, and the distinction matters — the radio-menu half-trigger
+is already spoken for by the F10 command path this project built, so binding there would collide
+with an existing input surface. VOIP is also semantically right: it is the control the player
+already uses to *talk to someone*, which is exactly what talking to Petrovich is. Single-player
+only, so DCS's own VOIP transmission is moot.
+
+**This refines the investigator's finding rather than replacing it.** Its evidence that a held
+state is readable through `GetDevice(0):get_argument_value` stands, along with the per-frame tick
+rate that kills the missed-press concern. What changes is *which* signal to read: the probe must
+now establish which device argument (or other readable state) corresponds to the **VOIP**
+half-trigger specifically, rather than assuming arg 738's graduated value is the right source.
+Since 738 was already absent from this project's own clickabledata dump, and the VOIP/radio-menu
+split was not considered when it was identified, **the probe's scope widens slightly**: capture
+both, and label which is which by pressing each binding in turn.
+
 ### Decisions Requiring User Input
 
 1. **Capture process placement.** This plan puts microphone capture in a **second `srs-adapter`
