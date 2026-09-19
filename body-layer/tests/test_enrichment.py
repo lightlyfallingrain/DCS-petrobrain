@@ -19,6 +19,7 @@ from belief.enrichment import (
     NEAR_FACT_RADIUS_M,
     SemanticFact,
     WorldEnrichmentCache,
+    _proximity_text,
     _within_near_radius,
     displayable_name,
     motion_when_seen,
@@ -777,3 +778,63 @@ def test_latin1_names_survive_including_accents() -> None:
 
 def test_displayable_name_passes_none_through() -> None:
     assert displayable_name(None) is None
+
+
+# --- proximity wording: "on"/"next to" at short range (2026-09-19 roadmap
+# item) ------------------------------------------------------------------
+
+
+def test_proximity_text_at_zero_distance_says_on() -> None:
+    assert _proximity_text("a road", 0.0) == "on a road"
+
+
+def test_proximity_text_in_the_next_to_band_says_next_to() -> None:
+    # 10.0 exactly is the band boundary and belongs to "next to", since the
+    # user's rule is strictly "<10m" for "on".
+    assert _proximity_text("a road", 10.0) == "next to a road"
+    assert _proximity_text("a road", 50.0) == "next to a road"
+    assert _proximity_text("a road", 99.0) == "next to a road"
+
+
+def test_proximity_text_single_metres_is_on_not_near() -> None:
+    """User direction 2026-09-19: "<10m from road -> on road". An earlier
+    pass read the roadmap's "0 m" literally and left a 0.5-10 m gap that
+    rendered as "near a road (~4 metres)" -- absurd for something a crew
+    member would simply call *on* the road, and below what any eye resolves.
+    The three bands now tile with no gap."""
+    assert _proximity_text("a road", 0.0) == "on a road"
+    assert _proximity_text("a road", 4.0) == "on a road"
+    assert _proximity_text("a road", 9.9) == "on a road"
+
+
+def test_proximity_text_at_or_above_the_next_to_band_falls_back_to_near() -> None:
+    assert _proximity_text("a road", 100.0) == "near a road (100m)"
+    assert _proximity_text("a road", 250.0) == "near a road (250m)"
+
+
+def test_semantic_facts_for_road_on_top_of_says_on_the_road(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(nearest_road=_FakeInfo(name=None, distance_m=0.0))
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+    assert facts[0].text == "on a road"
+
+
+def test_semantic_facts_for_road_close_by_says_next_to_the_road(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_road=_FakeInfo(name="Route 1", distance_m=40.0)
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+    assert facts[0].text == "next to Route 1"

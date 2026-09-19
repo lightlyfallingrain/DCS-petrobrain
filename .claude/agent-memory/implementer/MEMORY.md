@@ -60,6 +60,7 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Overlay speech callouts](project_overlay_speech_callouts.md) — CrewConsole._print second sink, widened private _handle_inject_urgent return type to carry bypass_gate, "!!" prefix at push site not on OutgoingSpeech.text.
 - [osm-classified-cache](project_osm_classified_cache.md) — 3rd two-store instance (osm_cache/); dropped source_id from cache schema; finalize_cache/open_osm_cache_for_populate take explicit conn param not in plan prose.
 - [F10 crew commands Stages 1-3](project_f10_crew_commands.md) — first Hook->collector inbound UDP direction, first bounded-FIFO cache, no aircraft-layer venv, verify-before-assume wiring gaps, plan's manual-check prose was wrong.
+- [Contact report wording](project_contact_report_wording.md) — spelled units/TTS acronym table/"very close"/"on-next to" wording; roadmap's own "LR"/"MI-8" examples didn't match real vocabulary.
 
 - [Overlay speech callouts addendum](project_overlay_speech_callouts_addendum.md) — shared _contact_report_text helper fixes broken lifecycle callout text; facts["semantic"] is list[dict] not list[SemanticFact].
 - [Overlay speech callouts addendum 2](project_overlay_speech_callouts_addendum2.md) — round() ties-to-even on rounding boundaries, CONTACT_LOST no-template needs no route_event change, classification-changed relative_now needs EnrichmentContext.
