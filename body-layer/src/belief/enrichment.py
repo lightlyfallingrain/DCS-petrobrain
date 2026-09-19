@@ -51,8 +51,9 @@ itself can't explain the `side` reading).
 md`, opened 2026-09-18, this pass 2026-09-19). `semantic_facts_for`'s five
 `"near {label} ({distance}m)"` fact constructions (settlement/road/water/
 ridge/valley) now go through a shared `_proximity_text(label, distance_m)`
-helper: at or under `_ON_FEATURE_MAX_M`, `"on {label}"`, no figure; in the
-`_NEXT_TO_MIN_M`..`_NEXT_TO_MAX_M` band, `"next to {label}"`, also no figure
+helper: under `_ON_FEATURE_MAX_M` (10 m), `"on {label}"`, no figure; in the
+`_NEXT_TO_MIN_M`..`_NEXT_TO_MAX_M` band (10-100 m), `"next to {label}"`, also
+no figure. The three bands tile with no gap
 -- both replace the bare-distance shape entirely at the range where the fact
 of proximity matters more than the number, per the roadmap item. Generic
 over `label` (a proper name, or a generic noun phrase like `"a road"`/`"a
@@ -183,18 +184,22 @@ def _within_near_radius(kind: str, distance_m: float) -> bool:
 #: rather than "near {label} (Nm)" -- 2026-09-19 roadmap item: at zero
 #: distance the exact figure is meaningless (there is nothing left to
 #: measure), so the wording drops it entirely rather than saying "near a
-#: road (0m)". Checked as `<=` rather than `== 0.0` to tolerate the small
-#: float noise a real geometry computation can produce for a position that
-#: is, for practical purposes, on the linear feature.
-_ON_FEATURE_MAX_M: Final[float] = 0.5
+#: road (0m)".
+#:
+#: **Raised 0.5 -> 10 m (user, 2026-09-19: "<10m from road -> on road").**
+#: The first pass read the item's "0 m" literally and used a float-noise
+#: epsilon, which left an unworded 0.5-10 m gap falling through to
+#: "near a road (~4 metres)" -- absurd phrasing for something a crew member
+#: would simply call *on* the road. The user's threshold is the honest one:
+#: within ten metres of a linear feature you are on it, not near it, and no
+#: eye resolves the difference anyway.
+_ON_FEATURE_MAX_M: Final[float] = 10.0
 
-#: The "next to {label}" band -- roughly 10 to 100 m, per the same roadmap
-#: item: close enough that "near ... (Nm)" undersells how close this is,
-#: too far to say "on" it. Below `_NEXT_TO_MIN_M` (and above
-#: `_ON_FEATURE_MAX_M`) falls through to the pre-existing "near {label}
-#: (Nm)" shape -- that ~0.5-10 m gap is not one either named case in the
-#: roadmap item covers, so it is left alone rather than inventing a third
-#: band nobody asked for.
+#: The "next to {label}" band -- 10 to 100 m, per the same roadmap item:
+#: close enough that "near ... (Nm)" undersells how close this is, too far
+#: to say "on" it. `_NEXT_TO_MIN_M` meets `_ON_FEATURE_MAX_M` exactly, so
+#: the three bands tile the range with no gap; the earlier version left one
+#: and it produced nonsense at its bottom end.
 _NEXT_TO_MIN_M: Final[float] = 10.0
 _NEXT_TO_MAX_M: Final[float] = 100.0
 
@@ -220,7 +225,7 @@ def _proximity_text(label: str, distance_m: float) -> str:
     these two cases no longer carry at all). Otherwise, the pre-existing
     `"near {label} ({distance}m)"` shape, unchanged -- `speech.py` still
     rounds/spells that figure for TTS at render time."""
-    if distance_m <= _ON_FEATURE_MAX_M:
+    if distance_m < _ON_FEATURE_MAX_M:
         return f"on {label}"
     if _NEXT_TO_MIN_M <= distance_m < _NEXT_TO_MAX_M:
         return f"next to {label}"
