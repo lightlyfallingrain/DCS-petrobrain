@@ -122,6 +122,18 @@ contact sits in, not ground truth.
 "Stage 4b design -- speech and events").** A contact whose `Contact.
 cardinality` holds a plural interval speaks a hedged quantity word ahead of
 the unit type -- `"several contacts, ..."`, `"a handful of trucks, ..."`.
+**Grammar is polished only where it is obviously wrong, not where it is merely
+imperfect** (user, 2026-09-19: *"Petrovich is Russian, we don't expect perfect
+grammar. Value/effort is low on fine tuning grammar beyond obvious mistakes."*).
+Slightly-off English is **in character** for a Soviet-trained weapons operator
+speaking a second language, so `"a couple of armor"` (a mass noun taking a
+count phrase) and `"three T-72"` (an unpluralised type designation) are left
+as they are, deliberately. The line worth fixing is the one a listener hears as
+a *defect* rather than an accent -- `"a handful trucks"` was missing a word,
+which is a different thing from being stilted. Do not add pluralisation rules,
+article handling, or agreement logic here without a reason beyond tidiness;
+that cost buys nothing this character needs.
+
 **The phrase carries its own connector**: `"several"`/`"many"` take a bare
 noun, while `"a handful"` requires `"of"` to be grammatical, so
 `_cardinality_phrase` returns `"a handful of"` and composition stays a plain
