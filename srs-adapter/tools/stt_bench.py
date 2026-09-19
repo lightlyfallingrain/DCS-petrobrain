@@ -288,6 +288,14 @@ def print_report(engine_label: str, results: list[ClipResult]) -> None:
             f"Recognition time per clip: median {statistics.median(times):.2f}s  "
             f"p90 {p90:.2f}s  max {times[-1]:.2f}s"
         )
+        if "windows" in engine_label:
+            print(
+                "  NOTE: this row spawns a fresh powershell.exe and loads\n"
+                "  System.Speech per clip, so the figures above are dominated by\n"
+                "  process startup rather than recognition. They are NOT\n"
+                "  comparable to the whisper rows, and a resident service would\n"
+                "  be far faster. Read this row's accuracy, not its latency."
+            )
 
     confusions: dict[tuple[str, str], list[ClipResult]] = {}
     for r in results:
