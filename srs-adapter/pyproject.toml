@@ -26,4 +26,6 @@ known-first-party = [
     "tts_engine",
     "server",
     "aircraft_client",
+    "stt_engine",
+    "vocabulary",
 ]
