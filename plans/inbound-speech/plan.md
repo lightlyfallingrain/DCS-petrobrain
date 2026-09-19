@@ -361,6 +361,36 @@ asymmetry is justified by the direction of the damage rather than by aviation an
 
 ---
 
+### Decision 1 REVISED — the Windows engine is removed (2026-09-19, post-Stage-1)
+
+`WindowsSpeechEngine` is deleted. Decision 1 below still describes it as "the required Windows
+baseline"; that requirement is withdrawn, and this note records why rather than rewriting the
+original.
+
+**It was never executed.** No Windows run ever happened, so nothing here is a measurement — the
+code was written from `System.Speech`'s documented surface and removed before it was benched.
+
+**The reason is structural.** `System.Speech` is a command-and-control recogniser driven by a
+`Choices` grammar, with no real free-dictation mode. This slice's design is two-tier: a
+transmission opening with the wake word is free speech for the brain layer. Free speech therefore
+has to reach whisper regardless, which means **Decision 2's LAN audio hop exists either way** — the
+one thing a Windows-side recogniser could have eliminated, it does not eliminate. What remains is
+an optimisation of the command tier bought with a second engine, a second vocabulary to keep in
+sync, and a second incompatible confidence scale feeding one set of behaviour bands. User's call:
+*"this kills the windows path. That's a real no-go."*
+
+Decision 1's "two implementations" framing goes with it. The `STTEngine` protocol stays, for two
+concrete reasons rather than the speculation that another engine appears: Stage 3 needs a seam to
+inject a fake engine into tests without a binary, and whisper model/decoding variants swap behind
+it — the model sweep is four configurations of one class.
+
+Decision 3's note that *"AI ATC used open dictation, and `System.Speech` with a `Choices` grammar
+is a different mode"* was the original argument for trying it. Stage 1 answered the underlying
+question a different way: whisper with `--prompt` scored 99.2% on this speaker, so the accent
+problem that motivated a constrained Windows recogniser no longer needs one.
+
+---
+
 ### Decision 4 REVISED — the matcher moves to the adapter (2026-09-19, post-Stage-1)
 
 Decision 4 below put the matcher in body-layer (`belief/voice_commands.py`) with the adapter
