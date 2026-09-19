@@ -68,8 +68,10 @@ from belief.escalation import (
 from belief.speech import (
     UrgentCall,
     render_cancel_readback,
+    render_confirm_request,
     render_contact_report,
     render_readback,
+    render_say_again,
     render_scan_readback,
     render_watch_nearest_readback,
     route_event,
@@ -84,6 +86,13 @@ from belief.tools import (
     set_attention,
 )
 from belief.utterance import PartialParse, PlayerUtterance, parse_utterance
+from belief.voice_commands import (
+    CONFIRM_WINDOW_S,
+    BandDecision,
+    PendingConfirmation,
+    classify_response,
+    classify_yes_no,
+)
 from perception.geometry import GeoPosition
 
 #: Spoken when "Cancel Task" finds nothing to cancel -- no task store wired
@@ -105,6 +114,11 @@ Petrovich crew session -- type naturally, e.g.:
 
   !inject-urgent <id> <text>      test harness: force an urgent bypass_gate
                                    call (no real threat detector exists yet)
+  !voice <token|-> <ratio> <confidence> <verb_anchored:0|1> <ambiguous:0|1> <text...>
+                                   test harness: drive handle_transcript with
+                                   an already-matched result, as if srs-adapter's
+                                   command_matcher had produced it (Stage 3
+                                   wires the real thing; no audio here)
 
 Anything else is escalated (there is no brain to answer it yet).
 """
@@ -203,6 +217,36 @@ _SECTOR_SCAN_LABELS: dict[Sector, str] = {
 #: `scan-area` command's trailing `reason` argument does.
 _F10_SCAN_REASON = "F10 scan command"
 
+#: Plain human phrase per non-scan legacy token, for `_describe_token_for_
+#: confirm`'s fallback table -- `render_confirm_request`'s `description`
+#: argument (`"watch nearest, confirm?"`). Scan tokens instead reuse
+#: `_RELATIVE_SCAN_LABELS`/`_SECTOR_SCAN_LABELS` directly (see that
+#: function), since those already carry the exact spoken sector phrase.
+_TOKEN_DESCRIPTIONS: dict[str, str] = {
+    "watch_nearest": "watch nearest",
+    "watch_nearest_air_defence": "watch nearest air defence",
+    "cancel_task": "cancel the task",
+}
+
+
+def _describe_token_for_confirm(token: str) -> str:
+    """A plain human phrase for `token`, for `belief.speech.
+    render_confirm_request`'s `description` argument (Stage 2,
+    `plans/inbound-speech/plan.md`). Reuses `handle_f10_command`'s own
+    token->label tables for the 15-token legacy vocabulary it can already
+    dispatch (`_describe_task_for_speech`'s sibling, same "one table, two
+    readers" idea); anything outside that set (a voice-only token this
+    milestone does not yet act on -- see `handle_f10_command`'s own
+    defensive `else` branch) falls back to the token name with
+    underscores turned to spaces, which is honest rather than polished:
+    there is no dispatch behind it yet for the confirm to be about."""
+    if token in _RELATIVE_SCAN_TOKENS:
+        return f"scan {_RELATIVE_SCAN_LABELS[_RELATIVE_SCAN_TOKENS[token]]}"
+    if token in _BEARING_SCAN_TOKENS:
+        return f"scan {_SECTOR_SCAN_LABELS[_BEARING_SCAN_TOKENS[token]]}"
+    return _TOKEN_DESCRIPTIONS.get(token, token.replace("_", " "))
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -265,6 +309,12 @@ class CrewConsole:
     #: different process, a different URL).
     speech_client: SrsAdapterClient | None = None
     _next_utterance_number: int = field(default=0, repr=False)
+    #: Stage 2 of `plans/inbound-speech/plan.md`'s confirm-band state --
+    #: set by `handle_transcript` when a matched command lands in the
+    #: confirm band (or is ambiguous), cleared on the next call once it is
+    #: answered, discarded, or expired (`CONFIRM_WINDOW_S`). `None` means
+    #: no question is currently open.
+    _pending_confirmation: PendingConfirmation | None = field(default=None, repr=False)
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         stripped = line.strip()
@@ -272,10 +322,12 @@ class CrewConsole:
             return []
         if stripped.startswith("!inject-urgent"):
             lines, bypass_gate = self._handle_inject_urgent(stripped, now_sim)
-        else:
-            lines = self._handle_utterance(stripped, now_sim)
-            bypass_gate = False
-        self._print(lines, bypass_gate=bypass_gate)
+            self._print(lines, bypass_gate=bypass_gate)
+            return lines
+        if stripped.startswith("!voice"):
+            return self._handle_voice_test_command(stripped, now_sim)
+        lines = self._handle_utterance(stripped, now_sim)
+        self._print(lines, bypass_gate=False)
         return lines
 
     def drain_events(self, now_sim: float) -> list[str]:
@@ -547,6 +599,125 @@ class CrewConsole:
         description = self._describe_task_for_speech(task)
         cancel_task(self.store, self.tasks, task.id)
         return [render_cancel_readback(description).text]
+
+    def handle_transcript(
+        self,
+        transcript: str,
+        confidence: float,
+        token: str | None,
+        match_ratio: float,
+        verb_anchored: bool,
+        ambiguous: bool,
+        now_sim: float,
+    ) -> list[str]:
+        """`plans/inbound-speech/plan.md` Stage 2's voice-command entry
+        point -- a sibling of `handle_line`/`handle_f10_command`, per the
+        module docstring's prediction of a third input surface. Called
+        with the fields `srs_adapter.command_matcher.MatchResult` already
+        resolved (Stage 3 wires the real HTTP poll; this stage is driven
+        by tests and the `!voice` REPL harness, see `_handle_voice_test_
+        command`).
+
+        **A pending confirm-band question, if any, is checked first** --
+        `classify_yes_no` decides whether this transcript commits, discards,
+        or (implicitly) abandons it. Any answer other than affirm/negative
+        discards the pending question *silently* and falls through to treat
+        this transcript as its own new input (Decision 4 Layer 3: "anything
+        else, or the timeout, discards silently" -- read as discarding the
+        stale question, not the player's new utterance). Affirm/negative
+        are valid only inside this branch, i.e. only while a confirmation
+        is pending -- outside it the same words are ordinary text and reach
+        `belief.voice_commands.classify_response` like anything else."""
+        if self._pending_confirmation is not None:
+            pending = self._pending_confirmation
+            if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:
+                answer = classify_yes_no(transcript)
+                self._pending_confirmation = None
+                if answer == "affirm":
+                    return self.handle_f10_command(pending.token, now_sim)
+                if answer == "negative":
+                    return []
+                # else: falls through and this transcript is evaluated on
+                # its own merits below.
+            else:
+                self._pending_confirmation = None
+
+        decision = classify_response(
+            token, match_ratio, confidence, verb_anchored, ambiguous
+        )
+        return self._act_on_voice_decision(decision, transcript, now_sim)
+
+    def _act_on_voice_decision(
+        self, decision: BandDecision, transcript: str, now_sim: float
+    ) -> list[str]:
+        if decision.disposition == "fallthrough":
+            # `handle_line` re-strips/re-checks the `!`-prefixed harness
+            # commands, which a real transcript never begins with -- safe
+            # to route straight through it rather than duplicating
+            # `_handle_utterance` + `_print` here.
+            return self.handle_line(transcript, now_sim)
+        if decision.disposition == "act":
+            assert decision.token is not None
+            return self.handle_f10_command(decision.token, now_sim)
+        if decision.disposition == "confirm":
+            assert decision.token is not None
+            description = _describe_token_for_confirm(decision.token)
+            self._pending_confirmation = PendingConfirmation(
+                token=decision.token, description=description, pending_since_sim=now_sim
+            )
+            lines = [render_confirm_request(description).text]
+        else:  # "say_again"
+            lines = [render_say_again().text]
+        self._print(lines)
+        return lines
+
+    def _handle_voice_test_command(self, line: str, now_sim: float) -> list[str]:
+        """`!voice` -- a manually-typed test harness for `handle_transcript`,
+        mirroring `!inject-urgent`'s "clearly-labelled test harness, not a
+        production surface" posture. Body-layer cannot compute a real match
+        itself (module independence: no import of `srs-adapter`'s
+        `command_matcher`/`vocabulary`) -- this command instead takes the
+        fields the adapter would have already produced as literal typed
+        arguments, exactly the shape Stage 3's real `GET /transcripts/poll`
+        will eventually deliver, so a developer can drive the full
+        act/confirm/say-again pipeline from the REPL without audio, a
+        running adapter, or DCS.
+
+        `!voice <token|-> <match_ratio> <confidence> <verb_anchored:0|1>
+        <ambiguous:0|1> <transcript...>` -- `-` for `token` means "no
+        match" (`None`)."""
+        usage = [
+            (
+                "usage: !voice <token|-> <match_ratio> <confidence> "
+                "<verb_anchored:0|1> <ambiguous:0|1> <transcript...>"
+            )
+        ]
+        parts = line.split(maxsplit=6)
+        if len(parts) != 7:
+            self._print(usage)
+            return usage
+        _, token_arg, ratio_arg, confidence_arg, verb_arg, ambiguous_arg, transcript = (
+            parts
+        )
+        try:
+            match_ratio = float(ratio_arg)
+            confidence = float(confidence_arg)
+        except ValueError:
+            self._print(usage)
+            return usage
+        if verb_arg not in ("0", "1") or ambiguous_arg not in ("0", "1"):
+            self._print(usage)
+            return usage
+        token = None if token_arg == "-" else token_arg
+        return self.handle_transcript(
+            transcript,
+            confidence,
+            token,
+            match_ratio,
+            verb_arg == "1",
+            ambiguous_arg == "1",
+            now_sim,
+        )
 
     def _new_utterance_id(self) -> str:
         self._next_utterance_number += 1

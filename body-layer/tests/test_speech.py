@@ -33,8 +33,10 @@ from belief.speech import (
     _respell_for_tts,
     _round_enrichment_fragment,
     _unit_type_display,
+    render_confirm_request,
     render_contact_report,
     render_readback,
+    render_say_again,
     render_watch_nearest_readback,
     route_event,
 )
@@ -139,6 +141,23 @@ def test_render_readback_template_is_readback() -> None:
     speech = render_readback("watch", "CONTACT_1")
     assert speech.template == "readback"
     assert speech.bypass_gate is False
+
+
+def test_render_say_again() -> None:
+    speech = render_say_again()
+    assert speech.text == "Say again?"
+    assert speech.template == "readback"
+    assert speech.bypass_gate is False
+
+
+def test_render_confirm_request_capitalizes_and_appends_confirm() -> None:
+    speech = render_confirm_request("scan left")
+    assert speech.text == "Scan left, confirm?"
+    assert speech.template == "readback"
+
+
+def test_render_confirm_request_empty_description() -> None:
+    assert render_confirm_request("").text == ", confirm?"
 
 
 def test_render_contact_report_returns_none_for_unknown_contact() -> None:

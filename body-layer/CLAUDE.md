@@ -683,6 +683,35 @@ subproject-needed dev path.
   `"Scanning <sector label>."`). `tasks` mirrors `aircraft_client`'s own reserved-field pattern;
   `logger.py` wires it to the same `ConsolePerceptionRunner.tasks` instance its poll loop already
   ticks.
+- `src/belief/voice_commands.py` (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's
+  split) — the act/confirm/say-again band decision (`classify_response`, given `srs_adapter.
+  command_matcher.MatchResult`'s fields reproduced as plain arguments — body-layer holds no import
+  of that subproject or its vocabulary, module independence) and `classify_yes_no`, a small,
+  body-owned affirm/negative word check (not a copy of the adapter's phrase table — a different,
+  much smaller closed set answering a yes/no question, consulted only while a confirmation is
+  pending). `ACT_FLOOR`/`CONFIRM_FLOOR`/`CONFIRM_WINDOW_S` are behaviour constants split out from
+  Decision 4's original five — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` stay in `srs-adapter`'s
+  `command_matcher.py`. `ACT_FLOOR` is grounded in Stage 1's measured confidence distribution
+  (`srs-adapter/research/2026-09-19-whisper-model-sweep.md`); `ACT_FLOOR_CANCEL`/`CONFIRM_FLOOR`/
+  `CONFIRM_WINDOW_S` are documented-unmeasured placeholders (their own comments say so), pending
+  Stage 6 live-sortie data. `PendingConfirmation` is the one piece of state a confirm question needs
+  between two calls — owned and mutated by `crew_console.py`, not this module.
+  `CrewConsole.handle_transcript(transcript, confidence, token, match_ratio, verb_anchored,
+  ambiguous, now_sim)` (`crew_console.py`) is the new sibling entry point this module's docstring
+  predicted: pending-confirmation check first (affirm commits via `handle_f10_command`, negative
+  discards silently, anything else discards the stale question and falls through to treat the new
+  transcript as its own input), then `classify_response`'s disposition — `"fallthrough"` routes to
+  the unchanged `handle_line`; `"act"` reuses `handle_f10_command` directly (so only the 15-token
+  legacy vocabulary that function already dispatches has real behaviour this stage — a voice-only
+  token like `report_all`/`report_bearing_*`/`scan_bearing_deg` matches and reads back/confirms via
+  `_describe_token_for_confirm`'s generic fallback, but acting on it is a graceful no-op through
+  `handle_f10_command`'s existing defensive `else` branch, a documented gap, not silently missing);
+  `"confirm"`/`"say_again"` speak `belief.speech.render_confirm_request`/`render_say_again` through
+  the usual `_print` funnel. `!voice <token|-> <match_ratio> <confidence> <verb_anchored:0|1>
+  <ambiguous:0|1> <transcript...>` is a `!inject-urgent`-style typed test harness for this whole
+  pipeline (Stage 2 has no audio and no adapter HTTP wiring yet — Stage 3 adds `GET
+  /transcripts/poll`; body-layer cannot compute a real match itself, so this command takes the
+  already-matched fields as literal arguments, exactly Stage 3's future wire shape).
 - `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
   Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
   Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into

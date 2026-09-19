@@ -288,6 +288,32 @@ def render_cancel_readback(what_was_cancelled: str | None) -> OutgoingSpeech:
     )
 
 
+def render_say_again() -> OutgoingSpeech:
+    """`plans/inbound-speech/plan.md` Stage 2 -- spoken when a voice
+    transcript falls below `belief.voice_commands.CONFIRM_FLOOR`, or was a
+    verb-anchored command attempt that resolved to nothing (an unmatched
+    phrase, or an illegal bearing `srs_adapter.command_matcher` detected).
+    Fixed phrasing, no caller-supplied description -- there is nothing
+    coherent to describe yet at this confidence. **Not the same signal as
+    silence**: a clip the adapter's own signal-level gate rejected never
+    reaches this far and produces no speech at all (module docstring
+    behaviour #1) -- this is only for speech that was heard and not
+    understood."""
+    return OutgoingSpeech(text="Say again?", template="readback")
+
+
+def render_confirm_request(description: str) -> OutgoingSpeech:
+    """`plans/inbound-speech/plan.md` Stage 2's confirm-band interrogative
+    readback (Decision 4 Layer 3): `render_confirm_request("scan left")`
+    -> `"Scan left, confirm?"`. `description` is a plain human phrase for
+    the best-matching candidate command -- `belief.voice_commands`/
+    `belief.crew_console` own picking it (from the matched token, or from
+    the best of two ambiguous candidates), this function only formats it,
+    mirroring `render_scan_readback`'s division of labour."""
+    capitalized = description[:1].upper() + description[1:] if description else ""
+    return OutgoingSpeech(text=f"{capitalized}, confirm?", template="readback")
+
+
 def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
     """The F10 "Watch Nearest" readback (`plans/f10-crew-commands/plan.md`).
     Unlike a typed `watch <id>`, the player named no contact, so the readback

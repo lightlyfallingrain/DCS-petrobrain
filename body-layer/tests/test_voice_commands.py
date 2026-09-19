@@ -1,0 +1,152 @@
+"""Tests for `belief.voice_commands` -- Stage 2 of `plans/inbound-speech/
+plan.md`: the act/confirm/say-again band decision and the affirm/negative
+answer classifier. `belief.crew_console.CrewConsole.handle_transcript`'s
+own tests (`test_crew_console.py`) cover the pending-confirmation state
+machine built on top of these; this module tests the pure decision logic
+in isolation."""
+
+from __future__ import annotations
+
+from belief.voice_commands import (
+    ACT_FLOOR,
+    ACT_FLOOR_CANCEL,
+    CONFIRM_FLOOR,
+    BandDecision,
+    classify_response,
+    classify_yes_no,
+)
+
+
+def test_not_verb_anchored_falls_through_regardless_of_other_fields() -> None:
+    """Behaviour #4: an unmatched transcript falls through unconditionally
+    -- even a high `match_ratio`/`confidence` must not override a `False`
+    `verb_anchored`, since `command_matcher` never sets `verb_anchored=
+    False` alongside a real token/ratio in practice, but this decision
+    must not rely on that never happening."""
+    decision = classify_response(
+        token="scan_left",
+        match_ratio=1.0,
+        confidence=1.0,
+        verb_anchored=False,
+        ambiguous=False,
+    )
+    assert decision == BandDecision(disposition="fallthrough")
+
+
+def test_ambiguous_always_confirms_even_at_a_high_ratio() -> None:
+    """Behaviour #2: ambiguous is never a silent best guess, however high
+    the ratio -- checked before any floor comparison."""
+    decision = classify_response(
+        token="scan_bearing_e",
+        match_ratio=0.99,
+        confidence=0.99,
+        verb_anchored=True,
+        ambiguous=True,
+    )
+    assert decision == BandDecision(disposition="confirm", token="scan_bearing_e")
+
+
+def test_verb_anchored_no_token_always_says_again() -> None:
+    """A verb anchored but nothing else resolved (an unmatched phrase, or
+    a detected illegal-bearing error from `command_matcher`) -- there is
+    no token to act on or confirm, so this is always "say again"."""
+    decision = classify_response(
+        token=None, match_ratio=0.0, confidence=1.0, verb_anchored=True, ambiguous=False
+    )
+    assert decision == BandDecision(disposition="say_again")
+
+
+def test_act_band() -> None:
+    decision = classify_response(
+        token="scan_left",
+        match_ratio=1.0,
+        confidence=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    assert decision == BandDecision(disposition="act", token="scan_left")
+
+
+def test_confirm_band_between_the_two_floors() -> None:
+    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    decision = classify_response(
+        token="scan_left",
+        match_ratio=combined,
+        confidence=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    assert decision == BandDecision(disposition="confirm", token="scan_left")
+
+
+def test_say_again_below_confirm_floor() -> None:
+    decision = classify_response(
+        token="scan_left",
+        match_ratio=CONFIRM_FLOOR / 2,
+        confidence=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    assert decision == BandDecision(disposition="say_again")
+
+
+def test_cancel_task_uses_the_higher_floor() -> None:
+    """Decision 5: `cancel_task` destroys state, so a combined score that
+    would `act` for any other token must instead land in the confirm band
+    for `cancel_task` specifically."""
+    combined = (ACT_FLOOR + ACT_FLOOR_CANCEL) / 2
+    ordinary = classify_response(
+        token="scan_left",
+        match_ratio=combined,
+        confidence=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    cancel = classify_response(
+        token="cancel_task",
+        match_ratio=combined,
+        confidence=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    assert ordinary == BandDecision(disposition="act", token="scan_left")
+    assert cancel == BandDecision(disposition="confirm", token="cancel_task")
+
+
+def test_cancel_task_still_acts_above_its_own_higher_floor() -> None:
+    decision = classify_response(
+        token="cancel_task",
+        match_ratio=1.0,
+        confidence=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    assert decision == BandDecision(disposition="act", token="cancel_task")
+
+
+def test_classify_yes_no_affirm_words() -> None:
+    for word in ("affirm", "affirmative", "yes", "roger", "Roger", "YES"):
+        assert classify_yes_no(word) == "affirm", word
+
+
+def test_classify_yes_no_negative_words() -> None:
+    for word in ("negative", "no", "disregard", "No."):
+        assert classify_yes_no(word) == "negative", word
+
+
+def test_classify_yes_no_other() -> None:
+    assert classify_yes_no("scan left") == "other"
+    assert classify_yes_no("") == "other"
+    assert classify_yes_no("   ") == "other"
+
+
+def test_measured_constants_have_documented_grounding() -> None:
+    """Guards the specific figures the module's comments claim -- a
+    silent drift here means the comment beside the constant no longer
+    describes what is actually shipped. `ACT_FLOOR` is Stage 1's measured
+    min-correct confidence (`research/2026-09-19-whisper-model-sweep.md`);
+    the other three are documented as unmeasured placeholders, asserted
+    here only so a future edit is deliberate, not accidental."""
+    assert ACT_FLOOR == 0.60
+    assert ACT_FLOOR_CANCEL == 0.80
+    assert CONFIRM_FLOOR == 0.35
