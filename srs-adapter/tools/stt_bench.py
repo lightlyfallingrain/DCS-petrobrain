@@ -115,6 +115,12 @@ class ClipResult:
     matched_token: str | None
     confidence: float
     correct: bool
+    #: `True` when `confidence` is `WhisperCliEngine`'s placeholder `1.0`
+    #: rather than a measured per-token probability (`Transcript.
+    #: confidence_is_placeholder`) -- surfaced in `print_report` so a
+    #: whisper.cpp JSON-schema mismatch is visible in the report instead
+    #: of silently inflating the confidence columns (review finding).
+    confidence_is_placeholder: bool = False
 
 
 def _match_token(raw_text: str) -> str | None:
@@ -180,10 +186,12 @@ def run_engine(
     for expected_token, files in corpus.items():
         for file in files:
             wav = file.read_bytes()
+            confidence_is_placeholder = False
             try:
                 transcript = engine.transcribe(wav)
                 raw_text = transcript.text
                 confidence = transcript.confidence
+                confidence_is_placeholder = transcript.confidence_is_placeholder
             except STTRecognitionError as exc:
                 print(
                     f"  [{engine_label}] {file}: recognition failed: {exc}",
@@ -200,6 +208,7 @@ def run_engine(
                     matched_token=matched,
                     confidence=confidence,
                     correct=(matched == expected_token),
+                    confidence_is_placeholder=confidence_is_placeholder,
                 )
             )
     return results
@@ -245,6 +254,17 @@ def print_report(engine_label: str, results: list[ClipResult]) -> None:
     print(
         f"  incorrect (n={len(incorrect_conf)}): {_confidence_summary(incorrect_conf)}"
     )
+
+    n_placeholder = sum(1 for r in results if r.confidence_is_placeholder)
+    if n_placeholder:
+        print(
+            f"\nWARNING: {n_placeholder}/{n} results used a placeholder "
+            "confidence of 1.00 -- per-token probabilities were not found "
+            "in the whisper.cpp JSON output (see stt_engine.py's module "
+            "docstring: this engine's JSON contract is unverified against "
+            "a real binary). Treat the confidence columns above as "
+            "unreliable until this is checked."
+        )
 
 
 def _confidence_summary(values: list[float]) -> str:

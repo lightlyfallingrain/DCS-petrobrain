@@ -44,7 +44,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +65,19 @@ class Transcript:
     placeholder; `WindowsSpeechEngine`'s is `System.Speech`'s own
     `RecognitionResult.Confidence` verbatim) -- `engine` is carried
     precisely so a confidence value is never read without knowing which
-    engine produced it."""
+    engine produced it.
+
+    `confidence_is_placeholder` is `True` only for `WhisperCliEngine`
+    results where no per-token probability was found in the JSON output
+    and `confidence` is therefore the documented `1.0` fallback, not a
+    real measurement (review finding: this must be visible to a caller,
+    not just a debug log line, since Decision 4's confidence-band
+    constants are meant to be set from *measured* confidence)."""
 
     text: str
     confidence: float
     engine: str
+    confidence_is_placeholder: bool = False
 
 
 class STTEngine(Protocol):
@@ -207,39 +215,70 @@ class WhisperCliEngine:
                     logger.debug("could not remove temp file %s", path, exc_info=True)
 
 
-def _parse_whisper_json(payload: dict[str, Any]) -> Transcript:
+def _parse_whisper_json(payload: object) -> Transcript:
     """Extract `Transcript` from whisper.cpp's `-ojf` JSON shape --
     `{"transcription": [{"text": ..., "tokens": [{"p": ...}, ...]}, ...]}`
     per whisper.cpp's public output-format docs. **Unverified against a
     real binary run** (module docstring). Falls back to a placeholder
     confidence of `1.0` if no per-token probabilities are present, rather
     than raising -- a missing confidence figure should degrade the bench's
-    numbers, not crash it."""
+    numbers, not crash it, but it is surfaced via
+    `Transcript.confidence_is_placeholder` so a caller (`tools/
+    stt_bench.py`'s `print_report`) can warn rather than silently trust it.
+
+    Every level of `payload` is `isinstance`-checked before use (review
+    finding: a non-dict root, or a non-dict segment/token, used to raise a
+    bare `AttributeError` from `.get()` instead of a clear
+    `STTRecognitionError` -- exactly the kind of failure that could be
+    misread as "the recognizer did badly" rather than "the JSON shape
+    assumption was wrong")."""
+    if not isinstance(payload, dict):
+        raise STTRecognitionError(
+            f"unexpected whisper.cpp JSON shape: root is {type(payload).__name__}, "
+            f"not an object: {payload!r}"
+        )
     segments = payload.get("transcription", [])
     if not isinstance(segments, list):
         raise STTRecognitionError(
-            "unexpected whisper.cpp JSON shape: no 'transcription' list"
+            "unexpected whisper.cpp JSON shape: 'transcription' is "
+            f"{type(segments).__name__}, not a list: {segments!r}"
         )
 
     texts: list[str] = []
     token_probs: list[float] = []
     for segment in segments:
+        if not isinstance(segment, dict):
+            raise STTRecognitionError(
+                "unexpected whisper.cpp JSON shape: a 'transcription' "
+                f"entry is {type(segment).__name__}, not an object: {segment!r}"
+            )
         text = segment.get("text", "")
         if isinstance(text, str):
             texts.append(text)
         for token in segment.get("tokens", []):
+            if not isinstance(token, dict):
+                raise STTRecognitionError(
+                    "unexpected whisper.cpp JSON shape: a 'tokens' entry "
+                    f"is {type(token).__name__}, not an object: {token!r}"
+                )
             p = token.get("p")
             if isinstance(p, (int, float)):
                 token_probs.append(float(p))
 
     full_text = " ".join(t.strip() for t in texts if t.strip()).strip()
+    confidence_is_placeholder = not token_probs
     confidence = sum(token_probs) / len(token_probs) if token_probs else 1.0
-    if not token_probs:
+    if confidence_is_placeholder:
         logger.debug(
             "whisper.cpp JSON carried no per-token probabilities; "
             "using placeholder confidence 1.0"
         )
-    return Transcript(text=full_text, confidence=confidence, engine="whisper-cli")
+    return Transcript(
+        text=full_text,
+        confidence=confidence,
+        engine="whisper-cli",
+        confidence_is_placeholder=confidence_is_placeholder,
+    )
 
 
 #: The PowerShell script driving `System.Speech.Recognition.
@@ -333,6 +372,11 @@ class WindowsSpeechEngine:
                 raise STTRecognitionError(
                     f"could not parse powershell output as JSON: {stdout!r}"
                 ) from exc
+            if not isinstance(payload, dict):
+                raise STTRecognitionError(
+                    "unexpected powershell JSON shape: root is "
+                    f"{type(payload).__name__}, not an object: {payload!r}"
+                )
             text = payload.get("text", "")
             confidence = payload.get("confidence", 0.0)
             if not isinstance(text, str) or not isinstance(confidence, (int, float)):
