@@ -97,6 +97,12 @@ _RECOGNITION_TIMEOUT_S = 30.0
 #: absolute/relative path is supplied.
 DEFAULT_WHISPER_BINARY = "whisper-cli"
 
+#: Top-level GBNF rule name passed as whisper-cli's `--grammar-rule`.
+#: Must match the rule `vocabulary.to_gbnf()` emits. whisper-cli does not
+#: default this to "root" despite its `--help` implying an empty default
+#: is fine -- see `WhisperCliEngine.transcribe`.
+GRAMMAR_ROOT_RULE = "root"
+
 
 class WhisperCliEngine:
     """`STTEngine` backed by whisper.cpp's `whisper-cli` CLI.
@@ -104,20 +110,31 @@ class WhisperCliEngine:
     Each call writes `wav` to a temp file and runs:
 
         whisper-cli -m <model> -f <clip.wav> -l en -ojf -of <out>
-            --no-timestamps [--grammar <grammar> --grammar-penalty <p>]
+            --no-timestamps [--grammar <g> --grammar-rule root
+                             --grammar-penalty <p>]
 
-    `-ojf` ("output JSON, full") is requested rather than plain `-oj` so
-    per-token probabilities are available for `Transcript.confidence` --
-    **unverified flag name**, see module docstring. `-of <out>` writes
-    `<out>.json`, read back and then removed, the same
-    write-then-read-then-clean-up shape `MacSayEngine` uses for its WAV
-    output.
+    **This command line is verified against whisper.cpp 1.9.4 (Homebrew,
+    arm64), 2026-09-19** -- it was written from public documentation and
+    flagged unverified when this module was first authored. `-ojf`
+    ("output JSON, full") is confirmed to emit `transcription[].text` and
+    per-token `tokens[].p`, which is what `Transcript.confidence` reads,
+    so the placeholder-confidence fallback below is a guard against a
+    future schema change rather than the expected path. `-of <out>`
+    writes `<out>.json`, read back and then removed.
 
-    `grammar_path`, when set, is passed as `--grammar` -- constrained
-    decoding (Decision 1, point 3). Stage 1's bench runs this class both
-    with and without a grammar path and reports them as separate rows,
-    since constrained decoding can convert obvious garbage into a
-    confident wrong answer (plan's stated risk) rather than only helping.
+    `grammar_path`, when set, is passed as `--grammar` **together with
+    `--grammar-rule`** -- see the note at the call site for why the rule
+    name is mandatory rather than defaulted. Stage 1's bench runs this
+    class both with and without a grammar path and reports them as
+    separate rows, since constrained decoding can convert obvious garbage
+    into a confident wrong answer (plan's stated risk) rather than only
+    helping. That risk is now observed, not hypothetical: on a live
+    probe, "scan left" and "watch nearest" came back as exact vocabulary
+    matches under grammar (no capitalisation or trailing-period noise),
+    while the longer "scan bearing northwest" collapsed to the single
+    character "f" -- grammar helping short phrases and destroying a long
+    one in the same run. Which effect dominates on the user's own voice
+    is exactly what the bench exists to measure.
     """
 
     def __init__(
@@ -173,7 +190,24 @@ class WhisperCliEngine:
                 "--no-timestamps",
             ]
             if self._grammar_path is not None:
-                command += ["--grammar", self._grammar_path]
+                # `--grammar-rule` is NOT optional, despite whisper-cli's
+                # own `--help` showing an empty default. Verified against
+                # whisper.cpp 1.9.4: with `--grammar` alone the grammar is
+                # loaded and echoed to stderr but never applied to
+                # decoding, and `--grammar-penalty` is inert with it. An
+                # out-of-vocabulary clip ("the weather is quite nice
+                # today") transcribed byte-identically with and without
+                # `--grammar`; adding `--grammar-rule root` constrained it
+                # immediately. Omitting this makes the bench's
+                # with-grammar row a silent duplicate of its without-
+                # grammar row -- the run would report "constrained
+                # decoding changes nothing" when it was never enabled.
+                command += [
+                    "--grammar",
+                    self._grammar_path,
+                    "--grammar-rule",
+                    GRAMMAR_ROOT_RULE,
+                ]
                 if self._grammar_penalty is not None:
                     command += ["--grammar-penalty", str(self._grammar_penalty)]
 
