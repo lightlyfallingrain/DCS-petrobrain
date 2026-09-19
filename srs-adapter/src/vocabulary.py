@@ -106,12 +106,14 @@ def to_gbnf() -> str:
     whisper.cpp (and llama.cpp, which it shares grammar sampling with)
     accepts a GBNF grammar file with a `root` rule; a flat alternation of
     quoted literals is the simplest grammar that admits only our phrases
-    and nothing else. **Unverified against a real `whisper-cli` run** --
-    no whisper.cpp binary was available while writing this (see Stage 1's
-    implementation notes) -- this is written from whisper.cpp's public
-    `--grammar` documentation and llama.cpp's GBNF spec, not confirmed
-    live. Bench with `--grammar` vs. without is exactly the run that
-    validates (or corrects) this.
+    and nothing else.
+
+    **Verified against whisper.cpp 1.9.4 (Homebrew, arm64), 2026-09-19.**
+    This grammar parses and constrains decoding as intended -- but only
+    when the caller also passes `--grammar-rule root`, which
+    `stt_engine.WhisperCliEngine` now does. The rule name here and
+    `stt_engine.GRAMMAR_ROOT_RULE` must stay in agreement; a mismatch
+    fails silently, leaving decoding unconstrained rather than erroring.
     """
     alternatives = " | ".join(f'"{phrase}"' for phrase in spoken_phrases())
     return f"root ::= {alternatives}\n"

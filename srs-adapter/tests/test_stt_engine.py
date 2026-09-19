@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from stt_engine import (
+    GRAMMAR_ROOT_RULE,
     STTRecognitionError,
     Transcript,
     WhisperCliEngine,
@@ -186,3 +187,47 @@ def test_windows_speech_engine_transcribe_nondict_json_raises(
     engine = WindowsSpeechEngine(phrases=("scan left", "scan right"))
     with pytest.raises(STTRecognitionError, match="root is"):
         engine.transcribe(_SAMPLE_WAV_PATH.read_bytes())
+
+
+def test_grammar_run_passes_grammar_rule(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--grammar` alone does not constrain decoding; the rule name is required.
+
+    Verified against whisper.cpp 1.9.4: passing `--grammar` without
+    `--grammar-rule` loads and echoes the grammar but leaves decoding
+    completely unconstrained, and silently so -- an out-of-vocabulary
+    clip transcribes byte-identically with and without the flag. That
+    failure mode is invisible in the bench's own output: the with-grammar
+    row would simply duplicate the without-grammar row, and the run would
+    be read as "constrained decoding makes no difference here" rather
+    than "constrained decoding never ran."
+
+    So this asserts the flag pairing directly, without needing a binary.
+    """
+    captured: list[list[str]] = []
+
+    def fake_run(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured.append(command)
+        raise AssertionError("stop after capturing the command line")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    grammar = tmp_path / "v.gbnf"
+    grammar.write_text('root ::= "scan left"\n')
+    engine = WhisperCliEngine(
+        model_path=str(tmp_path / "model.bin"),
+        grammar_path=str(grammar),
+    )
+    with pytest.raises((AssertionError, STTRecognitionError)):
+        engine.transcribe(b"\x00" * 64)
+
+    assert captured, "whisper-cli was never invoked"
+    command = captured[0]
+    assert "--grammar" in command
+    assert "--grammar-rule" in command, (
+        "--grammar without --grammar-rule leaves decoding unconstrained"
+    )
+    assert command[command.index("--grammar-rule") + 1] == GRAMMAR_ROOT_RULE
