@@ -1,3 +1,17 @@
+-- SCOPE WIDENED (user, 2026-09-19): the Mi-24P has TWO half-trigger bindings in
+-- DCS -- one opens the radio menu, one is VOIP PTT -- and this project binds to
+-- the VOIP one, because the radio-menu half-trigger is already spoken for by the
+-- F10 command path. So this probe must not just confirm arg 738 moves; it must
+-- establish WHICH readable argument corresponds to the VOIP half-trigger
+-- specifically.
+--
+-- Method: with the log running, press each binding in turn and note the time,
+-- then match against the samples below. Press the radio-menu half-trigger
+-- several times, pause, then the VOIP half-trigger several times. If both drive
+-- the same argument, the two cannot be told apart by value alone and the plan's
+-- `listen`-token fallback comes back into play -- record that result plainly
+-- rather than picking whichever looks convenient.
+
 --[[
 PILOT PTT / SPU-8 PROBE -- not the production script.
 
