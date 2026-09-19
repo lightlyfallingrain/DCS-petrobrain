@@ -344,3 +344,65 @@ def test_scan_left_vs_scan_right_and_scan_north_vs_scan_south() -> None:
     assert result == MatchResult(
         token="scan_bearing_n", match_ratio=1.0, verb_anchored=True
     )
+
+
+def test_filler_words_do_not_cost_a_match() -> None:
+    """Filler actively depresses the score of the intended command.
+
+    `_phrase_match_ratio` divides by the longer word count, so every
+    unnecessary word a player says counts against them. These three all
+    scored 0.500 -- rejections -- before filler was stripped.
+    """
+    assert match_transcript("um scan the left").token == "scan_left"
+    assert match_transcript("scan to the right").token == "scan_right"
+    assert match_transcript("cancel the task").token == "cancel_task"
+    assert match_transcript("watch the nearest contact").token == "watch_nearest"
+
+
+def test_filler_stripping_does_not_reopen_the_false_positives() -> None:
+    """Stripping words raises scores, so the adversarial set is re-pinned.
+
+    Removing words shortens the transcript and therefore inflates every
+    ratio, which is exactly the direction that could resurrect the
+    false-execution bug this matcher was rewritten to fix. Each of these
+    resolved to a real command at some point during that bug's life.
+    """
+    for text in (
+        "look at that",
+        "watch out",
+        "the tanks are on the ridge",
+        "scan the trucks on the road",
+        "this kind of stuff",
+        "it's kind of full",
+    ):
+        assert match_transcript(text).token is None, text
+
+
+def test_descriptive_speech_is_not_pulled_into_a_command() -> None:
+    """The case that decided how short `FILLER_WORDS` should be.
+
+    A wider list including "of"/"on"/"in"/"this"/"that" gave identical
+    gains on every real phrasing while pulling this one up to a
+    `scan_left` match. It is description, not an order, and under the
+    two-tier design it belongs to the brain rather than the matcher.
+    """
+    assert match_transcript("scan the ridge on the left").token is None
+
+
+def test_an_all_filler_transmission_stays_an_ordinary_no_match() -> None:
+    """Stripping must not empty the transcript into a different path.
+
+    What matters is that no command resolves. `verb_anchored` is
+    deliberately not asserted either way: "okay" scores 0.571 against a
+    real verb, clearing the intentionally loose `VERB_FLOOR`, so it
+    reports anchored-but-unresolved and body will answer "say again"
+    rather than passing it to the brain.
+
+    Whether that is the right answer for a bare acknowledgement is a
+    live question -- a player saying "okay" is not asking for anything
+    and may not want to be asked to repeat it -- but it follows from the
+    loose anchor being correct elsewhere, and guessing at it here would
+    pin behaviour nobody has decided. Recorded in
+    `plans/inbound-speech/plan.md` instead.
+    """
+    assert match_transcript("okay").token is None
