@@ -123,11 +123,11 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
 #: vocabulary.
 #:
 #: `cancel_nevermind` retracts the transmission it ends. Its existence is
-#: what forbids acting on a command before the transmission closes, since
-#: the last word can withdraw everything before it. `stop_talking` is the
-#: deliberate exception -- it interrupts Petrovich's speech rather than
-#: issuing a command, so it must act on recognition rather than waiting
-#: for release.
+#: what forbids acting on anything before the transmission closes, since
+#: the last word can withdraw everything before it. Every decision
+#: therefore happens at PTT release, with no exceptions -- including
+#: `stop_talking`, which an earlier draft had firing mid-stream for
+#: barge-in latency.
 ROUTING_TOKENS: tuple[str, ...] = ("wake_petrovich", "cancel_nevermind")
 
 #: Every token the recogniser should admit. This, not any subgroup, is
@@ -160,14 +160,21 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # Voice-only. `report` carries three phrasings because it is the
     # command most likely to be said casually and differently each time.
     "report_all": ("report", "report contacts", "what do you see"),
-    # `stop` is the shortest and most safety-critical word here -- it
-    # aborts speech mid-sentence, so a miss leaves Petrovich talking over
-    # something the player needs to hear, and a false positive silences
+    # `stop` aborts Petrovich's speech, so a miss leaves him talking over
+    # something the player needs to hear and a false positive silences
     # him for no reason. A single short syllable is also the hardest
-    # thing for a recogniser to catch reliably. The alternates are
-    # recorded so the bench can say which of them actually survives,
-    # rather than committing to "stop" and discovering the problem in
-    # the cockpit.
+    # thing for a recogniser to catch reliably -- on clean synthetic
+    # speech it already came back as "cloud" and "stock". The alternates
+    # are recorded so the bench can say which of them actually survives
+    # this speaker, rather than committing to "stop" and discovering the
+    # problem in the cockpit.
+    #
+    # **It counts only as the whole transmission** (user direction,
+    # 2026-09-19): a "stop" inside a sentence -- "stop scanning north" --
+    # is not the stop rule. That is what lets every decision wait for PTT
+    # release instead of carving out a mid-stream exception, and it
+    # removes a false-positive class an always-listening interrupt would
+    # eventually have hit.
     "stop_talking": ("stop", "stop talking", "quiet"),
     # Standard aviation practice, and deliberately bidirectional: the
     # player says it when he missed what Petrovich said, and Petrovich

@@ -547,14 +547,28 @@ Four consequences, each with a reason:
    returns "Petrovitch" where `ggml-small.en` returns "Petrovich" — and that is before any accent
    is involved. An equality test would fail open on the more common model.
 
-3. **Nothing may execute before the transmission closes.** "Nevermind" can retract everything said
-   before it, so a command has to wait for PTT release rather than firing as soon as it is
-   recognised. This forbids incremental execution outright.
+3. **Nothing executes before the transmission closes. One rule, no exceptions.** "Nevermind" can
+   retract everything said before it, so every decision waits for PTT release. This forbids
+   incremental execution outright.
 
-4. **`stop_talking` is the deliberate exception to (3).** It interrupts Petrovich's speech rather
-   than issuing a command, so waiting for release would defeat it. Two timing rules, and the split
-   is along what the word acts on: `stop` targets Petrovich's output, every command targets the
-   world.
+4. **`stop` counts only when it is the entire transmission** (user direction, 2026-09-19). A
+   "stop" appearing inside a sentence — "stop scanning north", or any ordinary use of the word —
+   is not the stop rule and is handled like any other speech.
+
+   An earlier draft made `stop` an exception to (3), firing the moment it was recognised so
+   barge-in would not wait for release. This rule removes that exception and is better for two
+   reasons. It deletes a whole mechanism: recognising a word mid-stream needs partial decoding of
+   an open transmission, which is a different and harder problem than decoding a closed one. And
+   it removes a false-positive class that would have been genuinely bad — an interrupt that can
+   fire from the middle of a sentence will eventually fire from a sentence that merely contains
+   the word. The latency cost is one PTT release, which is roughly the time it takes to stop
+   speaking anyway.
+
+   **Reading of "one word":** taken as *the transmission contains nothing but a stop phrasing*, so
+   a bare "stop talking" or "quiet" qualifies alongside a bare "stop". Narrowing this to literally
+   the single word "stop" is a one-line change; which way it goes should be settled by which
+   phrasings survive Stage 1's bench on the user's own voice, since "stop" alone already came back
+   as "cloud" and "stock" on clean synthetic speech.
 
 `say again` in the Petrovich→player direction is where Stage 1's confidence distribution is spent:
 below the band, ask instead of guessing or sitting silent. That makes the bench's confidence column
