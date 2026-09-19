@@ -160,22 +160,27 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # Voice-only. `report` carries three phrasings because it is the
     # command most likely to be said casually and differently each time.
     "report_all": ("report", "report contacts", "what do you see"),
-    # `stop` aborts Petrovich's speech, so a miss leaves him talking over
-    # something the player needs to hear and a false positive silences
-    # him for no reason. A single short syllable is also the hardest
-    # thing for a recogniser to catch reliably -- on clean synthetic
-    # speech it already came back as "cloud" and "stock". The alternates
-    # are recorded so the bench can say which of them actually survives
-    # this speaker, rather than committing to "stop" and discovering the
-    # problem in the cockpit.
+    # **Exactly one phrasing, and it counts only when it is the entire
+    # transmission** (user direction, 2026-09-19: "Let's just use 'stop'
+    # for this purpose. It's simple."). A "stop" inside a sentence --
+    # "stop scanning north" -- is not the stop rule.
     #
-    # **It counts only as the whole transmission** (user direction,
-    # 2026-09-19): a "stop" inside a sentence -- "stop scanning north" --
-    # is not the stop rule. That is what lets every decision wait for PTT
-    # release instead of carving out a mid-stream exception, and it
-    # removes a false-positive class an always-listening interrupt would
-    # eventually have hit.
-    "stop_talking": ("stop", "stop talking", "quiet"),
+    # The single phrasing is not an oversight. Admitting "stop talking"
+    # or "quiet" as command phrasings while routing only on a bare "stop"
+    # would contradict itself: the longer forms would trigger the same
+    # behaviour through the command matcher, by the back door, and the
+    # whole-transmission rule would no longer mean what it says.
+    #
+    # The known risk of that simplicity: `stop` aborts Petrovich's speech,
+    # so a miss leaves him talking over something the player needs to
+    # hear. It is a single short syllable, the hardest thing for a
+    # recogniser to catch, and on clean synthetic speech it already came
+    # back as "cloud" and "stock". With the alternates gone there is no
+    # fallback word -- so if Stage 1's bench shows this token unreliable
+    # on the user's own voice, the decision genuinely needs revisiting
+    # rather than tuning around. Revisiting is cheap: adding a phrasing
+    # is a handful of clips, not a re-recorded corpus.
+    "stop_talking": ("stop",),
     # Standard aviation practice, and deliberately bidirectional: the
     # player says it when he missed what Petrovich said, and Petrovich
     # says it when recognition confidence falls below the band Stage 1's
