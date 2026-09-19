@@ -118,52 +118,47 @@ body-side view and the slice numbering both files share.
   all, and whether SRS's Mi-24P export reads them, is unknown; `SR.exportRadioMI24P` as quoted in
   the recon reads only the selector at device 455 and the PTT at 738, which suggests it does not.
 
-- [ ] **Slice 3 — inbound speech (STT + PTT).** Not started, and the larger half. Capture, PTT
-  debounce, silence/noise gating and transcription all live here; body receives already-transcribed
-  `PlayerUtterance` records and never sees audio. Signal-level gating is this subproject's;
-  context-dependent suppression (e.g. tighter tolerance mid-engagement) is body's, acting on
-  transcribed records (`plans/body-layer/plan.md` §1's responsibility table).
+- [ ] **Slice 3 — inbound speech (STT + PTT).** Not started, and the larger half. **Next priority**
+  (user, 2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body
+  receives already-transcribed `PlayerUtterance` records and never sees audio.
 
-  **Hard requirement (user, 2026-09-17): a dedicated joystick PTT gates speech recognition.** STT
-  must not run continuously — it listens only while the player deliberately holds a transmit
-  button. Two reasons this is a requirement rather than an optimisation: an always-listening
-  microphone turns every muttered word and every piece of room noise into a candidate command, and
-  continuous transcription is the expensive part of the pipeline.
+  **Settled before design (user, 2026-09-19):**
 
-  Note the deliberate asymmetry with slice 2, and do not "simplify" it away later: **outbound**
-  (Petrovich → player) is always open, while **inbound** (player → Petrovich) is explicitly gated.
-  The PTT that gates inbound must be independent of the SPU-8 selector for the same reason the
-  outbound channel is.
+  1. **Capture is on Windows, and that is not a choice.** The headset boom mic plugs into the
+     Windows box only. So audio capture happens there regardless of where recognition runs.
+  2. **Recognition uses whatever the host it runs on offers — Mac preferred, Windows required.**
+     *"When on windows, use windows tools. When on mac, use Mac tools. I will prefer Mac, but it
+     must work on windows as well."* This is the same shape `srs-adapter`'s `TTSEngine` protocol
+     already has (`MacSayEngine` today, a `WindowsSapiEngine` droppable beside it), so an
+     `STTEngine` protocol mirrors a pattern this subproject already proved.
+  3. **Therefore a transit is needed** — *"A transit is needed"* — carrying captured audio from the
+     Windows box to the Mac. This is the **inverse of a path that already exists**: WAV already
+     travels Mac → Windows over `POST /audio/play`. The return direction should look like it rather
+     than inventing a second audio-transport idiom.
+  4. **Start with the constrained command set; free-form comes with the brain layer.** Design must
+     not foreclose it, but nothing should be built for it yet.
+  5. **Readback is the confirmation mechanism**, because *"readback is standard in aviation for
+     exactly this reason"* — short, but carrying enough to catch a mishearing. Note this is
+     **already built**: `speech.render_readback`, `render_scan_readback`,
+     `render_cancel_readback` and `render_watch_nearest_readback` exist from BL-5a and the F10
+     work. Slice 3 wires recognition into an existing confirmation loop rather than designing one.
 
-  **Transport decision (user, 2026-09-17): the two directions use different transports.** Outbound
-  goes over SRS ICS so Petrovich mixes into the headset like real crew audio; **inbound never
-  touches SRS at all** — the adapter captures the microphone directly. This is not a symmetry
-  failure, it is the resolution of one: SRS can send to the player but offers no clean way to
-  capture the player's voice back out (`DCS-SR-ExternalAudio.exe` is a sender; receiving would mean
-  a headless SRS client joined as a listener plus virtual-cable capture on Windows, with no
-  documented API — by a wide margin the largest build in this milestone). Capturing the mic
-  directly also satisfies the stay-on-mission-frequency constraint absolutely, since inbound then
-  involves no radio stack at all.
+  **The accent constraint, and why it is tractable here.** The user has a Finnish accent, and
+  Windows speech recognition has consistently failed it — *"wrong words that made the whole service
+  not very useful"* (with Intentions AI ATC). Note the failure mode: **wrong words, not silence.**
+  The recogniser heard speech and produced the wrong tokens, which is the failure open dictation
+  makes and a closed vocabulary largely does not. The existing F10 set is **15 tokens**
+  (`scan_ahead`, `scan_left`, `scan_right`, `scan_full`, eight `scan_bearing_*`, `watch_nearest`,
+  `watch_nearest_air_defence`, `cancel_task`), which makes this a *classification over a tiny
+  closed set*, not transcription. Two cheap mitigations follow from that and should be evaluated
+  in design: biasing the recogniser toward the command vocabulary, and fuzzy-matching whatever
+  comes back to the nearest known token, so *"scan lift"* resolves to `scan_left` rather than
+  failing. Neither helps free-form later, which is another reason to keep the two phases distinct.
 
-  **PTT decision (user, 2026-09-17): a separate DCS keybind on a spare joystick button**, read
-  through the aircraft layer's existing Export.lua channel — the same route F10 commands already
-  arrive by, so no new input stack. Chosen over the cyclic trigger's half-press (device 738, which
-  stock SRS's own export uses for intercom) specifically because a dedicated binding cannot collide
-  with radio transmit, and over reading the joystick directly outside DCS, which would need an
-  input library the stdlib-only rule does not currently allow. Costs the user one binding to set
-  up.
-
-  Still to verify before building: that a bound DCS command's pressed state is actually readable on
-  our own Export.lua channel (F10 commands arrive as discrete events, which is not the same thing
-  as a held-button state) — Investigator pass during this slice's plan, not an assumption.
-
-  Worth recording even though it was not chosen: the Mi-24P's two-stage cyclic trigger already
-  implements exactly this pattern in stock SRS — half-press (`_pilotPTT == 0.5`) forces
-  `_data.selected = 0`, i.e. intercom, *for the duration of the press only*, leaving the SPU-8
-  selection untouched; full press transmits on the selected radio. If the dedicated-keybind path
-  hits trouble, that is the fallback to reach for. Its own caveat: the same export ends with
-  `_data.control = 1` ("HOTAS for now"), and if that makes SRS use its own PTT binding instead of
-  the in-game one, the half-press branch may never be consulted.
+  **Unchanged from earlier decisions:** a dedicated joystick PTT gates recognition so it never runs
+  continuously (user, 2026-09-18), read through the aircraft layer's existing Export.lua channel;
+  and **inbound bypasses SRS entirely** — this slice does not depend on intercom injection ever
+  working.
 
 ## Backlog
 
