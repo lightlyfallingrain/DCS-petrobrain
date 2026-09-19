@@ -560,67 +560,33 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
   flying anyway rather than run standalone. **Do not start without the user's instruction.**
 
-- [ ] **Range should be spoken with uncertainty, like everything else.** Raised 2026-09-19. Petrovich
-  currently states distance flatly — *"two kilometres"* — which makes him sound **more** certain
-  about range than about anything else, exactly backwards for the quantity a human eye judges worst.
-  The user: *"judging distance is never easy, the more distance, the more uncertainty."*
-
-  **The uncertainty already exists and speech discards it.** `naked_eye_source._RANGE_BUCKETS_M` is
-  ED's own ladder and already widens with distance — 100 m steps out to a kilometre
-  (`OP_D100M`…`OP_D1000M`), then `OP_D1_1p5k`, `OP_D1p5_2k`, coarser beyond. `speech._format_range_km`
-  then rounds to the nearest 0.5 km and states the result as if measured. So the bucket width *is*
-  the confidence interval, already computed, already correct, and thrown away at the last step.
-
-  **Deliberately not folded into Stage 4b** (user direction, 2026-09-19, same call as the wording
-  fixes): it is a different quantity needing its own vocabulary, and it touches the **single-contact**
-  callout — the one case Stage 4b must leave byte-identical as its regression guard. Bundling them
-  would remove that guard exactly when the code is changing most.
-
-  **Settled (user, 2026-09-19): precision degrades with distance.** Chosen from three rendered
-  options — a uniform "about N" hedge, spoken bucket edges ("four to five kilometres"), and this.
-  Close in he states the number plainly; further out the phrasing loosens, so **the vagueness itself
-  carries the information** rather than the sentence having to state an interval. Sketch, to be
-  refined against real renderings:
-
-  | True range | Spoken |
-  |---|---|
-  | 400 m | "very close" |
-  | 1.8 km | "two kilometres" |
-  | 4.2 km | "about four kilometres" |
-  | 8.9 km | "eight, nine kilometres" |
-
-  This is the same principle chosen twice already — hedge by default, precision where earned — now
-  applied to the quantity a human eye judges worst. The bucket widths in
-  `naked_eye_source._RANGE_BUCKETS_M` are the input; they already widen with distance, so the tiers
-  should be derived from them rather than picked independently.
-
-  **Still open, not decided:** whether a watched or priority contact gets a tighter range the way it
-  gets an exact count (Stage 4b's attention-earns-precision rule). The same logic would say yes, but
-  the user has not ruled and it should not be assumed.
-
-  **Should reuse Stage 4b's hedging register rather than invent a parallel one.** The same voice that
-  turns six into "several" should turn 2000 m into "about two kilometres" and 9 km into "eight, nine
-  kilometres" — one hedging vocabulary across two quantities. Natural to do alongside the contact
-  report fine-tuning items, since both are callout phrasing in the same module.
-
 - [ ] **Contact report fine tuning — a running list, appended to as real sorties surface things.**
   Opened 2026-09-18 from the first flights with TTS live. These are about what Petrovich *says* and
   how it sounds, not about what he believes; most touch `belief/speech.py` and
   `belief/enrichment.py` only. Grouped by what they cost.
 
-  **Cheap — wording, in `speech.py`:**
+  **Cheap — wording, in `speech.py`. ✅ All shipped 2026-09-19 (`9035317`).**
   - **Spell units out.** "m" and "km" must become "meters" and "kilometers"; TTS does not handle the
     shorthands. Note `_format_range_km` and `_round_enrichment_fragment` both currently emit them.
-  - **Acronyms need spacing or expansion.** TTS reads "MI-8" as one token and "LR" as letters with
-    no gap. Wanted: "M I 8", "long range". **"SAM" is the exception** — a well-known word TTS
-    already says correctly, so this is a per-token table, not a blanket rule.
+  - **Acronyms need spacing or expansion.** TTS reads a designation as one token. Wanted: "M I 8".
+    **"SAM" is the exception** — a well-known word TTS already says correctly, so this is a
+    per-token table, not a blanket rule. *Shipped: the table applies only at `type` level, and
+    "SAM" is a `class`-level word, so it is structurally out of reach rather than protected by an
+    exception entry. Two of this bullet's original examples were wrong and were corrected during
+    implementation: "LR" occurs nowhere in the vocabulary (checked the class table and all reporting
+    names) and was left out rather than given an invented use; the real string is "Mi-8", mixed
+    case.*
   - **"very close" under 0.5 km.** Replaces a bare range figure at the distance where the exact
     number stops mattering and the fact of proximity starts to.
 
-  **Cheap — thresholds, in `enrichment.py`:**
-  - **0 m from a feature → "on the road"** (and the same for any feature reference, not just
-    roads).
-  - **Between ~10 m and ~100 m → "next to the road"**, with the side named.
+  **Cheap — thresholds, in `enrichment.py`. ✅ Shipped 2026-09-19 (`9035317`).**
+  - **Within 10 m of a feature → "on the road"** (and the same for any feature reference, not just
+    roads). *User correction 2026-09-19: originally written as "0 m", which a first pass read
+    literally with a float-noise epsilon, leaving a 0.5-10 m gap that rendered as "near a road
+    (~4 metres)". Within ten metres you are on it, and no eye resolves the difference.*
+  - **Between ~10 m and ~100 m → "next to the road"**, with the side named. *Shipped without the
+    side, which needs the bearing below. Note a deliberate gap: 0.5-10 m still renders as
+    "near X (Nm)", disclosed in the code rather than silently rounded into one of the neighbours.*
   - These replace the current "near X (~200m)" shape entirely at short distances. The existing
     1000 m `NEAR_FACT_RADIUS_M` gate stays above them.
 
@@ -633,8 +599,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     "which side" falls out; without the bearing, neither does. Sequence this before the two wording
     items that depend on it rather than half-building them.
 
-  **Needs verification first:**
-  - **Airborne contacts should be called "aircraft" or "helicopter"**, refining to
+  **Deferred (user, 2026-09-19):**
+  - [>] **Airborne contacts should be called "aircraft" or "helicopter"**, refining to
     fighter/bomber/attack/transport. Check what actually exists before scoping: whether the
     perception channel can tell a contact is airborne at all (candidate altitude versus terrain
     elevation is available to the naked-eye channel, but nothing currently reads it that way), and
@@ -676,6 +642,23 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 - [ ] **BL-2.5 overlay has no dismiss affordance.** Moot while the titled window (with its close
   button) is in effect. Would matter again if the borderless restyle is ever revisited.
+
+- **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
+  started. **Now also owns range uncertainty** (moved here by the user, 2026-09-19), because that
+  turned out to be the same kind of problem: a genuine perception limit that differs by optic, not a
+  presentation choice. Summary of what moved, full reasoning below:
+
+  > Count vagueness is presentation — the model may hold an exact twelve and still say "several".
+  > **Range vagueness is not**: the eye cannot judge distance at these scales, which is why
+  > everything that shoots far has carried a rangefinding solution. Today range reaches belief as a
+  > ground-truth figure, so a brain layer asking "how far?" would get an answer no crew member could
+  > give — the no-omniscience invariant leaking, which adverbs in the callout would have hidden
+  > rather than fixed. The 9K113's stadiametric aide (useful to ~5 km, verify before building) means
+  > certainty should *narrow* when he uses the sight. The settled rendering rule, once the belief
+  > actually holds uncertainty: precision degrades with distance — "very close", a plain figure
+  > close in, "about four kilometres", "eight, nine kilometres". Open: whether attention tightens
+  > range — probably **no** by default, since attention does not improve the eye, unless it implies
+  > he is looking through the sight.
 
 - **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
   started. Today's channels implicitly assume Petrovich is looking everywhere at once within

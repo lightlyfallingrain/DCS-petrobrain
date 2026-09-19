@@ -30,7 +30,9 @@ from belief.speech import (
     _contact_report_text,
     _format_range_km,
     _plural_unit_type_display,
+    _respell_for_tts,
     _round_enrichment_fragment,
+    _unit_type_display,
     render_contact_report,
     render_readback,
     render_watch_nearest_readback,
@@ -367,9 +369,8 @@ def test_route_event_classification_changed_omits_range_when_not_enriched() -> N
 
 
 def test_format_range_km_rounds_to_nearest_half_km_no_trailing_zero() -> None:
-    assert _format_range_km(5000.0) == "5"
-    assert _format_range_km(1500.0) == "1.5"
-    assert _format_range_km(0.0) == "0"
+    assert _format_range_km(5000.0) == "5 kilometres"
+    assert _format_range_km(1500.0) == "1.5 kilometres"
 
 
 def test_format_range_km_boundary_cases() -> None:
@@ -377,16 +378,29 @@ def test_format_range_km_boundary_cases() -> None:
     # round() (banker's rounding, ties to even) resolves them to 1 and 2
     # respectively -- pinned here so a future change to the rounding
     # implementation is a deliberate, visible diff.
-    assert _format_range_km(1250.0) == "1"
-    assert _format_range_km(1750.0) == "2"
+    assert _format_range_km(1250.0) == "1 kilometres"
+    assert _format_range_km(1750.0) == "2 kilometres"
+
+
+def test_format_range_km_says_very_close_under_half_a_kilometre() -> None:
+    """Below `_VERY_CLOSE_RANGE_M` the exact figure stops mattering -- the
+    fact of proximity does instead (2026-09-19 roadmap item)."""
+    assert _format_range_km(0.0) == "very close"
+    assert _format_range_km(499.0) == "very close"
+    # 500m itself is the boundary, not "very close" -- it rounds normally.
+    assert _format_range_km(500.0) == "0.5 kilometres"
 
 
 def test_round_enrichment_fragment_rounds_trailing_distance() -> None:
-    assert _round_enrichment_fragment("near a road (439m)") == "near a road (~400m)"
+    assert (
+        _round_enrichment_fragment("near a road (439m)") == "near a road (~400 metres)"
+    )
     # 450m sits exactly on a 100m rounding boundary; Python's round()
     # (ties to even) resolves it to 400, pinned for the same reason as
     # the range boundary case above.
-    assert _round_enrichment_fragment("near a road (450m)") == "near a road (~400m)"
+    assert (
+        _round_enrichment_fragment("near a road (450m)") == "near a road (~400 metres)"
+    )
 
 
 def test_round_enrichment_fragment_passes_through_text_without_distance() -> None:
@@ -515,6 +529,45 @@ def test_plural_unit_type_display_class_level_not_in_table_falls_back_to_raw_val
 
 def test_plural_unit_type_display_type_level_is_unpluralized_raw_value() -> None:
     assert _plural_unit_type_display("T-72", "type") == "T-72"
+
+
+# --- TTS acronym/designation respelling (2026-09-19 roadmap item) -------
+
+
+def test_respell_for_tts_respells_a_known_designation() -> None:
+    assert _respell_for_tts("Mi-8") == "M I 8"
+    assert _respell_for_tts("Mi-24") == "M I 24"
+
+
+def test_respell_for_tts_is_case_insensitive() -> None:
+    assert _respell_for_tts("MI-8") == "M I 8"
+    assert _respell_for_tts("mi-8") == "M I 8"
+
+
+def test_respell_for_tts_leaves_unlisted_tokens_alone() -> None:
+    """A per-token table, not a blanket rule -- most tokens pass through
+    unchanged, including multi-word type-level values."""
+    assert _respell_for_tts("T-72") == "T-72"
+    assert _respell_for_tts("SA-6 launcher") == "SA-6 launcher"
+
+
+def test_respell_for_tts_never_touches_sam() -> None:
+    """ "SAM" is the roadmap's named exception -- TTS already reads it
+    correctly, so it must never be respelled even though it is exactly
+    the shape (a short all-caps acronym) the table exists to fix for other
+    tokens."""
+    assert _respell_for_tts("SAM") == "SAM"
+
+
+def test_unit_type_display_type_level_respells_for_tts() -> None:
+    """`_unit_type_display`'s `type` level is where a raw reporting-name
+    designation like `"Mi-8"` reaches spoken text -- confirms the table is
+    actually wired in, not just correct in isolation."""
+    assert _unit_type_display("Mi-8", "type") == "M I 8"
+
+
+def test_plural_unit_type_display_type_level_respells_for_tts() -> None:
+    assert _plural_unit_type_display("Mi-8", "type") == "M I 8"
 
 
 def test_contact_report_text_with_no_cardinality_fact_matches_singular_text() -> None:
