@@ -615,6 +615,39 @@ part and adding tokens to it now is nearly free. The routing itself, the brain-l
 transmission buffer and the repeat-last-utterance store are Stage 2-and-later work and need their
 own architect pass.
 
+### Slots, not enumerated phrases — and why the corpus does not follow (2026-09-19)
+
+User proposal: *"instead of constructing corpus for every possible command like 'report three
+o'clock', how about blocks that build sentences: 'report' 'three' 'o'clock'. Then each word is
+swappable within a more general pattern: `<verb> <direction> <etc>`"*.
+
+**Adopted for the grammar and the matcher.** Commands are a product of slots — a verb and a
+target — not a hand-listed set of sentences. This is what keeps 72 legal bearings from becoming
+144 table entries, makes a new target cost one row rather than one row per verb, and gives the
+matcher a verb anchor, which is separately needed: the bench already showed fuzzy matching
+repairing "record three o'clock" into "report three o'clock" and scoring it correct, hiding the
+one error class that swaps an action rather than garbling a word.
+
+**Deliberately NOT adopted for the corpus, which keeps whole utterances.** The reason is validity
+rather than difficulty. What gets deployed is whole utterances — one PTT press, one sentence — so
+a bench predicts live performance only if its clips resemble live transmissions. A corpus of
+isolated words would measure a task nobody ever performs, and its accuracy figure would not
+transfer to the thing being judged. That is the same failure this slice already paid for once,
+where a recording artefact arrived at the bench dressed as an accent problem.
+
+Worth recording what the evidence did and did not show, since the obvious argument here is the
+wrong one. Isolated words are *not* broadly harder for whisper: probed on clean synthetic speech,
+"report", "east", "cancel", "watch", "nearest" and "bearing" all came back correctly on their own.
+One did not — "o'clock" alone returns "A clock" — which would have made isolated-word recording
+actively misleading for the clock tokens specifically. But the case against an isolated-word
+corpus does not rest on that; it rests on measuring the wrong task.
+
+**The combinatorial worry behind the proposal is real, and the answer is a covering set.** The
+corpus records whole utterances chosen so that every slot value appears in a few of them — not
+every combination. Adding a target then costs a handful of clips rather than `verbs x targets`.
+This is already how the numeric bearings are sampled: twelve spoken bearings selected so all ten
+digits are uttered, instead of recording seventy-two.
+
 ### Settled Decisions (user, 2026-09-19)
 
 **1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a
