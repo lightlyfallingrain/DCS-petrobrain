@@ -602,19 +602,26 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   how it sounds, not about what he believes; most touch `belief/speech.py` and
   `belief/enrichment.py` only. Grouped by what they cost.
 
-  **Cheap — wording, in `speech.py`:**
+  **Cheap — wording, in `speech.py`. ✅ All shipped 2026-09-19 (`9035317`).**
   - **Spell units out.** "m" and "km" must become "meters" and "kilometers"; TTS does not handle the
     shorthands. Note `_format_range_km` and `_round_enrichment_fragment` both currently emit them.
-  - **Acronyms need spacing or expansion.** TTS reads "MI-8" as one token and "LR" as letters with
-    no gap. Wanted: "M I 8", "long range". **"SAM" is the exception** — a well-known word TTS
-    already says correctly, so this is a per-token table, not a blanket rule.
+  - **Acronyms need spacing or expansion.** TTS reads a designation as one token. Wanted: "M I 8".
+    **"SAM" is the exception** — a well-known word TTS already says correctly, so this is a
+    per-token table, not a blanket rule. *Shipped: the table applies only at `type` level, and
+    "SAM" is a `class`-level word, so it is structurally out of reach rather than protected by an
+    exception entry. Two of this bullet's original examples were wrong and were corrected during
+    implementation: "LR" occurs nowhere in the vocabulary (checked the class table and all reporting
+    names) and was left out rather than given an invented use; the real string is "Mi-8", mixed
+    case.*
   - **"very close" under 0.5 km.** Replaces a bare range figure at the distance where the exact
     number stops mattering and the fact of proximity starts to.
 
-  **Cheap — thresholds, in `enrichment.py`:**
+  **Cheap — thresholds, in `enrichment.py`. ✅ Shipped 2026-09-19 (`9035317`).**
   - **0 m from a feature → "on the road"** (and the same for any feature reference, not just
     roads).
-  - **Between ~10 m and ~100 m → "next to the road"**, with the side named.
+  - **Between ~10 m and ~100 m → "next to the road"**, with the side named. *Shipped without the
+    side, which needs the bearing below. Note a deliberate gap: 0.5-10 m still renders as
+    "near X (Nm)", disclosed in the code rather than silently rounded into one of the neighbours.*
   - These replace the current "near X (~200m)" shape entirely at short distances. The existing
     1000 m `NEAR_FACT_RADIUS_M` gate stays above them.
 
