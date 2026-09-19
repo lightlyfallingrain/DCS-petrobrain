@@ -776,6 +776,47 @@ redundant third phrasing of `cancel_nevermind`, heard as "This is the card") and
 "this kind of" — the last survivor of a pattern that dominated earlier runs, and the most-used verb
 in the vocabulary.
 
+### Filler stripping in the matcher (2026-09-20)
+
+User direction, clarified: this is **action recognition from the text STT produced**, not anything
+done to recognition itself. The recogniser still returns whatever it heard; the matcher drops words
+that carry no command meaning before scoring.
+
+**Why it helps more than it looks.** `_phrase_match_ratio` divides by the longer word count, so
+every filler word a player says actively depresses the score of the command they meant. Removing
+them recovers ratio without touching `MATCH_FLOOR`. Measured: "um scan the left" 0.500 → **1.000**,
+"cancel the task" 0.500 → **1.000**, "scan to the right" 0.500 → **1.000**, "watch the nearest
+contact" 0.500 → 0.667. All four were rejections before.
+
+**The list is deliberately short**, and the measurement decided it rather than taste. A wider list
+adding `of`/`on`/`in`/`this`/`that` gave *identical* gains on every real phrasing while raising
+every adversarial score — and pulled "scan the ridge on the left" up into a `scan_left` match. That
+is description, not an order, and it belongs to the brain under the two-tier design. The extra words
+bought nothing and spent margin, so they are out.
+
+Because stripping words shortens the transcript and therefore inflates every ratio, the adversarial
+set that caught the original false-execution bug is re-pinned as a test. All six still reject.
+
+**Open, deliberately not decided:** a bare "okay" anchors at 0.571 against a real verb, clearing the
+intentionally loose `VERB_FLOOR`, so it reports anchored-but-unresolved and body answers "say
+again". A player saying "okay" is not asking for anything and may not want to be asked to repeat
+it. The behaviour follows from the loose anchor being right elsewhere, so it is recorded rather than
+patched.
+
+**Two things this does NOT solve, both surfaced by the user's own example** ("Look to the north,
+watch the nearest contact"):
+
+1. **`look <compass>` is missing from the vocabulary.** Relative directions carry both verbs
+   ("scan ahead" / "look ahead") but compass directions only carry "scan north". So "look north"
+   scores 0.500 and fails for a reason filler stripping cannot fix. Worth knowing that phrasings and
+   recordings are independent — the table drives matching, the corpus only measures — so this can be
+   added today and works immediately, with the honest caveat that it is unmeasured until a future
+   recording session.
+2. **Two commands in one transmission needs segmentation**, which is a real feature rather than a
+   tweak: split on comma or conjunction, match each fragment, act in order. It also interacts with
+   the `nevermind` rule, since a retraction at the end would have to kill every fragment before it.
+   Not built, not planned here.
+
 ### Settled Decisions (user, 2026-09-19)
 
 **1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a

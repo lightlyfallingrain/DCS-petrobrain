@@ -163,6 +163,66 @@ VERB_FLOOR: float = 0.5
 SEPARATION_MIN: float = 0.05
 
 
+#: Words dropped before matching: hesitation sounds, articles, and the two
+#: prepositions this vocabulary's phrasings never contain. **Deliberately
+#: short.** Measured against both real phrasings and the adversarial set
+#: that caught the earlier false-execution bug, a wider list -- adding
+#: "of", "on", "in", "this", "that" -- produced *identical* gains on every
+#: phrasing worth matching while raising every adversarial score, because
+#: those words carry meaning here: "scan the ridge on the left" is
+#: description, and only the wider list pulled it up to a `scan_left`
+#: match. So the extra words bought nothing and spent margin.
+#:
+#: This is a matching decision, not a normalisation one, which is why it
+#: lives here rather than in `vocabulary.normalize_for_match` -- see that
+#: function's own docstring, which says so explicitly and stays
+#: conservative on purpose so the bench and the matcher can disagree.
+FILLER_WORDS: frozenset[str] = frozenset(
+    {
+        # hesitation
+        "um",
+        "uh",
+        "ah",
+        "er",
+        "erm",
+        "hmm",
+        # politeness and discourse padding
+        "okay",
+        "ok",
+        "well",
+        "please",
+        "just",
+        # articles -- no phrasing contains one, they were stripped from the
+        # vocabulary itself on 2026-09-19
+        "the",
+        "a",
+        "an",
+        # the one preposition players insert freely ("scan to the right")
+        "to",
+    }
+)
+
+
+def strip_filler(normalized: str) -> str:
+    """Drop `FILLER_WORDS`, unless that would empty the transcript.
+
+    Worth stating why this helps as much as it does: `_phrase_match_ratio`
+    divides by the **longer** word count, so every filler word a player
+    says actively depresses the score of the command they meant. Removing
+    them recovers ratio without touching `MATCH_FLOOR` -- "um scan the
+    left" goes from 0.500, a rejection, to 1.000, an exact hit, and
+    "cancel the task" from 0.500 to 1.000, purely by not counting words
+    nobody needs to say.
+
+    The guard against emptying matters for one real case: a transmission
+    of nothing but "okay" would otherwise normalise to the empty string
+    and take a different path through the matcher than an unmatched word
+    does. Leaving it intact keeps it an ordinary no-match.
+    """
+    kept = [word for word in normalized.split() if word not in FILLER_WORDS]
+    return " ".join(kept) if kept else normalized
+
+
 def _derive_verb_anchor_words() -> frozenset[str]:
     """Every normalised first word across every phrasing of every token.
     See this module's docstring for why this is derived rather than a
@@ -349,7 +409,7 @@ def match_transcript(text: str) -> MatchResult:
     """Normalise -> verb anchor -> (bearing slot | phrase match) ->
     separation check. See module and `MatchResult` docstrings for the
     full outcome shape."""
-    normalized = normalize_for_match(text)
+    normalized = strip_filler(normalize_for_match(text))
     words = normalized.split()
     if not words:
         return MatchResult(token=None, match_ratio=0.0, verb_anchored=False)
