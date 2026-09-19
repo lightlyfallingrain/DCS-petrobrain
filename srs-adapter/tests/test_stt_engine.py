@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from stt_engine import (
     Transcript,
     WhisperCliEngine,
     WindowsSpeechEngine,
+    _parse_whisper_json,
 )
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -111,4 +113,76 @@ def test_windows_speech_engine_not_available_on_this_platform() -> None:
 def test_windows_speech_engine_transcribe_raises_off_windows() -> None:
     engine = WindowsSpeechEngine(phrases=("scan left", "scan right"))
     with pytest.raises(STTRecognitionError, match="Windows"):
+        engine.transcribe(_SAMPLE_WAV_PATH.read_bytes())
+
+
+# --- Malformed-JSON handling (review required fixes) -----------------------
+#
+# Reproduced directly by the reviewer: a non-dict JSON root (or a non-dict
+# item inside a list the parsing code iterates) used to raise a bare
+# AttributeError from `.get()` instead of a clear STTRecognitionError. Both
+# `_parse_whisper_json` and `WindowsSpeechEngine.transcribe`'s inline
+# PowerShell JSON parsing had the same shape. These are pure-function/
+# mocked-subprocess tests -- no real binary or Windows host needed.
+
+
+def test_parse_whisper_json_nondict_root_raises_recognition_error() -> None:
+    with pytest.raises(STTRecognitionError, match="root is"):
+        _parse_whisper_json(["oops"])
+
+
+def test_parse_whisper_json_nondict_transcription_value_raises() -> None:
+    with pytest.raises(STTRecognitionError, match="'transcription'"):
+        _parse_whisper_json({"transcription": "not a list"})
+
+
+def test_parse_whisper_json_nondict_segment_raises() -> None:
+    with pytest.raises(STTRecognitionError, match="transcription.*entry"):
+        _parse_whisper_json({"transcription": ["scan left"]})
+
+
+def test_parse_whisper_json_nondict_token_raises() -> None:
+    with pytest.raises(STTRecognitionError, match="tokens.*entry"):
+        _parse_whisper_json(
+            {"transcription": [{"text": "scan left", "tokens": ["not a token"]}]}
+        )
+
+
+def test_parse_whisper_json_with_token_probs_is_not_placeholder() -> None:
+    transcript = _parse_whisper_json(
+        {
+            "transcription": [
+                {
+                    "text": "scan left",
+                    "tokens": [{"p": 0.9}, {"p": 0.8}],
+                }
+            ]
+        }
+    )
+    assert transcript.text == "scan left"
+    assert transcript.confidence == pytest.approx(0.85)
+    assert transcript.confidence_is_placeholder is False
+
+
+def test_parse_whisper_json_without_token_probs_is_placeholder() -> None:
+    transcript = _parse_whisper_json(
+        {"transcription": [{"text": "scan left", "tokens": []}]}
+    )
+    assert transcript.confidence == 1.0
+    assert transcript.confidence_is_placeholder is True
+
+
+def test_windows_speech_engine_transcribe_nondict_json_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(WindowsSpeechEngine, "is_available", staticmethod(lambda: True))
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b'["oops"]', stderr=b""
+        ),
+    )
+    engine = WindowsSpeechEngine(phrases=("scan left", "scan right"))
+    with pytest.raises(STTRecognitionError, match="root is"):
         engine.transcribe(_SAMPLE_WAV_PATH.read_bytes())
