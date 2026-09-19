@@ -16,6 +16,8 @@ from vocabulary import (
     PHRASES,
     TOKENS,
     VOICE_ONLY_TOKENS,
+    normalize_for_match,
+    normalized_phrase_index,
     spoken_phrases,
     to_gbnf,
     token_for_phrase,
@@ -89,3 +91,48 @@ def test_to_gbnf_contains_every_phrase() -> None:
     assert grammar.startswith("root ::=")
     for phrase in spoken_phrases():
         assert f'"{phrase}"' in grammar
+
+
+def test_normalization_bridges_digits_and_number_words() -> None:
+    """The failure this exists to prevent is a silent one.
+
+    Recognizers return "report 3 o'clock"; `PHRASES` spells "report three
+    o'clock". Without bridging, every clock clip scores as a miss while
+    having been heard perfectly -- and on a bench report that is
+    indistinguishable from a recognition failure, which is the wrong
+    conclusion to hand someone judging whether recognition works on their
+    voice.
+    """
+    assert normalize_for_match(" Report 3 o'clock.") == "report three o'clock"
+    assert normalize_for_match("report 12 o’clock") == "report twelve o'clock"
+    assert normalize_for_match("report 8 oclock") == "report eight o'clock"
+
+
+def test_normalization_folds_case_punctuation_and_compass_spelling() -> None:
+    assert normalize_for_match("SCAN LEFT") == "scan left"
+    assert normalize_for_match(" Scan left.") == "scan left"
+    assert normalize_for_match("Scan bearing north-west.") == "scan bearing northwest"
+    assert normalize_for_match("scan north west") == "scan northwest"
+
+
+def test_normalization_does_not_repair_a_wrong_verb() -> None:
+    """Normalization must not do the matcher's job.
+
+    "record" for "report" is a real mishearing observed from ggml-base.en.
+    Folding it away here would hide the single most consequential error
+    class in this vocabulary -- verbs select the action, so a wrong verb
+    runs a different command rather than garbling a word. Whether to
+    forgive it is the matcher's decision, made with a verb anchor; this
+    step only removes differences that carry no meaning.
+    """
+    assert normalize_for_match("record three o'clock") != normalize_for_match(
+        "report three o'clock"
+    )
+
+
+def test_every_phrase_normalizes_to_a_unique_token() -> None:
+    index = normalized_phrase_index()
+    assert len(index) == len(spoken_phrases())
+    for token in TOKENS:
+        for phrase in PHRASES[token]:
+            assert index[normalize_for_match(phrase)] == token
