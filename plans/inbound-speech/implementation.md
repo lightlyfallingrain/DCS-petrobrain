@@ -75,3 +75,125 @@ still pending the user recording a corpus and running `tools/stt_bench.py` for r
   `_BEARING_SCAN_TOKENS` and `aircraft-layer/src/collector/f10_command_receiver.py`'s
   `ALLOWED_COMMANDS` agree exactly on the 15 tokens and their names — `vocabulary.py` mirrors that
   confirmed set, not a guess.
+
+---
+
+### Stage 2 — the matcher and the command path, driven by typed text (2026-09-19)
+
+Branch `feature/stt-command-matcher`. No audio anywhere, per plan. Two halves, split per Decision 4
+REVISED: `srs-adapter` owns matching mechanics, `body-layer` owns act/confirm/say-again behaviour.
+
+#### Files Changed
+
+- `srs-adapter/src/command_matcher.py` (new) — `match_transcript(text) -> MatchResult`: normalise
+  (`vocabulary.normalize_for_match`) -> verb anchor -> bearing slot (`vocabulary.parse_bearing`) or
+  phrase match (`vocabulary.normalized_phrase_index`) -> separation check. `MATCH_FLOOR` reuses
+  `tools/stt_bench.py`'s own measured `_MATCH_CUTOFF` (0.6) verbatim — the cutoff that actually
+  produced Stage 1's 99.2%/zero-unsafe-error result. `VERB_FLOOR` reuses the same figure (no
+  separate verb-only distribution was measured). `SEPARATION_MIN` (0.05) is an explicitly
+  undocumented-as-measured placeholder. `VERB_ANCHOR_WORDS` is derived from `vocabulary.PHRASES`
+  (every phrasing's first word), not transcribed from Decision 4 REVISED's prose enumeration — see
+  "Notable Discoveries" below.
+- `srs-adapter/tests/test_command_matcher.py` (new).
+- `srs-adapter/CLAUDE.md` — `Structure`/`Testing` entries for the new module.
+- `body-layer/src/belief/voice_commands.py` (new) — `classify_response` (the band decision) and
+  `classify_yes_no` (a tiny, body-owned affirm/negative word check — not a vocabulary import).
+  `ACT_FLOOR` (0.60) is grounded in Stage 1's measured min-correct confidence
+  (`srs-adapter/research/2026-09-19-whisper-model-sweep.md`). `ACT_FLOOR_CANCEL` (0.80),
+  `CONFIRM_FLOOR` (0.35), `CONFIRM_WINDOW_S` (8.0) are documented in their own comments as
+  unmeasured placeholders pending Stage 6 live-sortie data — not disguised as measured.
+  `PendingConfirmation`/`BandDecision` are plain dataclasses.
+- `body-layer/src/belief/speech.py` — `render_say_again`, `render_confirm_request`.
+- `body-layer/src/belief/crew_console.py` — `CrewConsole.handle_transcript` (new sibling entry
+  point to `handle_line`/`handle_f10_command`), `_pending_confirmation` state field,
+  `_describe_token_for_confirm` (reuses `handle_f10_command`'s own token->label tables),
+  `_handle_voice_test_command` (`!voice` REPL harness), `HELP_TEXT` update.
+- `body-layer/CLAUDE.md` — `Structure` entry for `voice_commands.py` and the `handle_transcript`/
+  `!voice` addition to `crew_console.py`'s existing entry.
+- Tests extended: `body-layer/tests/test_voice_commands.py` (new), `test_speech.py` (2 new
+  renders), `test_crew_console.py` (`handle_transcript` routing, pending-confirmation lifecycle,
+  `!voice` harness).
+
+#### Tests Added
+
+- `test_command_matcher.py` — exact hits per token shape, verb-anchor rejection (with a documented
+  finding about short-word false-anchoring, see below), a measured genuine-tie ambiguous case
+  ("scan est" scores an identical 0.941 against both "scan east"/"scan west"), legal/illegal
+  bearing outcomes via `parse_bearing` (not the phrase table), and two regression guards for the
+  derived verb set ("never mind", "hey petrovich" must still anchor).
+- `test_voice_commands.py` — `classify_response`'s four dispositions including the ambiguous-always-
+  confirms and cancel_task-higher-floor cases; `classify_yes_no`'s three outcomes.
+- `test_speech.py` — `render_say_again`, `render_confirm_request` (capitalisation, empty
+  description).
+- `test_crew_console.py` — `handle_transcript` fallthrough (verified via the stand-in brain client
+  actually receiving the escalation, not just matching return text), act above `ACT_FLOOR`, confirm
+  band (asks, holds pending, does not execute), ambiguous-always-confirms, say-again below
+  `CONFIRM_FLOOR`, confirm-then-affirm commits, confirm-then-negative discards silently,
+  confirm-then-unrelated-answer discards the stale question but still processes the new one,
+  confirm-window expiry, `cancel_task`'s higher floor, and the `!voice` harness (happy path,
+  no-match path, usage-error path).
+
+#### Checks
+
+**srs-adapter/**
+- `ruff format --check`: pass
+- `ruff check`: pass
+- `mypy src` (strict): pass
+- `pytest -q`: pass (72 passed, 1 skipped — pre-existing whisper-binary skip)
+
+**body-layer/**
+- `ruff format --check`: pass
+- `ruff check`: pass
+- `mypy src` (strict, run from `body-layer/`): pass
+- `pytest -q`: pass (705 passed)
+
+#### Notable Discoveries
+
+- **`VERB_ANCHOR_WORDS`, derived programmatically, is a strict superset of Decision 4 REVISED's own
+  prose verb-set enumeration.** The prose says `{scan, look, report, watch, cancel, stop, say,
+  repeat}` plus the wake word and `nevermind`. Deriving from every phrasing's first word (per the
+  task's own instruction: "derive it from the actual vocabulary rather than hardcoding a list that
+  will drift") additionally admits `full` ("full scan"), `what` ("what do you see"), `hey` ("hey
+  petrovich"), `never`, and `disregard` ("never mind"/"disregard"). Kept deliberately: excluding
+  `never` would silently break `"never mind"` — the exact alternate spelling `vocabulary.py`'s own
+  docstring says exists *because* `base.en` splits a spoken "nevermind" into two words — and the
+  identical argument applies to `hey petrovich`. Regression tests pin both. This is a real
+  deviation from the plan's literal prose list; I believe it is what the plan intended given its
+  own stated reasoning, but it is worth the user's explicit sign-off since the plan text names a
+  specific, narrower set.
+- **Fuzzy verb-anchor matching against short words is looser than it looks.** Measured while
+  writing tests: the word "the" scores a 0.667 `SequenceMatcher` ratio against "hey", clearing
+  `VERB_FLOOR` (0.6) and false-anchoring an ordinary sentence starting with "the". Any 3-4 letter
+  verb-anchor word (`hey`, `say`, `full`) is vulnerable to this — short strings have a structurally
+  higher baseline similarity to arbitrary other short strings. Not fixed here (`VERB_FLOOR` is
+  explicitly Stage 1's `MATCH_FLOOR` reused, not a verb-specific measurement, and the plan expects
+  Stage 6 to re-tune these constants from live data) but flagged for that re-tuning pass, and the
+  test that would have used the research doc's own out-of-vocabulary probe ("the weather is quite
+  nice today") had to be swapped for a different sentence because of exactly this.
+- **The plan's own Decision 6 seam table is stale relative to Decision 4 REVISED.** Decision 6
+  (below Decision 4 REVISED in the doc, but not itself marked REVISED) describes
+  `CrewConsole.handle_transcript(text, confidence, now_sim)` — a 3-argument signature with no
+  `token`/`match_ratio` at all — while Decision 4 REVISED's own seam table says body receives
+  `{transcript, confidence, token, match_ratio}`. Neither matches what got built:
+  `handle_transcript` needed **two more fields** than either table gives (`verb_anchored`,
+  `ambiguous`) to distinguish three behaviourally distinct `token=None` outcomes that Decision 4's
+  own prose requires be treated differently (not-a-command-attempt -> fallthrough;
+  verb-anchored-but-unresolved -> always say-again; ambiguous -> always confirm on the best
+  candidate). Two fields cannot encode three outcomes without a fragile magnitude-based convention
+  over `match_ratio`, so I added `verb_anchored: bool` and `ambiguous: bool` to `MatchResult` and
+  threaded them through. This is a genuine plan gap, not a preference — flagging for the user/
+  Architect to fold into Stage 3's real wire-shape design (`GET /transcripts/poll`'s JSON will need
+  these two fields too, not just the two the seam table currently names).
+- **Voice-only tokens (`report_all`, `report_bearing_*`, `report_clock_*`, `scan_bearing_deg`,
+  `stop_talking`, `say_again` as a player command) have no real dispatch behaviour yet.** The plan's
+  own Tests section describes the act path as "match -> `handle_f10_command` effects and readback",
+  which only covers the 15-token legacy vocabulary. `handle_transcript`'s act disposition reuses
+  `handle_f10_command` directly rather than building new dispatch logic for the newer voice-only
+  tokens (report-by-bearing/clock needs a query capability that doesn't exist anywhere in this
+  codebase; `stop_talking`/`say_again` as player-spoken commands need the not-yet-planned
+  transmission-buffer/repeat-last-utterance mechanisms the plan's own "Not planned here" note
+  defers). These tokens still match and can reach the confirm/say-again bands
+  (`_describe_token_for_confirm` has a generic fallback description), but "acting" on them is a
+  graceful no-op via `handle_f10_command`'s existing defensive `else` branch — a documented gap,
+  not a silent one, and consistent with effort/value: building real report-by-bearing dispatch is
+  its own feature, not part of "the matcher and the command path."
