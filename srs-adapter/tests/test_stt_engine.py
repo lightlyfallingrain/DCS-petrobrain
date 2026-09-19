@@ -1,4 +1,4 @@
-"""Tests for `stt_engine.WhisperCliEngine`/`WindowsSpeechEngine`.
+"""Tests for `stt_engine.WhisperCliEngine`.
 
 `WhisperCliEngine` is exercised against the **real** `whisper-cli` binary
 and a committed short WAV fixture, following `test_tts_engine.py`'s
@@ -6,7 +6,6 @@ real-binary posture -- but unlike `say`, whisper.cpp is **not** guaranteed
 present on every dev machine, so every test in that class skips cleanly
 (`pytest.skip`, not a failure) when the binary or a model file is absent,
 via `--whisper-binary`/`--whisper-model` pytest options with documented
-fallbacks. `WindowsSpeechEngine`'s platform-gated behaviour is tested
 directly (no subprocess call needed for that part); its real
 `powershell.exe` path is untestable from this Mac-only dev environment and
 is not exercised here.
@@ -26,7 +25,6 @@ from stt_engine import (
     STTRecognitionError,
     Transcript,
     WhisperCliEngine,
-    WindowsSpeechEngine,
     _parse_whisper_json,
 )
 
@@ -99,34 +97,6 @@ def test_transcribe_missing_binary_raises_actionable_error() -> None:
         engine.transcribe(_SAMPLE_WAV_PATH.read_bytes())
 
 
-def test_windows_speech_engine_requires_phrases() -> None:
-    with pytest.raises(ValueError):
-        WindowsSpeechEngine(phrases=())
-
-
-def test_windows_speech_engine_not_available_on_this_platform() -> None:
-    # This test suite runs on macOS/Linux dev machines; on any such host
-    # WindowsSpeechEngine must report itself unavailable rather than a
-    # caller discovering that only after a failed subprocess call.
-    assert WindowsSpeechEngine.is_available() is False
-
-
-def test_windows_speech_engine_transcribe_raises_off_windows() -> None:
-    engine = WindowsSpeechEngine(phrases=("scan left", "scan right"))
-    with pytest.raises(STTRecognitionError, match="Windows"):
-        engine.transcribe(_SAMPLE_WAV_PATH.read_bytes())
-
-
-# --- Malformed-JSON handling (review required fixes) -----------------------
-#
-# Reproduced directly by the reviewer: a non-dict JSON root (or a non-dict
-# item inside a list the parsing code iterates) used to raise a bare
-# AttributeError from `.get()` instead of a clear STTRecognitionError. Both
-# `_parse_whisper_json` and `WindowsSpeechEngine.transcribe`'s inline
-# PowerShell JSON parsing had the same shape. These are pure-function/
-# mocked-subprocess tests -- no real binary or Windows host needed.
-
-
 def test_parse_whisper_json_nondict_root_raises_recognition_error() -> None:
     with pytest.raises(STTRecognitionError, match="root is"):
         _parse_whisper_json(["oops"])
@@ -171,22 +141,6 @@ def test_parse_whisper_json_without_token_probs_is_placeholder() -> None:
     )
     assert transcript.confidence == 1.0
     assert transcript.confidence_is_placeholder is True
-
-
-def test_windows_speech_engine_transcribe_nondict_json_raises(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(WindowsSpeechEngine, "is_available", staticmethod(lambda: True))
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=b'["oops"]', stderr=b""
-        ),
-    )
-    engine = WindowsSpeechEngine(phrases=("scan left", "scan right"))
-    with pytest.raises(STTRecognitionError, match="root is"):
-        engine.transcribe(_SAMPLE_WAV_PATH.read_bytes())
 
 
 def test_grammar_run_passes_grammar_rule(

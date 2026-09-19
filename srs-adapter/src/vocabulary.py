@@ -33,7 +33,8 @@ whatever the F10 menu still offers.
 
 `PHRASES` is this file's own addition, not mirrored from anywhere -- it is
 the recogniser **bias hint list**: the spoken phrasings a constrained
-grammar (whisper.cpp `--grammar`, `System.Speech`'s `Choices`) should steer
+grammar or prompt (whisper.cpp `--prompt`, and `--grammar` where used)
+should steer
 decoding toward, and the prompt list `tools/stt_bench.py` and the corpus
 recording instructions are built from. Several phrasings per token,
 matching the examples in `plans/inbound-speech/plan.md` Decision 4 --

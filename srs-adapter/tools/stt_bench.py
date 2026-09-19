@@ -19,8 +19,6 @@ own voice, whichever are available on this host:
    (constrained decoding) -- reported as a **separate row**, since the
    plan explicitly wants to know whether constrained decoding helps or
    hurts, not just whichever one this script happened to run.
-3. `WindowsSpeechEngine` -- only attempted when running on Windows; on the
-   Mac this row is skipped with a clear message, never a traceback.
 
 ## Recording the corpus
 
@@ -98,14 +96,12 @@ from stt_engine import (
     STTEngine,
     STTRecognitionError,
     WhisperCliEngine,
-    WindowsSpeechEngine,
 )
 from vocabulary import (
     PHRASES,
     TOKENS,
     normalize_for_match,
     normalized_phrase_index,
-    spoken_phrases,
     to_gbnf,
     to_prompt,
 )
@@ -288,14 +284,6 @@ def print_report(engine_label: str, results: list[ClipResult]) -> None:
             f"Recognition time per clip: median {statistics.median(times):.2f}s  "
             f"p90 {p90:.2f}s  max {times[-1]:.2f}s"
         )
-        if "windows" in engine_label:
-            print(
-                "  NOTE: this row spawns a fresh powershell.exe and loads\n"
-                "  System.Speech per clip, so the figures above are dominated by\n"
-                "  process startup rather than recognition. They are NOT\n"
-                "  comparable to the whisper rows, and a resident service would\n"
-                "  be far faster. Read this row's accuracy, not its latency."
-            )
 
     confusions: dict[tuple[str, str], list[ClipResult]] = {}
     for r in results:
@@ -462,17 +450,6 @@ def main() -> None:
             else "--whisper-model not given"
         )
         print(f"\nSkipping whisper.cpp rows: {reason}.", file=sys.stderr)
-
-    if WindowsSpeechEngine.is_available():
-        windows_engine = WindowsSpeechEngine(phrases=spoken_phrases())
-        results = run_engine("windows-speech", windows_engine, corpus)
-        print_report("windows-speech", results)
-        ran_any = True
-    else:
-        print(
-            "\nSkipping windows-speech row: not running on Windows.",
-            file=sys.stderr,
-        )
 
     if not ran_any:
         print(
