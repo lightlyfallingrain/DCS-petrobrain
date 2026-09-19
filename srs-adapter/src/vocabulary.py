@@ -416,7 +416,21 @@ def normalize_for_match(text: str) -> str:
     normalized = " ".join(normalized.split())
     for split_form, solid in _COMPASS_JOINS:
         normalized = normalized.replace(split_form, solid)
-    words = [_DIGIT_WORDS.get(word, word) for word in normalized.split()]
+    words: list[str] = []
+    after_bearing = False
+    for word in normalized.split():
+        if after_bearing and word.isdigit():
+            # A recognizer writes a spoken "one eight zero" back as "180"
+            # (or "1.8.0", whose punctuation is already gone by here), so
+            # after the word "bearing" a digit run is expanded back into
+            # individual digit words. Without this a perfectly-heard
+            # bearing scores as a total miss, which is the same class of
+            # silent error the clock-digit bridging fixed -- a
+            # representation difference reading as a recognition failure.
+            words.extend(_DIGIT_NAMES[int(d)] for d in word)
+            continue
+        after_bearing = word == "bearing"
+        words.append(_DIGIT_WORDS.get(word, word))
     return " ".join(words)
 
 
