@@ -144,7 +144,7 @@ def test_measured_constants_have_documented_grounding() -> None:
     """Guards the specific figures the module's comments claim -- a
     silent drift here means the comment beside the constant no longer
     describes what is actually shipped. `ACT_FLOOR` is Stage 1's measured
-    min-correct confidence (`research/2026-09-19-whisper-model-sweep.md`);
+    min-correct confidence (`research/2026-09-19-corpus-bench-results.md`);
     the other three are documented as unmeasured placeholders, asserted
     here only so a future edit is deliberate, not accidental."""
     assert ACT_FLOOR == 0.60

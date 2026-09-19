@@ -46,16 +46,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-#: Stage 1's measured confidence distribution (`srs-adapter/research/
-#: 2026-09-19-whisper-model-sweep.md`, the prompted `small.en` row -- the
-#: model/decoding choice that row's sibling doc, `research/2026-09-19-
-#: whisper-contract-and-grammar-probe.md`, and Decision 1 REVISED all
-#: settle on): correct answers ran mean 0.82, min 0.60; the two remaining
+#: Stage 1's measured confidence distribution, recorded as data in
+#: `srs-adapter/research/2026-09-19-corpus-bench-results.md` (a reviewer
+#: caught this comment previously citing `2026-09-19-whisper-model-
+#: sweep.md`, which carries the accuracy/latency table but no confidence
+#: distribution at all -- the figures below were only citable from plan
+#: prose until that research doc was committed). Prompted (`--prompt`,
+#: `small.en`) correct answers ran 0.60-0.95, mean 0.82; the two remaining
 #: failures sat at 0.58 and 0.66. `ACT_FLOOR` is set directly from that
-#: min-correct figure. **Not a clean separator** -- one of the two
-#: failures (0.66) sits above it -- the research note itself calls a
-#: reject threshold "near 0.60" *defensible*, not exact; there is no
-#: larger distribution (2 failures) to fit a cleaner boundary from.
+#: min-correct figure. **Holds only while `--prompt` is in use** -- on the
+#: plain (unprompted) row the same research doc records, correct and
+#: incorrect confidence ranges overlap almost entirely (mean 0.68 vs
+#: 0.63) and the single most confident answer in that run was wrong, so
+#: this floor would be meaningless there. **Not a clean separator even
+#: prompted** -- one of the two failures (0.66) sits above it -- the
+#: research doc itself calls a reject threshold "near 0.60" *defensible*,
+#: not exact; there is no larger distribution (2 failures) to fit a
+#: cleaner boundary from.
 ACT_FLOOR: float = 0.60
 
 #: `cancel_task` is the one token that *destroys* state rather than
