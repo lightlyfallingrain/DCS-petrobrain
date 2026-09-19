@@ -336,11 +336,30 @@ def _parse_whisper_json(payload: object) -> Transcript:
 _WINDOWS_SPEECH_SCRIPT_TEMPLATE = r"""
 Add-Type -AssemblyName System.Speech
 $ErrorActionPreference = "Stop"
+
+# The recognizer culture is pinned rather than defaulted. A bare
+# `New-Object SpeechRecognitionEngine` selects the recognizer matching
+# the Windows display language, so on a non-English install it picks a
+# recognizer for the wrong language -- or finds none at all -- and an
+# English corpus then scores near zero for a reason that has nothing to
+# do with the speaker. That failure presents as "this engine cannot
+# handle my accent", which is precisely the conclusion this bench exists
+# to reach honestly rather than by accident.
+$installed = [System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()
+$match = $installed | Where-Object {{ $_.Culture.Name -eq "en-US" }} | Select-Object -First 1
+if ($match -eq $null) {{
+    $names = ($installed | ForEach-Object {{ $_.Culture.Name }}) -join ", "
+    if ($names -eq "") {{ $names = "(none)" }}
+    Write-Error "no en-US speech recognizer installed; available: $names. Add one via Settings > Time and Language > Speech, or install the English (United States) language pack."
+    exit 3
+}}
+$engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine($match)
+
 $phrases = @({phrases})
 $choices = New-Object System.Speech.Recognition.Choices($phrases)
 $builder = New-Object System.Speech.Recognition.GrammarBuilder($choices)
+$builder.Culture = $match.Culture
 $grammar = New-Object System.Speech.Recognition.Grammar($builder)
-$engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine
 $engine.LoadGrammar($grammar)
 $engine.SetInputToWaveFile("{wav_path}")
 $result = $engine.Recognize()
