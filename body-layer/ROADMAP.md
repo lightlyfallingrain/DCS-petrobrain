@@ -15,6 +15,17 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **Two things waiting on the user's own machines, added 2026-09-19.** Neither blocks work.
+  - **The daily status-page launchd job** (`.claude/scripts/com.petrobrain.status-page.plist`) is
+    written but **not installed** — installing writes outside the repo. Test with
+    `launchctl start com.petrobrain.status-page` and check
+    `~/Library/Logs/petrobrain-status-page.log`. The unproven part is whether a headless
+    `claude -p` can republish the artifact to the existing URL; everything else is guarded and was
+    verified firing.
+  - **The sortie.** Five separate entries now clear on one flight — see the list below plus Stage 4b
+    speech and the contact-report wording. Flight card:
+    `docs/acceptance/2026-09-18-stage6-sortie.md`.
+
 - [ ] **BL-4's attention/events tools** (`set_attention`/`watch_area`/`get_attention_state`/
   `list_events`/`acknowledge_event`) — live acceptance deliberately deferred, "bundled with BL-5's
   transport layer" per the BL-4 plan. BL-5's own live sortie exercised `place`/`position`/
