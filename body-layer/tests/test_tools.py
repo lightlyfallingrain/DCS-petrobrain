@@ -350,7 +350,12 @@ def test_get_stats_counts_observations_contacts_and_events() -> None:
     store = _store_with_one_contact()
     store.tick(now_sim=0.0)
     stats = get_stats(store)
-    assert stats == {"observations": 1, "contacts": 1, "events": 1}
+    assert stats == {
+        "observations": 1,
+        "contacts": 1,
+        "events": 1,
+        "estimated_units": 1,
+    }
 
 
 # --- BL-3 enrichment threading -------------------------------------------
@@ -696,6 +701,7 @@ def test_get_situation_counts_and_position_summary_with_no_contacts(
     result = get_situation(store, now_sim=0.0, enrichment=context)
     facts = result["facts"]
     assert facts["contact_counts"] == {"total": 0, "visible": 0, "watched": 0}
+    assert facts["estimated_units"] == 0
     assert facts["unacknowledged_events"] == 0
     assert "highest_attention_contact" not in facts
     assert isinstance(facts["our_position_summary"], str)
@@ -723,6 +729,7 @@ def test_get_situation_reports_priority_contact_over_watched_and_visible(
     result = get_situation(store, now_sim=1.0, enrichment=context)
     facts = result["facts"]
     assert facts["contact_counts"] == {"total": 2, "visible": 2, "watched": 2}
+    assert facts["estimated_units"] == 2
     highest = facts["highest_attention_contact"]
     assert isinstance(highest, dict)
     assert highest["facts"]["id"] == priority_id

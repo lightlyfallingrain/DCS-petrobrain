@@ -595,7 +595,7 @@ byte-identical**, which is the regression guard for every existing speech test;
 `len(store.contacts)`) to distinguish contact records from estimated units. **Full design: "Stage
 4b design — speech and events" below.**
 
-**Stage 5 — composition.** `belief/composition.py`, `Observation.composition`, per-member folding,
+**Stage 5 — composition. DEFERRED 2026-09-19, and may never be built — see `body-layer/ROADMAP.md`. Do not start on reasoning alone; the evidence has to come from a sortie.** `belief/composition.py`, `Observation.composition`, per-member folding,
 the over-subscription retraction, `facts["composition"]`, and speech's "three of them tanks … and
 something else". Also amend `enrichment.motion_when_seen`, which derives a direction from a
 contact's two most recent implied positions — for a cluster those can come from different vehicles
@@ -1331,6 +1331,35 @@ therefore exist as an event but be spoken sparingly, if at all, until compositio
 acronym spacing, "very close" under 0.5 km). They are the immediate next step, deliberately
 separate, to keep 4b's scope clean and preserve its regression guard that singular output stays
 byte-identical.
+
+### Settled: attention earns precision (user, 2026-09-19)
+
+Two additions after hearing Stage 4b's output rendered.
+
+**1. Two or three is "a couple of", not "several".** Carries its own connector
+for the same reason `"a handful of"` does.
+
+**2. A watched or tracked contact gets a detailed report, including an exact unit count.** The
+user: *"a group of watched/tracked contacts is, for whatever reason, more important and should get
+more detailed reports, including unit counts."*
+
+This resolves something the Stage 4b design had recorded as unreachable. It cut exact counts on the
+grounds that *precision-on-demand needs a caller holding a question, and none exists*. **One did,
+under another name**: `Contact.attention`. A `watch` or `priority` mark is the crew deliberately
+saying this one matters — which is exactly the "useful" half of the standing rule that precision is
+spoken only when it is both *available* and *useful*. Attention is the usefulness signal; it was
+already in the facts payload.
+
+The honesty condition is unchanged, and this is the part to preserve if the rule is ever extended:
+an exact number is spoken **only when the belief itself is exact** (`lo == hi`). A watched contact
+whose interval is 4-5 still says *"a handful of"*. So **attention buys disclosure of precision
+already held, never manufactured precision** — which keeps the no-omniscience invariant intact
+while making Petrovich more useful about the things the crew asked him to watch.
+
+One bound, from the same reasoning rather than a tuned constant: above twelve the hedge resumes
+even when attended and exact, because a crew member who says *"seventeen"* about vehicles he is
+looking at is claiming a count nobody makes by eye. Exactness in the model does not make a number
+sayable if no human would say it.
 
 ### Settled Decisions (user, 2026-09-18) — Stage 3b escalations
 

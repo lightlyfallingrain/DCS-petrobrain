@@ -9,6 +9,7 @@ enrichment-distance rounding helpers."""
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from dataclasses import dataclass
 
@@ -18,15 +19,24 @@ from belief import enrichment as enrichment_module
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
-from belief.events import CONTACT_ATTENTION_CHANGED, Event
+from belief.events import (
+    CONTACT_ATTENTION_CHANGED,
+    CONTACT_CLASSIFICATION_CHANGED,
+    Event,
+)
 from belief.speech import (
     UrgentCall,
+    _cardinality_phrase,
+    _contact_report_text,
     _format_range_km,
+    _plural_unit_type_display,
     _round_enrichment_fragment,
     render_contact_report,
     render_readback,
+    render_watch_nearest_readback,
     route_event,
 )
+from belief.tools import describe_contact
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -86,6 +96,7 @@ def _observation(
     t_sim: float,
     classification_raw: str = "BMP-2",
     classification_level: int = 2,
+    count_bucket: str | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -102,6 +113,7 @@ def _observation(
         ),
         provenance="test_fixture",
         classification_level=classification_level,
+        count_bucket=count_bucket,
     )
 
 
@@ -160,13 +172,34 @@ def test_render_contact_report_maps_default_op_class_to_display_word() -> None:
     """`OP_GROUPSOMETHING` (`perception.object_model.DEFAULT_OP_CLASS`, ED's
     own "unclassified ground unit" fallback bucket) is a real, common
     classification value, not a rare edge case -- it must map to a display
-    word like every other `OP_*` bucket, not leak the internal enum name
-    verbatim (live-acceptance regression, 2026-09-11)."""
+    word, not leak the internal enum name verbatim (live-acceptance
+    regression, 2026-09-11).
+
+    **Fixture changed at Stage 4b of `plans/group-contact-model/plan.md`**
+    (level 2/"class" -> level 1/"presence", `"group."` -> `"ground."`): the
+    original fixture forced `classification_level=2`, constructing a
+    class-level classification holding the raw value `"OP_GROUPSOMETHING"`
+    directly -- a state no real code path produces (`classification.
+    _op_class_of` explicitly excludes `DEFAULT_OP_CLASS` from ever being
+    returned as a class-level value, per Stage 4b's design Sec 4), only a
+    hand-built fixture like this one could construct it. `_OP_CLASS_
+    DISPLAY["OP_GROUPSOMETHING"]` was therefore dead code, removed at Stage
+    4b -- disambiguation is now handled structurally: `_unit_type_display`'s
+    `level == "presence"` branch already returns `"ground"` regardless of
+    the raw value, which is the level `OP_GROUPSOMETHING`/`DEFAULT_OP_CLASS`
+    actually occurs at in real classification (`classification.
+    PRESENCE_CLASS` is the same string). This fixture now uses that
+    realistic level instead of an unreachable one, preserving the test's
+    original intent (a real, common value maps to a sensible word, not
+    leaked verbatim) against the level where it actually applies."""
     store = ContactStore()
     store.ingest(
         [
             _observation(
-                obs_id="OBS_1", t_sim=0.0, classification_raw="OP_GROUPSOMETHING"
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_GROUPSOMETHING",
+                classification_level=1,
             )
         ],
         now_sim=0.0,
@@ -175,7 +208,7 @@ def test_render_contact_report_maps_default_op_class_to_display_word() -> None:
     contact_id = store.contacts[0].id
     speech = render_contact_report(store, contact_id, now_sim=0.0)
     assert speech is not None
-    assert speech.text == "group."
+    assert speech.text == "ground."
 
 
 def test_route_event_urgent_call_bypasses_the_gate() -> None:
@@ -391,3 +424,249 @@ def test_route_event_returns_none_for_a_vanished_contact() -> None:
         certainty="observed",
     )
     assert route_event(store, ghost_event, now_sim=0.0) is None
+
+
+# --- Stage 4b: the count clause (`plans/group-contact-model/plan.md`) -------
+
+
+def test_cardinality_phrase_singular_is_no_clause() -> None:
+    assert _cardinality_phrase(1, 1) is None
+
+
+def test_cardinality_phrase_two_or_three_is_a_couple() -> None:
+    """User direction, 2026-09-19. Carries its own `"of"`, like
+    `"a handful of"` and for the same reason."""
+    assert _cardinality_phrase(2, 2) == "a couple of"
+    assert _cardinality_phrase(3, 3) == "a couple of"
+    assert _cardinality_phrase(2, 3) == "a couple of"
+
+
+def test_cardinality_phrase_default_is_several() -> None:
+    """`"several"` is the fallback for any plural interval no named phrase
+    claims -- never wrong about a plural count, which is why it is the
+    default rather than an error case."""
+    assert _cardinality_phrase(6, 6) == "several"
+    assert _cardinality_phrase(8, 10) == "several"
+    assert _cardinality_phrase(2, 5) == "several"
+
+
+def test_attention_earns_an_exact_count_when_the_interval_is_exact() -> None:
+    """Attention is the "useful" half of the user's precision rule: the crew
+    deliberately marked this contact, so the question the number answers
+    exists. Honesty is unchanged -- the belief must already be exact."""
+    assert _cardinality_phrase(3, 3, attended=True) == "three"
+    assert _cardinality_phrase(8, 8, attended=True) == "eight"
+
+
+def test_attention_does_not_manufacture_precision() -> None:
+    """An inexact interval keeps its hedge however closely it is watched --
+    attention buys disclosure of precision already held, never invention of
+    precision that is not."""
+    assert _cardinality_phrase(4, 5, attended=True) == "a handful of"
+    assert _cardinality_phrase(8, 10, attended=True) == "several"
+
+
+def test_attention_falls_back_to_the_hedge_beyond_the_spoken_range() -> None:
+    """A crew member does not say "seventeen" about vehicles he is looking
+    at -- nobody counts that precisely by eye, so the hedge resumes."""
+    assert _cardinality_phrase(16, 16, attended=True) == "many"
+    assert _cardinality_phrase(13, 13, attended=True) == "several"
+
+
+def test_attention_never_adds_a_clause_to_a_singular_contact() -> None:
+    """The regression guard holds regardless of attention."""
+    assert _cardinality_phrase(1, 1, attended=True) is None
+
+
+def test_cardinality_phrase_op_to5units_is_a_handful() -> None:
+    """Carries its own `"of"`. English grammar here is per-phrase, not
+    global: `"several trucks"` and `"many trucks"` are correct with a bare
+    noun, `"a handful trucks"` is not. Keeping the connector in the phrase
+    lets `_contact_report_text` stay a plain phrase-plus-noun join instead
+    of growing a second grammar rule beside the first."""
+    assert _cardinality_phrase(4, 5) == "a handful of"
+
+
+def test_cardinality_phrase_lo_16_or_more_is_many() -> None:
+    assert _cardinality_phrase(16, math.inf) == "many"
+
+
+def test_cardinality_phrase_fold_derived_non_named_interval_falls_back_to_several() -> (
+    None
+):
+    """An intersection like `(4, 7)` matches neither `OP_TO5UNITS (4, 5)` nor
+    any other named bucket exactly -- the safe default applies."""
+    assert _cardinality_phrase(4, 7) == "several"
+
+
+def test_plural_unit_type_display_presence_level_is_contacts() -> None:
+    assert _plural_unit_type_display("OP_GROUPSOMETHING", "presence") == "contacts"
+
+
+def test_plural_unit_type_display_class_level_in_table() -> None:
+    assert _plural_unit_type_display("OP_TRUCK", "class") == "trucks"
+
+
+def test_plural_unit_type_display_class_level_not_in_table_falls_back_to_raw_value() -> (
+    None
+):
+    assert _plural_unit_type_display("BMP-2", "class") == "BMP-2"
+
+
+def test_plural_unit_type_display_type_level_is_unpluralized_raw_value() -> None:
+    assert _plural_unit_type_display("T-72", "type") == "T-72"
+
+
+def test_contact_report_text_with_no_cardinality_fact_matches_singular_text() -> None:
+    """The second half of `_contact_report_text`'s regression guard: an
+    absent `facts["cardinality"]` (the lattice root `UNKNOWN`, per
+    `_cardinality_facts`) produces the exact same text as a present fact
+    holding the exactly-one interval -- both routes fall through to the old
+    singular `_unit_type_display` call."""
+    facts_without_cardinality: dict[str, object] = {
+        "classification": {"value": "BMP-2", "level": "type"}
+    }
+    facts_with_unit_cardinality: dict[str, object] = {
+        "classification": {"value": "BMP-2", "level": "type"},
+        "cardinality": {"lo": 1, "hi": 1, "confidence": 1.0},
+    }
+    assert _contact_report_text(facts_without_cardinality) == "BMP-2."
+    assert _contact_report_text(facts_without_cardinality) == _contact_report_text(
+        facts_with_unit_cardinality
+    )
+
+
+def test_route_event_contact_detected_speaks_plural_cardinality_clause() -> None:
+    """Confirms the clause reaches `route_event`'s lifecycle path, not just
+    `render_contact_report` directly -- `CONTACT_DETECTED`/`CONTACT_
+    REACQUIRED` gain it for free, since both call `_contact_report_text`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                count_bucket="OP_TO5UNITS",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    detected = next(e for e in store.events if e.kind == "CONTACT_DETECTED")
+    speech = route_event(store, detected, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "a handful of trucks."
+
+
+def test_render_watch_nearest_readback_speaks_plural_cardinality_clause() -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                count_bucket="OP_TO5UNITS",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    result = describe_contact(store, contact_id, now_sim=0.0)
+    assert result is not None
+    speech = render_watch_nearest_readback(result["facts"])
+    assert speech.text == "Watching a handful of trucks."
+
+
+def _store_with_a_classification_change_and_plural_cardinality() -> ContactStore:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                count_bucket="OP_TO5UNITS",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="T-72",
+                classification_level=3,
+            )
+        ],
+        now_sim=1.0,
+    )
+    store.tick(now_sim=1.0)
+    return store
+
+
+def test_classification_changed_text_omits_count_clause_even_with_plural_cardinality() -> (
+    None
+):
+    """The negative case for the "does not gain the clause" claim:
+    `CONTACT_CLASSIFICATION_CHANGED` builds its own line directly from
+    `_unit_type_display`, not through `_contact_report_text`, so a plural
+    cardinality on the contact has no effect on its rendered text."""
+    store = _store_with_a_classification_change_and_plural_cardinality()
+    changed = store.events[-1]
+    assert changed.kind == CONTACT_CLASSIFICATION_CHANGED
+
+    speech = route_event(store, changed, now_sim=1.0)
+
+    assert speech is not None
+    assert speech.text == "unit is T-72."
+
+
+def test_route_event_cardinality_changed_has_no_template_and_is_not_acknowledged() -> (
+    None
+):
+    """`CONTACT_CARDINALITY_CHANGED` (`plans/group-contact-model/plan.md`
+    Stage 4b) joins `CONTACT_LOST`/`CONTACT_ATTENTION_CHANGED`'s no-template
+    pattern -- settled decision 4: a bare cardinality move is not worth
+    interrupting for at this hedged register."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                count_bucket="OP_TO5UNITS",
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                count_bucket="OP_MORETHAN15UNITS",
+            )
+        ],
+        now_sim=1.0,
+    )
+    store.tick(now_sim=1.0)
+    changed = next(e for e in store.events if e.kind == "CONTACT_CARDINALITY_CHANGED")
+    assert changed in store.unacknowledged_events
+
+    speech = route_event(store, changed, now_sim=1.0)
+
+    assert speech is None
+    assert changed in store.unacknowledged_events
