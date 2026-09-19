@@ -558,21 +558,5 @@ both, and label which is which by pressing each binding in turn.
 
 ### Decisions Requiring User Input
 
-1. **Capture process placement.** This plan puts microphone capture in a **second `srs-adapter`
-   process on the Windows box** (boundary-correct: `division-or-responsibility.md` says raw audio
-   never leaves the adapter, and the aircraft layer's contract is DCS I/O). The cheaper alternative
-   is hosting capture in the existing **collector**, which already runs on Windows, already serves
-   HTTP, and already plays audio — saving a whole process at the cost of putting a microphone and
-   raw-audio transit inside a module whose contract excludes both. Recommendation: the separate
-   process. Overrule if the fourth process is the bigger irritation in practice.
-2. **The Stage 1 pass bar.** What top-1 token accuracy on your own voice is good enough to keep
-   going? This is a judgment only you can make, and it should be stated *before* the numbers come
-   in rather than rationalised after. (My suggestion: ≥95% top-1 with clean separation between
-   correct and incorrect confidences, or the ergonomics won't be worth it.)
-3. **Dedicated PTT control vs. sharing the existing trigger.** The investigator surfaced a
-   cheaper option than the plan assumed: arg 738's *half-press* selects intercom specifically,
-   independent of the SPU-8 selector, so **the trigger you already have could be the Petrovich PTT
-   with no new joystick binding** — and it does not reopen the settled "stay on mission frequency"
-   constraint. Against that, it overloads a control that also transmits on SRS, so every time you
-   talk to a human you would also be opening Petrovich's mic. Binding a spare control keeps the two
-   separate at the cost of one more binding. Your call.
+All three are answered — see "Settled Decisions (user, 2026-09-19)" above. Kept as a heading so the
+plan's shape stays readable against the sign-off commit that resolved them; nothing here is open.
