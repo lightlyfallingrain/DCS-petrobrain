@@ -576,6 +576,28 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   callout — the one case Stage 4b must leave byte-identical as its regression guard. Bundling them
   would remove that guard exactly when the code is changing most.
 
+  **Settled (user, 2026-09-19): precision degrades with distance.** Chosen from three rendered
+  options — a uniform "about N" hedge, spoken bucket edges ("four to five kilometres"), and this.
+  Close in he states the number plainly; further out the phrasing loosens, so **the vagueness itself
+  carries the information** rather than the sentence having to state an interval. Sketch, to be
+  refined against real renderings:
+
+  | True range | Spoken |
+  |---|---|
+  | 400 m | "very close" |
+  | 1.8 km | "two kilometres" |
+  | 4.2 km | "about four kilometres" |
+  | 8.9 km | "eight, nine kilometres" |
+
+  This is the same principle chosen twice already — hedge by default, precision where earned — now
+  applied to the quantity a human eye judges worst. The bucket widths in
+  `naked_eye_source._RANGE_BUCKETS_M` are the input; they already widen with distance, so the tiers
+  should be derived from them rather than picked independently.
+
+  **Still open, not decided:** whether a watched or priority contact gets a tighter range the way it
+  gets an exact count (Stage 4b's attention-earns-precision rule). The same logic would say yes, but
+  the user has not ruled and it should not be assumed.
+
   **Should reuse Stage 4b's hedging register rather than invent a parallel one.** The same voice that
   turns six into "several" should turn 2000 m into "about two kilometres" and 9 km into "eight, nine
   kilometres" — one hedging vocabulary across two quantities. Natural to do alongside the contact
