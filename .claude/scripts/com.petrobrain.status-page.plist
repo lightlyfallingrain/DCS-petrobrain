@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: refresh the derived status page at 05:00 local, daily.
+
+  Template. Install with:
+
+      cp .claude/scripts/com.petrobrain.status-page.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.petrobrain.status-page.plist
+
+  Remove with:
+
+      launchctl unload ~/Library/LaunchAgents/com.petrobrain.status-page.plist
+      rm ~/Library/LaunchAgents/com.petrobrain.status-page.plist
+
+  Run it once immediately, without waiting for 05:00:
+
+      launchctl start com.petrobrain.status-page
+
+  Why launchd rather than the cloud-routine mechanism: StartCalendarInterval is
+  local wall-clock, so 05:00 stays 05:00 across DST with no intervention, and a
+  job missed because the Mac was asleep fires on wake. A cloud cron is UTC-only
+  and would have drifted an hour at the October changeover. It also runs as the
+  user, which is what lets it republish the artifact to the existing URL.
+
+  The script itself does nothing unless there is something to do -- see its own
+  header for the three guards. Output goes to
+  ~/Library/Logs/petrobrain-status-page.log.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.petrobrain.status-page</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/sg/Code/DCS-petrobrain/.claude/scripts/status-page-refresh.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Do not fire on login/load; 05:00 is the only intended trigger. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/sg/Library/Logs/petrobrain-status-page.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sg/Library/Logs/petrobrain-status-page.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/sg/Code/DCS-petrobrain</string>
+</dict>
+</plist>
