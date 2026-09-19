@@ -13,21 +13,39 @@ module adds, see `MatchResult`'s docstring) so body can decide what to do
 about it without ever seeing a phrase table.
 
 **The verb anchor fires first, but it is a cheap early-out, not the
-primary defence.** An earlier version of this docstring claimed it was
-the single most important line of defence; live testing against this
-branch found that false. If the first normalised word does not resemble a
-known command verb, `match_transcript` stops immediately --
-`verb_anchored=False`, no phrase scoring happens at all -- which is a real
-saving, but `VERB_ANCHOR_WORDS` is unavoidably full of ordinary English
-words this vocabulary's own verbs happen to be (`look`, `watch`, `report`,
-`scan`, `say`, `stop`, `cancel`, `full`), so an anchored verb is common,
-not rare: `"look at that"`, `"watch out"`, `"report says otherwise"` all
-anchor. **The phrase-sequence score below (`_phrase_match_ratio`) is the
-real defence** -- it is what actually rejects those three, because none
-of them resembles a *word sequence* this vocabulary knows, even though
-their first word does. See that function's docstring for why scoring word
+primary defence -- and it is deliberately permissive because of that.**
+An earlier version of this docstring claimed it was the single most
+important line of defence; live testing against this branch found that
+false. If the first normalised word does not resemble a known command
+verb, `match_transcript` stops immediately -- `verb_anchored=False`, no
+phrase scoring happens at all -- which is a real saving, but
+`VERB_ANCHOR_WORDS` is unavoidably full of ordinary English words this
+vocabulary's own verbs happen to be (`look`, `watch`, `report`, `scan`,
+`say`, `stop`, `cancel`, `full`), so an anchored verb is common, not rare:
+`"look at that"`, `"watch out"`, `"report says otherwise"` all anchor.
+**The phrase-sequence score below (`_phrase_match_ratio`) is the real
+defence** -- it is what actually rejects those three, because none of
+them resembles a *word sequence* this vocabulary knows, even though their
+first word does. See that function's docstring for why scoring word
 sequences rather than character streams is what makes ordinary sentences
 fail to score well, without any hand-tuned floor.
+
+**The two floors (`VERB_FLOOR`, `MATCH_FLOOR`) guard mistakes of very
+different cost, and are set accordingly -- read them as a pair, not two
+independent knobs.** A false anchor (a word that should not have passed)
+costs one extra phrase-scoring pass that almost always rejects it anyway.
+A false *rejection* at the anchor is worse and irreversible: it discards
+the transcript before phrase scoring -- the actual defence -- ever runs,
+so a command the player really spoke silently falls through as free
+speech instead of executing. That asymmetry is why `VERB_FLOOR` (0.5) sits
+below `MATCH_FLOOR` (0.6) rather than reusing it: `"skin bearing 315"`, a
+real transcript from the user's own recorded corpus (a mishearing of
+"scan bearing three one five"), fails to anchor at all at 0.6
+(`ratio("skin", "scan")` = 0.5) -- a spoken command discarded, not merely
+a noisier "say again". See `VERB_FLOOR`'s own comment for the full
+reasoning and `test_command_matcher.py` for the regression tests pinning
+both directions (real mishearings admitted, the reviewer's false
+positives still rejected end to end).
 
 **`VERB_ANCHOR_WORDS` is derived from `vocabulary.PHRASES`, not
 hand-copied.** Decision 4 REVISED's own prose gives a verb set --
@@ -106,14 +124,33 @@ MATCH_FLOOR: float = 0.6
 #: the false-positive/real-mishearing fixture set (module docstring).
 _WORD_REPAIR_FLOOR: float = 0.5
 
-#: The verb-anchor ratio floor (Decision 4 Layer 2 step 2). Stage 1's bench
-#: never separately measured a distribution of verb-only match ratios --
-#: only whole-phrase ratios, which is what `MATCH_FLOOR` above is set
-#: from. This reuses that same figure because it is the one measured
-#: cutoff this vocabulary has, not because a verb-specific number was
-#: derived; revisit once live use (Stage 6) produces real verb-only miss
-#: data.
-VERB_FLOOR: float = MATCH_FLOOR
+#: The verb-anchor ratio floor (Decision 4 Layer 2 step 2). **Deliberately
+#: lower than `MATCH_FLOOR`, and that gap is the point, not an oversight.**
+#: The two floors guard different mistakes, and they are not the same size
+#: of mistake: a false anchor (a word that should not have passed) costs
+#: exactly one extra phrase-scoring pass that `_phrase_match_ratio` will
+#: almost certainly still reject -- `"the"` anchors against `"hey"` at
+#: 0.667 and gets scored anyway, but `"the tanks are on the ridge"` scores
+#: 0.083 against its best phrase-table candidate, nowhere near
+#: `MATCH_FLOOR`. A false *rejection* here is worse and irreversible: it
+#: silently discards a transcript before phrase scoring ever runs, so a
+#: command the player actually spoke falls through as free speech instead
+#: of executing, with no downstream stage able to recover it. Given that
+#: asymmetry, the anchor should err toward letting things through and let
+#: the phrase score -- the real defence, see module docstring -- do the
+#: rejecting.
+#:
+#: Set to 0.5 from real corpus evidence, not Stage 1's bench cutoff:
+#: `"skin bearing 315"` is an actual whisper transcript from the user's
+#: own recorded corpus (a mishearing of "scan bearing three one five"),
+#: and at the old floor (`MATCH_FLOOR`, 0.6) `ratio("skin", "scan")` =
+#: 0.5 fails to anchor at all -- a real spoken command silently discarded
+#: to free speech, which is exactly the failure class Stage 1 measured
+#: its way toward avoiding. 0.5 admits it (and `"walk ahead"`, a mishearing
+#: of "look ahead"/"scan ahead", `ratio("walk","look")` = 0.5) while still
+#: rejecting the reviewer's false-positive fixtures end to end -- see
+#: `test_command_matcher.py`'s regression tests for both directions.
+VERB_FLOOR: float = 0.5
 
 #: Minimum ratio gap between the best and second-best *different-token*
 #: candidates (Decision 4 Layer 2 step 4, "the separation check") before
