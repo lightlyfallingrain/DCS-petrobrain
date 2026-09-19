@@ -648,6 +648,45 @@ every combination. Adding a target then costs a handful of clips rather than `ve
 This is already how the numeric bearings are sampled: twelve spoken bearings selected so all ten
 digits are uttered, instead of recording seventy-two.
 
+### Stage 1 result: GATE CLEARED (2026-09-19)
+
+**99.2% top-1 on 252 clips of the user's own voice**, `ggml-small.en` with `--prompt`, two errors,
+both safe misses. The user's call: *"this clears the gate."*
+
+The arc matters as much as the number, because only one step of it was about the speaker:
+
+| | accuracy | what changed |
+|---|---|---|
+| 55.6% | first run | corpus truncated by a recorder bug — **not a voice result** |
+| 90.5% | recorder fixed | buffer, tail capture, pre-roll |
+| 98.4% | `--prompt` | soft vocabulary biasing |
+| 99.2% | repetition collapsing | recovering whisper's own loop artefacts |
+
+Accent was never the limiting factor. Every gain came from tooling.
+
+**Model: `small.en`** (`research/2026-09-19-whisper-model-sweep.md`). Chosen on unsafe-error count
+rather than accuracy: it is the lightest of the four English-only models with **zero wrong-command
+errors**, where `tiny.en` produces seven and `base.en` two. A no-match costs a "say again" the
+player notices; a wrong-but-valid command executes confidently with nothing to flag it, and on a
+two-tier design the worst case routes a whole transmission to the wrong interpreter. Latency does
+not argue against it — 0.50 s median, 1.46 s p90, inside what the Stage 6 card already judged
+crew-like.
+
+**Decoding: `--prompt`, never `--grammar`.** A grammar cannot decline, so every failure becomes a
+confident wrong command: measured here, "watch nearest air defence" read as "what do you see" at
+0.82 confidence, seven times. `--with-grammar` keeps the row available for re-measurement.
+
+**Confidence bands are viable after all, but only prompted.** On the plain row correct and
+incorrect were 0.68 against 0.63 with overlapping ranges — unusable. Prompted, correct runs 0.82
+(min 0.60) and both remaining failures sit at 0.58 and 0.66, so a reject threshold near 0.60 is
+defensible. This is what Decision 4 needed and what Stage 2's "say again" trigger should use,
+alongside match distance.
+
+**Two weak words to watch in the sortie**, both patterned rather than random: `disregard` (the
+redundant third phrasing of `cancel_nevermind`, heard as "This is the card") and `scan` heard as
+"this kind of" — the last survivor of a pattern that dominated earlier runs, and the most-used verb
+in the vocabulary.
+
 ### Settled Decisions (user, 2026-09-19)
 
 **1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a
