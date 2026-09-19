@@ -803,19 +803,33 @@ again". A player saying "okay" is not asking for anything and may not want to be
 it. The behaviour follows from the loose anchor being right elsewhere, so it is recorded rather than
 patched.
 
-**Two things this does NOT solve, both surfaced by the user's own example** ("Look to the north,
-watch the nearest contact"):
+**Two things surfaced by the user's own example ("Look to the north, watch the nearest contact"),
+both settled the same day — and both settled as NO.**
 
-1. **`look <compass>` is missing from the vocabulary.** Relative directions carry both verbs
-   ("scan ahead" / "look ahead") but compass directions only carry "scan north". So "look north"
-   scores 0.500 and fails for a reason filler stripping cannot fix. Worth knowing that phrasings and
-   recordings are independent — the table drives matching, the corpus only measures — so this can be
-   added today and works immediately, with the honest caveat that it is unmeasured until a future
-   recording session.
-2. **Two commands in one transmission needs segmentation**, which is a real feature rather than a
-   tweak: split on comma or conjunction, match each fragment, act in order. It also interacts with
-   the `nevermind` rule, since a retraction at the end would have to kill every fragment before it.
-   Not built, not planned here.
+**1. `look <compass>` is not being added.** Relative directions carry both verbs ("scan ahead" /
+"look ahead") while compass directions carry only "scan north", so "look north" scores 0.500 and
+fails. That asymmetry looks like an oversight and is not being corrected: the user says "scan
+north", and a phrasing nobody utters costs clips to record, gives a mishearing one more way to
+resolve to something legal, and adds no recognition coverage — the same reasoning that removed the
+filler phrasings from the vocabulary in the first place. Left deliberately asymmetric.
+
+**2. Multiple commands in one transmission are out of scope.** *"It is the player's responsibility
+to separate them by PTT usage."*
+
+This is worth more than the segmentation feature it declines, because **it makes one mechanism do
+both jobs.** Push-to-talk already delimits transmissions, which is what removed endpointing from
+the capture problem. It now also delimits *commands*, which removes parsing ambiguity from the
+matcher — no splitting on commas or conjunctions, no deciding whether "and" joins two orders or
+belongs inside one.
+
+It also keeps `nevermind` unambiguous. A retraction at the end of a multi-command transmission
+would have raised a question with no good answer — does it kill the last command or all of them? —
+and every answer would have been a guess about intent. One transmission, one command, one thing to
+retract.
+
+The cost is a habit the player has to hold: two orders means two presses. That is a real
+constraint, but it matches how radio discipline works anyway, and it is enforced by the physical
+control rather than by remembering a rule.
 
 ### Settled Decisions (user, 2026-09-19)
 
