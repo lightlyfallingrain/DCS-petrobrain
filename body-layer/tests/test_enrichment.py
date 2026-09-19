@@ -789,16 +789,22 @@ def test_proximity_text_at_zero_distance_says_on() -> None:
 
 
 def test_proximity_text_in_the_next_to_band_says_next_to() -> None:
+    # 10.0 exactly is the band boundary and belongs to "next to", since the
+    # user's rule is strictly "<10m" for "on".
     assert _proximity_text("a road", 10.0) == "next to a road"
     assert _proximity_text("a road", 50.0) == "next to a road"
     assert _proximity_text("a road", 99.0) == "next to a road"
 
 
-def test_proximity_text_below_the_next_to_band_falls_back_to_near() -> None:
-    """Between "on" and "next to" (~0.5-10 m) is not one of the two named
-    bands, so it keeps the pre-existing "near X (Nm)" shape -- deliberately,
-    see `_proximity_text`'s docstring."""
-    assert _proximity_text("a road", 5.0) == "near a road (5m)"
+def test_proximity_text_single_metres_is_on_not_near() -> None:
+    """User direction 2026-09-19: "<10m from road -> on road". An earlier
+    pass read the roadmap's "0 m" literally and left a 0.5-10 m gap that
+    rendered as "near a road (~4 metres)" -- absurd for something a crew
+    member would simply call *on* the road, and below what any eye resolves.
+    The three bands now tile with no gap."""
+    assert _proximity_text("a road", 0.0) == "on a road"
+    assert _proximity_text("a road", 4.0) == "on a road"
+    assert _proximity_text("a road", 9.9) == "on a road"
 
 
 def test_proximity_text_at_or_above_the_next_to_band_falls_back_to_near() -> None:

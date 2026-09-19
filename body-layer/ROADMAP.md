@@ -560,43 +560,6 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
   flying anyway rather than run standalone. **Do not start without the user's instruction.**
 
-- [ ] **Range uncertainty is a perception limit, not a wording choice.** Raised 2026-09-19, and
-  **reframed the same day by the user** — the reframing is the important part.
-
-  **The distinction, in the user's words:** *"whereas unit count is detail that can be worded in
-  more or less detail, distance ambiguity is perception based ambiguity."* Count vagueness is
-  presentation: the model may hold an exact twelve and still say "several", because that is how a
-  crew member talks. **Range vagueness is not presentation — he genuinely does not know.** *"The
-  human eye cannot tell exact distances at kilometre or even hundreds of metres scale. All things
-  that fire projectiles over great distances have had different range finding solutions"* precisely
-  because of that.
-
-  **So this does not belong in `speech.py`.** Today range reaches belief as a ground-truth figure
-  quantised into `_RANGE_BUCKETS_M`, and only the *wording* would hedge it. That means the belief
-  itself holds a number far better than an eye could produce — so a brain layer asking "how far?"
-  gets an answer no crew member could give. **That is the no-omniscience invariant leaking**, and
-  adverbs in the callout would hide it rather than fix it. The uncertainty has to live in the
-  percept, and speech should render whatever the belief actually holds.
-
-  **It is optic-dependent, which is the other half.** The 9K113 sight carries a **stadiametric
-  range-judgement aide, useful out to about 5 km** (user, 2026-09-19 — verify the exact mechanism
-  and limit before building). So range certainty should *narrow* when Petrovich uses the sight and
-  stay wide when he does not. That is the same shape as the angular-acuity finding: a genuine
-  perception capability that differs by optic, which was about to be modelled as a presentation
-  concern. It also connects directly to the deferred **"Attention direction and detection cones"**
-  item, which already owns the per-optic split — this may belong there rather than standing alone.
-
-  **What the earlier decision still settles**, now as a rendering rule rather than the whole item:
-  precision degrades with distance (option C of three rendered candidates, user 2026-09-19) — "very
-  close" under 0.5 km, a plain number close in, loosening to "about four kilometres" and "eight,
-  nine kilometres" further out. That is how the held uncertainty gets *spoken*; it is no longer a
-  substitute for holding it.
-
-  **Still open:** whether a watched contact gets a tighter range the way Stage 4b gives it an exact
-  count. Under the reframing the answer is probably no by default — attention does not improve the
-  eye — unless attention implies he is *looking through the sight*, which would improve it for a
-  real reason rather than as a reward.
-
 - [ ] **Contact report fine tuning — a running list, appended to as real sorties surface things.**
   Opened 2026-09-18 from the first flights with TTS live. These are about what Petrovich *says* and
   how it sounds, not about what he believes; most touch `belief/speech.py` and
@@ -617,8 +580,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     number stops mattering and the fact of proximity starts to.
 
   **Cheap — thresholds, in `enrichment.py`. ✅ Shipped 2026-09-19 (`9035317`).**
-  - **0 m from a feature → "on the road"** (and the same for any feature reference, not just
-    roads).
+  - **Within 10 m of a feature → "on the road"** (and the same for any feature reference, not just
+    roads). *User correction 2026-09-19: originally written as "0 m", which a first pass read
+    literally with a float-noise epsilon, leaving a 0.5-10 m gap that rendered as "near a road
+    (~4 metres)". Within ten metres you are on it, and no eye resolves the difference.*
   - **Between ~10 m and ~100 m → "next to the road"**, with the side named. *Shipped without the
     side, which needs the bearing below. Note a deliberate gap: 0.5-10 m still renders as
     "near X (Nm)", disclosed in the code rather than silently rounded into one of the neighbours.*
@@ -634,8 +599,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     "which side" falls out; without the bearing, neither does. Sequence this before the two wording
     items that depend on it rather than half-building them.
 
-  **Needs verification first:**
-  - **Airborne contacts should be called "aircraft" or "helicopter"**, refining to
+  **Deferred (user, 2026-09-19):**
+  - [>] **Airborne contacts should be called "aircraft" or "helicopter"**, refining to
     fighter/bomber/attack/transport. Check what actually exists before scoping: whether the
     perception channel can tell a contact is airborne at all (candidate altitude versus terrain
     elevation is available to the naked-eye channel, but nothing currently reads it that way), and
@@ -677,6 +642,23 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 - [ ] **BL-2.5 overlay has no dismiss affordance.** Moot while the titled window (with its close
   button) is in effect. Would matter again if the borderless restyle is ever revisited.
+
+- **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
+  started. **Now also owns range uncertainty** (moved here by the user, 2026-09-19), because that
+  turned out to be the same kind of problem: a genuine perception limit that differs by optic, not a
+  presentation choice. Summary of what moved, full reasoning below:
+
+  > Count vagueness is presentation — the model may hold an exact twelve and still say "several".
+  > **Range vagueness is not**: the eye cannot judge distance at these scales, which is why
+  > everything that shoots far has carried a rangefinding solution. Today range reaches belief as a
+  > ground-truth figure, so a brain layer asking "how far?" would get an answer no crew member could
+  > give — the no-omniscience invariant leaking, which adverbs in the callout would have hidden
+  > rather than fixed. The 9K113's stadiametric aide (useful to ~5 km, verify before building) means
+  > certainty should *narrow* when he uses the sight. The settled rendering rule, once the belief
+  > actually holds uncertainty: precision degrades with distance — "very close", a plain figure
+  > close in, "about four kilometres", "eight, nine kilometres". Open: whether attention tightens
+  > range — probably **no** by default, since attention does not improve the eye, unless it implies
+  > he is looking through the sight.
 
 - **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
   started. Today's channels implicitly assume Petrovich is looking everywhere at once within
