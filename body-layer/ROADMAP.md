@@ -694,6 +694,37 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   logic written between now and then leaves room for a conditions modifier instead of hard-coding a
   clear-day assumption, not as a call to build it.
 
+- **PREREQUISITE for the detection-cones milestone: research ED's own detection and identification
+  model.** Raised by the user 2026-09-19: *"ED native model should be researched in detail for
+  detection and identification logic. What is there that we have not thought of, what is there that
+  we are missing?"* Started as a desk pass from the Mac (forums, Hoggit, the existing
+  `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` listing); **the deep pass happens on the
+  Windows box**, where the installed DCS tree can actually be read rather than inferred.
+
+  **It gates the cones milestone rather than merely informing it**, which is the reason it is
+  written here instead of in the backlog. Two of the questions it answers would change that
+  milestone's design rather than its details:
+
+  - Whether ED separates *detected / visible / type known / **distance known*** as distinct states.
+    If it does, that is a near-exact analogue of our own PRESENCE → CLASS → TYPE lattice, and the
+    fourth flag speaks directly to the range-uncertainty work the cones milestone owns — ED may
+    already model the thing being deferred.
+  - Whether ED models sensor field of view, scan pattern or dwell. That is the cones milestone's
+    central mechanism, and the one part with no precedent anywhere in this codebase.
+
+  It is also the best available chance to find what we have **not thought of**, which is the half of
+  a gap analysis that cannot be produced by reading our own code. The standing suspicion is
+  **movement**: a moving vehicle is far more detectable than a static one, it is most of how ground
+  targets are really spotted, and `perception/visibility.py` has no term for it at all — a
+  stationary T-72 and one crossing open ground are currently equally visible at the same range.
+
+  **Not everything ED does is worth copying.** Our tier semantics are this project's own modelling
+  choice and are already documented as never verified against ED internals; the goal is a crew
+  simulation, not a reimplementation of ED's AI. The research should say plainly where adopting
+  ED's approach would be wrong, and where we have reinvented something ED already does better.
+  Nothing found may become a route to omniscience: a field that would let Petrovich know what a
+  crew member could not perceive is unusable however readable it is.
+
 - **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
   started. **Now also owns range uncertainty** (moved here by the user, 2026-09-19), because that
   turned out to be the same kind of problem: a genuine perception limit that differs by optic, not a
