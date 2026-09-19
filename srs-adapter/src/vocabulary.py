@@ -98,10 +98,63 @@ _CLOCK_WORDS: dict[int, str] = {
 #: Commands with no F10 equivalent -- the first vocabulary this project
 #: added for voice on its own terms rather than by transcribing a menu.
 VOICE_ONLY_TOKENS: tuple[str, ...] = (
-    ("report_all", "stop_talking", "say_again")
+    (
+        "report_all",
+        "stop_talking",
+        "say_again",
+        "scan_bearing_deg",
+        "report_bearing_deg",
+    )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
 )
+
+#: Numeric bearings are a **slot, not an enumeration** (user direction,
+#: 2026-09-19: *"'<verb> bearing <south/etc>' is something I'll never
+#: actually say. Just '<verb> south'. On the other hand '<verb> bearing
+#: 320' is entirely possible."*). The compass words keep their bare form
+#: and lose the "bearing" form entirely; degrees arrive as a parsed
+#: number instead.
+#:
+#: Spoken digit by digit, always three digits ("bearing three two zero",
+#: "bearing zero zero five"), which is standard readback form and removes
+#: the ambiguity between 50, 350 and 005 by construction.
+BEARING_RESOLUTION_DEG = 5
+
+#: Every legal bearing: 0, 5, 10 ... 355.
+LEGAL_BEARINGS_DEG: tuple[int, ...] = tuple(range(0, 360, BEARING_RESOLUTION_DEG))
+
+_DIGIT_NAMES: tuple[str, ...] = (
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+)
+
+#: Bearings sampled for the recording corpus. Not the legal set -- 72
+#: values times two verbs is not a thing anybody should record, and the
+#: matcher accepts all of them regardless. These are chosen so that
+#: **every digit 0-9 is spoken at least once**, which is what the bench
+#: actually needs to measure: numbers are the accent-fragile part, and
+#: what matters is per-digit reliability rather than per-bearing.
+_SAMPLED_SCAN_BEARINGS: tuple[int, ...] = (0, 45, 60, 90, 135, 180, 225, 270, 315)
+_SAMPLED_REPORT_BEARINGS: tuple[int, ...] = (5, 180, 355)
+
+
+def bearing_digits(degrees: int) -> str:
+    """ "three two zero" for 320 -- always three digit words."""
+    return " ".join(_DIGIT_NAMES[int(d)] for d in f"{degrees % 360:03d}")
+
+
+def bearing_phrase(verb: str, degrees: int) -> str:
+    return f"{verb} bearing {bearing_digits(degrees)}"
+
 
 #: Tokens that route or retract a transmission rather than commanding
 #: anything (user direction, 2026-09-19). They are listed here because the
@@ -143,14 +196,14 @@ PHRASES: dict[str, tuple[str, ...]] = {
     "scan_left": ("scan left", "look left", "scan to the left"),
     "scan_right": ("scan right", "look right", "scan to the right"),
     "scan_full": ("scan full", "full scan", "scan all around"),
-    "scan_bearing_n": ("scan north", "scan bearing north"),
-    "scan_bearing_ne": ("scan northeast", "scan bearing northeast"),
-    "scan_bearing_e": ("scan east", "scan bearing east"),
-    "scan_bearing_se": ("scan southeast", "scan bearing southeast"),
-    "scan_bearing_s": ("scan south", "scan bearing south"),
-    "scan_bearing_sw": ("scan southwest", "scan bearing southwest"),
-    "scan_bearing_w": ("scan west", "scan bearing west"),
-    "scan_bearing_nw": ("scan northwest", "scan bearing northwest"),
+    "scan_bearing_n": ("scan north",),
+    "scan_bearing_ne": ("scan northeast",),
+    "scan_bearing_e": ("scan east",),
+    "scan_bearing_se": ("scan southeast",),
+    "scan_bearing_s": ("scan south",),
+    "scan_bearing_sw": ("scan southwest",),
+    "scan_bearing_w": ("scan west",),
+    "scan_bearing_nw": ("scan northwest",),
     "watch_nearest": ("watch nearest", "watch the nearest"),
     "watch_nearest_air_defence": (
         "watch nearest air defence",
@@ -217,10 +270,7 @@ for _direction, _word in (
     ("w", "west"),
     ("nw", "northwest"),
 ):
-    PHRASES[f"report_bearing_{_direction}"] = (
-        f"report {_word}",
-        f"report bearing {_word}",
-    )
+    PHRASES[f"report_bearing_{_direction}"] = (f"report {_word}",)
 
 #: `report <clock>` -- one phrasing each, unlike every other token here.
 #: The discriminating content is the number word itself, which one carrier
@@ -228,6 +278,13 @@ for _direction, _word in (
 #: without adding evidence about the number. Numbers are the accent-fragile
 #: part of this vocabulary, so what matters is takes per number, not
 #: phrasings per number.
+PHRASES["scan_bearing_deg"] = tuple(
+    bearing_phrase("scan", d) for d in _SAMPLED_SCAN_BEARINGS
+)
+PHRASES["report_bearing_deg"] = tuple(
+    bearing_phrase("report", d) for d in _SAMPLED_REPORT_BEARINGS
+)
+
 for _position in FORWARD_CLOCK_POSITIONS:
     PHRASES[f"report_clock_{_position}"] = (
         f"report {_CLOCK_WORDS[_position]} o'clock",
@@ -372,3 +429,73 @@ def normalized_phrase_index() -> dict[str, str]:
                 )
             index[key] = token
     return index
+
+
+#: Number words a recognizer may return in place of digits, for the
+#: bearing parser. Wider than `_DIGIT_NAMES` because whisper writes some
+#: digits as words and others numerically in the same sentence.
+_WORD_DIGITS: dict[str, str] = {name: str(i) for i, name in enumerate(_DIGIT_NAMES)}
+
+
+class BearingParse:
+    """Outcome of reading a numeric bearing out of a transcript.
+
+    Three outcomes rather than two, and the third is the useful one.
+    `degrees` set means a legal bearing was read. `degrees is None` with
+    `heard` set means digits were found but they do not name a legal
+    bearing -- which is a *detected* recognition error, not a silent one.
+    Both `None` means no bearing was spoken at all.
+    """
+
+    __slots__ = ("degrees", "heard")
+
+    def __init__(self, degrees: int | None, heard: int | None) -> None:
+        self.degrees = degrees
+        self.heard = heard
+
+    def __repr__(self) -> str:
+        return f"BearingParse(degrees={self.degrees}, heard={self.heard})"
+
+
+def parse_bearing(text: str) -> BearingParse:
+    """Read a bearing from recognizer output after the word "bearing".
+
+    Accepts digits and number words interchangeably ("bearing 320",
+    "bearing three two zero", "bearing 3 2 0"), because recognizers mix
+    the two freely -- whisper returned "3" for a spoken "three" in one
+    clip and spelled it out in another.
+
+    **The 5 degree resolution is a checksum, and that is the point.**
+    Bearings are constrained to multiples of five, so roughly four out of
+    five possible mishearings land on a value that cannot be a real
+    bearing. Those are returned as `heard` without `degrees`, so the
+    caller can ask the player to say again rather than turning to a
+    number nobody said. A wrong heading flown confidently is a far worse
+    failure than one more readback, and this makes most of that class
+    detectable for free.
+
+    It cannot catch everything: a mishearing that lands on another
+    multiple of five ("three two zero" heard as "three three zero") is
+    indistinguishable from a correct reading here, and only the readback
+    protects against it.
+    """
+    normalized = normalize_for_match(text)
+    words = normalized.split()
+    if "bearing" not in words:
+        return BearingParse(None, None)
+
+    digits: list[str] = []
+    for word in words[words.index("bearing") + 1 :]:
+        if word in _WORD_DIGITS:
+            digits.append(_WORD_DIGITS[word])
+        elif word.isdigit():
+            digits.extend(word)
+        else:
+            break
+    if not digits:
+        return BearingParse(None, None)
+
+    value = int("".join(digits))
+    if value > 359 or value % BEARING_RESOLUTION_DEG != 0:
+        return BearingParse(None, value)
+    return BearingParse(value, value)
