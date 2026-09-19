@@ -90,6 +90,7 @@ import difflib
 import statistics
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -135,6 +136,11 @@ class ClipResult:
     #: confidence_is_placeholder`) -- surfaced in `print_report` so a
     #: whisper.cpp JSON-schema mismatch is visible in the report instead
     #: of silently inflating the confidence columns (review finding).
+    #: Wall-clock seconds for this clip's recognition. Reported because
+    #: "how light can we go" is a question about latency as much as
+    #: accuracy: a model is only worth dropping to if it buys response
+    #: time the player would notice.
+    seconds: float = 0.0
     confidence_is_placeholder: bool = False
     #: `True` when the normalized text was a known phrasing verbatim;
     #: `False` when it only matched after fuzzy repair. See
@@ -229,6 +235,7 @@ def run_engine(
         for file in files:
             wav = file.read_bytes()
             confidence_is_placeholder = False
+            started = time.monotonic()
             try:
                 transcript = engine.transcribe(wav)
                 raw_text = transcript.text
@@ -242,6 +249,7 @@ def run_engine(
                 raw_text = ""
                 confidence = 0.0
             matched, exact = _match_token(raw_text)
+            elapsed = time.monotonic() - started
             results.append(
                 ClipResult(
                     expected_token=expected_token,
@@ -252,6 +260,7 @@ def run_engine(
                     correct=(matched == expected_token),
                     confidence_is_placeholder=confidence_is_placeholder,
                     exact_match=exact,
+                    seconds=elapsed,
                 )
             )
     return results
@@ -271,6 +280,14 @@ def print_report(engine_label: str, results: list[ClipResult]) -> None:
         f"  of which heard verbatim: {n_exact}/{n_correct}"
         f"  (repaired by fuzzy match: {n_correct - n_exact})"
     )
+
+    times = sorted(r.seconds for r in results)
+    if times and times[-1] > 0.0:
+        p90 = times[min(len(times) - 1, int(0.9 * len(times)))]
+        print(
+            f"Recognition time per clip: median {statistics.median(times):.2f}s  "
+            f"p90 {p90:.2f}s  max {times[-1]:.2f}s"
+        )
 
     confusions: dict[tuple[str, str], list[ClipResult]] = {}
     for r in results:
