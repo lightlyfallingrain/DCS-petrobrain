@@ -560,48 +560,42 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
   flying anyway rather than run standalone. **Do not start without the user's instruction.**
 
-- [ ] **Range should be spoken with uncertainty, like everything else.** Raised 2026-09-19. Petrovich
-  currently states distance flatly — *"two kilometres"* — which makes him sound **more** certain
-  about range than about anything else, exactly backwards for the quantity a human eye judges worst.
-  The user: *"judging distance is never easy, the more distance, the more uncertainty."*
+- [ ] **Range uncertainty is a perception limit, not a wording choice.** Raised 2026-09-19, and
+  **reframed the same day by the user** — the reframing is the important part.
 
-  **The uncertainty already exists and speech discards it.** `naked_eye_source._RANGE_BUCKETS_M` is
-  ED's own ladder and already widens with distance — 100 m steps out to a kilometre
-  (`OP_D100M`…`OP_D1000M`), then `OP_D1_1p5k`, `OP_D1p5_2k`, coarser beyond. `speech._format_range_km`
-  then rounds to the nearest 0.5 km and states the result as if measured. So the bucket width *is*
-  the confidence interval, already computed, already correct, and thrown away at the last step.
+  **The distinction, in the user's words:** *"whereas unit count is detail that can be worded in
+  more or less detail, distance ambiguity is perception based ambiguity."* Count vagueness is
+  presentation: the model may hold an exact twelve and still say "several", because that is how a
+  crew member talks. **Range vagueness is not presentation — he genuinely does not know.** *"The
+  human eye cannot tell exact distances at kilometre or even hundreds of metres scale. All things
+  that fire projectiles over great distances have had different range finding solutions"* precisely
+  because of that.
 
-  **Deliberately not folded into Stage 4b** (user direction, 2026-09-19, same call as the wording
-  fixes): it is a different quantity needing its own vocabulary, and it touches the **single-contact**
-  callout — the one case Stage 4b must leave byte-identical as its regression guard. Bundling them
-  would remove that guard exactly when the code is changing most.
+  **So this does not belong in `speech.py`.** Today range reaches belief as a ground-truth figure
+  quantised into `_RANGE_BUCKETS_M`, and only the *wording* would hedge it. That means the belief
+  itself holds a number far better than an eye could produce — so a brain layer asking "how far?"
+  gets an answer no crew member could give. **That is the no-omniscience invariant leaking**, and
+  adverbs in the callout would hide it rather than fix it. The uncertainty has to live in the
+  percept, and speech should render whatever the belief actually holds.
 
-  **Settled (user, 2026-09-19): precision degrades with distance.** Chosen from three rendered
-  options — a uniform "about N" hedge, spoken bucket edges ("four to five kilometres"), and this.
-  Close in he states the number plainly; further out the phrasing loosens, so **the vagueness itself
-  carries the information** rather than the sentence having to state an interval. Sketch, to be
-  refined against real renderings:
+  **It is optic-dependent, which is the other half.** The 9K113 sight carries a **stadiametric
+  range-judgement aide, useful out to about 5 km** (user, 2026-09-19 — verify the exact mechanism
+  and limit before building). So range certainty should *narrow* when Petrovich uses the sight and
+  stay wide when he does not. That is the same shape as the angular-acuity finding: a genuine
+  perception capability that differs by optic, which was about to be modelled as a presentation
+  concern. It also connects directly to the deferred **"Attention direction and detection cones"**
+  item, which already owns the per-optic split — this may belong there rather than standing alone.
 
-  | True range | Spoken |
-  |---|---|
-  | 400 m | "very close" |
-  | 1.8 km | "two kilometres" |
-  | 4.2 km | "about four kilometres" |
-  | 8.9 km | "eight, nine kilometres" |
+  **What the earlier decision still settles**, now as a rendering rule rather than the whole item:
+  precision degrades with distance (option C of three rendered candidates, user 2026-09-19) — "very
+  close" under 0.5 km, a plain number close in, loosening to "about four kilometres" and "eight,
+  nine kilometres" further out. That is how the held uncertainty gets *spoken*; it is no longer a
+  substitute for holding it.
 
-  This is the same principle chosen twice already — hedge by default, precision where earned — now
-  applied to the quantity a human eye judges worst. The bucket widths in
-  `naked_eye_source._RANGE_BUCKETS_M` are the input; they already widen with distance, so the tiers
-  should be derived from them rather than picked independently.
-
-  **Still open, not decided:** whether a watched or priority contact gets a tighter range the way it
-  gets an exact count (Stage 4b's attention-earns-precision rule). The same logic would say yes, but
-  the user has not ruled and it should not be assumed.
-
-  **Should reuse Stage 4b's hedging register rather than invent a parallel one.** The same voice that
-  turns six into "several" should turn 2000 m into "about two kilometres" and 9 km into "eight, nine
-  kilometres" — one hedging vocabulary across two quantities. Natural to do alongside the contact
-  report fine-tuning items, since both are callout phrasing in the same module.
+  **Still open:** whether a watched contact gets a tighter range the way Stage 4b gives it an exact
+  count. Under the reframing the answer is probably no by default — attention does not improve the
+  eye — unless attention implies he is *looking through the sight*, which would improve it for a
+  real reason rather than as a reward.
 
 - [ ] **Contact report fine tuning — a running list, appended to as real sorties surface things.**
   Opened 2026-09-18 from the first flights with TTS live. These are about what Petrovich *says* and
