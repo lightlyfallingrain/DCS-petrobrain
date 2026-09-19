@@ -65,5 +65,15 @@ sits below the correct-answer mean.
 
 One speaker, one headset, one quiet room, 252 clips. The unsafe-error counts are small integers, so
 the ordering between `tiny` and `base` is solid but the gap between `small` and `medium` is within
-noise. Live conditions — engine noise, rotor, oxygen mask, stress — are not represented, and the
-sortie is what tests them.
+noise.
+
+**Simulator noise is not a factor, and assuming otherwise would send someone chasing a
+non-problem** (user correction, 2026-09-19): engine, rotor and cockpit audio go to the player's
+headphones, not into the room, so a boom mic never captures them. This is a materially easier
+acoustic environment than a real cockpit, and the corpus is representative of it rather than
+optimistic about it.
+
+What genuinely differs in flight is narrower and worth naming precisely: the player is speaking
+while flying, so transmissions come faster, more clipped, and sometimes mid-manoeuvre, where a
+recording session invites careful delivery. Ordinary room noise — fans, keyboard, a headset
+knocked — also remains. The sortie tests those; it does not need to test cockpit audio.
