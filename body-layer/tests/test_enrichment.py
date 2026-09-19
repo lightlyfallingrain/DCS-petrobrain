@@ -19,6 +19,7 @@ from belief.enrichment import (
     NEAR_FACT_RADIUS_M,
     SemanticFact,
     WorldEnrichmentCache,
+    _proximity_text,
     _within_near_radius,
     displayable_name,
     motion_when_seen,
@@ -777,3 +778,57 @@ def test_latin1_names_survive_including_accents() -> None:
 
 def test_displayable_name_passes_none_through() -> None:
     assert displayable_name(None) is None
+
+
+# --- proximity wording: "on"/"next to" at short range (2026-09-19 roadmap
+# item) ------------------------------------------------------------------
+
+
+def test_proximity_text_at_zero_distance_says_on() -> None:
+    assert _proximity_text("a road", 0.0) == "on a road"
+
+
+def test_proximity_text_in_the_next_to_band_says_next_to() -> None:
+    assert _proximity_text("a road", 10.0) == "next to a road"
+    assert _proximity_text("a road", 50.0) == "next to a road"
+    assert _proximity_text("a road", 99.0) == "next to a road"
+
+
+def test_proximity_text_below_the_next_to_band_falls_back_to_near() -> None:
+    """Between "on" and "next to" (~0.5-10 m) is not one of the two named
+    bands, so it keeps the pre-existing "near X (Nm)" shape -- deliberately,
+    see `_proximity_text`'s docstring."""
+    assert _proximity_text("a road", 5.0) == "near a road (5m)"
+
+
+def test_proximity_text_at_or_above_the_next_to_band_falls_back_to_near() -> None:
+    assert _proximity_text("a road", 100.0) == "near a road (100m)"
+    assert _proximity_text("a road", 250.0) == "near a road (250m)"
+
+
+def test_semantic_facts_for_road_on_top_of_says_on_the_road(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(nearest_road=_FakeInfo(name=None, distance_m=0.0))
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+    assert facts[0].text == "on a road"
+
+
+def test_semantic_facts_for_road_close_by_says_next_to_the_road(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    description = _FakeDescription(
+        nearest_road=_FakeInfo(name="Route 1", distance_m=40.0)
+    )
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: description
+    )
+    facts = semantic_facts_for(
+        _FAKE_CONN, "Syria", GeoPosition(x=0.0, z=0.0, alt_m=0.0), 1.0
+    )
+    assert facts[0].text == "next to Route 1"
