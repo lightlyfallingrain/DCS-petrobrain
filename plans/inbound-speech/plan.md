@@ -551,9 +551,9 @@ Four consequences, each with a reason:
    retract everything said before it, so every decision waits for PTT release. This forbids
    incremental execution outright.
 
-4. **`stop` counts only when it is the entire transmission** (user direction, 2026-09-19). A
-   "stop" appearing inside a sentence — "stop scanning north", or any ordinary use of the word —
-   is not the stop rule and is handled like any other speech.
+4. **`stop` counts only when the whole transmission is the single word "stop"** (user direction,
+   2026-09-19). A "stop" inside a sentence — "stop scanning north", or any ordinary use — is not
+   the stop rule.
 
    An earlier draft made `stop` an exception to (3), firing the moment it was recognised so
    barge-in would not wait for release. This rule removes that exception and is better for two
@@ -564,11 +564,46 @@ Four consequences, each with a reason:
    the word. The latency cost is one PTT release, which is roughly the time it takes to stop
    speaking anyway.
 
-   **Reading of "one word":** taken as *the transmission contains nothing but a stop phrasing*, so
-   a bare "stop talking" or "quiet" qualifies alongside a bare "stop". Narrowing this to literally
-   the single word "stop" is a one-line change; which way it goes should be settled by which
-   phrasings survive Stage 1's bench on the user's own voice, since "stop" alone already came back
-   as "cloud" and "stock" on clean synthetic speech.
+   `stop_talking` therefore carries exactly one phrasing. Admitting "stop talking" or "quiet" as
+   command phrasings while routing only on a bare "stop" would contradict itself — the longer
+   forms would reach the same behaviour through the command matcher by the back door.
+
+   **Known risk, accepted deliberately:** with no alternates there is no fallback word, and this
+   is the token likeliest to fail. It is one short syllable, and on clean synthetic speech it
+   already returned as "cloud" and "stock". If Stage 1's bench shows it unreliable on the user's
+   own voice, this decision needs revisiting rather than tuning around — which is cheap, since
+   adding a phrasing is a handful of clips rather than a re-recorded corpus.
+
+### Transmission segmentation: PTT delimits clips (user, 2026-09-19)
+
+*"Natural use is to hold PTT while I say a command and question and then release. So that
+different commands/questions arrive as separate audio clips. Second may arrive while first is
+being processed, but they're separate."*
+
+**This is a larger simplification than it appears.** Live speech systems normally have to solve
+endpointing — deciding where one utterance ends and the next begins, usually with voice-activity
+detection, and usually badly in a noisy cockpit. Push-to-talk supplies that boundary exactly:
+press to release is one clip, one transmission, one decision. No VAD, no silence thresholds, no
+partial decoding of an open stream. It is also what makes rule (3) natural rather than a
+restriction — the transmission closes on release because that is literally when the player stops
+speaking.
+
+Consequences for the design:
+
+- **Capture produces discrete, complete WAV clips**, not a stream. This matches what the corpus
+  already is, so Stage 1's measurements transfer to live operation without reinterpretation.
+- **Transmissions queue, and may overlap in processing.** A second clip can arrive while the
+  first is still being recognised or answered. Recognition of separate clips is independent and
+  can run concurrently; what needs ordering is the *response*, since two crew answers talking over
+  each other is worse than one arriving late.
+- **Responses should default to the order asked**, the way a crew member answers questions in the
+  order they were put. A fast command queued behind a slow free-text request waits; that reads as
+  someone working through what was asked rather than as a bug.
+- **`stop` is the one transmission that jumps the queue** — it aborts current speech and clears
+  what is pending, which is the whole point of it. Note this is a *queue-priority* exception, not
+  a resurrection of the mid-stream timing exception removed in (4): it is still recognised only
+  from a closed transmission, and it is now unambiguous by construction, since the entire clip
+  must be that single word.
 
 `say again` in the Petrovich→player direction is where Stage 1's confidence distribution is spent:
 below the band, ask instead of guessing or sitting silent. That makes the bench's confidence column
