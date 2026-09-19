@@ -595,7 +595,7 @@ byte-identical**, which is the regression guard for every existing speech test;
 `len(store.contacts)`) to distinguish contact records from estimated units. **Full design: "Stage
 4b design — speech and events" below.**
 
-**Stage 5 — composition.** `belief/composition.py`, `Observation.composition`, per-member folding,
+**Stage 5 — composition. DEFERRED 2026-09-19, and may never be built — see `body-layer/ROADMAP.md`. Do not start on reasoning alone; the evidence has to come from a sortie.** `belief/composition.py`, `Observation.composition`, per-member folding,
 the over-subscription retraction, `facts["composition"]`, and speech's "three of them tanks … and
 something else". Also amend `enrichment.motion_when_seen`, which derives a direction from a
 contact's two most recent implied positions — for a cluster those can come from different vehicles

@@ -346,7 +346,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   which fixed the live defect · 3a ✅ same-source/same-poll exclusion in `ContactStore.ingest`,
   radius-independent · 4a ✅ cardinality observable in `facts`/console · 3b-i ✅ angular separability
   (rev.2) · 3b-ii ⚠ scope now questionable (see below) · **4b ✅ speech and events — merged
-  2026-09-19** (feature/group-contact-speech) · 5 ⛔ composition · 6 ⛔ hardening.
+  2026-09-19** (feature/group-contact-speech) · **5 ⏸ composition — DEFERRED** · 6 ⛔ hardening.
 
   **Rule delivered in Stage 4b — Attention earns precision:** A `watch` or `priority` contact with an
   exact cardinality interval (`lo == hi`, no uncertainty) speaks its real count, capped at twelve.
@@ -365,6 +365,20 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     (2026-09-19):** Same sortie (F10 vocabulary + Stage 4b speech live) will exercise whether
     kind separation (tanks vs. BTRs) adds tactical value beyond cardinality alone. DoD's acceptance
     plan documents what to listen for that argues for or against this stage.
+
+  **Stage 5 (composition) is deferred, and may never be built** (user, 2026-09-19: *"Let's at least
+  defer stage 5. It may become entirely redundant, but that needs testing first."*). The case for
+  it has weakened twice over. The angular model resolved the twelve-unit scenario that motivated the
+  whole group model, so the headline example dissolved; and Stage 4b's hedged register plus
+  attention-earned counts may already carry what a crew member actually needs to hear. *"Several
+  armor, eleven o'clock, two kilometres"* — with an exact count available on anything watched —
+  might simply be enough.
+
+  **What would settle it, and it is a listening test rather than an analysis**: fly with 4b and
+  notice whether the missing piece is *what they are*. If "several contacts" leaves a real question
+  unanswered in the moment, composition earns its build. If the hedge plus a watch mark covers it,
+  Stage 5 is redundant and not building it is a saving, not a compromise. Do not start it on
+  reasoning alone — the whole point of deferring is that the evidence comes from the air.
 
   **Deferred, recorded so they are not silently assumed away** (user, 2026-09-18): occlusion (a near
   object hiding a far one on the same line of sight), and shape, colour and movement as
