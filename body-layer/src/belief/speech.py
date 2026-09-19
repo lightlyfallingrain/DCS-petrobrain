@@ -325,23 +325,64 @@ def _plural_unit_type_display(value: object, level: object) -> str:
     return "contacts"
 
 
-def _cardinality_phrase(lo: int, hi: float) -> str | None:
-    """The count clause's vague-only vocabulary (`plans/group-contact-model/
-    plan.md`'s Stage 4b design, Sec 1) -- reads `lo`/`hi` magnitude directly
-    rather than matching a `belief.cardinality.CountBucket` name, since a
-    folded interval (an intersection or a contradiction hull) need not equal
-    any one named bucket. `None` means "no clause at all" (an exactly-one
-    interval); `"a handful"`/`"many"` are the two named exceptions, picked
-    out by ED's own bucket boundaries; everything else plural collapses to
-    the safe default `"several"`, which is never wrong to say about any
-    plural count. This function never returns an exact number -- see the
-    design's "deliberate scope cut" note."""
+#: Spoken numbers for an exactly-known count, used only where precision has
+#: been earned (see `_cardinality_phrase`'s `attended` parameter). Digits are
+#: spelled because TTS reads numerals inconsistently; beyond twelve the hedge
+#: is used instead, since a crew member who says "seventeen" about vehicles he
+#: is looking at is claiming a count no one makes by eye.
+_SPOKEN_NUMBERS: Final[dict[int, str]] = {
+    2: "two",
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+    11: "eleven",
+    12: "twelve",
+}
+
+
+def _cardinality_phrase(lo: int, hi: float, attended: bool = False) -> str | None:
+    """The count clause's vocabulary (`plans/group-contact-model/plan.md`'s
+    Stage 4b design, Sec 1) -- reads `lo`/`hi` magnitude directly rather than
+    matching a `belief.cardinality.CountBucket` name, since a folded interval
+    (an intersection or a contradiction hull) need not equal any one named
+    bucket.
+
+    `None` means "no clause at all" (an exactly-one interval). Otherwise the
+    register is deliberately **hedged**: `"a couple of"` for two or three,
+    `"a handful of"` for four or five, `"many"` from sixteen up, and the safe
+    default `"several"` for everything else plural -- never wrong to say about
+    any plural count. Each phrase carries its own connector, because the
+    grammar is per-phrase: `"several trucks"` is correct with a bare noun and
+    `"a handful trucks"` is not.
+
+    **`attended` is where precision is earned** (user, 2026-09-19: "a group of
+    watched/tracked contacts is, for whatever reason, more important and should
+    get more detailed reports, including unit counts"). The user's standing
+    rule is that an exact count is spoken only when it is both *available* and
+    *useful* -- and attention is precisely the usefulness signal, since the
+    crew deliberately marked this contact. So a watched or priority contact
+    whose interval is exactly known (`lo == hi`) speaks the number; everything
+    else keeps the hedge. This is the caller-holding-a-question that the
+    Stage 4b design noted did not yet exist -- it did, under a different name.
+
+    Note the honesty condition is unchanged either way: an exact number is
+    only ever spoken when the belief itself is exact, so attention buys
+    *disclosure* of precision already held, never manufactured precision."""
     if lo == 1 and hi == 1:
         return None
+    if attended and lo == hi and lo in _SPOKEN_NUMBERS:
+        return _SPOKEN_NUMBERS[lo]
     if lo >= 16:
         return "many"
     if lo == 4 and hi <= 5:
         return "a handful of"
+    if lo >= 2 and hi <= 3:
+        return "a couple of"
     return "several"
 
 
@@ -398,7 +439,13 @@ def _contact_report_text(facts: dict[str, object]) -> str:
     cardinality = facts.get("cardinality")
     phrase = None
     if isinstance(cardinality, dict):
-        phrase = _cardinality_phrase(cardinality["lo"], cardinality["hi"])
+        # `watch`/`priority` mean the crew deliberately picked this contact,
+        # which is the "useful" half of the user's precision rule -- see
+        # `_cardinality_phrase`'s `attended` parameter.
+        attended = facts.get("attention") in ("watch", "priority")
+        phrase = _cardinality_phrase(
+            cardinality["lo"], cardinality["hi"], attended=attended
+        )
     if phrase is None:
         text = _unit_type_display(
             classification.get("value"), classification.get("level")

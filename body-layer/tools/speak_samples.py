@@ -54,9 +54,27 @@ SAMPLES: tuple[tuple[str, str, str, tuple[int, float] | None], ...] = (
     ("plural at type level", "T-72", "type", (3, 3)),
 )
 
+#: Attention earns precision: the same contacts, marked `watch`. An exact
+#: interval speaks its number; an inexact one keeps the hedge, because
+#: attention buys disclosure of precision already held, never manufactured
+#: precision.
+WATCHED_SAMPLES: tuple[tuple[str, str, str, tuple[int, float] | None], ...] = (
+    ("WATCHED two", "OP_ARMORED", "class", (2, 2)),
+    ("WATCHED three, type level", "T-72", "type", (3, 3)),
+    ("WATCHED four to five (inexact)", "OP_TRUCK", "class", (4, 5)),
+    ("WATCHED eight", "OP_ARMORED", "class", (8, 8)),
+    ("WATCHED sixteen (beyond spoken range)", "OP_ARMORED", "class", (16, 16)),
+    ("WATCHED singular", "T-72", "type", (1, 1)),
+)
 
-def build_facts(value: str, level: str, card: tuple[int, float] | None) -> dict:
-    facts: dict = {"classification": {"value": value, "level": level}}
+
+def build_facts(
+    value: str, level: str, card: tuple[int, float] | None, attention: str = "normal"
+) -> dict:
+    facts: dict = {
+        "classification": {"value": value, "level": level},
+        "attention": attention,
+    }
     if card is not None:
         facts["cardinality"] = {"lo": card[0], "hi": card[1], "confidence": 1.0}
     return facts
@@ -90,11 +108,14 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    width = max(len(label) for label, *_ in SAMPLES)
+    rows = [(lbl, v, lv, c, "normal") for lbl, v, lv, c in SAMPLES] + [
+        (lbl, v, lv, c, "watch") for lbl, v, lv, c in WATCHED_SAMPLES
+    ]
+    width = max(len(label) for label, *_ in rows)
     guard_texts = []
 
-    for label, value, level, card in SAMPLES:
-        text = _contact_report_text(build_facts(value, level, card))
+    for label, value, level, card, attention in rows:
+        text = _contact_report_text(build_facts(value, level, card, attention))
         line = f"{label:<{width}}  |  {text}"
         if args.speak:
             status = speak(args.adapter_url, text)

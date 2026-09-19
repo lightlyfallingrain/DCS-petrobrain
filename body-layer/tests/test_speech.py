@@ -433,9 +433,49 @@ def test_cardinality_phrase_singular_is_no_clause() -> None:
     assert _cardinality_phrase(1, 1) is None
 
 
+def test_cardinality_phrase_two_or_three_is_a_couple() -> None:
+    """User direction, 2026-09-19. Carries its own `"of"`, like
+    `"a handful of"` and for the same reason."""
+    assert _cardinality_phrase(2, 2) == "a couple of"
+    assert _cardinality_phrase(3, 3) == "a couple of"
+    assert _cardinality_phrase(2, 3) == "a couple of"
+
+
 def test_cardinality_phrase_default_is_several() -> None:
-    assert _cardinality_phrase(2, 2) == "several"
-    assert _cardinality_phrase(3, 3) == "several"
+    """`"several"` is the fallback for any plural interval no named phrase
+    claims -- never wrong about a plural count, which is why it is the
+    default rather than an error case."""
+    assert _cardinality_phrase(6, 6) == "several"
+    assert _cardinality_phrase(8, 10) == "several"
+    assert _cardinality_phrase(2, 5) == "several"
+
+
+def test_attention_earns_an_exact_count_when_the_interval_is_exact() -> None:
+    """Attention is the "useful" half of the user's precision rule: the crew
+    deliberately marked this contact, so the question the number answers
+    exists. Honesty is unchanged -- the belief must already be exact."""
+    assert _cardinality_phrase(3, 3, attended=True) == "three"
+    assert _cardinality_phrase(8, 8, attended=True) == "eight"
+
+
+def test_attention_does_not_manufacture_precision() -> None:
+    """An inexact interval keeps its hedge however closely it is watched --
+    attention buys disclosure of precision already held, never invention of
+    precision that is not."""
+    assert _cardinality_phrase(4, 5, attended=True) == "a handful of"
+    assert _cardinality_phrase(8, 10, attended=True) == "several"
+
+
+def test_attention_falls_back_to_the_hedge_beyond_the_spoken_range() -> None:
+    """A crew member does not say "seventeen" about vehicles he is looking
+    at -- nobody counts that precisely by eye, so the hedge resumes."""
+    assert _cardinality_phrase(16, 16, attended=True) == "many"
+    assert _cardinality_phrase(13, 13, attended=True) == "several"
+
+
+def test_attention_never_adds_a_clause_to_a_singular_contact() -> None:
+    """The regression guard holds regardless of attention."""
+    assert _cardinality_phrase(1, 1, attended=True) is None
 
 
 def test_cardinality_phrase_op_to5units_is_a_handful() -> None:
