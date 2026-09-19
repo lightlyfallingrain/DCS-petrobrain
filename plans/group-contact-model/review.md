@@ -1,75 +1,112 @@
 ### Review Summary
 
-Stage 4b (branch `feature/group-contact-speech`, commit `6b7cdec`) adds the hedged group-cardinality
-speech clause and the `CONTACT_CARDINALITY_CHANGED` event. Reviewed against the plan's "Stage 4b
-design — speech and events (2026-09-19)" section and the "Settled: how a group is spoken (user,
-2026-09-19)" decisions, with the implementation log in `implementation.md`'s Stage 4b section.
+Re-review of `feature/group-contact-speech`, scoped to the three commits added since the prior
+approval at `6b7cdec` (`2e80dcd`, `66a856d`, `023c591` — `git diff 6b7cdec..HEAD`). These are
+user-driven phrasing changes plus one defect fix, made after the user heard Stage 4b's output
+rendered. The prior approval (commit `6b7cdec`) is not re-reviewed.
 
-All eight "check hardest" items were verified directly against the diff, not taken on the
-implementer's word:
+- `2e80dcd` fixes the `"a handful trucks"` grammar defect by having `_cardinality_phrase` carry
+  its own connector (`"a handful of"`), and adds `body-layer/tools/speak_samples.py`, a new
+  assertion-free acceptance aid.
+- `66a856d` adds `"a couple of"` for two-or-three and lets a `watch`/`priority`-attended contact
+  with an exact interval (`lo == hi`) speak the real number instead of a hedge, capped at twelve.
+- `023c591` is docstring-only, recording that imperfect English ("a couple of armor", "three
+  T-72") is in character and out of scope to polish.
 
-1. **Regression guard.** Confirmed via `git diff` on `test_speech.py`: only one existing test's body
-   changed (`test_render_contact_report_maps_default_op_class_to_display_word`), no other existing
-   `def test_` line touched. Traced the dead-code claim myself in `classification.py`:
-   `Contact.record` takes `SpecificityLevel(percept.classification_level)` directly from the
-   `Observation`, with no `_op_class_of` resolution step on that path at all — so a hand-built
-   fixture can construct `classification_level=2` + `classification_raw="OP_GROUPSOMETHING"` even
-   though `_op_class_of` itself would never return that combination through a real resolver. The
-   fixture change (level 2 → 1, `"group."` → `"ground."`) is a legitimate correction of a test that
-   was exercising an unreachable state, not a hidden regression. `_contact_report_text`'s guard
-   branch (`phrase is None` → identical `_unit_type_display` call, same args) is exactly what the
-   design specified.
-2. **Branch not early return.** Confirmed — `_contact_report_text` computes `text` via an `if/else`
-   and falls through to the shared trailing clock/range/semantic logic unchanged.
-3. **Attachment points.** Confirmed by reading the code: `render_contact_report`,
-   `_render_lifecycle_text`'s `CONTACT_DETECTED`/`CONTACT_REACQUIRED`, and
-   `render_watch_nearest_readback` all route through `_contact_report_text`.
-   `CONTACT_CLASSIFICATION_CHANGED` builds its line directly from `_unit_type_display` and never
-   calls `_contact_report_text` — verified by reading that branch, it genuinely does not gain the
-   clause.
-4. **Scope cut holds.** `_cardinality_phrase` has three return points, none numeric: `None`,
-   `"many"` (`lo >= 16`, so `hi == inf` cases fall here), `"a handful"` (`lo == 4 and hi <= 5`
-   exactly), else `"several"` — including fold-derived non-named intervals like `(4, 7)`, tested
-   directly.
-5. **`CONTACT_CARDINALITY_CHANGED`.** No template (falls to `_render_lifecycle_text`'s explicit
-   `None` branch), wired into `tick()` at lifecycle → classification → cardinality → attention
-   (read the diff directly), reuses `EVENT_COOLDOWN_S`/`_cooldown_elapsed` — no second constant
-   introduced.
-6. **Count-arithmetic keys additive.** `contact_counts` stays a bare int in `escalation.py` and the
-   existing `{total, visible, watched}` dict in `get_situation` — both unchanged; `estimated_units`
-   added as a sibling key in all three places (`get_stats`, `get_situation`, `_situational_header`).
-7. **Scope discipline.** Grepped the full diff for "very close", "metre"/"kilomet" (outside the
-   already-existing `_format_range_km` docstring and one Sec-1-quoting docstring line), acronym
-   spacing — none leaked in.
-8. **Test-inventory finding.** Verified `test_console_module_contains_no_belief_logic` genuinely
-   filters `not name.startswith("_")` — a public `estimated_units_lower_bound` would have broken it.
-   Renaming to `_estimated_units_lower_bound` matches the established `_cardinality_facts`/
-   `_classification_facts` convention for tools.py-internal helpers and is the correct fix, not a
-   dodge: the function has no `console.py` caller by design (only `get_stats`/`get_situation`/
-   `escalation.py` consume it), so the test's actual invariant (every *console-facing* tool has a
-   console caller) is preserved rather than weakened.
+**Verified directly, not just trusted:**
+- `_cardinality_phrase`'s branch order: the `attended and lo == hi` check sits after the
+  `lo == 1 and hi == 1` singular guard, so a singular contact is unaffected regardless of
+  `attended` — confirmed by reading and by the new test.
+- The honesty condition: `_cardinality_phrase(4, 5, attended=True)` hedges (`"a handful of"`),
+  `_cardinality_phrase(8, 10, attended=True)` hedges (`"several"`) — an inexact interval never
+  gets a number no matter how it's attended.
+- The twelve-count cap: `attended and lo==hi==13` (outside `_SPOKEN_NUMBERS`) falls through to
+  `"several"`; `attended and lo==hi==16` hits the pre-existing `lo >= 16: return "many"` branch.
+  Both correct — the hedge resumes above the cap, not a numeral.
+- `facts.get("attention") in ("watch", "priority")` — checked against `belief/attention.py`'s
+  actual `Attention` literal (`"ignore" | "normal" | "watch" | "priority"`) and against
+  `tools.py`'s two `"attention"` key writers (`describe_contact`'s facts builder, line 255; the
+  event-derived entry, line 598) — the key name and both values are real, and `facts.get(...)`
+  on a dict never raises when the key is absent, satisfying the "missing/None cannot raise"
+  check.
+- No `_cardinality_phrase` branch double-composes a connector: `"several"`/`"many"` stay
+  bare-noun phrases (unchanged), `"a handful of"` and the new `"a couple of"` each carry their
+  own trailing `"of"`, and `_contact_report_text`'s composition is still a plain
+  `f"{phrase} {plural_noun}"` join — no second connector logic was added alongside it.
+  `attended`'s exact-number branch returns a bare numeral (`"three"`), which composes the same
+  way.
+- `attended: bool = False` default — every pre-existing call site of `_cardinality_phrase`
+  besides `_contact_report_text` (there are none) is unaffected; `_contact_report_text` itself
+  only sets `attended=True` when the new `attention` read says so, otherwise behaves exactly as
+  before.
+- Ran `body-layer/tools/speak_samples.py` directly (see Required Fixes — needed a different
+  `PYTHONPATH`/interpreter than the file's own docstring states) and confirmed its printed table
+  matches the reasoning above, including the regression guard's self-check line.
+- `023c591` is confirmed docstring-only (`git show --stat` — one file, only insertions, all
+  inside the module docstring).
+- Scope discipline: grepped the diff for metres/kilometres spelling, acronym spacing, "very
+  close", and range-uncertainty changes — none appear; the one `"kilometres"` hit in the diff is
+  pre-existing text that moved position, not new content.
+- Five new tests in `test_speech.py` do pin the rule's limits, not just its happy path: exact
+  count when attended, hedge held when inexact-but-attended, hedge resumed above the spoken
+  cap, and the singular guard re-checked under `attended=True`.
+- New files staged; `git status` on the branch shows nothing from these three commits
+  uncommitted (the untracked files present — `run.sh`, `syria-full-build.log`,
+  `syria-theatre-unfiltered.osm.pbf` — are unrelated stray files, not part of this branch's
+  diff).
 
-Ran body-layer's full verification myself: `ruff format --check` (79 files formatted), `ruff check`
-(all checks passed), `mypy src` (no issues, 34 files), `pytest tests -q` — **659 passed**, matching
-the expected count (642 baseline + 17 new: 14 in `test_speech.py`, 3 in `test_events.py`).
+**Verification run (body-layer's own commands, from `body-layer/`):**
+- `ruff format --check src tests tools` — pass
+- `ruff check src tests tools` — pass
+- `mypy src` — pass, no issues
+- `pytest tests -q` — 664 passed (up from 659, as expected: 5 new tests)
 
 ### Required Fixes
 
-None.
+- **`body-layer/tools/speak_samples.py`'s own documented usage command does not work as
+  written.** The docstring says `PYTHONPATH=src python3 tools/speak_samples.py`. Running exactly
+  that fails immediately: `ModuleNotFoundError: No module named 'query'` (missing
+  `../world-model/src` on `PYTHONPATH`), and even with that added, `ModuleNotFoundError: No
+  module named 'pyproj'` (needs `body-layer/.venv`'s interpreter, not plain `python3` — the
+  world-model seam pulls in `pyproj`, per `body-layer/CLAUDE.md`'s own "Running the live logger"
+  note about this exact failure mode). The correct invocation is
+  `PYTHONPATH=src:../world-model/src .venv/bin/python tools/speak_samples.py`, confirmed working
+  when I ran it. Fix the two usage lines in the module docstring (plain and `--speak` forms) to
+  match. Since this is a dev-facing acceptance tool whose entire point is being runnable, a
+  command in its own header that doesn't run is a real defect, not a nit — this is the same
+  documented-command class of gap `body-layer/CLAUDE.md` calls out for the live logger.
 
 ### Optional Refinements
 
-- None worth calling out — the implementation matches the design closely enough that there is no
-  daylight between "what was built" and "what §1–§6 specified" to leave a stylistic nit against.
+- `speak_samples.py`'s `build_facts` return type is bare `dict` — `mypy --strict` on that file
+  in isolation flags two `[type-arg]` errors (`dict[str, object]` would clear them). The file is
+  outside `body-layer/CLAUDE.md`'s configured `mypy src` scope, so this isn't a required-fix
+  violation of the project's stated check, but it's a one-line inconsistency with the "fully
+  type-hinted" stack standard the rest of the subproject holds to (optional).
+- `speak_samples.py` imports `belief.speech._contact_report_text`, a private name, across the
+  `tools/` → `src/` boundary. Judged acceptable for what this file is — a dev tool driving the
+  exact function whose output is under judgment, taking the same `facts` dict shape the function
+  itself takes, with no public wrapper that returns bare rendered text for a hand-built facts
+  dict today. An alternative (a thin public re-export) would remove the private-name coupling
+  but adds surface for a one-off acceptance aid; not worth requiring (optional).
+- `body-layer/tools/` did not exist before this commit — this is the subproject's first
+  `tools/`. Judged as the right home in spirit (mirrors `world-model/tools/`'s "one-off
+  inspection/probe scripts" role for this subproject) even though `body-layer/CLAUDE.md` doesn't
+  yet document a `tools/` convention the way the root `CLAUDE.md` does for `world-model/tools/`.
+  Worth a one-line mention in `body-layer/CLAUDE.md`'s Structure section at some point, but not
+  blocking this branch (optional).
 
 ### Verdict
 
-APPROVED
+APPROVED WITH MINOR FIXES
+
+The phrasing and honesty-condition logic is correct and well-tested; the one required fix is
+confined to two lines of a docstring in a brand-new, non-shipping dev tool and does not touch
+`speech.py`'s actual behavior. Once fixed, this is mergeable.
 
 ### Review Confidence
 
-Full read — read every changed file in the diff (`speech.py`, `events.py`, `contacts.py`,
-`tools.py`, `escalation.py`, and all four test files), cross-checked the two highest-risk claims
-(regression-guard fixture change, `OP_GROUPSOMETHING` unreachability) against the actual
-`classification.py`/`contacts.py` source rather than trusting the implementation log's prose, and
-ran the full body-layer verification suite directly rather than relying on the reported numbers.
+Full read — all three commits' diffs read in full, the honesty/cap/singular-guard properties
+hand-verified against the code (not just the tests' claims), the acceptance tool actually run
+end-to-end, and the full body-layer verification suite (format/lint/mypy/pytest) run directly
+rather than trusted from a prior report.

@@ -14,11 +14,16 @@ dicts, prints the exact text, and can POST each line to a running
 Deliberately not a test. It asserts nothing -- it exists so a human can judge
 phrasing, which is the one thing the test suite structurally cannot do.
 
+Run from `body-layer/`. Both paths on `PYTHONPATH` and this subproject's own
+interpreter are required, not optional: `perception.geometry` imports the
+world-model seam, and that pulls in `pyproj`, which only exists in
+`body-layer/.venv` (see `body-layer/CLAUDE.md`, "Running the live logger").
+
     # print the table
-    PYTHONPATH=src python3 tools/speak_samples.py
+    PYTHONPATH=src:../world-model/src .venv/bin/python tools/speak_samples.py
 
     # print and speak (srs-adapter must be running on --target local)
-    PYTHONPATH=src python3 tools/speak_samples.py --speak
+    PYTHONPATH=src:../world-model/src .venv/bin/python tools/speak_samples.py --speak
 
 Stdlib only, like the rest of this subproject.
 """
@@ -70,8 +75,8 @@ WATCHED_SAMPLES: tuple[tuple[str, str, str, tuple[int, float] | None], ...] = (
 
 def build_facts(
     value: str, level: str, card: tuple[int, float] | None, attention: str = "normal"
-) -> dict:
-    facts: dict = {
+) -> dict[str, object]:
+    facts: dict[str, object] = {
         "classification": {"value": value, "level": level},
         "attention": attention,
     }

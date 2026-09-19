@@ -705,6 +705,15 @@ subproject-needed dev path.
   `logger.py` gains `--mission-understanding PATH` to load it. `key_locations` (MI-6's
   `CompactLocation`) carries no position field, so relevance can only be scored against route
   waypoints, not named mission-critical areas — a real, documented gap, not worked around.
+- `tools/speak_samples.py` — a dev acceptance aid, not a test: renders sample crew callouts through
+  `belief.speech`'s real functions and can POST each to a running `srs-adapter --target local` so
+  phrasing is *heard* rather than read. It exists because accepting a speech change through the real
+  `--crew-text` pipeline needs a live aircraft layer and therefore the Windows box, which would gate
+  a phrasing judgement on hardware access. Assertion-free by design — it is for a human ear, which
+  is the one thing the suite cannot be. It found `"a handful trucks"` (a missing connector) on its
+  first run, while every unit test of the phrase itself was passing, because the defect existed only
+  in the composed sentence. Needs both `PYTHONPATH` entries and this subproject's own interpreter,
+  same as the live logger.
 - `tests/fixtures/` — committed fixture frames for the replay harness's own tests (see Testing).
   `association.py`'s own fixtures (including the ambiguous multi-candidate scene) are
   hand-authored directly in `tests/test_association.py` rather than as separate files, since a
