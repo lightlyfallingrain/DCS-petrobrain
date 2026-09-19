@@ -384,6 +384,29 @@ _OCLOCK_VARIANTS: tuple[str, ...] = (
 )
 
 
+def _collapse_repeats(words: list[str]) -> list[str]:
+    """Reduce "scan west scan west scan west" to "scan west".
+
+    Whisper loops on short utterances, especially when prompted, and
+    emits the same phrase several times. The recognition itself is
+    correct when that happens -- the words are right, there are just too
+    many of them -- so collapsing recovers a clip that would otherwise
+    score as a total miss. Two of the four errors in this project's best
+    bench run were exactly this.
+
+    Finds the shortest period that tiles the whole sequence, allowing the
+    final repeat to be cut off mid-phrase, which is how these actually
+    arrive. Requires at least two full repeats, so a genuine phrase with
+    an incidental repeated word is left alone.
+    """
+    count = len(words)
+    for period in range(1, count // 2 + 1):
+        pattern = words[:period]
+        if all(words[i] == pattern[i % period] for i in range(count)):
+            return pattern
+    return words
+
+
 def normalize_for_match(text: str) -> str:
     """Fold recognizer output and a known phrasing onto common ground.
 
@@ -431,7 +454,7 @@ def normalize_for_match(text: str) -> str:
             continue
         after_bearing = word == "bearing"
         words.append(_DIGIT_WORDS.get(word, word))
-    return " ".join(words)
+    return " ".join(_collapse_repeats(words))
 
 
 def normalized_phrase_index() -> dict[str, str]:
