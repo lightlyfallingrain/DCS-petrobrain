@@ -37,12 +37,28 @@ exception).
   See `ROADMAP.md` in this directory for that slice's full requirements, including the
   always-available-regardless-of-selector property it has to satisfy.
 
+**Inbound speech (Slice 3, `plans/inbound-speech/plan.md`, Stage 1 only so far)**: recognises the
+same 15-token scan/watch/cancel command vocabulary `body-layer`'s F10 command path already
+dispatches, spoken instead of clicked. Stage 1 is a **stop/go gate**, not a working pipeline: it
+answers whether a recogniser can handle this user's Finnish-accented English on a closed
+vocabulary at all, before any capture/transit/PTT wiring is built. See "Structure" below for
+`stt_engine.py`/`vocabulary.py`/`tools/stt_bench.py`, and that tool's own module docstring for how
+to record a corpus and run the bench.
+
 ## Tech stack
 
 - Python 3.11+, fully type-hinted, `mypy --strict` (`pyproject.toml`). Stdlib only for this
   subproject's own code (`http.server`, `urllib.request`, `subprocess`, `json`, `base64`,
   `argparse`) — no dependencies declared, consistent with `world-model/`'s and
   `aircraft-layer/`'s dependency policy.
+- **The STT engine is an external binary, never a package dependency**, mirroring the TTS engine's
+  own rule (`plans/inbound-speech/plan.md` Decision 1): `stt_engine.WhisperCliEngine` shells out to
+  whisper.cpp's `whisper-cli`, `stt_engine.WindowsSpeechEngine` shells out to `powershell.exe`
+  driving `System.Speech.Recognition.SpeechRecognitionEngine`. **Neither engine's exact CLI/JSON
+  contract has been verified against a live binary** — no `whisper-cli` binary and no Windows box
+  were available while writing Stage 1 — both are written from each tool's public documented
+  surface; `tools/stt_bench.py` run against real binaries is what validates or corrects them. See
+  `stt_engine.py`'s module docstring before debugging a real run that behaves unexpectedly.
 - **The TTS engine is an external binary, never a package dependency** (plan Decision 2):
   `tts_engine.MacSayEngine` shells out to macOS's `say` CLI (`say -v <voice> -o <tmp>.wav
   --data-format=LEI16@22050 <text>`), the same "external binary, not a package" rule
@@ -94,6 +110,17 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
 
 ## Testing
 
+- `tests/test_stt_engine.py` — `WhisperCliEngine` against the **real** `whisper-cli` binary and a
+  committed short WAV fixture (`tests/fixtures/sample.wav`), following `test_tts_engine.py`'s
+  real-binary posture — but unlike `say`, whisper.cpp is not guaranteed present on every dev
+  machine, so that test class is `pytest.mark.skipif`-gated on `SRS_ADAPTER_WHISPER_BINARY`/
+  `SRS_ADAPTER_WHISPER_MODEL` env vars and skips cleanly (not a failure) when unset/absent — it is
+  skipped in this repo's own dev environment as of authorship. `WindowsSpeechEngine`'s
+  platform-gated behaviour (unavailable off Windows) is tested directly; its real `powershell.exe`
+  path is untestable from a Mac.
+- `tests/test_vocabulary.py` — internal consistency of `vocabulary.py`'s `TOKENS`/`PHRASES` tables
+  and its helpers. Cannot assert equality against `body-layer`'s/`aircraft-layer`'s token tables
+  directly (module independence) — see that test module's own docstring.
 - `tests/test_tts_engine.py` — exercises `MacSayEngine` against the **real** `say` binary, not a
   mock (mirroring `aircraft-layer/tests/test_text_sender.py`'s "real socket, not a double"
   posture) — this project's development machine is a Mac (root `CLAUDE.md` compute-topology
@@ -129,6 +156,26 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   so `python -m srs_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py` stay flat
   top-level modules on `src`'s `pythonpath`, imported directly by both this entrypoint and the
   test suite.
+- `src/stt_engine.py` (Slice 3 Stage 1) — `STTEngine` protocol + `WhisperCliEngine` +
+  `WindowsSpeechEngine`, the mirror image of `tts_engine.py`. See "Tech stack" above for the
+  unverified-CLI-contract caveat.
+- `src/vocabulary.py` (Slice 3 Stage 1) — the 15-token scan/watch/cancel command vocabulary, a
+  **deliberate hand-synced duplicate** of `body-layer/src/belief/crew_console.py`'s
+  `_RELATIVE_SCAN_TOKENS`/`_BEARING_SCAN_TOKENS` and `aircraft-layer`'s `ALLOWED_COMMANDS` —
+  `srs-adapter` cannot import either (module independence). `TOKENS`, `PHRASES` (several spoken
+  phrasings per token), and helpers (`spoken_phrases`, `token_for_phrase`, `to_gbnf` for
+  whisper.cpp's `--grammar`). Keep in sync with those two sources by hand; there is no automated
+  check tying the three together.
+- `tools/stt_bench.py` (Slice 3 Stage 1) — the recognition bench, and the whole slice's stop/go
+  gate. Runs whisper.cpp (with and without `--grammar`) and, on Windows, `WindowsSpeechEngine` over
+  a recorded corpus of the user's own voice, reporting top-1 token accuracy, every confusion pair
+  with sample misheard text, and the confidence distribution split by correct/incorrect —
+  deliberately not just a single accuracy number, since the user did not set a pass bar in advance
+  (`plans/inbound-speech/plan.md` settled decision 2) and needs to judge "would I fly with this?"
+  from concrete evidence. See its own module docstring for the corpus directory layout and
+  recording instructions (`--list-prompts` prints exactly what to say for every token). Not part of
+  the mandated `ruff`/`mypy`/`pytest` commands above (a `tools/` script, matching
+  `world-model/tools/`'s role) but checked individually the same way.
 - `tests/` — automated tests per "Testing" above.
 - `research/` — dated Investigator findings (`2026-09-17-tts-audio-transport-recon.md` and its
   addenda), per the format in `docs/concept/WORLD_MODEL_BUILDER.md`.

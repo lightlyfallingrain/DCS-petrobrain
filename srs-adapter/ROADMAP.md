@@ -118,9 +118,25 @@ body-side view and the slice numbering both files share.
   all, and whether SRS's Mi-24P export reads them, is unknown; `SR.exportRadioMI24P` as quoted in
   the recon reads only the selector at device 455 and the PTT at 738, which suggests it does not.
 
-- [ ] **Slice 3 — inbound speech (STT + PTT).** Not started, and the larger half. **Next priority**
-  (user, 2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body
-  receives already-transcribed `PlayerUtterance` records and never sees audio.
+- [~] **Slice 3 — inbound speech (STT + PTT).** The larger half. **Next priority** (user,
+  2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body receives
+  already-transcribed `PlayerUtterance` records and never sees audio. Full design:
+  `plans/inbound-speech/plan.md`.
+
+  - [x] **Stage 1 — the recognition bench. STOP/GO GATE.** `stt_engine.py` (`STTEngine` +
+    `WhisperCliEngine` + `WindowsSpeechEngine`), `vocabulary.py` (a hand-synced mirror of the
+    15-token vocabulary), and `tools/stt_bench.py`. **Not yet run against real recordings** — the
+    corpus is the user's own voice and does not exist yet (`tools/stt_bench.py`'s own docstring has
+    the recording instructions and `--list-prompts`); neither engine's exact CLI/JSON contract was
+    verified against a live binary while building this (no `whisper-cli` and no Windows box in this
+    environment) — both are written from each tool's public documented surface, and the bench run
+    itself is what validates or corrects them. **The stop/go read is still pending** the user
+    recording a corpus and running the bench for real; nothing past this stage should start first.
+  - [ ] Stage 2 — the matcher and the command path, driven by typed text.
+  - [ ] Stage 3 — recognition as a service, and body-layer's inbound wiring.
+  - [ ] Stage 4 — Windows capture.
+  - [ ] Stage 5 — real PTT through DCS.
+  - [ ] Stage 6 — live sortie acceptance.
 
   **Settled before design (user, 2026-09-19):**
 
