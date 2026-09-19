@@ -12,8 +12,8 @@ So this prompts for each phrase in turn, records a fixed window, writes
 the file to the right place, and lets a bad take be redone on the spot.
 
 Requires `sox` (Homebrew: `brew install sox`; on Windows, the installer
-from sox.sourceforge.net, which ships `rec.exe`), an external binary in
-the same sense whisper-cli is -- deliberately not a Python package, since
+from sox.sourceforge.net), an external binary in the same sense
+whisper-cli is -- deliberately not a Python package, since
 this subproject is stdlib-only (`srs-adapter/CLAUDE.md`).
 
     # Mac
@@ -68,29 +68,31 @@ SAMPLE_RATE = 16000
 
 
 def _sox_available() -> bool:
-    return shutil.which("rec") is not None
+    return shutil.which("sox") is not None
 
 
 def _input_args(driver: str | None, device: str | None) -> list[str]:
     """sox input-source arguments, defaulted per platform.
 
-    `rec` picks the system default input on its own on macOS/Linux. On
-    Windows it needs the `waveaudio` driver named explicitly, and a
-    specific device when the default is not the headset -- which is the
-    common case on a box with a webcam mic, a monitor's mic and a
-    headset all present. `sox -h` lists the drivers; `rec -t waveaudio
-    -d` records from the default one, and a device can be named by index
-    or by substring (`--input-device 1`, `--input-device Headset`).
+    Uses `sox` rather than `rec`, which is the same program with the
+    input pre-set to the default device -- **the Windows sox
+    distribution ships only `sox.exe`**, so depending on `rec` made the
+    recorder Unix-only for no gain. Naming the input explicitly works
+    identically on both platforms.
+
+    `-d` is the default input device. Windows additionally needs the
+    `waveaudio` driver named, and often a specific device, since the
+    system default on a box with a webcam and a monitor microphone is
+    rarely the headset. `sox -h` lists the drivers; a device can be given
+    by index or name substring (`--input-device 1`,
+    `--input-device Headset`).
     """
     if driver is None and sys.platform == "win32":
         driver = "waveaudio"
     args: list[str] = []
     if driver is not None:
         args += ["-t", driver]
-    if device is not None:
-        args += [device]
-    elif driver is not None:
-        args += ["-d"]
+    args += [device] if device is not None else ["-d"]
     return args
 
 
@@ -99,9 +101,17 @@ def _record(
 ) -> bool:
     """Record one fixed-length take to `path`. False if sox failed."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Argument order is load-bearing: everything before the input spec
+    # applies to the input, everything after it applies to the output
+    # file. The rate/channel/width flags therefore sit AFTER `-d` so they
+    # describe what gets written, not what the device must produce.
+    # Microphones commonly refuse 16 kHz -- sox warns and captures at the
+    # device rate -- and this ordering is what makes it resample down to
+    # the 16 kHz mono PCM whisper.cpp requires instead of writing a
+    # 48 kHz file whisper will reject.
     result = subprocess.run(
         [
-            "rec",
+            "sox",
             "-q",
             *_input_args(driver, device),
             "-r",
@@ -168,10 +178,10 @@ def main() -> int:
 
     if not _sox_available():
         print(
-            "`rec` (from sox) not found. Install it with:\n"
+            "`sox` not found. Install it with:\n"
             "    macOS:   brew install sox\n"
             "    Windows: the installer from sox.sourceforge.net, then\n"
-            "             add its directory to PATH (it ships rec.exe)\n"
+            "             add its directory to PATH\n"
             "It is an external binary, not a Python dependency.",
             file=sys.stderr,
         )
