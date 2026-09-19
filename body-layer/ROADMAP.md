@@ -345,18 +345,26 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   mechanism (a no-op by merge criterion — 608 pre-existing tests passed untouched) · 2 ✅ clustering,
   which fixed the live defect · 3a ✅ same-source/same-poll exclusion in `ContactStore.ingest`,
   radius-independent · 4a ✅ cardinality observable in `facts`/console · 3b-i ✅ angular separability
-  (rev.2) · **3b-ii ⚠ scope now questionable** (see below) · 4b ⛔ speech and events — **the first
-  stage that changes what is heard** · 5 ⛔ composition · 6 ⛔ hardening.
+  (rev.2) · 3b-ii ⚠ scope now questionable (see below) · **4b ✅ speech and events — merged
+  2026-09-19** (feature/group-contact-speech) · 5 ⛔ composition · 6 ⛔ hardening.
+
+  **Rule delivered in Stage 4b — Attention earns precision:** A `watch` or `priority` contact with an
+  exact cardinality interval (`lo == hi`, no uncertainty) speaks its real count, capped at twelve.
+  An inexact interval (`lo ≠ hi`) stays hedged regardless of attention — no manufactured precision.
+  Honesty condition: attention buys disclosure of precision already held, never creates precision.
 
   **Open questions for the next pass, both real rather than rhetorical:**
   - **Does Stage 3b-ii still justify a sortie?** Its headline purpose was pinning the acuity
     magnitude, which rev.2 showed is not load-bearing. What remains is the tier → count-coarseness
-    cap and the chaining cap. Consider folding them elsewhere rather than flying for them.
+    cap and the chaining cap. Consider folding them elsewhere rather than flying for them. **Status
+    (2026-09-19):** Still deferred pending F10 vocabulary sortie feedback; user to re-judge.
   - **Is Stage 5 (composition) still worth building?** The angular model resolves the twelve-unit
     case that originally motivated the whole group model, so the headline example has largely
     dissolved. Cardinality retains real uses — along-LOS columns, tight formations, infantry below
-    detection size. The user's own instruction was to re-judge this after flying, and that still
-    stands.
+    detection size. The user's own instruction was to re-judge this after flying. **Status
+    (2026-09-19):** Same sortie (F10 vocabulary + Stage 4b speech live) will exercise whether
+    kind separation (tanks vs. BTRs) adds tactical value beyond cardinality alone. DoD's acceptance
+    plan documents what to listen for that argues for or against this stage.
 
   **Deferred, recorded so they are not silently assumed away** (user, 2026-09-18): occlusion (a near
   object hiding a far one on the same line of sight), and shape, colour and movement as
