@@ -152,7 +152,40 @@ it -- it builds its own line directly from `_unit_type_display`, not through
 `_contact_report_text`, by construction rather than an added exclusion (a
 classification-change callout volunteering count chatter on an event about
 something else entirely would be exactly the unrequested cardinality
-narration settled decision 4 warns against)."""
+narration settled decision 4 warns against).
+
+**Contact report fine tuning -- the cheap `speech.py` items (`ROADMAP.md`,
+opened 2026-09-18, this pass 2026-09-19).** Units are spelled out for TTS
+(`_format_range_km` now returns `"5 kilometres"`, not `"5 km"`; the
+enrichment-distance parenthetical `_round_enrichment_fragment` rounds now
+reads `"(~400 metres)"`, not `"(~400m)"` -- shorthand is not read correctly).
+British "kilometres"/"metres" was kept rather than switched to American
+spelling, matching this file's own pre-existing usage (this docstring's
+"eleven o'clock, two kilometres" worked example, `tools.py`'s own
+`"1 decimal place of kilometres"` docstring) -- either spelling is equally
+sayable, so there was nothing to gain from churning it. Below
+`_VERY_CLOSE_RANGE_M` (500 m), `_format_range_km` says `"very close"`
+instead of a figure -- the roadmap's own reasoning: at that range the exact
+number stops mattering and the fact of proximity starts to. Acronym/
+designation respelling for TTS (`_TTS_TOKEN_RESPELL`/`_respell_for_tts`) is
+a small, explicit per-token table applied only at `_unit_type_display`'s/
+`_plural_unit_type_display`'s `type` level, deliberately **not** a blanket
+rule -- a blanket rule would also respell `"SAM"`, which TTS already reads
+correctly on its own (the roadmap's named exception, and `_OP_CLASS_
+DISPLAY`'s existing acronym, untouched by this table since it lives at
+`class` level, not `type`). Checked against the real sayable vocabulary
+rather than guessed: the roadmap's own worked example, `"LR"`, does not
+occur anywhere in `_OP_CLASS_DISPLAY`/`_OP_CLASS_DISPLAY_PLURAL` or in
+`perception.reporting_names`'s 377-entry reporting-name catalogue (the full
+vocabulary a `type`-level classification value can hold), so it was left
+out rather than added on faith; the table's one populated entry, the
+`Mi-8`/`Mi-24`/`Mi-26`/`Mi-28` family, is the actual reporting-name shape
+that produced the live "read as one blended token" finding. See
+`enrichment.py`'s own docstring for the matching `belief/enrichment.py`
+items -- the `NEAR_FACT_RADIUS_M`-gated "on {label}"/"next to {label}"
+short-range wording, which `_round_enrichment_fragment` above now also has
+to pass through unchanged (no distance figure at all, by construction, so
+its regex simply does not match)."""
 
 from __future__ import annotations
 
@@ -304,6 +337,39 @@ _OP_CLASS_DISPLAY_PLURAL: Final[dict[str, str]] = {
 #: See `_round_enrichment_fragment`.
 _ENRICHMENT_DISTANCE_RE: Final = re.compile(r"\((\d+)m\)$")
 
+#: Per-token TTS respelling (2026-09-19 roadmap item, "Contact report fine
+#: tuning" -- cheap items). A table, not a blanket rule, because a blanket
+#: acronym-spacing rule would also mangle `"SAM"`, which TTS already reads
+#: correctly on its own (`_OP_CLASS_DISPLAY`'s exception, unaffected by this
+#: table). Checked against the actual sayable vocabulary rather than
+#: guessed: the roadmap's own worked example, `"LR"`, does not occur
+#: anywhere in `_OP_CLASS_DISPLAY`/`_OP_CLASS_DISPLAY_PLURAL` or in
+#: `perception.reporting_names`'s 377-entry reporting-name catalogue (the
+#: full vocabulary a `type`-level classification value can hold), so it is
+#: not in this table -- see this module's `implementation.md` note. The
+#: `Mi-XX` family (`Mi-8`/`Mi-24`/`Mi-26`/`Mi-28`, the only rotorcraft
+#: reporting names sharing that "letter(s)-dash-digits" shape) is: only
+#: `"Mi-8"` was actually heard misread live, but all four are the identical
+#: shape for the identical reason (a two-character prefix plus digits reads
+#: as one blended token, not as characters), so all four get the same fix
+#: rather than leaving three of them inconsistently unfixed.
+_TTS_TOKEN_RESPELL: Final[dict[str, str]] = {
+    "mi-8": "M I 8",
+    "mi-24": "M I 24",
+    "mi-26": "M I 26",
+    "mi-28": "M I 28",
+}
+
+
+def _respell_for_tts(text: str) -> str:
+    """Apply `_TTS_TOKEN_RESPELL` word-by-word (space-separated tokens,
+    case-insensitive match), leaving any token not in the table alone --
+    the safe default a per-token table exists to preserve (see the table's
+    own docstring on why this is not a blanket acronym rule)."""
+    return " ".join(
+        _TTS_TOKEN_RESPELL.get(token.lower(), token) for token in text.split(" ")
+    )
+
 
 def _unit_type_display(value: object, level: object) -> str:
     """The contact report's unit-type field, from `facts["classification"]`'s
@@ -311,7 +377,7 @@ def _unit_type_display(value: object, level: object) -> str:
     Lowercase throughout, consistent with `_OP_CLASS_DISPLAY`'s own
     vocabulary (acronyms like `"SAM"`/`"AAA"` excepted)."""
     if level == "type" and isinstance(value, str) and value:
-        return value
+        return _respell_for_tts(value)
     if level == "class" and isinstance(value, str) and value:
         return _OP_CLASS_DISPLAY.get(value, value)
     if level == "presence":
@@ -331,7 +397,7 @@ def _plural_unit_type_display(value: object, level: object) -> str:
     doesn't pluralize sensibly, and "several contacts" is what actually
     reads right."""
     if level == "type" and isinstance(value, str) and value:
-        return value
+        return _respell_for_tts(value)
     if level == "class" and isinstance(value, str) and value:
         return _OP_CLASS_DISPLAY_PLURAL.get(value, value)
     return "contacts"
@@ -398,29 +464,50 @@ def _cardinality_phrase(lo: int, hi: float, attended: bool = False) -> str | Non
     return "several"
 
 
+#: Below this slant range, the exact figure stops mattering and the fact of
+#: proximity starts to (2026-09-19 roadmap item) -- `_format_range_km`
+#: speaks `"very close"` instead of a rounded distance. Threshold, not a
+#: rounding artefact: it is checked against the raw `range_m`, before the
+#: nearest-0.5-km rounding below ever runs.
+_VERY_CLOSE_RANGE_M: Final[float] = 500.0
+
+
 def _format_range_km(range_m: float) -> str:
-    """Round a range in metres to the nearest 0.5 km, formatted without a
-    trailing `.0` (`5000.0 -> "5"`, `1500.0 -> "1.5"`). See module
-    docstring's "Contact report format" note."""
+    """Round a range in metres to the nearest 0.5 km, spelled out for TTS
+    (`5000.0 -> "5 kilometres"`, `1500.0 -> "1.5 kilometres"`) -- shorthand
+    like `"km"` is not spoken correctly. Below `_VERY_CLOSE_RANGE_M`, returns
+    `"very close"` instead of a figure (see that constant's docstring). See
+    module docstring's "Contact report format" note.
+
+    Spelled `"kilometres"` (not `"kilometers"`), matching this file's own
+    existing British spelling elsewhere (the module docstring's own worked
+    example, `"two kilometres"`) rather than picking a spelling fresh --
+    either reads fine for TTS, so there is nothing to gain from churning it."""
+    if range_m < _VERY_CLOSE_RANGE_M:
+        return "very close"
     range_km = round(range_m / 500.0) * 0.5
     if range_km == int(range_km):
-        return str(int(range_km))
-    return f"{range_km:g}"
+        range_str = str(int(range_km))
+    else:
+        range_str = f"{range_km:g}"
+    return f"{range_str} kilometres"
 
 
 def _round_enrichment_fragment(text: str) -> str:
     """Round a `SemanticFact.text` fragment's trailing `"(NNNm)"` distance to
-    the nearest 100 m, prefixed with `~` (`"near a road (439m)"` ->
-    `"near a road (~400m)"`). Text with no trailing distance parenthetical
-    (e.g. `"inside Anapa"`) passes through unchanged. `SemanticFact.text`
-    itself (`enrichment.py`) is not touched -- this is a display-only
-    post-process scoped to this module, see module docstring's "No coalition
-    token"/"Contact report format" notes."""
+    the nearest 100 m, prefixed with `~` and spelled out for TTS
+    (`"near a road (439m)"` -> `"near a road (~400 metres)"`). Text with no
+    trailing distance parenthetical (e.g. `"inside Anapa"`, or `enrichment.
+    py`'s new `"on {label}"`/`"next to {label}"` proximity phrasing, which
+    carries no distance figure at all) passes through unchanged.
+    `SemanticFact.text` itself (`enrichment.py`) is not touched -- this is a
+    display-only post-process scoped to this module, see module docstring's
+    "No coalition token"/"Contact report format" notes."""
     match = _ENRICHMENT_DISTANCE_RE.search(text)
     if match is None:
         return text
     rounded = round(int(match.group(1)) / 100.0) * 100
-    return f"{text[: match.start()]}(~{rounded}m)"
+    return f"{text[: match.start()]}(~{rounded} metres)"
 
 
 def _contact_report_text(facts: dict[str, object]) -> str:
@@ -473,7 +560,7 @@ def _contact_report_text(facts: dict[str, object]) -> str:
         clock = relative_now["clock_position"]
         range_m = relative_now["range_m"]
         assert isinstance(range_m, float)
-        text += f", {clock} o'clock, {_format_range_km(range_m)} km"
+        text += f", {clock} o'clock, {_format_range_km(range_m)}"
     semantic = facts.get("semantic")
     if isinstance(semantic, list) and semantic:
         best = max(semantic, key=lambda fact: fact["confidence"])
@@ -531,7 +618,9 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
             clock = relative_now["clock_position"]
             range_m = relative_now["range_m"]
             assert isinstance(range_m, float)
-            return f"unit at {clock} o'clock, {_format_range_km(range_m)} km is {unit_type}."
+            return (
+                f"unit at {clock} o'clock, {_format_range_km(range_m)} is {unit_type}."
+            )
         return f"unit is {unit_type}."
     if event.kind == CONTACT_CARDINALITY_CHANGED:
         return None

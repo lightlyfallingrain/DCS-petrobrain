@@ -46,6 +46,19 @@ risk note that `side` is unreliable *near* the coast is why the wording
 hedges to "near the coast" rather than asserting a side in that band, only
 asserting "over the sea" once far enough out that the position uncertainty
 itself can't explain the `side` reading).
+
+**Contact report fine tuning -- the cheap `enrichment.py` items** (`ROADMAP.
+md`, opened 2026-09-18, this pass 2026-09-19). `semantic_facts_for`'s five
+`"near {label} ({distance}m)"` fact constructions (settlement/road/water/
+ridge/valley) now go through a shared `_proximity_text(label, distance_m)`
+helper: at or under `_ON_FEATURE_MAX_M`, `"on {label}"`, no figure; in the
+`_NEXT_TO_MIN_M`..`_NEXT_TO_MAX_M` band, `"next to {label}"`, also no figure
+-- both replace the bare-distance shape entirely at the range where the fact
+of proximity matters more than the number, per the roadmap item. Generic
+over `label` (a proper name, or a generic noun phrase like `"a road"`/`"a
+ridge line"`) rather than road-specific, since the item asks for this
+wording for any feature reference. `speech.py`'s own module docstring has
+the matching `speech.py`-side items (spelled-out units, acronym respelling).
 """
 
 from __future__ import annotations
@@ -166,6 +179,54 @@ def _within_near_radius(kind: str, distance_m: float) -> bool:
     return distance_m <= NEAR_FACT_RADIUS_M.get(kind, float("inf"))
 
 
+#: At or below this distance, a feature reference reads as "on {label}"
+#: rather than "near {label} (Nm)" -- 2026-09-19 roadmap item: at zero
+#: distance the exact figure is meaningless (there is nothing left to
+#: measure), so the wording drops it entirely rather than saying "near a
+#: road (0m)". Checked as `<=` rather than `== 0.0` to tolerate the small
+#: float noise a real geometry computation can produce for a position that
+#: is, for practical purposes, on the linear feature.
+_ON_FEATURE_MAX_M: Final[float] = 0.5
+
+#: The "next to {label}" band -- roughly 10 to 100 m, per the same roadmap
+#: item: close enough that "near ... (Nm)" undersells how close this is,
+#: too far to say "on" it. Below `_NEXT_TO_MIN_M` (and above
+#: `_ON_FEATURE_MAX_M`) falls through to the pre-existing "near {label}
+#: (Nm)" shape -- that ~0.5-10 m gap is not one either named case in the
+#: roadmap item covers, so it is left alone rather than inventing a third
+#: band nobody asked for.
+_NEXT_TO_MIN_M: Final[float] = 10.0
+_NEXT_TO_MAX_M: Final[float] = 100.0
+
+
+def _proximity_text(label: str, distance_m: float) -> str:
+    """Distance-based feature-reference wording, shared by every "near X"
+    fact `semantic_facts_for` builds (settlement/road/water/ridge/valley) --
+    generic over `label` rather than road-specific, since the roadmap item
+    asks for "on"/"next to" wording for any feature reference, not just
+    roads. `label` is the same string each call site already built for the
+    pre-existing "near {label} (Nm)" shape (a proper name, or a generic
+    noun phrase like `"a road"`/`"a ridge line"`), so `"on a road"`/`"next
+    to a road"` is what an unnamed feature gets -- grammar polish beyond
+    that (swapping the article for "the") is exactly the class of fine
+    tuning `speech.py`'s 2026-09-19 standing rule keeps out of scope.
+
+    Below `_ON_FEATURE_MAX_M`: `"on {label}"`, no distance figure (there is
+    nothing left to measure). Within the `_NEXT_TO_MIN_M`.._NEXT_TO_MAX_M
+    band: `"next to {label}"`, also no figure -- both replace the bare-number
+    shape at the distance where the *fact* of proximity matters more than
+    the number (this is a wording decision made once, here, rather than
+    `speech.py`'s `_round_enrichment_fragment` continuing to round a figure
+    these two cases no longer carry at all). Otherwise, the pre-existing
+    `"near {label} ({distance}m)"` shape, unchanged -- `speech.py` still
+    rounds/spells that figure for TTS at render time."""
+    if distance_m <= _ON_FEATURE_MAX_M:
+        return f"on {label}"
+    if _NEXT_TO_MIN_M <= distance_m < _NEXT_TO_MAX_M:
+        return f"next to {label}"
+    return f"near {label} ({distance_m:.0f}m)"
+
+
 def displayable_name(name: str | None) -> str | None:
     """`name` if it can be shown and spoken, otherwise `None` so the caller
     falls back to a generic label ("a village", "a wadi").
@@ -258,7 +319,7 @@ def semantic_facts_for(
         )
         facts.append(
             SemanticFact(
-                text=f"near {name} ({settlement.distance_m:.0f}m)",
+                text=_proximity_text(name, settlement.distance_m),
                 confidence=_combined_confidence(settlement.confidence, position_conf),
                 provenance=settlement.provenance,
                 feature_id=f"settlement:{settlement.name or 'unnamed'}",
@@ -284,7 +345,7 @@ def semantic_facts_for(
         label = displayable_name(road.name) or road.subtype or "a road"
         facts.append(
             SemanticFact(
-                text=f"near {label} ({road.distance_m:.0f}m)",
+                text=_proximity_text(label, road.distance_m),
                 confidence=_combined_confidence(road.confidence, position_conf),
                 provenance=road.provenance,
                 feature_id=f"road:{road.name or road.subtype or 'unnamed'}",
@@ -296,7 +357,7 @@ def semantic_facts_for(
         name = displayable_name(water.name) or _unnamed_water_label(water.subtype)
         facts.append(
             SemanticFact(
-                text=f"near {name} ({water.distance_m:.0f}m)",
+                text=_proximity_text(name, water.distance_m),
                 confidence=_combined_confidence(water.confidence, position_conf),
                 provenance=water.provenance,
                 feature_id=f"water:{water.name or 'unnamed'}",
@@ -307,7 +368,7 @@ def semantic_facts_for(
     if ridge is not None and _within_near_radius("ridge", ridge.distance_m):
         facts.append(
             SemanticFact(
-                text=f"near a ridge line ({ridge.distance_m:.0f}m)",
+                text=_proximity_text("a ridge line", ridge.distance_m),
                 confidence=_combined_confidence(ridge.confidence, position_conf),
                 provenance=ridge.provenance,
                 feature_id=f"ridge:{round(ridge.distance_m / 100.0) * 100}",
@@ -318,7 +379,7 @@ def semantic_facts_for(
     if valley is not None and _within_near_radius("valley", valley.distance_m):
         facts.append(
             SemanticFact(
-                text=f"near a valley line ({valley.distance_m:.0f}m)",
+                text=_proximity_text("a valley line", valley.distance_m),
                 confidence=_combined_confidence(valley.confidence, position_conf),
                 provenance=valley.provenance,
                 feature_id=f"valley:{round(valley.distance_m / 100.0) * 100}",

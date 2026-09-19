@@ -72,6 +72,83 @@ WATCHED_SAMPLES: tuple[tuple[str, str, str, tuple[int, float] | None], ...] = (
     ("WATCHED singular", "T-72", "type", (1, 1)),
 )
 
+#: (label, facts) -- the 2026-09-19 "Contact report fine tuning" roadmap
+#: item's cheap wording changes: spelled-out units, "very close" under
+#: half a kilometre, per-token TTS respelling (a known designation, and the
+#: "SAM" exception), and `enrichment.py`'s new "on"/"next to" short-range
+#: feature wording (both bare, from a raw `SemanticFact.text`, and rounded
+#: for the pre-existing "near X (Nm)" shape once past those two bands).
+#: `build_facts` can't express clock/range/semantic fragments (its tuple
+#: shape is cardinality-only), so these are hand-built `facts` dicts
+#: instead, exercised through the same `_contact_report_text` every other
+#: row here goes through.
+WORDING_SAMPLES: tuple[tuple[str, dict[str, object]], ...] = (
+    (
+        "range spelled out",
+        {
+            "classification": {"value": "OP_ARMORED", "level": "class"},
+            "relative_now": {"clock_position": 3, "range_m": 3000.0},
+        },
+    ),
+    (
+        "very close (under 0.5 km)",
+        {
+            "classification": {"value": "OP_TRUCK", "level": "class"},
+            "relative_now": {"clock_position": 12, "range_m": 200.0},
+        },
+    ),
+    (
+        "known designation respelled (Mi-8)",
+        {"classification": {"value": "Mi-8", "level": "type"}},
+    ),
+    (
+        "SAM is NOT respelled (the roadmap's named exception)",
+        {"classification": {"value": "OP_SRSAM", "level": "class"}},
+    ),
+    (
+        "semantic fragment distance rounded and spelled",
+        {
+            "classification": {"value": "OP_ARMORED", "level": "class"},
+            "semantic": [
+                {
+                    "text": "near a road (439m)",
+                    "confidence": 1.0,
+                    "provenance": "osm",
+                    "feature_id": "road:sample",
+                }
+            ],
+        },
+    ),
+    (
+        "on the road (zero distance)",
+        {
+            "classification": {"value": "OP_ARMORED", "level": "class"},
+            "semantic": [
+                {
+                    "text": "on a road",
+                    "confidence": 1.0,
+                    "provenance": "osm",
+                    "feature_id": "road:sample",
+                }
+            ],
+        },
+    ),
+    (
+        "next to the road (~10-100 m)",
+        {
+            "classification": {"value": "OP_ARMORED", "level": "class"},
+            "semantic": [
+                {
+                    "text": "next to a road",
+                    "confidence": 1.0,
+                    "provenance": "osm",
+                    "feature_id": "road:sample",
+                }
+            ],
+        },
+    ),
+)
+
 
 def build_facts(
     value: str, level: str, card: tuple[int, float] | None, attention: str = "normal"
@@ -137,6 +214,19 @@ def main() -> int:
         "regression guard: explicit (1,1) and absent-cardinality render "
         + ("IDENTICALLY -- correct." if same else "DIFFERENTLY -- investigate.")
     )
+
+    print()
+    wording_width = max(len(label) for label, _ in WORDING_SAMPLES)
+    for label, facts in WORDING_SAMPLES:
+        text = _contact_report_text(facts)
+        line = f"{label:<{wording_width}}  |  {text}"
+        if args.speak:
+            status = speak(args.adapter_url, text)
+            line += f"   [{status}]"
+        print(line)
+        if args.speak:
+            time.sleep(args.pause)
+
     return 0
 
 
