@@ -182,10 +182,24 @@ consume.
   when unset), a recognition failure (`503`, never enqueued), and the same
   missing/invalid-base64/empty-decoded/non-JSON `400` cases `test_server.py`'s `/speak` covers for
   its own base64 field.
-- `src/__main__.py` (including `LocalPlaybackSink`, the `afplay` delivery target) has **no
-  automated test** — a live-process entrypoint, same untested-by-design posture as
+- `src/audio_adapter/__main__.py`'s CLI wiring (`argparse`, `main()` itself) has **no automated
+  test** — a live-process entrypoint, same untested-by-design posture as
   `aircraft-layer/src/collector/__main__.py`'s and `body-layer/src/logger.py`'s own `main()`s.
-  Verified manually via the `curl`/`afplay` command above.
+  Verified manually via the `curl`/`afplay` command above. **`LocalPlaybackSink` used to live in
+  that same file and inherited this exemption by co-location, not by actually being untestable**
+  (review, `plans/inbound-speech/plan.md` Stage 3 follow-up, 2026-09-20) — it is ordinary
+  deterministic class logic, the same shape as `AudioPlaybackSender.interrupt` on the
+  aircraft-layer side, which *is* tested. Moved to its own module (`src/local_playback.py`) with
+  its own test file specifically so this doesn't recur: an entrypoint's "no automated test"
+  exemption covers the CLI wiring genuinely tied to a live process, not every class that happens to
+  be defined next to it.
+- `tests/test_local_playback.py` (Stage 3 follow-up) — `_InFlightTracker` directly (no threads, no
+  subprocess: `start`/`interrupt`/`finish` called by hand to reproduce the exact interleaving that
+  broke the first version of this fix — a second `interrupt()` against a second in-flight process
+  landing before the first process's own `finish()` runs) plus `LocalPlaybackSink` against a fake
+  `_PlaybackProcess` double (success, genuine non-zero exit → `AudioDeliveryError`, missing binary
+  → `AudioDeliveryError`, an interrupted `deliver()` completing cleanly instead of raising, and two
+  concurrent `deliver()` calls each surviving their own interrupt).
 
 ## Structure
 
@@ -224,17 +238,26 @@ consume.
   `CLAUDE.md`'s module-independence rule.
 - `src/audio_adapter/__main__.py` — CLI entrypoint (`python -m audio_adapter`;
   `--host`/`--port`/`--target local|aircraft-layer`/`--aircraft-layer-url`/`--voice`/`--debug`,
-  plus (Slice 3 Stage 3) `--whisper-binary`/`--whisper-model`) and `LocalPlaybackSink`, the
-  `--target local` `AudioSink` implementation (`afplay` on a temp WAV file, now run via `Popen`
-  rather than the blocking `subprocess.run` this class started with — `interrupt()`, Stage 3
-  follow-up, needs a live reference to the in-flight process to `kill()` it, tracked under a small
-  lock so a `POST /stop` arriving on a different request-handling thread can reach it). Lives in its own
-  `audio_adapter/` package (unlike the flat top-level modules below) purely so
-  `python -m audio_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py` stay flat
-  top-level modules on `src`'s `pythonpath`, imported directly by both this entrypoint and the
-  test suite. `--whisper-model` (no default — omitted means no recogniser configured, a true
-  no-op) wires a `WhisperCliEngine` using Stage 1's settled config, `vocabulary.to_prompt()`
-  biasing and never `--grammar`.
+  plus (Slice 3 Stage 3) `--whisper-binary`/`--whisper-model`). Lives in its own `audio_adapter/`
+  package (unlike the flat top-level modules below) purely so `python -m audio_adapter` works —
+  `tts_engine.py`/`server.py`/`aircraft_client.py`/`local_playback.py` stay flat top-level modules
+  on `src`'s `pythonpath`, imported directly by both this entrypoint and the test suite.
+  `--whisper-model` (no default — omitted means no recogniser configured, a true no-op) wires a
+  `WhisperCliEngine` using Stage 1's settled config, `vocabulary.to_prompt()` biasing and never
+  `--grammar`.
+- `src/local_playback.py` (Stage 3 follow-up, extracted from `__main__.py`, review 2026-09-20) —
+  `LocalPlaybackSink`, the `--target local` `AudioSink` implementation (`afplay` on a temp WAV
+  file, run via `Popen` rather than the blocking `subprocess.run` this class started with —
+  `interrupt()` needs a live reference to the in-flight process to `kill()` it), plus
+  `_InFlightTracker`: the interrupted-vs-failed bookkeeping `deliver()` needs, since killing
+  `afplay` leaves a non-zero return code indistinguishable from a genuine crash. Tracks every
+  interrupted process **by identity** (`id(process)`, in a `set`) rather than in a single slot —
+  the single-slot version of this fix had a real concurrency bug (`ThreadingHTTPServer` allows two
+  `deliver()` calls in flight at once; a second `interrupt()` could clobber the first's pending
+  entry before its own `deliver()` had read it, making a genuine kill misread as a real failure and
+  500 the in-flight `/speak` call). `LocalPlaybackSink.__init__` takes an injectable `spawn`
+  callable (default: real `Popen`) specifically so tests can drive this logic with a fake
+  `_PlaybackProcess`, no real `afplay` involved.
 - `src/stt_engine.py` (Slice 3 Stage 1) — `STTEngine` protocol + `WhisperCliEngine` +
   the mirror image of `tts_engine.py`. See "Tech stack" above for the
   unverified-CLI-contract caveat.
