@@ -57,6 +57,7 @@ from typing import TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import RelativeSector, Sector
+from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.classification import parent_class_of
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
@@ -76,7 +77,6 @@ from belief.speech import (
     render_watch_nearest_readback,
     route_event,
 )
-from belief.srs_client import SrsAdapterClient, SrsAdapterError
 from belief.tasks import PendingIntent, TaskStore
 from belief.tools import (
     cancel_task,
@@ -116,7 +116,7 @@ Petrovich crew session -- type naturally, e.g.:
                                    call (no real threat detector exists yet)
   !voice <token|-> <ratio> <confidence> <verb_anchored:0|1> <ambiguous:0|1> <text...>
                                    test harness: drive handle_transcript with
-                                   an already-matched result, as if srs-adapter's
+                                   an already-matched result, as if audio-adapter's
                                    command_matcher had produced it (Stage 3
                                    wires the real thing; no audio here)
 
@@ -304,10 +304,10 @@ class CrewConsole:
     #: prefix) is threaded straight through as `push_speech`'s `urgent`
     #: argument -- no new signal invented, matching the plan's Decision 3.
     #: `logger.py`'s `--crew-text --speech-audio` branch wires this to a
-    #: `belief.srs_client.SrsAdapterClient` built from `--srs-adapter-url`,
+    #: `belief.audio_client.AudioAdapterClient` built from `--audio-adapter-url`,
     #: independent of `--overlay`'s own `AircraftLayerClient` wiring (a
     #: different process, a different URL).
-    speech_client: SrsAdapterClient | None = None
+    speech_client: AudioAdapterClient | None = None
     _next_utterance_number: int = field(default=0, repr=False)
     #: Stage 2 of `plans/inbound-speech/plan.md`'s confirm-band state --
     #: set by `handle_transcript` when a matched command lands in the
@@ -613,7 +613,7 @@ class CrewConsole:
         """`plans/inbound-speech/plan.md` Stage 2's voice-command entry
         point -- a sibling of `handle_line`/`handle_f10_command`, per the
         module docstring's prediction of a third input surface. Called
-        with the fields `srs_adapter.command_matcher.MatchResult` already
+        with the fields `audio_adapter.command_matcher.MatchResult` already
         resolved (Stage 3 wires the real HTTP poll; this stage is driven
         by tests and the `!voice` REPL harness, see `_handle_voice_test_
         command`).
@@ -675,7 +675,7 @@ class CrewConsole:
         """`!voice` -- a manually-typed test harness for `handle_transcript`,
         mirroring `!inject-urgent`'s "clearly-labelled test harness, not a
         production surface" posture. Body-layer cannot compute a real match
-        itself (module independence: no import of `srs-adapter`'s
+        itself (module independence: no import of `audio-adapter`'s
         `command_matcher`/`vocabulary`) -- this command instead takes the
         fields the adapter would have already produced as literal typed
         arguments, exactly the shape Stage 3's real `GET /transcripts/poll`
@@ -783,7 +783,7 @@ class CrewConsole:
         `overlay_client`/`speech_client` are configured, pushes the same
         line to the in-cockpit text overlay (`AircraftLayerClient.
         push_text_line`, `POST /text/push`) and/or the TTS audio pipeline
-        (`SrsAdapterClient.push_speech`, `POST /speak` -- BL-10 first
+        (`AudioAdapterClient.push_speech`, `POST /speak` -- BL-10 first
         slice, `plans/tts-voice-output/plan.md`) -- the single funnel
         point every path that produces spoken text (`handle_line`,
         `drain_events`) already goes through, so neither sink needs a
@@ -823,7 +823,7 @@ class CrewConsole:
             if self.speech_client is not None:
                 try:
                     self.speech_client.push_speech(line, urgent=bypass_gate)
-                except SrsAdapterError:
+                except AudioAdapterError:
                     logger.warning(
                         "speech push failed for crew-text line (continuing)",
                         exc_info=True,

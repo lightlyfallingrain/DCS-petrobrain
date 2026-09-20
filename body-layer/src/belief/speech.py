@@ -292,7 +292,7 @@ def render_say_again() -> OutgoingSpeech:
     """`plans/inbound-speech/plan.md` Stage 2 -- spoken when a voice
     transcript falls below `belief.voice_commands.CONFIRM_FLOOR`, or was a
     verb-anchored command attempt that resolved to nothing (an unmatched
-    phrase, or an illegal bearing `srs_adapter.command_matcher` detected).
+    phrase, or an illegal bearing `audio_adapter.command_matcher` detected).
     Fixed phrasing, no caller-supplied description -- there is nothing
     coherent to describe yet at this confidence. **Not the same signal as
     silence**: a clip the adapter's own signal-level gate rejected never

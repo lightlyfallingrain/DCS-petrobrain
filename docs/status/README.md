@@ -10,7 +10,7 @@ Published as a private artifact:
 
 **This page is never a source of truth.** Every status on it is derived from the `ROADMAP.md`
 files (root, `world-model/`, `aircraft-layer/`, `body-layer/`, `mission-interpreter/`,
-`srs-adapter/`) plus `todo/todo.md`. If this page and a roadmap disagree, **the page is wrong** —
+`audio-adapter/`) plus `todo/todo.md`. If this page and a roadmap disagree, **the page is wrong** —
 fix the page, never the roadmap, and never treat the page as the record of what happened.
 
 This is the same discipline the roadmaps already apply to each other (root `ROADMAP.md`: a

@@ -15,7 +15,7 @@ today, and `VOICE_ONLY_TOKENS` are the ones that never existed there.
 "fix" a mismatch against `aircraft-layer`'s `ALLOWED_COMMANDS` by
 deleting anything here. When the F10 path is removed the split collapses
 and both tuples fold into `TOKENS`.
-`srs-adapter` must stand alone (root `CLAUDE.md`'s module-independence
+`audio-adapter` must stand alone (root `CLAUDE.md`'s module-independence
 rule -- the body-layer<->world-model in-process import is the sole
 sanctioned exception, and this is not it), so it cannot import
 `body-layer/src/belief/crew_console.py`'s `_RELATIVE_SCAN_TOKENS`/

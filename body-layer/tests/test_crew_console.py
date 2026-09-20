@@ -17,13 +17,13 @@ import pytest
 
 from aircraft_client import AircraftLayerError
 from belief import enrichment as enrichment_module
+from belief.audio_client import AudioAdapterError
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import EscalationPayload
-from belief.srs_client import SrsAdapterError
 from belief.tasks import TaskStore
 from belief.voice_commands import ACT_FLOOR, CONFIRM_FLOOR, CONFIRM_WINDOW_S
 from perception.geometry import GeoPosition
@@ -54,7 +54,7 @@ class FakeSpeechClient:
     used to exercise `CrewConsole.speech_client` (BL-10 first slice,
     `plans/tts-voice-output/plan.md`). Records `(text, urgent)` pairs so
     tests can assert `bypass_gate` was threaded through as `push_speech`'s
-    `urgent` argument. `fail_on` names texts that raise `SrsAdapterError`
+    `urgent` argument. `fail_on` names texts that raise `AudioAdapterError`
     instead of recording, used to exercise `CrewConsole._print`'s per-push
     isolation for this sink."""
 
@@ -64,7 +64,7 @@ class FakeSpeechClient:
 
     def push_speech(self, text: str, urgent: bool) -> None:
         if text in self._fail_on:
-            raise SrsAdapterError("simulated push failure")
+            raise AudioAdapterError("simulated push failure")
         self.pushed.append((text, urgent))
 
 

@@ -673,7 +673,7 @@ The audio transport is **SRS (SimpleRadio Standalone)**, with Petrovich on the a
 (intercom) channel**. The player talks to Petrovich by transmitting on ICS; Petrovich answers on
 the same channel. There is no separate mechanism per direction.
 
-Audio never enters the runtime. An **SRS adapter** owns the audio boundary and deals in text only
+Audio never enters the runtime. An **audio adapter** owns the audio boundary and deals in text only
 on its inward side — see `division-or-responsibility.md`'s "Speech / audio (SRS ICS)" section for
 the layer placement argument (adapter as a sibling of the aircraft layer, not part of it).
 
@@ -941,7 +941,7 @@ invent them.
 
 Allow push-to-talk interaction on SRS ICS, including the transmit debounce and silence/noise gate.
 
-Both are signal-level and belong to the SRS adapter — raw audio must not cross into the runtime.
+Both are signal-level and belong to the audio adapter — raw audio must not cross into the runtime.
 Any context-dependent suppression (a tighter tolerance mid-engagement, say) is a later refinement
 that operates on already-transcribed text and belongs to the runtime instead.
 

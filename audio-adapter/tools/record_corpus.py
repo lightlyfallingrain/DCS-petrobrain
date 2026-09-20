@@ -14,7 +14,7 @@ the file to the right place, and lets a bad take be redone on the spot.
 Requires `sox` (Homebrew: `brew install sox`; on Windows, the installer
 from sox.sourceforge.net), an external binary in the same sense
 whisper-cli is -- deliberately not a Python package, since
-this subproject is stdlib-only (`srs-adapter/CLAUDE.md`).
+this subproject is stdlib-only (`audio-adapter/CLAUDE.md`).
 
     # Mac
     PYTHONPATH=src .venv/bin/python tools/record_corpus.py --corpus-dir <dir>

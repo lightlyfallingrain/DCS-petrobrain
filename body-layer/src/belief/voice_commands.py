@@ -1,20 +1,20 @@
 """The act/confirm/say-again confidence bands and the confirm-band pending
 state (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's split).
 
-**What lives here, and what deliberately does not.** `srs-adapter`'s
+**What lives here, and what deliberately does not.** `audio-adapter`'s
 `command_matcher.py` owns everything mechanical -- normalise, anchor a
 verb, fuzzy-match a phrase, check separation -- and body-layer never
 imports it (module independence: the world-model seam is the sole
 sanctioned in-process cross-subproject import). This module owns the
 other half: given a match already resolved (`token`, `match_ratio`,
-`verb_anchored`, `ambiguous` -- `srs_adapter.command_matcher.MatchResult`'s
+`verb_anchored`, `ambiguous` -- `audio_adapter.command_matcher.MatchResult`'s
 shape, reproduced here as plain arguments so body-layer holds no copy of
 that module or of `vocabulary.py`'s phrase table), decide whether to act,
 ask, or say again, and track the one piece of state a confirm question
 needs between two calls.
 
 **Behaviour constants only** -- `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN`
-are matching constants and stay in `srs-adapter/src/command_matcher.py`,
+are matching constants and stay in `audio-adapter/src/command_matcher.py`,
 not duplicated here (Decision 4 REVISED's "Constants split accordingly").
 
 **Four behaviours this module exists to get right, all from the plan's
@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 #: Stage 1's measured confidence distribution, recorded as data in
-#: `srs-adapter/research/2026-09-19-corpus-bench-results.md` (a reviewer
+#: `audio-adapter/research/2026-09-19-corpus-bench-results.md` (a reviewer
 #: caught this comment previously citing `2026-09-19-whisper-model-
 #: sweep.md`, which carries the accuracy/latency table but no confidence
 #: distribution at all -- the figures below were only citable from plan
@@ -96,7 +96,7 @@ CONFIRM_WINDOW_S: float = 8.0
 
 #: Words that commit a pending confirm-band command, checked only while
 #: one is pending (behaviour #3 above). A small, stable, body-owned
-#: vocabulary -- not a copy of `srs-adapter`'s command phrase table (that
+#: vocabulary -- not a copy of `audio-adapter`'s command phrase table (that
 #: table is unrelated: it names *commands*, this names *answers to a
 #: yes/no question*, a different and much smaller closed set that belongs
 #: to body's own confirm-band behaviour). `"roger"` is standard radio
@@ -104,7 +104,7 @@ CONFIRM_WINDOW_S: float = 8.0
 _AFFIRM_WORDS: frozenset[str] = frozenset({"affirm", "affirmative", "yes", "roger"})
 
 #: Words that discard a pending confirm-band command. `"disregard"` here
-#: is the same English word `srs-adapter`'s `vocabulary.py` also lists as
+#: is the same English word `audio-adapter`'s `vocabulary.py` also lists as
 #: a `cancel_nevermind` phrasing -- not a collision, a deliberate
 #: context-gated overload (Decision 4's original text: these pseudo-words
 #: are "valid only while a confirmation is pending"): the two meanings
@@ -119,7 +119,7 @@ def classify_yes_no(transcript: str) -> YesNo:
     """Whether `transcript` is an affirm/negative answer word, checked
     against the transcript's own first word after a minimal local
     normalisation (lowercase, strip punctuation) -- deliberately not
-    `srs-adapter`'s `vocabulary.normalize_for_match` (module independence:
+    `audio-adapter`'s `vocabulary.normalize_for_match` (module independence:
     this module holds no import of that subproject), and deliberately
     exact rather than fuzzy: this vocabulary is six short, common words,
     not a 39-entry phrase table, and exact matching is enough for it."""
@@ -172,7 +172,7 @@ def classify_response(
     verb_anchored: bool,
     ambiguous: bool,
 ) -> BandDecision:
-    """The band decision for one matched transcript -- `srs_adapter.
+    """The band decision for one matched transcript -- `audio_adapter.
     command_matcher.MatchResult`'s fields plus the transcript's own STT
     confidence, combined per Decision 4 Layer 2 step 5
     (`combined = stt_confidence * phrase_ratio`).

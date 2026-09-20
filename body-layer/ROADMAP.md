@@ -404,20 +404,20 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 - [ ] **BL-9 — Debug visualization.** Not started. Belief-vs-DCS-truth debug view. Arguably worth
   pulling earlier if BL-2/BL-3 turn out hard to reason about textually.
 
-- [~] **BL-10 — SRS transport wiring (= PB-7 + PB-8, body's half only).** **First slice done
+- [~] **BL-10 — audio transport wiring (= PB-7 + PB-8, body's half only).** **First slice done
   2026-09-17 (outbound TTS, `plans/tts-voice-output/`); the rest not started.** Swaps BL-5a's
-  typed/printed stand-ins for the real SRS adapter. The adapter itself (SRS client, ICS channel,
+  typed/printed stand-ins for the real audio adapter. The adapter itself (SRS client, ICS channel,
   PTT debounce, silence gate, STT, TTS) is not body-layer work — it now lives in its own
-  `srs-adapter/` sibling subproject (see `srs-adapter/ROADMAP.md` for that subproject's own
+  `audio-adapter/` sibling subproject (see `audio-adapter/ROADMAP.md` for that subproject's own
   milestone status).
 
   **Slice 1 — outbound TTS (stages 1-4 merged; 5-6 pending hardware).** Petrovich's already-
   generated text is synthesized on the Mac and played as audio. Body-layer's share came to exactly
   one optional field, `CrewConsole.speech_client`, read by the same `_print` funnel `overlay_client`
-  already uses, plus `logger.py --speech-audio --srs-adapter-url`. **That smallness is the
+  already uses, plus `logger.py --speech-audio --audio-adapter-url`. **That smallness is the
   milestone's own stated test of BL-5a, and BL-5a passed it** — the plan said "body changes here
   should be small; if they are not, BL-5a's interface was drawn in the wrong place."
-  `srs-adapter` owns synthesis (`TTSEngine` protocol + `MacSayEngine`) and delivery
+  `audio-adapter` owns synthesis (`TTSEngine` protocol + `MacSayEngine`) and delivery
   (`--target local` plays on the Mac via `afplay`, needing neither Windows nor DCS;
   `--target aircraft-layer` POSTs WAV bytes to the collector's new `POST /audio/play`, played
   there by `AudioPlaybackSender` — FIFO for routine lines, urgent lines clear the queue and
@@ -426,8 +426,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   acceptability on a real sortie (stage 6).
 
   **Slice 2 — SRS ICS injection (next, not started).** `DCS-SR-ExternalAudio.exe --modulations
-  INTERCOM --unitId <player unit id>` as a second `AudioSink` inside `srs-adapter`. The recon
-  (`srs-adapter/research/2026-09-17-tts-audio-transport-recon.md`, read its two addenda) confirmed
+  INTERCOM --unitId <player unit id>` as a second `AudioSink` inside `audio-adapter`. The recon
+  (`audio-adapter/research/2026-09-17-tts-audio-transport-recon.md`, read its two addenda) confirmed
   stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz modulation 2, and that
   `--unitId` exists specifically to allow intercom over external audio. **ICS is the only
   acceptable target** (user constraint, 2026-09-17): the player must stay on the mission frequency
@@ -444,7 +444,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   deliberately capped at the simple fixed set `f10-command-vocabulary` built, and everything the
   command half of `docs/concept/state-transitions.jpg` asks for beyond it — `watch <unit>
   <where>` against a live contact list, waypoint/landmark-anchored scans, the
-  `o'clock-and-distance` location form — is SRS's, not F10's. Those are *rejected* for the radio
+  `o'clock-and-distance` location form — is audio-adapter's, not F10's. Those are *rejected* for the radio
   menu rather than deferred, so this milestone's scope is wider than "swap the transport": that
   diagram's command half is its requirements input. Do not re-expand the F10 tree instead.
 
@@ -510,7 +510,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   commands themselves need work. But the mechanism is ok." — merged on the mechanism, command
   behaviour split into the follow-ups below. History: `plans/f10-crew-commands/` (plan, review,
   dod-check). Next-milestone impact: none on the BL sequence; it adds a second `CrewConsole` input
-  surface that BL-10's SRS transport can follow.
+  surface that BL-10's audio transport can follow.
 
 - [x] **F10 command vocabulary and ownship-relative sectors — command half done, merged
   2026-09-16, merge `1a9189c` (`feature/f10-command-vocabulary`,
@@ -626,7 +626,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   one permanently. **Delivery is a separate problem from accent** (user, 2026-09-18, on first
   hearing it): the voice is flat and evenly stressed whether it is reading a routine contact
   report or an urgent break call. Prosody may matter more for believability than the accent does,
-  and it has different fixes — SSML, per-line rate and pitch, or urgency-aware templates. Cheap to try in isolation — `srs-adapter --target local --voice <name>` plays a
+  and it has different fixes — SSML, per-line rate and pitch, or urgency-aware templates. Cheap to try in isolation — `audio-adapter --target local --voice <name>` plays a
   line on the Mac with nothing else running, so voice auditioning costs one command per candidate.
 
 - [ ] **Cross-channel contact duplication — continuity maps are per-channel, not shared.** Found

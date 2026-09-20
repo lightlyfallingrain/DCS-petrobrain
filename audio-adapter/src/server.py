@@ -1,5 +1,5 @@
-"""`srs-adapter`'s own inbound HTTP server -- `POST /speak`, the one call
-body-layer's `SrsAdapterClient` makes (`plans/tts-voice-output/plan.md`
+"""`audio-adapter`'s own inbound HTTP server -- `POST /speak`, the one call
+body-layer's `AudioAdapterClient` makes (`plans/tts-voice-output/plan.md`
 stage 1/4).
 
 Structurally a direct copy of `aircraft-layer/src/api/server.py`'s
@@ -28,7 +28,7 @@ from tts_engine import TTSEngine, TTSSynthesisError
 
 logger = logging.getLogger(__name__)
 
-#: Loopback only -- body-layer's `SrsAdapterClient` is expected to run on
+#: Loopback only -- body-layer's `AudioAdapterClient` is expected to run on
 #: the same box as this server for now (mirrors the compute-topology note
 #: in root `CLAUDE.md`: Mac runs both Ollama/brain and, now, TTS).
 DEFAULT_HOST = "127.0.0.1"
@@ -155,7 +155,7 @@ class TTSAdapterServer:
         self._httpd = ThreadingHTTPServer(
             (self._host, self._port), _make_handler(self._engine, self._sink)
         )
-        logger.info("srs-adapter listening on %s:%d", self._host, self.port)
+        logger.info("audio-adapter listening on %s:%d", self._host, self.port)
 
     def close(self) -> None:
         if self._httpd is not None:

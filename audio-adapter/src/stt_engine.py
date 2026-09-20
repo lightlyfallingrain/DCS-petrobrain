@@ -1,4 +1,4 @@
-"""Speech-to-text recognition for `srs-adapter`
+"""Speech-to-text recognition for `audio-adapter`
 (`plans/inbound-speech/plan.md` Decision 1).
 
 `STTEngine` is a small `Protocol` -- the mirror image of
@@ -6,7 +6,7 @@
 raising `STTRecognitionError` on any failure rather than returning an
 empty/partial transcript silently. The implementation writes its input to
 a temp file and shells out to an **external binary, never a package**
-(`srs-adapter/CLAUDE.md` "Tech stack"), exactly as `MacSayEngine` does --
+(`audio-adapter/CLAUDE.md` "Tech stack"), exactly as `MacSayEngine` does --
 whisper-cli does not read WAV reliably from stdin.
 
 `WhisperCliEngine` is the only implementation. **The protocol is kept
@@ -173,8 +173,8 @@ class WhisperCliEngine:
         if not wav:
             raise STTRecognitionError("cannot transcribe empty audio")
 
-        wav_fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="srs-adapter-in-")
-        out_fd, out_base = tempfile.mkstemp(prefix="srs-adapter-out-")
+        wav_fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-in-")
+        out_fd, out_base = tempfile.mkstemp(prefix="audio-adapter-out-")
         os.close(out_fd)
         out_json_path = out_base + ".json"
         try:

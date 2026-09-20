@@ -1,7 +1,7 @@
 """Tests for `vocabulary.py`'s internal consistency.
 
 This module cannot assert equality against `aircraft-layer`'s
-`ALLOWED_COMMANDS` or `body-layer`'s token tables directly -- `srs-adapter`
+`ALLOWED_COMMANDS` or `body-layer`'s token tables directly -- `audio-adapter`
 must stand alone (root `CLAUDE.md` module-independence rule), which is
 exactly why `vocabulary.py` is a hand-synced duplicate rather than a
 shared import. What *is* testable here is that this file's own two tables
