@@ -84,7 +84,8 @@ for.
 ## Keeping the knowledge graph honest
 
 A queryable graph over the current-state design documentation lives in `graphify-out/`, built from
-a curated corpus — every `ROADMAP.md` and `CLAUDE.md`, `docs/`, `AGENTS.md`, `NOTES.md`, `todo/`,
+a curated corpus (`.claude/scripts/graph-corpus-files.sh` — a **file list, never a copied mirror**;
+a mirror silently breaks cache keying and leaks its own name into node ids) — every `ROADMAP.md` and `CLAUDE.md`, `docs/`, `AGENTS.md`, `NOTES.md`, `todo/`,
 all `*/research/`, and the active plan. It exists because this project's recurring failure is not
 missing documentation but **failing to find documentation that already exists**, and occasionally
 finding a superseded version of it instead.
@@ -104,8 +105,9 @@ rebuild being **skipped**; when it happens relative to the merge does not matter
    superseded section keeps its body and gains a pointer to its replacement (see "Superseding a
    decision"); a plan nothing current cites moves to `plans/archive/`. This is the Definition of
    Done's job.
-2. **Rebuild the graph** — `/graphify graphify-corpus --update`. Incremental; only changed files
-   are re-extracted.
+2. **Rebuild the graph** — `/graph-refresh`. The corpus is a file list
+   (`.claude/scripts/graph-corpus-files.sh`), not a directory, and extraction is cache-aware so
+   only genuinely changed files cost anything.
 3. **Merge and push.** Afterwards code, documents and graph describe the same state.
 4. **Clear the flag** — `rm -f graphify-out/.needs_update`.
 

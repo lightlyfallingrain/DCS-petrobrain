@@ -96,8 +96,8 @@ Install the hooks once per clone: `.claude/scripts/install-git-hooks.sh`. They k
 structural spine current per commit (AST over changed `.py`, ~1.5s, captures docstrings) and record
 that a semantic rebuild is owed when docs change. **The rebuild order at merge is load-bearing —
 documents first, graph second, merge third** — because a graph built from stale documents launders
-the staleness rather than merely lagging it. Full reasoning and the merge procedure:
-`docs/PROCESS.md`, "Keeping the knowledge graph honest".
+the staleness rather than merely lagging it. Rebuild after a merge with `/graph-refresh`. Full reasoning: `docs/PROCESS.md`, "Keeping the
+knowledge graph honest".
 
 ## Verification
 
