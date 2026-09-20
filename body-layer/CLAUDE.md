@@ -141,6 +141,22 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
 `--whisper-model` for `GET /transcripts/poll` to ever have anything to drain — see
 `audio-adapter/CLAUDE.md`.
 
+Add `--detection-trace PATH` alongside `--console` or `--crew-text` (BL-9, `plans/
+bl9-debug-visualization/plan.md`) to write a per-poll, per-object naked-eye visibility-gate trace
+(JSONL) to `PATH` — the answer to "why did Petrovich not see that" after a flight: which of
+`check_visibility`'s three gates (cockpit mask / angular-size-or-range-cap / terrain LOS) decided
+each `LoGetWorldObjects` candidate's fate, at what true range/bearing, plus (once admitted) which
+`Contact` it was folded into. Reduce a raw trace with `body-layer/tools/
+summarize_detection_trace.py PATH` for the actual flight-debrief table (first-admitted range per
+object, and the never-admitted-but-in-FOV list) — the raw JSONL is not meant to be read directly.
+`parser.error`s if passed without `--console` or `--crew-text` (there is nothing to join against
+belief without one of those poll loops); defaults off, a true no-op when absent, same additive
+posture as `--overlay`/`--f10-commands`. Only the naked-eye channel is traced — the scope/hybrid
+channel has no geometric gate chain to instrument (a real HelperAI detection either exists or it
+doesn't). The join itself (`src/detection_trace_writer.py`) is the one module in this codebase
+deliberately allowed to hold both ground truth and belief at once, and is read-only against
+`ContactStore` — see that module's own docstring for the boundary this preserves.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
@@ -194,6 +210,17 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   modeling choice, not verified against ED internals (investigator finding, `plans/
   classification-refinement/plan.md` Session 6 addendum Q1) — documented here so a future reader
   does not "correct" it toward an ED semantics that was never established.
+
+  `check_visibility` also gained an additive `trace:
+  perception.detection_trace.DetectionTraceCollector | None = None` parameter (BL-9) — see that
+  module's own Structure entry; `None` (the default) is a true no-op, no change to this function's
+  existing return value or gate order. **At the BL-9/cones merge the two features turned out to
+  interact in two ways neither branch's tests could see**, both fixed in the merge commit: the
+  traced `range_threshold_m` was computed with `BINOCULAR_RANGE_MULTIPLIER` hardcoded, which after
+  the naked-eye default would have reported a threshold 4x larger than the gate actually applied —
+  it now uses `optic.magnification`, so the traced figure is the applied one by construction; and
+  the FOV gate returned without recording, which would have broken BL-9's one-entry-per-call
+  invariant as soon as slice 2 selects a non-default optic, so `GateOutcome` gained `OPTIC_FOV`.
 
   `check_visibility` gains a keyword-only `optic: Optic | None = None` parameter, resolved inside
   the function body rather than as a literal default expression — a real circular import between
@@ -322,7 +349,11 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   NEW_PER_POLL` still throttles individual-*object* admission into a poll's candidate pool exactly
   as before; it does not yet cap cluster size directly (a real cluster larger than the cap
   under-reports until acquisition catches up over several polls) — re-reading it as a true
-  per-cluster limit is Stage 3's explicit job, not pre-tuned here.
+  per-cluster limit is Stage 3's explicit job, not pre-tuned here. `trace_sink: perception.
+  detection_trace.DetectionTraceCollector | None = None` (BL-9) is threaded into every
+  `check_visibility` call this poll, and `poll()` annotates each admitted candidate's trace entry
+  with its cluster's member `object_id`s and the emitted `Observation.id` once clustering/emission
+  are done — see `detection_trace.py`'s own Structure entry.
 - `src/aircraft_client.py` — HTTP client for the aircraft-layer LAN API
   (`GET /telemetry/latest`, `GET /world_objects/latest`, `GET /petrovich_indication/latest`). A
   real network call, unlike the world-model seam. `push_text_line` (BL-2.5,
@@ -604,7 +635,52 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   unused, `now_sim` is this poll's own sim time) — its own `try`/`except AudioAdapterError`
   (log-and-continue), the same per-call isolation `_poll_f10_commands` uses. `--speech-audio` and
   `--speech-input` share one `AudioAdapterClient` instance when both are set (one process, one
-  URL), but either works independently of the other.
+  URL), but either works independently of the other. `--detection-trace PATH` (BL-9, `plans/
+  bl9-debug-visualization/plan.md`) is the same additive-no-op-when-absent shape again: both
+  `_run_console_poll_loop` and `_run_crew_text_poll_loop` build a `perception.detection_trace.
+  DetectionTraceCollector`, thread it into `_build_sources`'s new `trace_sink` parameter (only
+  `NakedEyePerceptionSource` consumes it), and call `detection_trace_writer.DetectionTraceWriter.
+  write_poll` immediately after each `runner.run_once()` — after `ingest`/`tick` have already run
+  against that poll's `Observation`s, so writing the trace can never influence what was ingested.
+- `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`COCKPIT_MASK`/`RANGE_OR_SIZE`/
+  `TERRAIN_LOS`/`ADMITTED`), the mutable `DetectionTrace` record (one per candidate per poll,
+  ground truth by construction, same footing as `Observation`/`WorldObjectCandidate` — no
+  `belief/` import), and `DetectionTraceCollector`, the small accumulator
+  `visibility.check_visibility`'s new optional `trace` parameter and `NakedEyePerceptionSource`
+  append/annotate into. `check_visibility` records one entry per call, at whichever of its three
+  gates decided a candidate's fate (or `ADMITTED`); `range_threshold_m`/`threshold_bound`
+  (`"size_curve"` vs `"range_cap"`, recovering the two distinct reasons a single `min()`
+  expression collapses) are populated unconditionally, even on a `COCKPIT_MASK` failure, so every
+  row has a uniform shape. `NakedEyePerceptionSource.poll` then annotates each admitted
+  candidate's own entry, in place, with its cluster's member `object_id`s and the emitted
+  `Observation.id` once clustering/emission are done — an `ADMITTED` outcome does not by itself
+  guarantee that annotation exists, since `NAKED_EYE_MAX_NEW_PER_POLL` can still throttle a
+  gate-admitted candidate out of a given poll's emission (a documented, intentional gap: "visible,
+  but throttled" is itself useful debrief information). `trace`/`trace_sink` default to `None`
+  everywhere, a true no-op — proven, not just asserted, by
+  `tests/test_detection_trace.py::test_trace_sink_does_not_perturb_the_observation_contact_or_event_streams`,
+  which replays the same fixture twice (trace attached vs. not) and asserts the resulting
+  `Observation`/`Contact`/`Event` streams are identical.
+- `src/detection_trace_writer.py` (BL-9) — `DetectionTraceWriter`, the one module in this
+  codebase deliberately allowed to hold both ground truth and belief at once: given a
+  `DetectionTraceCollector` and a `ContactStore`, it resolves each admitted entry's `Contact.id`
+  by scanning `store.contacts`' `Contact.contributing_observation_ids` for the entry's
+  `observation_id` (an `O(contacts x history)` rebuild every poll, an accepted cost for a
+  single-sortie debug artifact, not a standing index), appends one JSON line per record to a
+  file, and clears the collector. **Read-only and one-directional** — it never calls anything
+  that mutates `ContactStore`, and no ground-truth field is ever passed into `ContactStore.
+  ingest`/`Percept`/`Contact`; `belief/percept.py`'s structural no-omniscience boundary is
+  untouched. Deliberately sits beside `logger.py`, not inside `perception/` or `belief/` — neither
+  package gains an import because of this module. Buffers `DEFAULT_FLUSH_EVERY_N_POLLS` (5) polls'
+  worth before flushing, so disk I/O never sits on the poll loop's own critical path.
+- `body-layer/tools/summarize_detection_trace.py` (BL-9) — the post-flight reducer, not a test
+  (same "dev acceptance aid" posture as `speak_samples.py`): reads a `--detection-trace` JSONL
+  file and prints the actual flight-debrief table — per object, the range at which the
+  presence/class/type tiers were first admitted, and the list of objects that cleared the cockpit
+  mask (plausibly "on screen") but never reached `ADMITTED` at any tier. That second list is
+  stated in its own output as an approximation, not a verified claim — code can confirm an object
+  cleared the geometric gates, not that the pilot's own monitor rendered it large enough to
+  notice.
 - `src/belief/utterance.py` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`) — the
   deterministic intent parser: `PlayerUtterance`/`PartialParse` (§5/§3.5's shapes, trimmed to what
   this milestone populates) and `parse_utterance`, a small ordered table of `(regex, intent)` pairs
