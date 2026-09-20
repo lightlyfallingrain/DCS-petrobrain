@@ -607,10 +607,36 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   aircraft strobes, tracers, explosions, flares. Those are an attention-capture channel, closer to
   BL-4's attention machinery than to this gate.
 
-  **Still needed before building:** a real number for the perceptual threshold, and whether unit
-  velocity is directly available from `LoGetWorldObjects` or must be differenced in the collector.
-  Unlike the detection-range constants, no existing screenshot ladder can supply the threshold —
-  motion was never captured.
+  **The perceptual threshold: 8 arcmin/sec (≈0.133 °/s), over a ~1 s window.** Derived on user
+  direction (2026-09-20) as **2 arcmin/sec lab baseline × 4 for the cockpit**. Human smooth-motion
+  detection runs about 1–2 arcmin/sec in laboratory conditions; 2 is taken as the baseline because a
+  *higher* threshold means motion is *harder* to detect, so it is the conservative end. The ×4
+  covers three effects that stack and that lab conditions exclude by design: canopy vibration
+  smearing the image, **scanning rather than fixating**, and divided attention — a lab subject
+  stares at a known location, which is the opposite of what a scanning crewman does.
+
+  Same debt class as `BINOCULAR_OPTIC`'s ~0.67 stabilisation penalty: **the factor is not measured,
+  but it is named, isolated and measurable**, rather than buried inside the threshold as a single
+  unexplained number. A sortie can measure it later; until then it can be moved in one place.
+
+  Sanity-checked against three cases before adoption, which is what makes it credible rather than
+  merely arithmetic:
+
+  | Case | Angular rate | Detected |
+  |---|---|---|
+  | Truck 10 m/s crossing at 2 km | 17 arcmin/s | yes |
+  | Truck 5 m/s crossing at 5 km | 3.4 arcmin/s | **no** |
+  | Jet 200 m/s crossing at 5 km | 137 arcmin/s | yes, easily |
+
+  The middle row is the one that argues for the number: a slow truck at 5 km genuinely does not read
+  as moving at a glance, and a threshold that flagged it would be modelling a machine, not a crewman.
+
+  **Still needed before building:** whether unit velocity is directly available from
+  `LoGetWorldObjects` or must be differenced in the collector — if it must be differenced, the
+  compute saving this design buys is smaller than it appears, though still cheaper than keeping
+  per-candidate bearing history in the body layer. Note that no screenshot ladder can ever supply
+  the threshold the way it supplied the detection-range constants: a still frame cannot show
+  motion, so this constant's only calibration path is a purpose-built sortie.
 
 - [>] **Threat-based report prioritisation (`docs/concept/threat-levels.md`) — spec exists, mostly
   gated.** The user's own table: five priority bands (urgent / high / medium / low / ignore), what
