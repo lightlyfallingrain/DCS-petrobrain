@@ -57,6 +57,7 @@ from typing import TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import RelativeSector, Sector
+from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.classification import parent_class_of
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
@@ -76,7 +77,6 @@ from belief.speech import (
     render_watch_nearest_readback,
     route_event,
 )
-from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.tasks import PendingIntent, TaskStore
 from belief.tools import (
     cancel_task,

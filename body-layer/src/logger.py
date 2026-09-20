@@ -163,6 +163,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.audio_client import AudioAdapterClient
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
@@ -170,7 +171,6 @@ from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
-from belief.audio_client import AudioAdapterClient
 from belief.tasks import TaskStore
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
