@@ -33,6 +33,32 @@ Prioritize any open task here over any other task in this file or roadmap files.
   and `.claude/agents/dod.md` now both require the relevant `ROADMAP.md` to be updated *in the
   same push* as any merge — see root `ROADMAP.md`'s "Keeping this current" note.
 
+
+### Model the 9K113 sight as an optic (deferred, 2026-09-20)
+
+- [>] **Model the 9K113 Raduga-Sh as a selectable optic.** Deferred by the user while cones slice 1
+  ships the naked eye and binoculars only. Not blocked on research — the groundwork is already done:
+  - **Figures are recorded** in `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`,
+    by confidence class. Field of regard ±60° lateral, +20°/−15° vertical (sourced, English manual
+    §3.4). Magnification ×3.3 wide / ×10 narrow, switchable in flight (`LCtrl+X`). Fields of view
+    11.5° / 6.0° (user-supplied, unverified — and the pair is internally inconsistent, so 6.0° is
+    the figure to doubt first).
+  - **Calibration ground truth already exists.** `body-layer/tests/fixtures/vision_calibration.json`
+    grades `9k113_wide` and `9k113_narrow` at all nine ranges alongside `naked_eye` and `binocular`.
+    No sortie is needed to calibrate this — the screenshots were taken with all four columns.
+  - **Three things the eventual slice must get right**, each already argued out: two optic entries
+    rather than one plus a zoom state (magnification is switched in flight, and either mode can use
+    either field); field of view and field of regard as *separate* fields (they differ by an order
+    of magnitude — a few degrees seen at a time, anywhere within a 120°-wide arc); and the doors as
+    real state (`НАБЛ.` opens the outer doors, needs hydraulic pressure, closing runs inner then
+    outer — so "Observ off" means the sight genuinely cannot see, not merely that it is unselected).
+  - **Depends on mode selection**, which is cones slice 2. An optic nothing can select is table data
+    nothing reads — the reason the 9K113 entries were cut from slice 1 in the first place.
+  - Also recorded there and relevant: the operator commands an angular **rate**, not a position, so
+    pointing the sight costs time proportional to angular distance; the gyro-stabilised head needs
+    **~3 minutes** from power-on before it is ready; and launch entry requires the sight line within
+    0.86° of the airframe axis, which is a *firing* constraint and not a *seeing* one.
+
 ## Cross-cutting / unscoped backlog
 
 - [>] **Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
