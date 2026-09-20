@@ -21,7 +21,10 @@ slice 1 of the detection-cones milestone — as an explicit, opt-in extension of
   touch `COCKPIT_MASKS` or its measured angles.
 - **The mode set is the diagram's** (`docs/concept/STATE_TRANSITIONS.md`): Scan, Watch, Observ
   (scan with 9K113), Track (9K113 attack), Observ off (9K113 doors closed) — not the earlier
-  "peripheral/naked eye/binoculars/APS-17" guess, which is superseded.
+  "peripheral/naked eye/binoculars/APS-17" guess, which is superseded. **The ASP-17V in particular
+  was never a candidate**: it is the pilot's gunsight in the rear cockpit and Petrovich cannot
+  manipulate it in any mode (user direction, 2026-09-20). Petrovich's optics are the naked eye,
+  binoculars, and the 9K113 — nothing else.
 - **Today's default is the binocular column.** `BINOCULAR_RANGE_MULTIPLIER` in `visibility.py` is
   what `NakedEyePerceptionSource` uses for every candidate, unconditionally.
   **Superseded 2026-09-20:** this bullet originally read "a calibration sortie is flying today …
