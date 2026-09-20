@@ -569,6 +569,48 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
   spoken id. Typed `watch <id>` readback unchanged.
 
+- [>] **Threat-based report prioritisation (`docs/concept/threat-levels.md`) — spec exists, mostly
+  gated.** The user's own table: five priority bands (urgent / high / medium / low / ignore), what
+  each does to reporting, and what counts as "dangerous to us". Raised 2026-09-20 asking where it
+  fits; the answer is that it is **not one milestone** — it decomposes by what each row needs, and
+  most rows are behind gates.
+
+  **The dominant gate is coalition.** Roughly 15 of the 24 rows key on friendly/enemy/neutral/
+  unknown, so they are downstream of the Coalition/IFF item below — which is itself deferred and
+  needs terrain-control data `world-model` does not have. Today every contact is `UNKNOWN`, which
+  collapses the table to its one unknown row.
+
+  What the other rows need, none of which exists: unit **engagement envelopes** and "capable of
+  firing at us" (also in the STATE_TRANSITIONS autonomous-behaviour backlog, with its 1.5 factor); a
+  **behaviour-change channel** for "tracking us"/"engaging us" (there is none — the built event set
+  is lifecycle, classification and cardinality); **terrain control** for the friendly-terrain /
+  frontline / enemy-territory rows; **Mission Interpreter** output for "mission target" and escort
+  targets; and a real **weapon detector** for the aimed-at-us rows, where `UrgentCall` already
+  provides the mechanism and `!inject-urgent` is still the only trigger.
+
+  **The buildable slice, and the recommended entry point: the bands themselves.** Urgent interrupts,
+  high reports first, low gets the coarse form the spec writes out ("friendly ground 10 o'clock"),
+  ignore is silent. This extends BL-7's relevance scoring with a band output and gives
+  `belief/speech.py` a coarse rendering path. Every contact would band as `medium` today — which
+  sounds useless and is not: it builds the machinery so each row lights up as its own input lands,
+  rather than arriving later as one large blocked milestone with a dozen prerequisites.
+
+  **No-omniscience constraint, to settle before any of it is built.** Rows like "enemy air defense,
+  not tracking self/flight → high" and "unit well outside its engagement envelope → not dangerous"
+  require knowing another unit's envelope and whether it has track on ownship — things Petrovich
+  cannot perceive. Threat band must therefore be computed from **believed** classification and carry
+  that belief's uncertainty: a contact held only as `lowres` presence has no type, so it cannot band
+  above unknown/medium. Computing the band from ground truth would be an omniscience backdoor
+  wearing a prioritisation label, and would be invisible in the output — the reports would simply be
+  well-prioritised in a way nobody could account for.
+
+  Also connects to two things already recorded: "urgent units must receive automatic tracking
+  status" is the auto-watch-on-engaged rule in the STATE_TRANSITIONS autonomous half, and the
+  group rule ("use the highest-capability threat to determine reporting") is the threat-based member
+  selection that `clustering.py` deliberately does not do.
+
+  **Do not start without the user's instruction**, same posture as the coalition item it depends on.
+
 - [>] **Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:
   the new contact-report format (`belief/speech.py`'s `render_contact_report`) has a
   FRIENDLY/ENEMY/HOSTILE/UNKNOWN slot, always `"UNKNOWN"` for now — no coalition/IFF perception
