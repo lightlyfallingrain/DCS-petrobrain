@@ -704,13 +704,20 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   for the first time. Each scan speaks a fixed readback (`speech.render_scan_readback`,
   `"Scanning <sector label>."`). `tasks` mirrors `aircraft_client`'s own reserved-field pattern;
   `logger.py` wires it to the same `ConsolePerceptionRunner.tasks` instance its poll loop already
-  ticks. `stop_talking` (Stage 3, `plans/inbound-speech/plan.md`, "deferred from Stage 2") is
-  `handle_f10_command`'s newest branch: `_handle_stop_talking` returns a short acknowledgement
-  (`speech.render_stop_acknowledged`, `"Copy."`), and this is the one token whose dispatch calls
-  `self._print(lines, bypass_gate=True)` instead of the shared tail's plain `self._print(lines)` —
-  `bypass_gate=True` is what threads through as `speech_client.push_speech(..., urgent=True)`,
-  which is what actually triggers aircraft-layer's `AudioPlaybackSender._interrupt_playback` and
-  clears whatever is currently playing before this acknowledgement plays.
+  ticks. `stop_talking` (Stage 3, `plans/inbound-speech/plan.md`; revised by that plan's Stage 3
+  follow-up, user direction 2026-09-20 — "no readback or confirmation, just stop talking... more
+  of a debug tool than crew feature") is `handle_f10_command`'s one token with **no readback at
+  all** and no `_print` call: `_handle_stop_talking` calls `speech_client.stop()`
+  (`belief.audio_client.AudioAdapterClient.stop`, `POST /stop`) when a `speech_client` is
+  configured and otherwise no-ops, then `handle_f10_command` returns `[]` directly. `stop()`
+  reaches `audio-adapter`'s `AudioSink.interrupt()` without synthesizing or delivering any audio —
+  for `--target aircraft-layer` that forwards to `collector.audio_sender.AudioPlaybackSender.
+  interrupt` (`POST /audio/stop`), which clears the routine queue and stops in-flight playback
+  exactly as `play_audio(..., urgent=True)` already did. The original Stage 3 shipment spoke a
+  short `"Copy."` acknowledgement (`speech.render_stop_acknowledged`, now removed) pushed urgent
+  through `_print` — that acknowledgement was itself the defect the follow-up fixes: it had to go
+  out over the same channel it was interrupting, so asking Petrovich to stop talking made him talk
+  once more.
 - `src/belief/voice_commands.py` (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's
   split) — the act/confirm/say-again band decision (`classify_response`, given `audio_adapter.
   command_matcher.MatchResult`'s fields reproduced as plain arguments — body-layer holds no import

@@ -361,6 +361,43 @@ asymmetry is justified by the direction of the damage rather than by aviation an
 
 ---
 
+### Decision 5 REVISED — `stop_talking` is the one exception, and it speaks nothing (2026-09-20)
+
+Everything above still governs the other 14 tokens. `stop_talking` gets a documented carve-out,
+user direction, verbatim: *"'Stop' — no readback or confirmation, just stop talking. That is
+exception to the normal read back/confirm rule. It's more of a debug tool than crew feature."*
+
+**Why it can't just be a shorter readback.** Stage 3 shipped `stop_talking` speaking `"Copy."`
+right after interrupting playback — the acknowledgement itself was the defect, not an oversight:
+it had to go out over the exact channel it was asked to silence, so a request for quiet produced
+one more line of speech. A shorter or different acknowledgement has the same problem; the fix is
+no acknowledgement.
+
+**Why that needed a real mechanism, not a deleted string.** `CrewConsole._print` never pushes to
+`speech_client` when there are no lines, and no interrupt-only call existed anywhere in the
+codebase — the only way to reach `AudioPlaybackSender`'s queue-clear and in-flight interrupt was to
+push new urgent audio through it. So the fix adds an interrupt-only path end to end: `POST
+/audio/stop` on the aircraft layer (`AudioPlaybackSender.interrupt`, the same `_clear_queue`/
+`_interrupt_playback` pair `play_audio(..., urgent=True)` already used, minus the enqueue), `POST
+/stop` on `audio-adapter` (`AudioSink.interrupt()` — for `--target aircraft-layer`, forwards to the
+new endpoint; for `--target local`, kills whatever `afplay` process is in flight, tracked via a
+`Popen` reference `LocalPlaybackSink` did not previously keep), and `AudioAdapterClient.stop()` on
+the body-layer side. `crew_console.CrewConsole._handle_stop_talking` calls `speech_client.stop()`
+when configured and otherwise no-ops; `handle_f10_command`'s `stop_talking` branch returns `[]`
+directly and never calls `_print` — no line, no overlay push, no speech push, of any kind.
+`speech.render_stop_acknowledged` is removed as dead code.
+
+**Latency finding.** The Stage 6 live-latency question asked whether recognition → dispatch → HTTP
+round trip still carries synthesis latency once an interrupt-only path exists.
+**Unverified — could not be checked without a live Windows box/DCS session** (this repo's
+provenance rule: execution against the real hardware chain is the user's to run, not this session's
+to simulate). What can be said from the code alone: the interrupt path removes both TTS synthesis
+(`engine.synthesize`) and WAV delivery/playback-queueing from the request — `POST /stop` calls
+`sink.interrupt()` directly, nothing else — so the round trip should be faster than any `/speak`
+call in principle. Confirming the actual magnitude needs a live timed run.
+
+---
+
 ### Decision 1 REVISED — the Windows engine is removed (2026-09-19, post-Stage-1)
 
 `WindowsSpeechEngine` is deleted. Decision 1 below still describes it as "the required Windows
@@ -499,6 +536,15 @@ relative to the other voice-only tokens Stage 2 left as no-ops (`report_bearing_
 `report_clock_*`/`scan_bearing_deg` need a query capability that does not exist yet;
 `stop_talking`'s interrupt mechanism already works end to end). Give it real dispatch in
 `CrewConsole` before or alongside the other voice-only tokens.
+
+**As shipped in Stage 3, `stop_talking` dispatched then spoke `"Copy."`** — pushed urgent through
+`push_speech(..., urgent=True)`, which is what reached `_interrupt_playback` at the time, since no
+interrupt-only call existed yet. **Superseded by Decision 5 REVISED (2026-09-20, this plan):** the
+acknowledgement was itself the defect (it had to go out over the channel it was interrupting), and
+the fix needed a real interrupt-only path (`POST /audio/stop` on aircraft-layer, `POST /stop` on
+audio-adapter, `AudioAdapterClient.stop()` on body-layer) rather than a shorter string. See Decision
+5 REVISED for the full account and the still-unverified live-latency question this follow-up
+partly answers.
 
 **Stage 4 — Windows capture. [Win]** (no DCS needed)
 `audio_capture.py` (`FfmpegCapture`, `ClipGate`, `CaptureClipQueue`), `capture_server.py`,

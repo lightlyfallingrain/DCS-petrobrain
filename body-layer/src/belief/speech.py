@@ -302,17 +302,16 @@ def render_say_again() -> OutgoingSpeech:
     return OutgoingSpeech(text="Say again?", template="readback")
 
 
-def render_stop_acknowledged() -> OutgoingSpeech:
-    """`stop_talking` (Stage 3, `plans/inbound-speech/plan.md`, "deferred
-    from Stage 2") -- the short acknowledgement spoken right after
-    interrupting whatever aircraft-layer is currently playing.
-    `crew_console._handle_stop_talking` pushes this line urgent
-    (`bypass_gate=True`), which is what actually triggers `AudioPlaybackSender.
-    _interrupt_playback` on the aircraft-layer side (`AudioPlaybackSender.
-    play_audio`'s own docstring) -- so this text is deliberately short: a
-    long readback here would defeat the point of asking Petrovich to stop
-    talking."""
-    return OutgoingSpeech(text="Copy.", template="readback")
+# No `render_stop_acknowledged` here (removed, `plans/inbound-speech/
+# plan.md` Stage 3 follow-up, user direction 2026-09-20). `stop_talking`
+# used to speak "Copy." right after interrupting playback -- that was
+# itself the bug: the acknowledgement had to go out over the same channel
+# it was interrupting, so asking Petrovich to stop talking made him talk
+# once more. `stop_talking` is now the one dispatched token with **no
+# readback at all** (`crew_console.CrewConsole._handle_stop_talking`'s own
+# docstring is the fuller account) -- every render_* function in this
+# module remains "templated, body-written" speech for a token that *does*
+# speak; this is the deliberate, stated exception, not an omission.
 
 
 def render_confirm_request(description: str) -> OutgoingSpeech:

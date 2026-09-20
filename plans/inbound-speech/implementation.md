@@ -476,3 +476,108 @@ call — with no Windows box and no DCS involved, matching the stage's stated ac
   `parser.error` the moment `--speech-audio` was parsed (unrecognized argument). Fixed in place
   (see "Files Changed") since it is the exact script this stage's acceptance flow needed to be
   correct, and leaving it broken would have actively misled whoever ran it next.
+
+---
+
+### Stage 3 follow-up: `stop_talking` becomes truly silent (2026-09-20)
+
+**Context.** Reviewer traced the "Copy." acknowledgement (above) and found it architecturally
+forced: `CrewConsole._print` never pushes to `speech_client` when there are no lines, and no
+interrupt-only call existed anywhere in the codebase — the only way to reach `AudioPlaybackSender`'s
+queue-clear/in-flight-interrupt was to push new urgent audio through it. User direction (verbatim,
+2026-09-20): *"'Stop' — no readback or confirmation, just stop talking. That is exception to the
+normal read back/confirm rule. It's more of a debug tool than crew feature."* This entry records
+the fix: a real interrupt-only path end to end, on `feature/stt-recognition-service` (not merged).
+
+#### Files Changed
+
+- `aircraft-layer/src/collector/audio_sender.py` — new public `AudioPlaybackSender.interrupt()`:
+  the same `_clear_queue()`/`_interrupt_playback()` pair `play_audio(..., urgent=True)` already
+  called, with the enqueue dropped. `play_audio`'s own urgent branch now calls `self.interrupt()`
+  instead of duplicating the two calls.
+- `aircraft-layer/src/api/server.py` — new `POST /audio/stop`: no request body, forwards to
+  `audio_sender.interrupt()`, `503` when unconfigured, never a `500` (matches `interrupt()`'s
+  own never-raises posture). Module docstring updated.
+- `aircraft-layer/tests/test_audio_sender.py` — `interrupt()` directly: queued lines dropped and
+  in-flight playback stopped with nothing new played, and a clean no-op with nothing playing/queued.
+- `aircraft-layer/tests/test_audio_stop_api.py` (new) — `POST /audio/stop` against a real server
+  with a recording `AudioPlaybackSender` double: forwards to `interrupt()`, `503` unconfigured.
+- `audio-adapter/src/server.py` — `AudioSink` protocol gains `interrupt() -> None` (raises
+  `AudioDeliveryError` on failure, same contract as `deliver`); new `POST /stop`, no body, calls
+  `sink.interrupt()`, `500` on `AudioDeliveryError`, `200` otherwise. Module docstring updated.
+- `audio-adapter/src/aircraft_client.py` — `AircraftLayerClient.stop_audio()` (`POST
+  /audio/stop`, no body, raises `AircraftLayerError`); `AircraftLayerAudioSink.interrupt()` wraps
+  it into `AudioDeliveryError`, mirroring `deliver()`'s own wrapping of `play_audio`.
+- `audio-adapter/src/audio_adapter/__main__.py` — `LocalPlaybackSink` refactored from blocking
+  `subprocess.run` to `Popen` + `communicate()`, tracking the in-flight process under a
+  `threading.Lock` so `interrupt()` (called from a different request-handling thread) can `kill()`
+  it. A killed process's own `deliver()` call still raises `AudioDeliveryError` (non-zero return
+  code) — that failure belongs to the request that was interrupted, not to `interrupt()` itself.
+- `audio-adapter/tests/test_server.py` — `_RecordingSink` gains `interrupt()`/`interrupt_calls`/
+  `should_fail_interrupt`; new tests for `POST /stop` (success, and interrupt failure -> `500`).
+- `body-layer/src/belief/audio_client.py` — `AudioAdapterClient.stop()` (`POST /stop`, no body,
+  raises `AudioAdapterError`).
+- `body-layer/src/belief/crew_console.py` — `_handle_stop_talking` rewritten: no longer returns
+  a line; calls `speech_client.stop()` when configured (log-and-continue on `AudioAdapterError`,
+  matching `_print`'s per-sink isolation) and otherwise no-ops. `handle_f10_command`'s
+  `stop_talking` branch now returns `[]` directly and never calls `_print` — no line is printed,
+  pushed to the overlay, or spoken. Removed the now-unused `render_stop_acknowledged` import.
+- `body-layer/src/belief/speech.py` — `render_stop_acknowledged` deleted; a comment in its place
+  explains the removal and why `stop_talking` is the one token with no readback.
+- `body-layer/tests/test_crew_console.py` — `FakeSpeechClient` gains `stop()`/`stop_calls`
+  (`"Copy."` reused as the `fail_on` sentinel for a stop-failure test, since no text flows through
+  this path any more). Three Stage 3 tests rewritten (empty output, `speech_client.stop()` called
+  not `push_speech`, no overlay push) plus one new interrupt-failure test — the old assertions
+  (`lines == ["Copy."]`, `push_speech` called urgent) directly described the behaviour this
+  follow-up removes, so they could not be preserved.
+- `body-layer/tests/test_speech.py` — `test_render_stop_acknowledged` and the now-dead import
+  removed.
+- `plans/inbound-speech/plan.md` — new "Decision 5 REVISED" section (full rationale, the latency
+  finding below); Stage 3's `stop_talking` entry gets a superseded-by note pointing at it.
+- `body-layer/CLAUDE.md`, `aircraft-layer/CLAUDE.md`, `audio-adapter/CLAUDE.md` — structure/
+  endpoint-list entries updated for the new interrupt-only path (`_handle_stop_talking`,
+  `POST /audio/stop`, `POST /stop`, `AudioSink.interrupt`, `LocalPlaybackSink`'s `Popen` change).
+
+#### Tests Added
+
+- `test_interrupt_clears_queued_lines_and_stops_in_flight_playback` (aircraft-layer) — the
+  interrupt-only contract: FIRST (in flight) finishes, SECOND/THIRD (queued) are dropped, nothing
+  new plays.
+- `test_interrupt_with_nothing_playing_or_queued_is_a_clean_no_op` (aircraft-layer).
+- `test_audio_stop_forwards_to_sender_interrupt` / `test_audio_stop_without_configured_sender_returns_503`
+  (aircraft-layer).
+- `test_stop_calls_sink_interrupt_and_never_synthesizes` / `test_stop_interrupt_failure_returns_500`
+  (audio-adapter).
+- `test_stop_talking_speaks_nothing` / `test_stop_talking_calls_speech_client_stop_not_push_speech` /
+  `test_stop_talking_pushes_nothing_to_the_overlay` / `test_stop_talking_interrupt_failure_does_not_raise`
+  (body-layer, replacing the three old Stage 3 tests).
+
+#### Checks
+
+**aircraft-layer/** — ruff format --check: pass · ruff check: pass · mypy --strict: pass (15
+files) · pytest: pass (134 passed).
+
+**audio-adapter/** — ruff format --check: pass · ruff check: pass · mypy --strict: pass (9 files)
+· pytest: pass (100 passed, 1 skipped — the real-whisper-binary test, skip-gated as documented).
+
+**body-layer/** — ruff format --check: pass · ruff check: pass · mypy --strict (`cd body-layer &&
+mypy src`): pass (35 files) · pytest (`PYTHONPATH=src:../world-model/src`): pass (717 passed).
+
+#### Notable Discoveries
+
+- **The live-sortie-latency question is still unverified.** Per this project's execution-boundary
+  rule, a real Windows/DCS run was not attempted from this session. What the code supports: `POST
+  /stop` never calls `TTSEngine.synthesize` or any `AudioSink.deliver` — it is `sink.interrupt()`
+  alone — so the round trip should be faster than any `/speak` call in principle (no synthesis, no
+  WAV write, no playback-queue join). Confirming the actual magnitude needs a live timed run;
+  recorded as still-open in Decision 5 REVISED rather than claimed as measured.
+- **`LocalPlaybackSink` had no automated test before this change and still has none** — matches
+  this subproject's own documented posture (`audio-adapter/CLAUDE.md` Testing: "`src/__main__.py`
+  ... has no automated test — a live-process entrypoint"). The `Popen`/lock refactor was verified
+  by reading + the full mypy/ruff/pytest pass, not by a new unit test, consistent with that
+  existing exemption rather than a gap introduced here.
+- **Concurrency note, not fixed here:** `ThreadingHTTPServer` runs each `/speak` call on its own
+  thread, so `LocalPlaybackSink._current` genuinely only tracks the *most recent* in-flight
+  process if two overlap — a real limitation for a debug-tool-scoped feature, matching the
+  existing docstring's own acknowledgement that this dev-only path was never designed for
+  concurrent delivery. Not addressed, since `stop_talking` is explicitly scoped as a debug tool.
