@@ -68,6 +68,21 @@ the body/brain process, on either Windows or Mac (compute topology note in
   playback failure -- `AudioPlaybackSender.play_audio` never raises (plan
   Decision 5: audio is best-effort display-equivalent output, not a
   verifiable command).
+- `POST /audio/stop` -> the aircraft layer's fourth inbound/write path
+  (`plans/inbound-speech/plan.md` Stage 3 follow-up, "stop_talking"'s
+  interrupt-only path). No request body is read or required -- forwards
+  directly to `collector.audio_sender.AudioPlaybackSender.interrupt`,
+  which clears the routine queue and stops in-flight playback without
+  enqueueing anything, and responds `200 {"ok": true}`. `503
+  {"error": "audio playback not configured"}` if this server was built
+  without an `audio_sender`, same as `/audio/play`. Like `/audio/play`,
+  this never propagates a `500` -- `AudioPlaybackSender.interrupt` never
+  raises (it is `_clear_queue`/`_interrupt_playback`, the same two calls
+  `/audio/play`'s own `urgent=True` path already uses, with the enqueue
+  dropped). This is a debug/utility tool rather than a crew feature (user
+  direction, 2026-09-20): it exists so a stop request can be silent --
+  interrupting playback with no new audio to acknowledge it -- rather than
+  needing to push an audio line just to reach the interrupt mechanism.
 
 - `GET /f10_commands/poll` -> drains the collector's `F10CommandQueue`
   (`plans/f10-crew-commands/plan.md`) and returns every pending F10
@@ -135,6 +150,7 @@ _TEXT_PUSH_PATH = "/text/push"
 _COMMAND_PETROVICH_SEARCH_PATH = "/command/petrovich_search"
 _F10_COMMANDS_POLL_PATH = "/f10_commands/poll"
 _AUDIO_PLAY_PATH = "/audio/play"
+_AUDIO_STOP_PATH = "/audio/stop"
 
 #: `SearchMode`'s two valid wire values -- checked against the request
 #: body's `mode` field before forwarding to `CommandSender.send_command`.
@@ -218,6 +234,9 @@ def _make_handler(
                 return
             if path == _AUDIO_PLAY_PATH:
                 self._handle_audio_play()
+                return
+            if path == _AUDIO_STOP_PATH:
+                self._handle_audio_stop()
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -323,6 +342,17 @@ def _make_handler(
             # never-raises posture, not /command/petrovich_search's
             # propagate-500 one).
             audio_sender.play_audio(audio, urgent)
+            self._respond_json(200, {"ok": True})
+
+        def _handle_audio_stop(self) -> None:
+            """No request body is read -- `AudioPlaybackSender.interrupt`
+            takes no arguments, so there is nothing to validate here
+            (unlike every other `POST` handler above). Never raises --
+            see `AudioPlaybackSender.interrupt`'s own docstring."""
+            if audio_sender is None:
+                self._respond_json(503, {"error": "audio playback not configured"})
+                return
+            audio_sender.interrupt()
             self._respond_json(200, {"ok": True})
 
         def _respond_json(self, status: int, body: Any) -> None:
