@@ -37,7 +37,6 @@ from belief.speech import (
     render_contact_report,
     render_readback,
     render_say_again,
-    render_stop_acknowledged,
     render_watch_nearest_readback,
     route_event,
 )
@@ -159,13 +158,6 @@ def test_render_confirm_request_capitalizes_and_appends_confirm() -> None:
 
 def test_render_confirm_request_empty_description() -> None:
     assert render_confirm_request("").text == ", confirm?"
-
-
-def test_render_stop_acknowledged() -> None:
-    speech = render_stop_acknowledged()
-    assert speech.text == "Copy."
-    assert speech.template == "readback"
-    assert speech.bypass_gate is False
 
 
 def test_render_contact_report_returns_none_for_unknown_contact() -> None:

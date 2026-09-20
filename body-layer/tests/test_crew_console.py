@@ -50,22 +50,33 @@ class FakeOverlayClient:
 
 
 class FakeSpeechClient:
-    """A `push_speech`-only double, mirroring `FakeOverlayClient` above --
-    used to exercise `CrewConsole.speech_client` (BL-10 first slice,
-    `plans/tts-voice-output/plan.md`). Records `(text, urgent)` pairs so
-    tests can assert `bypass_gate` was threaded through as `push_speech`'s
-    `urgent` argument. `fail_on` names texts that raise `AudioAdapterError`
-    instead of recording, used to exercise `CrewConsole._print`'s per-push
-    isolation for this sink."""
+    """A `push_speech`/`stop`-only double, mirroring `FakeOverlayClient`
+    above -- used to exercise `CrewConsole.speech_client` (BL-10 first
+    slice, `plans/tts-voice-output/plan.md`, `stop` added `plans/
+    inbound-speech/plan.md` Stage 3 follow-up). Records `(text, urgent)`
+    pairs so tests can assert `bypass_gate` was threaded through as
+    `push_speech`'s `urgent` argument, and a separate `stop_calls` count
+    for `stop()` -- a different call with no text/urgent argument at all.
+    `fail_on` names texts that raise `AudioAdapterError` from `push_speech`
+    instead of recording (used to exercise `CrewConsole._print`'s per-push
+    isolation for this sink); `"Copy."` in `fail_on` also makes `stop()`
+    raise, reusing the same set rather than adding a second constructor
+    flag purely for one stop_talking test."""
 
     def __init__(self, fail_on: frozenset[str] = frozenset()) -> None:
         self.pushed: list[tuple[str, bool]] = []
+        self.stop_calls = 0
         self._fail_on = fail_on
 
     def push_speech(self, text: str, urgent: bool) -> None:
         if text in self._fail_on:
             raise AudioAdapterError("simulated push failure")
         self.pushed.append((text, urgent))
+
+    def stop(self) -> None:
+        if "Copy." in self._fail_on:
+            raise AudioAdapterError("simulated stop failure")
+        self.stop_calls += 1
 
 
 class _CapturingBrainClient:
@@ -554,40 +565,54 @@ def test_handle_f10_command_unrecognized_token_returns_empty_list() -> None:
     assert console.handle_f10_command("shut_down_dcs", now_sim=0.0) == []
 
 
-# -- stop_talking (deferred from Stage 2, plans/inbound-speech/plan.md ------
-# Stage 3) ------------------------------------------------------------------
+# -- stop_talking (Stage 3, plans/inbound-speech/plan.md, revised by the ----
+# Stage 3 follow-up, user direction 2026-09-20: "no readback or            --
+# confirmation, just stop talking" -- an exception to the readback/confirm --
+# rule, not the deferred-from-Stage-2 "Copy." acknowledgement this token   --
+# originally shipped with) -----------------------------------------------
 
 
-def test_stop_talking_speaks_a_short_acknowledgement() -> None:
+def test_stop_talking_speaks_nothing() -> None:
     console = CrewConsole(store=ContactStore())
     lines = console.handle_f10_command("stop_talking", now_sim=0.0)
-    assert lines == ["Copy."]
+    assert lines == []
 
 
-def test_stop_talking_pushes_to_speech_client_as_urgent() -> None:
-    """The whole point of `stop_talking`: it must push urgent, not routine,
-    since urgent=True is what triggers aircraft-layer's
-    `AudioPlaybackSender._interrupt_playback` and clears whatever is
-    currently playing before this acknowledgement plays."""
+def test_stop_talking_calls_speech_client_stop_not_push_speech() -> None:
+    """The whole point of `stop_talking`: it must reach the interrupt-only
+    `AudioAdapterClient.stop()` (`POST /stop`), never `push_speech` -- no
+    audio is ever synthesized or delivered for this token."""
     speech_client = FakeSpeechClient()
     console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
 
     lines = console.handle_f10_command("stop_talking", now_sim=0.0)
 
-    assert lines == ["Copy."]
-    assert speech_client.pushed == [("Copy.", True)]
+    assert lines == []
+    assert speech_client.pushed == []
+    assert speech_client.stop_calls == 1
 
 
-def test_stop_talking_pushes_to_overlay_without_urgent_prefix_mismatch() -> None:
-    """`bypass_gate=True` prepends the urgent overlay prefix (same rule
-    every other injected-urgent line follows) -- not a new behaviour
-    invented for this token."""
+def test_stop_talking_pushes_nothing_to_the_overlay() -> None:
+    """No line, no overlay push, no `"!! "` prefix -- `_print` is never
+    called for this token at all."""
     overlay_client = FakeOverlayClient()
     console = CrewConsole(store=ContactStore(), overlay_client=overlay_client)  # type: ignore[arg-type]
 
     console.handle_f10_command("stop_talking", now_sim=0.0)
 
-    assert overlay_client.pushed == ["!! Copy."]
+    assert overlay_client.pushed == []
+
+
+def test_stop_talking_interrupt_failure_does_not_raise() -> None:
+    """A failed interrupt call degrades silently -- same per-sink isolation
+    posture as every other `speech_client` use in `_print`, even though
+    this call bypasses `_print` entirely."""
+    speech_client = FakeSpeechClient(fail_on=frozenset({"Copy."}))
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+
+    lines = console.handle_f10_command("stop_talking", now_sim=0.0)
+
+    assert lines == []
 
 
 def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:

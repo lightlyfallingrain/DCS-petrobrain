@@ -73,6 +73,30 @@ class AudioAdapterClient:
         except (urllib.error.URLError, OSError) as exc:
             raise AudioAdapterError(f"request to {url} failed: {exc}") from exc
 
+    def stop(self) -> None:
+        """`POST /stop` (`plans/inbound-speech/plan.md` Stage 3 follow-up)
+        -- the interrupt-only counterpart to `push_speech`: no text, no
+        `urgent` flag, just a bare request that reaches `audio-adapter`'s
+        `AudioSink.interrupt()` directly. Unlike `push_speech`, this never
+        synthesizes or delivers any audio -- it exists specifically for
+        `stop_talking`, a stated exception to this project's usual
+        readback/confirm rule (`crew_console.CrewConsole.
+        _handle_stop_talking`'s own docstring), which must interrupt
+        playback and say nothing. Raises `AudioAdapterError` on any
+        failure, same posture as `push_speech`."""
+        url = f"{self.base_url}/stop"
+        request = urllib.request.Request(
+            url,
+            data=b"",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+                response.read()
+        except (urllib.error.URLError, OSError) as exc:
+            raise AudioAdapterError(f"request to {url} failed: {exc}") from exc
+
     def get_transcripts(self) -> list[dict[str, Any]]:
         """`GET /transcripts/poll` -> drains `audio-adapter`'s recognised-
         speech queue (`audio-adapter/src/transcript_queue.py`,
