@@ -172,6 +172,8 @@ from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
 from belief.tasks import TaskStore
+from detection_trace_writer import DetectionTraceWriter
+from perception.detection_trace import DetectionTraceCollector
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -405,11 +407,18 @@ def _build_sources(
     theatre: str,
     world_model_conn: sqlite3.Connection,
     emit_mode: Literal["on_change", "every_poll"],
+    trace_sink: DetectionTraceCollector | None = None,
 ) -> list[PerceptionSource]:
     """Construct both concrete tiers at a given `emit_mode` -- shared by
-    `main()`'s plain-logger path (`"on_change"`) and `--console` path
-    (`"every_poll"`) so the two never drift apart on which tiers are wired
-    in, only on their emission mode and what consumes their output."""
+    `main()`'s plain-logger path (`"on_change"`) and `--console`/
+    `--crew-text` paths (`"every_poll"`) so the two never drift apart on
+    which tiers are wired in, only on their emission mode and what
+    consumes their output.
+
+    `trace_sink` (BL-9, `--detection-trace`) is additive, defaults to
+    `None`, and is only ever wired into `NakedEyePerceptionSource` -- the
+    scope/hybrid channel has no geometric gate chain to trace (plan
+    Risks)."""
     return [
         HybridPerceptionSource(
             aircraft_client=aircraft_client, theatre=theatre, emit_mode=emit_mode
@@ -419,6 +428,7 @@ def _build_sources(
             theatre=theatre,
             world_model_conn=world_model_conn,
             emit_mode=emit_mode,
+            trace_sink=trace_sink,
         ),
     ]
 
@@ -433,17 +443,39 @@ def _run_console_poll_loop(
     world_model_db: Path,
     poll_interval_s: float,
     stop_event: threading.Event,
+    detection_trace_path: Path | None = None,
 ) -> None:
     """Stage 4's background poll thread, fixed in Stage 6: opens
     `world_model_conn` and builds `runner.sources` here, on this thread, then
     keeps calling `runner.run_once()` (which fills `runner.store` and updates
     `runner.last_t_sim`) until `stop_event` is set -- see module docstring's
     "Stage 6 fix" for why the connection can't be built by the caller and
-    handed in. Closes the connection when the loop stops."""
+    handed in. Closes the connection when the loop stops.
+
+    `detection_trace_path` (BL-9, `--detection-trace`) is additive and
+    defaults to `None` -- unset, this function's behavior is unchanged.
+    When set, builds a `DetectionTraceCollector` and wires it into
+    `_build_sources` (so `NakedEyePerceptionSource` records into it), then
+    writes each poll's buffered records to `detection_trace_path` via
+    `DetectionTraceWriter` immediately after `runner.run_once()` -- after
+    `ingest`/`tick` have already run against this poll's `Observation`s, so
+    the write can never influence what was ingested."""
     world_model_conn = open_world_model(world_model_db)
+    trace_collector = (
+        DetectionTraceCollector() if detection_trace_path is not None else None
+    )
+    trace_writer = (
+        DetectionTraceWriter(detection_trace_path)
+        if detection_trace_path is not None
+        else None
+    )
     try:
         runner.sources = _build_sources(
-            aircraft_client, theatre, world_model_conn, emit_mode="every_poll"
+            aircraft_client,
+            theatre,
+            world_model_conn,
+            emit_mode="every_poll",
+            trace_sink=trace_collector,
         )
         # BL-3: same thread-affinity reasoning as `sources` above -- the
         # `EnrichmentContext` `run_once` lazily builds needs this same
@@ -452,8 +484,12 @@ def _run_console_poll_loop(
         runner.theatre = theatre
         while not stop_event.is_set():
             runner.run_once()
+            if trace_writer is not None and trace_collector is not None:
+                trace_writer.write_poll(trace_collector, runner.store)
             stop_event.wait(poll_interval_s)
     finally:
+        if trace_writer is not None:
+            trace_writer.close()
         world_model_conn.close()
 
 
@@ -616,6 +652,7 @@ def _run_crew_text_poll_loop(
     f10_commands_enabled: bool = False,
     speech_client: AudioAdapterClient | None = None,
     speech_input_enabled: bool = False,
+    detection_trace_path: Path | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -632,16 +669,32 @@ def _run_crew_text_poll_loop(
     transcripts` -- `speech_client` is only ever non-`None` here when
     `speech_input_enabled` is set (`main()`'s own wiring), but both are
     still checked so this function has no implicit dependency on how its
-    caller constructs them."""
+    caller constructs them. `detection_trace_path` (BL-9, `--detection-
+    trace`) mirrors `_run_console_poll_loop`'s own wiring exactly -- see
+    that function's docstring."""
     world_model_conn = open_world_model(world_model_db)
+    trace_collector = (
+        DetectionTraceCollector() if detection_trace_path is not None else None
+    )
+    trace_writer = (
+        DetectionTraceWriter(detection_trace_path)
+        if detection_trace_path is not None
+        else None
+    )
     try:
         runner.sources = _build_sources(
-            aircraft_client, theatre, world_model_conn, emit_mode="every_poll"
+            aircraft_client,
+            theatre,
+            world_model_conn,
+            emit_mode="every_poll",
+            trace_sink=trace_collector,
         )
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
         while not stop_event.is_set():
             runner.run_once()
+            if trace_writer is not None and trace_collector is not None:
+                trace_writer.write_poll(trace_collector, runner.store)
             if runner.last_t_sim is not None:
                 crew_console.enrichment = runner.enrichment
                 crew_console.drain_events(runner.last_t_sim)
@@ -651,6 +704,8 @@ def _run_crew_text_poll_loop(
                     _poll_transcripts(speech_client, crew_console, runner.last_t_sim)
             stop_event.wait(poll_interval_s)
     finally:
+        if trace_writer is not None:
+            trace_writer.close()
         world_model_conn.close()
 
 
@@ -813,6 +868,21 @@ def main() -> None:
             "otherwise"
         ),
     )
+    parser.add_argument(
+        "--detection-trace",
+        type=Path,
+        default=None,
+        help=(
+            "write a per-poll, per-object naked-eye visibility gate trace "
+            "(JSONL) to this path -- BL-9, plans/bl9-debug-visualization/"
+            "plan.md. Answers 'why did Petrovich not see that' after a "
+            "flight: reduce it with body-layer/tools/"
+            "summarize_detection_trace.py. Only meaningful with --console "
+            "or --crew-text (there is nothing to join against belief "
+            "without one of those poll loops); defaults off, a true no-op "
+            "when absent."
+        ),
+    )
     args = parser.parse_args()
 
     if args.crew_text and args.console:
@@ -821,6 +891,8 @@ def main() -> None:
         parser.error("--speech-audio requires --audio-adapter-url")
     if args.speech_input and args.audio_adapter_url is None:
         parser.error("--speech-input requires --audio-adapter-url")
+    if args.detection_trace is not None and not (args.console or args.crew_text):
+        parser.error("--detection-trace requires --console or --crew-text")
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
@@ -880,6 +952,7 @@ def main() -> None:
                 args.f10_commands,
                 audio_adapter_client if args.speech_input else None,
                 args.speech_input,
+                args.detection_trace,
             ),
             daemon=True,
         )
@@ -911,6 +984,7 @@ def main() -> None:
                 args.world_model_db,
                 args.poll_interval_s,
                 stop_event,
+                args.detection_trace,
             ),
             daemon=True,
         )
