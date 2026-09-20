@@ -783,8 +783,9 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     `BINOCULAR_OPTIC` is a Б-6 6×30 at M=4.0 — *derived* as 6× glass × a ~0.67 unstabilised-platform
     penalty, not the inherited `HelperAI.lua` constant restored — carrying a real 4.25° field-of-view
     half-angle that becomes enforceable once slice 2 can select an optic. The 9K113 was cut from this
-    slice and is filed in `todo/todo.md`; its figures and its already-existing calibration column are
-    recorded there.
+    slice. Its figures live in `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`, and
+    the deferred backlog item is in `todo/todo.md` — filed on `main` (7a87514) as a side quest, so
+    it is not visible from this feature branch.
 
     Full record, including a 4.0 → 8.0 → 4.0 excursion that the 2026-09-17 photographic ladder
     refuted within a commit: `plans/detection-cones-slice1/plan.md`.
