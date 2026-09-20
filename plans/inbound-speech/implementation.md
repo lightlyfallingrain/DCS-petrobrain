@@ -312,3 +312,517 @@ it's harder to delete as "just a fixture"), `test_walk_ahead_matches_end_to_end`
 Checks re-run: srs-adapter (`ruff format --check`/`ruff check`/`mypy src`/`pytest -q`) — 81
 passed, 1 skipped. body-layer (unaffected by this change, re-run anyway per instruction) — 705
 passed.
+
+---
+
+### Stage 3 — recognition as a service, and body-layer's inbound wiring (2026-09-20)
+
+Branch `feature/stt-recognition-service`, forked from a just-merged `main` (the `srs-adapter` ->
+`audio-adapter` rename had already landed). Both halves of Decision 6's seven-field seam row, plus
+`stop_talking` dispatch deferred from Stage 2.
+
+#### Plan-vs-tree check (before starting)
+
+Per process: read Decision 6's seam table (2026-09-19 update), Decision 1/4 REVISED, the Stage 1
+GATE-CLEARED section, and `implementation.md`'s own Stage 2 entry before writing anything. The
+plan's Tests section names `srs-adapter/tests/...` paths throughout — all pre-rename prose, mapped
+to `audio-adapter/tests/...` per the 2026-09-20 rename note in the task brief; no other test-list
+mismatch found. `CrewConsole.handle_transcript` already took all seven of Decision 6's fields
+(Stage 2 had already added `verb_anchored`/`ambiguous` beyond the plan's own stale two-field
+table) — Stage 3 only had to build the wire that feeds it, not change its signature.
+
+#### Files Changed
+
+**`audio-adapter/`:**
+- `src/transcript_queue.py` (new) — `TranscriptEvent` (the seven-field row) + `TranscriptQueue`
+  (`push`/`drain_all`), a bounded FIFO mirroring `aircraft-layer/src/collector/cache.py`'s
+  `F10CommandQueue` almost exactly (same two-poller-safe drain-on-GET reasoning).
+- `src/server.py` — `TTSAdapterServer` gains optional `stt_engine`/`transcript_queue` constructor
+  params (both optional, `stt_engine=None` the default) and two routes: `POST /transcribe`
+  (base64 WAV in, mirroring `/audio/play`'s decode shape from `aircraft-layer`) ->
+  `STTEngine.transcribe` -> `command_matcher.match_transcript` -> `TranscriptQueue.push`; `GET
+  /transcripts/poll` -> `TranscriptQueue.drain_all`, `[]` on empty, mirroring `GET
+  /f10_commands/poll`. Without `stt_engine` configured, `/transcribe` answers `503` and
+  `/transcripts/poll` always drains empty — same "optional collaborator" posture as
+  `aircraft-layer`'s optional senders.
+- `src/audio_adapter/__main__.py` — `--whisper-binary`/`--whisper-model` wire a `WhisperCliEngine`
+  into the server using Stage 1's settled config (`vocabulary.to_prompt()` biasing, never
+  `--grammar`). No default model path — omitted means no recogniser, a true no-op.
+- `pyproject.toml` — `command_matcher`/`transcript_queue` added to ruff's `known-first-party`.
+- `tests/test_transcribe_api.py` (new) — structural copy of `test_server.py`'s pattern plus a
+  recording `STTEngine` double; `command_matcher.match_transcript` runs for real against whatever
+  text the double returns, so these tests exercise the real match path, not a matcher double.
+- `audio-adapter/CLAUDE.md` — Structure/Testing/Commands sections updated for all of the above.
+
+**`body-layer/`:**
+- `src/belief/audio_client.py` — `AudioAdapterClient.get_transcripts()`, following
+  `get_f10_commands`'s own drain-on-poll precedent (`[]` not `None` on empty; raises
+  `AudioAdapterError` on transport/parse failure, same as `push_speech` — not a swallow-and-
+  return-`[]` posture, since `logger.py`'s poll loop is where that decision belongs).
+- `src/belief/speech.py` — `render_stop_acknowledged()` ("Copy.").
+- `src/belief/crew_console.py` — `handle_f10_command`'s dispatch gains a `stop_talking` branch
+  calling a new `_handle_stop_talking`, and — unlike every other token's shared tail — pushes via
+  `self._print(lines, bypass_gate=True)` instead of the plain `self._print(lines)` every other
+  token uses. `bypass_gate=True` is what threads through as `speech_client.push_speech(...,
+  urgent=True)`, which is what actually triggers aircraft-layer's `AudioPlaybackSender.
+  _interrupt_playback` per the plan's own note on this token.
+- `src/logger.py` — `_poll_transcripts` (mirrors `_poll_f10_commands`'s per-call
+  `try`/`except`-isolated shape), validating all seven wire fields (type-checking each, including
+  an explicit `bool`-excluded numeric check for `confidence`/`match_ratio` since `bool` is an `int`
+  subclass) before dispatching through `CrewConsole.handle_transcript`; `t_wall` is read but not
+  passed through — `now_sim` is this poll's own sim time, the clock every other dispatch path
+  already uses. `--speech-input` (requires `--audio-adapter-url`, independent of `--speech-audio`)
+  wires it into `_run_crew_text_poll_loop` right after `_poll_f10_commands`. `main()` now builds
+  one shared `AudioAdapterClient` when either `--speech-audio` or `--speech-input` is set (one
+  process, one URL) — `CrewConsole.speech_client` only takes it when `--speech-audio` is actually
+  set, since audio *output* stays its own concern.
+- `run-crew-text.sh` — fixed a stale `--srs-adapter-url` flag left over from the `audio-adapter`
+  rename (would have crashed `main()`'s own `parser.error` check the moment `--speech-audio` was
+  parsed against an unrecognized flag); added `--speech-input`. This script was found already
+  modified/uncommitted at task start (unrelated prior session), fixed in place since it's the
+  exact run path this stage's acceptance target needed.
+- `tests/test_audio_client.py` — `get_transcripts()`: empty poll, ordered drain, unreachable-host
+  raise; `_make_handler` extended with a `do_GET` branch for `/transcripts/poll`.
+- `tests/test_speech.py` — `render_stop_acknowledged`.
+- `tests/test_crew_console.py` — `stop_talking`: speaks "Copy.", pushes to `speech_client` with
+  `urgent=True`, pushes to the overlay with the `"!! "` prefix (the same rule every other injected-
+  urgent line follows, not new behaviour).
+- `tests/test_logger.py` — `_poll_transcripts`: dispatches a matched command, a `token=None`/
+  `verb_anchored=False` transcript falls through to `handle_line`/escalation (verified via a
+  recording `BrainClient`, not just a return value), an empty queue dispatches nothing, a failed
+  poll degrades without raising, and a malformed item in a list is skipped while a well-formed
+  sibling in the same list still dispatches.
+- `body-layer/CLAUDE.md` — `--speech-input` flag doc, `AudioAdapterClient.get_transcripts`,
+  `_poll_transcripts`, and `stop_talking` dispatch added to their respective Structure entries.
+
+#### Tests Added
+
+See "Files Changed" above for what each new/extended test file covers; nothing summarized twice.
+
+#### Checks
+
+**audio-adapter/**: `ruff format --check` pass, `ruff check` pass, `mypy src` (strict) pass,
+`pytest -q` pass (98 passed, 1 skipped — pre-existing real-whisper-binary skip, unaffected).
+
+**body-layer/**: `ruff format --check` pass, `ruff check` pass, `mypy src` (strict, from
+`body-layer/`) pass, `pytest -q` pass (717 passed, up from 705 baseline + 12 new).
+
+#### Acceptance verification (real, not simulated)
+
+Ran for real, per the task's explicit instruction not to describe this untested. Found a stale
+`audio-adapter` process already listening on 7795 from before this session's code existed (`GET
+/transcripts/poll` 501'd — no `do_GET` at all, confirming it predated Stage 3); killed it and
+started a fresh instance from this branch:
+
+```sh
+cd audio-adapter
+PYTHONPATH=src .venv/bin/python -m audio_adapter --whisper-model /Users/sg/whisper-models/ggml-small.en.bin --target local --port 7795
+```
+
+POSTed three of the user's Stage 1 corpus WAVs (`data/corpus/raw/<token>/*.wav`) directly to
+`POST /transcribe`, real whisper-cli, real `command_matcher`:
+- `scan_left/scan_left_0.wav` -> `{"transcript": "scan left.", "token": "scan_left",
+  "confidence": 0.86, "verb_anchored": true, "ambiguous": false}` via `GET /transcripts/poll`.
+- `cancel_task/cancel_task_0.wav` -> recognised and matched, but confidence landed in the confirm
+  band (below `ACT_FLOOR_CANCEL`'s higher floor) — real behaviour, not act-by-default.
+- `stop_talking/stop_0.wav` -> recognised, matched to `stop_talking`, acted.
+
+Then drove `AudioAdapterClient.get_transcripts()` -> `_poll_transcripts` -> `CrewConsole.
+handle_transcript` directly (a small in-process script, not the full `logger.py main()` — see
+"Notable Discoveries" below for why) against a real `speech_client` pointed at the same running
+`audio-adapter` instance:
+- `scan_left` -> acted immediately (no confirm question), `handle_f10_command("scan_ahead"-family)`
+  ran (a "no world-model connection configured" readback line is the expected degraded output
+  with no `EnrichmentContext` wired in this minimal script, not a Stage 3 defect).
+- `cancel_task` -> printed `"Cancel the task, confirm?"` — the confirm band's real question, driven
+  by real recognition confidence, not a fixture.
+- `stop_talking` -> printed `"Copy."`. `_handle_stop_talking`'s dispatch path (`bypass_gate=True`)
+  ran; `speech_client.push_speech(..., urgent=True)` was called without raising against the real
+  `POST /speak` endpoint (delivery via `afplay` — this project's own compute-topology note that
+  audio confirmation is a human-in-the-loop check, and `test_server.py`'s existing suite already
+  covers the synthesis/delivery mechanics this call exercises).
+
+This exercises every real component in the chain end to end — `WhisperCliEngine`,
+`command_matcher.match_transcript`, `POST /transcribe`, `TranscriptQueue`, `GET /transcripts/poll`,
+`AudioAdapterClient.get_transcripts`, `_poll_transcripts`'s field validation,
+`CrewConsole.handle_transcript`'s band routing, and `_print`'s real `speech_client.push_speech`
+call — with no Windows box and no DCS involved, matching the stage's stated acceptance target.
+
+#### Notable Discoveries
+
+- **The full `logger.py main() --crew-text` path could not be driven end to end in this
+  environment, for a reason unrelated to Stage 3.** `ConsolePerceptionRunner.run_once`/
+  `PerceptionLogger.run_once` both return early (`[]`) whenever
+  `aircraft_client.get_telemetry_latest()` is `None`, and `_run_crew_text_poll_loop`'s own gate
+  (`if runner.last_t_sim is not None`) means `_poll_transcripts`/`_poll_f10_commands`/
+  `drain_events` never run at all until *some* real telemetry has arrived at least once — a
+  pre-existing property of `--crew-text` (present since Stage 4's `_run_console_poll_loop`, not
+  introduced here), not something Stage 3 changed. Running the real `main()` for a from-WAV
+  acceptance test would need a live `aircraft-layer` collector process actually receiving
+  telemetry (from DCS or a synthetic Export.lua-shaped feed), which is out of Stage 3's own scope
+  ("no Windows, no DCS in the loop"). The verification above drives the same real components
+  (`AudioAdapterClient`, `_poll_transcripts`, `CrewConsole.handle_transcript`, `speech_client`)
+  directly instead of through `main()`'s CLI wiring — everything Stage 3 itself built is real and
+  exercised; only the pre-existing telemetry-gating wrapper around it was bypassed. Worth the
+  user's awareness before the next stage that needs a from-WAV acceptance test through the full
+  `--crew-text` process.
+- **A stale `audio-adapter` process from before this branch's code was already listening on port
+  7795** at task start (confirmed via `GET /transcripts/poll` 501ing with "Unsupported method",
+  which only happens on a handler with no `do_GET` at all — pre-Stage-3 code). Killed and replaced
+  with a freshly built instance before verification; flagging in case the user notices the PID
+  changed underneath a session they had running.
+- **`run-crew-text.sh` was already modified/uncommitted at task start**, passing a stale
+  `--srs-adapter-url` flag from before the `audio-adapter` rename — would have hit `main()`'s own
+  `parser.error` the moment `--speech-audio` was parsed (unrecognized argument). Fixed in place
+  (see "Files Changed") since it is the exact script this stage's acceptance flow needed to be
+  correct, and leaving it broken would have actively misled whoever ran it next.
+
+---
+
+### Stage 3 follow-up: `stop_talking` becomes truly silent (2026-09-20)
+
+**Context.** Reviewer traced the "Copy." acknowledgement (above) and found it architecturally
+forced: `CrewConsole._print` never pushes to `speech_client` when there are no lines, and no
+interrupt-only call existed anywhere in the codebase — the only way to reach `AudioPlaybackSender`'s
+queue-clear/in-flight-interrupt was to push new urgent audio through it. User direction (verbatim,
+2026-09-20): *"'Stop' — no readback or confirmation, just stop talking. That is exception to the
+normal read back/confirm rule. It's more of a debug tool than crew feature."* This entry records
+the fix: a real interrupt-only path end to end, on `feature/stt-recognition-service` (not merged).
+
+#### Files Changed
+
+- `aircraft-layer/src/collector/audio_sender.py` — new public `AudioPlaybackSender.interrupt()`:
+  the same `_clear_queue()`/`_interrupt_playback()` pair `play_audio(..., urgent=True)` already
+  called, with the enqueue dropped. `play_audio`'s own urgent branch now calls `self.interrupt()`
+  instead of duplicating the two calls.
+- `aircraft-layer/src/api/server.py` — new `POST /audio/stop`: no request body, forwards to
+  `audio_sender.interrupt()`, `503` when unconfigured, never a `500` (matches `interrupt()`'s
+  own never-raises posture). Module docstring updated.
+- `aircraft-layer/tests/test_audio_sender.py` — `interrupt()` directly: queued lines dropped and
+  in-flight playback stopped with nothing new played, and a clean no-op with nothing playing/queued.
+- `aircraft-layer/tests/test_audio_stop_api.py` (new) — `POST /audio/stop` against a real server
+  with a recording `AudioPlaybackSender` double: forwards to `interrupt()`, `503` unconfigured.
+- `audio-adapter/src/server.py` — `AudioSink` protocol gains `interrupt() -> None` (raises
+  `AudioDeliveryError` on failure, same contract as `deliver`); new `POST /stop`, no body, calls
+  `sink.interrupt()`, `500` on `AudioDeliveryError`, `200` otherwise. Module docstring updated.
+- `audio-adapter/src/aircraft_client.py` — `AircraftLayerClient.stop_audio()` (`POST
+  /audio/stop`, no body, raises `AircraftLayerError`); `AircraftLayerAudioSink.interrupt()` wraps
+  it into `AudioDeliveryError`, mirroring `deliver()`'s own wrapping of `play_audio`.
+- `audio-adapter/src/audio_adapter/__main__.py` — `LocalPlaybackSink` refactored from blocking
+  `subprocess.run` to `Popen` + `communicate()`, tracking the in-flight process under a
+  `threading.Lock` so `interrupt()` (called from a different request-handling thread) can `kill()`
+  it. A killed process's own `deliver()` call still raises `AudioDeliveryError` (non-zero return
+  code) — that failure belongs to the request that was interrupted, not to `interrupt()` itself.
+- `audio-adapter/tests/test_server.py` — `_RecordingSink` gains `interrupt()`/`interrupt_calls`/
+  `should_fail_interrupt`; new tests for `POST /stop` (success, and interrupt failure -> `500`).
+- `body-layer/src/belief/audio_client.py` — `AudioAdapterClient.stop()` (`POST /stop`, no body,
+  raises `AudioAdapterError`).
+- `body-layer/src/belief/crew_console.py` — `_handle_stop_talking` rewritten: no longer returns
+  a line; calls `speech_client.stop()` when configured (log-and-continue on `AudioAdapterError`,
+  matching `_print`'s per-sink isolation) and otherwise no-ops. `handle_f10_command`'s
+  `stop_talking` branch now returns `[]` directly and never calls `_print` — no line is printed,
+  pushed to the overlay, or spoken. Removed the now-unused `render_stop_acknowledged` import.
+- `body-layer/src/belief/speech.py` — `render_stop_acknowledged` deleted; a comment in its place
+  explains the removal and why `stop_talking` is the one token with no readback.
+- `body-layer/tests/test_crew_console.py` — `FakeSpeechClient` gains `stop()`/`stop_calls`
+  (`"Copy."` reused as the `fail_on` sentinel for a stop-failure test, since no text flows through
+  this path any more). Three Stage 3 tests rewritten (empty output, `speech_client.stop()` called
+  not `push_speech`, no overlay push) plus one new interrupt-failure test — the old assertions
+  (`lines == ["Copy."]`, `push_speech` called urgent) directly described the behaviour this
+  follow-up removes, so they could not be preserved.
+- `body-layer/tests/test_speech.py` — `test_render_stop_acknowledged` and the now-dead import
+  removed.
+- `plans/inbound-speech/plan.md` — new "Decision 5 REVISED" section (full rationale, the latency
+  finding below); Stage 3's `stop_talking` entry gets a superseded-by note pointing at it.
+- `body-layer/CLAUDE.md`, `aircraft-layer/CLAUDE.md`, `audio-adapter/CLAUDE.md` — structure/
+  endpoint-list entries updated for the new interrupt-only path (`_handle_stop_talking`,
+  `POST /audio/stop`, `POST /stop`, `AudioSink.interrupt`, `LocalPlaybackSink`'s `Popen` change).
+
+#### Tests Added
+
+- `test_interrupt_clears_queued_lines_and_stops_in_flight_playback` (aircraft-layer) — the
+  interrupt-only contract: FIRST (in flight) finishes, SECOND/THIRD (queued) are dropped, nothing
+  new plays.
+- `test_interrupt_with_nothing_playing_or_queued_is_a_clean_no_op` (aircraft-layer).
+- `test_audio_stop_forwards_to_sender_interrupt` / `test_audio_stop_without_configured_sender_returns_503`
+  (aircraft-layer).
+- `test_stop_calls_sink_interrupt_and_never_synthesizes` / `test_stop_interrupt_failure_returns_500`
+  (audio-adapter).
+- `test_stop_talking_speaks_nothing` / `test_stop_talking_calls_speech_client_stop_not_push_speech` /
+  `test_stop_talking_pushes_nothing_to_the_overlay` / `test_stop_talking_interrupt_failure_does_not_raise`
+  (body-layer, replacing the three old Stage 3 tests).
+
+#### Checks
+
+**aircraft-layer/** — ruff format --check: pass · ruff check: pass · mypy --strict: pass (15
+files) · pytest: pass (134 passed).
+
+**audio-adapter/** — ruff format --check: pass · ruff check: pass · mypy --strict: pass (9 files)
+· pytest: pass (100 passed, 1 skipped — the real-whisper-binary test, skip-gated as documented).
+
+**body-layer/** — ruff format --check: pass · ruff check: pass · mypy --strict (`cd body-layer &&
+mypy src`): pass (35 files) · pytest (`PYTHONPATH=src:../world-model/src`): pass (717 passed).
+
+#### Notable Discoveries
+
+- **The live-sortie-latency question is still unverified.** Per this project's execution-boundary
+  rule, a real Windows/DCS run was not attempted from this session. What the code supports: `POST
+  /stop` never calls `TTSEngine.synthesize` or any `AudioSink.deliver` — it is `sink.interrupt()`
+  alone — so the round trip should be faster than any `/speak` call in principle (no synthesis, no
+  WAV write, no playback-queue join). Confirming the actual magnitude needs a live timed run;
+  recorded as still-open in Decision 5 REVISED rather than claimed as measured.
+- **`LocalPlaybackSink` had no automated test before this change and still has none** — matches
+  this subproject's own documented posture (`audio-adapter/CLAUDE.md` Testing: "`src/__main__.py`
+  ... has no automated test — a live-process entrypoint"). The `Popen`/lock refactor was verified
+  by reading + the full mypy/ruff/pytest pass, not by a new unit test, consistent with that
+  existing exemption rather than a gap introduced here.
+- **Concurrency note, not fixed here:** `ThreadingHTTPServer` runs each `/speak` call on its own
+  thread, so `LocalPlaybackSink._current` genuinely only tracks the *most recent* in-flight
+  process if two overlap — a real limitation for a debug-tool-scoped feature, matching the
+  existing docstring's own acknowledgement that this dev-only path was never designed for
+  concurrent delivery. Not addressed, since `stop_talking` is explicitly scoped as a debug tool.
+
+---
+
+### Stage 3 follow-up, hotfix: a successful stop was failing the interrupted /speak call (2026-09-20)
+
+**Context.** Coordinator live-verified the local `/stop` path on the Mac: `afplay` in flight,
+`POST /stop` returned `200` in ~6ms, playback stopped — but the in-flight `POST /speak` call then
+raised `HTTPError: 500`. Root cause: `LocalPlaybackSink.deliver` treated `afplay`'s post-`kill()`
+return code (`-9`, indistinguishable from a genuine crash) as failure and raised
+`AudioDeliveryError`. Since `AudioAdapterClient.push_speech` raises on any non-2xx and
+`CrewConsole._print` logs that as a failure, every intentional stop would have logged a spurious
+speech-delivery error — exactly the "system reports an error for doing what it was told" defect an
+interrupt-only path exists to avoid.
+
+#### Files Changed
+
+- `audio-adapter/src/audio_adapter/__main__.py` — `LocalPlaybackSink` gains `self._interrupted:
+  Popen | None`, set by `interrupt()` to the exact process it killed and read (then cleared) by
+  `deliver()`'s own `finally`. `deliver()` now branches on that flag when it sees a non-zero return
+  code: if this process is the one `interrupt()` killed, logs at `info` and returns normally (an
+  expected outcome); otherwise raises `AudioDeliveryError` exactly as before (a genuine `afplay`
+  failure is unaffected by this change). Docstrings record the live-measured ~6ms interrupt latency
+  and the `ThreadingHTTPServer` dependency (`/speak` blocks the handling thread until `afplay`
+  exits; only a threading server keeps `/stop` servicable during that window — a switch to a
+  single-threaded server would silently break `stop_talking` entirely).
+- `plans/inbound-speech/plan.md` — Decision 5 REVISED's latency paragraph replaced with the
+  measured ~6ms figure (local target, Mac, 2026-09-20) plus this defect/fix account and the
+  aircraft-layer parity check below; the Windows figure stays recorded as genuinely unmeasured.
+
+#### aircraft-layer parity check
+
+Checked whether `collector/audio_sender.py`'s `_interrupt_playback` has the same shape. **It does
+not — pre-existing-safe, no change needed.** `_WinsoundPlayer.play` never inspects a return code:
+it starts playback async and blocks on a `threading.Event`; `stop()` purges the sound and sets that
+same event, so an interrupted `play()` call simply returns, indistinguishable at the call-site from
+one that finished normally. The worker loop (`_run`) only catches exceptions `play()` might raise,
+and `play()` never raises on interrupt. So the equivalent failure mode does not exist on the
+aircraft-layer side, and never did.
+
+#### Checks
+
+Re-ran all three subprojects' full check sequences after the fix — all pass:
+
+- **aircraft-layer/** — ruff format --check / ruff check / mypy --strict (15 files) / pytest (134
+  passed). Unchanged by this fix; re-run to confirm nothing regressed.
+- **audio-adapter/** — ruff format --check / ruff check / mypy --strict (9 files) / pytest (100
+  passed, 1 skipped).
+- **body-layer/** — ruff format --check / ruff check / mypy --strict (`cd body-layer && mypy src`,
+  35 files) / pytest (`PYTHONPATH=src:../world-model/src`, 717 passed). Unchanged by this fix;
+  re-run to confirm nothing regressed.
+
+#### Notable Discoveries
+
+- **No new automated test added for this fix.** `LocalPlaybackSink`/`__main__.py` has no automated
+  test by documented policy (`audio-adapter/CLAUDE.md` Testing: a live-process entrypoint, verified
+  manually) — a unit test here would need either a real `afplay` kill race (flaky, timing-
+  dependent) or a fake stand-in binary, which is a bigger design decision than this targeted fix
+  warrants. The coordinator's live run is the verification of record for this behaviour, consistent
+  with how this file was already tested.
+
+---
+
+### Stage 3 follow-up, review round 2: single-slot interrupt tracking under concurrency (2026-09-20)
+
+**Context.** Review (`plans/inbound-speech/review.md`) came back APPROVED WITH MINOR FIXES on the
+previous hotfix (`dce0aac`). Two required fixes, both real, confirmed by direct code reading rather
+than accepted on report:
+
+1. `self._interrupted` was a single `Popen | None` slot. Two `/speak` calls can genuinely be in
+   flight at once (`ThreadingHTTPServer`), so a second `interrupt()` against a second process could
+   overwrite the first's pending entry before the first `deliver()`'s own `finally` read it — the
+   first process's intentional kill would then be misread as a genuine failure and 500 the
+   in-flight `/speak` call, reproducing the exact pre-fix bug under concurrency the earlier
+   single-request live test could not have exercised (only one `/speak` was ever in flight in that
+   test).
+2. No automated test covered the flag logic itself — the `__main__.py`-is-a-live-process-entrypoint
+   exemption didn't actually apply to `LocalPlaybackSink`, which is ordinary deterministic class
+   logic (the same shape as the already-tested `AudioPlaybackSender.interrupt` on the aircraft-layer
+   side); it only inherited the exemption by being defined in the same file as the CLI wiring.
+
+#### Files Changed
+
+- `audio-adapter/src/local_playback.py` (new) — `LocalPlaybackSink` extracted out of `__main__.py`,
+  plus a new `_InFlightTracker` class that owns the interrupted-vs-failed bookkeeping in isolation:
+  tracks every interrupted process **by identity** (`id(process)`, in a `set`, per the review's own
+  suggestion) rather than a single slot, with entries removed the moment they're consumed
+  (`finish()`) so the set cannot grow unbounded. `LocalPlaybackSink.__init__` gained an injectable
+  `spawn: Callable[[str], _PlaybackProcess]` parameter (default: real `Popen`) so tests can drive
+  the exact interleaving with a fake process, no real `afplay`. Docstring also fixes the now-stale
+  "afplay serialises concurrent calls" claim (true only under the old blocking `subprocess.run`,
+  false since the `Popen` move) and documents the `ThreadingHTTPServer` dependency load-bearing in
+  both directions (needed for `/stop` to reach `interrupt()` at all, *and* the reason two
+  `deliver()` calls can race in the first place).
+- `audio-adapter/src/audio_adapter/__main__.py` — `LocalPlaybackSink` removed; now imports it from
+  `local_playback`. Dropped now-unused `subprocess`/`tempfile`/`threading`/`AudioDeliveryError`
+  imports and the now-dead `_PLAYBACK_TIMEOUT_S` constant (moved to `local_playback.py` as
+  `PLAYBACK_TIMEOUT_S`).
+- `audio-adapter/tests/test_local_playback.py` (new) — `_InFlightTracker` tested directly with no
+  threads at all (`start`/`interrupt`/`finish` called by hand to reproduce the exact two-process
+  interleaving that broke the single-slot version deterministically, rather than racing real
+  threads); `LocalPlaybackSink` tested against a fake `_PlaybackProcess` (success, genuine non-zero
+  exit → `AudioDeliveryError`, missing binary → `AudioDeliveryError`, an interrupted `deliver()`
+  completing cleanly, and two concurrent `deliver()` calls each surviving their own interrupt — the
+  regression scenario end to end).
+- `audio-adapter/CLAUDE.md` — `__main__.py`'s "no automated test" note narrowed to just the CLI
+  wiring, with an explicit note that `LocalPlaybackSink` only inherited that exemption by
+  co-location and didn't actually qualify; new `local_playback.py`/`test_local_playback.py`
+  Structure/Testing entries.
+- `.claude/agent-memory/implementer/feedback_entrypoint_exemption_scope.md` (new) — durable lesson:
+  an entrypoint's "no automated test" exemption covers the CLI wiring genuinely tied to a live
+  process, not every class merely defined in the same file.
+- `plans/inbound-speech/plan.md` — not further edited this round; Decision 5 REVISED's existing
+  latency/defect account already covers the single-slot fix's context. (No new decision text added
+  here since this round is a correctness fix to that same fix, not a new design decision.)
+
+#### Tests Added
+
+`_InFlightTracker`: `test_finish_without_a_prior_interrupt_is_not_flagged`,
+`test_interrupt_then_finish_is_flagged_and_then_forgotten`,
+`test_interrupt_with_nothing_in_flight_returns_none`,
+`test_second_interrupt_does_not_clobber_the_first_pending_one` (the regression test, direct and
+deterministic), `test_finish_clears_current_only_for_the_matching_process`.
+
+`LocalPlaybackSink`: `test_deliver_success_does_not_raise`,
+`test_deliver_genuine_nonzero_exit_raises`, `test_deliver_missing_binary_raises_audio_delivery_error`,
+`test_interrupt_stops_in_flight_playback_without_raising_in_deliver`,
+`test_interrupt_with_nothing_playing_is_a_clean_no_op`,
+`test_two_concurrent_delivers_both_survive_being_interrupted` (thread-based, exercises the real
+race end to end — re-ran 5x locally with no flakes).
+
+#### Checks
+
+Re-ran all three subprojects' full check sequences — all pass:
+
+- **aircraft-layer/** — ruff format --check / ruff check / mypy --strict (15 files) / pytest (134
+  passed). Untouched by this round; re-run to confirm nothing regressed.
+- **audio-adapter/** — ruff format --check / ruff check / mypy --strict (10 files, up from 9 —
+  `local_playback.py` is new) / pytest (111 passed, 1 skipped, up from 100 — 11 new tests in
+  `test_local_playback.py`). `test_local_playback.py` alone re-run 5x in isolation to check for
+  timing flakiness in the two thread-based tests — stable every time (0.30s each run).
+- **body-layer/** — ruff format --check / ruff check / mypy --strict (`cd body-layer && mypy src`,
+  35 files) / pytest (`PYTHONPATH=src:../world-model/src`, 717 passed). Untouched by this round;
+  re-run to confirm nothing regressed.
+
+#### Notable Discoveries
+
+- **`Popen.communicate`'s real signature (`input` first, `timeout` second) broke the first draft of
+  the `_PlaybackProcess` Protocol.** Declaring `communicate(self, timeout: float | None = None)`
+  positionally put `timeout` at position 0, which `mypy --strict` compared against `Popen`'s actual
+  position-0 parameter (`input: bytes | None`) and rejected as an incompatible default for the
+  `spawn` constructor parameter. Fixed by making the Protocol's `timeout` keyword-only
+  (`def communicate(self, *, timeout: float | None = None)`), which checks by name against
+  keyword-callable positions rather than by position — `deliver()` already only ever calls
+  `communicate(timeout=...)` as a keyword, so this changes nothing about real behaviour, only the
+  Protocol's structural-typing shape.
+- **The direct, non-threaded `_InFlightTracker` tests are the ones that actually prove the fix.**
+  The thread-based `LocalPlaybackSink` tests (in particular
+  `test_two_concurrent_delivers_both_survive_being_interrupted`) exercise the real code path end to
+  end and are valuable as an integration check, but they rely on `time.sleep(0.1)` to get the
+  interleaving order right and could in principle pass by luck on a scheduler that happens to
+  serialize things. The `_InFlightTracker` unit tests call `start`/`interrupt`/`finish` directly in
+  the exact broken order with no timing dependency at all — those are the ones that would fail
+  immediately and deterministically against the old single-slot implementation, and are the
+  stronger evidence the underlying logic is actually fixed.
+
+---
+
+### Decision 4 REVISED AGAIN: gate confidence and match ratio independently (2026-09-20)
+
+**Context.** `plans/inbound-speech/plan.md`'s Decision 4 REVISED AGAIN (committed separately,
+`12ba8d1`, docs-only) records the user's decision and full reasoning. Summary: `ACT_FLOOR = 0.60`
+was measured against Stage 1's *confidence* distribution, then applied to `combined = confidence *
+match_ratio` — a product of two sub-1 quantities systematically lower than either factor. Four real
+corpus clips run end to end put two in the confirm band that should have acted (0.589 vs 0.60, 0.790
+vs cancel's 0.80), a third clearing by 0.001. The fix gates the two quantities independently rather
+than inventing a new number: `ACT_FLOOR`/`CONFIRM_FLOOR`/`ACT_FLOOR_CANCEL` now compare against
+`confidence` alone, which is the quantity `ACT_FLOOR` was actually measured on.
+
+**The substantive change, not the threshold fix:** `verb_anchored=False` already routed to
+`"fallthrough"` (→ `handle_line` → `parse_utterance` → escalation), and this was already, mechanically,
+the brain-layer route for well-heard non-command speech — no code change was needed there. What the
+revision does is make that routing the documented, intentional second path into the brain (alongside
+the explicit wake word), and confirm that `verb_anchored` — not confidence — is what decides between
+"free speech, go to the brain" and "an unresolved command attempt, say again" for the two no-match
+cells in Decision 4 REVISED AGAIN's table.
+
+#### Files Changed
+
+- `body-layer/src/belief/voice_commands.py` — `classify_response`'s floor comparisons changed from
+  `combined = confidence * match_ratio` to `confidence` alone. `match_ratio` stays in the function
+  signature (parity with `MatchResult`/`handle_transcript`'s seven-field seam) but is no longer read
+  for gating — a comment explains why re-gating it body-side would double-penalise something the
+  adapter's own `MATCH_FLOOR` already filtered. `ACT_FLOOR`'s comment restated to say it's now
+  applied to the quantity it was measured on (validates the number, doesn't replace it).
+  `ACT_FLOOR_CANCEL`'s comment restated honestly: always an unmeasured placeholder margin on top of
+  `ACT_FLOOR`, now also compared against confidence for the same reason. `CONFIRM_FLOOR`'s comment
+  notes the quantity switch without claiming new grounding (it was never measured against either
+  quantity). Docstring rewritten to explain the independent-gating rationale and the `verb_anchored`
+  routing distinction (fallthrough → brain vs. say_again for an unresolved-but-attempted command).
+- `body-layer/CLAUDE.md` — `voice_commands.py`'s Structure entry updated with the same account, so
+  the durable doc doesn't still describe the multiply.
+- `body-layer/tests/test_voice_commands.py` — module docstring states the new gating contract. Band
+  tests (`test_confirm_band_between_the_two_floors`, `test_say_again_below_confirm_floor`,
+  `test_cancel_task_uses_the_higher_floor`) now vary `confidence` between the floors with
+  `match_ratio` fixed at 1.0, instead of the old `combined` product — rewritten to assert the new
+  contract, not adjusted numbers. New `test_act_band_is_gated_on_confidence_alone_not_the_product`:
+  a low-but-above-`MATCH_FLOOR` `match_ratio` (0.61) with high confidence still acts — this is the
+  test that would have failed against a lingering product-based implementation even though the
+  pre-existing `test_act_band` (both at 1.0) would have passed either way.
+- `body-layer/tests/test_crew_console.py` — the six `handle_transcript`-level tests that built a
+  `combined` mid-band value and passed it as `match_ratio` were rewritten to pass it as `confidence`
+  instead (`match_ratio=1.0` fixed). New `test_handle_transcript_unresolved_verb_says_again_even_
+  when_heard_clearly`: the subtle half of the table — "scan somethinggarbled" at `confidence=0.95`
+  (would clear `ACT_FLOOR` if matched) with `token=None`/`verb_anchored=True` still says again, never
+  falls through to the brain. `test_handle_transcript_fallthrough_uses_handle_line_unchanged`'s
+  docstring extended to name this as Decision 4 REVISED AGAIN's "second route in" — the test itself
+  (high confidence 0.95, `verb_anchored=False`, asserting the brain client actually received the
+  escalation) already proved the property; only the docstring needed to say so.
+
+#### Tests Added
+
+- `test_act_band_is_gated_on_confidence_alone_not_the_product` (`test_voice_commands.py`).
+- `test_handle_transcript_unresolved_verb_says_again_even_when_heard_clearly` (`test_crew_console.py`).
+
+#### Checks
+
+- **body-layer/** — ruff format --check / ruff check / mypy --strict (`cd body-layer && mypy src`,
+  35 files) / pytest (`PYTHONPATH=src:../world-model/src`, 719 passed, up from 717 — 2 new tests).
+- **audio-adapter/** — re-run as the plan's sibling subproject, unchanged by this revision: ruff
+  format --check / ruff check / mypy --strict (10 files) / pytest (111 passed, 1 skipped).
+
+#### Notable Discoveries
+
+- **The "second route to the brain" required no code change, only documentation.** Tracing
+  `_act_on_voice_decision`'s `"fallthrough"` branch showed it already called `self.handle_line
+  (transcript, now_sim)` unconditionally whenever `verb_anchored=False`, regardless of confidence —
+  this was already Stage 2's behaviour, not something this revision added. The revision's actual
+  code delta is confined to `classify_response`'s floor comparisons (product → confidence alone);
+  the "brain gets a second route in" framing documents an existing mechanism's newly-understood
+  significance, not a new one. Worth recording plainly rather than letting the commit message imply
+  a bigger surface change than what actually shipped.
+- **No second body-side match threshold was added**, per the coordinator's explicit instruction to
+  justify one if introduced rather than pick a number. `match_ratio` remains in `classify_response`'s
+  signature for seam parity but is inert for gating — `MATCH_FLOOR` (0.6, audio-adapter's
+  `command_matcher.py`) is still the only place match quality is filtered.

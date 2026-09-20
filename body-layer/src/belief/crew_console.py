@@ -377,6 +377,12 @@ class CrewConsole:
             lines = self._handle_watch_nearest(now_sim, air_defence_only=True)
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
+        elif token == "stop_talking":
+            # No readback, no `_print` call at all -- `stop_talking` is a
+            # stated exception to every other token's "dispatch, then
+            # readback" shape (see `_handle_stop_talking`'s own docstring).
+            self._handle_stop_talking()
+            return []
         else:
             return []
         self._print(lines)
@@ -599,6 +605,46 @@ class CrewConsole:
         description = self._describe_task_for_speech(task)
         cancel_task(self.store, self.tasks, task.id)
         return [render_cancel_readback(description).text]
+
+    def _handle_stop_talking(self) -> None:
+        """`stop_talking` -- interrupts whatever is currently playing and
+        drops whatever is queued, and says **nothing at all** (user
+        direction, 2026-09-20, verbatim: *"'Stop' -- no readback or
+        confirmation, just stop talking. That is exception to the normal
+        read back/confirm rule. It's more of a debug tool than crew
+        feature."*). Every other token this method's caller dispatches
+        speaks a readback (`belief.speech`'s module docstring, "Templated,
+        body-written" class); `stop_talking` deliberately does not --
+        acknowledging a request for silence with speech would defeat the
+        request. That is why this method returns nothing and is never
+        routed through `_print`: there is no line to print, push to the
+        overlay, or speak.
+
+        `handle_f10_command`'s Stage 3 revision to this method (the
+        original had this return a short `"Copy."` acknowledgement, pushed
+        urgent through `_print` -- see plan Stage 3's own entry for that
+        history) replaced *that* with a real interrupt-only call:
+        `speech_client.stop()` (`belief.audio_client.AudioAdapterClient.
+        stop`, `POST /stop`) reaches audio-adapter's `AudioSink.interrupt`
+        without synthesizing or delivering any audio -- for `--target
+        aircraft-layer` that forwards to `collector.audio_sender.
+        AudioPlaybackSender.interrupt` (`POST /audio/stop`), which clears
+        the routine queue and stops in-flight playback exactly as
+        `play_audio(..., urgent=True)` already did, just without the
+        enqueue that used to carry the acknowledgement. Without
+        `speech_client` configured (no `--speech-audio`), there is nothing
+        to interrupt and this is a true no-op -- the same
+        None-means-no-op posture every other `speech_client` use already
+        has."""
+        if self.speech_client is None:
+            return
+        try:
+            self.speech_client.stop()
+        except AudioAdapterError:
+            logger.warning(
+                "speech interrupt failed for stop_talking (continuing)",
+                exc_info=True,
+            )
 
     def handle_transcript(
         self,

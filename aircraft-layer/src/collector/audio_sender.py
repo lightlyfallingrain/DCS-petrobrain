@@ -208,10 +208,24 @@ class AudioPlaybackSender:
             return
 
         if urgent:
-            self._clear_queue()
-            self._interrupt_playback()
+            self.interrupt()
 
         self._queue.put(path)
+
+    def interrupt(self) -> None:
+        """Stop whatever is currently playing and drop everything queued,
+        without enqueueing anything new -- the interrupt-only path
+        `stop_talking` needs (`plans/inbound-speech/plan.md` Stage 3
+        follow-up, "'Stop' -- no readback or confirmation, just stop
+        talking", a stated exception to this project's usual readback/
+        confirm rule). `play_audio(..., urgent=True)` already reaches this
+        exact pair of calls on its way to enqueueing its own urgent line;
+        this method is that same preemption with the enqueue dropped, so a
+        caller that only wants silence never has to push audio to get it.
+        Never raises -- `_clear_queue`/`_interrupt_playback` already don't,
+        same posture as `play_audio` itself."""
+        self._clear_queue()
+        self._interrupt_playback()
 
     def _clear_queue(self) -> None:
         """Drops every currently-queued routine `.wav` path (an urgent push

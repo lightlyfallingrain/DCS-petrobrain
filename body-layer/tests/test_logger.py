@@ -22,8 +22,10 @@ from typing import Any
 import pytest
 
 from aircraft_client import AircraftLayerError
+from belief.audio_client import AudioAdapterError
 from belief.console import Console
 from belief.contacts import ContactStore
+from belief.crew_console import CrewConsole
 from belief.mission_phase import (
     CompactRoutePoint,
     MissionPhaseTracker,
@@ -32,6 +34,7 @@ from belief.mission_phase import (
 from logger import (
     ConsolePerceptionRunner,
     PerceptionLogger,
+    _poll_transcripts,
     _run_console_poll_loop,
     _run_console_repl,
     format_observation_line,
@@ -631,3 +634,116 @@ def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
         x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
     )
     assert projected.wedge_deg == (0.0, 30.0)
+
+
+# -- _poll_transcripts (plans/inbound-speech/plan.md Stage 3) ---------------
+
+
+class FakeSpeechInputClient:
+    """Stands in for `belief.audio_client.AudioAdapterClient` for
+    `_poll_transcripts` -- returns a fixed list of transcript dicts once,
+    then empty (mirroring `GET /transcripts/poll`'s real drain-on-GET
+    behaviour), or raises `AudioAdapterError` if `should_fail` is set."""
+
+    def __init__(
+        self,
+        transcripts: list[dict[str, object]] | None = None,
+        should_fail: bool = False,
+    ) -> None:
+        self._transcripts = transcripts if transcripts is not None else []
+        self.should_fail = should_fail
+        self.poll_count = 0
+
+    def get_transcripts(self) -> list[dict[str, object]]:
+        self.poll_count += 1
+        if self.should_fail:
+            raise AudioAdapterError("poll failed (test double)")
+        drained = self._transcripts
+        self._transcripts = []
+        return drained
+
+
+def test_poll_transcripts_dispatches_a_matched_command_through_handle_transcript() -> (
+    None
+):
+    console = CrewConsole(store=ContactStore())
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan left",
+                "confidence": 0.9,
+                "token": "scan_left",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert client.poll_count == 1
+
+
+def test_poll_transcripts_no_match_falls_through_to_handle_line() -> None:
+    """A `token=None, verb_anchored=False` transcript (not a command
+    attempt at all) must reach the ordinary typed-text path, exactly like
+    Stage 2's `handle_transcript` fallthrough test."""
+    escalated: list[str] = []
+
+    class _RecordingBrainClient:
+        def handle(self, payload: object) -> None:
+            escalated.append("sent")
+
+        def awaiting_reply_id(self) -> str | None:
+            return None
+
+    console = CrewConsole(store=ContactStore(), brain_client=_RecordingBrainClient())  # type: ignore[arg-type]
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "the tanks are on the ridge",
+                "confidence": 0.5,
+                "token": None,
+                "match_ratio": 0.0,
+                "verb_anchored": False,
+                "ambiguous": False,
+                "t_wall": 100.0,
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert escalated == ["sent"]
+
+
+def test_poll_transcripts_empty_queue_dispatches_nothing() -> None:
+    console = CrewConsole(store=ContactStore())
+    client = FakeSpeechInputClient(transcripts=[])
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert client.poll_count == 1
+
+
+def test_poll_transcripts_failed_poll_degrades_without_raising() -> None:
+    console = CrewConsole(store=ContactStore())
+    client = FakeSpeechInputClient(should_fail=True)
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+
+
+def test_poll_transcripts_skips_malformed_items() -> None:
+    console = CrewConsole(store=ContactStore())
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {"transcript": 123, "confidence": 0.9, "token": None},  # bad shape
+            {
+                "transcript": "scan left",
+                "confidence": 0.9,
+                "token": "scan_left",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+            },
+        ]
+    )
+    # Must not raise, and the well-formed second item must still dispatch.
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert client.poll_count == 1

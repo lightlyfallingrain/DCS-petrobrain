@@ -10,3 +10,8 @@
 # (community campaign content, community-tool assets, etc.). Local-only.
 mission-interpreter/research/samples/
 
+
+# Knowledge-graph build artifacts and the curated corpus mirror they are
+# built from. Both are derived; the corpus is a copy of tracked documents.
+graphify-corpus/
+graphify-out/
