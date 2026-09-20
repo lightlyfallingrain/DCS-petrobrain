@@ -17,13 +17,13 @@ import pytest
 
 from aircraft_client import AircraftLayerError
 from belief import enrichment as enrichment_module
+from belief.audio_client import AudioAdapterError
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import CrewConsole
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import EscalationPayload
-from belief.audio_client import AudioAdapterError
 from belief.tasks import TaskStore
 from belief.voice_commands import ACT_FLOOR, CONFIRM_FLOOR, CONFIRM_WINDOW_S
 from perception.geometry import GeoPosition
