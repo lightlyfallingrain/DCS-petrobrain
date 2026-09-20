@@ -37,6 +37,40 @@ slice 1 of the detection-cones milestone — as an explicit, opt-in extension of
   `(boresight_azimuth_deg, 0.0)` compared against `fov_half_angle_deg`; `None` means "no
   restriction," always `True`.
 
+#### The binocular is 8×30, and the 4.0 was never a magnification
+
+`BINOCULAR_RANGE_MULTIPLIER = 4.0` is, by `visibility.py`'s own comment, `HelperAI.lua`'s
+`extra_eyesight_ratio` — an ED engine constant this project relabelled as binocular magnification.
+So it is not an imprecise estimate of magnification; it never measured magnification at all.
+
+The modelled instrument is a **Б-8 / БПЦ5 8×30**: standard Soviet compact issue, about the handheld
+ceiling in a vibrating airframe, and small enough to raise and stow in an Mi-24 front cockpit
+without fouling the sight. The artillery glasses (Б-12 12×45) are the wrong size for that space.
+
+**8.0 cannot simply replace 4.0 in the range formula.** `NakedEyePerceptionSource` applies this
+multiplier unconditionally, so the substitution would double every detection range in the live path,
+invalidate the calibration sortie's data mid-flight, and break this slice's central regression test.
+
+So the one constant is split into the two quantities it was conflating:
+
+| Quantity | Value | Standing |
+|---|---|---|
+| `magnification` | 8.0 | The real instrument. Realistic, not measured in-sim. |
+| `handheld_effectiveness` | 0.5 | **Unmeasured.** Chosen to reproduce today's effective 4.0. |
+| effective multiplier | **4.0** | The empirically calibrated figure all sortie data rests on. |
+
+`Optic` gains `handheld_effectiveness: float = 1.0` (so `UNAIDED_OPTIC` is untouched), and the range
+formula uses `magnification × handheld_effectiveness`.
+
+The 0.5 is a fudge factor and the plan says so. The gain is that it is now a *named and measurable*
+one: 8× glass handheld in a vibrating helicopter genuinely does not deliver 8× of usable acuity, and
+a calibration sortie can measure that shortfall — which was impossible while it sat hidden inside a
+magnification figure that was really an AI-eyesight constant. Same total behaviour, one honest field
+instead of one mislabelled one.
+
+A test asserts the effective multiplier equals `BINOCULAR_RANGE_MULTIPLIER`, so the two cannot drift
+apart silently.
+
 #### Scope cut 2026-09-20: the 9K113 is deferred (user direction)
 
 Slice 1 builds the unaided and binocular optics only. An earlier revision of this plan added two
