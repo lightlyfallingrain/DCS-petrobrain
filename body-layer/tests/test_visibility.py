@@ -82,24 +82,30 @@ def _candidate(
 
 
 def test_infantry_just_inside_medres_tier_range_is_visible() -> None:
-    # infantry: size 1.8 m, medres threshold = 1.8 / 0.014 * 4.0 = 514.29 m
-    # (recalibrated 2026-09-17 from the screenshot ladder; was 900 m under
-    # the old 0.008 constant).
+    # infantry: size 1.8 m, medres threshold = 1.8 / 0.014 * 8.0 = 1028.57 m.
+    # **STALE-FIGURE UPDATE (2026-09-20)**: this was 513 m / 514.29 m under
+    # the old BINOCULAR_RANGE_MULTIPLIER = 4.0 (recalibrated 2026-09-17 from
+    # the screenshot ladder against that value); the multiplier is now 8.0
+    # (visibility.py's own docstring has the rationale), so every threshold
+    # in this file doubled. Values below are recomputed for 8.0, not a new
+    # calibration pass.
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=513.0, z=0.0)
+    candidate = _candidate("Infantry", x=1027.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
     assert result is not None
-    assert result.range_m == pytest.approx(513.0)
+    assert result.range_m == pytest.approx(1027.0)
     assert result.bearing_deg == pytest.approx(0.0)
     assert result.tier == "medres"
     assert result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
 
 
 def test_infantry_well_inside_hires_tier_range_achieves_hires_tier() -> None:
-    # infantry: size 1.8 m, hires threshold = 1.8 / 0.028 * 4.0 = 257.14 m
-    # (recalibrated 2026-09-17; was 360 m under the old 0.02 constant). A
+    # infantry: size 1.8 m, hires threshold = 1.8 / 0.028 * 8.0 = 514.29 m
+    # (was 257.14 m under the old M=4.0, see the medres test above for the
+    # 2026-09-20 multiplier change). x=250 sits well inside either value,
+    # so this candidate's own assertions are unaffected by the change. A
     # candidate inside it resolves to the tighter achieved tier regardless
     # of where the gate itself sits.
     ownship = _ownship(heading_true_deg=0.0)
@@ -113,8 +119,10 @@ def test_infantry_well_inside_hires_tier_range_achieves_hires_tier() -> None:
 
 
 def test_infantry_just_outside_hires_tier_range_achieves_medres_tier() -> None:
+    # Just beyond the new (2026-09-20, M=8.0) hires threshold of 514.29 m
+    # -- was 258 m against the old 257.14 m threshold under M=4.0.
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=258.0, z=0.0)
+    candidate = _candidate("Infantry", x=516.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
@@ -125,13 +133,14 @@ def test_infantry_just_outside_hires_tier_range_achieves_medres_tier() -> None:
 
 def test_infantry_just_inside_lowres_tier_range_is_visible() -> None:
     # `plans/classification-refinement/plan.md` Stage 7: the gate moved
-    # from `medres` to `lowres`. Infantry: size 1.8 m, lowres*4 threshold =
-    # 1.8 / 0.003 * 4.0 = 2400 m (recalibrated 2026-09-17; was 1674.42 m)
-    # -- well below NAKED_EYE_RANGE_CAP_M, so the size curve (not the cap)
-    # still does the discriminating here. A
-    # candidate this far out achieves only the `lowres` (presence) tier.
+    # from `medres` to `lowres`. Infantry: size 1.8 m, lowres*8 threshold =
+    # 1.8 / 0.003 * 8.0 = 4800 m (was 2400 m under the old M=4.0, see the
+    # medres test above for the 2026-09-20 multiplier change) -- well below
+    # NAKED_EYE_RANGE_CAP_M, so the size curve (not the cap) still does the
+    # discriminating here for an object this small. A candidate this far
+    # out achieves only the `lowres` (presence) tier.
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=1674.0, z=0.0)
+    candidate = _candidate("Infantry", x=4799.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
@@ -141,28 +150,42 @@ def test_infantry_just_inside_lowres_tier_range_is_visible() -> None:
 
 
 def test_infantry_just_outside_lowres_tier_range_is_not_visible() -> None:
+    # Just beyond the new (2026-09-20, M=8.0) lowres threshold of 4800 m --
+    # was 2401 m against the old 2400 m threshold under M=4.0.
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=2401.0, z=0.0)
+    candidate = _candidate("Infantry", x=4801.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
     assert result is None
 
 
-def test_ural_truck_gate_is_bound_by_the_size_curve_not_the_range_cap() -> None:
-    # Ural truck: size 6 m, lowres*4 threshold = 6 / 0.003 * 4.0 = 8000 m,
-    # comfortably inside NAKED_EYE_RANGE_CAP_M (10000 m since the
-    # 2026-09-17 calibration). Under the old constants this was the
-    # opposite -- a 5581 m threshold against a 5000 m cap, so the cap bound
-    # a truck-sized object and flattened the size curve. Raising the cap
-    # and loosening `lowres` together handed the discriminating back to the
-    # size curve for everything up to ship-sized (see the ship test below,
-    # where the cap still binds and should).
-    ownship = _ownship(heading_true_deg=0.0)
-    inside = _candidate("Ural-4320", x=7999.0, z=0.0)
-    beyond = _candidate("Ural-4320", x=8001.0, z=0.0)
+def test_ural_truck_gate_is_now_bound_by_the_range_cap_again() -> None:
+    """**REVERSED FINDING, 2026-09-20** -- this test used to be named
+    `test_ural_truck_gate_is_bound_by_the_size_curve_not_the_range_cap` and
+    proved the opposite of what it proves now.
 
-    assert check_visibility(ownship, inside, _FAKE_CONN, _THEATRE) is not None
+    Under the old `BINOCULAR_RANGE_MULTIPLIER = 4.0`, a Ural truck's
+    (size 6 m) lowres threshold was `6 / 0.003 * 4.0 = 8000 m`, comfortably
+    inside `NAKED_EYE_RANGE_CAP_M` (10000 m) -- the size curve, not the
+    cap, did the discriminating. At the new `M = 8.0` (2026-09-20, see
+    `visibility.py`'s own docstring) the same curve computes
+    `6 / 0.003 * 8.0 = 16000 m`, past the cap -- so `NAKED_EYE_RANGE_CAP_M`
+    is what actually bounds a Ural-sized vehicle's detection range again,
+    same as the 2026-09-17 calibration's own history (a 5000 m cap used to
+    bind trucks-and-up until that pass raised it to 10000 m specifically
+    to hand the discriminating back to the size curve). This is a real,
+    unresolved consequence of the 2026-09-20 multiplier change -- flagged
+    in the implementer's report, not corrected here -- a future
+    calibration/cap pass against real M=8.0 sortie data should revisit it.
+    """
+    ownship = _ownship(heading_true_deg=0.0)
+    inside = _candidate("Ural-4320", x=9999.0, z=0.0)
+    beyond = _candidate("Ural-4320", x=10001.0, z=0.0)
+
+    result = check_visibility(ownship, inside, _FAKE_CONN, _THEATRE)
+    assert result is not None
+    assert result.tier == "lowres"
     assert check_visibility(ownship, beyond, _FAKE_CONN, _THEATRE) is None
 
 
@@ -357,25 +380,46 @@ def test_banking_right_lifts_a_right_side_contact_but_banking_left_does_not() ->
 # --- detection-cones slice 1 (`plans/detection-cones-slice1/plan.md`) ---
 #
 # `check_visibility` gained a keyword-only `optic` parameter defaulting to
-# `BINOCULAR_OPTIC`. The regression test immediately below is the one that
-# actually enforces "must not change today's default detection" -- a
-# calibration sortie is flying and pre/post-slice-1 data must stay
-# comparable (plan's "Context this plan builds on").
+# `BINOCULAR_OPTIC`. The test immediately below originally pinned
+# byte-identical default behaviour against the pre-slice-1 baseline
+# (`BINOCULAR_RANGE_MULTIPLIER = 4.0`). **That guard is gone by design, not
+# by accident**: a same-session, dated, user-directed follow-up (2026-09-20)
+# reversed an intermediate "preserve today's range via a derating factor"
+# step and raised `BINOCULAR_RANGE_MULTIPLIER` itself to 8.0 -- "take the
+# range increase now and recalibrate afterwards." Default detection range
+# now roughly doubles, on purpose. The test below replaces the old
+# byte-identical guard with one that pins the **new** default explicitly,
+# including a worked before/after comparison in its own docstring so the
+# change reads as deliberate, not as a regression that slipped through.
 
 
-def test_default_optic_argument_matches_pre_slice1_behaviour() -> None:
-    """`check_visibility(...)` called with no `optic` argument must produce
-    byte-identical results to before this slice existed, across a handful
-    of the fixture cases already exercised above -- a `hires`-tier case, a
-    `medres`-tier case, and an out-of-range case. This is the regression
-    guard the plan calls for explicitly, not just documentation of intent:
-    it fails if the default ever silently stops being `BINOCULAR_OPTIC`, or
-    if the new FOV gate ever rejects a boresight-forward candidate it must
-    not."""
+def test_default_optic_is_binocular_at_the_new_8x_range_multiplier() -> None:
+    """Pins two things about `check_visibility`'s default `optic`, dated
+    2026-09-20:
+
+    1. **The default is still exactly `BINOCULAR_OPTIC`** -- an explicit
+       `optic=BINOCULAR_OPTIC` call must produce byte-identical results to
+       the no-argument call, for every case below. This half of the old
+       guard is unchanged.
+    2. **The magnification that default now carries is 8.0, not 4.0** --
+       demonstrated with an Infantry candidate at 700 m: under the old
+       `BINOCULAR_RANGE_MULTIPLIER = 4.0` this range would have cleared
+       only the `medres` threshold (514.29 m) and landed in `lowres`
+       (`medres` threshold under M=4.0 was 514.29 m; `lowres` threshold was
+       2400 m -- 700 m falls between them). Under the new M=8.0, the same
+       geometry now resolves to `medres` (`hires`/`medres` thresholds are
+       514.29 m / 1028.57 m; 700 m falls between *those*) -- a full tier
+       upgrade from the same input, purely from the multiplier change. A
+       `hires`-tier case (250 m, unaffected by the change either way) and
+       the hard `NAKED_EYE_RANGE_CAP_M` out-of-range case (10001 m, also
+       unaffected -- the cap does not scale with magnification) are pinned
+       alongside it so this test covers the same three-case shape the
+       superseded guard did.
+    """
     ownship = _ownship(heading_true_deg=0.0)
 
     hires_candidate = _candidate("Infantry", x=250.0, z=0.0)
-    medres_candidate = _candidate("Infantry", x=513.0, z=0.0)
+    upgraded_candidate = _candidate("Infantry", x=700.0, z=0.0)
     out_of_range_candidate = _candidate("Infantry", x=10_001.0, z=0.0)
 
     hires_result = check_visibility(ownship, hires_candidate, _FAKE_CONN, _THEATRE)
@@ -385,22 +429,39 @@ def test_default_optic_argument_matches_pre_slice1_behaviour() -> None:
     assert hires_result.range_m == pytest.approx(250.0)
     assert hires_result.bearing_deg == pytest.approx(0.0)
 
-    medres_result = check_visibility(ownship, medres_candidate, _FAKE_CONN, _THEATRE)
-    assert medres_result is not None
-    assert medres_result.tier == "medres"
-    assert medres_result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
+    upgraded_result = check_visibility(
+        ownship, upgraded_candidate, _FAKE_CONN, _THEATRE
+    )
+    assert upgraded_result is not None
+    assert upgraded_result.tier == "medres"
+    assert upgraded_result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
 
     assert (
         check_visibility(ownship, out_of_range_candidate, _FAKE_CONN, _THEATRE) is None
     )
 
-    # Explicitly passing BINOCULAR_OPTIC must match the no-argument call
-    # exactly -- pinning that the default really is BINOCULAR_OPTIC, not
-    # merely something that happens to behave like it today.
-    explicit_result = check_visibility(
-        ownship, hires_candidate, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
+    # Explicitly passing BINOCULAR_OPTIC must match every no-argument call
+    # exactly -- pinning that the default really is BINOCULAR_OPTIC (at its
+    # current 8.0 magnification), not merely something that happens to
+    # behave like it today.
+    for candidate, no_arg_result in (
+        (hires_candidate, hires_result),
+        (upgraded_candidate, upgraded_result),
+    ):
+        explicit_result = check_visibility(
+            ownship, candidate, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
+        )
+        assert explicit_result == no_arg_result
+    assert (
+        check_visibility(
+            ownship,
+            out_of_range_candidate,
+            _FAKE_CONN,
+            _THEATRE,
+            optic=BINOCULAR_OPTIC,
+        )
+        is None
     )
-    assert explicit_result == hires_result
 
 
 def test_synthetic_narrow_fov_optic_rejects_candidate_outside_its_cone() -> None:
@@ -439,21 +500,23 @@ def test_synthetic_narrow_fov_optic_admits_candidate_inside_its_cone() -> None:
 def test_higher_magnification_optic_extends_the_range_threshold() -> None:
     """`size_m / threshold_rad * M` -- the range threshold scales linearly
     with magnification. `UNAIDED_OPTIC` (M=1.0) is used here as the "no
-    optic" reference point against `BINOCULAR_OPTIC` (M=4.0): a candidate
-    within the binocular gate's own outer (`lowres`) threshold but beyond
-    the unaided gate's threshold is admitted under one and rejected under
-    the other at the exact same range."""
+    optic" reference point against `BINOCULAR_OPTIC` (M=8.0, as of
+    2026-09-20 -- see `visibility.BINOCULAR_RANGE_MULTIPLIER`'s own
+    docstring): a candidate within the binocular gate's own hires threshold
+    but beyond the unaided gate's outer (`lowres`) threshold is admitted
+    under one and rejected under the other at the exact same range."""
     ownship = _ownship(heading_true_deg=0.0)
     # Infantry: size 1.8 m, gating tier is `lowres` (0.003 rad).
     # Unaided (M=1.0) lowres threshold: 1.8 / 0.003 * 1 = 600 m.
-    # Binocular (M=4.0) lowres threshold: 1.8 / 0.003 * 4 = 2400 m.
+    # Binocular (M=8.0) hires threshold: 1.8 / 0.028 * 8 = 514.29 m;
+    # binocular lowres threshold: 1.8 / 0.003 * 8 = 4800 m.
     candidate = _candidate("Infantry", x=610.0, z=0.0)
 
     binocular_result = check_visibility(
         ownship, candidate, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
     )
     assert binocular_result is not None
-    assert binocular_result.tier == "lowres"
+    assert binocular_result.tier == "medres"
 
     unaided_result = check_visibility(
         ownship, candidate, _FAKE_CONN, _THEATRE, optic=UNAIDED_OPTIC

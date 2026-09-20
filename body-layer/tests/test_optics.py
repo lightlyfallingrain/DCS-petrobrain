@@ -74,26 +74,17 @@ def test_unaided_optic_has_no_fov_restriction() -> None:
     assert UNAIDED_OPTIC.fov_half_angle_deg is None
 
 
-def test_unaided_optic_derating_leaves_effective_magnification_unchanged() -> None:
-    """`handheld_effectiveness` defaults to `1.0` -- `UNAIDED_OPTIC` is
-    unaffected by the binocular derating concept (`plans/
-    detection-cones-slice1/plan.md`, 2026-09-20 magnification split)."""
-    assert UNAIDED_OPTIC.handheld_effectiveness == pytest.approx(1.0)
-    assert UNAIDED_OPTIC.effective_magnification == pytest.approx(1.0)
+def test_binocular_optic_magnification_matches_the_range_multiplier() -> None:
+    """`BINOCULAR_OPTIC.magnification` must track `visibility.
+    BINOCULAR_RANGE_MULTIPLIER` exactly, so the two can never silently
+    drift apart -- an import, not a hand-copied literal (plan Decision 1).
 
-
-def test_binocular_optic_effective_magnification_matches_the_calibrated_constant() -> (
-    None
-):
-    """`BINOCULAR_OPTIC.effective_magnification` (real 8x magnification
-    times the named handheld/vibration derating factor) must track
-    `visibility.BINOCULAR_RANGE_MULTIPLIER` exactly, so the two can never
-    silently drift apart -- this is the behaviour-preservation guarantee
-    for the 2026-09-20 magnification/derating split (raw `magnification`
-    changed from 4.0 to a realistic 8.0; only the *effective* figure,
-    which is what `visibility.py` actually consumes, is required to stay
-    at 4.0)."""
-    assert BINOCULAR_OPTIC.effective_magnification == pytest.approx(
-        BINOCULAR_RANGE_MULTIPLIER
-    )
+    As of 2026-09-20 (user direction, reversing a same-session derating
+    split) this is a plain, honestly-labelled 8.0 -- no separate
+    `handheld_effectiveness`/`effective_magnification` concept exists any
+    more. Was 4.0 before this change; every stale worked-example range
+    number elsewhere in this codebase's comments was calibrated against
+    that older value."""
+    assert BINOCULAR_OPTIC.magnification == pytest.approx(BINOCULAR_RANGE_MULTIPLIER)
+    assert BINOCULAR_OPTIC.magnification == pytest.approx(8.0)
     assert BINOCULAR_OPTIC.fov_half_angle_deg is None
