@@ -569,6 +569,49 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
   spoken id. Typed `watch <id>` readback unchanged.
 
+- [>] **Movement detection — design settled 2026-09-20 (user), not built.** The diagram
+  (`docs/concept/STATE_TRANSITIONS.md`) lists `moving / stopped` as a reporting trigger, and
+  `docs/concept/threat-levels.md` uses motion as a danger criterion. Nothing in the built event set
+  can produce either. The user's design, recorded here so it is not re-derived:
+
+  **Take the velocity vector from unit data rather than differencing observed bearings.** This is
+  deliberately omniscient at the source and the user accepts that trade for the compute it saves —
+  differencing angular positions across frames means retaining history per candidate and eating the
+  noise. **The omniscience is then removed by the gate, not by the source**, which is the shape this
+  project already uses elsewhere: truth in, perception-limited out.
+
+  **The gate is apparent angular change over a short interval.** For velocity `v` over time `t` the
+  unit travels `s = v·t`; the angular change seen from ownship is the component of `s` perpendicular
+  to the line of sight, divided by range. Movement is detected only when that exceeds a perceptual
+  threshold.
+
+  **Cheap early-out first, and cheaper than it looks.** Since `|v⊥| ≤ |v|`, the test
+  `|v|·t / range < threshold` rejects a candidate with no perpendicular component and no
+  trigonometry at all — one multiply and one compare. Most candidates die here.
+
+  **Use the unit's own velocity, not its velocity relative to ownship.** A stationary truck seen
+  from a moving helicopter sweeps across the field of view but does not *look* like it is moving,
+  because it is static against its background; humans discount self-motion through optic flow. So
+  absolute velocity is correct for ground units against terrain. The exception is anything seen
+  against empty sky, where there is no static background to be judged against — the same case as the
+  next paragraph.
+
+  **The model reproduces a real human failure mode for free, and this is a feature.** A unit on a
+  constant-bearing collision course produces zero angular change, so it reads as "no movement" —
+  precisely the general-aviation blind spot where an aircraft on an intercept course is hard to
+  see because the eye perceives no motion (user's own example). No special-casing required; it
+  falls out of the geometry. **Do not "fix" it.**
+
+  **Two further perceptual inputs the user named**, not yet designed: higher speed grabs attention
+  automatically rather than merely being detectable, and **lights and flashes** do the same —
+  aircraft strobes, tracers, explosions, flares. Those are an attention-capture channel, closer to
+  BL-4's attention machinery than to this gate.
+
+  **Still needed before building:** a real number for the perceptual threshold, and whether unit
+  velocity is directly available from `LoGetWorldObjects` or must be differenced in the collector.
+  Unlike the detection-range constants, no existing screenshot ladder can supply the threshold —
+  motion was never captured.
+
 - [>] **Threat-based report prioritisation (`docs/concept/threat-levels.md`) — spec exists, mostly
   gated.** The user's own table: five priority bands (urgent / high / medium / low / ignore), what
   each does to reporting, and what counts as "dangerous to us". Raised 2026-09-20 asking where it
