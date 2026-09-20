@@ -745,3 +745,84 @@ Re-ran all three subprojects' full check sequences — all pass:
   the exact broken order with no timing dependency at all — those are the ones that would fail
   immediately and deterministically against the old single-slot implementation, and are the
   stronger evidence the underlying logic is actually fixed.
+
+---
+
+### Decision 4 REVISED AGAIN: gate confidence and match ratio independently (2026-09-20)
+
+**Context.** `plans/inbound-speech/plan.md`'s Decision 4 REVISED AGAIN (committed separately,
+`12ba8d1`, docs-only) records the user's decision and full reasoning. Summary: `ACT_FLOOR = 0.60`
+was measured against Stage 1's *confidence* distribution, then applied to `combined = confidence *
+match_ratio` — a product of two sub-1 quantities systematically lower than either factor. Four real
+corpus clips run end to end put two in the confirm band that should have acted (0.589 vs 0.60, 0.790
+vs cancel's 0.80), a third clearing by 0.001. The fix gates the two quantities independently rather
+than inventing a new number: `ACT_FLOOR`/`CONFIRM_FLOOR`/`ACT_FLOOR_CANCEL` now compare against
+`confidence` alone, which is the quantity `ACT_FLOOR` was actually measured on.
+
+**The substantive change, not the threshold fix:** `verb_anchored=False` already routed to
+`"fallthrough"` (→ `handle_line` → `parse_utterance` → escalation), and this was already, mechanically,
+the brain-layer route for well-heard non-command speech — no code change was needed there. What the
+revision does is make that routing the documented, intentional second path into the brain (alongside
+the explicit wake word), and confirm that `verb_anchored` — not confidence — is what decides between
+"free speech, go to the brain" and "an unresolved command attempt, say again" for the two no-match
+cells in Decision 4 REVISED AGAIN's table.
+
+#### Files Changed
+
+- `body-layer/src/belief/voice_commands.py` — `classify_response`'s floor comparisons changed from
+  `combined = confidence * match_ratio` to `confidence` alone. `match_ratio` stays in the function
+  signature (parity with `MatchResult`/`handle_transcript`'s seven-field seam) but is no longer read
+  for gating — a comment explains why re-gating it body-side would double-penalise something the
+  adapter's own `MATCH_FLOOR` already filtered. `ACT_FLOOR`'s comment restated to say it's now
+  applied to the quantity it was measured on (validates the number, doesn't replace it).
+  `ACT_FLOOR_CANCEL`'s comment restated honestly: always an unmeasured placeholder margin on top of
+  `ACT_FLOOR`, now also compared against confidence for the same reason. `CONFIRM_FLOOR`'s comment
+  notes the quantity switch without claiming new grounding (it was never measured against either
+  quantity). Docstring rewritten to explain the independent-gating rationale and the `verb_anchored`
+  routing distinction (fallthrough → brain vs. say_again for an unresolved-but-attempted command).
+- `body-layer/CLAUDE.md` — `voice_commands.py`'s Structure entry updated with the same account, so
+  the durable doc doesn't still describe the multiply.
+- `body-layer/tests/test_voice_commands.py` — module docstring states the new gating contract. Band
+  tests (`test_confirm_band_between_the_two_floors`, `test_say_again_below_confirm_floor`,
+  `test_cancel_task_uses_the_higher_floor`) now vary `confidence` between the floors with
+  `match_ratio` fixed at 1.0, instead of the old `combined` product — rewritten to assert the new
+  contract, not adjusted numbers. New `test_act_band_is_gated_on_confidence_alone_not_the_product`:
+  a low-but-above-`MATCH_FLOOR` `match_ratio` (0.61) with high confidence still acts — this is the
+  test that would have failed against a lingering product-based implementation even though the
+  pre-existing `test_act_band` (both at 1.0) would have passed either way.
+- `body-layer/tests/test_crew_console.py` — the six `handle_transcript`-level tests that built a
+  `combined` mid-band value and passed it as `match_ratio` were rewritten to pass it as `confidence`
+  instead (`match_ratio=1.0` fixed). New `test_handle_transcript_unresolved_verb_says_again_even_
+  when_heard_clearly`: the subtle half of the table — "scan somethinggarbled" at `confidence=0.95`
+  (would clear `ACT_FLOOR` if matched) with `token=None`/`verb_anchored=True` still says again, never
+  falls through to the brain. `test_handle_transcript_fallthrough_uses_handle_line_unchanged`'s
+  docstring extended to name this as Decision 4 REVISED AGAIN's "second route in" — the test itself
+  (high confidence 0.95, `verb_anchored=False`, asserting the brain client actually received the
+  escalation) already proved the property; only the docstring needed to say so.
+
+#### Tests Added
+
+- `test_act_band_is_gated_on_confidence_alone_not_the_product` (`test_voice_commands.py`).
+- `test_handle_transcript_unresolved_verb_says_again_even_when_heard_clearly` (`test_crew_console.py`).
+
+#### Checks
+
+- **body-layer/** — ruff format --check / ruff check / mypy --strict (`cd body-layer && mypy src`,
+  35 files) / pytest (`PYTHONPATH=src:../world-model/src`, 719 passed, up from 717 — 2 new tests).
+- **audio-adapter/** — re-run as the plan's sibling subproject, unchanged by this revision: ruff
+  format --check / ruff check / mypy --strict (10 files) / pytest (111 passed, 1 skipped).
+
+#### Notable Discoveries
+
+- **The "second route to the brain" required no code change, only documentation.** Tracing
+  `_act_on_voice_decision`'s `"fallthrough"` branch showed it already called `self.handle_line
+  (transcript, now_sim)` unconditionally whenever `verb_anchored=False`, regardless of confidence —
+  this was already Stage 2's behaviour, not something this revision added. The revision's actual
+  code delta is confined to `classify_response`'s floor comparisons (product → confidence alone);
+  the "brain gets a second route in" framing documents an existing mechanism's newly-understood
+  significance, not a new one. Worth recording plainly rather than letting the commit message imply
+  a bigger surface change than what actually shipped.
+- **No second body-side match threshold was added**, per the coordinator's explicit instruction to
+  justify one if introduced rather than pick a number. `match_ratio` remains in `classify_response`'s
+  signature for seam parity but is inert for gating — `MATCH_FLOOR` (0.6, audio-adapter's
+  `command_matcher.py`) is still the only place match quality is filtered.
