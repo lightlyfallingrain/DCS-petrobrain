@@ -36,6 +36,7 @@ import pytest
 
 from perception import visibility
 from perception.association import WorldObjectCandidate
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import OwnshipState
 from perception.visibility import (
     NAKED_EYE_PRESENCE_CONFIDENCE,
@@ -351,3 +352,110 @@ def test_banking_right_lifts_a_right_side_contact_but_banking_left_does_not() ->
     assert check_visibility(level, candidate, _FAKE_CONN, _THEATRE) is None
     assert check_visibility(banked_right, candidate, _FAKE_CONN, _THEATRE) is not None
     assert check_visibility(banked_left, candidate, _FAKE_CONN, _THEATRE) is None
+
+
+# --- detection-cones slice 1 (`plans/detection-cones-slice1/plan.md`) ---
+#
+# `check_visibility` gained a keyword-only `optic` parameter defaulting to
+# `BINOCULAR_OPTIC`. The regression test immediately below is the one that
+# actually enforces "must not change today's default detection" -- a
+# calibration sortie is flying and pre/post-slice-1 data must stay
+# comparable (plan's "Context this plan builds on").
+
+
+def test_default_optic_argument_matches_pre_slice1_behaviour() -> None:
+    """`check_visibility(...)` called with no `optic` argument must produce
+    byte-identical results to before this slice existed, across a handful
+    of the fixture cases already exercised above -- a `hires`-tier case, a
+    `medres`-tier case, and an out-of-range case. This is the regression
+    guard the plan calls for explicitly, not just documentation of intent:
+    it fails if the default ever silently stops being `BINOCULAR_OPTIC`, or
+    if the new FOV gate ever rejects a boresight-forward candidate it must
+    not."""
+    ownship = _ownship(heading_true_deg=0.0)
+
+    hires_candidate = _candidate("Infantry", x=250.0, z=0.0)
+    medres_candidate = _candidate("Infantry", x=513.0, z=0.0)
+    out_of_range_candidate = _candidate("Infantry", x=10_001.0, z=0.0)
+
+    hires_result = check_visibility(ownship, hires_candidate, _FAKE_CONN, _THEATRE)
+    assert hires_result is not None
+    assert hires_result.tier == "hires"
+    assert hires_result.confidence == NAKED_EYE_TYPE_CONFIDENCE
+    assert hires_result.range_m == pytest.approx(250.0)
+    assert hires_result.bearing_deg == pytest.approx(0.0)
+
+    medres_result = check_visibility(ownship, medres_candidate, _FAKE_CONN, _THEATRE)
+    assert medres_result is not None
+    assert medres_result.tier == "medres"
+    assert medres_result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
+
+    assert (
+        check_visibility(ownship, out_of_range_candidate, _FAKE_CONN, _THEATRE) is None
+    )
+
+    # Explicitly passing BINOCULAR_OPTIC must match the no-argument call
+    # exactly -- pinning that the default really is BINOCULAR_OPTIC, not
+    # merely something that happens to behave like it today.
+    explicit_result = check_visibility(
+        ownship, hires_candidate, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
+    )
+    assert explicit_result == hires_result
+
+
+def test_synthetic_narrow_fov_optic_rejects_candidate_outside_its_cone() -> None:
+    narrow_optic = Optic(name="test_narrow", magnification=4.0, fov_half_angle_deg=5.0)
+    ownship = _ownship(heading_true_deg=0.0)
+    # 30 deg off boresight, well outside a 5 deg half-angle FOV, but well
+    # within the cockpit mask (near-zero depression near the nose).
+    off_axis_candidate = _candidate("Infantry", x=100.0, z=57.735)
+
+    assert (
+        check_visibility(
+            ownship, off_axis_candidate, _FAKE_CONN, _THEATRE, optic=narrow_optic
+        )
+        is None
+    )
+    # The same candidate is admitted under the default (unrestricted) optic
+    # -- confirms the rejection above is the FOV gate, not some other gate
+    # coincidentally firing.
+    assert (
+        check_visibility(ownship, off_axis_candidate, _FAKE_CONN, _THEATRE) is not None
+    )
+
+
+def test_synthetic_narrow_fov_optic_admits_candidate_inside_its_cone() -> None:
+    narrow_optic = Optic(name="test_narrow", magnification=4.0, fov_half_angle_deg=5.0)
+    ownship = _ownship(heading_true_deg=0.0)
+    # Dead ahead, well inside any plausible FOV.
+    on_axis_candidate = _candidate("Infantry", x=250.0, z=0.0)
+
+    result = check_visibility(
+        ownship, on_axis_candidate, _FAKE_CONN, _THEATRE, optic=narrow_optic
+    )
+    assert result is not None
+
+
+def test_higher_magnification_optic_extends_the_range_threshold() -> None:
+    """`size_m / threshold_rad * M` -- the range threshold scales linearly
+    with magnification. `UNAIDED_OPTIC` (M=1.0) is used here as the "no
+    optic" reference point against `BINOCULAR_OPTIC` (M=4.0): a candidate
+    within the binocular gate's own outer (`lowres`) threshold but beyond
+    the unaided gate's threshold is admitted under one and rejected under
+    the other at the exact same range."""
+    ownship = _ownship(heading_true_deg=0.0)
+    # Infantry: size 1.8 m, gating tier is `lowres` (0.003 rad).
+    # Unaided (M=1.0) lowres threshold: 1.8 / 0.003 * 1 = 600 m.
+    # Binocular (M=4.0) lowres threshold: 1.8 / 0.003 * 4 = 2400 m.
+    candidate = _candidate("Infantry", x=610.0, z=0.0)
+
+    binocular_result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
+    )
+    assert binocular_result is not None
+    assert binocular_result.tier == "lowres"
+
+    unaided_result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, optic=UNAIDED_OPTIC
+    )
+    assert unaided_result is None
