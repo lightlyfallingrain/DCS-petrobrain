@@ -595,8 +595,8 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       bottom: a voice out, then a voice in, then a brain worth talking to.</p>
 
     <div class="diagram-wrap">
-      <button class="expand" id="gv-open" type="button">Expand graph</button>
-      <div class="diagram">
+      <button class="expand" id="gv-open" data-graph="#graph-deps" type="button">Expand graph</button>
+      <div class="diagram" id="graph-deps">
 <pre class="mermaid">
 %%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 26, "rankSpacing": 46}} }%%
 flowchart LR
@@ -653,6 +653,91 @@ flowchart LR
       <span class="chip block">Blocked on hardware</span>
       <span class="chip hold">Deferred</span>
     </div>
+  </section>
+
+  <section>
+    <h2>What&rsquo;s left, and what gates it</h2>
+    <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing that is done.
+      The map above shows how the project got here; this one shows what is in front of it. Read it as
+      three separate chains that barely touch: <strong>speech</strong>, <strong>perception</strong>, and
+      <strong>reporting</strong>. Only the perception chain is moving right now.</p>
+
+    <div class="diagram-wrap">
+      <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
+      <div class="diagram" id="graph-upcoming">
+<pre class="mermaid">
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 24, "rankSpacing": 42}} }%%
+flowchart LR
+  classDef active fill:#F6E3BE,stroke:#A9741B,stroke-width:1.5px,color:#2E2208;
+  classDef open   fill:#E3E7E4,stroke:#6E7D74,stroke-width:1px,color:#1B2622;
+  classDef hold   fill:#DCE3E9,stroke:#5D6B78,stroke-width:1px,color:#18232B,stroke-dasharray:4 3;
+  classDef block  fill:#F2D6D1,stroke:#A93B30,stroke-width:1.5px,color:#2E110D;
+
+  subgraph PERC ["Perception"]
+    direction LR
+    SORTIE["Cones + BL-9 sortie<br/>card is published"]:::block
+    CAL["Adapt the constants<br/>from the trace"]:::open
+    EDR["ED detection model<br/>read on Windows"]:::block
+    C2["Cones slice 2<br/>scan, dwell, honest range"]:::hold
+    K9["9K113 as an optic"]:::hold
+    SCAN["Scan commands drive<br/>the naked eye"]:::open
+    MOV["Movement detection<br/>designed, 8 arcmin/s"]:::hold
+  end
+
+  subgraph SPEECH ["Speech"]
+    direction LR
+    S4["Stage 4<br/>Windows capture"]:::block
+    S5["Stage 5<br/>real PTT in DCS"]:::block
+    S6["Stage 6<br/>sortie acceptance"]:::block
+    TTS6["TTS Stage 6<br/>live sortie"]:::block
+    BL10["BL-10<br/>audio transport"]:::active
+    SPU8["Cockpit audio state<br/>SPU-8"]:::hold
+    VOICE["Voice character<br/>accent + prosody"]:::open
+  end
+
+  subgraph REPORT ["Reporting"]
+    direction LR
+    BEH["Behaviour channel<br/>tracking / engaging"]:::hold
+    TERR["Terrain control<br/>world-model"]:::hold
+    IFF["Coalition / IFF<br/>inferred, never truth"]:::hold
+    THR["Threat banding<br/>urgent &hellip; ignore"]:::hold
+    GC4B["Group stage 4b<br/>counts, spoken"]:::open
+    GC5["Stage 5<br/>composition"]:::hold
+  end
+
+  BL8["BL-8<br/>memory interfaces"]:::open
+  BRAIN["Brain layer<br/>not started"]:::hold
+
+  SORTIE --> CAL --> C2
+  EDR --> C2
+  C2 --> K9
+  C2 --> SCAN
+  MOV --> BEH --> THR
+  TERR --> IFF --> THR
+  S4 --> S5 --> S6 --> BL10 --> BRAIN
+  GC4B --> GC5
+  SORTIE -.->|"can ride along"| TTS6
+  SORTIE -.->|"judge after flying"| GC5
+  SORTIE -.->|"needs many flights"| BL8
+  BL8 --> BRAIN
+  THR -.->|"needs judgement"| BRAIN
+</pre>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="chip active">In progress</span>
+      <span class="chip open">Ready to start</span>
+      <span class="chip block">Needs your hardware or a sortie</span>
+      <span class="chip hold">Deferred or gated</span>
+    </div>
+
+    <p class="section-note"><strong>Two things this map makes obvious that a list does not.</strong>
+      One sortie sits upstream of four separate branches &mdash; it is the single highest-leverage
+      thing on the board, and it is waiting on you rather than on code. And the reporting chain is
+      almost entirely dashed: threat banding needs believed coalition, which needs terrain control,
+      which does not exist in world-model yet. That chain is longer than it looks from
+      <code>threat-levels.md</code>, which reads like one table.</p>
   </section>
 
   <section>
@@ -1110,8 +1195,8 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !drawer.hi
     apply();
   }
 
-  function open() {
-    const src = document.querySelector(".diagram svg");
+  function open(sel) {
+    const src = document.querySelector((sel || ".diagram") + " svg");
     if (!src) return;
     lastFocusG = document.activeElement;
 
@@ -1137,7 +1222,9 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !drawer.hi
     if (lastFocusG) lastFocusG.focus();
   }
 
-  document.getElementById("gv-open").addEventListener("click", open);
+  document.querySelectorAll(".expand[data-graph]").forEach(function (b) {
+    b.addEventListener("click", function () { open(b.dataset.graph); });
+  });
   document.getElementById("gv-close").addEventListener("click", close);
   document.getElementById("gv-fit").addEventListener("click", fit);
   document.getElementById("gv-in").addEventListener("click",
