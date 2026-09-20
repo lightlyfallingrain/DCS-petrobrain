@@ -53,8 +53,9 @@ to record a corpus and run the bench.
   `aircraft-layer/`'s dependency policy.
 - **The STT engine is an external binary, never a package dependency**, mirroring the TTS engine's
   own rule (`plans/inbound-speech/plan.md` Decision 1): `stt_engine.WhisperCliEngine` shells out to
-  whisper.cpp's `whisper-cli`, `stt_engine.WindowsSpeechEngine` shells out to `powershell.exe`
-  driving `System.Speech.Recognition.SpeechRecognitionEngine`. **Neither engine's exact CLI/JSON
+  whisper.cpp's `whisper-cli`. (A `WindowsSpeechEngine` driving `System.Speech` existed briefly and
+  was removed 2026-09-19 without ever running -- it has no free-dictation mode, and this project's
+  two-tier design needs one; see `stt_engine.py`'s module docstring.) **The whisper CLI/JSON
   contract has been verified against a live binary** — no `whisper-cli` binary and no Windows box
   were available while writing Stage 1 — both are written from each tool's public documented
   surface; `tools/stt_bench.py` run against real binaries is what validates or corrects them. See
@@ -115,12 +116,16 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   real-binary posture — but unlike `say`, whisper.cpp is not guaranteed present on every dev
   machine, so that test class is `pytest.mark.skipif`-gated on `SRS_ADAPTER_WHISPER_BINARY`/
   `SRS_ADAPTER_WHISPER_MODEL` env vars and skips cleanly (not a failure) when unset/absent — it is
-  skipped in this repo's own dev environment as of authorship. `WindowsSpeechEngine`'s
+  skipped in this repo's own dev environment as of authorship. A removed Windows engine's
   platform-gated behaviour (unavailable off Windows) is tested directly; its real `powershell.exe`
   path is untestable from a Mac.
 - `tests/test_vocabulary.py` — internal consistency of `vocabulary.py`'s `TOKENS`/`PHRASES` tables
   and its helpers. Cannot assert equality against `body-layer`'s/`aircraft-layer`'s token tables
   directly (module independence) — see that test module's own docstring.
+- `tests/test_command_matcher.py` (Slice 3 Stage 2) — `match_transcript`: exact hits across token
+  families, verb-anchor rejection, the separation check on a measured genuine tie, legal/illegal
+  bearing outcomes, and the derived `VERB_ANCHOR_WORDS`' coverage of alternate spellings
+  (`"never mind"`, `"hey petrovich"`) that a hand-copied verb list would have missed.
 - `tests/test_tts_engine.py` — exercises `MacSayEngine` against the **real** `say` binary, not a
   mock (mirroring `aircraft-layer/tests/test_text_sender.py`'s "real socket, not a double"
   posture) — this project's development machine is a Mac (root `CLAUDE.md` compute-topology
@@ -157,7 +162,7 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   top-level modules on `src`'s `pythonpath`, imported directly by both this entrypoint and the
   test suite.
 - `src/stt_engine.py` (Slice 3 Stage 1) — `STTEngine` protocol + `WhisperCliEngine` +
-  `WindowsSpeechEngine`, the mirror image of `tts_engine.py`. See "Tech stack" above for the
+  the mirror image of `tts_engine.py`. See "Tech stack" above for the
   unverified-CLI-contract caveat.
 - `src/vocabulary.py` (Slice 3 Stage 1) — the 15-token scan/watch/cancel command vocabulary, a
   **deliberate hand-synced duplicate** of `body-layer/src/belief/crew_console.py`'s
@@ -166,8 +171,18 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   phrasings per token), and helpers (`spoken_phrases`, `token_for_phrase`, `to_gbnf` for
   whisper.cpp's `--grammar`). Keep in sync with those two sources by hand; there is no automated
   check tying the three together.
+- `src/command_matcher.py` (Slice 3 Stage 2, `plans/inbound-speech/plan.md` Decision 4 REVISED) —
+  the transcript -> candidate-token matcher: normalise (`vocabulary.normalize_for_match`) -> verb
+  anchor (`VERB_ANCHOR_WORDS`, derived from `vocabulary.PHRASES`, not hand-copied) -> bearing slot
+  (`vocabulary.parse_bearing`) or phrase match (`vocabulary.normalized_phrase_index`) -> separation
+  check. `match_transcript(text) -> MatchResult` (`token`, `match_ratio`, `verb_anchored`,
+  `ambiguous`, `bearing_degrees`) is everything this subproject hands body-layer about one
+  transcript — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` are the matching constants (behaviour
+  constants — `ACT_FLOOR`/`CONFIRM_FLOOR`/etc — live in body-layer's `belief.voice_commands`, per
+  the plan's constant split). Not wired to an HTTP route yet (`GET /transcripts/poll` is Stage 3);
+  Stage 2 exercises it directly from tests and from body-layer's `!voice` REPL test harness.
 - `tools/stt_bench.py` (Slice 3 Stage 1) — the recognition bench, and the whole slice's stop/go
-  gate. Runs whisper.cpp (with and without `--grammar`) and, on Windows, `WindowsSpeechEngine` over
+  gate. Runs whisper.cpp plain and with `--prompt` (and with `--grammar` behind `--with-grammar`) over
   a recorded corpus of the user's own voice, reporting top-1 token accuracy, every confusion pair
   with sample misheard text, and the confidence distribution split by correct/incorrect —
   deliberately not just a single accuracy number, since the user did not set a pass bar in advance

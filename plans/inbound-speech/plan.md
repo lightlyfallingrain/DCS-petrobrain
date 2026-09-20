@@ -361,6 +361,87 @@ asymmetry is justified by the direction of the damage rather than by aviation an
 
 ---
 
+### Decision 1 REVISED — the Windows engine is removed (2026-09-19, post-Stage-1)
+
+`WindowsSpeechEngine` is deleted. Decision 1 below still describes it as "the required Windows
+baseline"; that requirement is withdrawn, and this note records why rather than rewriting the
+original.
+
+**It was never executed.** No Windows run ever happened, so nothing here is a measurement — the
+code was written from `System.Speech`'s documented surface and removed before it was benched.
+
+**The reason is structural.** `System.Speech` is a command-and-control recogniser driven by a
+`Choices` grammar, with no real free-dictation mode. This slice's design is two-tier: a
+transmission opening with the wake word is free speech for the brain layer. Free speech therefore
+has to reach whisper regardless, which means **Decision 2's LAN audio hop exists either way** — the
+one thing a Windows-side recogniser could have eliminated, it does not eliminate. What remains is
+an optimisation of the command tier bought with a second engine, a second vocabulary to keep in
+sync, and a second incompatible confidence scale feeding one set of behaviour bands. User's call:
+*"this kills the windows path. That's a real no-go."*
+
+Decision 1's "two implementations" framing goes with it. The `STTEngine` protocol stays, for two
+concrete reasons rather than the speculation that another engine appears: Stage 3 needs a seam to
+inject a fake engine into tests without a binary, and whisper model/decoding variants swap behind
+it — the model sweep is four configurations of one class.
+
+Decision 3's note that *"AI ATC used open dictation, and `System.Speech` with a `Choices` grammar
+is a different mode"* was the original argument for trying it. Stage 1 answered the underlying
+question a different way: whisper with `--prompt` scored 99.2% on this speaker, so the accent
+problem that motivated a constrained Windows recogniser no longer needs one.
+
+---
+
+### Decision 4 REVISED — the matcher moves to the adapter (2026-09-19, post-Stage-1)
+
+Decision 4 below put the matcher in body-layer (`belief/voice_commands.py`) with the adapter
+sending only `{transcript, confidence}`. **Stage 1 invalidated the premise.** Two findings:
+
+**The vocabulary churns, and body would have been a third copy.** It went from 15 tokens to 39
+during Stage 1, with phrasings added and removed four times in a day. `aircraft-layer` (legacy F10)
+and `srs-adapter` already hold copies; adding body's would mean three hand-synced tables for
+something still moving, with no automated check tying any of them together.
+
+**Normalisation turned out to be recogniser-specific, not domain knowledge.** Whisper writes a
+spoken "one eight zero" back as "180", loops short phrases verbatim, and returns "record" for
+"report". Those rules are facts about whisper, and putting them inside Petrovich's belief layer
+would file knowledge about a transcription tool next to knowledge about contacts and attention.
+A different recogniser would need different rules and body would have to change.
+
+**Revised split.** The adapter owns the vocabulary and turns text into a candidate token;
+body decides what to do about it:
+
+| | `srs-adapter` | `body-layer` |
+| --- | --- | --- |
+| audio → text | yes | never |
+| normalise (whisper quirks) | yes | no |
+| verb anchor, phrase match, separation check | yes | no |
+| act / confirm / say-again bands | no | **yes** |
+| dispatch, readback, escalation | no | **yes** |
+
+Seam payload grows from two fields to four:
+`GET /transcripts/poll` → `[{"transcript": str, "confidence": float, "token": str | null,
+"match_ratio": float, "t_wall": float}]`.
+
+**The division that matters is preserved, and arguably sharpened.** Body still owns every decision
+with crew behaviour in it — whether to act, whether to ask, what to say — and still receives the
+raw transcript, so the unmatched branch falls through to `parse_utterance`/escalation exactly as
+before. What moved is mechanical string-to-token resolution, which was never a belief question.
+Body also never sees audio, unchanged.
+
+**Constants split accordingly.** `VERB_FLOOR`, `MATCH_FLOOR` and `SEPARATION_MIN` are matching
+constants and live in the adapter. `CONFIRM_FLOOR`, `ACT_FLOOR`, `ACT_FLOOR_CANCEL` and
+`CONFIRM_WINDOW_S` are behaviour constants and stay in body. Both sets are still set from Stage 1's
+measured distribution rather than guessed.
+
+**Also superseded by Stage 1, within Decision 4 below:** Layer 1's `--grammar` biasing is replaced
+by `--prompt` (a grammar cannot decline; see the Stage 1 result section). The verb set is no longer
+`{scan, watch, cancel}` — it is `{scan, look, report, watch, cancel, stop, say, repeat}` plus the
+wake word and `nevermind`. And the phrase-table example mapping `"scan zero four five"` to
+`scan_bearing_ne` is wrong twice over: bearings are a parsed slot with 5° resolution, not a compass
+alias, and `"scan to the left"` was dropped as a phrasing the user never says.
+
+---
+
 ### Decision 6 — module boundaries: exactly what crosses each seam
 
 | Seam | Direction | Payload | Notes |
@@ -368,8 +449,8 @@ asymmetry is justified by the direction of the damage rather than by aviation an
 | DCS Export.lua → collector | in-process/loopback | `ptt_down: bool` on the existing telemetry sample | One boolean. No audio ever. Stage 5. |
 | collector → capture process | loopback HTTP | `GET /ptt/state` → `{"ptt_down": bool, "t": float}` | Windows-local. The capture process does its own edge detection and debounce. |
 | capture process → `srs-adapter` | LAN HTTP, **Mac polls** | `GET /capture/poll` → `{"clip": {"audio_b64", "duration_s", "t_wall"}}` or `{"clip": null}` | The only raw-audio hop, and it is adapter-internal. |
-| `srs-adapter` → body-layer | LAN HTTP, **body polls** | `GET /transcripts/poll` → `[{"transcript": str, "confidence": float, "t_wall": float}]` | **Text only.** Body-layer never sees audio bytes, never sees a WAV path, never learns which engine ran. |
-| body-layer internal | — | `CrewConsole.handle_transcript(text, confidence, now_sim)` → `list[str]` | Routes to `handle_f10_command` on a match; otherwise the existing `handle_line`/`parse_utterance`/escalation path, unchanged. |
+| `srs-adapter` → body-layer | LAN HTTP, **body polls** | `GET /transcripts/poll` → `[{"transcript": str, "confidence": float, "token": str \| null, "match_ratio": float, "verb_anchored": bool, "ambiguous": bool, "t_wall": float}]` | **Text only.** Body-layer never sees audio bytes, never sees a WAV path, never learns which engine ran. **Updated 2026-09-19 (Stage 2 implementation + review):** this row originally read `{"transcript", "confidence", "t_wall"}` with body doing its own matching; Decision 4 REVISED moved the matcher to the adapter (`srs_adapter.command_matcher.MatchResult`) but this table was never updated to match, and the two-field `{token, match_ratio}` shorthand it briefly carried was itself insufficient — `verb_anchored`/`ambiguous` are required, not optional, because `token=None` alone cannot distinguish "not a command attempt" (fallthrough) from "verb-anchored but unresolved" (always say-again) from "ambiguous" (always confirm on the best candidate), three behaviourally distinct outcomes Decision 4's own prose demands. See `plans/inbound-speech/implementation.md`'s Stage 2 section. |
+| body-layer internal | — | `CrewConsole.handle_transcript(transcript, confidence, token, match_ratio, verb_anchored, ambiguous, now_sim)` → `list[str]` | **Updated 2026-09-19** — this row originally read `handle_transcript(text, confidence, now_sim)`, written before Decision 4 REVISED moved matching to the adapter; superseded by the row above. Routes to `handle_f10_command` on a match; otherwise the existing `handle_line`/`parse_utterance`/escalation path, unchanged. |
 
 **The gating split follows `plans/body-layer/plan.md` §1 exactly.** Signal-level (clip shorter than
 `MIN_CLIP_S`, RMS below `ENERGY_FLOOR`) is the **adapter's** and happens before anything crosses to
@@ -410,6 +491,14 @@ by typing. This is where the slice's actual behaviour lives, and it is provable 
 `_poll_transcripts` in the existing `--crew-text` poll thread. Verified by POSTing a Stage 1
 recording and watching Petrovich act and read back. **End-to-end from a WAV file to a spoken
 readback, with no Windows and no DCS in the loop.**
+
+**`stop_talking` dispatch (deferred from Stage 2, review optional-item):** wire it to
+`aircraft-layer`'s existing `collector/audio_sender.py::AudioPlaybackSender._interrupt_playback` —
+already reachable today via `push_speech(text, urgent=True)`, so this is comparatively cheap
+relative to the other voice-only tokens Stage 2 left as no-ops (`report_bearing_*`/
+`report_clock_*`/`scan_bearing_deg` need a query capability that does not exist yet;
+`stop_talking`'s interrupt mechanism already works end to end). Give it real dispatch in
+`CrewConsole` before or alongside the other voice-only tokens.
 
 **Stage 4 — Windows capture. [Win]** (no DCS needed)
 `audio_capture.py` (`FfmpegCapture`, `ClipGate`, `CaptureClipQueue`), `capture_server.py`,
@@ -686,6 +775,113 @@ alongside match distance.
 redundant third phrasing of `cancel_nevermind`, heard as "This is the card") and `scan` heard as
 "this kind of" — the last survivor of a pattern that dominated earlier runs, and the most-used verb
 in the vocabulary.
+
+### Filler stripping in the matcher (2026-09-20)
+
+User direction, clarified: this is **action recognition from the text STT produced**, not anything
+done to recognition itself. The recogniser still returns whatever it heard; the matcher drops words
+that carry no command meaning before scoring.
+
+**Why it helps more than it looks.** `_phrase_match_ratio` divides by the longer word count, so
+every filler word a player says actively depresses the score of the command they meant. Removing
+them recovers ratio without touching `MATCH_FLOOR`. Measured: "um scan the left" 0.500 → **1.000**,
+"cancel the task" 0.500 → **1.000**, "scan to the right" 0.500 → **1.000**, "watch the nearest
+contact" 0.500 → 0.667. All four were rejections before.
+
+**The list is deliberately short**, and the measurement decided it rather than taste. A wider list
+adding `of`/`on`/`in`/`this`/`that` gave *identical* gains on every real phrasing while raising
+every adversarial score — and pulled "scan the ridge on the left" up into a `scan_left` match. That
+is description, not an order, and it belongs to the brain under the two-tier design. The extra words
+bought nothing and spent margin, so they are out.
+
+Because stripping words shortens the transcript and therefore inflates every ratio, the adversarial
+set that caught the original false-execution bug is re-pinned as a test. All six still reject.
+
+**Open, deliberately not decided:** a bare "okay" anchors at 0.571 against a real verb, clearing the
+intentionally loose `VERB_FLOOR`, so it reports anchored-but-unresolved and body answers "say
+again". A player saying "okay" is not asking for anything and may not want to be asked to repeat
+it. The behaviour follows from the loose anchor being right elsewhere, so it is recorded rather than
+patched.
+
+**Two things surfaced by the user's own example ("Look to the north, watch the nearest contact"),
+both settled the same day — and both settled as NO.**
+
+**1. `look <compass>` is not being added.** Relative directions carry both verbs ("scan ahead" /
+"look ahead") while compass directions carry only "scan north", so "look north" scores 0.500 and
+fails. That asymmetry looks like an oversight and is not being corrected: the user says "scan
+north", and a phrasing nobody utters costs clips to record, gives a mishearing one more way to
+resolve to something legal, and adds no recognition coverage — the same reasoning that removed the
+filler phrasings from the vocabulary in the first place. Left deliberately asymmetric.
+
+**2. Multiple commands in one transmission are out of scope.** *"It is the player's responsibility
+to separate them by PTT usage."*
+
+This is worth more than the segmentation feature it declines, because **it makes one mechanism do
+both jobs.** Push-to-talk already delimits transmissions, which is what removed endpointing from
+the capture problem. It now also delimits *commands*, which removes parsing ambiguity from the
+matcher — no splitting on commas or conjunctions, no deciding whether "and" joins two orders or
+belongs inside one.
+
+It also keeps `nevermind` unambiguous. A retraction at the end of a multi-command transmission
+would have raised a question with no good answer — does it kill the last command or all of them? —
+and every answer would have been a guess about intent. One transmission, one command, one thing to
+retract.
+
+The cost is a habit the player has to hold: two orders means two presses. That is a real
+constraint, but it matches how radio discipline works anyway, and it is enforced by the physical
+control rather than by remembering a rule.
+
+### Command chaining — referring back to an earlier transmission (raised 2026-09-20)
+
+User: *"Command chaining may become needed though, so referring to something that was said just
+earlier."* Not scoped, not built. Recorded now because the decisions above constrain it, and
+because more of it exists already than is obvious.
+
+**It is a different mechanism from the multi-command parsing just declined, and the distinction is
+load-bearing.** That was about splitting one transmission; this is about *carrying context between*
+transmissions. Each transmission still holds exactly one command — PTT still delimits both — but a
+command may refer to a referent established earlier. Nothing about the one-command rule has to bend
+to support it, which is why declining the first does not prejudge this.
+
+**A working instance already exists.** `CrewConsole._pending_confirmation` is precisely this:
+"Scan left, confirm?" followed by "affirm" is a second transmission whose meaning depends entirely
+on the first, resolved against time-bounded state and expiring after `CONFIRM_WINDOW_S`. The
+general case generalises that shape rather than introducing a new one — a referent, a window, and
+an expiry.
+
+The scaffolding is likewise mostly in place, and worth knowing about before anyone builds it fresh:
+
+- `EscalationPayload.awaiting_reply_to` exists and is always `None` today — a field reserved for
+  exactly this conversational-turn link.
+- Utterance ids (`UTTERANCE_<n>`) are already minted per transmission, so a referent has something
+  stable to point at.
+- `PartialParse.referenced_contact_id` / `referenced_contact_candidates` already encode the right
+  posture: a single id **only** when resolution is unambiguous, a candidate list otherwise, and
+  never a guessed single id.
+
+**One architectural constraint, stated before it is violated.** This must **not** live in
+`srs-adapter`'s matcher. That matcher is stateless per transmission by design, and it knows nothing
+about contacts — giving it referent memory would require teaching it the belief state, which is the
+coupling Decision 4 REVISED was written to prevent. Chaining resolves in **body**, where the
+contacts and the dialogue history are, or in the brain once it exists. The adapter's job ends at
+producing a token and a ratio.
+
+**Two properties it will need, both already precedented here:**
+
+- **Referents expire, and can be invalidated early.** The confirm window is 8 s because a
+  confirmation is a tight exchange; a referent like "that one" plausibly lives longer. But it must
+  also die when its subject does — a contact that has gone `lost` cannot still be "that one", and
+  resolving to it would be a small omniscience leak, remembering with more confidence than the
+  belief layer holds.
+- **Ambiguity asks rather than guesses.** "That one" with three recent contacts is the same problem
+  the matcher's separation check already solves by refusing to pick: a near-tie goes to the confirm
+  band regardless of how high either score is. The conversational form of that answer is a
+  question, not a best guess.
+
+**Likely forms, unresearched:** "watch that one", "the second one", "same again", "cancel that",
+"him". Which of these the user actually says is a question for a sortie rather than a design
+session — the same lesson the vocabulary itself learned when phrasings nobody utters were stripped
+out.
 
 ### Settled Decisions (user, 2026-09-19)
 

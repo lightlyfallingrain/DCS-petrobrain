@@ -4,33 +4,39 @@
 `STTEngine` is a small `Protocol` -- the mirror image of
 `tts_engine.TTSEngine`: one method, WAV bytes in, a `Transcript` out,
 raising `STTRecognitionError` on any failure rather than returning an
-empty/partial transcript silently. Both implementations write their input
-to a temp file and shell out to an **external binary, never a package**
+empty/partial transcript silently. The implementation writes its input to
+a temp file and shells out to an **external binary, never a package**
 (`srs-adapter/CLAUDE.md` "Tech stack"), exactly as `MacSayEngine` does --
-neither candidate binary reads WAV reliably from stdin.
+whisper-cli does not read WAV reliably from stdin.
 
-- `WhisperCliEngine` -- the preferred implementation, on both hosts. Shells
-  out to whisper.cpp's `whisper-cli`. Supports constrained decoding via
-  `--grammar` (a GBNF grammar, e.g. `vocabulary.to_gbnf()`), which is the
-  strongest form of vocabulary-biasing this project has available --
-  restricting the decoder to admit only the 15-token vocabulary's
-  phrasings, converting the task from open transcription to closed
-  classification inside the recognizer itself.
-- `WindowsSpeechEngine` -- the required Windows baseline, zero install.
-  Shells out to `powershell.exe` driving `System.Speech.Recognition.
-  SpeechRecognitionEngine` with a `Choices` grammar. Windows-only by
-  construction -- `transcribe` raises `STTRecognitionError` immediately on
-  any other platform rather than attempting (and failing) the subprocess
-  call, so a bench run on the Mac can detect and skip it cleanly.
+`WhisperCliEngine` is the only implementation. **The protocol is kept
+despite having one** for two concrete reasons rather than on the
+speculation that another engine might appear: Stage 3 needs a seam to
+inject a fake engine into tests without a binary, and whisper model and
+decoding variants swap behind it -- the model sweep
+(`research/2026-09-19-whisper-model-sweep.md`) is four configurations of
+one class.
 
-**Neither engine's exact CLI/JSON contract was verified against a live
-binary while writing this** -- no `whisper-cli` binary and no Windows box
-were available in this environment (`srs-adapter/tests/test_stt_engine.py`
-skips for the same reason). Both are written from each tool's public,
-documented CLI surface. This is precisely what Stage 1's bench
-(`tools/stt_bench.py`) exists to validate once the user runs it against
-real binaries -- see each class's own docstring for the specific
-assumptions to check first if a real run behaves unexpectedly.
+**A Windows implementation was removed on 2026-09-19, and is not coming
+back.** `WindowsSpeechEngine` shelled out to `System.Speech` with a
+`Choices` grammar; it was written but never once executed. The reason it
+went is structural, not a measurement: `System.Speech` is a
+command-and-control recognizer with no real free-dictation mode, and this
+project's design is two-tier -- a transmission opening with the wake word
+is free speech for the brain layer. Free speech therefore has to reach
+whisper regardless, so the LAN audio hop in Decision 2 exists either way,
+and a Windows recognizer could only ever have optimised the command tier
+while adding a second engine, a second vocabulary to keep in sync, and a
+second incompatible confidence scale feeding one set of behaviour bands.
+
+The whisper CLI/JSON contract **is** verified against a real binary
+(whisper.cpp 1.9.4, 2026-09-19) -- see
+`research/2026-09-19-whisper-contract-and-grammar-probe.md`, and note the
+`--grammar-rule` finding recorded in `WhisperCliEngine.transcribe`.
+Constrained decoding via `--grammar` exists here but **is not the
+project's chosen path**: a grammar cannot decline, so its failures are
+confident wrong commands rather than detectable misses. `--prompt` biasing
+is what Stage 1 settled on.
 """
 
 from __future__ import annotations
@@ -38,10 +44,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import platform
 import shutil
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from typing import Protocol
@@ -62,8 +66,7 @@ class Transcript:
     """One recognition result. `confidence` is in `[0.0, 1.0]`; its exact
     meaning is engine-specific (`WhisperCliEngine`'s is an average
     per-token probability if the binary reports one, else a documented
-    placeholder; `WindowsSpeechEngine`'s is `System.Speech`'s own
-    `RecognitionResult.Confidence` verbatim) -- `engine` is carried
+    placeholder) -- `engine` is carried
     precisely so a confidence value is never read without knowing which
     engine produced it.
 
@@ -321,130 +324,3 @@ def _parse_whisper_json(payload: object) -> Transcript:
         engine="whisper-cli",
         confidence_is_placeholder=confidence_is_placeholder,
     )
-
-
-#: The PowerShell script driving `System.Speech.Recognition.
-#: SpeechRecognitionEngine` against a WAV file with a `Choices` grammar,
-#: emitting `{"text": ..., "confidence": ...}` as JSON on stdout (or
-#: `{"text": "", "confidence": 0.0}` if nothing in the grammar matched --
-#: `System.Speech` raises no distinct "no match" exception, it simply
-#: returns no result). **Unverified against a live Windows run** -- see
-#: module docstring; `System.Speech`'s API shape (`SetInputToWaveFile`,
-#: `LoadGrammar(new Grammar(new GrammarBuilder(new Choices(...))))`,
-#: `Recognize()`, `.Text`/`.Confidence`) is documented Win32/.NET surface,
-#: not confirmed live.
-_WINDOWS_SPEECH_SCRIPT_TEMPLATE = r"""
-Add-Type -AssemblyName System.Speech
-$ErrorActionPreference = "Stop"
-$phrases = @({phrases})
-$choices = New-Object System.Speech.Recognition.Choices($phrases)
-$builder = New-Object System.Speech.Recognition.GrammarBuilder($choices)
-$grammar = New-Object System.Speech.Recognition.Grammar($builder)
-$engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine
-$engine.LoadGrammar($grammar)
-$engine.SetInputToWaveFile("{wav_path}")
-$result = $engine.Recognize()
-if ($result -eq $null) {{
-    Write-Output '{{"text": "", "confidence": 0.0}}'
-}} else {{
-    $obj = @{{ text = $result.Text; confidence = $result.Confidence }}
-    Write-Output ($obj | ConvertTo-Json -Compress)
-}}
-"""
-
-
-class WindowsSpeechEngine:
-    """`STTEngine` backed by Windows's built-in `System.Speech.Recognition.
-    SpeechRecognitionEngine`, driven via `powershell.exe -NoProfile
-    -Command <script>`. `powershell.exe` is an OS-shipped external binary
-    -- no download, no package, consistent with the external-binary rule.
-
-    Windows-only by construction: `transcribe` raises immediately (never
-    attempts a subprocess call) on any other platform, so a bench run on
-    the Mac skips this engine cleanly rather than erroring.
-    """
-
-    def __init__(self, phrases: tuple[str, ...]) -> None:
-        if not phrases:
-            raise ValueError("WindowsSpeechEngine requires a non-empty phrase list")
-        self._phrases = phrases
-
-    @staticmethod
-    def is_available() -> bool:
-        """Whether this engine can run at all on the current host --
-        platform-only check, no subprocess call. `False` on every non-
-        Windows host, including this project's own Mac development
-        machine."""
-        return sys.platform == "win32"
-
-    def transcribe(self, wav: bytes) -> Transcript:
-        if not WindowsSpeechEngine.is_available():
-            raise STTRecognitionError(
-                "WindowsSpeechEngine only runs on Windows "
-                f"(current platform: {platform.system()})"
-            )
-        if not wav:
-            raise STTRecognitionError("cannot transcribe empty audio")
-
-        wav_fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="srs-adapter-in-")
-        try:
-            with os.fdopen(wav_fd, "wb") as f:
-                f.write(wav)
-
-            phrase_literal = ", ".join(f'"{_ps_escape(p)}"' for p in self._phrases)
-            script = _WINDOWS_SPEECH_SCRIPT_TEMPLATE.format(
-                phrases=phrase_literal,
-                wav_path=_ps_escape(wav_path),
-            )
-            result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command", script],
-                capture_output=True,
-                timeout=_RECOGNITION_TIMEOUT_S,
-                check=False,
-            )
-            if result.returncode != 0:
-                stderr = result.stderr.decode("utf-8", errors="replace")
-                raise STTRecognitionError(
-                    f"'powershell.exe' exited {result.returncode}: {stderr.strip()}"
-                )
-            stdout = result.stdout.decode("utf-8", errors="replace").strip()
-            try:
-                payload = json.loads(stdout)
-            except json.JSONDecodeError as exc:
-                raise STTRecognitionError(
-                    f"could not parse powershell output as JSON: {stdout!r}"
-                ) from exc
-            if not isinstance(payload, dict):
-                raise STTRecognitionError(
-                    "unexpected powershell JSON shape: root is "
-                    f"{type(payload).__name__}, not an object: {payload!r}"
-                )
-            text = payload.get("text", "")
-            confidence = payload.get("confidence", 0.0)
-            if not isinstance(text, str) or not isinstance(confidence, (int, float)):
-                raise STTRecognitionError(
-                    f"unexpected powershell JSON shape: {payload!r}"
-                )
-            return Transcript(
-                text=text, confidence=float(confidence), engine="windows-speech"
-            )
-        except FileNotFoundError as exc:
-            raise STTRecognitionError(
-                "'powershell.exe' not found (not on Windows?)"
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise STTRecognitionError(
-                f"'powershell.exe' timed out after {_RECOGNITION_TIMEOUT_S}s"
-            ) from exc
-        finally:
-            try:
-                os.remove(wav_path)
-            except OSError:
-                logger.debug("could not remove temp file %s", wav_path, exc_info=True)
-
-
-def _ps_escape(value: str) -> str:
-    """Escape a value for embedding inside a PowerShell double-quoted
-    string literal -- doubling embedded double quotes and backticks is
-    PowerShell's own escaping rule for that context."""
-    return value.replace("`", "``").replace('"', '`"')

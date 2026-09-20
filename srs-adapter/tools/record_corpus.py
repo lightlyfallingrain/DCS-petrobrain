@@ -33,10 +33,12 @@ its preamp and the headset's own response are part of what the bench is
 measuring. A corpus captured through a different microphone would score
 a signal chain that never flies.
 
-Recording once and benching on both boxes is also what makes the engine
-comparison fair: `stt_bench.py` run on Windows scores `WindowsSpeechEngine`
-against the identical audio whisper saw on the Mac, so a difference
-between them is the engine rather than the take.
+Recording on the box you fly from is still the point: the microphone, its
+preamp and the headset's own response are part of what the bench measures.
+(An earlier note here promised a fair engine comparison by benching the same
+corpus on both machines. That is gone with the Windows recognizer, removed
+2026-09-19 -- see `stt_engine.py`. Recognition now happens on the Mac
+regardless of where the audio was captured.)
 
 **Space is the push-to-talk key**: press it to start the take, say the
 phrase, press it again to stop. Single keypresses, no Enter. `r` redoes
