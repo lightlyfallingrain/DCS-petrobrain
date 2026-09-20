@@ -4,8 +4,9 @@
 §4.6.7 "Пульты и объекты комплекса УРВ 9К113", pages 68–71 (Russian)
 
 Found while wiring that PDF into the project's reference surface. It answers, with published
-figures, three things the detection-cones slice 1 plan had recorded as **placeholders** and one
-question the roadmap had flagged as "verify before building".
+figures, two things the detection-cones slice 1 plan had recorded as **placeholders** and one
+question the roadmap had flagged as "verify before building" — and it produced one over-claim,
+corrected below, which is recorded rather than quietly deleted.
 
 ## Magnification: ×3.3 and ×10, switchable
 
@@ -21,19 +22,28 @@ setting is ×3.3. That is near enough that today's calibrated behaviour is appro
 at its wide setting*, which is worth knowing before anyone reasons about what the current numbers
 represent.
 
-## Sight slew limits — a field of *regard*, not just a field of view
+## Control-console travel — NOT the sight's own limits
 
-From the ПУ ПН control console (p.70, Рис. 4.20, annotated on the photograph):
+**Corrected 2026-09-20 by the user, who spotted the over-claim before it propagated.** An earlier
+version of this note reported ±40° azimuth and −15°/+20° elevation as *the 9K113 sight's slew
+limits*. They are not. They are the annotated travel of the **ПУ ПН control console** — the
+operator's handle (p.70, Рис. 4.20, "missile control console") — which is the input device, not the
+optical head.
 
-| axis | limit |
-|---|---|
-| horizontal | **±40°** |
-| vertical | **−15° / +20°** |
+The distinction matters for the cone model. The console's handle travel and the sight head's
+angular deflection need not map one to one, and the manual describes the linkage as a
+*spring-centred* control: release the force and the head returns toward a rest position, which is a
+rate-or-displacement control relationship rather than a direct angular mapping (p.71, items 2 and
+4). Treating handle travel as a field of regard would have put a wrong bound into `optics.py` and
+made it look sourced.
 
-This is a distinct constraint from the optic's own FOV and from the cockpit occlusion mask. The
-sight cannot be pointed outside this envelope at all, so a contact beyond ±40° azimuth is
-unreachable by the magnified channel however visible it might be to the unaided eye. Slice 1's cone
-test should treat it as a third, independent bound.
+**The 9K113's own angular limits are in this manual** — the user confirms they are there — but not
+on the pages read so far. Until they are found and cited, the cone model has **no sourced field of
+regard for the sight**, and should say so rather than substituting these numbers.
+
+The lesson generalises past this note: a figure printed next to a photograph of a control describes
+*that control*, and the temptation to read it as the system's limit is exactly the kind of
+plausible-but-wrong claim a citation makes durable.
 
 ## Stadiametric ranging: calibrated for a 2.5 m target, marks at 1000 m and 5000 m
 
