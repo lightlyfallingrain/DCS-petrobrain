@@ -1,5 +1,21 @@
 """Regression tests for `tests/fixtures/vision_calibration.json`.
 
+**The fixture is contaminated and these tests are no longer evidence about
+human visibility (2026-09-21).** The authoritative PNG set was captured
+with DCS's "detection aid dots" enabled -- a small dark marker DCS draws
+at a target to make it findable at range -- so every grade records what
+was visible *with that aid*, optimistically, by an unmeasured amount that
+grows with range.
+
+The tests are deliberately kept and still pass. What they now pin is that
+the model still agrees with the data it was actually fitted to, which is
+a real regression guard against an accidental constant change. What they
+no longer support is any claim of the form "this is what a person can
+see". Do not derive new constants here without re-shooting with the aid
+off; see `body-layer/research/2026-09-21-first-cones-sortie-results.md`,
+which also explains why the contamination does *not* account for that
+sortie's finding that the model sees too little at the presence tier.
+
 The fixture carries two source sets. The **authoritative** one
 (`source_set == "png-2026-09-17"`, `authoritative == True`) is a nine-range
 ladder -- 503 m to 8.89 km, one 12-unit complex, four optics per range,
