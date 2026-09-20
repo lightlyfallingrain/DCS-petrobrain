@@ -253,6 +253,39 @@ The fix put the connector inside the phrase (`"a handful of"`), so the join stay
 phrase-plus-noun concatenation and the grammar lives in one place rather than being split across
 two functions that must agree (2026-09-19).
 
+## Optics/Calibration
+
+- **A plausible physical argument for a constant is not evidence — check it against the
+  photographic ground truth before committing.** `BINOCULAR_RANGE_MULTIPLIER` was raised from 4.0 to
+  an "honest" 8.0 (a real 8x30 instrument, no derating) on physical reasoning that sounded more
+  rigorous than the inherited, unexamined 4.0. Running it against `test_vision_calibration.py`'s
+  9-range photographic ladder refuted it within one commit — four cases computed `hires` where the
+  screenshots show `medres`. The eventual correct value (4.0, independently re-derived as 6x glass ×
+  a ~0.67 unstabilised-platform penalty) happened to match the number it replaced, but only checking
+  against the fixture revealed that the *physically cleaner-sounding* number was wrong. A fixture
+  built for regression calibration doubles as a fast falsifier for a new hypothesis — run it before
+  trusting the arithmetic, not after (detection-cones-slice1, 2026-09-20).
+
+- **When a scope cut removes a feature, audit for dataclass fields that would hold the same
+  placeholder value on every remaining instance — those are untestable by construction and should
+  go too, not just the feature's own code.** Cutting the 9K113 sight from `Optic` also required
+  cutting its four field-of-regard fields: with no sighted optic left in the table, every remaining
+  instance would carry `None` on all four, so no test could ever exercise the restricting branch.
+  The rule that emerged: carry a mechanism only as long as at least one real instance exercises its
+  non-trivial branch (the FOV *field* stayed, because `BINOCULAR_OPTIC` got a real non-`None` value
+  even without a live caller yet) — data nothing can ever read given the current instance set should
+  be deferred with the feature that would have populated it, not left behind as inert scaffolding
+  (detection-cones-slice1, 2026-09-20).
+
+- **Rescaling a geometry test fixture under a changed range threshold is not a linear operation.**
+  Shrinking a fixture's candidate ranges to fit a shorter detection ceiling, without also rescaling
+  whatever fixed offset defines the angular separation between candidates (a cross-range offset, an
+  AGL altitude difference), silently breaks the merge/split boundary the fixture exists to test:
+  apparent angular size (`size_m / range_m`) is not scale-invariant even though the bearing angle
+  between two uniformly-scaled points is. The fix re-derived the fixtures by iterating scale factors
+  through the real clustering/pipeline functions until the required merge/split outcomes reproduced,
+  rather than trusting a flat distance rescale (detection-cones-slice1, 2026-09-20).
+
 ## Voice Recognition & Command Matching
 
 - **Phrase scoring requires word-sequence matching, not character-sequence matching.** Early approach using whole-string character-level difflib (`SequenceMatcher` over the full normalized transcript) inflated scores for arbitrary speech with short-word overlap — "look at that" scored 0.727 against "scan_ahead", "watch out" scored 0.636 against "watch_nearest", both clearing action threshold under normal recognition confidence. Word-sequence scoring (SequenceMatcher over word lists, exact word matches score 1.0, character credit for equal-length "replace" opcodes only, divided by `max(len(heard), len(phrase))`) filters false positives while preserving real mishearings (e.g., "skin bearing 315" for "scan bearing 315"). This matters because fuzzy matching is a load-bearing defense in voice recognition against misheard words, and the right metric determines whether you catch mishearings or false-execute arbitrary speech (Inbound Speech Stage 2 review finding).
