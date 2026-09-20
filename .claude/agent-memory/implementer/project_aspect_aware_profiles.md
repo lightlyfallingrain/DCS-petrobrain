@@ -32,3 +32,17 @@ at every realistic aspect for these tall/thin objects.
 See [[feedback_decouple_fixtures_from_tuned_defaults]] and
 [[project_m6_terrain_semantics]] for related "don't let a test accidentally prove a degenerate
 case" lessons — this task's mandated-45°-test rule is the same family of defect.
+
+**2026-09-21 post-DoD correction**: new flight data showed presence/detection is aspect-invariant
+(1.00x across 3 instruments on a real BTR-60) while class/type move 1.33x-2.31x with aspect —
+`check_visibility`'s gate and `_achieved_tier`'s `lowres` must use plain `profile.size_m`;
+`medres`/`hires` keep `apparent_extent_m`. `_achieved_tier` now takes two required size params
+(`presence_size_m`, `recognition_extent_m`) with an EXPLICIT `lowres` threshold computation
+(not an implicit else-fallback) — the coherence fix the coordinator asked for, so the gate and
+the presence tier can't silently drift apart on a future edit. `apparent_extent_m` is not
+guaranteed `>= size_m` at every aspect (nose-on can project below the hand-set max(L,W,H)) —
+flagged, not fixed, since fixing it is a model-shape decision (clamping) outside a narrow
+correction's scope. See `body-layer/research/2026-09-21-aspect-magnification-and-
+distinctiveness.md` for the full measurement (also: magnification scales oppositely for
+presence vs. class/type, and per-type "distinctiveness" — infantry class range == presence range
+exactly — both explicitly deferred, not attempted).
