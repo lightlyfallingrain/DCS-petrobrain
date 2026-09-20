@@ -388,13 +388,30 @@ directly and never calls `_print` — no line, no overlay push, no speech push, 
 `speech.render_stop_acknowledged` is removed as dead code.
 
 **Latency finding.** The Stage 6 live-latency question asked whether recognition → dispatch → HTTP
-round trip still carries synthesis latency once an interrupt-only path exists.
-**Unverified — could not be checked without a live Windows box/DCS session** (this repo's
-provenance rule: execution against the real hardware chain is the user's to run, not this session's
-to simulate). What can be said from the code alone: the interrupt path removes both TTS synthesis
-(`engine.synthesize`) and WAV delivery/playback-queueing from the request — `POST /stop` calls
-`sink.interrupt()` directly, nothing else — so the round trip should be faster than any `/speak`
-call in principle. Confirming the actual magnitude needs a live timed run.
+round trip still carries synthesis latency once an interrupt-only path exists. **Partly answered,
+live (local target, Mac, measured 2026-09-20):** `POST /stop` against an in-flight `POST /speak`
+returned `200` in ~6ms and playback stopped — the interrupt mechanism itself is effectively free.
+So the round-trip cost the reviewer originally flagged is recognition + dispatch + HTTP, not the
+audio mechanism; removing TTS synthesis from the path is what took the audio side down to
+essentially nothing. **The Windows figure (`winsound`, aircraft-layer's `_WinsoundPlayer`) remains
+genuinely unmeasured** — it is a different mechanism (`SND_PURGE` + an interruptible
+`threading.Event` wait, not a killed subprocess) and this session had no live Windows/DCS access to
+time it (this repo's provenance rule: execution against the real hardware chain is the user's to
+run, not this session's to simulate).
+
+**Defect found by that same live run, fixed here:** a successful `/stop` was making the in-flight
+`/speak` call itself fail with `500`. `LocalPlaybackSink.deliver` treated `afplay`'s post-`kill()`
+non-zero return code (`-9`) as a genuine failure and raised `AudioDeliveryError` — indistinguishable
+from `afplay` actually crashing, so every intentional stop logged as a spurious speech-delivery
+failure on the body-layer side (`AudioAdapterClient.push_speech` raises, `CrewConsole._print`
+catches and logs). Fixed by having `LocalPlaybackSink` track *which* process `interrupt()` killed
+(`self._interrupted`) so `deliver()` can tell "killed because we were asked to stop" (now logged at
+info and swallowed — an expected outcome, not an error) apart from "afplay genuinely failed" (still
+raises). Checked whether `aircraft-layer`'s `_interrupt_playback` has the equivalent shape: it does
+not, and this is pre-existing rather than introduced by this follow-up — `_WinsoundPlayer.play`
+never inspects a return code at all; `stop()` sets the same `threading.Event` `play()` is already
+waiting on, so an interrupted `play()` simply returns, same as a completed one. No aircraft-layer
+change was needed.
 
 ---
 

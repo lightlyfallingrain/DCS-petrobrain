@@ -581,3 +581,62 @@ mypy src`): pass (35 files) · pytest (`PYTHONPATH=src:../world-model/src`): pas
   process if two overlap — a real limitation for a debug-tool-scoped feature, matching the
   existing docstring's own acknowledgement that this dev-only path was never designed for
   concurrent delivery. Not addressed, since `stop_talking` is explicitly scoped as a debug tool.
+
+---
+
+### Stage 3 follow-up, hotfix: a successful stop was failing the interrupted /speak call (2026-09-20)
+
+**Context.** Coordinator live-verified the local `/stop` path on the Mac: `afplay` in flight,
+`POST /stop` returned `200` in ~6ms, playback stopped — but the in-flight `POST /speak` call then
+raised `HTTPError: 500`. Root cause: `LocalPlaybackSink.deliver` treated `afplay`'s post-`kill()`
+return code (`-9`, indistinguishable from a genuine crash) as failure and raised
+`AudioDeliveryError`. Since `AudioAdapterClient.push_speech` raises on any non-2xx and
+`CrewConsole._print` logs that as a failure, every intentional stop would have logged a spurious
+speech-delivery error — exactly the "system reports an error for doing what it was told" defect an
+interrupt-only path exists to avoid.
+
+#### Files Changed
+
+- `audio-adapter/src/audio_adapter/__main__.py` — `LocalPlaybackSink` gains `self._interrupted:
+  Popen | None`, set by `interrupt()` to the exact process it killed and read (then cleared) by
+  `deliver()`'s own `finally`. `deliver()` now branches on that flag when it sees a non-zero return
+  code: if this process is the one `interrupt()` killed, logs at `info` and returns normally (an
+  expected outcome); otherwise raises `AudioDeliveryError` exactly as before (a genuine `afplay`
+  failure is unaffected by this change). Docstrings record the live-measured ~6ms interrupt latency
+  and the `ThreadingHTTPServer` dependency (`/speak` blocks the handling thread until `afplay`
+  exits; only a threading server keeps `/stop` servicable during that window — a switch to a
+  single-threaded server would silently break `stop_talking` entirely).
+- `plans/inbound-speech/plan.md` — Decision 5 REVISED's latency paragraph replaced with the
+  measured ~6ms figure (local target, Mac, 2026-09-20) plus this defect/fix account and the
+  aircraft-layer parity check below; the Windows figure stays recorded as genuinely unmeasured.
+
+#### aircraft-layer parity check
+
+Checked whether `collector/audio_sender.py`'s `_interrupt_playback` has the same shape. **It does
+not — pre-existing-safe, no change needed.** `_WinsoundPlayer.play` never inspects a return code:
+it starts playback async and blocks on a `threading.Event`; `stop()` purges the sound and sets that
+same event, so an interrupted `play()` call simply returns, indistinguishable at the call-site from
+one that finished normally. The worker loop (`_run`) only catches exceptions `play()` might raise,
+and `play()` never raises on interrupt. So the equivalent failure mode does not exist on the
+aircraft-layer side, and never did.
+
+#### Checks
+
+Re-ran all three subprojects' full check sequences after the fix — all pass:
+
+- **aircraft-layer/** — ruff format --check / ruff check / mypy --strict (15 files) / pytest (134
+  passed). Unchanged by this fix; re-run to confirm nothing regressed.
+- **audio-adapter/** — ruff format --check / ruff check / mypy --strict (9 files) / pytest (100
+  passed, 1 skipped).
+- **body-layer/** — ruff format --check / ruff check / mypy --strict (`cd body-layer && mypy src`,
+  35 files) / pytest (`PYTHONPATH=src:../world-model/src`, 717 passed). Unchanged by this fix;
+  re-run to confirm nothing regressed.
+
+#### Notable Discoveries
+
+- **No new automated test added for this fix.** `LocalPlaybackSink`/`__main__.py` has no automated
+  test by documented policy (`audio-adapter/CLAUDE.md` Testing: a live-process entrypoint, verified
+  manually) — a unit test here would need either a real `afplay` kill race (flaky, timing-
+  dependent) or a fake stand-in binary, which is a bigger design decision than this targeted fix
+  warrants. The coordinator's live run is the verification of record for this behaviour, consistent
+  with how this file was already tested.

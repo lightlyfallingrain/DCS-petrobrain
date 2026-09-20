@@ -67,11 +67,35 @@ class LocalPlaybackSink:
     `interrupt()` from another request-handling thread -- `_current` +
     `_lock` are the one small piece of shared state that requires, mirroring
     `AudioPlaybackSender`'s own worker-thread/queue split on the
-    aircraft-layer side, at dev-tool scale."""
+    aircraft-layer side, at dev-tool scale.
+
+    Live-verified 2026-09-20 (Mac, local target): `POST /stop` against an
+    in-flight `POST /speak` returned `200` in ~6ms and playback stopped --
+    the interrupt mechanism itself is effectively free; the latency this
+    project cares about is in recognition/dispatch/HTTP, not here. Windows
+    (`winsound`, aircraft-layer's `_WinsoundPlayer`) is a different
+    mechanism and remains unmeasured.
+
+    **Only serviceable because `TTSAdapterServer.open()` runs
+    `ThreadingHTTPServer`.** `deliver()` blocks the handling thread until
+    `afplay` exits; a single-threaded `HTTPServer` would leave `POST /stop`
+    queued behind that same blocked thread and never reach `interrupt()`
+    until playback finished on its own -- silently defeating the whole
+    point of this method. Not obvious from this class alone, since nothing
+    here chooses the server class; recorded here because this is the
+    method load-bearing on that choice."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._current: subprocess.Popen[bytes] | None = None
+        #: Set by `interrupt()` to the exact process object it killed, and
+        #: cleared by `deliver()`'s own `finally` once it has read it --
+        #: this is what lets `deliver()` tell "killed because someone
+        #: asked us to stop" (expected, not an error) apart from "afplay
+        #: genuinely failed" (still an `AudioDeliveryError`) without
+        #: guessing from the return code alone, which is `-9` either way
+        #: a `kill()` produced it, whether we intended the kill or not.
+        self._interrupted: subprocess.Popen[bytes] | None = None
 
     def deliver(self, audio: bytes, urgent: bool) -> None:
         fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-play-")
@@ -93,6 +117,7 @@ class LocalPlaybackSink:
 
             with self._lock:
                 self._current = process
+            was_interrupted = False
             try:
                 _stdout, stderr = process.communicate(timeout=_PLAYBACK_TIMEOUT_S)
             except subprocess.TimeoutExpired as exc:
@@ -105,8 +130,23 @@ class LocalPlaybackSink:
                 with self._lock:
                     if self._current is process:
                         self._current = None
+                    if self._interrupted is process:
+                        self._interrupted = None
+                        was_interrupted = True
 
             if process.returncode != 0:
+                if was_interrupted:
+                    # Expected outcome, not a failure -- `interrupt()`
+                    # itself did this kill. Logged at info, not warning,
+                    # and never raised: a normal `POST /stop` must not
+                    # surface as a speech-delivery error on the body-layer
+                    # side (`AudioAdapterClient.push_speech`'s caller,
+                    # `CrewConsole._print`, logs any `AudioDeliveryError`-
+                    # turned-500 as a failure it isn't).
+                    logger.info(
+                        "afplay interrupted by POST /stop (expected, not a failure)"
+                    )
+                    return
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 raise AudioDeliveryError(
                     f"'afplay' exited {process.returncode}: {stderr_text.strip()}"
@@ -118,13 +158,17 @@ class LocalPlaybackSink:
                 logger.debug("could not remove temp file %s", tmp_path, exc_info=True)
 
     def interrupt(self) -> None:
-        """Kill whatever `afplay` process is currently in flight, if any.
-        Never raises (same posture as `AudioPlaybackSender.interrupt` on
-        the aircraft-layer side) -- the killed process's own `deliver()`
-        call sees a non-zero return code and raises `AudioDeliveryError`
-        there, which is that request's own concern, not this one's."""
+        """Kill whatever `afplay` process is currently in flight, if any,
+        and record it as an intentional interrupt (`self._interrupted`) so
+        `deliver()` can tell that kill apart from a genuine `afplay`
+        failure once it observes the resulting non-zero return code --
+        see `__init__`'s `_interrupted` field docstring for why that
+        distinction is needed. Never raises (same posture as
+        `AudioPlaybackSender.interrupt` on the aircraft-layer side)."""
         with self._lock:
             process = self._current
+            if process is not None:
+                self._interrupted = process
         if process is None:
             return
         try:
