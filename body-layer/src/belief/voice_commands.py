@@ -63,6 +63,16 @@ from typing import Literal
 #: research doc itself calls a reject threshold "near 0.60" *defensible*,
 #: not exact; there is no larger distribution (2 failures) to fit a
 #: cleaner boundary from.
+#:
+#: **Compared against `confidence` alone, not `confidence * match_ratio`**
+#: (Decision 4 REVISED AGAIN, `plans/inbound-speech/plan.md`, user
+#: 2026-09-20). This was the actual defect the revision fixes: this figure
+#: was measured against confidence, then applied to a product of two
+#: sub-1 quantities whose range is systematically lower than either
+#: factor -- four real corpus clips run end to end put two in the confirm
+#: band that should have acted, both barely under the (wrong) floor. The
+#: fix validates this number rather than replacing it: pointing it back at
+#: the quantity it was measured on makes it correct again.
 ACT_FLOOR: float = 0.60
 
 #: `cancel_task` is the one token that *destroys* state rather than
@@ -72,7 +82,15 @@ ACT_FLOOR: float = 0.60
 #: different mechanism -- routing a marginal cancel into the confirm band
 #: that already exists. **Not independently measured** -- Stage 1's two
 #: failures were both on other tokens, so there is no cancel-specific data
-#: to set this from -- picked as `ACT_FLOOR` plus a fixed margin.
+#: to set this from -- picked as `ACT_FLOOR` plus a fixed margin, and that
+#: relationship (not the number itself) is the only thing grounding it.
+#:
+#: **Compared against `confidence` alone**, same as `ACT_FLOOR` above and
+#: for the same reason (Decision 4 REVISED AGAIN) -- it was also being
+#: applied to the `confidence * match_ratio` product, and restating it
+#: honestly means saying plainly that this was *always* an unmeasured
+#: placeholder margin on top of `ACT_FLOOR`, now correctly measured
+#: against the same quantity `ACT_FLOOR` is.
 ACT_FLOOR_CANCEL: float = 0.80
 
 #: Below this, nothing fires and Petrovich asks the player to say it
@@ -84,6 +102,12 @@ ACT_FLOOR_CANCEL: float = 0.80
 #: rather than an immediate reject, pending Stage 6's live-sortie
 #: acceptance data (the plan's own expectation: "Expect the constants from
 #: Decision 4 to move once after this").
+#:
+#: **Compared against `confidence` alone**, same as `ACT_FLOOR`/
+#: `ACT_FLOOR_CANCEL` above (Decision 4 REVISED AGAIN) -- it was never
+#: measured against either the product or confidence alone, so this
+#: change doesn't validate or invalidate the figure, only makes explicit
+#: which quantity it now gates.
 CONFIRM_FLOOR: float = 0.35
 
 #: How long a confirm-band question stays open before it is dropped
@@ -174,17 +198,43 @@ def classify_response(
 ) -> BandDecision:
     """The band decision for one matched transcript -- `audio_adapter.
     command_matcher.MatchResult`'s fields plus the transcript's own STT
-    confidence, combined per Decision 4 Layer 2 step 5
-    (`combined = stt_confidence * phrase_ratio`).
+    confidence.
+
+    **Gates confidence and match ratio independently, never as a product**
+    (Decision 4 REVISED AGAIN, `plans/inbound-speech/plan.md`, user
+    2026-09-20, replacing the original Decision 4 Layer 2 step 5
+    `combined = stt_confidence * phrase_ratio`). The two quantities answer
+    different questions -- "did I hear you clearly?" and "is that a
+    command I know?" -- and multiplying them destroys the distinction:
+    `0.9 * 0.5` and `0.5 * 0.9` give the same product for opposite
+    situations. `ACT_FLOOR`/`CONFIRM_FLOOR`/`ACT_FLOOR_CANCEL` below are
+    therefore compared against `confidence` alone. `match_ratio` is still
+    accepted here (signature parity with `MatchResult`/`handle_transcript`'s
+    seven-field seam) but plays no role in this function's own floor
+    comparisons: by the time `token` is non-`None`, `match_ratio` has
+    already cleared `audio_adapter.command_matcher.MATCH_FLOOR` (0.6)
+    upstream -- a second body-side threshold on the same quantity would
+    just re-penalise something already filtered, which was exactly the
+    defect this revision removes. (If a genuine need for a second,
+    body-side match threshold ever emerges, it should be added and
+    justified on its own terms then, not smuggled back in as a product.)
 
     Order matters and mirrors the module docstring's four behaviours:
-    not-a-command-attempt is checked first (behaviour #4), then ambiguity
-    unconditionally forces a confirm (behaviour #2, checked before any
-    floor comparison so a high ratio can never buy its way past it), then
-    a verb-anchored-but-unresolved match (no phrase cleared the floor, or
-    an illegal bearing was detected) always says again -- there is no
-    token to act on or confirm -- and only then does a genuine single
-    candidate get floor-compared."""
+    not-a-command-attempt is checked first (behaviour #4) -- `verb_anchored
+    =False` routes to `"fallthrough"`, which is also this module's second,
+    implicit route into the brain layer (`plans/inbound-speech/plan.md`
+    Decision 4 REVISED AGAIN's table: "heard clearly, no command match" ->
+    brain; until this revision the only path in was the explicit wake
+    word). Then ambiguity unconditionally forces a confirm (behaviour #2,
+    checked before any floor comparison so a high ratio can never buy its
+    way past it). Then a verb-anchored-but-unresolved match (no phrase
+    cleared `MATCH_FLOOR`, or an illegal bearing was detected) always says
+    again, never falls through to the brain -- the player plainly tried to
+    issue a command, so "say again" is the right question, not free-speech
+    routing (Decision 4 REVISED AGAIN: "`verb_anchored` decides between the
+    two right-hand cells... only speech with no verb anchor at all goes to
+    the brain"). Only then does a genuine single candidate get
+    confidence-compared."""
     if not verb_anchored:
         return BandDecision(disposition="fallthrough")
     if ambiguous:
@@ -193,10 +243,9 @@ def classify_response(
     if token is None:
         return BandDecision(disposition="say_again")
 
-    combined = confidence * match_ratio
     floor = ACT_FLOOR_CANCEL if token == "cancel_task" else ACT_FLOOR
-    if combined >= floor:
+    if confidence >= floor:
         return BandDecision(disposition="act", token=token)
-    if combined >= CONFIRM_FLOOR:
+    if confidence >= CONFIRM_FLOOR:
         return BandDecision(disposition="confirm", token=token)
     return BandDecision(disposition="say_again")

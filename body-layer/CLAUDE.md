@@ -731,7 +731,21 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   use — the whisper-model-sweep doc has no confidence distribution, a reviewer-caught wrong
   citation fixed 2026-09-19); `ACT_FLOOR_CANCEL`/`CONFIRM_FLOOR`/
   `CONFIRM_WINDOW_S` are documented-unmeasured placeholders (their own comments say so), pending
-  Stage 6 live-sortie data. `PendingConfirmation` is the one piece of state a confirm question needs
+  Stage 6 live-sortie data. **`classify_response` gates `confidence` and `match_ratio`
+  independently, never as a product** (Decision 4 REVISED AGAIN, `plans/inbound-speech/plan.md`,
+  user 2026-09-20, fixing a real category error: `ACT_FLOOR` was measured against confidence alone
+  and had been applied to `confidence * match_ratio`, a product systematically lower than either
+  factor — four real corpus clips run end to end put two in the confirm band that should have
+  acted). `ACT_FLOOR`/`ACT_FLOOR_CANCEL`/`CONFIRM_FLOOR` now compare against `confidence` alone;
+  `match_ratio` is accepted for signature parity with the seven-field seam but plays no role in
+  the floor comparisons, since it already cleared the adapter's own `MATCH_FLOOR` upstream by the
+  time `token` is non-`None` — a second body-side match threshold would just re-penalise something
+  already filtered. `verb_anchored=False` (not confidence) is what routes a transcript to the
+  brain layer via `"fallthrough"` — this is the revision's second, implicit route into the brain,
+  alongside the pre-existing explicit wake word: well-heard speech matching no command pattern is
+  exactly what the brain should receive, while a verb-anchored-but-unresolved attempt ("scan
+  somethinggarbled") still says again rather than falling through, since the player plainly tried
+  to issue a command. `PendingConfirmation` is the one piece of state a confirm question needs
   between two calls — owned and mutated by `crew_console.py`, not this module.
   `CrewConsole.handle_transcript(transcript, confidence, token, match_ratio, verb_anchored,
   ambiguous, now_sim)` (`crew_console.py`) is the new sibling entry point this module's docstring
