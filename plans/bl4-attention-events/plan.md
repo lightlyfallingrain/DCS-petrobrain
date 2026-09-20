@@ -7,7 +7,7 @@ event-queue consumption mechanics BL-5's `poll_events`/`acknowledge_event` will 
 still console-driven, no LLM, no new perception/geometry primitives.
 
 **Explicitly out of scope** (per `todo/todo.md`'s "Attention direction and detection cones"
-deferred entry): distinct optical modes (peripheral/naked-eye/binocular/APS-17), scan-loop
+deferred entry): distinct optical modes (naked eye, binocular, 9K113), scan-loop
 logic, attention *direction* as a perception-gating input. That entry names BL-4 as the
 milestone whose machinery it will eventually sit on top of, not something BL-4 builds itself.
 Also out of scope: threat/relevance scoring (BL-6), mission-phase-driven attention, and natural-

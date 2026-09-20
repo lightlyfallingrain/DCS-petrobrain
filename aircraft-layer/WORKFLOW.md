@@ -311,9 +311,29 @@ so it persists on screen for a few seconds and can be read verbatim. For each on
    log — which is far stronger evidence than "something changed near this timestamp." A screenshot
    works too.
 
-You do not need to track the OBSERV transitions by hand: the probe logs `list_indication(2)`
-(the ASP-17) on change, so the sight's state is recorded in-band and each callout can be
-attributed to a segment after the fact.
+**Track the OBSERV transitions by hand.** An earlier version of this section said you did not need
+to, because the probe logs `list_indication(2)` on change, recording the sight's state in-band.
+**That was wrong and would have silently produced nothing.** Device 2 is the **ASP-17V**, the
+*pilot's* gunsight in the rear cockpit -- a different instrument from the 9K113 that `OBSERV`
+controls, and one the operator cannot touch at all (see "Petrovich and the ASP-17V" below). It
+would never have carried an OBSERV transition.
+
+So mark each segment boundary the same way as the callouts: flip your distinctive switch at every
+`OBSERV ON`/`OBSERV OFF` change, and write down which way it went. Attribution is then as reliable
+as the callout marks themselves, rather than resting on a channel that does not carry the signal.
+
+#### Petrovich and the ASP-17V
+
+**Invariant: Petrovich never manipulates the ASP-17V, in any mode.** It is the pilot's sight, in the
+pilot's cockpit. When the 9K113 is in auto mode it *displays* to the pilot where that sight is
+pointing -- that is the only relationship between them, and it runs sight to pilot's display, never
+operator to sight.
+
+Anything modelling Petrovich as selecting, slewing, or seeing through the ASP-17V is wrong by
+construction, not merely unimplemented. What may still legitimately mention it: records of DCS
+reconnaissance -- device ID 2, `list_indication(2)` confirmed dead as a geometry channel in the PB-1
+live spike, cockpit script paths. Those are facts about the simulator and are worth keeping so the
+dead channel is not re-probed; they are not design intent.
 
 **What the result will mean**
 
