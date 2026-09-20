@@ -113,14 +113,28 @@ detection here to be ambiguous *about*):
    ambient-detection.md`, Session 5 Finding 3) is ED's own range-by-target-
    size curve, expressed as a threshold angular radius per recognition tier
    rather than a flat range. This module works it backwards into a range
-   threshold: `range_threshold = object_model.size_m(object_type) /
-   NAKED_EYE_GATING_ANGULAR_RADIUS_RAD * BINOCULAR_RANGE_MULTIPLIER`, capped
-   at `NAKED_EYE_RANGE_CAP_M` as a sanity bound
-   regardless of what the formula computes for a given object's looked-up
-   size -- this project's own derivation from ED's published constants, not
-   a verified reproduction of ED's actual formula (see the plan's Risks
-   section: the native code also folds in `min_contrast_f`/
-   `min_fog_transparency`, which this project has no input for).
+   threshold: `range_threshold = extent / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
+   * BINOCULAR_RANGE_MULTIPLIER`, capped at `NAKED_EYE_RANGE_CAP_M` as a
+   sanity bound regardless of what the formula computes for a given
+   object's looked-up extent -- this project's own derivation from ED's
+   published constants, not a verified reproduction of ED's actual formula
+   (see the plan's Risks section: the native code also folds in
+   `min_contrast_f`/`min_fog_transparency`, which this project has no input
+   for).
+
+   **`extent` is aspect-aware, not the bare looked-up size**
+   (`plans/aspect-aware-profiles/plan.md`) -- `object_model.apparent_extent_m`
+   projects a candidate's real `length_m`/`width_m`/`height_m` (where
+   known) onto the observer's line of sight using the angle between the
+   candidate's heading and the observer-to-candidate bearing
+   (`_aspect_deg` below), so a target's detectable extent depends on how
+   it is presented: broadside shows more of its length, nose/tail-on shows
+   less, and a tall/thin object (a radar mast) is recognised at its full
+   height regardless of aspect. Falls back to the plain `profile.size_m`
+   this gate always used before -- byte-for-byte unchanged -- whenever a
+   profile carries no measured dimensions (every row except the two S-300
+   ones this pass migrated) or the candidate's heading is unknown this
+   tick.
 4. **Terrain LOS** -- reuses `geometry.line_of_sight_clear` as-is; the piece
    `geometry.py`'s own docstring already anticipated needing ("turning
    'clear line of sight' into an actual detectability decision... [is] a
@@ -348,6 +362,24 @@ class VisibilityResult:
     confidence: float
 
 
+def _aspect_deg(
+    candidate_heading_true_deg: float | None, candidate_bearing_deg: float
+) -> float | None:
+    """The angle between the candidate's heading and the observer-to-
+    candidate bearing, wrapped to `[0, 180]` -- 0 deg means the candidate is
+    viewed from directly ahead or astern (its heading is aligned with, or
+    opposite to, the line of sight), 90 deg means broadside
+    (`plans/aspect-aware-profiles/plan.md`'s "The formula" section).
+    `None` whenever the candidate's heading is unknown this tick
+    (`WorldObjectCandidate.heading_true_deg`'s tri-state contract) -- never
+    guessed, since a wrong guess here would fabricate a specific aspect
+    `object_model.apparent_extent_m` would then silently trust."""
+    if candidate_heading_true_deg is None:
+        return None
+    delta = (candidate_heading_true_deg - candidate_bearing_deg + 180.0) % 360.0 - 180.0
+    return abs(delta)
+
+
 def _achieved_tier(
     range_m: float,
     size_m: float,
@@ -458,8 +490,10 @@ def check_visibility(
     candidate_bearing_deg = bearing_deg(observer, target)
     candidate_range_m = range_m(observer, target)
     profile = object_model.profile_for(candidate.object_type)
+    aspect_deg = _aspect_deg(candidate.heading_true_deg, candidate_bearing_deg)
+    candidate_extent_m = object_model.apparent_extent_m(profile, aspect_deg)
     size_curve_threshold_m = (
-        profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
+        candidate_extent_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
     ) * optic.magnification
     range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
     threshold_bound = (
@@ -512,7 +546,7 @@ def check_visibility(
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
-        candidate_range_m, profile.size_m, optic.magnification
+        candidate_range_m, candidate_extent_m, optic.magnification
     )
     _record(GateOutcome.ADMITTED, achieved_tier=achieved_tier)
     return VisibilityResult(

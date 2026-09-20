@@ -34,8 +34,9 @@ import sqlite3
 
 import pytest
 
-from perception import visibility
+from perception import object_model, visibility
 from perception.association import WorldObjectCandidate
+from perception.object_model import ObjectTypeProfile
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import OwnshipState
 from perception.visibility import (
@@ -87,10 +88,21 @@ def _ownship(
 
 
 def _candidate(
-    object_type: str, *, x: float, z: float, alt_m: float = 500.0
+    object_type: str,
+    *,
+    x: float,
+    z: float,
+    alt_m: float = 500.0,
+    heading_true_deg: float | None = None,
 ) -> WorldObjectCandidate:
     return WorldObjectCandidate(
-        object_id=1, object_type=object_type, x=x, z=z, alt_m=alt_m, is_ownship=False
+        object_id=1,
+        object_type=object_type,
+        x=x,
+        z=z,
+        alt_m=alt_m,
+        is_ownship=False,
+        heading_true_deg=heading_true_deg,
     )
 
 
@@ -591,3 +603,112 @@ def test_higher_magnification_optic_extends_the_range_threshold() -> None:
         ownship, candidate, _FAKE_CONN, _THEATRE, optic=UNAIDED_OPTIC
     )
     assert unaided_result is None
+
+
+# --- Aspect-aware apparent extent (`plans/aspect-aware-profiles/plan.md`) --
+
+
+#: A synthetic dimensioned profile (`length_m=10 != width_m=4`), monkeypatched
+#: in for a private test-only object_type below so these tests are
+#: independent of the real S-300 keyword table -- exercising
+#: `check_visibility`'s aspect wiring directly rather than its accidental
+#: interaction with real sourced dimensions.
+_ASPECT_TEST_OBJECT_TYPE = "AspectTestDimensionedObject"
+_ASPECT_TEST_PROFILE = ObjectTypeProfile(
+    size_m=10.0, op_class="OP_TEST", length_m=10.0, width_m=4.0, height_m=6.0
+)
+
+#: A synthetic tall-mast profile mirroring the real S-300 bug shape:
+#: `size_m=5.0` is the old generic-fallback figure a mast used to collapse
+#: to before this pass, `height_m=24.0` its real measured height -- kept
+#: separate from the real "S-300PS 40B6M tr" keyword row so this test pins
+#: the fix mechanically, not by relying on this pass's own dimension
+#: sourcing being correct.
+_TALL_MAST_TEST_OBJECT_TYPE = "AspectTestTallMast"
+_TALL_MAST_TEST_PROFILE = ObjectTypeProfile(
+    size_m=5.0, op_class="OP_TEST", length_m=10.0, width_m=3.0, height_m=24.0
+)
+
+
+@pytest.fixture
+def dimensioned_profile_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_profile_for = object_model.profile_for
+
+    def _fake_profile_for(object_type: str) -> ObjectTypeProfile:
+        if object_type == _ASPECT_TEST_OBJECT_TYPE:
+            return _ASPECT_TEST_PROFILE
+        if object_type == _TALL_MAST_TEST_OBJECT_TYPE:
+            return _TALL_MAST_TEST_PROFILE
+        return real_profile_for(object_type)
+
+    monkeypatch.setattr(object_model, "profile_for", _fake_profile_for)
+
+
+def test_broadside_and_nose_on_headings_resolve_to_different_visibility(
+    dimensioned_profile_lookup: None,
+) -> None:
+    # Ownship at the origin heading north; candidate dead ahead (bearing 0
+    # deg from the observer) at a fixed range in between the nose-on and
+    # broadside lowres thresholds this profile implies:
+    #   nose-on (aspect 0):  apparent extent = max(width=4, height=6) = 6,
+    #                        lowres threshold = 6 / 0.003 * 1.0 = 2000 m.
+    #   broadside (aspect 90): apparent extent = max(length=10, height=6)
+    #                        = 10, lowres threshold = 10 / 0.003 * 1.0
+    #                        = 3333.3 m.
+    # A candidate at 2500 m is beyond the nose-on threshold but within the
+    # broadside one -- admitted only when presented broadside.
+    ownship = _ownship(heading_true_deg=0.0)
+    nose_on = _candidate(
+        _ASPECT_TEST_OBJECT_TYPE, x=2500.0, z=0.0, heading_true_deg=180.0
+    )
+    broadside = _candidate(
+        _ASPECT_TEST_OBJECT_TYPE, x=2500.0, z=0.0, heading_true_deg=90.0
+    )
+
+    assert check_visibility(ownship, nose_on, _FAKE_CONN, _THEATRE) is None
+    broadside_result = check_visibility(ownship, broadside, _FAKE_CONN, _THEATRE)
+    assert broadside_result is not None
+    assert broadside_result.tier == "lowres"
+
+
+def test_unknown_heading_reproduces_the_pre_aspect_scalar_behaviour(
+    dimensioned_profile_lookup: None,
+) -> None:
+    # Regression guard (mirrors cones-slice-1's own "must not change the
+    # default" pattern): with heading_true_deg=None, apparent_extent_m
+    # falls back to plain profile.size_m (10.0) regardless of geometry --
+    # exactly what this gate computed before aspect existed. lowres
+    # threshold = 10 / 0.003 * 1.0 = 3333.3 m, so a candidate at 2500 m
+    # (which the nose-on aspect above rejects) is admitted here.
+    ownship = _ownship(heading_true_deg=0.0)
+    unknown_heading = _candidate(
+        _ASPECT_TEST_OBJECT_TYPE, x=2500.0, z=0.0, heading_true_deg=None
+    )
+
+    result = check_visibility(ownship, unknown_heading, _FAKE_CONN, _THEATRE)
+
+    assert result is not None
+    assert result.tier == "lowres"
+
+
+def test_tall_mast_shaped_profile_is_visible_past_its_old_scalar_threshold(
+    dimensioned_profile_lookup: None,
+) -> None:
+    # Pins the S-300 tall-mast fix directly, independent of real sourced
+    # dimensions (`_TALL_MAST_TEST_PROFILE` above): under the old,
+    # aspect-blind behaviour this object would gate on its size_m=5.0
+    # generic-fallback figure (lowres threshold 5/0.003*1=1666.7 m); with
+    # real height_m=24.0 wired through apparent_extent_m, the mast's
+    # threshold becomes height-dominated at every aspect
+    # (max(projected_width, 24.0) >= 24.0), lowres threshold
+    # 24/0.003*1=8000 m. A candidate at 3000 m -- past the old threshold,
+    # well inside the new one -- is exactly the bug this plan fixes.
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate(
+        _TALL_MAST_TEST_OBJECT_TYPE, x=3000.0, z=0.0, heading_true_deg=180.0
+    )
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+
+    assert result is not None
+    assert result.tier == "lowres"
