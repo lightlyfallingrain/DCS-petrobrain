@@ -75,10 +75,17 @@ this project's recurring failure is not missing documentation but failing to fin
 already exists, and occasionally finding a superseded version instead.
 
 ```sh
-graphify query "<question>"          # BFS traversal, broad context
+.claude/scripts/gq.sh "<question>"   # query, then list the sources to read
 graphify path "<node A>" "<node B>"  # shortest path between two concepts
 graphify explain "<node>"            # plain-language explanation
 ```
+
+**Use `gq.sh`, not `graphify query` directly.** The graph says *where* to look; it does not say what
+the text says. Edge annotations quote fragments, and a fragment can lose its tense — the first build
+cited "a standing no-omniscience violation" from a passage whose next sentence records the fix. The
+wrapper ends every answer with the source files already assembled, so reading them is one step
+rather than a decision, and re-renders annotations as `fragment@path` so they stop reading as
+claims. That is the mechanism; the rule on its own was forgotten within the hour it was written.
 
 Install the hooks once per clone: `.claude/scripts/install-git-hooks.sh`. They keep the graph's
 structural spine current per commit (AST over changed `.py`, ~1.5s, captures docstrings) and record
