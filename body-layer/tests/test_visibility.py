@@ -644,31 +644,75 @@ def dimensioned_profile_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(object_model, "profile_for", _fake_profile_for)
 
 
-def test_broadside_and_nose_on_headings_resolve_to_different_visibility(
+def test_broadside_and_nose_on_headings_resolve_to_different_recognition_tier(
     dimensioned_profile_lookup: None,
 ) -> None:
-    # Ownship at the origin heading north; candidate dead ahead (bearing 0
-    # deg from the observer) at a fixed range in between the nose-on and
-    # broadside lowres thresholds this profile implies:
-    #   nose-on (aspect 0):  apparent extent = max(width=4, height=6) = 6,
-    #                        lowres threshold = 6 / 0.003 * 1.0 = 2000 m.
+    # **Corrected 2026-09-21** (`body-layer/research/2026-09-21-aspect-
+    # magnification-and-distinctiveness.md` Finding 1): aspect must feed
+    # recognition only, never admission -- a real four-instrument BTR-60
+    # measurement found presence identical (1.00x) at every aspect while
+    # class/type moved 1.33x-2.31x. This test used to assert nose_on was
+    # rejected outright at this range; that was exactly the defect the
+    # research note caught. Both headings now use the SAME size_m=10.0 for
+    # the gate (aspect-invariant), so both are admitted at the same range
+    # -- what differs is the achieved recognition tier:
+    #   nose-on (aspect 0):    apparent extent = max(width=4, height=6)
+    #                          = 6, medres threshold = 6/0.014*1 = 428.6 m,
+    #                          hires threshold = 6/0.028*1 = 214.3 m --
+    #                          500 m clears neither, so tier = lowres.
     #   broadside (aspect 90): apparent extent = max(length=10, height=6)
-    #                        = 10, lowres threshold = 10 / 0.003 * 1.0
-    #                        = 3333.3 m.
-    # A candidate at 2500 m is beyond the nose-on threshold but within the
-    # broadside one -- admitted only when presented broadside.
+    #                          = 10, medres threshold = 10/0.014*1
+    #                          = 714.3 m -- 500 m clears it, tier = medres.
     ownship = _ownship(heading_true_deg=0.0)
     nose_on = _candidate(
-        _ASPECT_TEST_OBJECT_TYPE, x=2500.0, z=0.0, heading_true_deg=180.0
+        _ASPECT_TEST_OBJECT_TYPE, x=500.0, z=0.0, heading_true_deg=180.0
     )
     broadside = _candidate(
-        _ASPECT_TEST_OBJECT_TYPE, x=2500.0, z=0.0, heading_true_deg=90.0
+        _ASPECT_TEST_OBJECT_TYPE, x=500.0, z=0.0, heading_true_deg=90.0
     )
 
-    assert check_visibility(ownship, nose_on, _FAKE_CONN, _THEATRE) is None
+    nose_on_result = check_visibility(ownship, nose_on, _FAKE_CONN, _THEATRE)
     broadside_result = check_visibility(ownship, broadside, _FAKE_CONN, _THEATRE)
+
+    assert nose_on_result is not None
+    assert nose_on_result.tier == "lowres"
     assert broadside_result is not None
-    assert broadside_result.tier == "lowres"
+    assert broadside_result.tier == "medres"
+
+
+def test_detection_range_is_invariant_under_aspect(
+    dimensioned_profile_lookup: None,
+) -> None:
+    """Regression guard for the exact defect
+    `2026-09-21-aspect-magnification-and-distinctiveness.md` Finding 1
+    caught: admission and the `lowres`/presence tier must be identical at
+    every aspect, including non-axis-aligned ones -- 0/90 alone would have
+    hidden the original defect just as surely as the `apparent_extent_m`
+    cubic-fallback bug was hidden by testing only 0/90 (the mirror image
+    of this plan's own mandated formula-test rule). `_ASPECT_TEST_PROFILE`
+    has `size_m=10.0`; at every aspect below, both the admission gate and
+    the achieved tier at a range just inside the size_m-derived lowres
+    threshold (3333.3 m) must agree: admitted, tier lowres. Kept comfortably
+    inside every aspect's medres threshold's *lower* bound too (nose-on
+    medres threshold is 428.6 m, the smallest any aspect here produces) is
+    not required -- what must hold is that presence itself never moves."""
+    ownship = _ownship(heading_true_deg=0.0)
+    range_m = 3000.0  # inside 3333.3 m at every aspect, outside every medres threshold
+
+    for aspect_heading_true_deg in (0.0, 45.0, 90.0, 135.0, 180.0, 270.0):
+        candidate = _candidate(
+            _ASPECT_TEST_OBJECT_TYPE,
+            x=range_m,
+            z=0.0,
+            heading_true_deg=aspect_heading_true_deg,
+        )
+        result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+        assert result is not None, (
+            f"admission changed with aspect at heading={aspect_heading_true_deg}"
+        )
+        assert result.tier == "lowres", (
+            f"presence tier changed with aspect at heading={aspect_heading_true_deg}"
+        )
 
 
 def test_unknown_heading_reproduces_the_pre_aspect_scalar_behaviour(
@@ -677,38 +721,46 @@ def test_unknown_heading_reproduces_the_pre_aspect_scalar_behaviour(
     # Regression guard (mirrors cones-slice-1's own "must not change the
     # default" pattern): with heading_true_deg=None, apparent_extent_m
     # falls back to plain profile.size_m (10.0) regardless of geometry --
-    # exactly what this gate computed before aspect existed. lowres
-    # threshold = 10 / 0.003 * 1.0 = 3333.3 m, so a candidate at 2500 m
-    # (which the nose-on aspect above rejects) is admitted here.
+    # exactly what this gate computed before aspect existed. medres
+    # threshold = 10 / 0.014 * 1.0 = 714.3 m, so a candidate at 500 m
+    # (which achieves only `lowres` nose-on, per the test above) achieves
+    # `medres` here, matching the *broadside* result exactly -- an unknown
+    # aspect falls back to the same generous, no-regression size_m the
+    # gate itself always used.
     ownship = _ownship(heading_true_deg=0.0)
     unknown_heading = _candidate(
-        _ASPECT_TEST_OBJECT_TYPE, x=2500.0, z=0.0, heading_true_deg=None
+        _ASPECT_TEST_OBJECT_TYPE, x=500.0, z=0.0, heading_true_deg=None
     )
 
     result = check_visibility(ownship, unknown_heading, _FAKE_CONN, _THEATRE)
 
     assert result is not None
-    assert result.tier == "lowres"
+    assert result.tier == "medres"
 
 
-def test_tall_mast_shaped_profile_is_visible_past_its_old_scalar_threshold(
+def test_tall_mast_shaped_profile_achieves_a_better_tier_than_the_old_scalar_formula(
     dimensioned_profile_lookup: None,
 ) -> None:
     # Pins the S-300 tall-mast fix directly, independent of real sourced
-    # dimensions (`_TALL_MAST_TEST_PROFILE` above): under the old,
-    # aspect-blind behaviour this object would gate on its size_m=5.0
-    # generic-fallback figure (lowres threshold 5/0.003*1=1666.7 m); with
-    # real height_m=24.0 wired through apparent_extent_m, the mast's
-    # threshold becomes height-dominated at every aspect
-    # (max(projected_width, 24.0) >= 24.0), lowres threshold
-    # 24/0.003*1=8000 m. A candidate at 3000 m -- past the old threshold,
-    # well inside the new one -- is exactly the bug this plan fixes.
+    # dimensions (`_TALL_MAST_TEST_PROFILE` above) -- and now, per the
+    # 2026-09-21 correction, pins it as a RECOGNITION improvement, not a
+    # detection-range one: admission is governed by size_m=5.0 (the old
+    # generic-fallback figure a mast used to collapse to) at every aspect,
+    # unaffected by this fix -- lowres threshold 5/0.003*1 = 1666.7 m,
+    # identical before and after this pass. What the real height_m=24.0
+    # fixes is recognition: old scalar medres threshold was
+    # 5/0.014*1 = 357.1 m; with apparent_extent_m height-dominated at every
+    # aspect (max(projected_width, 24.0) >= 24.0), the new medres threshold
+    # is 24/0.014*1 = 1714.3 m. A candidate at 1000 m -- past the old
+    # medres threshold, comfortably admitted either way, well inside the
+    # new medres threshold -- achieves only `lowres` under the old formula
+    # and `medres` under the new one.
     ownship = _ownship(heading_true_deg=0.0)
     candidate = _candidate(
-        _TALL_MAST_TEST_OBJECT_TYPE, x=3000.0, z=0.0, heading_true_deg=180.0
+        _TALL_MAST_TEST_OBJECT_TYPE, x=1000.0, z=0.0, heading_true_deg=180.0
     )
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
     assert result is not None
-    assert result.tier == "lowres"
+    assert result.tier == "medres"

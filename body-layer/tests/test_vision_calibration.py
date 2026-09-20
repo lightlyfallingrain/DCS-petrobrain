@@ -219,8 +219,15 @@ def test_computed_tier_matches_ground_truth(record: dict[str, Any]) -> None:
     edit contradicts."""
     expected_tier = _tier_for_grade(record["grades"]["binocular"])
 
+    # The screenshot ladder carries no aspect/heading data, so both size
+    # measures are the same plain size_m here -- exactly what
+    # object_model.apparent_extent_m would itself fall back to for an
+    # unknown aspect (`plans/aspect-aware-profiles/plan.md`), and the
+    # split `_achieved_tier` now takes (`presence_size_m`,
+    # `recognition_extent_m`) doesn't change this test's numbers.
+    largest_size_m = _largest_size_m(record)
     computed_tier, _confidence = visibility._achieved_tier(
-        record["range_m"], _largest_size_m(record)
+        record["range_m"], largest_size_m, largest_size_m
     )
 
     assert computed_tier == expected_tier, (

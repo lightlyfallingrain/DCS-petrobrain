@@ -103,3 +103,61 @@ explicit scope cut. `LOWRES`/`MEDRES`/`HIRES_ANGULAR_RADIUS_RAD` untouched.
   entries' `expected_op_class` updated from `null` to `"OP_LRSAM"` — without this the fixture's
   mismatch-detection test would have failed (a real, expected consequence of the two rows leaving
   the fallback bucket, not a bug).
+
+### Correction (2026-09-21, post-DoD): aspect feeds recognition only, never detection
+
+New flight data (`body-layer/research/2026-09-21-aspect-magnification-and-distinctiveness.md`,
+Finding 1) contradicted a premise this branch had already merged and DoD-passed: a four-instrument
+BTR-60 measurement found presence identical at every aspect (1.00x ratio, 90° vs. 0/20° AOB, across
+binoculars and both 9K113 FOV settings) while class/type moved by 1.33x-2.31x. As merged,
+`check_visibility`'s range-admission gate and `_achieved_tier`'s `lowres` tier both used the
+aspect-aware `apparent_extent_m`, which the data says is wrong — detection is a contrast event
+driven by presented area, not by which silhouette the object turns; recognition is a shape event
+and needs the shape.
+
+**Fix, narrow and targeted:**
+- `check_visibility`'s range-admission gate now uses `profile.size_m` (aspect-invariant), not
+  `apparent_extent_m` — reverted to exactly the formula this branch found before the aspect work.
+- `_achieved_tier` gained a second required parameter: `presence_size_m` (drives the `lowres`
+  threshold, now computed explicitly rather than left as an implicit "anything left over"
+  fallback) and `recognition_extent_m` (drives `medres`/`hires`, where the aspect effect belongs).
+  Explicit computation for `lowres` — instead of the previous implicit `else` branch — was the
+  deliberate fix for the coherence risk the coordinator flagged: with two different size measures
+  now in the same function, an implicit fallback could silently drift out of sync with the gate's
+  own arithmetic on a future edit; an explicit threshold, fed the identical value the gate uses,
+  cannot.
+- `test_vision_calibration.py`'s one direct `_achieved_tier(...)` call site was updated to pass
+  the same `_largest_size_m(record)` value for both new parameters — correct, not just
+  mechanically necessary: the screenshot ladder carries no aspect data, so this is exactly what
+  `apparent_extent_m(profile, None)` itself falls back to.
+- Two tests from the original pass tested exactly the now-fixed defect (aspect changing
+  admission/`lowres`) and were rewritten, not just patched: gate/`lowres` behaviour is now
+  identical across headings by construction, so their assertions were re-pointed at the
+  `medres`/`hires` tier difference aspect actually produces. A new
+  `test_detection_range_is_invariant_under_aspect` was added — the explicit regression guard for
+  this defect, swept across headings including non-axis-aligned ones (45°/135°), mirroring the
+  plan's own "no axis-aligned-only test" rule from the other direction.
+
+**Files touched:** `body-layer/src/perception/visibility.py` (gate + `_achieved_tier` + module
+docstring gate-#3 section, which had drifted to describe the wrong, now-reverted gate formula),
+`body-layer/tests/test_visibility.py` (2 tests rewritten, 1 added), `body-layer/tests/
+test_vision_calibration.py` (1 call site updated to match the new required-parameter signature —
+this file's numbers/behaviour are unchanged, only the call shape).
+
+**Checks:** `ruff format --check` pass, `ruff check` pass, `mypy src` (strict) pass, `pytest -q`
+pass — 770/770 (769 before this correction + net 1: 2 old tests replaced, 3 new/rewritten in
+their place... net +1 file-wide after accounting for the parametrized sweep folding into a single
+new test rather than N).
+
+**Nothing incoherent found in splitting the two size measures once made explicit.** The one risk
+worth naming for a future reader: `apparent_extent_m` is not guaranteed `>= profile.size_m` at
+every aspect (for a profile where `size_m` is hand-set to the *largest* of `length_m`/`width_m`/
+`height_m`, a nose-on view can project to less than that maximum on the other two axes) — so
+`medres`/`hires` thresholds computed from it are not mathematically guaranteed to nest inside the
+`size_m`-derived `lowres` threshold the way the single-size-measure version trivially did. In
+practice this doesn't bite: `MEDRES_ANGULAR_RADIUS_RAD`/`HIRES_ANGULAR_RADIUS_RAD` are both several
+times larger than `LOWRES_ANGULAR_RADIUS_RAD`, so `recognition_extent_m` would have to exceed
+`presence_size_m` by a wide margin before a `medres`/`hires` threshold could exceed the `lowres`
+one — not observed in any profile in the real table, including the two S-300 rows. Flagged rather
+than fixed, since fixing it would mean clamping `apparent_extent_m`'s output against `size_m`,
+which is a model-shape decision outside this correction's narrow scope.
