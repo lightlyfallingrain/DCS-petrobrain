@@ -55,3 +55,66 @@ Maintain `NOTES.md` for non-obvious findings: bugs, perf bottlenecks, framework 
 - Short, factual entries — one idea per bullet, no narrative
 - Add when something non-trivial is discovered; never duplicate code comments
 - Consult before making decisions in areas where prior issues are recorded
+
+## Keeping the knowledge graph honest
+
+A queryable graph over the current-state design documentation lives in `graphify-out/`, built from
+a curated corpus — every `ROADMAP.md` and `CLAUDE.md`, `docs/`, `AGENTS.md`, `NOTES.md`, `todo/`,
+all `*/research/`, and the active plan. It exists because this project's recurring failure is not
+missing documentation but **failing to find documentation that already exists**, and occasionally
+finding a superseded version of it instead.
+
+### The order at merge is load-bearing, not tidiness
+
+**Documents first. Graph second. Merge third.**
+
+1. **Bring the documents current** — what was built, what is left, what this work superseded. A
+   superseded section keeps its body and gains a pointer to its replacement (see "Superseding a
+   decision"); a plan nothing current cites moves to `plans/archive/`. This is the Definition of
+   Done's job.
+2. **Rebuild the graph** — `/graphify graphify-corpus --update`. Incremental; only changed files
+   are re-extracted.
+3. **Merge and push.** Afterwards code, documents and graph describe the same state.
+4. **Clear the flag** — `rm -f graphify-out/.needs_update`.
+
+Getting this backwards is **worse than skipping the rebuild entirely.** A graph built from stale
+documents does not merely lag — it *launders* the staleness. The next query returns the outdated
+claim with a citation and a confidence score attached, which is considerably more convincing than
+the stale paragraph was on its own. A tool that makes wrong information easier to find and harder
+to doubt is a net loss.
+
+### Why the rebuild is not automatic
+
+Semantic extraction over prose needs an LLM, and an LLM inside a commit hook would be slow,
+non-deterministic, and fire on typo fixes. So the hooks deliberately do almost nothing:
+
+| hook | script | does |
+| --- | --- | --- |
+| `pre-commit` | `graphify-dirty-flag.sh` | appends changed doc paths to `.needs_update` |
+| `post-commit` | `graphify-ast-refresh.sh` | re-runs AST extraction on changed `.py` |
+
+**Structure per commit, meaning per merge.** AST extraction is deterministic, needs no API key, and
+took 1.56s across all 141 Python files here — and it emits nodes for **docstrings**, which matters
+more in this repo than most: the design reasoning lives there, and the things most often missed (the
+binocular premise, the measured cockpit angles, the association gate's ratio lesson) are docstrings,
+not markdown.
+
+What AST cannot do is link two ideas sharing no import and no citation. The graph's most useful
+finding so far — that a world-model latency note and a speech-recognition band fix are the same
+error, *a number measured against one quantity and applied to another* — needed semantic
+extraction. That is the part which waits for merge.
+
+Install once per clone: `.claude/scripts/install-git-hooks.sh`. Both hooks fail open.
+
+### The graph says where to look, not what the text says
+
+Edge annotations quote fragments, and a fragment can lose its tense — the first build cited "a
+standing no-omniscience violation" from a passage whose *next sentence* records the fix. Read as an
+assertion it is simply wrong; read as a coordinate it points at exactly the right paragraph.
+
+**This is enforced mechanically rather than left as advice, because it was forgotten within the
+hour it was first written down.** `.claude/scripts/gq.sh` is the documented way to query: it ends
+every answer with the source files already assembled, and re-renders annotations as `fragment@path`
+so they present as coordinates rather than claims. A rule that fires at the moment of use survives;
+a rule in a document competes with every other line in that document — including, evidently, this
+one.
