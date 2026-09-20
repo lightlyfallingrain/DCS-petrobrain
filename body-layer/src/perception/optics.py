@@ -21,6 +21,28 @@ them back, sourced fields intact in the research note above.
 `Optic.boresight_azimuth_deg` is pinned to `0.0` (dead ahead, Decision 3
 of the plan) -- there is no slew model in this slice.
 
+**No derating factor (reversed, 2026-09-20, same session as the scope
+cut above).** An earlier pass of this module split `BINOCULAR_RANGE_
+MULTIPLIER` into a realistic 8x magnification times a 0.5
+`handheld_effectiveness` derating factor, chosen so the product
+reproduced the old 4.0 exactly -- preserving today's detection *range*
+while dressing it up as physics. The user reversed that: a multiplier
+should state the instrument honestly, and a fabricated derating factor
+whose only job is to cancel out a magnification change is a behaviour
+knob wearing an optics label, exactly the problem the split was meant to
+fix in the first place. `BINOCULAR_OPTIC.magnification` is now plainly
+8.0, `BINOCULAR_RANGE_MULTIPLIER` is now plainly 8.0, and detection range
+is taken to roughly double as a direct, intended consequence -- not
+something to re-cancel with a second knob. Where detection range actually
+gets tuned is the acuity thresholds (`visibility.LOWRES_ANGULAR_RADIUS_
+RAD`/`MEDRES_ANGULAR_RADIUS_RAD`/`HIRES_ANGULAR_RADIUS_RAD`), against real
+sortie data -- one honestly-labelled magnification knob, calibrated
+thresholds behind it. **Every calibration figure recorded before this
+commit (the screenshot-ladder-derived angular-radius constants, the
+worked-example range numbers in test/docstring comments) was calibrated
+against the old effective 4.0 and is now stale** -- due for a fresh
+sortie against the real 8.0, not corrected here.
+
 Pure, no I/O, no DCS/world-model dependency -- mirrors `cockpit_mask.py`'s
 own posture.
 """
@@ -36,81 +58,41 @@ from perception.visibility import BINOCULAR_RANGE_MULTIPLIER
 
 @dataclass(frozen=True, slots=True)
 class Optic:
-    """One named optic: what it magnifies by, what it shows once pointed
-    (field of view), and how much of that raw magnification is actually
-    usable in practice.
-
-    `magnification` is the instrument's own, true optical magnification.
-    `handheld_effectiveness` (default `1.0`, i.e. no derating) is a
-    **separate** factor for anything that erodes what raw magnification
-    alone would predict -- a handheld instrument's image shake in a
-    vibrating airframe being the motivating case (see `BINOCULAR_OPTIC`
-    below). `effective_magnification` is the product of the two, and is
-    the figure both `visibility.py`'s range-threshold formula and
-    `_achieved_tier` actually use -- never `magnification` alone.
-    `fov_half_angle_deg` is `None` for an optic with no FOV restriction
-    (the naked eye and the binoculars -- the cockpit occlusion mask is
-    their only envelope)."""
+    """One named optic: what it magnifies by, and what it shows once
+    pointed (field of view). `magnification` is the figure `visibility.
+    py`'s range-threshold formula and `_achieved_tier` actually use --
+    stated honestly as the instrument's own optical magnification, no
+    hidden derating factor (see module docstring). `fov_half_angle_deg`
+    is `None` for an optic with no FOV restriction (the naked eye and the
+    binoculars -- the cockpit occlusion mask is their only envelope)."""
 
     name: str
     magnification: float
     fov_half_angle_deg: float | None
     boresight_azimuth_deg: float = 0.0
-    handheld_effectiveness: float = 1.0
-
-    @property
-    def effective_magnification(self) -> float:
-        """The multiplier `visibility.py` actually applies to the range
-        threshold -- `magnification * handheld_effectiveness`, never raw
-        `magnification` alone. See the class docstring and
-        `BINOCULAR_OPTIC`'s own comment for why the two are kept separate
-        rather than folded into one number."""
-        return self.magnification * self.handheld_effectiveness
 
 
-#: Magnification 1.0, no derating, no FOV restriction -- the naked eye
-#: sees whatever the cockpit mask admits.
+#: Magnification 1.0, no FOV restriction -- the naked eye sees whatever
+#: the cockpit mask admits.
 UNAIDED_OPTIC: Final[Optic] = Optic(
     name="unaided",
     magnification=1.0,
     fov_half_angle_deg=None,
 )
 
-#: **Today's implicit default, now a named value -- and, as of 2026-09-20,
-#: a realistic instrument split into its two honest components rather than
-#: one borrowed engine constant.**
-#:
-#: `magnification=8.0` is a Б-8 / БПЦ5 8x30 -- standard Soviet compact
-#: issue, handheld-practical in a vibrating Mi-24 front cockpit (user,
-#: 2026-09-20). Realistic, but not measured in-sim.
-#:
-#: `handheld_effectiveness=0.5` is a **named, measurable** derating factor
-#: for what raw 8x magnification does not survive intact when handheld in
-#: a vibrating airframe rather than mounted. It is itself unmeasured --
-#: chosen specifically so `effective_magnification` (8.0 * 0.5 = 4.0)
-#: reproduces `BINOCULAR_RANGE_MULTIPLIER` exactly, so this refactor
-#: changes no detection behaviour (see `visibility.py`'s docstring and
-#: `test_binocular_optic_effective_magnification_matches_the_calibrated_
-#: constant` below). The point of naming it separately from magnification
-#: is that a real number now exists for a future calibration sortie to
-#: actually measure, which was impossible while it was hidden inside a
-#: mislabelled "magnification."
-#:
-#: `effective_magnification` (4.0) is `BINOCULAR_RANGE_MULTIPLIER` --
-#: `visibility.py`'s own constant, imported rather than redefined here
-#: (see that module's Decision 1 on why the constant's home stays
-#: `visibility.py`) -- the empirically calibrated figure every existing
-#: sortie's data is already built on. `magnification` and
-#: `handheld_effectiveness` are chosen to multiply to it, not the other
-#: way around.
-#:
-#: No FOV restriction -- binoculars magnify what is already being looked
-#: at, they do not narrow where the head can turn.
+#: **Today's implicit default, now a named value.** `magnification=8.0`
+#: is `BINOCULAR_RANGE_MULTIPLIER` -- `visibility.py`'s own constant,
+#: imported rather than redefined here (see that module's Decision 1 on
+#: why the constant's home stays `visibility.py`) -- taken as a real,
+#: honestly-stated instrument magnification (a Б-8/БПЦ5 8x30, standard
+#: Soviet compact issue, realistic but unmeasured in-sim) rather than
+#: split against a derating factor (see module docstring's "No derating
+#: factor" note). No FOV restriction -- binoculars magnify what is
+#: already being looked at, they do not narrow where the head can turn.
 BINOCULAR_OPTIC: Final[Optic] = Optic(
     name="binocular",
-    magnification=8.0,
+    magnification=BINOCULAR_RANGE_MULTIPLIER,
     fov_half_angle_deg=None,
-    handheld_effectiveness=BINOCULAR_RANGE_MULTIPLIER / 8.0,
 )
 
 
