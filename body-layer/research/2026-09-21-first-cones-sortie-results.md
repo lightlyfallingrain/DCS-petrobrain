@@ -148,3 +148,38 @@ simply drops it. Aspect is a plumbing change, not a new export.
 - **For tall radars, whether the mast was against sky or against terrain.** That is contrast, not
   size, and the model has no term for it at all — worth knowing whether it needs one before
   inventing one.
+
+## After the aspect fix: the radars improve, and a new gap appears
+
+Measured against the same observations once `feature/aspect-aware-profiles` was implemented:
+
+| | before | after | observed |
+|---|---|---|---|
+| 40B6M tr — presence | 1665 m | **8000 m** | 6700 m |
+| 40B6M tr — class | 345 m | **1714 m** | 4500 m |
+| 64H6E sr — presence | 1645 m | 3333–4400 m | 5000 m |
+| 64H6E sr — class | — | 714–943 m | 2000 m |
+
+Presence is essentially fixed: 4× short became roughly right, with the tall mast now slightly
+*over* (8000 against 6700). The class error fell from 13× to about 2.6×.
+
+### The new gap: classification is not purely angular size
+
+The class tier is still **short** for both radars — while being about **20% too generous** for
+vehicles (median ratio 0.82 in the table above). Same tier, opposite errors, split by what kind of
+object it is. That breaks the tidy "move `LOWRES` and `MEDRES` apart" story that the opposite-sign
+finding suggested, because no single pair of thresholds produces both.
+
+The likely reason is a term the model does not have: **a 24 m mast is identifiable at 4.5 km because
+nothing else on a battlefield looks like that**, not because its detail was resolved. Classification
+range depends on silhouette *distinctiveness*, not on angular size alone. A tank at 4.5 km is a blob
+among blobs; a mast is unmistakable at the same angular size.
+
+Not acted on, and deliberately not turned into a constant here — it is a model-shape question, not a
+tuning one, and it needs the binocular dataset before anyone designs for it. Recorded because the
+threshold recalibration will otherwise try to absorb it into `MEDRES` and produce a number that is
+wrong for both object kinds at once.
+
+**This strengthens the case for waiting.** Two separate effects (aspect, distinctiveness) were
+hiding inside what looked like one threshold error; fitting constants before either was understood
+would have buried both.
