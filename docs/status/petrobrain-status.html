@@ -576,8 +576,8 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       </article>
 
       <article class="sys" role="button" tabindex="0" data-detail="srs">
-        <h3>SRS Adapter</h3>
-        <span class="path">srs-adapter/</span>
+        <h3>Audio Adapter</h3>
+        <span class="path">audio-adapter/</span>
         <div class="bar"><i style="width:45%"></i></div>
         <span class="chip active">Slice 1, stages 1–5</span>
         <p class="next">Petrovich is audible, and urgent calls cut in mid-word.
@@ -694,7 +694,7 @@ flowchart LR
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="s2">
-        <span class="who">srs-adapter</span>
+        <span class="who">audio-adapter</span>
         <div class="what">
           <b>Slice 2 — SRS intercom injection</b>
           <p>Confirmed reachable: stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz. ICS is
@@ -706,7 +706,7 @@ flowchart LR
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="s3">
-        <span class="who">srs-adapter</span>
+        <span class="who">audio-adapter</span>
         <div class="what">
           <b>Slice 3 — speech in, gated by a joystick PTT</b>
           <p>Inbound bypasses SRS entirely and captures the microphone directly, because SRS offers no
@@ -771,7 +771,7 @@ flowchart LR
       </div>
 
       <div class="row s-hold" role="button" tabindex="0" data-detail="voice">
-        <span class="who">srs-adapter</span>
+        <span class="who">audio-adapter</span>
         <div class="what">
           <b>Voice character — accent and prosody</b>
           <p>Two problems, not one. No Russian-accented English voice exists in macOS <code>say</code>,
@@ -875,7 +875,7 @@ const DETAIL = {
     src: "body-layer/ROADMAP.md"
   },
   srs: {
-    kicker: "srs-adapter/", title: "SRS Adapter", chip: ["active", "Slice 1, stages 1-5"],
+    kicker: "audio-adapter/", title: "Audio Adapter", chip: ["active", "Slice 1, stages 1-5"],
     facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Merged today", "f469a56"]],
     sections: [
       { h: "Why it exists separately", p: "So neither the body layer nor the aircraft layer grows a TTS dependency. Body and brain deal in text only and never see audio bytes. The seam is HTTP throughout, so no new in-process cross-subproject import was introduced — the world-model import remains the sole sanctioned exception." },
@@ -885,7 +885,7 @@ const DETAIL = {
       { h: "Next", p: "A sortie to judge latency and voice, then intercom injection. The transports are deliberately asymmetric: outbound over SRS intercom, inbound bypassing SRS entirely to capture the microphone directly." }
     ],
     items: [["done","Stage 1 - synthesis + local playback"],["done","Stage 2 - collector audio channel"],["done","Stage 3 - cross-machine wiring"],["done","Stage 4 - body-layer sink"],["done","Stage 5 - Windows playback"],["block","Stage 6 - live sortie"],["open","Slice 2 - SRS intercom"],["open","Slice 3 - speech in"],["hold","Voice character"]],
-    src: "srs-adapter/ROADMAP.md"
+    src: "audio-adapter/ROADMAP.md"
   },
 
   gc4b: {
@@ -924,20 +924,20 @@ const DETAIL = {
     facts: [["Today", "Four processes, two machines, launched by hand"], ["Coming", "SRS, a brain layer"]],
     sections: [
       { h: "The ask", p: "\"Start services\" as one action, with a manifest saying which service runs on which machine -- today only the aircraft layer is on Windows, but that should not be baked in." },
-      { h: "Why Docker covers at most three of five", p: "Two services exist <em>precisely</em> to use host-OS facilities. The aircraft layer plays audio through <code>winsound</code> to the Windows device and talks to DCS over localhost; the SRS adapter shells out to macOS <code>say</code> and <code>afplay</code>, neither of which a Linux container has. The two it cannot cover are the two that matter during a flight." },
+      { h: "Why Docker covers at most three of five", p: "Two services exist <em>precisely</em> to use host-OS facilities. The aircraft layer plays audio through <code>winsound</code> to the Windows device and talks to DCS over localhost; the audio adapter shells out to macOS <code>say</code> and <code>afplay</code>, neither of which a Linux container has. The two it cannot cover are the two that matter during a flight." },
       { h: "The cheaper alternative", p: "A declarative manifest naming each service, its host, command, env and health check, plus a small stdlib launcher that starts whatever is assigned to the machine it runs on. Same goal, no new dependency, and the existing run scripts fold in as entries." },
-      { h: "Still to decide", p: "Whether reproducible builds justify containerising the three that can be, and startup ordering -- body-layer needs a built world-model database, and the SRS adapter is useless without the aircraft layer reachable." }
+      { h: "Still to decide", p: "Whether reproducible builds justify containerising the three that can be, and startup ordering -- body-layer needs a built world-model database, and the audio adapter is useless without the aircraft layer reachable." }
     ],
     src: "todo/todo.md"
   },
   stage6: {
-    kicker: "srs-adapter/ - blocked", title: "Stage 6 - live sortie acceptance", chip: ["block", "Needs a flight"],
+    kicker: "audio-adapter/ - blocked", title: "Stage 6 - live sortie acceptance", chip: ["block", "Needs a flight"],
     facts: [["Needs", "DCS, a real sortie"], ["Type", "Acceptance, not a correctness gate"]],
     sections: [
       { h: "What only a human can judge", p: "Whether 0.6-0.8 s of synthesis latency reads as crew-like or laggy. Whether several callouts arriving in one poll queue acceptably or feel like a backlog. And whether a generic English voice is tolerable in the cockpit, or whether the missing Russian accent breaks the illusion badly enough to promote that backlog item." },
       { h: "Why it isn't a gate", p: "Stage 5 already proves the pipeline works. This measures whether it <em>feels</em> right, which is a different question and one no test can answer." }
     ],
-    src: "srs-adapter/ROADMAP.md"
+    src: "audio-adapter/ROADMAP.md"
   },
   debt: {
     kicker: "body-layer/ - debt", title: "Live-acceptance debt", chip: ["block", "Clears on one flight"],
@@ -951,7 +951,7 @@ const DETAIL = {
   },
 
   s2: {
-    kicker: "srs-adapter/", title: "Slice 2 - SRS intercom injection", chip: ["open", "Next up"],
+    kicker: "audio-adapter/", title: "Slice 2 - SRS intercom injection", chip: ["open", "Next up"],
     facts: [["Mechanism", "DCS-SR-ExternalAudio.exe"], ["Target", "ICS only"], ["Gated on", "Stage 5"]],
     sections: [
       { h: "Confirmed reachable", p: "Stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz, modulation 2 — established from the SRS radio export, where the contributor notes their patch was never merged because official Mi-24 support had already shipped. <code>--unitId</code> exists specifically to allow intercom over external audio." },
@@ -959,10 +959,10 @@ const DETAIL = {
       { h: "Open prerequisite", p: "Discovering the player's DCS unit ID at runtime. <code>--unitId</code> defaults to 1000 and intercom scoping needs the real value, with no frequency-based escape hatch if it proves unobtainable. Likely already available through the aircraft layer's ownship flag — verify, do not assume." },
       { h: "Hard requirement", p: "The channel must be available regardless of SPU-8 position. Petrovich is the crew member in front of you; an intercom that goes silent because the pilot selected a radio is not an intercom. Receive is not gated by the selector in SRS, so this should hold — but it is pass/fail for the slice and must be confirmed live." }
     ],
-    src: "srs-adapter/ROADMAP.md, research/2026-09-17-tts-audio-transport-recon.md"
+    src: "audio-adapter/ROADMAP.md, research/2026-09-17-tts-audio-transport-recon.md"
   },
   s3: {
-    kicker: "srs-adapter/", title: "Slice 3 - speech in, PTT-gated", chip: ["open", "Largest remaining"],
+    kicker: "audio-adapter/", title: "Slice 3 - speech in, PTT-gated", chip: ["open", "Largest remaining"],
     facts: [["Transport", "Direct mic capture, bypasses SRS"], ["Gate", "Dedicated DCS keybind"]],
     sections: [
       { h: "Why inbound bypasses SRS", p: "SRS can send to the player but offers no clean way to capture the player's voice back out. <code>ExternalAudio</code> is a sender; receiving would mean a headless SRS client joined as a listener plus virtual-cable capture on Windows, with no documented API — by a wide margin the largest build in this milestone. Capturing the microphone directly also satisfies the stay-on-mission-frequency constraint absolutely, since inbound then involves no radio stack at all." },
@@ -970,7 +970,7 @@ const DETAIL = {
       { h: "Why PTT rather than always-on", p: "An always-listening microphone turns every muttered word and every piece of room noise into a candidate command, and continuous transcription is the expensive part of the pipeline." },
       { h: "Unverified", p: "Whether a bound DCS command's <em>held</em> state is readable on the Export.lua channel at all. F10 commands arrive as discrete events, which is not the same thing. Fallback if not: the Hind's two-stage cyclic trigger already forces intercom for the duration of a half-press without disturbing the SPU-8 — stock behaviour. Its caveat is that the export ends with <code>control = 1</code>, which may mean SRS never consults that branch." }
     ],
-    src: "srs-adapter/ROADMAP.md"
+    src: "audio-adapter/ROADMAP.md"
   },
   bl8: {
     kicker: "body-layer/", title: "BL-8 - memory layer interfaces", chip: ["open", "Deliberately gated"],
@@ -992,14 +992,14 @@ const DETAIL = {
     src: "world-model/ROADMAP.md"
   },
   voice: {
-    kicker: "srs-adapter/", title: "Voice character", chip: ["hold", "Backlog"],
+    kicker: "audio-adapter/", title: "Voice character", chip: ["hold", "Backlog"],
     facts: [["Deferred at", "TTS slice, Decision 7"], ["Cost to try", "One command per candidate"]],
     sections: [
       { h: "The situation", p: "Petrovich currently speaks in a generic English voice. macOS <code>say</code> ships no Russian-accented English voice — Milena is a Russian-<em>language</em> voice, which is a different thing entirely." },
       { h: "Why it was deferred", p: "Solving it would have expanded a slice whose entire point was 'audible at all'. Deferred deliberately and recorded, rather than quietly dropped." },
       { h: "Options when picked up", p: "A different local engine with a suitable voice, a trained or cloned voice, or accepting a generic one permanently. Auditioning is cheap: the local playback target speaks a line on the Mac with nothing else running, so each candidate costs one command." }
     ],
-    src: "srs-adapter/ROADMAP.md"
+    src: "audio-adapter/ROADMAP.md"
   }
 };
 

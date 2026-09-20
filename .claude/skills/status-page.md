@@ -9,7 +9,7 @@ existing artifact URL. Usage: `/status-page`.
 
 **The page is a view, never a source of truth.** Every fact on it is derived from the `ROADMAP.md`
 files (root, `world-model/`, `aircraft-layer/`, `body-layer/`, `mission-interpreter/`,
-`srs-adapter/`) plus `todo/todo.md`. If the page and a roadmap disagree, **the page is wrong** —
+`audio-adapter/`) plus `todo/todo.md`. If the page and a roadmap disagree, **the page is wrong** —
 fix the page, never the roadmap. `docs/status/README.md` states this contract; do not weaken it.
 
 **Regenerating is optional, and must stay that way.** A stale page is cosmetic; a stale roadmap is
