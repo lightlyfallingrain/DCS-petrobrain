@@ -2,49 +2,24 @@
 `plans/detection-cones-slice1/plan.md`, slice 1 of the "detection cones"
 milestone `body-layer/ROADMAP.md` names.
 
-**Two bounds, not one.** Each `Optic` below carries two independent
-angular quantities that are easy to conflate but describe different
-things:
+**Scope cut (user, 2026-09-20): the 9K113 sight is deferred entirely.**
+This module names only `UNAIDED_OPTIC` and `BINOCULAR_OPTIC` -- the latter
+being today's implicit, unconditional default (`visibility.py`'s
+`BINOCULAR_RANGE_MULTIPLIER`, applied to every naked-eye candidate) made
+explicit, which is the core value of this slice. The 9K113's own
+magnification/field-of-view/field-of-regard figures, sourced and
+unverified alike, stay recorded in `body-layer/research/
+2026-09-20-9k113-sight-optics-from-manual.md` until the sight itself gets
+its own slice. `Optic` therefore carries only a field of view
+(`fov_half_angle_deg`) -- **no field-of-regard fields** (how far an optic
+can be *pointed*, as opposed to what it shows once pointed): with no
+sighted optic in this table, every entry's regard would be `None` and
+unexercised by any test, so those fields were cut along with the 9K113
+entries that were their only reason to exist. A future 9K113 slice adds
+them back, sourced fields intact in the research note above.
 
-* **Field of view** (`fov_half_angle_deg`) -- how much the eyepiece shows
-  once it is pointed somewhere. Genuinely circular (Decision 2 of the
-  plan), so one half-angle is enough.
-* **Field of regard** (`regard_azimuth_half_deg` /
-  `regard_elevation_min_deg` / `regard_elevation_max_deg`) -- how far the
-  optic can be *pointed* in the first place. A rectangle, and asymmetric
-  in elevation for the 9K113 sight, so it cannot be collapsed into a
-  half-angle at all.
-
-Collapsing the two would make the sight appear to see its FOV degrees of
-the world *total*, when in fact it sees that many degrees *at a time*,
-anywhere within its (much wider) regard rectangle.
-
-**The regard fields are data only in this slice -- nothing gates on them
-yet.** `Optic.boresight_azimuth_deg` is pinned to `0.0` (dead ahead,
-Decision 3) and there is no slew model, so the FOV cone always sits well
-inside the regard rectangle and a regard check could never fire in
-today's code. They are carried here for slice 2 (attention/scanning),
-which is where pointing the optic becomes possible at all. Do not add a
-regard gate to `visibility.check_visibility` on the strength of these
-fields existing -- an unreachable branch that no test can exercise is
-worse than no branch.
-
-**Provenance is two different classes of number, not one.** The regard
-bounds for the 9K113 sight (`SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC`) are
-*sourced* -- the English-language Mi-24P manual, section 3.4 "Missile
-Guidance Controls" (`body-layer/research/
-2026-09-20-9k113-sight-optics-from-manual.md`). The FOV half-angles for
-those same two optics are *user-supplied and unverified* -- adopted on
-user direction so the table holds real-shaped numbers rather than round
-invented ones, but with a known internal inconsistency: magnification
-rises ×3.03 (×3.3 -> ×10) while the field narrows only ×1.92
-(11.5° -> 6.0°). A single optical train sharing one objective would
-narrow in proportion to magnification, which would put the narrow field
-near 3.8° instead of 3.0° (6.0° full). **If a sim measurement ever
-contradicts one of these two figures, doubt the narrow FOV (6.0° full)
-first** -- see the research note's "One internal inconsistency" section.
-Each `Optic`'s own docstring below repeats which class its numbers belong
-to, so the distinction survives being read out of context.
+`Optic.boresight_azimuth_deg` is pinned to `0.0` (dead ahead, Decision 3
+of the plan) -- there is no slew model in this slice.
 
 Pure, no I/O, no DCS/world-model dependency -- mirrors `cockpit_mask.py`'s
 own posture.
@@ -62,85 +37,80 @@ from perception.visibility import BINOCULAR_RANGE_MULTIPLIER
 @dataclass(frozen=True, slots=True)
 class Optic:
     """One named optic: what it magnifies by, what it shows once pointed
-    (field of view), and how far it can be pointed in the first place
-    (field of regard). See module docstring for why those are two
-    independent bounds, and for which fields are sourced vs. unverified
-    per optic.
+    (field of view), and how much of that raw magnification is actually
+    usable in practice.
 
-    `fov_half_angle_deg` / `regard_azimuth_half_deg` /
-    `regard_elevation_min_deg` / `regard_elevation_max_deg` are all
-    `None` for an optic with no such restriction (the naked eye and the
-    binoculars, per the plan's table -- the cockpit occlusion mask is
-    their only envelope). `regard_elevation_min_deg` is signed negative
-    for "below boresight", positive for "above", matching
-    `perception.geometry.BodyRelativeDirection.elevation_deg`'s own sign
-    convention -- **not** `cockpit_mask.py`'s depression convention (that
-    module's `max_depression_deg` is positive-down; this dataclass is
-    positive-up, deliberately kept aligned with `elevation_deg` since
-    `within_optic_fov` below compares directly against it)."""
+    `magnification` is the instrument's own, true optical magnification.
+    `handheld_effectiveness` (default `1.0`, i.e. no derating) is a
+    **separate** factor for anything that erodes what raw magnification
+    alone would predict -- a handheld instrument's image shake in a
+    vibrating airframe being the motivating case (see `BINOCULAR_OPTIC`
+    below). `effective_magnification` is the product of the two, and is
+    the figure both `visibility.py`'s range-threshold formula and
+    `_achieved_tier` actually use -- never `magnification` alone.
+    `fov_half_angle_deg` is `None` for an optic with no FOV restriction
+    (the naked eye and the binoculars -- the cockpit occlusion mask is
+    their only envelope)."""
 
     name: str
     magnification: float
     fov_half_angle_deg: float | None
     boresight_azimuth_deg: float = 0.0
-    regard_azimuth_half_deg: float | None = None
-    regard_elevation_min_deg: float | None = None
-    regard_elevation_max_deg: float | None = None
+    handheld_effectiveness: float = 1.0
+
+    @property
+    def effective_magnification(self) -> float:
+        """The multiplier `visibility.py` actually applies to the range
+        threshold -- `magnification * handheld_effectiveness`, never raw
+        `magnification` alone. See the class docstring and
+        `BINOCULAR_OPTIC`'s own comment for why the two are kept separate
+        rather than folded into one number."""
+        return self.magnification * self.handheld_effectiveness
 
 
-#: Magnification 1.0, no FOV restriction (the naked eye sees whatever the
-#: cockpit mask admits), no field of regard (the head can turn to look
-#: anywhere the mask allows).
+#: Magnification 1.0, no derating, no FOV restriction -- the naked eye
+#: sees whatever the cockpit mask admits.
 UNAIDED_OPTIC: Final[Optic] = Optic(
     name="unaided",
     magnification=1.0,
     fov_half_angle_deg=None,
 )
 
-#: **Today's implicit default, now a named value.** Magnification is
-#: `BINOCULAR_RANGE_MULTIPLIER` (`visibility.py`'s own constant, imported
-#: rather than redefined here -- see that module's Decision 1 on why the
-#: constant's home stays `visibility.py`), no FOV restriction, no field of
-#: regard, same as `UNAIDED_OPTIC` -- binoculars magnify what is already
-#: being looked at, they do not narrow or widen where the head can turn.
+#: **Today's implicit default, now a named value -- and, as of 2026-09-20,
+#: a realistic instrument split into its two honest components rather than
+#: one borrowed engine constant.**
+#:
+#: `magnification=8.0` is a Б-8 / БПЦ5 8x30 -- standard Soviet compact
+#: issue, handheld-practical in a vibrating Mi-24 front cockpit (user,
+#: 2026-09-20). Realistic, but not measured in-sim.
+#:
+#: `handheld_effectiveness=0.5` is a **named, measurable** derating factor
+#: for what raw 8x magnification does not survive intact when handheld in
+#: a vibrating airframe rather than mounted. It is itself unmeasured --
+#: chosen specifically so `effective_magnification` (8.0 * 0.5 = 4.0)
+#: reproduces `BINOCULAR_RANGE_MULTIPLIER` exactly, so this refactor
+#: changes no detection behaviour (see `visibility.py`'s docstring and
+#: `test_binocular_optic_effective_magnification_matches_the_calibrated_
+#: constant` below). The point of naming it separately from magnification
+#: is that a real number now exists for a future calibration sortie to
+#: actually measure, which was impossible while it was hidden inside a
+#: mislabelled "magnification."
+#:
+#: `effective_magnification` (4.0) is `BINOCULAR_RANGE_MULTIPLIER` --
+#: `visibility.py`'s own constant, imported rather than redefined here
+#: (see that module's Decision 1 on why the constant's home stays
+#: `visibility.py`) -- the empirically calibrated figure every existing
+#: sortie's data is already built on. `magnification` and
+#: `handheld_effectiveness` are chosen to multiply to it, not the other
+#: way around.
+#:
+#: No FOV restriction -- binoculars magnify what is already being looked
+#: at, they do not narrow where the head can turn.
 BINOCULAR_OPTIC: Final[Optic] = Optic(
     name="binocular",
-    magnification=BINOCULAR_RANGE_MULTIPLIER,
+    magnification=8.0,
     fov_half_angle_deg=None,
-)
-
-#: The 9K113 sight's guidance unit (ПН) at its wide magnification setting
-#: (handle position A, ×3.3 -- `body-layer/research/
-#: 2026-09-20-9k113-sight-optics-from-manual.md`). `fov_half_angle_deg`
-#: (5.75°, 11.5° full) is **user-supplied and unverified** -- see module
-#: docstring. `regard_azimuth_half_deg`/`regard_elevation_min_deg`/
-#: `regard_elevation_max_deg` (±60° azimuth, −15°/+20° elevation) are
-#: **sourced** from the English-language Mi-24P manual §3.4. Boresight
-#: pinned dead ahead (Decision 3) -- no slew model exists yet.
-SIGHT_WIDE_OPTIC: Final[Optic] = Optic(
-    name="sight_wide",
-    magnification=3.3,
-    fov_half_angle_deg=5.75,
-    boresight_azimuth_deg=0.0,
-    regard_azimuth_half_deg=60.0,
-    regard_elevation_min_deg=-15.0,
-    regard_elevation_max_deg=20.0,
-)
-
-#: The same 9K113 guidance unit at its narrow setting (handle position B,
-#: ×10). `fov_half_angle_deg` (3.0°, 6.0° full) is **user-supplied and
-#: unverified**, and is the figure most likely to be wrong -- see module
-#: docstring's note on the magnification-vs-field-narrowing inconsistency.
-#: Field of regard is the same sourced envelope as `SIGHT_WIDE_OPTIC`
-#: (both magnifications share one gyro-stabilised head).
-SIGHT_NARROW_OPTIC: Final[Optic] = Optic(
-    name="sight_narrow",
-    magnification=10.0,
-    fov_half_angle_deg=3.0,
-    boresight_azimuth_deg=0.0,
-    regard_azimuth_half_deg=60.0,
-    regard_elevation_min_deg=-15.0,
-    regard_elevation_max_deg=20.0,
+    handheld_effectiveness=BINOCULAR_RANGE_MULTIPLIER / 8.0,
 )
 
 
@@ -150,8 +120,8 @@ def within_optic_fov(optic: Optic, azimuth_deg: float, elevation_deg: float) -> 
     inside `optic`'s field of view.
 
     `optic.fov_half_angle_deg is None` means "no restriction," always
-    `True` (the naked eye and binoculars). Otherwise compares the true
-    angular separation between `(azimuth_deg, elevation_deg)` and
+    `True` (both optics currently in this table). Otherwise compares the
+    true angular separation between `(azimuth_deg, elevation_deg)` and
     `(optic.boresight_azimuth_deg, 0.0)` against the half-angle --
     small-angle-safe great-circle-style separation via the standard
     spherical law of cosines, not a flat azimuth/elevation box (an optic's
@@ -172,4 +142,8 @@ def within_optic_fov(optic: Optic, azimuth_deg: float, elevation_deg: float) -> 
     cos_separation = max(-1.0, min(1.0, cos_separation))
     separation_deg = math.degrees(math.acos(cos_separation))
 
-    return separation_deg <= optic.fov_half_angle_deg
+    # A tiny epsilon absorbs floating-point round-trip error through
+    # sin/cos/acos -- without it, a separation constructed to sit exactly
+    # on the half-angle boundary can land a few ULPs over and be rejected,
+    # which would make "exactly at the boundary" an untestable case.
+    return separation_deg <= optic.fov_half_angle_deg + 1e-9
