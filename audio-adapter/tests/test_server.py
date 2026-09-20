@@ -35,16 +35,27 @@ class _FakeEngine:
 
 class _RecordingSink:
     """Records `(audio, urgent)` deliveries; raises `AudioDeliveryError`
-    when `should_fail` is set."""
+    when `should_fail` is set. `interrupt_calls`/`should_fail_interrupt`
+    are `/stop`'s own counterpart, independent of `deliver`'s own
+    `should_fail` flag."""
 
-    def __init__(self, should_fail: bool = False) -> None:
+    def __init__(
+        self, should_fail: bool = False, should_fail_interrupt: bool = False
+    ) -> None:
         self.should_fail = should_fail
+        self.should_fail_interrupt = should_fail_interrupt
         self.delivered: list[tuple[bytes, bool]] = []
+        self.interrupt_calls = 0
 
     def deliver(self, audio: bytes, urgent: bool) -> None:
         if self.should_fail:
             raise AudioDeliveryError("delivery failed (test double)")
         self.delivered.append((audio, urgent))
+
+    def interrupt(self) -> None:
+        if self.should_fail_interrupt:
+            raise AudioDeliveryError("interrupt failed (test double)")
+        self.interrupt_calls += 1
 
 
 @pytest.fixture
@@ -195,3 +206,35 @@ def test_speak_unknown_path_returns_404(
     server, _engine, _sink = running_server
     status, _body = _post(server, "/nonexistent", {})
     assert status == 404
+
+
+# -- POST /stop (plans/inbound-speech/plan.md Stage 3 follow-up) ------------
+
+
+def test_stop_calls_sink_interrupt_and_never_synthesizes(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, engine, sink = running_server
+    status, body = _post(server, "/stop", b"")
+    assert status == 200
+    assert body == {"ok": True}
+    assert sink.interrupt_calls == 1
+    assert engine.requested_text == []
+    assert sink.delivered == []
+
+
+def test_stop_interrupt_failure_returns_500() -> None:
+    engine = _FakeEngine()
+    sink = _RecordingSink(should_fail_interrupt=True)
+    server = TTSAdapterServer(engine, sink, host="127.0.0.1", port=0)
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _post(server, "/stop", b"")
+        assert status == 500
+        assert isinstance(body, dict)
+        assert "error" in body
+    finally:
+        server.close()
+        thread.join(timeout=5)
