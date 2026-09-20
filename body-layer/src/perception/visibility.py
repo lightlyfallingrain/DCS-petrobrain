@@ -23,10 +23,15 @@ a transcription of DCS's own `HelperAI.lua` `extra_eyesight_ratio` tuning
 constant -- that constant's real role in ED's native detection formula is
 unverified (see the plan's Risks section on `min_contrast_f`/
 `min_fog_transparency`/`extra_eyesight_ratio` all being unaddressed here).
-The numeric value happens to match `extra_eyesight_ratio` (4.0), but this
-project owns the ×4 as "what a crew member sees through binoculars,"
-independent of whatever `extra_eyesight_ratio` actually multiplies in DCS's
-native code. Do not re-derive the defaults below from an unaided-eye
+The value **originally** happened to match `extra_eyesight_ratio` (4.0),
+and this project owned that number as "what a crew member sees through
+binoculars," independent of whatever `extra_eyesight_ratio` actually
+multiplies in DCS's native code. **As of 2026-09-20 the two have
+diverged**: `BINOCULAR_RANGE_MULTIPLIER` is now 8.0 (see its own
+docstring below for why), so the coincidence this paragraph originally
+flagged no longer holds -- worth knowing so a future reader doesn't go
+looking for a reason the two should still match. Do not re-derive the
+defaults below from an unaided-eye
 assumption and "correct" them to be stricter: the screenshot ladder
 described under the angular-radius constants below measured *both* the
 unaided view and the zoomed/binocular view of the same targets at the same
@@ -37,12 +42,18 @@ instrument -- and the place to model that properly is the deferred
 "attention direction and detection cones" milestone, which owns the
 per-optic split (see `body-layer/ROADMAP.md`).
 
-The multiplier survived calibration unchanged, which is itself a result
-worth keeping: reading the ladder as apparent angular size (true angular
-size x magnification) makes the unaided and binocular columns land on the
-*same* tier thresholds, with the optic supplying only the magnification.
-That is why retuning the three angular constants below was enough, and no
-per-optic curve had to be introduced here.
+The multiplier survived the 2026-09-17 calibration unchanged, which was
+itself a result worth keeping: reading the ladder as apparent angular size
+(true angular size x magnification) makes the unaided and binocular
+columns land on the *same* tier thresholds, with the optic supplying only
+the magnification. That is why retuning the three angular constants below
+was enough, and no per-optic curve had to be introduced there.
+
+**That calibration is now stale.** The 2026-09-20 change below raises the
+multiplier itself (4.0 -> 8.0), which the 2026-09-17 pass never
+contemplated -- the three angular-radius constants were tuned against a
+detector that no longer exists in this form. A fresh screenshot ladder
+against the real 8.0 is needed; nothing here re-derives it.
 
 **`optics.py`** (`plans/detection-cones-slice1/plan.md`) now names this
 binocular premise explicitly as `BINOCULAR_OPTIC`, `check_visibility`'s
@@ -141,6 +152,14 @@ if TYPE_CHECKING:
     # other, which itself needs the first one fully loaded.
     from perception.optics import Optic
 
+#: **STALE as of 2026-09-20** -- every threshold below was derived using
+#: `BINOCULAR_RANGE_MULTIPLIER = 4.0` (see that constant's own docstring).
+#: The constant is now 8.0; these three values, and every worked-example
+#: number in the comment below that cites `* 4`, describe the old,
+#: superseded calibration and need a fresh screenshot ladder against the
+#: real 8.0 multiplier -- not corrected in place here (out of this
+#: change's scope; flagged so no one reads these numbers as current).
+#:
 #: Apparent-angular-radius thresholds (radians) per recognition tier,
 #: **calibrated 2026-09-17 against real in-game screenshots** -- see
 #: `body-layer/research/2026-09-17-vision-range-calibration-pass2.md` and
@@ -199,21 +218,33 @@ NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
 #: and owned by this project as binocular magnification, not a
 #: transcription of that constant's (unverified) native role.
 #:
-#: **Reinterpreted again, 2026-09-20** (`plans/detection-cones-slice1/
-#: plan.md`, `optics.py`'s `BINOCULAR_OPTIC`): this is no longer read as a
-#: raw optical magnification at all -- 4.0 was never a real binoculars'
-#: magnification, it was `extra_eyesight_ratio` wearing that label. It is
-#: now this project's *effective* range multiplier, the empirically
-#: calibrated figure every existing sortie's data is built on --
-#: `optics.BINOCULAR_OPTIC.effective_magnification` -- factored into a
-#: realistic instrument's true magnification (8.0, a handheld 8x30) times
-#: a named, unmeasured handheld/vibration derating factor
-#: (`handheld_effectiveness=0.5`), chosen so the two multiply back to
-#: exactly this constant. This value itself is untouched by that split --
-#: still 4.0, still what every gate below applies by default -- only what
-#: it is understood to mean changed. See `optics.py`'s `BINOCULAR_OPTIC`
-#: docstring for the full derivation.
-BINOCULAR_RANGE_MULTIPLIER: Final[float] = 4.0
+#: **Raised 4.0 -> 8.0, 2026-09-20** (`plans/detection-cones-slice1/
+#: plan.md`, `optics.py`'s `BINOCULAR_OPTIC`, user direction, reversing a
+#: same-session intermediate step). 4.0 was never a real binoculars'
+#: magnification -- it was `extra_eyesight_ratio` wearing that label. An
+#: intermediate pass of this work tried to fix that honestly while
+#: preserving today's detection *range*: split into a realistic 8x
+#: instrument times a 0.5 "handheld_effectiveness" derating factor chosen
+#: so the product still equalled 4.0. The user rejected that as dressing a
+#: behaviour knob up as physics -- a derating factor invented purely to
+#: cancel out a magnification change is exactly the mislabelling problem
+#: being fixed, one level down. **This constant is now plainly what
+#: `BINOCULAR_OPTIC.magnification` states it is: 8.0, no hidden derating.**
+#: Detection range roughly doubles as a direct, intended consequence, not
+#: something to re-cancel -- the user's own framing: "take the range
+#: increase now and recalibrate afterwards." Where range actually gets
+#: tuned is the acuity thresholds (`LOWRES_ANGULAR_RADIUS_RAD`/
+#: `MEDRES_ANGULAR_RADIUS_RAD`/`HIRES_ANGULAR_RADIUS_RAD` above), against
+#: real sortie data -- one honestly-labelled magnification knob,
+#: calibrated thresholds behind it.
+#:
+#: **Every worked-example figure in this module's own comments/docstrings
+#: (and in `optics.py`, and in the test suite) that cites a specific range
+#: number was calibrated against the old effective 4.0 and is now stale**
+#: -- due for a fresh calibration sortie against the real 8.0, not
+#: corrected in place here. Treat any number derived from "4.0" elsewhere
+#: in this codebase's comments as historical, not current.
+BINOCULAR_RANGE_MULTIPLIER: Final[float] = 8.0
 
 #: Outer range bound, applied regardless of what the angular-radius formula
 #: computes for a given object's looked-up size, so a very large object
@@ -408,8 +439,7 @@ def check_visibility(
     profile = object_model.profile_for(candidate.object_type)
     range_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
-        (profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD)
-        * optic.effective_magnification,
+        (profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD) * optic.magnification,
     )
     if candidate_range_m > range_threshold_m:
         return None
@@ -418,7 +448,7 @@ def check_visibility(
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
-        candidate_range_m, profile.size_m, optic.effective_magnification
+        candidate_range_m, profile.size_m, optic.magnification
     )
     return VisibilityResult(
         bearing_deg=candidate_bearing_deg,
