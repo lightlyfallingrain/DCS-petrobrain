@@ -169,14 +169,18 @@ def test_hires_range_candidate_with_a_known_reporting_name_reaches_type_level() 
 
 
 def test_medres_range_candidate_stays_at_class_level() -> None:
-    # T-72B at 1500 m: beyond the 1000 m hires threshold, still inside the
-    # 2000 m medres threshold -- resolves to class. Both thresholds moved in
-    # the 2026-09-17 screenshot calibration (hires 1400 -> 1000 m, medres
-    # 3500 -> 2000 m for a 7 m object), which is why this range is 1500 and
-    # not the 3000 it was: 3000 m is now presence-only, matching what the
-    # ladder shows through binoculars at 2.99 km.
+    # T-72B (size 7 m) at 3000 m: beyond the hires threshold, still inside
+    # the medres threshold -- resolves to class.
+    # **STALE-FIGURE UPDATE (2026-09-20)**: thresholds recomputed for
+    # `BINOCULAR_RANGE_MULTIPLIER = 8.0` (was 4.0, see `visibility.py`'s own
+    # docstring on that constant for the rationale) -- hires 2000 m, medres
+    # 4000 m for a 7 m object (was 1000 m / 2000 m under M=4.0). This is a
+    # formula recomputation only, not a fresh calibration pass -- see
+    # `tests/test_vision_calibration.py`'s own `_STALE_AT_8X_MULTIPLIER` for
+    # the ranges where the formula now disagrees with real screenshot
+    # ground truth.
     world_objects = {
-        "objects": [_world_object(1, "T-72B", lat_deg=1500.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "T-72B", lat_deg=3000.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 
@@ -228,11 +232,16 @@ def test_lowres_range_candidate_reaches_presence_level() -> None:
 
 
 def test_no_visible_candidates_returns_empty() -> None:
-    # A 6 m truck gates out past 8000 m (6 / 0.003 * 4.0) since the
-    # 2026-09-17 calibration; 6000 m, which used to be beyond the gate, is
-    # now comfortably inside it.
+    # **STALE-FIGURE UPDATE (2026-09-20)**: at the old M=4.0 a 6 m truck's
+    # lowres threshold was 8000 m, so 8500 m gated it out. At the new
+    # M=8.0 that same threshold computes 16000 m, capped by
+    # `NAKED_EYE_RANGE_CAP_M` (10000 m) -- 8500 m is now comfortably
+    # inside it (see `test_ural_truck_gate_is_now_bound_by_the_range_cap_
+    # again` in `test_visibility.py` for the same finding at the gate
+    # level). 10500 m clears the hard range cap regardless of object size
+    # or magnification, so it stays a reliable "gates out" candidate.
     world_objects = {
-        "objects": [_world_object(1, "Ural-4320", lat_deg=8500.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "Ural-4320", lat_deg=10_500.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 

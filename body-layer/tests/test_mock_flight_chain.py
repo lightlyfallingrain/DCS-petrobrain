@@ -58,13 +58,23 @@ transform, per the plan's decision to exercise real geometry end to end):
   stationary at `(x=1800, z=0, alt=500)`.** The plan's "appears mid-flight"
   object: present in `world_objects` ground truth from frame 0 (DCS ground
   truth is never gated), but outside the naked-eye visibility gate's range
-  threshold (~1674 m) until frame 3, when the shrinking ownship-to-object
-  range first clears it -- `lowres` tier initially, refining to `medres` by
-  frame 16 as range keeps shrinking. Never referenced by
-  `petrovich_indication` text, so it is naked-eye-only, unlike object 101 --
-  this is what keeps the fixture's Hybrid-channel behavior simple to reason
-  about (exactly one classification text, `"Ural truck"`, ever appears on
-  that channel).
+  threshold until frame 3, when the shrinking ownship-to-object range
+  first clears it -- `lowres` tier initially.
+
+  **Updated 2026-09-20** (`plans/detection-cones-slice1/plan.md`,
+  `BINOCULAR_RANGE_MULTIPLIER` 4.0 -> 8.0): under the old M=4.0 this
+  object never actually crossed into `medres` before the fixture's last
+  frame (the "refining to medres by frame 16" text this replaced was
+  stale even before this change -- the real old-M=4.0 slant range at
+  frame 19 was still ~689 m against a 514.29 m threshold). Verified by
+  actually running the harness (this file's own convention, not guessed):
+  at the new M=8.0 it genuinely does cross into `medres` mid-flight, at
+  frame 14 (t_sim=70.0, slant range ~980.6 m against the new 1028.57 m
+  medres threshold) -- a real `CONTACT_CLASSIFICATION_CHANGED` event, see
+  the assertions below. Never referenced by `petrovich_indication` text,
+  so it is naked-eye-only, unlike object 101 -- this is what keeps the
+  fixture's Hybrid-channel behavior simple to reason about (exactly one
+  classification text, `"Ural truck"`, ever appears on that channel).
 
 Exact per-frame range/tier numbers were computed by a throwaway script
 against the real formulas in `perception.visibility`/`perception.geometry`
@@ -262,13 +272,24 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
 
         # Two founding CONTACT_DETECTED, one per contact -- no spurious
         # CONTACT_LOST/REACQUIRED (both contacts continuously visible once
-        # acquired) and no CONTACT_CLASSIFICATION_CHANGED (see the module
+        # acquired) and no reclassification of CONTACT_1 (see the module
         # docstring's "lower level holds" note -- Hybrid's frame-0
-        # TYPE-level percept still establishes the truck contact first, and
-        # the infantry contact never gets a claim higher than presence).
+        # TYPE-level percept already establishes the truck contact, so
+        # every later naked-eye CLASS-level percept of it folds in without
+        # changing what's held).
+        #
+        # **CONTACT_2 does reclassify, as of 2026-09-20**
+        # (`BINOCULAR_RANGE_MULTIPLIER` 4.0 -> 8.0, see the module
+        # docstring's object-102 bullet above): a genuine
+        # presence -> class promotion at frame 14 when the infantry
+        # object's naked-eye tier first crosses into `medres` under the
+        # new, larger multiplier. This is `fold_classification` doing
+        # exactly what it should -- a finer claim refining a coarser held
+        # one -- not a bug introduced by this change.
         assert [event.kind for event in runner.store.events] == [
             "CONTACT_DETECTED",
             "CONTACT_DETECTED",
+            "CONTACT_CLASSIFICATION_CHANGED",
         ]
 
         truck = next(c for c in contacts if c["facts"]["id"] == "CONTACT_1")
@@ -291,9 +312,14 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         truck_cardinality = truck["facts"]["cardinality"]
         assert (truck_cardinality["lo"], truck_cardinality["hi"]) == (1, 1)
 
+        # As of 2026-09-20 (see above), CONTACT_2 ends the fixture at
+        # class level, not presence -- it reclassified at frame 14 and the
+        # classification lattice's "lower level holds" rule never
+        # downgrades a held claim back down, so the class-level value
+        # from frame 14 onward is what the final read sees.
         infantry = next(c for c in contacts if c["facts"]["id"] == "CONTACT_2")
-        assert infantry["facts"]["classification"]["value"] == "OP_GROUPSOMETHING"
-        assert infantry["facts"]["classification"]["level"] == "presence"
+        assert infantry["facts"]["classification"]["value"] == "OP_INFANTRY"
+        assert infantry["facts"]["classification"]["level"] == "class"
         assert infantry["facts"]["certainty"] == "observed"
         assert infantry["facts"]["sources"] == ["naked_eye_visual_filtered"]
         infantry_cardinality = infantry["facts"]["cardinality"]
