@@ -193,41 +193,49 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   reachable at all. The tier -> "existence/class/class/IFF" semantics reading is this project's own
   modeling choice, not verified against ED internals (investigator finding, `plans/
   classification-refinement/plan.md` Session 6 addendum Q1) — documented here so a future reader
-  does not "correct" it toward an ED semantics that was never established. `check_visibility` gains
-  a keyword-only `optic: Optic | None = None` parameter, resolved to `optics.BINOCULAR_OPTIC`
-  inside the function body rather than as a literal default expression — a real circular import
-  between this module and `optics.py` (each needs a name from the other) forces the lazy resolution;
-  behaviourally identical to a literal `= BINOCULAR_OPTIC` default (see the function's own
-  docstring). `optic.magnification` replaces the old hardcoded `BINOCULAR_RANGE_MULTIPLIER`
-  reference in both the range-threshold formula and `_achieved_tier` (which gains its own
-  `magnification: float = BINOCULAR_RANGE_MULTIPLIER` parameter) — every existing call site, which
-  passes no `optic` argument, still resolves to `BINOCULAR_OPTIC`, but **not to the same range any
-  more**: `BINOCULAR_RANGE_MULTIPLIER` moved 4.0 -> 8.0 on 2026-09-20 user direction (see the
-  constant's own docstring for the full rationale — real detection range roughly doubles, a
-  deliberate, dated change, not a regression; `test_default_optic_is_binocular_at_the_new_8x_range_
-  multiplier` in `test_visibility.py` pins the new behaviour explicitly, superseding an earlier
-  byte-identical-default guard). `BINOCULAR_RANGE_MULTIPLIER` itself stays declared here (plan
-  Decision 1) — `optics.py` imports it, not the reverse. **Every calibration figure recorded before
-  this commit (the three angular-radius constants above, and every worked-example range number in
-  this codebase's comments/tests) was calibrated against the old M=4.0 and is stale pending a fresh
-  sortie against the real 8.0** — `test_vision_calibration.py`'s `_STALE_AT_8X_MULTIPLIER` `xfail`s
-  the four screenshot-ground-truth ranges that now disagree with the formula as a result, rather
-  than silently re-deriving new "ground truth" from the formula itself.
+  does not "correct" it toward an ED semantics that was never established.
+
+  `check_visibility` gains a keyword-only `optic: Optic | None = None` parameter, resolved inside
+  the function body rather than as a literal default expression — a real circular import between
+  this module and `optics.py` (each needs a name from the other) forces the lazy resolution.
+  **The default is `optics.UNAIDED_OPTIC` (magnification 1.0), not `BINOCULAR_OPTIC`** — the
+  slice's final scope change (2026-09-20, user direction): modelling Petrovich as permanently
+  glassed-up, with binocular magnification and no field-of-view cost across the whole cockpit-mask
+  envelope, was the single biggest source of over-detection in this channel. Real observation is
+  naked-eye by default; binoculars are a deliberate, narrower, raised act (see `optics.py`'s
+  `BINOCULAR_OPTIC`, which now carries a real field-of-view value for exactly this reason).
+  `optic.magnification` replaces the old hardcoded `BINOCULAR_RANGE_MULTIPLIER` reference in both
+  the range-threshold formula and `_achieved_tier` (which gains its own `magnification: float =
+  BINOCULAR_RANGE_MULTIPLIER` parameter) — every existing call site, which passes no `optic`
+  argument, now resolves to `UNAIDED_OPTIC` and a roughly 4x shorter default detection range than
+  this slice's own original binocular-default baseline (`test_default_optic_is_naked_eye` in
+  `test_visibility.py` pins the current default explicitly, with a worked before/after example in
+  its own docstring).
+
+  **`BINOCULAR_RANGE_MULTIPLIER`'s round trip, in one line**: 4.0 (inherited, unexamined, from
+  `HelperAI.lua`'s `extra_eyesight_ratio`) -> 8.0 (a same-session excursion: an honest 8x30, no
+  derating) -> **4.0 again (final)** — numerically identical to the first value but independently
+  derived this time (a real Б-6 6x30's 6x magnification times a ~0.67 handheld-stabilisation
+  penalty, `optics.py`'s `BINOCULAR_OPTIC` docstring has the arithmetic), and confirmed to match
+  what the 2026-09-17 screenshot ladder's binocular column independently shows. Because the
+  multiplier and the three angular-radius constants are both back to the values that calibration
+  was run against, `test_vision_calibration.py` is fully green again with no `xfail`s — verified
+  by actually running it, not assumed from the numbers matching on paper. `BINOCULAR_RANGE_
+  MULTIPLIER` stays declared here (plan Decision 1) — `optics.py` imports it, not the reverse.
 - `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md`, slice 1 of the "detection
   cones" milestone) — `Optic` (`name`, `magnification`, `fov_half_angle_deg: float | None`,
   `boresight_azimuth_deg: float = 0.0`) and two named instances: `UNAIDED_OPTIC` (M=1.0, no FOV
-  restriction) and `BINOCULAR_OPTIC` (M=`BINOCULAR_RANGE_MULTIPLIER`, no FOV restriction) — the
-  latter is today's implicit, unconditional binocular default made explicit. **No derating
-  factor**: an intermediate 2026-09-20 pass split this into a realistic 8x magnification times a
-  `handheld_effectiveness=0.5` factor chosen to reproduce the old 4.0 exactly, preserving detection
-  *range* while relabelling it as physics; the user reversed that same session — a derating factor
-  invented only to cancel out a magnification change is a behaviour knob dressed as optics, exactly
-  the mislabelling problem one level down. `BINOCULAR_OPTIC.magnification` is now plainly 8.0, no
-  hidden second factor, no `effective_magnification` property (removed — it would only have
-  returned `magnification` unchanged). Detection range is taken to roughly double as a direct,
-  intended consequence ("take the range increase now and recalibrate afterwards," user) — where
-  range actually gets tuned is the acuity thresholds in `visibility.py`, against real sortie data.
-  `within_optic_fov` tests a body-relative `(azimuth_deg, elevation_deg)` against an optic's own
+  restriction, **the default `check_visibility` optic as of 2026-09-20**) and `BINOCULAR_OPTIC`
+  (M=`BINOCULAR_RANGE_MULTIPLIER` = 4.0, **no longer the default** — a deliberate, narrower,
+  raised-to-the-eyes act). `BINOCULAR_OPTIC` is a Б-6 6x30 (~8.5 deg true field): magnification
+  derived as 6x raw glass times a ~0.67 unstabilised-platform penalty (stated in prose, not a
+  separate dataclass field — an earlier same-session `handheld_effectiveness`/
+  `effective_magnification` split was tried and reversed, see `visibility.py`'s own docstring for
+  why: a derating factor invented only to cancel out a magnification change is a behaviour knob
+  dressed as optics), and `fov_half_angle_deg=4.25` (half the true field) — **the first real,
+  non-`None` FOV value in this table**, safe now specifically because binoculars are no longer the
+  default: no concrete `PerceptionSource` calls `check_visibility` with this optic yet (plan
+  Decision 4), so the value cannot misfire a gate in the live path today. `within_optic_fov` tests a
   circular field of view (true angular separation from `(boresight_azimuth_deg, 0.0)`, spherical
   law of cosines, not an independent azimuth-box/elevation-box check); `None` means unrestricted.
   **The 9K113 sight is deliberately deferred out of this slice** (user, 2026-09-20) — its own
