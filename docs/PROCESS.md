@@ -55,3 +55,28 @@ Maintain `NOTES.md` for non-obvious findings: bugs, perf bottlenecks, framework 
 - Short, factual entries — one idea per bullet, no narrative
 - Add when something non-trivial is discovered; never duplicate code comments
 - Consult before making decisions in areas where prior issues are recorded
+
+## Superseding a decision
+
+When a decision is overturned, **do not rewrite it**. The original reasoning is usually why the
+revision makes sense, and this project has repeatedly found the discarded argument to be the useful
+part of the record.
+
+Two rules make that safe rather than confusing:
+
+1. **The revision goes above, as its own section** — `Decision 4 REVISED`, `Decision 1 REVISED` —
+   carrying what changed, why, and what evidence overturned it.
+2. **The original opens with a pointer to its replacement.** One blockquote naming the successor and
+   summarising the change in a line.
+
+Rule 2 is the one that is easy to skip and expensive to miss. Without it, a reader arriving at the
+original — by search, by scroll, or as an agent retrieving that section alone — gets the superseded
+design presented exactly as confidently as current material. **The failure mode this project keeps
+hitting is not only missed information; it is the wrong version found, with nothing in the text to
+distinguish it.** Anything that retrieves sections rather than whole documents makes that worse, so
+the signal has to live in the section itself.
+
+Plans that nothing current cites — no document, no code docstring — move to `plans/archive/`, which
+is excluded from search indexes. That is a much smaller set than it sounds: most `plans/` content is
+live reference material, and most staleness sits *inside* living documents, which is what rule 2 is
+for.
