@@ -631,12 +631,25 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   The middle row is the one that argues for the number: a slow truck at 5 km genuinely does not read
   as moving at a glance, and a threshold that flagged it would be modelling a machine, not a crewman.
 
-  **Still needed before building:** whether unit velocity is directly available from
-  `LoGetWorldObjects` or must be differenced in the collector — if it must be differenced, the
-  compute saving this design buys is smaller than it appears, though still cheaper than keeping
-  per-candidate bearing history in the body layer. Note that no screenshot ladder can ever supply
-  the threshold the way it supplied the detection-range constants: a still frame cannot show
-  motion, so this constant's only calibration path is a purpose-built sortie.
+  ~~**Still needed before building:** whether unit velocity is directly available from
+  `LoGetWorldObjects` or must be differenced in the collector~~ — **answered 2026-09-20: it must be
+  differenced in the collector.** `LoGetWorldObjects` carries no velocity. Its complete per-object
+  field set is `Pitch, Bank, Heading, Type, Country, Coalition(ID), GroupName, Name, UnitName,
+  Position, PositionAsMatrix, LatLongAlt, Flags`, and the string `Velocity` occurs **zero** times in
+  the 10.4 MB `aircraft_layer_debug.log`. (`LoGetLockedTargetInformation` does return a velocity
+  vector, but only for a locked target, not for the global table.)
+
+  So the compute saving this design buys is smaller than it appeared, though still cheaper than
+  keeping per-candidate bearing history in the body layer — and three consequences are now concrete:
+  the collector must hold a previous position per `object_id`, the computed rate is sensitive to the
+  poll interval, and **`object_id` continuity across polls becomes load-bearing for movement** in a
+  way it is not for position. The mission-sandbox alternative (`Unit.getVelocity()`) exists but
+  costs the whole Hook bridge. Source:
+  `aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md` finding 10.
+
+  Note that no screenshot ladder can ever supply the threshold the way it supplied the
+  detection-range constants: a still frame cannot show motion, so this constant's only calibration
+  path is a purpose-built sortie.
 
 - [>] **Threat-based report prioritisation (`docs/concept/threat-levels.md`) — spec exists, mostly
   gated.** The user's own table: five priority bands (urgent / high / medium / low / ignore), what
@@ -823,16 +836,43 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
      wired to `perception/visibility.py`. Nothing new has to be extracted from DCS. Note the
      asymmetry this introduces: a contact *in* forest is hard to see, and a contact *against* forest
      is a different problem again (contrast, factor 4).
+
+     **Update 2026-09-20 — ED already does this, and decomposes it better than the sketch above.**
+     `Scripts/AI/Detection.lua` sets `trees_LOS_test_T4 = true`, and all five installed theatres
+     (Syria included) are Terrain-4, so **ED's AI detection samples tree geometry for line of
+     sight**; our `line_of_sight_clear` samples the bare terrain mesh only, making us strictly more
+     permissive through forest than the engine. Separately `background_factors[FOREST] = 0.3`, but
+     the file states in capitals that background applies to **airborne targets only** — so ED models
+     "hard to see an aircraft against trees" and deliberately does *not* model "hard to see a tank
+     against trees" as a contrast effect. That resolves the asymmetry this bullet anticipated: the
+     two halves are an **LOS term and a background term**, they apply to different target classes,
+     and only the first one touches ground units.
   2. **Light level — dawn, day, dusk, night.** The user: *"light/dark/dusk matters immensely."*
      Mission time and sun elevation are the inputs; the effect is large and non-linear, and dusk is
      the interesting case rather than full night, because full night is nearly a binary. Needs a
      decision on whether Petrovich has any low-light aid at all.
-  3. **Weather — visibility, fog, precipitation, cloud.** **Needs an investigator pass first**: it
-     is unknown what the Export API actually exposes, and how much of mission weather is readable
-     live rather than only from the `.miz`. Do not plan against assumed fields. Worth knowing that
-     ED's own detection model carries `min_contrast_f` and `min_fog_transparency` terms —
-     `perception/visibility.py`'s own docstring already names both as deliberately unaddressed
-     here, so there is prior art to read before inventing a curve.
+
+     **Update 2026-09-20 — the inputs need no new channel.** `Export.lua` ships
+     `LoGetMissionStartTime()` and `LoGetModelTime()` (both documented in the installed file), so
+     time of day is already reachable on the existing telemetry path. With the mission date (the
+     Mission Interpreter already parses it from the `.miz`) and ownship lat/long (already in
+     telemetry), sun elevation is ordinary astronomy computed locally — **no Hook, no
+     `net.dostring_in`, no new transport.** That makes this factor materially cheaper than factor 3
+     and fully independent of it, which was not true when the four were first ordered.
+  3. **Weather — visibility, fog, precipitation, cloud.** ~~**Needs an investigator pass
+     first**~~ — **the pass is done (2026-09-19 desk, 2026-09-20 install).** `Export.lua` exposes
+     **no** weather getter beyond `LoGetVectorWindVelocity` and `LoGetBasicAtmospherePressure`;
+     fog is confirmed absent from that channel, so the Hook -> mission-sandbox bridge is the only
+     candidate route and its reachability is still unprobed. ED's own fog is a **time series**
+     (`fog2.manual = {{time, visibility, thickness}, ...}`), not a constant, so anything built here
+     must sample rather than read once. Do not plan against assumed fields.
+
+     There is prior art to read before inventing a curve, and 2026-09-20 made it concrete:
+     `min_contrast_f` and `min_fog_transparency` are **Mi-24P HelperAI's own thresholds applied on
+     top of the engine detector's outputs** (`wDetector::getContrastFactor`,
+     `getMaxVisibilityDistWithFog`), while the engine's own fog term is
+     `atmosphere_transparency_factor.fog_transparency_threshold = 0.085` in `Detection.lua`.
+     `perception/visibility.py`'s docstring names the first two as deliberately unaddressed here.
   4. **Colour separation and camouflage — explicitly deferred by the user.** It is why units are
      painted the way they are, and it is the factor that interacts with all three above rather than
      standing alone. Do not start it with the others.
@@ -865,11 +905,23 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `aircraft-layer/research/2026-09-19-ed-native-detection-identification-gap-analysis.md`. Four
   results worth carrying forward:
 
-  - **The movement suspicion was wrong, and that is useful.** The standing guess was that movement
-    would be our biggest gap against ED — a moving vehicle being far more detectable than a static
-    one, with `visibility.py` having no term for it. **Neither ED nor we model movement or dwell.**
-    So it is not catch-up; if it gets built it is this project's own design choice, and should be
-    argued on crew realism rather than on parity.
+  - ~~**The movement suspicion was wrong, and that is useful.**~~ **THIS BULLET WAS ITSELF WRONG —
+    corrected 2026-09-20 from the installed tree.** It said *"neither ED nor we model movement or
+    dwell."* ED models both. `Scripts/AI/Detection.lua` has a `motion_factor` (detection-distance
+    bonus up to 1.5x, keyed to angular speed over angular size, saturating at 10) and an aspect-
+    and class-dependent detection-*time* model (1 s for a target ahead at max range, 10 s behind;
+    10 s and 60 s respectively for ground units), plus a scan-time term for optic sensors. The
+    desk pass reached its conclusion honestly — the Mi-24P tree genuinely contains neither term —
+    but generalised from the module to the engine. Full reading:
+    `aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md` findings 2-3.
+
+    **What survives, and matters more than the correction:** ED's motion term and our own
+    movement-detection design answer *different questions* and must not be swapped. ED's ratio
+    reduces algebraically to `v_perp / size` — body-lengths per second, range-invariant — and it
+    asks "is this easier to spot". Ours is an absolute angular rate and asks "can the crew tell it
+    is moving". ED has no moving/stopped state at all, so our design is not redundant. The
+    argument for building it on crew realism rather than parity stands unchanged; only the
+    "nothing to catch up to" premise is gone.
   - **ED never exposes a raw numeric range on any crew-facing channel** — only a 24-bucket range
     fragment, or nothing. That corroborates rather than merely supports moving range uncertainty
     into this milestone: ED's own AI crew does not get a number either.
@@ -878,12 +930,31 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     weather was `.miz`-only. They live in the Mission Scripting sandbox rather than `Export.lua`, so
     they need the Hook → `net.dostring_in` → UDP bridge already proven for F10 commands — untested
     against the `"mission"` target specifically.
-  - **The formula is still only partly known**, and the next artifact is named: `./Scripts/AI/
-    Detection.lua`, confirmed present in `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` and
-    never fetched. Three grep passes found **zero Lua consumers** of `min_contrast_f`,
-    `min_fog_transparency` or `extra_eyesight_ratio` anywhere in the Mi-24P tree, so the engine-wide
-    script is the likely consumer. **This is the single highest-value thing to read on the Windows
-    box.**
+  - ~~**The formula is still only partly known**, and the next artifact is named: `./Scripts/AI/
+    Detection.lua` … **the single highest-value thing to read on the Windows box.**~~ **DONE
+    2026-09-20** — read, along with `Skill_Factors.lua` and the detector symbol tables:
+    `aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md`. Four results that
+    change what slice 2 is planning against:
+
+    - **ED models dwell and scan, with numbers.** Detection takes time; the time depends on aspect
+      (6x penalty for a ground unit behind you versus ahead) and, for optics, on the ratio between
+      the area being swept and the instrument's field of view. This was the part of the cones
+      milestone described here as having "no precedent anywhere in this codebase." It has one now.
+    - **The `min_contrast_f` hunt is closed.** The consumer is the engine's own `wDetector`, which
+      `CockpitMi24.dll` constructs and calls directly (`getContrastFactor`, `isTargetDetected`);
+      `Detection.lua` configures it via `wDetectorInfo::load_from_state`. So ED's two constant sets
+      are **layered, not alternative** — engine detection first, module reporting filter on top —
+      which is the same two-stage shape as our own `hybrid_source` -> `classification` split.
+    - **Petrovich-class omniscience has a number: 27x.** `Skill_Factors.lua`'s `HUMAN_SKILL` tier
+      (its own comment: *"for example, gunners on UH-1"*) multiplies visual detection distance by
+      27.0 against the excellent-AI baseline, which clips against the 50 km absolute cap. This
+      project is not working around an accident; it is replacing a deliberate concession.
+    - **One disagreement to settle deliberately, not discover mid-build:** ED gives optics a
+      *recognition* advantage over and above magnification (`recognition_distance_ratio_threshold`
+      0.5 for optics vs 0.25 for the naked eye). Our 2026-09-17 calibration concluded the opposite
+      — that the tiers belong to the eye and the optic only multiplies the angle. Ours is
+      screenshot-calibrated on this aircraft and ED's is a game-tuning constant, so this is not a
+      defect; it is a real, specific disagreement that slice 2 should decide on the record.
 
   **Not everything ED does is worth copying.** Our tier semantics are this project's own modelling
   choice and are already documented as never verified against ED internals; the goal is a crew
