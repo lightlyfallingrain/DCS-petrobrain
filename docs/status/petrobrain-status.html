@@ -513,21 +513,21 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 18 Sep 2026, evening</span>
+      <span>Derived from ROADMAP.md · 20 Sep 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Five subsystems, ninety-one tracked items, one question worth answering at a glance:
-      what is actually blocking a crew member who sees, remembers, and talks back. He now has a voice,
-      and he counts what he cannot individually resolve.</p>
+    <p class="lede">Five subsystems, one hundred and six tracked items, one question worth answering at a glance:
+      what is actually blocking a crew member who sees, remembers, and talks back. He has a voice, he
+      counts what he cannot individually resolve — and as of this week he can be spoken to.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>56</b><span>Done</span></div>
-    <div class="count is-active"><b>5</b><span>In progress</span></div>
-    <div class="count is-open"><b>24</b><span>Open</span></div>
-    <div class="count is-hold"><b>4</b><span>Deferred</span></div>
-    <div class="count is-block"><b>2</b><span>Await a sortie</span></div>
+    <div class="count is-done"><b>64</b><span>Done</span></div>
+    <div class="count is-active"><b>6</b><span>In progress</span></div>
+    <div class="count is-open"><b>30</b><span>Open</span></div>
+    <div class="count is-hold"><b>6</b><span>Deferred</span></div>
+    <div class="count is-block"><b>3</b><span>Await a sortie</span></div>
   </div>
 
   <section>
@@ -578,10 +578,11 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       <article class="sys" role="button" tabindex="0" data-detail="srs">
         <h3>Audio Adapter</h3>
         <span class="path">audio-adapter/</span>
-        <div class="bar"><i style="width:45%"></i></div>
-        <span class="chip active">Slice 1, stages 1–5</span>
-        <p class="next">Petrovich is audible, and urgent calls cut in mid-word.
-          <b>Next:</b> a sortie to judge it, then intercom injection.</p>
+        <div class="bar"><i style="width:62%"></i></div>
+        <span class="chip active">Voice out done · speech in, stages 1–2</span>
+        <p class="next">He is audible, urgent calls cut in mid-word, and speech recognition now clears
+          its gate at 99.2% on the pilot's own voice. <b>Next:</b> recognition as a service, then
+          Windows-side capture.</p>
         <span class="more">Details</span>
       </article>
 
@@ -616,10 +617,13 @@ flowchart LR
   GC4B["Stage 4b<br/>counts, spoken"]:::open
   GC5["Stage 5<br/>composition"]:::hold
 
-  S1["Slice 1<br/>TTS out, stages 1–5"]:::done
+  S1["Slice 1<br/>voice out, stages 1–5"]:::done
   S6["Stage 6<br/>live sortie"]:::block
-  S2["Slice 2<br/>SRS intercom"]:::open
-  S3["Slice 3<br/>speech in + PTT"]:::open
+  ST12["Speech in 1–2<br/>gate passed, matcher"]:::done
+  ST36["Speech in 3–6<br/>service, capture, PTT"]:::open
+  CKPT["Cockpit audio state<br/>intercom + volume"]:::open
+  CONES["Detection cones<br/>+ honest range"]:::hold
+  EDR["ED model research<br/>read on Windows"]:::block
 
   BL8["BL-8<br/>memory interfaces"]:::open
   BRAIN["Brain layer<br/>not started"]:::hold
@@ -632,7 +636,10 @@ flowchart LR
   GC --> GC4B --> GC5
   BL5a --> S1
   S1 --> S6
-  S1 --> S2 --> S3 --> BRAIN
+  S1 --> CKPT
+  S1 --> ST12 --> ST36 --> BRAIN
+  EDR -.->|"gates the design"| CONES
+  BL27 --> CONES
   BL27 -.->|"needs real flights"| BL8
   GC4B -.->|"judge after flying"| GC5
 </pre>
@@ -682,36 +689,38 @@ flowchart LR
 
     <div class="work">
 
-      <div class="row s-active" role="button" tabindex="0" data-detail="gc4b">
+      <div class="row s-block" role="button" tabindex="0" data-detail="gc4b">
         <span class="who">body-layer</span>
         <div class="what">
-          <b>Stage 4b — say the counts out loud</b>
-          <p>Five stages of group-contact work are invisible outside the console until this lands. Adds
-            the count clause to speech and a cardinality-changed event. Singular output must stay
-            byte-identical — that is the regression guard for every existing speech test.</p>
+          <b>Detection under real conditions — and reading ED's own model first</b>
+          <p>Every detection test so far was flown in near-perfect visibility, which makes the current
+            calibration a <em>ceiling</em> rather than an average. Weather, light and vegetation multiply
+            down from it. Researching ED's native model gates the cones milestone rather than merely
+            informing it — and the desk pass already overturned one assumption.</p>
         </div>
-        <span class="chip open">Next</span>
+        <span class="chip block">Windows</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="s2">
         <span class="who">audio-adapter</span>
         <div class="what">
-          <b>Slice 2 — SRS intercom injection</b>
-          <p>Confirmed reachable: stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz. ICS is
-            the <em>only</em> acceptable target — the SPU-8 selects one source at a time, so a dedicated
-            frequency would compete with mission comms. It also makes Petrovich's volume adjustable from
-            the cockpit, which local playback can never do.</p>
+          <b>Cockpit state drives the audio</b>
+          <p>The SRS dependency is dropped — it was never wired, and Windows audio through the collector
+            already did the job. What replaces it is better: the intercom switch gates the crew channel in
+            <em>both</em> directions, and the SPU-8 volume knob sets how loud he is. One physical control
+            turns Petrovich on and off, exactly as the real one does.</p>
         </div>
-        <span class="chip open">Open</span>
+        <span class="chip open">Next</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="s3">
         <span class="who">audio-adapter</span>
         <div class="what">
-          <b>Slice 3 — speech in, gated by a joystick PTT</b>
-          <p>Inbound bypasses SRS entirely and captures the microphone directly, because SRS offers no
-            clean way to get the player's voice back out. Outbound always open, inbound explicitly gated —
-            deliberately asymmetric.</p>
+          <b>Speech in — stages 3 to 6</b>
+          <p>The gate is passed and the matcher is merged; what remains is plumbing and hardware.
+            Recognition becomes a service, the collector grows flag-gated capture, and the VOIP
+            half-trigger becomes the push-to-talk. Every decision waits for PTT release, because the last
+            word of a transmission can retract everything before it.</p>
         </div>
         <span class="chip open">Open</span>
       </div>
@@ -875,28 +884,30 @@ const DETAIL = {
     src: "body-layer/ROADMAP.md"
   },
   srs: {
-    kicker: "audio-adapter/", title: "Audio Adapter", chip: ["active", "Slice 1, stages 1-5"],
-    facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Merged today", "f469a56"]],
+    kicker: "audio-adapter/", title: "Audio Adapter", chip: ["active", "Voice out done - speech in, stages 1-2"],
+    facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Renamed", "2026-09-20"]],
     sections: [
-      { h: "Why it exists separately", p: "So neither the body layer nor the aircraft layer grows a TTS dependency. Body and brain deal in text only and never see audio bytes. The seam is HTTP throughout, so no new in-process cross-subproject import was introduced — the world-model import remains the sole sanctioned exception." },
-      { h: "What works today", p: "Text in over <code>POST /speak</code>, synthesized on the Mac by <code>say</code> behind a swappable engine protocol, then either played locally via <code>afplay</code> or POSTed as WAV to the collector and played on Windows. The local path needs neither Windows nor DCS, which makes it the fastest way to audition voices and wording." },
-      { h: "The result that shaped it", p: "Body-layer's entire share came to <strong>one optional field</strong> on <code>CrewConsole</code>. That was the plan's own stated test of whether BL-5a drew its interface in the right place, and it passed." },
-      { h: "Where it stands", p: "Stage 5 passed on the Windows box after one real failure: urgent preemption did not interrupt, because synchronous <code>PlaySound</code> blocks inside the Win32 call and cannot be purged from another thread. Fixed by playing asynchronously and waiting on an interruptible event; re-tested, an urgent line now cuts a routine one off mid-word." },
-      { h: "Next", p: "A sortie to judge latency and voice, then intercom injection. The transports are deliberately asymmetric: outbound over SRS intercom, inbound bypassing SRS entirely to capture the microphone directly." }
+      { h: "Why it exists separately", p: "So neither the body layer nor the aircraft layer grows a speech dependency. Body and brain deal in text only and never see audio bytes. The seam is HTTP throughout, so no new in-process cross-subproject import was introduced \u2014 the world-model import remains the sole sanctioned exception." },
+      { h: "The SRS dependency is gone", p: "Renamed from <code>srs-adapter</code> on 2026-09-20. SRS was never actually wired: playback already posted a WAV to the collector, which plays it with <code>winsound</code>. Dropping it removes a planned integration rather than a working one \u2014 and dissolves the \"stay on the mission frequency\" constraint, which only existed because SRS was in the picture. Research notes still say SRS, deliberately: they record sessions that really did." },
+      { h: "Speech in cleared its gate", p: "<strong>99.2% top-1 on 252 clips of the pilot's own voice</strong>, <code>small.en</code> with <code>--prompt</code>, both remaining errors safe misses rather than wrong commands. The number matters less than the arc: the first run read 55.6%, which looked exactly like the negative accent result the gate existed to detect, and was a recorder bug discarding a quarter-second off the end of every clip. Every gain after that was tooling. Accent was never the limiting factor." },
+      { h: "Why not a constrained grammar", p: "A grammar cannot decline. When the audio fits nothing it must still emit something legal, so each failure becomes a confident wrong command \u2014 measured here, \"watch nearest air defence\" came back as \"what do you see\" at 0.82 confidence, seven times over. <code>--prompt</code> biases without forbidding, so a mishearing still looks wrong and the matcher can reject it." },
+      { h: "The model was chosen on the wrong-command column", p: "Not on accuracy. A no-match costs a \"say again\" the player notices; a wrong-but-valid command executes with nothing to flag it. <code>tiny.en</code> produces seven of those, <code>base.en</code> two, <code>small.en</code> none \u2014 a difference the four-point accuracy gap hides completely." },
+      { h: "Next", p: "Cockpit state driving the audio. Note <code>winsound</code> has no volume control, so the SPU-8 knob has to scale the samples before playback \u2014 which is why it belongs in the collector, where the live cockpit state already is." }
     ],
-    items: [["done","Stage 1 - synthesis + local playback"],["done","Stage 2 - collector audio channel"],["done","Stage 3 - cross-machine wiring"],["done","Stage 4 - body-layer sink"],["done","Stage 5 - Windows playback"],["block","Stage 6 - live sortie"],["open","Slice 2 - SRS intercom"],["open","Slice 3 - speech in"],["hold","Voice character"]],
-    src: "audio-adapter/ROADMAP.md"
+    src: "audio-adapter/ROADMAP.md, research/2026-09-19-corpus-bench-results.md"
   },
 
   gc4b: {
-    kicker: "body-layer/", title: "Stage 4b - say the counts out loud", chip: ["open", "Next"],
-    facts: [["Blocks", "Everything group-contact being audible"], ["Risk", "Low -- additive"]],
+    kicker: "body-layer/", title: "Detection under real conditions", chip: ["block", "Needs the Windows box"],
+    facts: [["Raised", "2026-09-19"], ["Gates", "Detection cones"], ["Next artifact", "Scripts/AI/Detection.lua"]],
     sections: [
-      { h: "Why it matters more than it sounds", p: "Five stages of group-contact work -- cardinality as a refining belief, angular clustering, the same-source exclusion rule -- are currently <em>invisible</em> outside the debug console. This is the stage where Petrovich actually says \"a group of six\" instead of naming one thing." },
-      { h: "The regression guard", p: "Singular output must stay <strong>byte-identical</strong>. Every existing speech test is the guard: if a single-unit callout changes by one character, the count clause has leaked into the case that was already right." },
-      { h: "Also in scope", p: "A cardinality-changed event, and fixing count arithmetic that currently conflates contact <em>records</em> with estimated <em>units</em> -- <code>get_situation</code>, <code>get_stats</code> and the situational header all report a bare contact count today, which now means something different." }
+      { h: "The framing matters more than the list", p: "Every detection test so far was flown in near-perfect visual conditions. That makes the calibration an <strong>upper bound on what is possible</strong>, not a model of what usually happens \u2014 so conditions do not replace it, they multiply down from it. Optics multiply apparent size up, conditions multiply detectability down, and the three calibrated angular thresholds stay fixed in the middle." },
+      { h: "Vegetation is nearly free", p: "World-model already resolves landcover \u2014 forest, orchard, scrubland, open fields \u2014 and it already reaches the body layer through enrichment. Nothing new has to be extracted from DCS; it simply is not wired to the visibility gate yet. Light level is next; weather needed research before it could be planned; camouflage is deliberately last, because it interacts with all three." },
+      { h: "The research already overturned an assumption", p: "Movement was the standing guess for our biggest gap against ED \u2014 a moving vehicle being far more detectable than a static one, with no term for it in our model. <strong>Neither ED nor we model movement, or dwell.</strong> So it is not catch-up; if it gets built it is a design choice to argue on crew realism rather than parity. That is exactly the kind of thing reading our own code could never have told us." },
+      { h: "And corroborated a decision", p: "ED never exposes a raw numeric range on any crew-facing channel \u2014 only a coarse range bucket, or nothing. Handing our belief layer a ground-truth distance departs from the sim's own conventions as much as from a crew member's senses. Weather also turned out live-readable after all, reversing an assumption recorded a day earlier." },
+      { h: "What is still unknown", p: "Three grep passes found zero consumers of <code>min_contrast_f</code>, <code>min_fog_transparency</code> or <code>extra_eyesight_ratio</code> anywhere in the Mi-24P tree, so the engine-wide <code>Scripts/AI/Detection.lua</code> is where they are most likely used. It is confirmed present in the file listing and has never been read \u2014 the single highest-value thing to open on the Windows box." }
     ],
-    src: "plans/group-contact-model/plan.md"
+    src: "body-layer/ROADMAP.md, aircraft-layer/research/2026-09-19-ed-native-detection-identification-gap-analysis.md"
   },
   gc5: {
     kicker: "body-layer/", title: "Stage 5 - composition", chip: ["hold", "Re-judge after flying"],
@@ -951,26 +962,26 @@ const DETAIL = {
   },
 
   s2: {
-    kicker: "audio-adapter/", title: "Slice 2 - SRS intercom injection", chip: ["open", "Next up"],
-    facts: [["Mechanism", "DCS-SR-ExternalAudio.exe"], ["Target", "ICS only"], ["Gated on", "Stage 5"]],
+    kicker: "audio-adapter/", title: "Cockpit state drives the audio", chip: ["open", "Next"],
+    facts: [["Replaces", "SRS intercom injection"], ["Decided", "2026-09-20"]],
     sections: [
-      { h: "Confirmed reachable", p: "Stock SRS declares an Intercom radio for the Mi-24P at 100.0 MHz, modulation 2 — established from the SRS radio export, where the contributor notes their patch was never merged because official Mi-24 support had already shipped. <code>--unitId</code> exists specifically to allow intercom over external audio." },
-      { h: "Why ICS is the only option", p: "The player must stay on the external mission frequency, and the Mi-24P's SPU-8 selects one audio source at a time — so a dedicated Petrovich frequency would <em>compete</em> with mission comms rather than layer beneath them. Frequency injection, the mechanism DATIS and MOOSE use, is therefore rejected outright rather than held as a fallback. <strong>If the live ICS test fails, this slice stops</strong> and local playback is what ships." },
-      { h: "Open prerequisite", p: "Discovering the player's DCS unit ID at runtime. <code>--unitId</code> defaults to 1000 and intercom scoping needs the real value, with no frequency-based escape hatch if it proves unobtainable. Likely already available through the aircraft layer's ownship flag — verify, do not assume." },
-      { h: "Hard requirement", p: "The channel must be available regardless of SPU-8 position. Petrovich is the crew member in front of you; an intercom that goes silent because the pilot selected a radio is not an intercom. Receive is not gated by the selector in SRS, so this should hold — but it is pass/fail for the slice and must be confirmed live." }
-    ],
-    src: "audio-adapter/ROADMAP.md, research/2026-09-17-tts-audio-transport-recon.md"
-  },
-  s3: {
-    kicker: "audio-adapter/", title: "Slice 3 - speech in, PTT-gated", chip: ["open", "Largest remaining"],
-    facts: [["Transport", "Direct mic capture, bypasses SRS"], ["Gate", "Dedicated DCS keybind"]],
-    sections: [
-      { h: "Why inbound bypasses SRS", p: "SRS can send to the player but offers no clean way to capture the player's voice back out. <code>ExternalAudio</code> is a sender; receiving would mean a headless SRS client joined as a listener plus virtual-cable capture on Windows, with no documented API — by a wide margin the largest build in this milestone. Capturing the microphone directly also satisfies the stay-on-mission-frequency constraint absolutely, since inbound then involves no radio stack at all." },
-      { h: "The asymmetry is deliberate", p: "Outbound is always open; inbound is explicitly gated. Do not let a later refactor 'simplify' them into symmetry — they solve different problems." },
-      { h: "Why PTT rather than always-on", p: "An always-listening microphone turns every muttered word and every piece of room noise into a candidate command, and continuous transcription is the expensive part of the pipeline." },
-      { h: "Unverified", p: "Whether a bound DCS command's <em>held</em> state is readable on the Export.lua channel at all. F10 commands arrive as discrete events, which is not the same thing. Fallback if not: the Hind's two-stage cyclic trigger already forces intercom for the duration of a half-press without disturbing the SPU-8 — stock behaviour. Its caveat is that the export ends with <code>control = 1</code>, which may mean SRS never consults that branch." }
+      { h: "What changed", p: "Slice 2 was SRS intercom injection, chosen largely because it would make Petrovich's volume adjustable from the cockpit \u2014 something local playback could never do. Dropping SRS removed the route but not the goal: reading the cockpit controls directly achieves the same thing without the dependency." },
+      { h: "The intercom switch gates both directions", p: "Off means he cannot hear you and you cannot hear him, which is what the real switch does. It also means a push-to-talk press with the intercom off should not produce a clip at all \u2014 so it is a gate in the collector, not something the adapter or the body layer has to reason about." },
+      { h: "The volume knob has an implementation catch", p: "<code>winsound</code> offers no volume control, so the SPU-8 setting cannot be applied at playback. It has to scale the PCM samples before the WAV is played, which decides where it lives: the collector, which already holds the live cockpit state. The adapter should not need to know about knobs." },
+      { h: "What it needs first", p: "Device argument numbers for the switch and the knob, the same way the push-to-talk needed argument 738. An investigator pass plus a probe on the Windows box." }
     ],
     src: "audio-adapter/ROADMAP.md"
+  },
+  s3: {
+    kicker: "audio-adapter/", title: "Speech in - stages 3 to 6", chip: ["open", "Largest remaining"],
+    facts: [["Gate", "Passed at 99.2%"], ["Merged", "Stages 1-2"]],
+    sections: [
+      { h: "Where it stands", p: "The recognition gate passed and the matcher is merged. What remains is plumbing and hardware: recognition becomes a long-running service, the collector grows flag-gated microphone capture, and the VOIP half-trigger becomes the push-to-talk." },
+      { h: "Push-to-talk removes a hard problem rather than solving it", p: "Press to release is one clip, one transmission, one decision. Live speech systems normally have to solve endpointing \u2014 deciding where an utterance ends, usually with voice-activity detection and usually badly. This deletes the question. It also delimits <em>commands</em>: two orders means two presses, so the matcher never has to split a sentence." },
+      { h: "Nothing acts before the transmission closes", p: "\"Nevermind\" at the end can retract everything before it, so every decision waits for release. <code>stop</code> counts only when the whole transmission is that single word \u2014 a rule that deleted a mid-stream recognition mechanism and a false-positive class at once." },
+      { h: "The matcher's own near-miss", p: "Review caught it scoring whole strings with <code>difflib</code>, so \"look at that\" resolved to a scan command at 0.727 and would have executed. The fix was structural rather than a tighter threshold: commands are word sequences, so score word sequences and count extra words against. Arbitrary speech now collapses to 0.333 while real mishearings survive \u2014 including \"skin bearing 315\", a genuine transcript from the corpus." }
+    ],
+    src: "audio-adapter/ROADMAP.md, plans/inbound-speech/plan.md"
   },
   bl8: {
     kicker: "body-layer/", title: "BL-8 - memory layer interfaces", chip: ["open", "Deliberately gated"],
