@@ -152,3 +152,45 @@ every answer with the source files already assembled, and re-renders annotations
 so they present as coordinates rather than claims. A rule that fires at the moment of use survives;
 a rule in a document competes with every other line in that document — including, evidently, this
 one.
+
+## Binary sources: images, PDFs, and anything grep cannot read
+
+A `.jpg`, a `.png` or a `.pdf` is invisible to search, to the knowledge graph, and to every agent
+that was not explicitly told to open it. This project has lost information to that three times:
+
+- the behaviour design sat in `docs/concept/state-transitions.jpg` for weeks and was re-derived by
+  guesswork until someone transcribed it;
+- 52 calibration screenshots sat in an ephemeral sync directory undocumented;
+- the **DCS Mi-24P manual** sat in `docs/concept/mi-24_info/` since 11 September, unread, while a
+  plan recorded the 9K113's magnification and field of regard as unresearched placeholders. Four
+  pages of it answered all of them.
+
+**The rule: a binary source must be accompanied by a text file that carries its content**, not a
+pointer to it. A transcription, a findings note, or a manifest — dated, in the relevant
+`research/` directory. Write it while the source is still in front of you.
+
+### `win-mac-sync/` is a delivery mechanism, not storage
+
+Anything the user drops there — screenshots, logs, exports — may vanish without warning. Extract
+what matters into a dated `research/` note **the same session it arrives**. Filenames survive
+nothing.
+
+### The Mi-24P manual
+
+`docs/concept/mi-24_info/DCS Mi-24P QuickStart RU.pdf` — 138 pages, Russian, and the authoritative
+source for how the real aircraft's systems behave. **Consult it before speculating about Mi-24
+functionality.** Read it with the `pages` parameter; the contents are on pages 3–5. The sections
+that have already paid for themselves:
+
+| section | pages | what it settles |
+|---|---|---|
+| 2.4 Прицел ПКИ | 23 | the operator's sight |
+| 4.6.7 комплекс УРВ 9К113 | 66–75 | the sight: magnifications, reticle, control console |
+| — field of view / ×10 elements | 68–69 | **×3.3 and ×10**, switchable |
+| — reticle stadia dimensions | 70 | **stadiametric ranging, 1000 m and 5000 m marks, 2.5 m reference target** |
+| — ПУ ПН control console | 70 | **slew limits ±40° azimuth, −15°/+20° elevation** |
+| 1.6 Прицел АСП-17ВП | 15, 46–53 | the pilot's sight |
+| 5.4 range entry into the АЦВУ | 124 | how range reaches the sighting computer |
+
+Findings from it go in a dated `research/` note like any other source — see
+`body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`.
