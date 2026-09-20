@@ -44,61 +44,75 @@ slice 1 of the detection-cones milestone — as an explicit, opt-in extension of
   `(boresight_azimuth_deg, 0.0)` compared against `fov_half_angle_deg`; `None` means "no
   restriction," always `True`.
 
-#### The binocular is 8×30, and the 4.0 was never a magnification
+#### Final shape: naked eye by default, binoculars as a mode
 
-`BINOCULAR_RANGE_MULTIPLIER = 4.0` is, by `visibility.py`'s own comment, `HelperAI.lua`'s
-`extra_eyesight_ratio` — an ED engine constant this project relabelled as binocular magnification.
-It never measured magnification at all.
+The single largest correction in this slice, and it is not the multiplier.
 
-The modelled instrument is a **Б-8 / БПЦ5 8×30**: standard Soviet compact issue, about the handheld
-ceiling in a vibrating airframe, small enough to raise and stow in an Mi-24 front cockpit without
-fouling the sight. The artillery glasses (Б-12 12×45) are the wrong size for that space.
+`check_visibility`'s default optic is **`UNAIDED_OPTIC` (M=1.0)**. It was `BINOCULAR_OPTIC`, applied
+unconditionally by `NakedEyePerceptionSource` to every candidate — Petrovich modelled as permanently
+glassed-up, receiving binocular magnification across the entire cockpit-mask envelope at no cost in
+field of view. That is the free-lunch version of binoculars and it was the biggest single
+contributor to over-detection. **Default detection range drops roughly 4×.**
 
-**`BINOCULAR_RANGE_MULTIPLIER` therefore becomes 8.0, and default detection range roughly doubles.**
+| Optic | Magnification | FOV half-angle | Default? |
+|---|---|---|---|
+| `UNAIDED_OPTIC` | 1.0 | `None` — cockpit mask is the only envelope | **yes** |
+| `BINOCULAR_OPTIC` | 4.0 | **4.25°** (8.5° true field) | no — a mode, selected in slice 2 |
 
-##### Why not preserve the old behaviour with a derating factor
+`BINOCULAR_OPTIC` is a **Б-6 6×30**, Soviet standard compact. Its 4.0 is *derived*: 6× glass times a
+~0.67 unstabilised-platform penalty, because handheld 6× on a vibrating helicopter does not deliver
+6× of usable acuity. Higher magnification would be worse, not better — without the 9K113's gyro
+stabilisation, more magnification means less usable image and a narrower straw to look through.
 
-An intermediate revision of this plan kept the effective multiplier at 4.0 by splitting the constant
-into `magnification = 8.0` times a `handheld_effectiveness = 0.5` — on the reasoning that 8× glass
-handheld under vibration does not deliver 8× of usable acuity, which is true. **The user rejected
-this in favour of taking the range increase now and recalibrating afterwards, and that is the better
-call.**
+**The FOV is set, not deferred, and that only became safe here.** While binoculars were the
+unconditional default, a 4.25° field would have blinded Petrovich outside a narrow forward cone,
+because nothing models lowering them. Now that nothing calls with this optic, the gate cannot
+misfire, and `within_optic_fov` finally holds a real value for slice 2 to enforce. Binoculars must
+cost field of view; that tradeoff *is* what makes them an instrument rather than free acuity.
 
-The derating would have preserved the old number's *behaviour* while dressing it as physics. The 0.5
-was not measured; it was reverse-engineered from the answer it had to produce. That is precisely the
-move that produced the constant being replaced here — a behaviour knob buried inside a figure that
-claims to describe an instrument — and repeating it one layer up would have made the next person's
-job harder, not easier.
+##### The multiplier's round trip: 4.0 → 8.0 → 4.0
 
-The honest structure is one knob that states the instrument and a separate, calibrated set of acuity
-thresholds (`LOWRES`/`MEDRES`/`HIRES_ANGULAR_RADIUS_RAD`) that say how well it is used. Range gets
-tuned there, against sortie data, where tuning is what the number is *for*.
+It ends where it started and the excursion was not wasted — record this so a later reader does not
+read it as churn.
 
-##### Consequence: no calibration data is invalidated, because none has been taken
+| | Value | What it was |
+|---|---|---|
+| Before | 4.0 | `HelperAI.lua`'s `extra_eyesight_ratio`, relabelled. Unexplained. |
+| Excursion | 8.0 | An honest 8×30 instrument — which **the screenshots then refuted**. |
+| Now | 4.0 | 6× glass × ~0.67 stabilisation penalty. Independently derived. |
 
-An earlier draft of this section warned that every pre-change sortie figure was now stale. **That
-turned out not to apply**: the user stopped short of flying in order to investigate these numbers
-first, so no detection-range data exists at ×4.0 and nothing is being thrown away. Recorded because
-the warning was written before the fact was known, and a reader finding only the warning would
-over-estimate the cost of this change.
+The final 4.0 is not the inherited constant restored. It is a different number that happens to share
+a value, and the excursion is what established that: taking 8.0 seriously produced four failures
+against the 2026-09-17 photographic ladder, which is how the stabilisation penalty stopped being a
+fudge and became a measured correction. **The physical argument and the photographic evidence
+arrived at the same number independently**, which neither had done before.
 
-It also improves the sequencing rather than merely costing nothing. The multiplier change, BL-9's
-detection trace, and the recalibration pass all want to be in place *before* the first sortie, so a
-single flight yields trace data at the final multiplier instead of a flight at ×4.0 that would have
-had to be repeated.
+##### Consequences, checked rather than assumed
 
-The **central regression test of this slice — byte-identical default behaviour — is still
-deliberately retired here**, replaced by a test that pins the new default with the 4.0 → 8.0
-transition named and dated in its docstring, so a later reader cannot mistake the change for a
-regression that slipped past. That test's purpose was protecting comparability of sortie data; with
-no data yet taken there is nothing to protect, which is the cleanest possible moment to make this
-change.
+- **`test_vision_calibration.py` passes in full again** — the `_STALE_AT_8X_MULTIPLIER` xfail set is
+  removed entirely, not emptied. 46 passed, 0 xfailed.
+- **`NAKED_EYE_RANGE_CAP_M` is healthy at M=1.0** — it now binds only for ships (≥30 m). The
+  pathological case at 8.0, where it bound for every vehicle ≥3.75 m and silently undid the
+  2026-09-17 cap increase, is gone.
+- **The test blast radius went well beyond the one named test.** `test_naked_eye_source.py` needed
+  real geometric re-derivation rather than a distance rescale (a flat rescale would have silently
+  broken the merge/split relationships those fixtures exist to exercise), and
+  `test_mock_flight_chain.py` changed substantively — object 102 is now never naked-eye-visible in
+  that 20-frame fixture, taking it from 2 contacts/56 observations to 1/36. Both were confirmed by
+  running the pipeline, not computed on paper.
 
-This also points the *opposite* way from the project's own goal for a moment, and that is worth
-stating plainly: the user's standing criticism of ED's Petrovich is that he is "way too hawk-eyed
-… can see way too far." Doubling the multiplier moves toward that failure. It is acceptable only
-because the recalibration pass follows immediately and pulls the thresholds back against real data.
-**Slice 1 is not finished, in the sense that matters, until that recalibration has happened.**
+##### One claim withdrawn
+
+While arguing for recalibration I asserted that the binocular:naked-eye range ratio is ~4 at the
+`class_recognizable` tier but only **~1.3** at the presence tier, and that one multiplicative model
+therefore cannot fit both. **The ~1.3 does not survive checking against the fixture.** The class-tier
+ratio is confirmed (~3.96), but the presence-tier ratio computes to **≥2.2–3.0**, and binocular's
+true presence threshold lies beyond the farthest photographed range, so the real figure may be
+larger still.
+
+A spread of 2.2–3.0 against 4.0 may well sit inside the grading noise of a four-level scale. The
+tier-dependent-magnification idea is therefore a **hypothesis for the recalibration pass to test**,
+not an established finding, and must not by itself justify redesigning the detection model.
 
 #### Scope cut 2026-09-20: the 9K113 is deferred (user direction)
 
