@@ -802,8 +802,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 - **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
   started. Today's channels implicitly assume Petrovich is looking everywhere at once within
-  range/FOV gates. Future design: distinct optical modes (peripheral/naked-eye/binoculars/APS-17,
-  each its own FOV/acuity/movement-tradeoff), an attention/scan state machine, a scanning loop
+  range/FOV gates. Future design: distinct optical modes (naked eye, binoculars, and the 9K113
+  sight, each its own FOV/acuity/movement-tradeoff), an attention/scan state machine, a scanning loop
   interrupted periodically by a full-area sweep. Would change what feeds `Percept`/`Observation` in
   the first place, upstream of everything BL-2 built — a future perception-layer milestone, likely
   well after BL-4.
