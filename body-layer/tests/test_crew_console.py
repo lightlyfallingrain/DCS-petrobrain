@@ -554,6 +554,42 @@ def test_handle_f10_command_unrecognized_token_returns_empty_list() -> None:
     assert console.handle_f10_command("shut_down_dcs", now_sim=0.0) == []
 
 
+# -- stop_talking (deferred from Stage 2, plans/inbound-speech/plan.md ------
+# Stage 3) ------------------------------------------------------------------
+
+
+def test_stop_talking_speaks_a_short_acknowledgement() -> None:
+    console = CrewConsole(store=ContactStore())
+    lines = console.handle_f10_command("stop_talking", now_sim=0.0)
+    assert lines == ["Copy."]
+
+
+def test_stop_talking_pushes_to_speech_client_as_urgent() -> None:
+    """The whole point of `stop_talking`: it must push urgent, not routine,
+    since urgent=True is what triggers aircraft-layer's
+    `AudioPlaybackSender._interrupt_playback` and clears whatever is
+    currently playing before this acknowledgement plays."""
+    speech_client = FakeSpeechClient()
+    console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
+
+    lines = console.handle_f10_command("stop_talking", now_sim=0.0)
+
+    assert lines == ["Copy."]
+    assert speech_client.pushed == [("Copy.", True)]
+
+
+def test_stop_talking_pushes_to_overlay_without_urgent_prefix_mismatch() -> None:
+    """`bypass_gate=True` prepends the urgent overlay prefix (same rule
+    every other injected-urgent line follows) -- not a new behaviour
+    invented for this token."""
+    overlay_client = FakeOverlayClient()
+    console = CrewConsole(store=ContactStore(), overlay_client=overlay_client)  # type: ignore[arg-type]
+
+    console.handle_f10_command("stop_talking", now_sim=0.0)
+
+    assert overlay_client.pushed == ["!! Copy."]
+
+
 def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:
     store = ContactStore()
     store.ingest(

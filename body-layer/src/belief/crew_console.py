@@ -74,6 +74,7 @@ from belief.speech import (
     render_readback,
     render_say_again,
     render_scan_readback,
+    render_stop_acknowledged,
     render_watch_nearest_readback,
     route_event,
 )
@@ -377,6 +378,15 @@ class CrewConsole:
             lines = self._handle_watch_nearest(now_sim, air_defence_only=True)
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
+        elif token == "stop_talking":
+            lines = self._handle_stop_talking()
+            # Urgent, unlike every other token dispatched here: this is
+            # what actually triggers aircraft-layer's `AudioPlaybackSender.
+            # _interrupt_playback` (see `_handle_stop_talking`'s own
+            # docstring) -- an ordinary (non-bypass_gate) push would just
+            # join the routine queue behind whatever it was meant to stop.
+            self._print(lines, bypass_gate=True)
+            return lines
         else:
             return []
         self._print(lines)
@@ -599,6 +609,26 @@ class CrewConsole:
         description = self._describe_task_for_speech(task)
         cancel_task(self.store, self.tasks, task.id)
         return [render_cancel_readback(description).text]
+
+    def _handle_stop_talking(self) -> list[str]:
+        """`stop_talking` (deferred from Stage 2, `plans/inbound-speech/
+        plan.md` Stage 3) -- interrupts whatever aircraft-layer is
+        currently playing. The interrupt mechanism itself lives entirely
+        on the aircraft-layer side (`collector/audio_sender.py`'s
+        `AudioPlaybackSender._interrupt_playback`, already reachable via
+        `play_audio(audio, urgent=True)` -- `AudioPlaybackSender.play_audio`
+        clears the routine queue and stops in-flight playback whenever
+        `urgent=True`, *before* the new line is even synthesized). This
+        method's only job is to produce a short acknowledgement;
+        `handle_f10_command`'s dispatch is what marks it urgent
+        (`bypass_gate=True`), which is what actually threads through to
+        `speech_client.push_speech(..., urgent=True)` in `_print`.
+
+        Without `speech_client` configured (no `--speech-audio`), there is
+        nothing to interrupt and this degrades to an ordinary printed
+        acknowledgement -- same as every other token when audio output is
+        off."""
+        return [render_stop_acknowledged().text]
 
     def handle_transcript(
         self,

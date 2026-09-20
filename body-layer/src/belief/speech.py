@@ -302,6 +302,19 @@ def render_say_again() -> OutgoingSpeech:
     return OutgoingSpeech(text="Say again?", template="readback")
 
 
+def render_stop_acknowledged() -> OutgoingSpeech:
+    """`stop_talking` (Stage 3, `plans/inbound-speech/plan.md`, "deferred
+    from Stage 2") -- the short acknowledgement spoken right after
+    interrupting whatever aircraft-layer is currently playing.
+    `crew_console._handle_stop_talking` pushes this line urgent
+    (`bypass_gate=True`), which is what actually triggers `AudioPlaybackSender.
+    _interrupt_playback` on the aircraft-layer side (`AudioPlaybackSender.
+    play_audio`'s own docstring) -- so this text is deliberately short: a
+    long readback here would defeat the point of asking Petrovich to stop
+    talking."""
+    return OutgoingSpeech(text="Copy.", template="readback")
+
+
 def render_confirm_request(description: str) -> OutgoingSpeech:
     """`plans/inbound-speech/plan.md` Stage 2's confirm-band interrogative
     readback (Decision 4 Layer 3): `render_confirm_request("scan left")`
