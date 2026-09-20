@@ -117,6 +117,11 @@ relying on it.**
 
 ### Decision 1 — the `STTEngine` protocol and its two implementations
 
+> **SUPERSEDED IN PART — see "Decision 1 REVISED" above.** The Windows implementation described
+> below was removed on 2026-09-20 without ever running. The `STTEngine` protocol survives with one
+> implementation.
+
+
 ```python
 class STTEngine(Protocol):
     def transcribe(self, wav: bytes) -> Transcript: ...
@@ -279,6 +284,12 @@ in `RUN.md`; do not build the buffer.
 
 ### Decision 4 — how recognition output becomes a command
 
+> **SUPERSEDED — see "Decision 4 REVISED" and "Decision 4 REVISED AGAIN" above.** The matcher
+> moved from body-layer to the adapter, `--grammar` biasing was replaced by `--prompt`, the verb set
+> is wider than the one named below, and the confidence bands no longer multiply confidence by match
+> ratio. Read the revisions first; what remains useful here is the reasoning, not the design.
+
+
 Three layers, each attacking "wrong words, not silence" at a different point.
 
 **Layer 1 — bias the recogniser (adapter side).** whisper.cpp `--grammar` generated from
@@ -337,6 +348,10 @@ implementer should ship Stage 2 with the bench's numbers in a comment next to ea
 ---
 
 ### Decision 5 — where readback fits, and what happens when it is wrong
+
+> **SUPERSEDED IN PART — see "Decision 5 REVISED" above.** `stop` is now an explicit exception to
+> the readback rule: it acknowledges nothing and speaks nothing.
+
 
 **Above `ACT_FLOOR`: execute, then read back.** Reasons: it is what `handle_f10_command` already
 does (the readback lines are its return value), so one code path serves both input surfaces; and
