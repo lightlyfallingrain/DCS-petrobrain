@@ -167,6 +167,25 @@ def test_object_model_resolves_every_object_type(record: dict[str, Any]) -> None
         assert profile.op_class != ""
 
 
+#: **The 8.0-multiplier excursion is over, 2026-09-20.** For part of this
+#: design slice `BINOCULAR_RANGE_MULTIPLIER` was 8.0, which made four of
+#: this test's own ranges (`C-3990m`, `C-2990m`, `C-1990m`, `C-1500m`)
+#: genuinely disagree with the real screenshot ground truth -- this
+#: module's own docstring predicts exactly that failure mode for exactly
+#: that kind of edit, and those four cases were `xfail`ed rather than
+#: edited, since editing the assertion or the fixture would have meant
+#: asserting the screenshots show something they do not. The user's final
+#: scope change for this slice put `BINOCULAR_RANGE_MULTIPLIER` back to
+#: 4.0 -- independently derived this time (a Б-6 6x30's honest 6x
+#: magnification times a stabilisation penalty, `optics.py`'s
+#: `BINOCULAR_OPTIC` docstring has the arithmetic), not merely restored,
+#: but numerically identical to the value every constant in this module
+#: was calibrated against. **The `xfail` machinery is removed, not just
+#: emptied**, and this file was verified green again by actually running
+#: it (not assumed from the numbers matching on paper) -- see
+#: `plans/detection-cones-slice1/implementation.md` for that verification.
+
+
 @pytest.mark.parametrize("record", _authoritative_records(), ids=_record_id)
 def test_computed_tier_matches_ground_truth(record: dict[str, Any]) -> None:
     """`_achieved_tier` must agree with what the screenshots show through

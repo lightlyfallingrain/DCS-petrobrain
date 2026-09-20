@@ -180,9 +180,10 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   `aircraft_client.get_petrovich_indication_latest()`), debounces on text change, and calls
   `association.py` + `geometry.py` to resolve geometry against a `world_objects` candidate.
   `source: "petrovich_detection_associated"` on every emitted `Observation`.
-- `src/perception/visibility.py` (PB-1.5, retuned BL-2.6) — `check_visibility`, the naked-eye
-  channel's three composed plausibility gates (range cap, angular-radius recognition tier, terrain
-  LOS via `geometry.py`). `VisibilityResult.tier` is a **computed achieved tier**
+- `src/perception/visibility.py` (PB-1.5, retuned BL-2.6, gains a per-optic gate at
+  `plans/detection-cones-slice1/plan.md`) — `check_visibility`, the naked-eye channel's four
+  composed plausibility gates (cockpit mask, per-optic field of view, angular-radius recognition
+  tier, terrain LOS via `geometry.py`). `VisibilityResult.tier` is a **computed achieved tier**
   (`"lowres"`/`"medres"`/`"hires"`, BL-2.6 Stage 6) rather than the constant `"medres"` PB-1.5
   originally returned — a candidate that clears the gate can resolve closer-in to a tighter tier
   than the gate itself requires. `NAKED_EYE_GATING_TIER_NAME` is the gate's own threshold and
@@ -193,6 +194,56 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   modeling choice, not verified against ED internals (investigator finding, `plans/
   classification-refinement/plan.md` Session 6 addendum Q1) — documented here so a future reader
   does not "correct" it toward an ED semantics that was never established.
+
+  `check_visibility` gains a keyword-only `optic: Optic | None = None` parameter, resolved inside
+  the function body rather than as a literal default expression — a real circular import between
+  this module and `optics.py` (each needs a name from the other) forces the lazy resolution.
+  **The default is `optics.UNAIDED_OPTIC` (magnification 1.0), not `BINOCULAR_OPTIC`** — the
+  slice's final scope change (2026-09-20, user direction): modelling Petrovich as permanently
+  glassed-up, with binocular magnification and no field-of-view cost across the whole cockpit-mask
+  envelope, was the single biggest source of over-detection in this channel. Real observation is
+  naked-eye by default; binoculars are a deliberate, narrower, raised act (see `optics.py`'s
+  `BINOCULAR_OPTIC`, which now carries a real field-of-view value for exactly this reason).
+  `optic.magnification` replaces the old hardcoded `BINOCULAR_RANGE_MULTIPLIER` reference in both
+  the range-threshold formula and `_achieved_tier` (which gains its own `magnification: float =
+  BINOCULAR_RANGE_MULTIPLIER` parameter) — every existing call site, which passes no `optic`
+  argument, now resolves to `UNAIDED_OPTIC` and a roughly 4x shorter default detection range than
+  this slice's own original binocular-default baseline (`test_default_optic_is_naked_eye` in
+  `test_visibility.py` pins the current default explicitly, with a worked before/after example in
+  its own docstring).
+
+  **`BINOCULAR_RANGE_MULTIPLIER`'s round trip, in one line**: 4.0 (inherited, unexamined, from
+  `HelperAI.lua`'s `extra_eyesight_ratio`) -> 8.0 (a same-session excursion: an honest 8x30, no
+  derating) -> **4.0 again (final)** — numerically identical to the first value but independently
+  derived this time (a real Б-6 6x30's 6x magnification times a ~0.67 handheld-stabilisation
+  penalty, `optics.py`'s `BINOCULAR_OPTIC` docstring has the arithmetic), and confirmed to match
+  what the 2026-09-17 screenshot ladder's binocular column independently shows. Because the
+  multiplier and the three angular-radius constants are both back to the values that calibration
+  was run against, `test_vision_calibration.py` is fully green again with no `xfail`s — verified
+  by actually running it, not assumed from the numbers matching on paper. `BINOCULAR_RANGE_
+  MULTIPLIER` stays declared here (plan Decision 1) — `optics.py` imports it, not the reverse.
+- `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md`, slice 1 of the "detection
+  cones" milestone) — `Optic` (`name`, `magnification`, `fov_half_angle_deg: float | None`,
+  `boresight_azimuth_deg: float = 0.0`) and two named instances: `UNAIDED_OPTIC` (M=1.0, no FOV
+  restriction, **the default `check_visibility` optic as of 2026-09-20**) and `BINOCULAR_OPTIC`
+  (M=`BINOCULAR_RANGE_MULTIPLIER` = 4.0, **no longer the default** — a deliberate, narrower,
+  raised-to-the-eyes act). `BINOCULAR_OPTIC` is a Б-6 6x30 (~8.5 deg true field): magnification
+  derived as 6x raw glass times a ~0.67 unstabilised-platform penalty (stated in prose, not a
+  separate dataclass field — an earlier same-session `handheld_effectiveness`/
+  `effective_magnification` split was tried and reversed, see `visibility.py`'s own docstring for
+  why: a derating factor invented only to cancel out a magnification change is a behaviour knob
+  dressed as optics), and `fov_half_angle_deg=4.25` (half the true field) — **the first real,
+  non-`None` FOV value in this table**, safe now specifically because binoculars are no longer the
+  default: no concrete `PerceptionSource` calls `check_visibility` with this optic yet (plan
+  Decision 4), so the value cannot misfire a gate in the live path today. `within_optic_fov` tests a
+  circular field of view (true angular separation from `(boresight_azimuth_deg, 0.0)`, spherical
+  law of cosines, not an independent azimuth-box/elevation-box check); `None` means unrestricted.
+  **The 9K113 sight is deliberately deferred out of this slice** (user, 2026-09-20) — its own
+  magnification/FOV/field-of-regard figures, sourced and unverified alike, stay recorded in
+  `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md` until it gets its own slice;
+  `Optic` therefore carries no field-of-regard fields at all (how far an optic can be *pointed*, as
+  opposed to what it shows once pointed) — with no sighted optic in the table they would all be
+  `None` and untested. Pure, no I/O, mirrors `cockpit_mask.py`'s own posture.
 - `src/perception/clustering.py` (`plans/group-contact-model/plan.md` Stage 2, reworked
   anisotropic by Stage 3b-i, then reworked again to a true angular predicate by Stage 3b-i rev.2) —
   position-only resolution clustering. **Separability is a 3D angle subtended at the observer,
