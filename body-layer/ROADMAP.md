@@ -767,13 +767,27 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   **So the milestone gets sliced, and slice 1 is deliberately the part that needs no research and no
   prior sortie:**
 
-  - **Slice 1 — the cone test and the optics table.** A direction, a field of view, and a
-    magnification per optic; apparent size = true angular size × M against the three thresholds
-    already calibrated. Static forward cone, no scanning, no dwell, no range uncertainty. This is
-    enough to make "scan north" mean something and to make the binocular default an explicit choice
-    — and enough that a calibration sortie is measuring a crew member rather than an omniscient one.
-    **Ungated.** The acuity ladder already generalises across optics (see
-    `perception/visibility.py`'s binocular premise), so the expensive part is bought.
+  - **Slice 1 — the cone test and the optics table. DONE (2026-09-20).** `perception/optics.py`
+    with an `Optic` dataclass and `within_optic_fov`; `check_visibility` takes an `optic` parameter
+    and threads its magnification through the range formula.
+
+    **It did not land as written here, and the difference matters.** This entry anticipated
+    "mak[ing] the binocular default an explicit choice." The shipped outcome is the opposite: the
+    **naked eye is now the default** (`UNAIDED_OPTIC`, M=1.0) and **binoculars became the explicit
+    non-default choice**. The old default applied `BINOCULAR_OPTIC` unconditionally to every
+    candidate — Petrovich permanently glassed-up, with binocular magnification across the whole
+    cockpit-mask envelope at no cost in field of view. **Default detection range dropped roughly
+    4×**, which is the largest single correction to over-detection the project has made, and larger
+    than anything the cone test itself contributes.
+
+    `BINOCULAR_OPTIC` is a Б-6 6×30 at M=4.0 — *derived* as 6× glass × a ~0.67 unstabilised-platform
+    penalty, not the inherited `HelperAI.lua` constant restored — carrying a real 4.25° field-of-view
+    half-angle that becomes enforceable once slice 2 can select an optic. The 9K113 was cut from this
+    slice and is filed in `todo/todo.md`; its figures and its already-existing calibration column are
+    recorded there.
+
+    Full record, including a 4.0 → 8.0 → 4.0 excursion that the 2026-09-17 photographic ladder
+    refuted within a commit: `plans/detection-cones-slice1/plan.md`.
   - **Slice 2 — scanning, dwell and honest range.** The attention state machine, detection as a
     process rather than a predicate, and range as a belief instead of a ground-truth figure.
     **Gated on the ED research deep pass**, because that is precisely what those questions are
