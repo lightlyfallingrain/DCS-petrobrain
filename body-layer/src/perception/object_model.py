@@ -196,28 +196,46 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     # long-range SAM bucket (`aircraft-layer/research/2026-09-08-pb1-5-
     # worldobjects-filter-and-ambient-detection.md`, the full `min_angular_
     # radius`-adjacent op-class table), not `OP_SRSAM`/`OP_MRSAM` like the
-    # short/medium systems above. Sourcing/citations for length_m/width_m/
-    # height_m: `body-layer/research/2026-09-21-s300-radar-dimensions.md`.
+    # short/medium systems above. Full sourcing, including what could not be
+    # found: `body-layer/research/2026-09-21-s300-radar-dimensions.md`.
+    #
+    # Per-field provenance, because these four numbers are NOT equally well
+    # known and a reader of this file alone would otherwise not be able to
+    # tell which is which. Two are cited; two are estimates.
     (
         "s-300ps 40b6m tr",
         ObjectTypeProfile(
             size_m=24.0,
             op_class="OP_LRSAM",
+            # ESTIMATE -- the trailer's stowed footprint could not be found
+            # in any source. Low consequence: `height_m` dominates
+            # `apparent_extent_m`'s max() at every realistic aspect for this
+            # object, so these two never reach the formula's output.
             length_m=10.0,
             width_m=3.0,
+            # SOURCED -- 24 m erected mast (ausairpower.net, corroborated
+            # independently). This is the load-bearing figure for this row.
             height_m=24.0,
         ),
-    ),  # SA-10 Flap Lid radar, tall mast -- see research doc for sourcing
+    ),  # SA-10 Flap Lid radar, tall mast
     (
         "s-300ps 64h6e sr",
         ObjectTypeProfile(
             size_m=13.2,
             op_class="OP_LRSAM",
+            # SOURCED -- 13.2 m x 3.0 m (Army Recognition).
             length_m=13.2,
             width_m=3.0,
+            # ESTIMATE, AND CIRCULAR -- the erected antenna height could not
+            # be sourced, so this ~10 m comes from the 2026-09-21 sortie's own
+            # in-game visual observation. That is the same sortie whose
+            # detection ranges this model is validated against, so this row
+            # cannot be treated as independent evidence that the aspect model
+            # works: agreement here is partly built in. Replace with a real
+            # figure before citing this row in any calibration argument.
             height_m=10.0,
         ),
-    ),  # SA-10 Big Bird radar, low trailer -- see research doc for sourcing
+    ),  # SA-10 Big Bird radar, low trailer
     # No bare "tank" keyword. It was measured against all 595 real DCS type
     # names and scored 8 false positives and zero true positives -- real
     # armour is named T-72/Leopard/Merkava/Challenger2, never "tank", while
