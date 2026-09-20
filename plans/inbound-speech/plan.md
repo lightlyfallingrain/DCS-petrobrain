@@ -946,6 +946,45 @@ producing a token and a ratio.
 session — the same lesson the vocabulary itself learned when phrasings nobody utters were stripped
 out.
 
+### Decision 4 REVISED AGAIN — gate confidence and match independently (user, 2026-09-20)
+
+**The defect.** `ACT_FLOOR = 0.60` is justified by Stage 1's measured *confidence* distribution —
+correct answers ran 0.60–0.95, so 0.60 is the minimum confidence of a correct answer. But the band
+test was applied to `combined = confidence × match_ratio`, a **product of two sub-1 quantities**
+whose range is systematically lower than either factor. Found by running four real corpus clips end
+to end: two landed in the confirm band, both barely under their floor (0.589 against 0.60; 0.790
+against cancel's 0.80), and a third cleared by 0.001. A category error rather than a mis-tuned
+constant — the threshold is sound for the quantity it was measured on and too high for the quantity
+it gated.
+
+**The deeper problem, which is why the fix is not just a new number.** Confidence and match ratio
+answer different questions — *"did I hear you clearly?"* and *"is that a command I know?"* —
+and multiplying destroys the distinction. `0.9 × 0.5` and `0.5 × 0.9` both give 0.45 and mean
+opposite things.
+
+**The decision: gate them independently.** User: *"Independently. Well transcribed audio that does
+not match command patterns is exactly what needs to be passed to brain layer."*
+
+| | matches a command | no command match |
+| --- | --- | --- |
+| **heard clearly** | act, then read back | **→ brain layer** (free speech) |
+| **heard poorly** | `"Scan left, confirm?"` | `"Say again?"` |
+
+**This gives the brain a second route in, and that is the substantive change.** Until now the only
+path to the brain was the explicit wake word. "Heard clearly, matches nothing" is the implicit one —
+and today it is indistinguishable from "did not hear", which is why it could only be guessed at.
+
+**`verb_anchored` keeps earning its place.** "Scan somethinggarbled", heard clearly but
+unresolvable, is *not* brain input — the player plainly tried to issue a command, so "say again" is
+right. Only speech with **no verb anchor at all** is genuinely free speech. The three-way
+distinction the seven-field seam exists for is what makes this expressible.
+
+**No new measurement is required.** `ACT_FLOOR = 0.60` was measured against confidence, so applying
+it to confidence makes the existing constant correct — it was wrong only because it was pointed at
+the product. The fix validates the number rather than replacing it. `MATCH_FLOOR = 0.6` already
+lives in the adapter and nothing below it reaches body, so the match side is largely gated upstream
+already; multiplying was re-penalising something already filtered.
+
 ### Settled Decisions (user, 2026-09-19)
 
 **1. Capture lives in the collector, behind a flag.** Overrules this plan's recommendation of a
