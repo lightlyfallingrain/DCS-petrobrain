@@ -1,1 +1,1 @@
-PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --crew-text --f10-commands --overlay --aircraft-layer-url http://$DCS_COLLECTOR_IP:7791 --theatre Syria --world-model-db ../world-model/data/world-model/syria-full.sqlite
+PYTHONPATH=src:../world-model/src .venv/bin/python -m logger --crew-text --f10-commands --aircraft-layer-url http://$DCS_COLLECTOR_IP:7791 --theatre Syria --world-model-db ../world-model/data/world-model/syria-full.sqlite --speech-audio --speech-input --audio-adapter-url http://127.0.0.1:7795
