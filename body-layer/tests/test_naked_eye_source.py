@@ -41,7 +41,7 @@ _FAKE_CONN = sqlite3.connect(":memory:")
 #: at the same altitude as ownship have zero angular separation and always
 #: merge, whatever their down-range gap -- a pure down-range spread, this
 #: fixture's pre-rev.2 shape, is now a degenerate case, not a safe one).
-#: Every pair's true 3D angular separation was checked by hand against
+#: Every pair's true 3D angular separation was checked against
 #: `perception.clustering.angular_separation_rad`/`angular_size_rad` to
 #: exceed the merge threshold at every range here (Infantry, 1.8 m) --
 #: computed, not guessed -- so this fixture still exercises the cap/
@@ -49,8 +49,19 @@ _FAKE_CONN = sqlite3.connect(":memory:")
 #: actually testing. The cross-offsets stay well inside the co-pilot
 #: mask's forward allowance (`perception.cockpit_mask`'s 22 deg out to
 #: 60 deg azimuth) at every one of these ranges.
-_CAP_TEST_RANGES_M: Final[tuple[float, ...]] = (100.0, 250.0, 430.0, 650.0, 950.0)
-_CAP_TEST_CROSS_OFFSETS_M: Final[tuple[float, ...]] = (0.0, 60.0, 90.0, 110.0, 130.0)
+#:
+#: **Rescaled 2026-09-20** (`plans/detection-cones-slice1/plan.md`, final
+#: scope change: `check_visibility`'s default optic moved to
+#: `UNAIDED_OPTIC`, M=1.0). The naked-eye default's own `lowres` threshold
+#: for Infantry is now only 600 m (`1.8 / 0.003 * 1.0`), well under the
+#: old spread's 950 m top range -- every value below was rescaled to fit
+#: under that ceiling and the pairwise separation re-verified (not just
+#: assumed to scale): shrinking range alone *increases* each candidate's
+#: apparent angular size (`size_m / range_m`), so the old cross-offsets
+#: could not simply be scaled down by the same factor without risking a
+#: spurious merge -- offsets were grown relative to range to compensate.
+_CAP_TEST_RANGES_M: Final[tuple[float, ...]] = (60.0, 150.0, 260.0, 390.0, 540.0)
+_CAP_TEST_CROSS_OFFSETS_M: Final[tuple[float, ...]] = (0.0, 40.0, 65.0, 85.0, 105.0)
 
 
 def _ownship() -> OwnshipState:
@@ -135,12 +146,17 @@ def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
 
 
 def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
+    # Infantry at 100 m: within the naked-eye default's (UNAIDED_OPTIC,
+    # M=1.0, `plans/detection-cones-slice1/plan.md` final scope change)
+    # medres threshold (128.57 m), so it still resolves to the class-level
+    # "OP_INFANTRY" this test asserts -- 500 m (the pre-2026-09-20 value)
+    # now only reaches `lowres`, a different label.
     world_objects = {
         "objects": [
             _world_object(
                 999, "Mi-24P", lat_deg=3.0, lon_deg=-2.0, is_ownship=True
             ),  # ownship echo
-            _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),  # real target
+            _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),  # real target
         ]
     }
     source, _client = _source(world_objects)
@@ -152,12 +168,11 @@ def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
 
 
 def test_hires_range_candidate_with_a_known_reporting_name_reaches_type_level() -> None:
-    # T-72B: size 7 m, hires threshold = 7 / 0.02 * 4.0 = 1400 m
-    # (`plans/classification-refinement/plan.md` Stage 6). "T-72B" is an
-    # exact entry in the reporting-name table, so this resolves to level 3.
-    world_objects = {
-        "objects": [_world_object(1, "T-72B", lat_deg=1000.0, lon_deg=0.0)]
-    }
+    # T-72B: size 7 m, hires threshold at the naked-eye default
+    # (UNAIDED_OPTIC, M=1.0, `plans/detection-cones-slice1/plan.md` final
+    # scope change) = 7 / 0.028 * 1.0 = 250 m. "T-72B" is an exact entry
+    # in the reporting-name table, so this resolves to level 3.
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
     source, _client = _source(world_objects)
 
     observations = source.poll(100.0, _ownship())
@@ -169,19 +184,15 @@ def test_hires_range_candidate_with_a_known_reporting_name_reaches_type_level() 
 
 
 def test_medres_range_candidate_stays_at_class_level() -> None:
-    # T-72B (size 7 m) at 3000 m: beyond the hires threshold, still inside
-    # the medres threshold -- resolves to class.
-    # **STALE-FIGURE UPDATE (2026-09-20)**: thresholds recomputed for
-    # `BINOCULAR_RANGE_MULTIPLIER = 8.0` (was 4.0, see `visibility.py`'s own
-    # docstring on that constant for the rationale) -- hires 2000 m, medres
-    # 4000 m for a 7 m object (was 1000 m / 2000 m under M=4.0). This is a
-    # formula recomputation only, not a fresh calibration pass -- see
-    # `tests/test_vision_calibration.py`'s own `_STALE_AT_8X_MULTIPLIER` for
-    # the ranges where the formula now disagrees with real screenshot
-    # ground truth.
-    world_objects = {
-        "objects": [_world_object(1, "T-72B", lat_deg=3000.0, lon_deg=0.0)]
-    }
+    # T-72B (size 7 m) at 400 m: beyond the hires threshold (250 m), still
+    # inside the medres threshold (500 m) -- resolves to class.
+    # **RECOMPUTED FOR THE DEFAULT-OPTIC CHANGE (2026-09-20, final scope
+    # change)**: the default optic is now UNAIDED_OPTIC (M=1.0), not
+    # BINOCULAR_OPTIC -- this test's range went 3000 m (binocular M=4.0
+    # baseline) -> a same-session M=8.0 excursion -> 400 m now, tracking
+    # the default's own magnification. Formula and angular-radius constants
+    # unchanged throughout.
+    world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=400.0, lon_deg=0.0)]}
     source, _client = _source(world_objects)
 
     observations = source.poll(100.0, _ownship())
@@ -197,9 +208,11 @@ def test_hires_range_candidate_with_no_reporting_name_falls_back_to_class() -> N
     # fixtures) has no exact entry in the reporting-name table -- only
     # compound entries like "Infantry AK" do. A close-range look still can't
     # produce a name Petrovich doesn't have, so this stays at class level
-    # even though the achieved geometric tier is `hires`.
+    # even though the achieved geometric tier is `hires`. 50 m is within
+    # the naked-eye default's (UNAIDED_OPTIC, M=1.0) hires threshold of
+    # 64.29 m for a 1.8 m object.
     world_objects = {
-        "objects": [_world_object(1, "Infantry", lat_deg=300.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "Infantry", lat_deg=50.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 
@@ -214,12 +227,13 @@ def test_hires_range_candidate_with_no_reporting_name_falls_back_to_class() -> N
 def test_lowres_range_candidate_reaches_presence_level() -> None:
     # `plans/classification-refinement/plan.md` Stage 7: the gate moved to
     # `lowres`, making the presence tier reachable for the first time.
-    # Infantry: medres threshold = 900 m, lowres threshold = 1674.42 m. At
-    # 1600 m the target clears the (now wider) gate but only achieves
-    # `lowres` -- "something is there," ED's only catch-all class, not a
-    # fabricated class guess.
+    # Infantry at the naked-eye default (UNAIDED_OPTIC, M=1.0, `plans/
+    # detection-cones-slice1/plan.md` final scope change): medres threshold
+    # 128.57 m, lowres threshold 600 m. At 400 m the target clears the gate
+    # but only achieves `lowres` -- "something is there," ED's only
+    # catch-all class, not a fabricated class guess.
     world_objects = {
-        "objects": [_world_object(1, "Infantry", lat_deg=1600.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "Infantry", lat_deg=400.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 
@@ -249,8 +263,12 @@ def test_no_visible_candidates_returns_empty() -> None:
 
 
 def test_a_newly_visible_candidate_emits_one_observation() -> None:
+    # 100 m -- within the naked-eye default's (UNAIDED_OPTIC, M=1.0,
+    # `plans/detection-cones-slice1/plan.md` final scope change) medres
+    # threshold (128.57 m), so this still resolves to "OP_INFANTRY"; 500 m
+    # (the pre-2026-09-20 value) now only reaches `lowres`.
     world_objects = {
-        "objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 
@@ -262,7 +280,7 @@ def test_a_newly_visible_candidate_emits_one_observation() -> None:
     assert obs.classification_raw == "OP_INFANTRY"
     assert obs.provenance == PROVENANCE_VISIBILITY_FILTER_ONLY
     assert obs.derived_world_position is not None
-    assert obs.derived_world_position.x == 500.0
+    assert obs.derived_world_position.x == 100.0
     assert obs.derived_world_position.z == 0.0
 
 
@@ -363,10 +381,19 @@ def test_continuity_never_cross_tags_two_different_objects() -> None:
     """Two distinct, simultaneously-visible objects must never have their
     `continues_observation_id`s cross -- each `object_id`'s map entry is
     independent."""
+    # **Rescaled 2026-09-20** (`plans/detection-cones-slice1/plan.md`,
+    # final scope change): both candidates need to resolve to a real
+    # class-level label (not the shared presence-level default) for the
+    # `classification_raw == "OP_INFANTRY"` lookups below to disambiguate
+    # them at all -- 100 m keeps Infantry inside its medres threshold
+    # (128.57 m at the naked-eye default, M=1.0); Ural-4320 at (90, 90)
+    # (range ~127.3 m) stays inside its own hires threshold (214.29 m for
+    # a 6 m object). Confirmed by actually running this scenario, not
+    # assumed.
     world_objects = {
         "objects": [
-            _world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0),
-            _world_object(2, "Ural-4320", lat_deg=400.0, lon_deg=200.0),
+            _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),
+            _world_object(2, "Ural-4320", lat_deg=90.0, lon_deg=90.0),
         ]
     }
     empty: dict[str, Any] = {"objects": []}
@@ -408,12 +435,12 @@ def test_continuity_never_cross_tags_two_different_objects() -> None:
 
 
 def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> None:
-    # 5 simultaneously-new infantry candidates (well within the 900 m
-    # threshold), cap = NAKED_EYE_MAX_NEW_PER_POLL = 3 -- only the 3
-    # nearest are emitted this poll. Spacing (`_CAP_TEST_RANGES_M`) is wide
-    # enough that no two of these candidates fall within `perception.
-    # clustering.naked_eye_down_range_radius_m` of each other -- computed by
-    # hand, not guessed (see `_CAP_TEST_RANGES_M`'s own docstring) -- so this test
+    # 5 simultaneously-new infantry candidates (well within the naked-eye
+    # default's 600 m threshold), cap = NAKED_EYE_MAX_NEW_PER_POLL = 3 --
+    # only the 3 nearest are emitted this poll. Spacing (`_CAP_TEST_RANGES_M`)
+    # is wide enough in true angular separation that no two of these
+    # candidates merge under `perception.clustering`'s predicate -- computed,
+    # not guessed (see `_CAP_TEST_RANGES_M`'s own docstring) -- so this test
     # still exercises the cap/debounce mechanism in isolation from Stage 2's
     # clustering (`plans/group-contact-model/plan.md`), which is what it is
     # actually testing.
@@ -631,15 +658,24 @@ def test_two_close_candidates_emit_one_clustered_observation() -> None:
 
 
 def _high_ownship() -> OwnshipState:
-    """A 200 m AGL variant of `_ownship()` (500 m target altitude + 200 m,
-    matching `plans/group-contact-model/plan.md`'s own worked case) --
-    needed by `test_a_cluster_splitting_gives_the_majority_child_continuity`
-    below, where a down-range-only split must actually separate two
-    candidates angularly: at the same altitude as its targets, ownship's
-    own line of sight to any two same-bearing candidates is collinear
-    regardless of their down-range gap (Stage 3b-i rev.2), so the split in
-    that test needs a real depression-angle axis to work at all."""
-    return OwnshipState(t_sim=100.0, x=0.0, z=0.0, alt_m=700.0, heading_true_deg=0.0)
+    """An 85 m AGL variant of `_ownship()` (500 m target altitude + 85 m)
+    -- needed by `test_a_cluster_splitting_gives_the_majority_child_
+    continuity` below, where a down-range-only split must actually
+    separate two candidates angularly: at the same altitude as its
+    targets, ownship's own line of sight to any two same-bearing
+    candidates is collinear regardless of their down-range gap (Stage
+    3b-i rev.2), so the split in that test needs a real depression-angle
+    axis to work at all.
+
+    **Rescaled 2026-09-20** (`plans/detection-cones-slice1/plan.md`, final
+    scope change -- see `_CAP_TEST_RANGES_M`'s own note): was 200 m AGL
+    (`plans/group-contact-model/plan.md`'s own worked case) against a
+    1300+ m range spread that no longer fits under the naked-eye default's
+    600 m threshold. The AGL offset was rescaled down with the range
+    spread it accompanies, by the same factor, so the depression-angle
+    relationship the sibling test depends on is preserved rather than
+    guessed -- confirmed by actually running the scenario, not assumed."""
+    return OwnshipState(t_sim=100.0, x=0.0, z=0.0, alt_m=585.0, heading_true_deg=0.0)
 
 
 def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
@@ -650,38 +686,46 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # offered fresh to the belief-layer gate (`plans/group-contact-model/
     # plan.md`'s Splitting section -- "the id follows the majority").
     #
-    # object_id=1 stays at lat 1300, lon 0 -- close enough (down-range) to
+    # **Rescaled 2026-09-20** (`plans/detection-cones-slice1/plan.md`,
+    # final scope change: `check_visibility`'s default optic moved to
+    # `UNAIDED_OPTIC`, M=1.0). The naked-eye default's own gate for
+    # Infantry now tops out at 600 m, well under this fixture's original
+    # 1300+ m spread -- every range/offset/altitude value below was
+    # rescaled down by the same factor (~2.4x) and the whole scenario
+    # re-run against the real pipeline to confirm the merge/split counts
+    # still hold (not assumed to survive scaling: apparent angular size
+    # grows as range shrinks, which could have collapsed the split this
+    # test depends on -- see `_high_ownship`'s own docstring for why its
+    # AGL offset was rescaled too, not left at its old value).
+    #
+    # object_id=1 stays at lat 540, lon 0 -- close enough (down-range) to
     # the other three to merge with them on the first poll. object_id=2, 3,
     # 4 (three of them, so they form the cluster's own majority once it
-    # splits) sit at lat 1310, spread in *lon* (cross-range) instead of lat
-    # this time: 0.0/0.9/1.8, chaining together single-link under Stage
+    # splits) sit at lat 545, spread in *lon* (cross-range) instead of lat
+    # this time: 0.0/0.4/0.75, chaining together single-link under Stage
     # 3b-i rev.2's angular predicate the same way `test_clustering.
     # test_chained_cluster_reports_a_plural_count` demonstrates in
-    # isolation. On the second poll object_id=1 alone moves to lat 600 --
-    # from `_high_ownship()`'s 200 m AGL, that down-range move genuinely
+    # isolation. On the second poll object_id=1 alone moves to lat 250 --
+    # from `_high_ownship()`'s 85 m AGL, that down-range move genuinely
     # separates it angularly from the group (confirmed by running this
     # test, not assumed -- a down-range-only move at ownship's own altitude
     # would not separate anything at all, see `_high_ownship`'s docstring).
-    # lat 600, not closer, so object_id=1 stays within the co-pilot mask's
-    # 22 deg forward depression allowance at 200 m AGL (`perception.
-    # cockpit_mask`) rather than dropping out of visibility entirely -- a
-    # real constraint this fixture ran into, not tuned around blindly.
     # It splits off on its own -- a 1-vs-3 split, the 3-strong group the
     # majority child.
     merged = {
         "objects": [
-            _world_object(1, "Infantry", lat_deg=1300.0, lon_deg=0.0),
-            _world_object(2, "Infantry", lat_deg=1310.0, lon_deg=0.0),
-            _world_object(3, "Infantry", lat_deg=1310.0, lon_deg=0.9),
-            _world_object(4, "Infantry", lat_deg=1310.0, lon_deg=1.8),
+            _world_object(1, "Infantry", lat_deg=540.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=545.0, lon_deg=0.0),
+            _world_object(3, "Infantry", lat_deg=545.0, lon_deg=0.4),
+            _world_object(4, "Infantry", lat_deg=545.0, lon_deg=0.75),
         ]
     }
     split = {
         "objects": [
-            _world_object(1, "Infantry", lat_deg=600.0, lon_deg=0.0),
-            _world_object(2, "Infantry", lat_deg=1310.0, lon_deg=0.0),
-            _world_object(3, "Infantry", lat_deg=1310.0, lon_deg=0.9),
-            _world_object(4, "Infantry", lat_deg=1310.0, lon_deg=1.8),
+            _world_object(1, "Infantry", lat_deg=250.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=545.0, lon_deg=0.0),
+            _world_object(3, "Infantry", lat_deg=545.0, lon_deg=0.4),
+            _world_object(4, "Infantry", lat_deg=545.0, lon_deg=0.75),
         ]
     }
     client = FakeAircraftClient(merged)
@@ -707,18 +751,18 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # (3-member) and minority (1-member) clusters land on `OP_1UNIT` here
     # (confirmed by running this test), so the count no longer distinguishes
     # them the way it did before Stage 3b-i rev.2. The minority child is the
-    # one that moved to lat 600; the majority child is still near lat 1310.
+    # one that moved to lat 250; the majority child is still near lat 545.
     majority = next(
         obs
         for obs in second
         if obs.derived_world_position is not None
-        and obs.derived_world_position.x > 1000.0
+        and obs.derived_world_position.x > 400.0
     )
     minority = next(
         obs
         for obs in second
         if obs.derived_world_position is not None
-        and obs.derived_world_position.x <= 1000.0
+        and obs.derived_world_position.x <= 400.0
     )
     assert majority.continues_observation_id == first[0].id
     assert minority.continues_observation_id is None
