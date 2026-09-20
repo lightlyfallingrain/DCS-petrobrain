@@ -110,6 +110,12 @@ one start while its live acceptance is still outstanding. That is deliberate, no
 - **Batch what a single flight can clear.** Several outstanding items usually share one sortie;
   saying so turns a scattered set of caveats into one actionable trip.
 
+**When acceptance needs the user's own hands, publish a card.** A sortie, a Windows session,
+anything requiring their judgement in a place a terminal is not — that work gets an artifact page
+via the `test-card` skill, not a section in a plan file they would have to find and scroll while
+flying. The first one produced the user's own verdict: *"excellent, we should use those
+regularly."* The markdown it was built from was complete, correct, and unusable at the controls.
+
 **RUN EVERY COMMAND BEFORE YOU WRITE IT DOWN. This is the rule this role has broken most often.**
 
 Five acceptance cards produced by this role have named commands that were never executed: a console

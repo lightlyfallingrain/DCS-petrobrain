@@ -194,3 +194,15 @@ that have already paid for themselves:
 
 Findings from it go in a dated `research/` note like any other source — see
 `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`.
+
+## Tests the user has to run
+
+Acceptance work only the user can perform — a sortie, a Windows session, anything needing their
+hands — is published as an artifact card via the `test-card` skill, not left as a markdown section.
+The source of truth stays in `docs/acceptance/`; the card is a view of it, the way the status page
+is a view of the roadmaps.
+
+The reason is not presentation. A card is read in glances, at the controls, possibly in VR, and it
+has to carry verified commands, an explicit statement of what is *not* testable this time, per-block
+expectations as numbers where numbers exist, and checkboxes that survive an interruption. A plan
+file satisfies none of that while being just as correct.
