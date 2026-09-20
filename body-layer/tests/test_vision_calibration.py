@@ -167,26 +167,23 @@ def test_object_model_resolves_every_object_type(record: dict[str, Any]) -> None
         assert profile.op_class != ""
 
 
-#: **Working exactly as designed, 2026-09-20.** This module's own docstring
-#: names the failure mode: "the moment someone changes ... `BINOCULAR_
-#: RANGE_MULTIPLIER` ... `test_computed_tier_matches_ground_truth` fails and
-#: names the range that stopped matching what the screenshots show." That
-#: edit happened (`plans/detection-cones-slice1/plan.md`, user direction:
-#: "take the range increase now and recalibrate afterwards" --
-#: `BINOCULAR_RANGE_MULTIPLIER` 4.0 -> 8.0, `LOWRES`/`MEDRES`/
-#: `HIRES_ANGULAR_RADIUS_RAD` deliberately left untouched). These four
-#: ranges are exactly the ones the tripwire names: at each, doubling the
-#: multiplier without re-deriving the angular-radius constants pushes the
-#: computed tier a full step past what the real screenshots show
-#: (`class_recognizable`/`medres` in the ground truth, `hires` from the
-#: formula). This is a real, load-bearing divergence from photographic
-#: evidence, not a stale comment -- `xfail`ed rather than edited, because
-#: editing the assertion or the fixture would mean asserting the
-#: screenshots show something they do not. Un-xfail this once a fresh
-#: calibration ladder against the real 8.0 multiplier lands.
-_STALE_AT_8X_MULTIPLIER: frozenset[str] = frozenset(
-    {"C-3990m", "C-2990m", "C-1990m", "C-1500m"}
-)
+#: **The 8.0-multiplier excursion is over, 2026-09-20.** For part of this
+#: design slice `BINOCULAR_RANGE_MULTIPLIER` was 8.0, which made four of
+#: this test's own ranges (`C-3990m`, `C-2990m`, `C-1990m`, `C-1500m`)
+#: genuinely disagree with the real screenshot ground truth -- this
+#: module's own docstring predicts exactly that failure mode for exactly
+#: that kind of edit, and those four cases were `xfail`ed rather than
+#: edited, since editing the assertion or the fixture would have meant
+#: asserting the screenshots show something they do not. The user's final
+#: scope change for this slice put `BINOCULAR_RANGE_MULTIPLIER` back to
+#: 4.0 -- independently derived this time (a Б-6 6x30's honest 6x
+#: magnification times a stabilisation penalty, `optics.py`'s
+#: `BINOCULAR_OPTIC` docstring has the arithmetic), not merely restored,
+#: but numerically identical to the value every constant in this module
+#: was calibrated against. **The `xfail` machinery is removed, not just
+#: emptied**, and this file was verified green again by actually running
+#: it (not assumed from the numbers matching on paper) -- see
+#: `plans/detection-cones-slice1/implementation.md` for that verification.
 
 
 @pytest.mark.parametrize("record", _authoritative_records(), ids=_record_id)
@@ -203,15 +200,7 @@ def test_computed_tier_matches_ground_truth(record: dict[str, Any]) -> None:
 
     This is the test that will break when `visibility.py`'s constants are
     next edited, and the range it names is the range whose ground truth the
-    edit contradicts. See `_STALE_AT_8X_MULTIPLIER` immediately above for
-    the four ranges currently doing exactly that, as of 2026-09-20."""
-    if _record_id(record) in _STALE_AT_8X_MULTIPLIER:
-        pytest.xfail(
-            f"{_record_id(record)}: stale against BINOCULAR_RANGE_MULTIPLIER "
-            "= 8.0 (was calibrated against 4.0, 2026-09-17) -- pending a "
-            "fresh calibration ladder, see _STALE_AT_8X_MULTIPLIER's docstring"
-        )
-
+    edit contradicts."""
     expected_tier = _tier_for_grade(record["grades"]["binocular"])
 
     computed_tier, _confidence = visibility._achieved_tier(
