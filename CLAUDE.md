@@ -80,7 +80,7 @@ graphify path "<node A>" "<node B>"  # shortest path between two concepts
 graphify explain "<node>"            # plain-language explanation
 ```
 
-**Use `gq.sh`, not `graphify query` directly.** The graph says *where* to look; it does not say what
+**Use `gq.sh`, not `graphify query` directly — a PreToolUse hook enforces this.** The graph says *where* to look; it does not say what
 the text says. Edge annotations quote fragments, and a fragment can lose its tense — the first build
 cited "a standing no-omniscience violation" from a passage whose next sentence records the fix. The
 wrapper ends every answer with the source files already assembled, so reading them is one step
