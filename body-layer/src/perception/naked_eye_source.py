@@ -146,6 +146,7 @@ from aircraft_client import AircraftLayerClient
 from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
+from perception.detection_trace import DetectionTraceCollector
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.reporting_names import reporting_name_for
 from perception.source import (
@@ -248,6 +249,14 @@ class NakedEyePerceptionSource:
     #: every poll -- see module docstring point 5 for how
     #: `NAKED_EYE_MAX_NEW_PER_POLL` is re-read under this mode.
     emit_mode: Literal["on_change", "every_poll"] = "on_change"
+    #: BL-9's detection trace (`plans/bl9-debug-visualization/plan.md`) --
+    #: additive, defaults to `None` (a true no-op, same pattern as every
+    #: other optional-sink field in this codebase). When set, every
+    #: `check_visibility` call this poll records into it, and this class
+    #: annotates each admitted candidate's entry with its cluster's member
+    #: object_ids and the emitted `Observation.id` once clustering and
+    #: emission are done (see `poll()`).
+    trace_sink: DetectionTraceCollector | None = None
 
     _previously_visible_ids: frozenset[int] = field(
         default_factory=frozenset, init=False, repr=False
@@ -288,7 +297,11 @@ class NakedEyePerceptionSource:
         visible: list[tuple[WorldObjectCandidate, VisibilityResult]] = []
         for candidate in candidates:
             result = check_visibility(
-                ownship_state, candidate, self.world_model_conn, self.theatre
+                ownship_state,
+                candidate,
+                self.world_model_conn,
+                self.theatre,
+                trace=self.trace_sink,
             )
             if result is not None:
                 visible.append((candidate, result))
@@ -315,9 +328,17 @@ class NakedEyePerceptionSource:
             ],
             observer,
         )
-        return self._build_observations(
+        observations = self._build_observations(
             now_sim, ownship_state, clusters, confidence_by_object_id
         )
+        if self.trace_sink is not None:
+            for cluster, observation in zip(clusters, observations):
+                member_ids = tuple(member.object_id for member in cluster.members)
+                for member in cluster.members:
+                    self.trace_sink.annotate_admission(
+                        member.object_id, member_ids, observation.id
+                    )
+        return observations
 
     def _build_observations(
         self,

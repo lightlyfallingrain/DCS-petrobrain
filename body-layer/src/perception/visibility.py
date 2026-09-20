@@ -139,6 +139,11 @@ from typing import TYPE_CHECKING, Final
 from perception import object_model
 from perception.association import WorldObjectCandidate
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
+from perception.detection_trace import (
+    DetectionTrace,
+    DetectionTraceCollector,
+    GateOutcome,
+)
 from perception.geometry import (
     GeoPosition,
     bearing_deg,
@@ -388,6 +393,7 @@ def check_visibility(
     theatre: str,
     *,
     optic: Optic | None = None,
+    trace: DetectionTraceCollector | None = None,
 ) -> VisibilityResult | None:
     """Run `candidate` through all four gates: cockpit mask, per-optic field
     of view (`plans/detection-cones-slice1/plan.md`), angular-radius range,
@@ -398,7 +404,7 @@ def check_visibility(
     ordering.
 
     `optic` defaults to `optics.UNAIDED_OPTIC` (magnification 1.0), as of
-    2026-09-20 -- this was `BINOCULAR_OPTIC` for most of this slice's
+    2026-09-20 -- this was `BINOCULAR_OPTIC` for most of that slice's
     development but is now naked-eye by default (module docstring's
     superseded "Binocular premise" section has the full reasoning: modelling
     Petrovich as permanently glassed-up, with binocular magnification and
@@ -417,9 +423,30 @@ def check_visibility(
     `within_optic_fov` always passes, so the gate is a no-op for the
     default path. `BINOCULAR_OPTIC` now carries a real field-of-view value
     (`optics.py`'s own docstring), but is not wired into any concrete
-    `PerceptionSource` in this slice (`plans/detection-cones-slice1/
-    plan.md` Decision 4) -- passing it is possible today only by an
-    explicit caller, none of which exist yet."""
+    `PerceptionSource` yet -- passing it is possible today only by an
+    explicit caller, none of which exist.
+
+    `trace` (`perception.detection_trace`, BL-9) is additive and defaults
+    to `None` -- a true no-op, same pattern `overlay_client`/`speech_client`
+    already use elsewhere in this codebase. When set, records exactly one
+    `DetectionTrace` entry per call, at whichever gate decided this
+    candidate's fate (or `ADMITTED` if it cleared all four) -- see that
+    module's docstring for why `range_threshold_m`/`threshold_bound` are
+    always populated regardless of which gate fired. No change to this
+    function's existing return value or gate order.
+
+    **Merge note (2026-09-20).** BL-9 and cones slice 1 were developed in
+    parallel and their interaction produced two defects that neither
+    branch's own tests could see, both fixed here. First, BL-9 computed the
+    traced `range_threshold_m` with `BINOCULAR_RANGE_MULTIPLIER` hardcoded;
+    once the default optic became the naked eye that would have made every
+    trace row report a threshold 4x larger than the one actually applied --
+    the trace silently misreporting the exact quantity it exists to measure.
+    It now uses `optic.magnification`, so the traced threshold is by
+    construction the one the gate used. Second, the FOV gate returned
+    without recording, which would have broken BL-9's one-entry-per-call
+    invariant the moment slice 2 wires a non-default optic; `GateOutcome`
+    gained `OPTIC_FOV` and the gate now records like every other."""
     from perception.optics import UNAIDED_OPTIC, within_optic_fov
 
     if optic is None:
@@ -429,6 +456,33 @@ def check_visibility(
     target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
 
     candidate_bearing_deg = bearing_deg(observer, target)
+    candidate_range_m = range_m(observer, target)
+    profile = object_model.profile_for(candidate.object_type)
+    size_curve_threshold_m = (
+        profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
+    ) * optic.magnification
+    range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
+    threshold_bound = (
+        "range_cap" if NAKED_EYE_RANGE_CAP_M <= size_curve_threshold_m else "size_curve"
+    )
+
+    def _record(outcome: GateOutcome, achieved_tier: str | None = None) -> None:
+        if trace is None:
+            return
+        trace.record(
+            DetectionTrace(
+                object_id=candidate.object_id,
+                object_type=candidate.object_type,
+                t_sim=ownship.t_sim,
+                true_bearing_deg=candidate_bearing_deg,
+                true_range_m=candidate_range_m,
+                range_threshold_m=range_threshold_m,
+                threshold_bound=threshold_bound,
+                outcome=outcome,
+                achieved_tier=achieved_tier,
+            )
+        )
+
     body_direction = body_relative_direction(
         observer,
         target,
@@ -440,28 +494,27 @@ def check_visibility(
     if not is_visible(
         co_pilot_mask, body_direction.azimuth_deg, body_direction.elevation_deg
     ):
+        _record(GateOutcome.COCKPIT_MASK)
         return None
 
     if not within_optic_fov(
         optic, body_direction.azimuth_deg, body_direction.elevation_deg
     ):
+        _record(GateOutcome.OPTIC_FOV)
         return None
 
-    candidate_range_m = range_m(observer, target)
-    profile = object_model.profile_for(candidate.object_type)
-    range_threshold_m = min(
-        NAKED_EYE_RANGE_CAP_M,
-        (profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD) * optic.magnification,
-    )
     if candidate_range_m > range_threshold_m:
+        _record(GateOutcome.RANGE_OR_SIZE)
         return None
 
     if not line_of_sight_clear(conn, theatre, observer, target):
+        _record(GateOutcome.TERRAIN_LOS)
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
         candidate_range_m, profile.size_m, optic.magnification
     )
+    _record(GateOutcome.ADMITTED, achieved_tier=achieved_tier)
     return VisibilityResult(
         bearing_deg=candidate_bearing_deg,
         range_m=candidate_range_m,
