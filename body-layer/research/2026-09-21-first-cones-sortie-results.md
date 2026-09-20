@@ -98,3 +98,53 @@ rather than resolved here. The S-300 profiles are a bug under either target.
   terrain LOS, not evidence of a gate fault — but it means this sortie carries no data for them.
 - **No `type` tier was reached for anything except the Tor** (314 m). The flight did not close
   inside ~250 m on most units, so the type tier is simply unmeasured rather than failing.
+
+## Follow-up findings, same day
+
+### Ownship is processed on every poll — an upstream fault, not a filter bug
+
+The user confirms the only Mi-24P present was ownship. `perception.association.filter_ownship()`
+*is* called (`naked_eye_source.py:290`), so the candidate surviving means `is_ownship` was never
+`True` for it. The tri-state contract is behaving exactly as documented — `None` means "ownship
+identity unknown this tick" and is deliberately kept rather than guessed either way — so the fault
+is upstream, in the collector's `LoGetPlayerPlaneId()` or in how the flag is stamped.
+
+Measured from the raw trace: **4113 rows for `object_id=16777472` across ~2634 polls.** Ownship is
+running the full gate chain every poll and landing in the never-admitted list, where it reads as a
+perception near-miss rather than as the aircraft being flown.
+
+Windows-side; cannot be diagnosed from the Mac. Cheap to confirm in flight by checking whether
+`is_ownship` is ever `True` in a fresh trace.
+
+### Aspect angle (user, 2026-09-21) — and why it precedes threshold recalibration
+
+> "Unit from 90 deg AOB is much easier to classify and identify than at 0 or 180 AOB. We could just
+> calculate apparent visual width (or height for tall things like the radars) and fairly linearly
+> use that to scale classification distance."
+
+Two things make this more than a refinement:
+
+**It subsumes the radar bug.** If characteristic extent is `max(projected width, height)` rather
+than one scalar, a mast is tall at every aspect and the S-300 case fixes itself instead of needing
+a special case. Fixing the radar profiles as scalars first would therefore be work thrown away.
+
+**It may explain part of the calibration spread.** The T-72's presence ratio was **2.17×** against
+1.20–1.33× for every other vehicle — exactly what a broadside view of a long hull produces. Some of
+what looks like threshold error may be unmodelled aspect.
+
+**So the tier-threshold split is deliberately deferred until aspect is in.** Splitting `LOWRES` and
+`MEDRES` against the current numbers would fit constants to an error that aspect is about to
+remove, and unpicking that later is harder than waiting. The opposite-sign finding above stands on
+its own; only its *magnitude* is in question.
+
+**The data is already on the wire.** `aircraft-layer/src/schema/world_objects.py`'s
+`WorldObjectSample` carries `heading_true_rad`; `perception.association.WorldObjectCandidate`
+simply drops it. Aspect is a plumbing change, not a new export.
+
+### What the next data-gathering sortie should capture
+
+- **Aspect per observation** — head-on / quartering / broadside is enough resolution. Without it the
+  binocular set inherits the same confound as this one, and neither dataset can be fully used.
+- **For tall radars, whether the mast was against sky or against terrain.** That is contrast, not
+  size, and the model has no term for it at all — worth knowing whether it needs one before
+  inventing one.
