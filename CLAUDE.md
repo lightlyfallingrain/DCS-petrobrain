@@ -67,6 +67,26 @@ roadmap update itself: does this milestone's completion change what the next mil
 or invalidate an assumption downstream milestones rely on? One line is enough — this is the
 project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than a calendar.
 
+## Knowledge graph
+
+A queryable graph over the current-state design documentation lives in `graphify-out/` (gitignored,
+built from the `graphify-corpus/` mirror). **Query it before concluding something is undocumented** —
+this project's recurring failure is not missing documentation but failing to find documentation that
+already exists, and occasionally finding a superseded version instead.
+
+```sh
+graphify query "<question>"          # BFS traversal, broad context
+graphify path "<node A>" "<node B>"  # shortest path between two concepts
+graphify explain "<node>"            # plain-language explanation
+```
+
+Install the hooks once per clone: `.claude/scripts/install-git-hooks.sh`. They keep the graph's
+structural spine current per commit (AST over changed `.py`, ~1.5s, captures docstrings) and record
+that a semantic rebuild is owed when docs change. **The rebuild order at merge is load-bearing —
+documents first, graph second, merge third** — because a graph built from stale documents launders
+the staleness rather than merely lagging it. Full reasoning and the merge procedure:
+`docs/PROCESS.md`, "Keeping the knowledge graph honest".
+
 ## Verification
 
 Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list (`world-model/CLAUDE.md`, `aircraft-layer/CLAUDE.md`, or `body-layer/CLAUDE.md`; each has its own equally-canonical list, ruff format/check + mypy --strict + pytest in each case). A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
