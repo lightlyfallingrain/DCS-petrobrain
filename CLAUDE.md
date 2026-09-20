@@ -43,7 +43,12 @@ Each major component under this repo may carry its own `<subproject>/CLAUDE.md` 
 
 ## Agents
 
-8 agent roles live in `.claude/agents/`: the 7 template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus a project-specific `investigator`. All default to `claude-sonnet-5`, except `dod` which uses `claude-haiku-4-5-20251001` (cheap final gate). For architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
+8 agent roles live in `.claude/agents/`: the 7 template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus a project-specific `investigator`. All use `claude-sonnet-5`. **`dod` was raised from `claude-haiku-4-5-20251001` to sonnet on
+2026-09-20** (user direction) after a run of errors in its acceptance cards — commands that had
+never been executed, a card with no commands in it at all, and twice a fabricated example. The
+cheap-final-gate saving was not worth a gate that reports work as verified when it was not; its own
+role file now carries the run-it-before-you-write-it rule alongside the model change, since the
+model was only half the problem. For architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
 
 **Skip `performance-reviewer` and `security` for now** — this phase is an offline single-user local pipeline with no hot path and no untrusted-input surface yet. Do not insert them into the default role sequence from `AGENTS.md`. Only run either when the user explicitly asks for it.
 
