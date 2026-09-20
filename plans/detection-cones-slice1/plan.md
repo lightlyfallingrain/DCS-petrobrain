@@ -41,35 +41,45 @@ slice 1 of the detection-cones milestone — as an explicit, opt-in extension of
 
 `BINOCULAR_RANGE_MULTIPLIER = 4.0` is, by `visibility.py`'s own comment, `HelperAI.lua`'s
 `extra_eyesight_ratio` — an ED engine constant this project relabelled as binocular magnification.
-So it is not an imprecise estimate of magnification; it never measured magnification at all.
+It never measured magnification at all.
 
 The modelled instrument is a **Б-8 / БПЦ5 8×30**: standard Soviet compact issue, about the handheld
-ceiling in a vibrating airframe, and small enough to raise and stow in an Mi-24 front cockpit
-without fouling the sight. The artillery glasses (Б-12 12×45) are the wrong size for that space.
+ceiling in a vibrating airframe, small enough to raise and stow in an Mi-24 front cockpit without
+fouling the sight. The artillery glasses (Б-12 12×45) are the wrong size for that space.
 
-**8.0 cannot simply replace 4.0 in the range formula.** `NakedEyePerceptionSource` applies this
-multiplier unconditionally, so the substitution would double every detection range in the live path,
-invalidate the calibration sortie's data mid-flight, and break this slice's central regression test.
+**`BINOCULAR_RANGE_MULTIPLIER` therefore becomes 8.0, and default detection range roughly doubles.**
 
-So the one constant is split into the two quantities it was conflating:
+##### Why not preserve the old behaviour with a derating factor
 
-| Quantity | Value | Standing |
-|---|---|---|
-| `magnification` | 8.0 | The real instrument. Realistic, not measured in-sim. |
-| `handheld_effectiveness` | 0.5 | **Unmeasured.** Chosen to reproduce today's effective 4.0. |
-| effective multiplier | **4.0** | The empirically calibrated figure all sortie data rests on. |
+An intermediate revision of this plan kept the effective multiplier at 4.0 by splitting the constant
+into `magnification = 8.0` times a `handheld_effectiveness = 0.5` — on the reasoning that 8× glass
+handheld under vibration does not deliver 8× of usable acuity, which is true. **The user rejected
+this in favour of taking the range increase now and recalibrating afterwards, and that is the better
+call.**
 
-`Optic` gains `handheld_effectiveness: float = 1.0` (so `UNAIDED_OPTIC` is untouched), and the range
-formula uses `magnification × handheld_effectiveness`.
+The derating would have preserved the old number's *behaviour* while dressing it as physics. The 0.5
+was not measured; it was reverse-engineered from the answer it had to produce. That is precisely the
+move that produced the constant being replaced here — a behaviour knob buried inside a figure that
+claims to describe an instrument — and repeating it one layer up would have made the next person's
+job harder, not easier.
 
-The 0.5 is a fudge factor and the plan says so. The gain is that it is now a *named and measurable*
-one: 8× glass handheld in a vibrating helicopter genuinely does not deliver 8× of usable acuity, and
-a calibration sortie can measure that shortfall — which was impossible while it sat hidden inside a
-magnification figure that was really an AI-eyesight constant. Same total behaviour, one honest field
-instead of one mislabelled one.
+The honest structure is one knob that states the instrument and a separate, calibrated set of acuity
+thresholds (`LOWRES`/`MEDRES`/`HIRES_ANGULAR_RADIUS_RAD`) that say how well it is used. Range gets
+tuned there, against sortie data, where tuning is what the number is *for*.
 
-A test asserts the effective multiplier equals `BINOCULAR_RANGE_MULTIPLIER`, so the two cannot drift
-apart silently.
+##### Consequence: calibration data taken before this change is stale
+
+Non-negotiable and must not be soft-pedalled. Every figure from a sortie flown before this commit
+was taken at effective ×4.0. The **central regression test of this slice — byte-identical default
+behaviour — is deliberately retired here**, replaced by a test that pins the new default with the
+4.0 → 8.0 transition named and dated in its docstring, so a later reader cannot mistake the change
+for a regression that slipped past.
+
+This also points the *opposite* way from the project's own goal for a moment, and that is worth
+stating plainly: the user's standing criticism of ED's Petrovich is that he is "way too hawk-eyed
+… can see way too far." Doubling the multiplier moves toward that failure. It is acceptable only
+because the recalibration pass follows immediately and pulls the thresholds back against real data.
+**Slice 1 is not finished, in the sense that matters, until that recalibration has happened.**
 
 #### Scope cut 2026-09-20: the 9K113 is deferred (user direction)
 
