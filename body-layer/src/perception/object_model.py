@@ -11,6 +11,20 @@ twice. Same "unvalidated starting vocabulary" caveat applies here: this is a
 hand-authored starting guess, not a validated catalogue of real DCS
 unit-type dimensions (see the plan's Risks section).
 
+**Aspect-aware apparent extent** (`plans/aspect-aware-profiles/plan.md`) --
+`ObjectTypeProfile` optionally carries real `length_m`/`width_m`/`height_m`
+alongside the original scalar `size_m`, and `apparent_extent_m(profile,
+aspect_deg)` projects them onto the observer's line of sight
+(`length * |sin(aspect)| + width * |cos(aspect)|`, maxed against `height`)
+so a target's detectable extent depends on how it is presented -- fixing
+the S-300 tall-mast bug (a 24 m radar mast was falling back to the 5 m
+generic profile) without touching the angular-radius tier thresholds
+themselves. `size_m` is unchanged and still required on every row; the new
+fields default to `None` and are only set on the two S-300 rows this pass
+migrated -- see that dataclass's own docstring and the plan's "Backward
+compatibility" section for why a `None` default was chosen over deriving
+the new fields from `size_m`.
+
 **Keyword vocabulary is checked against real DCS `object_type` strings, not
 guessed English/NATO-designation words.** A review pass found the original
 OP_SHIP keywords (`cruiser`/`frigate`/`corvette`/...) and the original SA-3/
@@ -49,6 +63,7 @@ tokenizer or scoring function.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Final
 
@@ -68,10 +83,62 @@ class ObjectTypeProfile:
     worldobjects-filter-and-ambient-detection.md`, Session 5 Finding 2) --
     reported verbatim in a naked-eye `Observation`'s `classification_raw`,
     in place of a free-text classification guess.
+
+    `length_m`/`width_m`/`height_m`: optional real measured dimensions,
+    `None` by default -- see `apparent_extent_m` below and `plans/aspect-
+    aware-profiles/plan.md`'s "Backward compatibility" section for why these
+    are separate optional fields rather than a derivation of `size_m`, and
+    why the ~150 existing rows below are deliberately left with all three
+    `None` (an earlier draft that defaulted them to `size_m`'s value, giving
+    every row a cube, was caught in review before implementation -- it
+    silently changed every unmigrated row's detection range by up to 41% at
+    oblique aspect; see the plan's "Correction, coordinator review" section
+    for the full arithmetic). `None` on any one of the three means this
+    row's real shape is not known, not that it is a cube or a point --
+    `apparent_extent_m` falls back to plain `size_m` in that case.
     """
 
     size_m: float
     op_class: str
+    length_m: float | None = None
+    width_m: float | None = None
+    height_m: float | None = None
+
+
+def apparent_extent_m(profile: ObjectTypeProfile, aspect_deg: float | None) -> float:
+    """The characteristic extent to use for a detection-range computation,
+    given the angle `aspect_deg` between the candidate's heading and the
+    observer-to-candidate bearing (0 deg = viewed from directly ahead or
+    astern, 90 deg = broadside; see `visibility.check_visibility` for how
+    it is computed).
+
+    Returns `profile.size_m` unchanged -- the old, aspect-blind behaviour --
+    whenever `profile` has no measured `length_m`/`width_m`/`height_m` (any
+    of the three `None`) or `aspect_deg` is `None` (aspect unknown this
+    tick). Both are deliberate "don't fabricate a fact you don't have"
+    cases, not degraded approximations: a profile with no measured
+    dimensions has no shape to project, and an unknown aspect has no angle
+    to project it through. Only the two S-300 rows this pass migrated
+    exercise the real formula below today (`plans/aspect-aware-profiles/
+    plan.md`'s "S-300 dimensions" section).
+
+    Otherwise computes the aspect-projected footprint width
+    (`length_m * |sin(aspect)| + width_m * |cos(aspect)|`, the linear
+    projection of a rectangular footprint onto the observer's line of
+    sight) and returns the larger of that and `height_m` -- so a tall, thin
+    object (a radar mast) is recognised at its mast height regardless of
+    aspect, while a long, low object (a vehicle hull) is recognised at its
+    broadside length when viewed side-on and its narrower width when viewed
+    nose/tail-on."""
+    if profile.length_m is None or profile.width_m is None or profile.height_m is None:
+        return profile.size_m
+    if aspect_deg is None:
+        return profile.size_m
+    theta = math.radians(aspect_deg)
+    projected_width_m = profile.length_m * abs(math.sin(theta)) + profile.width_m * abs(
+        math.cos(theta)
+    )
+    return max(projected_width_m, profile.height_m)
 
 
 #: Fallback for any `object_type` matching no keyword below. ED's own
@@ -119,6 +186,38 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
     ("strela-1", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-9
     ("tor 9a331", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-15
     ("chap_torm2", ObjectTypeProfile(size_m=9.0, op_class="OP_SRSAM")),  # SA-15
+    # S-300PS SA-10 components -- the two rows `plans/aspect-aware-profiles/
+    # plan.md` gives real measured dimensions, fixing the "tall mast read as
+    # a van" bug the 2026-09-21 sortie found (`body-layer/research/2026-09-
+    # 21-first-cones-sortie-results.md`). Real DCS `object_type` strings,
+    # confirmed against `data/dcs_type_to_reporting_name.tsv` lines 377/384
+    # (both resolve to "SA-10 Flap Lid radar" / "SA-10 Big Bird radar"
+    # respectively). `op_class=OP_LRSAM` -- S-300/SA-10 is ED's own
+    # long-range SAM bucket (`aircraft-layer/research/2026-09-08-pb1-5-
+    # worldobjects-filter-and-ambient-detection.md`, the full `min_angular_
+    # radius`-adjacent op-class table), not `OP_SRSAM`/`OP_MRSAM` like the
+    # short/medium systems above. Sourcing/citations for length_m/width_m/
+    # height_m: `body-layer/research/2026-09-21-s300-radar-dimensions.md`.
+    (
+        "s-300ps 40b6m tr",
+        ObjectTypeProfile(
+            size_m=24.0,
+            op_class="OP_LRSAM",
+            length_m=10.0,
+            width_m=3.0,
+            height_m=24.0,
+        ),
+    ),  # SA-10 Flap Lid radar, tall mast -- see research doc for sourcing
+    (
+        "s-300ps 64h6e sr",
+        ObjectTypeProfile(
+            size_m=13.2,
+            op_class="OP_LRSAM",
+            length_m=13.2,
+            width_m=3.0,
+            height_m=10.0,
+        ),
+    ),  # SA-10 Big Bird radar, low trailer -- see research doc for sourcing
     # No bare "tank" keyword. It was measured against all 595 real DCS type
     # names and scored 8 false positives and zero true positives -- real
     # armour is named T-72/Leopard/Merkava/Challenger2, never "tank", while
