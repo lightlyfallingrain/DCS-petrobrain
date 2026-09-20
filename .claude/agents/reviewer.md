@@ -134,3 +134,11 @@ type: {{user, feedback, project, reference}}
 Maintain a `MEMORY.md` index at the same path. Each entry: one line under ~150 characters.
 
 Do not save: code structure derivable from reading the repo, git history, or anything already in CLAUDE.md.
+
+## Before concluding something is undocumented
+
+Query the knowledge graph: `.claude/scripts/gq.sh "<question>"`. This project's recurring failure is
+not missing documentation but failing to find documentation that already exists — and occasionally
+finding a superseded version instead. The wrapper ends its answer with the source files to read:
+**the graph says where to look, it does not say what the text says.** Read the sources before
+concluding.

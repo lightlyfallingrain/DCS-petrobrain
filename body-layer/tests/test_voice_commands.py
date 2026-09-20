@@ -3,7 +3,16 @@ plan.md`: the act/confirm/say-again band decision and the affirm/negative
 answer classifier. `belief.crew_console.CrewConsole.handle_transcript`'s
 own tests (`test_crew_console.py`) cover the pending-confirmation state
 machine built on top of these; this module tests the pure decision logic
-in isolation."""
+in isolation.
+
+**Bands are gated on `confidence` alone, not `confidence * match_ratio`**
+(Decision 4 REVISED AGAIN, `plans/inbound-speech/plan.md`, user
+2026-09-20) -- every test below that exercises the act/confirm/say-again
+floors sets `match_ratio` to a fixed, clearly-irrelevant value (1.0, or
+something obviously above `MATCH_FLOOR`) and varies `confidence` instead
+of a `confidence * match_ratio` product, asserting the new contract
+directly rather than adjusting the old product-based numbers until they
+happened to pass again."""
 
 from __future__ import annotations
 
@@ -67,12 +76,30 @@ def test_act_band() -> None:
     assert decision == BandDecision(disposition="act", token="scan_left")
 
 
-def test_confirm_band_between_the_two_floors() -> None:
-    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+def test_act_band_is_gated_on_confidence_alone_not_the_product() -> None:
+    """The regression this revision fixes: a low `match_ratio` must not
+    drag a well-heard, cleanly-matched command down into the confirm band
+    the way `confidence * match_ratio` used to. `match_ratio` here is
+    still >= `MATCH_FLOOR` (the adapter's own floor, 0.6) -- a lower value
+    could never reach this function with a non-`None` token in practice --
+    but well below 1.0, so a lingering product-based implementation would
+    fail this test even though it passes `test_act_band` above."""
     decision = classify_response(
         token="scan_left",
-        match_ratio=combined,
+        match_ratio=0.61,
         confidence=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    assert decision == BandDecision(disposition="act", token="scan_left")
+
+
+def test_confirm_band_between_the_two_floors() -> None:
+    confidence = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    decision = classify_response(
+        token="scan_left",
+        match_ratio=1.0,
+        confidence=confidence,
         verb_anchored=True,
         ambiguous=False,
     )
@@ -82,8 +109,8 @@ def test_confirm_band_between_the_two_floors() -> None:
 def test_say_again_below_confirm_floor() -> None:
     decision = classify_response(
         token="scan_left",
-        match_ratio=CONFIRM_FLOOR / 2,
-        confidence=1.0,
+        match_ratio=1.0,
+        confidence=CONFIRM_FLOOR / 2,
         verb_anchored=True,
         ambiguous=False,
     )
@@ -91,21 +118,21 @@ def test_say_again_below_confirm_floor() -> None:
 
 
 def test_cancel_task_uses_the_higher_floor() -> None:
-    """Decision 5: `cancel_task` destroys state, so a combined score that
+    """Decision 5: `cancel_task` destroys state, so a confidence that
     would `act` for any other token must instead land in the confirm band
     for `cancel_task` specifically."""
-    combined = (ACT_FLOOR + ACT_FLOOR_CANCEL) / 2
+    confidence = (ACT_FLOOR + ACT_FLOOR_CANCEL) / 2
     ordinary = classify_response(
         token="scan_left",
-        match_ratio=combined,
-        confidence=1.0,
+        match_ratio=1.0,
+        confidence=confidence,
         verb_anchored=True,
         ambiguous=False,
     )
     cancel = classify_response(
         token="cancel_task",
-        match_ratio=combined,
-        confidence=1.0,
+        match_ratio=1.0,
+        confidence=confidence,
         verb_anchored=True,
         ambiguous=False,
     )

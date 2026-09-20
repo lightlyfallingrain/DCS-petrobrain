@@ -117,6 +117,11 @@ relying on it.**
 
 ### Decision 1 — the `STTEngine` protocol and its two implementations
 
+> **SUPERSEDED IN PART — see "Decision 1 REVISED" above.** The Windows implementation described
+> below was removed on 2026-09-20 without ever running. The `STTEngine` protocol survives with one
+> implementation.
+
+
 ```python
 class STTEngine(Protocol):
     def transcribe(self, wav: bytes) -> Transcript: ...
@@ -279,6 +284,12 @@ in `RUN.md`; do not build the buffer.
 
 ### Decision 4 — how recognition output becomes a command
 
+> **SUPERSEDED — see "Decision 4 REVISED" and "Decision 4 REVISED AGAIN" above.** The matcher
+> moved from body-layer to the adapter, `--grammar` biasing was replaced by `--prompt`, the verb set
+> is wider than the one named below, and the confidence bands no longer multiply confidence by match
+> ratio. Read the revisions first; what remains useful here is the reasoning, not the design.
+
+
 Three layers, each attacking "wrong words, not silence" at a different point.
 
 **Layer 1 — bias the recogniser (adapter side).** whisper.cpp `--grammar` generated from
@@ -338,6 +349,10 @@ implementer should ship Stage 2 with the bench's numbers in a comment next to ea
 
 ### Decision 5 — where readback fits, and what happens when it is wrong
 
+> **SUPERSEDED IN PART — see "Decision 5 REVISED" above.** `stop` is now an explicit exception to
+> the readback rule: it acknowledges nothing and speaks nothing.
+
+
 **Above `ACT_FLOOR`: execute, then read back.** Reasons: it is what `handle_f10_command` already
 does (the readback lines are its return value), so one code path serves both input surfaces; and
 every command in this vocabulary is *constructive and reversible* — a scan or a watch that was
@@ -358,6 +373,60 @@ gone — the one case where execute-then-readback tells you about a loss instead
 correct it. So `cancel_task` uses `ACT_FLOOR_CANCEL > ACT_FLOOR`, which simply routes marginal
 cancels into the confirm band that already exists. One extra constant, no second code path, and the
 asymmetry is justified by the direction of the damage rather than by aviation analogy.
+
+---
+
+### Decision 5 REVISED — `stop_talking` is the one exception, and it speaks nothing (2026-09-20)
+
+Everything above still governs the other 14 tokens. `stop_talking` gets a documented carve-out,
+user direction, verbatim: *"'Stop' — no readback or confirmation, just stop talking. That is
+exception to the normal read back/confirm rule. It's more of a debug tool than crew feature."*
+
+**Why it can't just be a shorter readback.** Stage 3 shipped `stop_talking` speaking `"Copy."`
+right after interrupting playback — the acknowledgement itself was the defect, not an oversight:
+it had to go out over the exact channel it was asked to silence, so a request for quiet produced
+one more line of speech. A shorter or different acknowledgement has the same problem; the fix is
+no acknowledgement.
+
+**Why that needed a real mechanism, not a deleted string.** `CrewConsole._print` never pushes to
+`speech_client` when there are no lines, and no interrupt-only call existed anywhere in the
+codebase — the only way to reach `AudioPlaybackSender`'s queue-clear and in-flight interrupt was to
+push new urgent audio through it. So the fix adds an interrupt-only path end to end: `POST
+/audio/stop` on the aircraft layer (`AudioPlaybackSender.interrupt`, the same `_clear_queue`/
+`_interrupt_playback` pair `play_audio(..., urgent=True)` already used, minus the enqueue), `POST
+/stop` on `audio-adapter` (`AudioSink.interrupt()` — for `--target aircraft-layer`, forwards to the
+new endpoint; for `--target local`, kills whatever `afplay` process is in flight, tracked via a
+`Popen` reference `LocalPlaybackSink` did not previously keep), and `AudioAdapterClient.stop()` on
+the body-layer side. `crew_console.CrewConsole._handle_stop_talking` calls `speech_client.stop()`
+when configured and otherwise no-ops; `handle_f10_command`'s `stop_talking` branch returns `[]`
+directly and never calls `_print` — no line, no overlay push, no speech push, of any kind.
+`speech.render_stop_acknowledged` is removed as dead code.
+
+**Latency finding.** The Stage 6 live-latency question asked whether recognition → dispatch → HTTP
+round trip still carries synthesis latency once an interrupt-only path exists. **Partly answered,
+live (local target, Mac, measured 2026-09-20):** `POST /stop` against an in-flight `POST /speak`
+returned `200` in ~6ms and playback stopped — the interrupt mechanism itself is effectively free.
+So the round-trip cost the reviewer originally flagged is recognition + dispatch + HTTP, not the
+audio mechanism; removing TTS synthesis from the path is what took the audio side down to
+essentially nothing. **The Windows figure (`winsound`, aircraft-layer's `_WinsoundPlayer`) remains
+genuinely unmeasured** — it is a different mechanism (`SND_PURGE` + an interruptible
+`threading.Event` wait, not a killed subprocess) and this session had no live Windows/DCS access to
+time it (this repo's provenance rule: execution against the real hardware chain is the user's to
+run, not this session's to simulate).
+
+**Defect found by that same live run, fixed here:** a successful `/stop` was making the in-flight
+`/speak` call itself fail with `500`. `LocalPlaybackSink.deliver` treated `afplay`'s post-`kill()`
+non-zero return code (`-9`) as a genuine failure and raised `AudioDeliveryError` — indistinguishable
+from `afplay` actually crashing, so every intentional stop logged as a spurious speech-delivery
+failure on the body-layer side (`AudioAdapterClient.push_speech` raises, `CrewConsole._print`
+catches and logs). Fixed by having `LocalPlaybackSink` track *which* process `interrupt()` killed
+(`self._interrupted`) so `deliver()` can tell "killed because we were asked to stop" (now logged at
+info and swallowed — an expected outcome, not an error) apart from "afplay genuinely failed" (still
+raises). Checked whether `aircraft-layer`'s `_interrupt_playback` has the equivalent shape: it does
+not, and this is pre-existing rather than introduced by this follow-up — `_WinsoundPlayer.play`
+never inspects a return code at all; `stop()` sets the same `threading.Event` `play()` is already
+waiting on, so an interrupted `play()` simply returns, same as a completed one. No aircraft-layer
+change was needed.
 
 ---
 
@@ -499,6 +568,15 @@ relative to the other voice-only tokens Stage 2 left as no-ops (`report_bearing_
 `report_clock_*`/`scan_bearing_deg` need a query capability that does not exist yet;
 `stop_talking`'s interrupt mechanism already works end to end). Give it real dispatch in
 `CrewConsole` before or alongside the other voice-only tokens.
+
+**As shipped in Stage 3, `stop_talking` dispatched then spoke `"Copy."`** — pushed urgent through
+`push_speech(..., urgent=True)`, which is what reached `_interrupt_playback` at the time, since no
+interrupt-only call existed yet. **Superseded by Decision 5 REVISED (2026-09-20, this plan):** the
+acknowledgement was itself the defect (it had to go out over the channel it was interrupting), and
+the fix needed a real interrupt-only path (`POST /audio/stop` on aircraft-layer, `POST /stop` on
+audio-adapter, `AudioAdapterClient.stop()` on body-layer) rather than a shorter string. See Decision
+5 REVISED for the full account and the still-unverified live-latency question this follow-up
+partly answers.
 
 **Stage 4 — Windows capture. [Win]** (no DCS needed)
 `audio_capture.py` (`FfmpegCapture`, `ClipGate`, `CaptureClipQueue`), `capture_server.py`,
@@ -882,6 +960,45 @@ producing a token and a ratio.
 "him". Which of these the user actually says is a question for a sortie rather than a design
 session — the same lesson the vocabulary itself learned when phrasings nobody utters were stripped
 out.
+
+### Decision 4 REVISED AGAIN — gate confidence and match independently (user, 2026-09-20)
+
+**The defect.** `ACT_FLOOR = 0.60` is justified by Stage 1's measured *confidence* distribution —
+correct answers ran 0.60–0.95, so 0.60 is the minimum confidence of a correct answer. But the band
+test was applied to `combined = confidence × match_ratio`, a **product of two sub-1 quantities**
+whose range is systematically lower than either factor. Found by running four real corpus clips end
+to end: two landed in the confirm band, both barely under their floor (0.589 against 0.60; 0.790
+against cancel's 0.80), and a third cleared by 0.001. A category error rather than a mis-tuned
+constant — the threshold is sound for the quantity it was measured on and too high for the quantity
+it gated.
+
+**The deeper problem, which is why the fix is not just a new number.** Confidence and match ratio
+answer different questions — *"did I hear you clearly?"* and *"is that a command I know?"* —
+and multiplying destroys the distinction. `0.9 × 0.5` and `0.5 × 0.9` both give 0.45 and mean
+opposite things.
+
+**The decision: gate them independently.** User: *"Independently. Well transcribed audio that does
+not match command patterns is exactly what needs to be passed to brain layer."*
+
+| | matches a command | no command match |
+| --- | --- | --- |
+| **heard clearly** | act, then read back | **→ brain layer** (free speech) |
+| **heard poorly** | `"Scan left, confirm?"` | `"Say again?"` |
+
+**This gives the brain a second route in, and that is the substantive change.** Until now the only
+path to the brain was the explicit wake word. "Heard clearly, matches nothing" is the implicit one —
+and today it is indistinguishable from "did not hear", which is why it could only be guessed at.
+
+**`verb_anchored` keeps earning its place.** "Scan somethinggarbled", heard clearly but
+unresolvable, is *not* brain input — the player plainly tried to issue a command, so "say again" is
+right. Only speech with **no verb anchor at all** is genuinely free speech. The three-way
+distinction the seven-field seam exists for is what makes this expressible.
+
+**No new measurement is required.** `ACT_FLOOR = 0.60` was measured against confidence, so applying
+it to confidence makes the existing constant correct — it was wrong only because it was pointed at
+the product. The fix validates the number rather than replacing it. `MATCH_FLOOR = 0.6` already
+lives in the adapter and nothing below it reaches body, so the match side is largely gated upstream
+already; multiplying was re-penalising something already filtered.
 
 ### Settled Decisions (user, 2026-09-19)
 

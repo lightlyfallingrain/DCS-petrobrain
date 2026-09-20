@@ -72,6 +72,33 @@ roadmap update itself: does this milestone's completion change what the next mil
 or invalidate an assumption downstream milestones rely on? One line is enough — this is the
 project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than a calendar.
 
+## Knowledge graph
+
+A queryable graph over the current-state design documentation lives in `graphify-out/` (gitignored,
+built from the `graphify-corpus/` mirror). **Query it before concluding something is undocumented** —
+this project's recurring failure is not missing documentation but failing to find documentation that
+already exists, and occasionally finding a superseded version instead.
+
+```sh
+.claude/scripts/gq.sh "<question>"   # query, then list the sources to read
+graphify path "<node A>" "<node B>"  # shortest path between two concepts
+graphify explain "<node>"            # plain-language explanation
+```
+
+**Use `gq.sh`, not `graphify query` directly — a PreToolUse hook enforces this.** The graph says *where* to look; it does not say what
+the text says. Edge annotations quote fragments, and a fragment can lose its tense — the first build
+cited "a standing no-omniscience violation" from a passage whose next sentence records the fix. The
+wrapper ends every answer with the source files already assembled, so reading them is one step
+rather than a decision, and re-renders annotations as `fragment@path` so they stop reading as
+claims. That is the mechanism; the rule on its own was forgotten within the hour it was written.
+
+Install the hooks once per clone: `.claude/scripts/install-git-hooks.sh`. They keep the graph's
+structural spine current per commit (AST over changed `.py`, ~1.5s, captures docstrings) and record
+that a semantic rebuild is owed when docs change. **The rebuild order at merge is load-bearing —
+documents first, graph second, merge third** — because a graph built from stale documents launders
+the staleness rather than merely lagging it. Full reasoning and the merge procedure:
+`docs/PROCESS.md`, "Keeping the knowledge graph honest".
+
 ## Verification
 
 Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list (`world-model/CLAUDE.md`, `aircraft-layer/CLAUDE.md`, or `body-layer/CLAUDE.md`; each has its own equally-canonical list, ruff format/check + mypy --strict + pytest in each case). A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
