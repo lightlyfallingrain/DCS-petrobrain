@@ -163,7 +163,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
-from belief.audio_client import AudioAdapterClient
+from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
@@ -551,6 +551,60 @@ def _poll_f10_commands(
             crew_console.handle_f10_command(token, now_sim)
 
 
+def _poll_transcripts(
+    audio_client: AudioAdapterClient, crew_console: CrewConsole, now_sim: float
+) -> None:
+    """Drains pending recognised-speech transcripts (`plans/inbound-speech/
+    plan.md` Stage 3) and dispatches each through `CrewConsole.
+    handle_transcript` -- the same per-poll dispatch shape `_poll_f10_
+    commands` already uses for its own drain-on-GET endpoint. Wrapped in
+    its own `try`/`except AudioAdapterError` (log-and-continue), so one
+    failed poll never stops the loop.
+
+    Each item is validated field-by-field against `transcript_queue.
+    TranscriptEvent.to_dict`'s seven-field shape before dispatch -- a
+    malformed/partial item (a schema mismatch, not an expected runtime
+    state) is skipped rather than raising, the same defensive posture
+    `_poll_f10_commands`'s `isinstance` check already takes on its own,
+    simpler payload. `t_wall` (wall-clock time the adapter recognised the
+    clip) is intentionally not threaded into `handle_transcript` --
+    `now_sim` is this poll's own DCS sim time, the same clock every other
+    dispatch path in this loop already uses."""
+    try:
+        transcripts = audio_client.get_transcripts()
+    except AudioAdapterError:
+        logger.warning("transcript poll failed (continuing)", exc_info=True)
+        return
+    for item in transcripts:
+        transcript = item.get("transcript")
+        confidence = item.get("confidence")
+        token = item.get("token")
+        match_ratio = item.get("match_ratio")
+        verb_anchored = item.get("verb_anchored")
+        ambiguous = item.get("ambiguous")
+        if not isinstance(transcript, str):
+            continue
+        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+            continue
+        if token is not None and not isinstance(token, str):
+            continue
+        if not isinstance(match_ratio, (int, float)) or isinstance(match_ratio, bool):
+            continue
+        if not isinstance(verb_anchored, bool):
+            continue
+        if not isinstance(ambiguous, bool):
+            continue
+        crew_console.handle_transcript(
+            transcript,
+            float(confidence),
+            token,
+            float(match_ratio),
+            verb_anchored,
+            ambiguous,
+            now_sim,
+        )
+
+
 def _run_crew_text_poll_loop(
     runner: ConsolePerceptionRunner,
     crew_console: CrewConsole,
@@ -560,6 +614,8 @@ def _run_crew_text_poll_loop(
     poll_interval_s: float,
     stop_event: threading.Event,
     f10_commands_enabled: bool = False,
+    speech_client: AudioAdapterClient | None = None,
+    speech_input_enabled: bool = False,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -570,7 +626,13 @@ def _run_crew_text_poll_loop(
     run_once` itself. `f10_commands_enabled` (`--f10-commands`, `plans/
     f10-crew-commands/plan.md`) additionally polls/dispatches pending F10
     radio-menu selections each cycle via `_poll_f10_commands` -- defaults
-    off, a true no-op when unset."""
+    off, a true no-op when unset. `speech_input_enabled` (`--speech-input`,
+    `plans/inbound-speech/plan.md` Stage 3) is the same additive-no-op-when-
+    unset shape, polling `speech_client.get_transcripts()` via `_poll_
+    transcripts` -- `speech_client` is only ever non-`None` here when
+    `speech_input_enabled` is set (`main()`'s own wiring), but both are
+    still checked so this function has no implicit dependency on how its
+    caller constructs them."""
     world_model_conn = open_world_model(world_model_db)
     try:
         runner.sources = _build_sources(
@@ -585,6 +647,8 @@ def _run_crew_text_poll_loop(
                 crew_console.drain_events(runner.last_t_sim)
                 if f10_commands_enabled:
                     _poll_f10_commands(aircraft_client, crew_console, runner.last_t_sim)
+                if speech_input_enabled and speech_client is not None:
+                    _poll_transcripts(speech_client, crew_console, runner.last_t_sim)
             stop_event.wait(poll_interval_s)
     finally:
         world_model_conn.close()
@@ -728,11 +792,25 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--speech-input",
+        action="store_true",
+        help=(
+            "poll and dispatch recognised speech transcripts via "
+            "audio-adapter's GET /transcripts/poll -- Stage 3, plans/"
+            "inbound-speech/plan.md. Only meaningful with --crew-text; "
+            "defaults off, a true no-op when absent. Requires "
+            "--audio-adapter-url. Independent of --speech-audio (audio "
+            "out) -- pass both to hear Petrovich act on and read back a "
+            "spoken command end to end."
+        ),
+    )
+    parser.add_argument(
         "--audio-adapter-url",
         default=None,
         help=(
             "audio-adapter base URL, e.g. http://127.0.0.1:7795 -- required "
-            "together with --speech-audio, unused otherwise"
+            "together with --speech-audio and/or --speech-input, unused "
+            "otherwise"
         ),
     )
     args = parser.parse_args()
@@ -741,6 +819,8 @@ def main() -> None:
         parser.error("--crew-text is mutually exclusive with --console")
     if args.speech_audio and args.audio_adapter_url is None:
         parser.error("--speech-audio requires --audio-adapter-url")
+    if args.speech_input and args.audio_adapter_url is None:
+        parser.error("--speech-input requires --audio-adapter-url")
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
@@ -765,9 +845,16 @@ def main() -> None:
             output=None,
             mission_phase_tracker=mission_phase_tracker,
         )
-        speech_client = (
+        # One AudioAdapterClient instance, shared by whichever of --speech-
+        # audio (push_speech, outbound) / --speech-input (get_transcripts,
+        # inbound) are set -- both hit the same audio-adapter process at
+        # the same --audio-adapter-url, so there is no reason to construct
+        # two. CrewConsole.speech_client only takes it when --speech-audio
+        # is actually set (audio *output* is its own concern, independent
+        # of whether speech input is also wired).
+        audio_adapter_client = (
             AudioAdapterClient(base_url=args.audio_adapter_url)
-            if args.speech_audio
+            if (args.speech_audio or args.speech_input)
             else None
         )
         crew_console = CrewConsole(
@@ -777,7 +864,7 @@ def main() -> None:
             aircraft_client=aircraft_client,
             tasks=crew_runner.tasks,
             overlay_client=aircraft_client if args.overlay else None,
-            speech_client=speech_client,
+            speech_client=audio_adapter_client if args.speech_audio else None,
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(
@@ -791,6 +878,8 @@ def main() -> None:
                 args.poll_interval_s,
                 stop_event,
                 args.f10_commands,
+                audio_adapter_client if args.speech_input else None,
+                args.speech_input,
             ),
             daemon=True,
         )
