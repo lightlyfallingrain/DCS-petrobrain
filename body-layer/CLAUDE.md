@@ -130,6 +130,17 @@ omitted); defaults off, a true no-op when absent, same additive posture as `--ov
 `audio-adapter/CLAUDE.md` for how to run that process, including its own `--target local` no-other-
 subproject-needed dev path.
 
+Add `--speech-input --audio-adapter-url URL` alongside `--crew-text` (Stage 3, `plans/
+inbound-speech/plan.md`) to poll and dispatch recognised speech transcripts through
+`CrewConsole.handle_transcript` — the inbound counterpart to `--speech-audio`'s outbound path,
+polling the same `audio-adapter` instance's `GET /transcripts/poll` instead of pushing to
+`POST /speak`. Independent of `--speech-audio` (a separate concern, audio in vs. audio out) —
+both share one `AudioAdapterClient` instance when both are set, but either works alone. Only
+meaningful with `--crew-text`; `--speech-input` requires `--audio-adapter-url`; defaults off, a
+true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-adapter` run with
+`--whisper-model` for `GET /transcripts/poll` to ever have anything to drain — see
+`audio-adapter/CLAUDE.md`.
+
 ## Testing
 
 - Everything in this subproject must be testable without a live DCS session or a running
@@ -283,7 +294,10 @@ subproject-needed dev path.
   module-independence rule — the world-model seam is the sole sanctioned in-process exception).
   `push_speech(text, urgent)` raises `AudioAdapterError` on any transport failure, mirroring
   `push_text_line`'s raise-and-let-the-caller-catch contract — `CrewConsole._print`'s own
-  `try`/`except` is where that failure is meant to be caught.
+  `try`/`except` is where that failure is meant to be caught. `get_transcripts()` (Stage 3,
+  `plans/inbound-speech/plan.md`) is this client's first inbound read — `GET /transcripts/poll`
+  mirrors `aircraft_client.get_f10_commands`'s own drain-on-poll precedent (`[]`, not `None`, on
+  an empty queue; raises `AudioAdapterError` on transport/parse failure, same as `push_speech`).
 - `src/replay.py` — BL-0 replay harness: drives any `PerceptionSource.poll()` over a recorded
   sequence of ownship states, no live DCS/aircraft-layer connection required.
 - `src/belief/` — PB-2's observation-*consumption* package (`perception/` stays observation
@@ -531,7 +545,15 @@ subproject-needed dev path.
   `--overlay`/`--f10-commands`) builds a `belief.audio_client.AudioAdapterClient` and wires it as
   `CrewConsole.speech_client` — independent of `--overlay`'s own `AircraftLayerClient` wiring
   (a different process, a different URL); `parser.error`s if `--speech-audio` is passed without
-  `--audio-adapter-url`.
+  `--audio-adapter-url`. `--speech-input` (Stage 3, `plans/inbound-speech/plan.md`, same
+  additive-no-op-when-absent posture) adds a `_poll_transcripts` call to `_run_crew_text_poll_loop`
+  right after `_poll_f10_commands`, draining `audio_client.get_transcripts()` and dispatching each
+  transcript through `CrewConsole.handle_transcript` after validating all seven wire fields
+  (`transcript`/`confidence`/`token`/`match_ratio`/`verb_anchored`/`ambiguous`/`t_wall` — the last
+  unused, `now_sim` is this poll's own sim time) — its own `try`/`except AudioAdapterError`
+  (log-and-continue), the same per-call isolation `_poll_f10_commands` uses. `--speech-audio` and
+  `--speech-input` share one `AudioAdapterClient` instance when both are set (one process, one
+  URL), but either works independently of the other.
 - `src/belief/utterance.py` (BL-5a, `plans/bl5a-text-mode-crew-interaction/plan.md`) — the
   deterministic intent parser: `PlayerUtterance`/`PartialParse` (§5/§3.5's shapes, trimmed to what
   this milestone populates) and `parse_utterance`, a small ordered table of `(regex, intent)` pairs
@@ -682,7 +704,13 @@ subproject-needed dev path.
   for the first time. Each scan speaks a fixed readback (`speech.render_scan_readback`,
   `"Scanning <sector label>."`). `tasks` mirrors `aircraft_client`'s own reserved-field pattern;
   `logger.py` wires it to the same `ConsolePerceptionRunner.tasks` instance its poll loop already
-  ticks.
+  ticks. `stop_talking` (Stage 3, `plans/inbound-speech/plan.md`, "deferred from Stage 2") is
+  `handle_f10_command`'s newest branch: `_handle_stop_talking` returns a short acknowledgement
+  (`speech.render_stop_acknowledged`, `"Copy."`), and this is the one token whose dispatch calls
+  `self._print(lines, bypass_gate=True)` instead of the shared tail's plain `self._print(lines)` —
+  `bypass_gate=True` is what threads through as `speech_client.push_speech(..., urgent=True)`,
+  which is what actually triggers aircraft-layer's `AudioPlaybackSender._interrupt_playback` and
+  clears whatever is currently playing before this acknowledgement plays.
 - `src/belief/voice_commands.py` (`plans/inbound-speech/plan.md` Stage 2, Decision 4 REVISED's
   split) — the act/confirm/say-again band decision (`classify_response`, given `audio_adapter.
   command_matcher.MatchResult`'s fields reproduced as plain arguments — body-layer holds no import
