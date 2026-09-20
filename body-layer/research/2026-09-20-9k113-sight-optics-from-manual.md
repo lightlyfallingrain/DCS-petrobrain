@@ -82,3 +82,66 @@ magnifications and the slew limits. The reticle mil markings bound the *visible*
 indirectly (13 mil ≈ 0.74°) but that is the reticle's extent, not the eyepiece's. If slice 1 needs
 a real FOV figure rather than a placeholder, that is a further question for the manual's optical
 sections or for measurement in the sim.
+
+## Second pass: looking for the sight's own angular limits (2026-09-20)
+
+The user recalls seeing the 9K113's real limits in this manual — **azimuth ±60°**, elevation not
+remembered. Searched pages **66–75** (all of §4.6.7), **80–81** (§4.11, which turns out to be an
+empty heading), **105–108** and **110–113** (the ПТУР employment procedure).
+
+**The elevation limit was not found on any of them.** Not recorded as absent from the manual — only
+as absent from the pages read. Still unread and plausible: §2.4 Прицел ПКИ (p.23), §1.6/4.5.4
+АСП-17ВП (p.15, 46–53), the tail of the ПТУР procedure (p.114–116), and §5.4–5.5 on sight modes and
+aiming angles (p.124–127).
+
+The search turned up four things that matter more to the cones model than the limits would have.
+
+### The operator commands an angular RATE, not an angular position
+
+Verbatim, p.113 step 14:
+
+> оператор управляет не угловым положением ЛВ ПН, а **угловой скоростью** ЛВ ПН … Чем сильнее
+> отклонен джойстик, или чем дальше перемещена мышь, тем быстрее начинает двигаться прицельная
+> марка.
+
+This **confirms the correction made earlier today rather than merely supporting it**: the control
+console's travel could never have been the sight's field of regard, because deflection sets *slew
+rate*, not angle. Handle position and head position are not the same kind of quantity.
+
+For the cones milestone this is a direct input to slice 2 rather than slice 1: **pointing the sight
+somewhere costs time proportional to angular distance**, at a rate the operator chooses. A scan
+model that teleports the sight between sectors would be wrong in a way the manual explicitly
+describes.
+
+### The sight has physical doors, and they are a real state
+
+p.110 step 10 and p.72 item 3: the `НАБЛ.` switch opens the **outer doors** (наружные створки) of
+the nose turret — hydraulic pressure required — and the inner doors are separately switched.
+Switching `НАБЛ.` off automatically closes inner then outer, in that order.
+
+So the state-transitions diagram's **"Observ off = close 9K113 doors"** is a real physical action
+with a real sequence, not a UI nicety. A cone model that lets the magnified channel see while the
+doors are shut would be wrong.
+
+### Launch entry requires the sight line within 0.86° of the airframe axis
+
+p.112 step 12: while the sight line is parallel to the construction axis (СГФ) or near it, a red
+cue and a buzzer indicate the missile-entry condition is satisfied; **beyond 0.86° of deflection
+the condition disappears.** The operator's panel lamp `РАЗРЕШ. ПУСК` states the same bound as "not
+more than 1°" (p.67).
+
+That is a *launch* constraint rather than a *seeing* constraint, and worth keeping separate: the
+sight can look well off-axis, but the missile can only be fired into a narrow cone ahead.
+
+### Magnification is toggled in flight
+
+`LCtrl+X` switches ×3.3 ↔ ×10 (p.112–113), and the manual's own step 13 says to use **both** when
+searching and identifying: search wide, identify narrow. That is a behaviour the cones design
+should expect rather than picking one magnification per mode.
+
+### Also noted
+
+The head is **gyro-stabilised** and takes about three minutes from power-on before `ГОТОВ` lights
+(p.75, p.110) — a warm-up state the model does not currently have. And the IR seeker's diaphragm
+works over an 8–16 arcminute viewing angle (p.73 item 12), which is the *missile tracker's* field,
+not the optical sight's, and should not be mistaken for it.
