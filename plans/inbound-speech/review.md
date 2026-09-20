@@ -165,3 +165,110 @@ speech/logger, all touched test files, both CLAUDE.md updates, implementation.md
 section), traced the five weighted concerns against actual code rather than docstrings/claims
 (including a cross-subproject trace into `aircraft-layer/src/collector/audio_sender.py` for the
 `stop_talking` sequencing question), and re-ran both subprojects' full check sequences myself.
+
+---
+
+## `stop_talking` silent-interrupt change (2026-09-20)
+
+Reviewed the four commits after Stage 3's DoD (`fe11cad..feature/stt-recognition-service`:
+`f53ff15`, `8bba359`, `7a5e522`, `dce0aac`) against Decision 5 REVISED
+(`plans/inbound-speech/plan.md`) and the Stage 3 entry in `implementation.md`. All three
+subprojects' full check sequences re-run directly and matched what was reported: aircraft-layer
+134 passed; audio-adapter 100 passed + 1 skipped; body-layer 717 passed (mypy from inside
+`body-layer/`).
+
+### Required Fixes
+
+- **Race in `LocalPlaybackSink`'s interrupted-vs-failed flag
+  (`audio-adapter/src/audio_adapter/__main__.py`)** — `self._interrupted` is a single-slot field
+  (`subprocess.Popen[bytes] | None`), not keyed per-process. Under two closely-spaced `/stop`
+  calls — e.g. `/speak` A in flight, `/stop` kills A and sets `self._interrupted = A`, then before
+  A's `deliver()` reaches its `finally` block a second `/speak` B starts and a second `/stop`
+  arrives and kills B, overwriting `self._interrupted` from A to B — A's `deliver()` then finds
+  `self._interrupted is not A` and treats its own intentional kill as a genuine `afplay` failure,
+  raising `AudioDeliveryError` exactly as the pre-fix code did for every kill. This is precisely
+  the "genuine failure must still raise, intentional kill must not" property the change is meant
+  to guarantee, and it breaks under the "concurrent `/speak` + `/stop` + a second `/speak`"
+  scenario the task brief asked to be checked, not an exotic edge case. `ThreadingHTTPServer` genuinely
+  allows this interleaving — nothing serializes requests. Fix: track interrupted processes by
+  identity in a set/dict (e.g. `set[int]` keyed by `id(process)`, added in `interrupt()` and
+  discharged in `deliver()`'s `finally`) rather than a single slot that a later interrupt can
+  clobber before an earlier `deliver()` has read it.
+
+- **No automated test for the interrupted-vs-failed flag logic itself.** The stated justification
+  (`__main__.py` is a live-process entrypoint, untested by policy, same as
+  `aircraft-layer/src/collector/__main__.py`/`body-layer/src/logger.py`'s `main()`) does not fit
+  here: `LocalPlaybackSink.deliver`/`interrupt`/the `_current`/`_interrupted` bookkeeping is
+  ordinary, deterministic class logic — the same shape as `AudioPlaybackSender.interrupt` on the
+  aircraft-layer side, which *does* have a real test (`test_audio_sender.py`, against a fake
+  `WavPlayer`, no real subprocess). It happens to be untested only because it was written inside
+  `__main__.py` alongside the genuinely-untestable CLI wiring (`main()`'s argparse/server-boot
+  code), not because the logic itself resists testing — a fake short-lived process (e.g. `sleep
+  0.5`) or a `Popen`-returning stub would exercise the exact race above. Given the race just found,
+  a regression test is not optional polish. Recommend: extract `LocalPlaybackSink` to its own
+  module (mirroring `AircraftLayerAudioSink`'s placement in `aircraft_client.py`, not the CLI
+  entrypoint), and add a direct test of `deliver()`/`interrupt()`'s interrupted-vs-failed
+  distinction, including the concurrent case above.
+
+### Optional Refinements
+
+- The `LocalPlaybackSink` docstring's claim that "a second `/speak` call while one is still playing
+  simply plays after it via `afplay`'s own process serialization" is no longer accurate now that
+  `deliver()` uses `Popen` instead of the previous blocking `subprocess.run` — nothing in this
+  class serializes concurrent `/speak` requests any more; two threads can each have their own
+  `afplay` in flight simultaneously, and `_current`/`interrupt()` will only ever address the
+  most-recently-started one. Harmless for the dev/debug use this path is intended for, but the
+  docstring should say so rather than imply serialization that isn't there (optional — dev-tool
+  scale, not a production path).
+
+### Verified findings (no fix needed)
+
+1. **Aircraft-layer parity claim holds.** Read `_WinsoundPlayer.play`/`stop`
+   (`aircraft-layer/src/collector/audio_sender.py`): `play()` starts audio with `SND_ASYNC` and
+   blocks on `threading.Event.wait(timeout=...)`, `stop()` calls `SND_PURGE` and sets that same
+   event — neither inspects a return/exit code of any kind, and `play()` returns identically
+   whether the wait ended via timeout or via `stop()`'s `set()`. There is no return-code path here
+   for an interrupt to be confused with a failure, so no aircraft-layer defect exists and no
+   change was needed there — verified by reading the code, not accepted on the implementer's word.
+   `AudioPlaybackSender.interrupt()` is a clean extraction of the exact `_clear_queue`/
+   `_interrupt_playback` pair `play_audio(..., urgent=True)` already used — no return-code
+   inspection anywhere in that path either.
+
+2. **Silence is genuine.** `handle_f10_command`'s `stop_talking` branch calls
+   `self._handle_stop_talking()` and `return []` directly, never calling `self._print` — confirmed
+   by reading `crew_console.py`'s diff, not the docstring. `_handle_stop_talking` itself returns
+   `None` and only calls `speech_client.stop()` (swallowing `AudioAdapterError` with a logged
+   warning). No line reaches `_print`, the overlay, or `push_speech` under any path, including the
+   `speech_client is None` and interrupt-failure cases (both covered by
+   `test_stop_talking_pushes_nothing_to_the_overlay` and
+   `test_stop_talking_interrupt_failure_does_not_raise`).
+
+3. **`render_stop_acknowledged` cleanly removed.** `grep` for `render_stop_acknowledged` across
+   `body-layer/src` and `body-layer/tests` returns nothing (the only remaining `"Copy."`
+   occurrences are historical prose in docstrings/comments explaining what was removed and why).
+   `test_render_stop_acknowledged` was deleted from `test_speech.py`, and `test_crew_console.py`'s
+   old `"Copy."`-asserting tests were rewritten in place — `test_stop_talking_speaks_nothing`,
+   `test_stop_talking_calls_speech_client_stop_not_push_speech`,
+   `test_stop_talking_pushes_nothing_to_the_overlay`, plus a new
+   `test_stop_talking_interrupt_failure_does_not_raise` — asserting the new contract, not merely
+   removed.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES
+
+The mechanism is sound in its single-request shape and the aircraft-layer parity claim checks out
+by direct code reading, but the interrupted-vs-failed flag has a real, non-hypothetical
+correctness gap under concurrent requests (exactly the scenario flagged for review), and that gap
+exists undetected precisely because the logic carrying it has no automated test. Both required
+fixes are localized to `LocalPlaybackSink` in `audio-adapter/src/audio_adapter/__main__.py` — no
+other file needs to change.
+
+### Review Confidence
+
+Full read — read every diff hunk across all three subprojects for this change (aircraft-layer
+`api/server.py`/`collector/audio_sender.py` + both new/changed test files, audio-adapter
+`server.py`/`aircraft_client.py`/`__main__.py`'s `LocalPlaybackSink` + `test_server.py`, body-layer
+`crew_console.py`/`speech.py`/`audio_client.py` + `test_crew_console.py`/`test_speech.py`), traced
+the interrupted-vs-failed logic by hand for the concurrent-request scenario rather than trusting
+the docstring's stated intent, and re-ran all three subprojects' checks directly.
