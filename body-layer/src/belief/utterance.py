@@ -105,7 +105,7 @@ class PartialParse:
 @dataclass(frozen=True, slots=True)
 class PlayerUtterance:
     """§5's `player_utterance` record, trimmed to what this milestone
-    actually populates (`duration_s`/`t_wall` are SRS-adapter/STT concerns
+    actually populates (`duration_s`/`t_wall` are audio-adapter/STT concerns
     not built yet -- PB-7/PB-8)."""
 
     id: str

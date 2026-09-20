@@ -1,4 +1,4 @@
-"""Tests for `belief.srs_client.SrsAdapterClient`.
+"""Tests for `belief.audio_client.AudioAdapterClient`.
 
 Exercised against a real loopback `http.server` instance rather than a
 mocked `urllib`, mirroring `test_aircraft_client.py`'s own pattern."""
@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from belief.srs_client import SrsAdapterClient, SrsAdapterError
+from belief.audio_client import AudioAdapterClient, AudioAdapterError
 
 
 def _make_handler(
@@ -60,7 +60,7 @@ def test_push_speech_posts_text_and_urgent(
     server_and_received: tuple[HTTPServer, list[dict[str, object]]],
 ) -> None:
     httpd, received = server_and_received
-    client = SrsAdapterClient(f"http://127.0.0.1:{httpd.server_port}")
+    client = AudioAdapterClient(f"http://127.0.0.1:{httpd.server_port}")
     client.push_speech("Watching Charlie one seven.", urgent=False)
 
     assert received == [{"text": "Watching Charlie one seven.", "urgent": False}]
@@ -70,13 +70,13 @@ def test_push_speech_urgent_true(
     server_and_received: tuple[HTTPServer, list[dict[str, object]]],
 ) -> None:
     httpd, received = server_and_received
-    client = SrsAdapterClient(f"http://127.0.0.1:{httpd.server_port}")
+    client = AudioAdapterClient(f"http://127.0.0.1:{httpd.server_port}")
     client.push_speech("Missile launch, break right.", urgent=True)
 
     assert received[0]["urgent"] is True
 
 
 def test_push_speech_unreachable_host_raises() -> None:
-    client = SrsAdapterClient("http://127.0.0.1:1", timeout_s=1.0)
-    with pytest.raises(SrsAdapterError):
+    client = AudioAdapterClient("http://127.0.0.1:1", timeout_s=1.0)
+    with pytest.raises(AudioAdapterError):
         client.push_speech("hello", urgent=False)

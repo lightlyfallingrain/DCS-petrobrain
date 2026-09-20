@@ -1,4 +1,4 @@
-"""Text-to-speech synthesis for `srs-adapter` (`plans/tts-voice-output/plan.md`
+"""Text-to-speech synthesis for `audio-adapter` (`plans/tts-voice-output/plan.md`
 Decision 2).
 
 `TTSEngine` is a small `Protocol` -- one method, `synthesize(text) -> bytes`
@@ -68,7 +68,7 @@ class MacSayEngine:
         if not text.strip():
             raise TTSSynthesisError("cannot synthesize empty text")
 
-        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="srs-adapter-")
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-")
         os.close(fd)
         try:
             result = subprocess.run(

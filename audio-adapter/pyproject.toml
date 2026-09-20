@@ -1,5 +1,5 @@
 [project]
-name = "dcs-srs-adapter"
+name = "dcs-audio-adapter"
 version = "0.1.0"
 description = "Text-to-speech audio adapter: synthesizes Petrovich's spoken lines and delivers them to a local speaker (dev) or the aircraft layer's Windows playback endpoint"
 requires-python = ">=3.11"
@@ -17,8 +17,8 @@ pythonpath = ["src"]
 [tool.ruff.lint.isort]
 # See world-model/pyproject.toml and aircraft-layer/pyproject.toml for why
 # this is declared explicitly rather than left to ruff's cwd-relative
-# auto-detection: invoking `ruff check srs-adapter/src srs-adapter/tests`
-# from the repo root vs. cwd srs-adapter/ changes whether these local
+# auto-detection: invoking `ruff check audio-adapter/src audio-adapter/tests`
+# from the repo root vs. cwd audio-adapter/ changes whether these local
 # packages are classified as first-party or third-party, flipping I001
 # findings depending on invocation cwd. Declaring them explicitly makes the
 # classification invocation-cwd-independent.
