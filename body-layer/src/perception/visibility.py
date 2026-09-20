@@ -44,9 +44,18 @@ size x magnification) makes the unaided and binocular columns land on the
 That is why retuning the three angular constants below was enough, and no
 per-optic curve had to be introduced here.
 
-Composes three independent plausibility gates over one
+**`optics.py`** (`plans/detection-cones-slice1/plan.md`) now names this
+binocular premise explicitly as `BINOCULAR_OPTIC`, `check_visibility`'s
+default `optic` parameter -- the paragraphs above describe
+`BINOCULAR_OPTIC` specifically, not an unnamed implicit default. See that
+module for the other named optic (`UNAIDED_OPTIC`) and the field-of-view
+gate they add on top of the other gates below. The 9K113 sight is
+deliberately deferred out of this slice (user, 2026-09-20) -- see
+`optics.py`'s own docstring.
+
+Composes four independent plausibility gates over one
 `association.WorldObjectCandidate` (reused, not duplicated) against one
-`OwnshipState`. All three must pass; failing any one returns `None`
+`OwnshipState`. All four must pass; failing any one returns `None`
 (absence, not a fabricated weak-confidence guess -- deliberately stricter
 than `association.py`'s ambiguous-match compromise, since there is no real
 detection here to be ambiguous *about*):
@@ -72,7 +81,12 @@ detection here to be ambiguous *about*):
    defects are fixed by the same replacement: a body-relative depression
    mask naturally bounds "how far down can he see" as a function of
    azimuth, which a heading-only cone structurally cannot express.
-2. **Angular-radius recognition-tier range threshold**, replacing an
+2. **Per-optic field of view** (`plans/detection-cones-slice1/plan.md`) --
+   `optics.within_optic_fov` tests the same body-relative direction against
+   `optic`'s own (circular) field-of-view half-angle, `None` meaning
+   unrestricted. A narrower cone stacked on top of the cockpit mask, not a
+   replacement for it -- see `check_visibility`'s own docstring.
+3. **Angular-radius recognition-tier range threshold**, replacing an
    invented range-multiplier curve. `HelperAI.lua`'s `min_angular_radius`
    table (`aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
    ambient-detection.md`, Session 5 Finding 3) is ED's own range-by-target-
@@ -86,7 +100,7 @@ detection here to be ambiguous *about*):
    a verified reproduction of ED's actual formula (see the plan's Risks
    section: the native code also folds in `min_contrast_f`/
    `min_fog_transparency`, which this project has no input for).
-3. **Terrain LOS** -- reuses `geometry.line_of_sight_clear` as-is; the piece
+4. **Terrain LOS** -- reuses `geometry.line_of_sight_clear` as-is; the piece
    `geometry.py`'s own docstring already anticipated needing ("turning
    'clear line of sight' into an actual detectability decision... [is] a
    concrete tier's job... not this shared helper's").
@@ -99,7 +113,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from perception import object_model
 from perception.association import WorldObjectCandidate
@@ -112,6 +126,20 @@ from perception.geometry import (
     range_m,
 )
 from perception.source import OwnshipState
+
+if TYPE_CHECKING:
+    # `Optic` is only used for annotations here -- the actual value (used
+    # both as a type at runtime inside `check_visibility` and to resolve
+    # its `optic` parameter's default) is imported lazily inside that
+    # function. See its docstring for why: `optics.py` imports
+    # `BINOCULAR_RANGE_MULTIPLIER` from this module at its own module
+    # scope (`plans/detection-cones-slice1/plan.md` Decision 1 -- this
+    # module keeps owning the constant), and a plain top-level import of
+    # `optics.py` back into this module would make the two modules
+    # genuinely circular: whichever of the two happens to be imported
+    # first would fail, because it would trigger a full load of the
+    # other, which itself needs the first one fully loaded.
+    from perception.optics import Optic
 
 #: Apparent-angular-radius thresholds (radians) per recognition tier,
 #: **calibrated 2026-09-17 against real in-game screenshots** -- see
@@ -166,10 +194,25 @@ IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
 NAKED_EYE_GATING_ANGULAR_RADIUS_RAD: Final[float] = LOWRES_ANGULAR_RADIUS_RAD
 NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
 
-#: See the module docstring's binocular premise. Same numeric value as
-#: `HelperAI.lua`'s `extra_eyesight_ratio`, reinterpreted and owned by this
-#: project as binocular magnification, not a transcription of that
-#: constant's (unverified) native role.
+#: See the module docstring's binocular premise. Originally the same
+#: numeric value as `HelperAI.lua`'s `extra_eyesight_ratio`, reinterpreted
+#: and owned by this project as binocular magnification, not a
+#: transcription of that constant's (unverified) native role.
+#:
+#: **Reinterpreted again, 2026-09-20** (`plans/detection-cones-slice1/
+#: plan.md`, `optics.py`'s `BINOCULAR_OPTIC`): this is no longer read as a
+#: raw optical magnification at all -- 4.0 was never a real binoculars'
+#: magnification, it was `extra_eyesight_ratio` wearing that label. It is
+#: now this project's *effective* range multiplier, the empirically
+#: calibrated figure every existing sortie's data is built on --
+#: `optics.BINOCULAR_OPTIC.effective_magnification` -- factored into a
+#: realistic instrument's true magnification (8.0, a handheld 8x30) times
+#: a named, unmeasured handheld/vibration derating factor
+#: (`handheld_effectiveness=0.5`), chosen so the two multiply back to
+#: exactly this constant. This value itself is untouched by that split --
+#: still 4.0, still what every gate below applies by default -- only what
+#: it is understood to mean changed. See `optics.py`'s `BINOCULAR_OPTIC`
+#: docstring for the full derivation.
 BINOCULAR_RANGE_MULTIPLIER: Final[float] = 4.0
 
 #: Outer range bound, applied regardless of what the angular-radius formula
@@ -262,7 +305,11 @@ class VisibilityResult:
     confidence: float
 
 
-def _achieved_tier(range_m: float, size_m: float) -> tuple[str, float]:
+def _achieved_tier(
+    range_m: float,
+    size_m: float,
+    magnification: float = BINOCULAR_RANGE_MULTIPLIER,
+) -> tuple[str, float]:
     """The tightest recognition tier `range_m` still satisfies for an object
     of characteristic size `size_m`, and that tier's confidence
     (Stage 6's worked table: presence low / class medium / type high). Each
@@ -271,6 +318,11 @@ def _achieved_tier(range_m: float, size_m: float) -> tuple[str, float]:
     gate #2) -- a very large object's `hires`/`medres` thresholds can both
     collapse onto the cap, which is expected, not a bug.
 
+    `magnification` generalises the old hardcoded `BINOCULAR_RANGE_
+    MULTIPLIER` reference (`plans/detection-cones-slice1/plan.md`) --
+    defaults to it, so every existing call site (which passes no
+    `magnification` argument) is unaffected.
+
     The `lowres` branch is unreachable while `NAKED_EYE_GATING_ANGULAR_
     RADIUS_RAD` gates at `medres` (Stage 6) -- `check_visibility` already
     drops anything beyond the gating threshold before this function is ever
@@ -278,11 +330,11 @@ def _achieved_tier(range_m: float, size_m: float) -> tuple[str, float]:
     `lowres`."""
     hires_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
-        (size_m / HIRES_ANGULAR_RADIUS_RAD) * BINOCULAR_RANGE_MULTIPLIER,
+        (size_m / HIRES_ANGULAR_RADIUS_RAD) * magnification,
     )
     medres_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
-        (size_m / MEDRES_ANGULAR_RADIUS_RAD) * BINOCULAR_RANGE_MULTIPLIER,
+        (size_m / MEDRES_ANGULAR_RADIUS_RAD) * magnification,
     )
     if range_m <= hires_threshold_m:
         return "hires", NAKED_EYE_TYPE_CONFIDENCE
@@ -296,12 +348,40 @@ def check_visibility(
     candidate: WorldObjectCandidate,
     conn: sqlite3.Connection,
     theatre: str,
+    *,
+    optic: Optic | None = None,
 ) -> VisibilityResult | None:
-    """Run `candidate` through all three gates (see module docstring).
-    Returns `None` on the first failing gate -- cheap geometric checks
-    (cockpit mask, angular-radius range) before the expensive LOS
-    terrain-sampling check, mirroring `association.associate()`'s own
-    cheap-before-expensive ordering."""
+    """Run `candidate` through all four gates: cockpit mask, per-optic field
+    of view (`plans/detection-cones-slice1/plan.md`), angular-radius range,
+    terrain LOS (see module docstring for the latter two). Returns `None`
+    on the first failing gate -- cheap geometric checks (cockpit mask, FOV,
+    angular-radius range) before the expensive LOS terrain-sampling check,
+    mirroring `association.associate()`'s own cheap-before-expensive
+    ordering.
+
+    `optic` defaults to `optics.BINOCULAR_OPTIC` -- today's implicit,
+    unconditional default (module docstring's binocular premise), now a
+    named value. Accepted as `None` and resolved inside this function
+    rather than as a literal `Optic = BINOCULAR_OPTIC` default expression,
+    to avoid a real circular import between this module and `optics.py`
+    (see the `TYPE_CHECKING` import above) -- behaviourally identical:
+    calling `check_visibility(...)` with no `optic` argument is the same as
+    passing `BINOCULAR_OPTIC` explicitly, which is what the regression test
+    below actually pins.
+
+    The FOV gate is a new cone on top of the cockpit mask, not a
+    replacement for it -- an optic can only narrow what the mask already
+    admits. For `BINOCULAR_OPTIC`/`UNAIDED_OPTIC` (`fov_half_angle_deg is
+    None`) `within_optic_fov` always passes, so the gate is a no-op for
+    every call site that doesn't pass a sighted optic -- which, in this
+    slice, is every call site (`plans/detection-cones-slice1/plan.md`
+    Decision 4: no concrete `PerceptionSource` wires a non-default optic
+    in yet)."""
+    from perception.optics import BINOCULAR_OPTIC, within_optic_fov
+
+    if optic is None:
+        optic = BINOCULAR_OPTIC
+
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
 
@@ -319,12 +399,17 @@ def check_visibility(
     ):
         return None
 
+    if not within_optic_fov(
+        optic, body_direction.azimuth_deg, body_direction.elevation_deg
+    ):
+        return None
+
     candidate_range_m = range_m(observer, target)
     profile = object_model.profile_for(candidate.object_type)
     range_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
         (profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD)
-        * BINOCULAR_RANGE_MULTIPLIER,
+        * optic.effective_magnification,
     )
     if candidate_range_m > range_threshold_m:
         return None
@@ -333,7 +418,7 @@ def check_visibility(
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
-        candidate_range_m, profile.size_m
+        candidate_range_m, profile.size_m, optic.effective_magnification
     )
     return VisibilityResult(
         bearing_deg=candidate_bearing_deg,
