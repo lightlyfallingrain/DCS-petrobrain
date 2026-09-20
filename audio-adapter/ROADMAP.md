@@ -70,59 +70,33 @@ body-side view and the slice numbering both files share.
     and whether the voice is tolerable. Acceptance, not a correctness gate — stage 5 already
     proves the pipeline.
 
-- [ ] **Slice 2 — SRS ICS injection.** Not started. A second `AudioSink` invoking
-  `DCS-SR-ExternalAudio.exe --modulations INTERCOM --unitId <player unit id>`, so Petrovich speaks
-  on the intercom like a crew member instead of as a separate sound source.
+- [>] **Slice 2 — cockpit state drives the audio. DEFERRED 2026-09-20** (user: *"Defer the SPU-8
+  for now, let's come back to it later."*). Replaces the original SRS ICS injection, which is
+  cancelled with the SRS dependency itself.
 
-  Groundwork is done: `research/2026-09-17-tts-audio-transport-recon.md` (**read its two addenda,
-  which correct the main body**) establishes that stock SRS declares an Intercom radio for the
-  Mi-24P at 100.0 MHz modulation 2, and that `--unitId` exists specifically to allow intercom over
-  external audio.
+  **What it would do.** The intercom switch gates the crew channel in **both directions** — off
+  means he cannot hear you and you cannot hear him, which is what the real switch does — and the
+  SPU-8 volume knob sets how loud he is. One physical control turning Petrovich on and off, which
+  is the cockpit-adjustable volume the SRS route was wanted for, reached by reading the controls
+  instead of adding a dependency.
 
-  **The SPU-8 volume knob is a second, independent reason to want this** (user, 2026-09-18): on the
-  intercom channel, Petrovich's level becomes adjustable from the cockpit with the control that
-  already exists for exactly that purpose — no separate mixer, no restart, and it works the way a
-  crew intercom is supposed to. Local playback can never offer that; its level is whatever the
-  Windows mixer says. This also largely answers the open ducking question for the local path: not
-  worth chasing, because the SRS path solves the same problem better.
+  **Two design notes worth keeping, so they are not re-derived:**
+  - **`winsound` has no volume control.** `PlaySound` cannot attenuate, so the knob cannot be
+    applied at playback — it has to scale the PCM samples before the WAV is played. That decides
+    where it lives: the **collector**, which already holds the live cockpit state. The adapter
+    should not need to know about knobs.
+  - **Gating capture in the collector, not downstream.** With the intercom off, a push-to-talk press
+    should not produce a clip at all, so neither the adapter nor the body layer has to reason about
+    it.
 
-  **ICS is the only acceptable target** (user constraint, 2026-09-17): the player must stay on the
-  external mission frequency, and the Mi-24P's SPU-8 selects one audio source at a time, so a
-  dedicated Petrovich frequency would compete with mission comms rather than layer beneath them.
-  Frequency injection — the mechanism DATIS and MOOSE use, and the fallback the recon originally
-  proposed — is therefore **rejected, not deferred**. If the live ICS test fails, this slice stops
-  and slice 1's local playback is what ships.
+  **Blocked on nothing but a decision to resume** — it needs device argument numbers for the switch
+  and the knob, the same way push-to-talk needed arg 738, which is an investigator pass plus a probe
+  on the Windows box.
 
-  Open prerequisite: discovering the player's DCS unit ID at runtime. `--unitId` defaults to 1000
-  and intercom scoping needs the real value, with no frequency-based escape hatch if it proves
-  unobtainable. Likely already available through the aircraft layer's
-  `LoGetWorldObjects`/`is_ownship` path — verify, do not assume.
-
-  **Hard requirement (user, 2026-09-17): the player↔Petrovich channel must be available at all
-  times, regardless of SPU-8 selector position.** Petrovich is the crew member sitting in front of
-  the player; a crew intercom that goes silent because the pilot selected a radio is not a crew
-  intercom. This is a *pass/fail property of the slice*, not a preference — if SRS can only deliver
-  intercom audio when the selector happens to sit on an intercom position, SRS is the wrong
-  transport for this and local playback (slice 1) remains the delivered capability.
-
-  In SRS, `_data.selected` governs *transmit*, not receive — a client normally hears every radio in
-  its list. So **outbound** intercom audio should reach the player irrespective of the SPU-8
-  position, which is what this slice needs. Confirm live for this airframe rather than assuming it
-  from the general behaviour.
-
-  **That property covers outbound only, and an earlier note here wrongly implied it settled the
-  channel as a whole** (corrected 2026-09-17 after the user caught it). Inbound — the player
-  talking to Petrovich — requires *transmit* on intercom, which is exactly what `selected`
-  governs, so over SRS it would mean moving the SPU-8 off the mission frequency. That is the
-  constraint this milestone exists to respect. See slice 3 for how the two directions were split
-  as a result.
-
-  Also unverified and worth a look at the same time: the Mi-24P's **intercom 1 / intercom 2 power
-  switches**. The user's read is that one is likely the ground-crew intercom (the one the radio/ICS
-  toggle selects) and the other an always-open pilot↔operator channel — which, if DCS models it and
-  SRS exposes it, would be the natural home for this channel. Whether DCS models these switches at
-  all, and whether SRS's Mi-24P export reads them, is unknown; `SR.exportRadioMI24P` as quoted in
-  the recon reads only the selector at device 455 and the PTT at 738, which suggests it does not.
+  The original SRS groundwork is preserved in `research/2026-09-17-tts-audio-transport-recon.md`
+  (read its two addenda, which correct the main body) — it established that stock SRS declares an
+  Intercom radio for the Mi-24P at 100.0 MHz modulation 2. That finding stands as a record; it is
+  simply no longer the route.
 
 - [~] **Slice 3 — inbound speech (STT + PTT).** The larger half. **Next priority** (user,
   2026-09-19). Capture, PTT debounce, silence gating and transcription live here; body receives
@@ -153,7 +127,18 @@ body-side view and the slice numbering both files share.
     Vocabulary grew to 39 tokens during this stage: `report`/`stop`/`say again`, the wake word and
     `nevermind` for two-tier routing, and numeric bearings as a parsed slot with 5° resolution
     acting as a checksum on recognition.
-  - [ ] Stage 2 — the matcher and the command path, driven by typed text.
+  - [x] **Stage 2 — the matcher and the command path.** Merged 2026-09-20. The matcher moved to
+    this subproject (plan's "Decision 4 REVISED"): body was going to hold a third hand-synced
+    vocabulary copy, and whisper-specific normalisation — "180" for a spoken "one eight zero",
+    repetition loops, "record" for "report" — is knowledge about the recogniser rather than about
+    flying. Body keeps every decision with crew behaviour in it and still receives the raw
+    transcript, so unmatched speech falls through to escalation unchanged.
+
+    Review caught a real hole: whole-string scoring resolved "look at that" to a scan command at
+    0.727, which would have executed. Fixed structurally rather than with a tighter floor —
+    commands are word sequences, so score word sequences and count extra words against. Filler
+    stripping followed, worth more than it looks because the ratio divides by the longer word
+    count, so every unnecessary word depressed the score of the command meant.
   - [ ] Stage 3 — recognition as a service, and body-layer's inbound wiring.
   - [ ] Stage 4 — Windows capture.
   - [ ] Stage 5 — real PTT through DCS.
