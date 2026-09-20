@@ -67,7 +67,7 @@ recording directly at that rate avoids a resampling step, though
 
 ## Running this script
 
-From `srs-adapter/`:
+From `audio-adapter/`:
 
     PYTHONPATH=src .venv/bin/python tools/stt_bench.py \\
         --corpus-dir /path/to/corpus \\
