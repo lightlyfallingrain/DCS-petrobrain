@@ -28,4 +28,6 @@ known-first-party = [
     "aircraft_client",
     "stt_engine",
     "vocabulary",
+    "command_matcher",
+    "transcript_queue",
 ]
