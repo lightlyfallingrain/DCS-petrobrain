@@ -12,57 +12,67 @@ as a multiplier on top of this rather than as a replacement for it. A
 future conditions term belongs alongside the gates here; the three
 angular thresholds themselves should survive it unchanged.
 
-**Binocular premise, stated plainly so a future reader doesn't "correct"
-these constants downward.** Per the plan's Decision #6 (resolved
-2026-09-09, user-affirmed): this filter models a crew observer using
-handheld BINOCULARS, not the unaided/naked eye -- even though the module,
-channel, milestone, branch, and research file all keep the "naked_eye"
-name (not renamed here, per that decision). `BINOCULAR_RANGE_MULTIPLIER`
-below is a deliberate modeling choice for binocular-aided observation, not
-a transcription of DCS's own `HelperAI.lua` `extra_eyesight_ratio` tuning
-constant -- that constant's real role in ED's native detection formula is
-unverified (see the plan's Risks section on `min_contrast_f`/
-`min_fog_transparency`/`extra_eyesight_ratio` all being unaddressed here).
-The value **originally** happened to match `extra_eyesight_ratio` (4.0),
-and this project owned that number as "what a crew member sees through
-binoculars," independent of whatever `extra_eyesight_ratio` actually
-multiplies in DCS's native code. **As of 2026-09-20 the two have
-diverged**: `BINOCULAR_RANGE_MULTIPLIER` is now 8.0 (see its own
-docstring below for why), so the coincidence this paragraph originally
-flagged no longer holds -- worth knowing so a future reader doesn't go
-looking for a reason the two should still match. Do not re-derive the
-defaults below from an unaided-eye
-assumption and "correct" them to be stricter: the screenshot ladder
-described under the angular-radius constants below measured *both* the
-unaided view and the zoomed/binocular view of the same targets at the same
-nine ranges, and they differ by roughly two recognition tiers. This module
-is calibrated against the binocular column. Recalibrating it against the
-unaided column would not be a correction, it would be a different
-instrument -- and the place to model that properly is the deferred
-"attention direction and detection cones" milestone, which owns the
-per-optic split (see `body-layer/ROADMAP.md`).
+**Binocular premise -- SUPERSEDED, 2026-09-20, final scope change of this
+slice.** Per the plan's Decision #6 (resolved 2026-09-09, user-affirmed),
+this filter originally modeled a crew observer using handheld BINOCULARS
+*unconditionally*, for every candidate the cockpit mask admitted, with no
+field-of-view cost at all -- even though the module, channel, milestone,
+branch, and research file all kept the "naked_eye" name throughout
+(not renamed, per that decision). **That premise is now recognised as the
+single biggest source of over-detection in this channel** (user,
+2026-09-20): Petrovich was permanently glassed-up, seeing binocular
+magnification across the whole mask envelope as if he had raised
+binoculars to look at every single candidate specifically. Real
+observation is naked-eye by default. `check_visibility`'s `optic`
+parameter now defaults to `optics.UNAIDED_OPTIC` (magnification 1.0), not
+`optics.BINOCULAR_OPTIC` -- see that function's own docstring for the
+mechanism, and `optics.py`'s module docstring for the full "Naked eye is
+now the default" rationale. This paragraph is kept, marked superseded,
+because the history matters: it explains why every constant below was
+originally tuned against the binocular column, and the angular-radius
+constants' own comments still describe that tuning.
 
-The multiplier survived the 2026-09-17 calibration unchanged, which was
-itself a result worth keeping: reading the ladder as apparent angular size
-(true angular size x magnification) makes the unaided and binocular
-columns land on the *same* tier thresholds, with the optic supplying only
-the magnification. That is why retuning the three angular constants below
-was enough, and no per-optic curve had to be introduced there.
+**`BINOCULAR_RANGE_MULTIPLIER`'s round trip, stated honestly so a future
+reader does not read a random walk back to a familiar number.** The value
+below has been, across this one design slice: **4.0** (inherited,
+unexamined, from `HelperAI.lua`'s `extra_eyesight_ratio` -- that
+constant's real role in ED's native detection formula is unverified, see
+the plan's Risks section on `min_contrast_f`/`min_fog_transparency`/
+`extra_eyesight_ratio`) -> **8.0** (a same-session excursion: a realistic
+8x30 instrument, magnification stated honestly with no hidden derating)
+-> **4.0 again (final, current value below).** The final 4.0 is
+numerically identical to the first but is a different fact: it is
+independently derived from a real Б-6 6x30 (6x magnification) times a
+~0.67 penalty for handheld use on a vibrating airframe (`optics.py`'s
+`BINOCULAR_OPTIC` docstring has the arithmetic), not the restored
+inherited `extra_eyesight_ratio` value. That derivation also happens to
+match what the 2026-09-17 screenshot ladder's binocular column
+independently shows -- the first time the physical argument and the
+photographic evidence have produced the same number without either being
+tuned to match the other. **Because both the multiplier and the three
+angular-radius constants below are back to the values the 2026-09-17
+calibration was run against, that calibration is current again, not
+stale** -- `tests/test_vision_calibration.py` asserts this directly
+rather than assuming it.
 
-**That calibration is now stale.** The 2026-09-20 change below raises the
-multiplier itself (4.0 -> 8.0), which the 2026-09-17 pass never
-contemplated -- the three angular-radius constants were tuned against a
-detector that no longer exists in this form. A fresh screenshot ladder
-against the real 8.0 is needed; nothing here re-derives it.
+Do not re-derive the angular-radius constants below from an unaided-eye
+assumption and "correct" them to be stricter for that reason alone: the
+screenshot ladder measured *both* the unaided view and the zoomed/
+binocular view of the same targets at the same nine ranges, and they
+differ by roughly two recognition tiers at the ladder's own binocular
+magnification. Reading the ladder as apparent angular size (true angular
+size x magnification) makes the unaided and binocular columns land on the
+*same* tier thresholds, with the optic supplying only the magnification --
+that is why retuning the three angular constants below was never needed
+across any of this slice's changes, only the magnification the formula
+multiplies by.
 
-**`optics.py`** (`plans/detection-cones-slice1/plan.md`) now names this
-binocular premise explicitly as `BINOCULAR_OPTIC`, `check_visibility`'s
-default `optic` parameter -- the paragraphs above describe
-`BINOCULAR_OPTIC` specifically, not an unnamed implicit default. See that
-module for the other named optic (`UNAIDED_OPTIC`) and the field-of-view
-gate they add on top of the other gates below. The 9K113 sight is
-deliberately deferred out of this slice (user, 2026-09-20) -- see
-`optics.py`'s own docstring.
+**`optics.py`** (`plans/detection-cones-slice1/plan.md`) names both optics
+this module distinguishes: `UNAIDED_OPTIC` (the default as of 2026-09-20)
+and `BINOCULAR_OPTIC` (no longer the default; now carries a real field of
+view, not `None` -- see that module's own docstring for why that is safe
+now and was not before). The 9K113 sight is deliberately deferred out of
+this slice (user, 2026-09-20) -- see `optics.py`'s own docstring.
 
 Composes four independent plausibility gates over one
 `association.WorldObjectCandidate` (reused, not duplicated) against one
@@ -152,13 +162,13 @@ if TYPE_CHECKING:
     # other, which itself needs the first one fully loaded.
     from perception.optics import Optic
 
-#: **STALE as of 2026-09-20** -- every threshold below was derived using
-#: `BINOCULAR_RANGE_MULTIPLIER = 4.0` (see that constant's own docstring).
-#: The constant is now 8.0; these three values, and every worked-example
-#: number in the comment below that cites `* 4`, describe the old,
-#: superseded calibration and need a fresh screenshot ladder against the
-#: real 8.0 multiplier -- not corrected in place here (out of this
-#: change's scope; flagged so no one reads these numbers as current).
+#: **Current again, as of 2026-09-20** -- these three thresholds were
+#: derived using `BINOCULAR_RANGE_MULTIPLIER = 4.0` (see that constant's
+#: own docstring for the full round trip: 4.0 -> 8.0 -> 4.0). The
+#: constant went to 8.0 for part of this design slice, which made this
+#: block briefly stale, and is back to 4.0 now -- the worked-example
+#: numbers below (`* 4`) are correct again, not historical.
+#: `tests/test_vision_calibration.py` checks this directly.
 #:
 #: Apparent-angular-radius thresholds (radians) per recognition tier,
 #: **calibrated 2026-09-17 against real in-game screenshots** -- see
@@ -213,38 +223,35 @@ IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
 NAKED_EYE_GATING_ANGULAR_RADIUS_RAD: Final[float] = LOWRES_ANGULAR_RADIUS_RAD
 NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
 
-#: See the module docstring's binocular premise. Originally the same
-#: numeric value as `HelperAI.lua`'s `extra_eyesight_ratio`, reinterpreted
-#: and owned by this project as binocular magnification, not a
-#: transcription of that constant's (unverified) native role.
+#: See the module docstring's "round trip" note for the full chronology.
+#: This is `BINOCULAR_OPTIC.magnification` (`optics.py`) -- the multiplier
+#: `check_visibility` applies whenever that (now non-default) optic is
+#: passed explicitly, and the one `_achieved_tier` and the angular-radius
+#: thresholds above were calibrated against on 2026-09-17.
 #:
-#: **Raised 4.0 -> 8.0, 2026-09-20** (`plans/detection-cones-slice1/
-#: plan.md`, `optics.py`'s `BINOCULAR_OPTIC`, user direction, reversing a
-#: same-session intermediate step). 4.0 was never a real binoculars'
-#: magnification -- it was `extra_eyesight_ratio` wearing that label. An
-#: intermediate pass of this work tried to fix that honestly while
-#: preserving today's detection *range*: split into a realistic 8x
-#: instrument times a 0.5 "handheld_effectiveness" derating factor chosen
-#: so the product still equalled 4.0. The user rejected that as dressing a
-#: behaviour knob up as physics -- a derating factor invented purely to
-#: cancel out a magnification change is exactly the mislabelling problem
-#: being fixed, one level down. **This constant is now plainly what
-#: `BINOCULAR_OPTIC.magnification` states it is: 8.0, no hidden derating.**
-#: Detection range roughly doubles as a direct, intended consequence, not
-#: something to re-cancel -- the user's own framing: "take the range
-#: increase now and recalibrate afterwards." Where range actually gets
-#: tuned is the acuity thresholds (`LOWRES_ANGULAR_RADIUS_RAD`/
-#: `MEDRES_ANGULAR_RADIUS_RAD`/`HIRES_ANGULAR_RADIUS_RAD` above), against
-#: real sortie data -- one honestly-labelled magnification knob,
-#: calibrated thresholds behind it.
+#: **Round trip, final value 2026-09-20:** 4.0 (inherited, unexamined,
+#: from `HelperAI.lua`'s `extra_eyesight_ratio`) -> 8.0 (a same-session
+#: excursion: a realistic 8x30, magnification stated honestly, no
+#: derating) -> **4.0 again.** The final value is numerically identical to
+#: the first but is not the restored inherited number -- it is
+#: independently derived, a Б-6 6x30's real 6x magnification times a
+#: ~0.67 penalty for handheld use on a vibrating airframe
+#: (`optics.py`'s `BINOCULAR_OPTIC` docstring has the arithmetic), and it
+#: also happens to match what the 2026-09-17 screenshot ladder's
+#: binocular column independently shows. Two independent lines of
+#: evidence landing on the same number is a real confirmation of this
+#: value, not evidence the excursion through 8.0 was wasted -- that
+#: excursion is what replaced an unexamined borrowed constant with a
+#: derived one that happens to agree with it.
 #:
-#: **Every worked-example figure in this module's own comments/docstrings
-#: (and in `optics.py`, and in the test suite) that cites a specific range
-#: number was calibrated against the old effective 4.0 and is now stale**
-#: -- due for a fresh calibration sortie against the real 8.0, not
-#: corrected in place here. Treat any number derived from "4.0" elsewhere
-#: in this codebase's comments as historical, not current.
-BINOCULAR_RANGE_MULTIPLIER: Final[float] = 8.0
+#: **No longer the default multiplier applied to every candidate.** As of
+#: this same change, `check_visibility`'s default `optic` is
+#: `UNAIDED_OPTIC` (magnification 1.0), not `BINOCULAR_OPTIC` -- see the
+#: module docstring's superseded "Binocular premise" section and that
+#: function's own docstring. This constant now only applies when
+#: `BINOCULAR_OPTIC` is passed explicitly (no concrete `PerceptionSource`
+#: does so yet, plan Decision 4).
+BINOCULAR_RANGE_MULTIPLIER: Final[float] = 4.0
 
 #: Outer range bound, applied regardless of what the angular-radius formula
 #: computes for a given object's looked-up size, so a very large object
@@ -390,28 +397,33 @@ def check_visibility(
     mirroring `association.associate()`'s own cheap-before-expensive
     ordering.
 
-    `optic` defaults to `optics.BINOCULAR_OPTIC` -- today's implicit,
-    unconditional default (module docstring's binocular premise), now a
-    named value. Accepted as `None` and resolved inside this function
-    rather than as a literal `Optic = BINOCULAR_OPTIC` default expression,
-    to avoid a real circular import between this module and `optics.py`
-    (see the `TYPE_CHECKING` import above) -- behaviourally identical:
-    calling `check_visibility(...)` with no `optic` argument is the same as
-    passing `BINOCULAR_OPTIC` explicitly, which is what the regression test
-    below actually pins.
+    `optic` defaults to `optics.UNAIDED_OPTIC` (magnification 1.0), as of
+    2026-09-20 -- this was `BINOCULAR_OPTIC` for most of this slice's
+    development but is now naked-eye by default (module docstring's
+    superseded "Binocular premise" section has the full reasoning: modelling
+    Petrovich as permanently glassed-up, with binocular magnification and
+    no field-of-view cost across the whole cockpit-mask envelope, was the
+    single biggest source of over-detection in this channel). Accepted as
+    `None` and resolved inside this function rather than as a literal
+    `Optic = UNAIDED_OPTIC` default expression, to avoid a real circular
+    import between this module and `optics.py` (see the `TYPE_CHECKING`
+    import above) -- behaviourally identical: calling `check_visibility(...)`
+    with no `optic` argument is the same as passing `UNAIDED_OPTIC`
+    explicitly, which is what the regression test below actually pins.
 
     The FOV gate is a new cone on top of the cockpit mask, not a
     replacement for it -- an optic can only narrow what the mask already
-    admits. For `BINOCULAR_OPTIC`/`UNAIDED_OPTIC` (`fov_half_angle_deg is
-    None`) `within_optic_fov` always passes, so the gate is a no-op for
-    every call site that doesn't pass a sighted optic -- which, in this
-    slice, is every call site (`plans/detection-cones-slice1/plan.md`
-    Decision 4: no concrete `PerceptionSource` wires a non-default optic
-    in yet)."""
-    from perception.optics import BINOCULAR_OPTIC, within_optic_fov
+    admits. For `UNAIDED_OPTIC` (`fov_half_angle_deg is None`)
+    `within_optic_fov` always passes, so the gate is a no-op for the
+    default path. `BINOCULAR_OPTIC` now carries a real field-of-view value
+    (`optics.py`'s own docstring), but is not wired into any concrete
+    `PerceptionSource` in this slice (`plans/detection-cones-slice1/
+    plan.md` Decision 4) -- passing it is possible today only by an
+    explicit caller, none of which exist yet."""
+    from perception.optics import UNAIDED_OPTIC, within_optic_fov
 
     if optic is None:
-        optic = BINOCULAR_OPTIC
+        optic = UNAIDED_OPTIC
 
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
