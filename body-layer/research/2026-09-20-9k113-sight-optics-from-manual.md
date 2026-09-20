@@ -22,6 +22,33 @@ setting is ×3.3. That is near enough that today's calibrated behaviour is appro
 at its wide setting*, which is worth knowing before anyone reasons about what the current numbers
 represent.
 
+## Field of view per magnification — UNVERIFIED (user, 2026-09-20)
+
+| Mode | Magnification | Field of view | Half-angle for code |
+|---|---|---|---|
+| Wide (WFOV) | ×3.3 | 11.5° | 5.75° |
+| Narrow (NFOV) | ×10 | 6.0° | 3.0° |
+
+**Explicitly unverified.** Supplied by the user from a source outside this repository and adopted
+on their direction so the cones work can proceed against real-shaped numbers instead of round
+invented ones. It is *not* from either manual edition — the Russian QuickStart states neither
+figure on any page read, and the English §3.4 that gave the slew limits was not reported as
+carrying them.
+
+### One internal inconsistency, recorded rather than smoothed over
+
+Magnification rises by a factor of 3.03 (×3.3 → ×10) while the field narrows by only 1.92
+(11.5° → 6.0°). A single optical train sharing one objective would narrow in proportion, putting
+the narrow field near **3.8°**. Separate optical paths can legitimately break that relation, so
+this is not proof of an error — but if exactly one of the two figures turns out wrong, **6.0° is
+the one to doubt**, and a measurement in the sim should check it before anything downstream treats
+either as settled.
+
+Both are far narrower than the **±60° / +20°/−15°** field of regard below, which is the point worth
+holding onto: the sight *sees* a few degrees at a time and can be *pointed* across a wide arc, and
+the second number does not shrink the first. These are two independent bounds and the code must
+keep them as two fields (see `plans/detection-cones-slice1/plan.md`).
+
 ## The sight's real angular limits — SOURCED (user, 2026-09-20)
 
 **Periscope lateral axis: ±60°. Periscope vertical axis: +20° / −15°.**
