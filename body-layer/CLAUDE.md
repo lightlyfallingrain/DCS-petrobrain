@@ -201,23 +201,32 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
   docstring). `optic.magnification` replaces the old hardcoded `BINOCULAR_RANGE_MULTIPLIER`
   reference in both the range-threshold formula and `_achieved_tier` (which gains its own
   `magnification: float = BINOCULAR_RANGE_MULTIPLIER` parameter) — every existing call site, which
-  passes no `optic` argument, is unaffected (pinned by
-  `test_default_optic_argument_matches_pre_slice1_behaviour`). `BINOCULAR_RANGE_MULTIPLIER` itself
-  stays declared here (plan Decision 1) — `optics.py` imports it, not the reverse.
+  passes no `optic` argument, still resolves to `BINOCULAR_OPTIC`, but **not to the same range any
+  more**: `BINOCULAR_RANGE_MULTIPLIER` moved 4.0 -> 8.0 on 2026-09-20 user direction (see the
+  constant's own docstring for the full rationale — real detection range roughly doubles, a
+  deliberate, dated change, not a regression; `test_default_optic_is_binocular_at_the_new_8x_range_
+  multiplier` in `test_visibility.py` pins the new behaviour explicitly, superseding an earlier
+  byte-identical-default guard). `BINOCULAR_RANGE_MULTIPLIER` itself stays declared here (plan
+  Decision 1) — `optics.py` imports it, not the reverse. **Every calibration figure recorded before
+  this commit (the three angular-radius constants above, and every worked-example range number in
+  this codebase's comments/tests) was calibrated against the old M=4.0 and is stale pending a fresh
+  sortie against the real 8.0** — `test_vision_calibration.py`'s `_STALE_AT_8X_MULTIPLIER` `xfail`s
+  the four screenshot-ground-truth ranges that now disagree with the formula as a result, rather
+  than silently re-deriving new "ground truth" from the formula itself.
 - `src/perception/optics.py` (`plans/detection-cones-slice1/plan.md`, slice 1 of the "detection
   cones" milestone) — `Optic` (`name`, `magnification`, `fov_half_angle_deg: float | None`,
-  `boresight_azimuth_deg: float = 0.0`, `handheld_effectiveness: float = 1.0`) and two named
-  instances: `UNAIDED_OPTIC` (M=1.0, no derating, no FOV restriction) and `BINOCULAR_OPTIC` — the
-  latter is today's implicit, unconditional binocular default made explicit, and, as of a
-  2026-09-20 user direction, a realistic instrument split into two honest components rather than
-  one borrowed engine constant: `magnification=8.0` (a Б-8/БПЦ5 8x30, standard Soviet compact
-  issue, realistic but unmeasured in-sim) times `handheld_effectiveness=0.5` (a **named,
-  measurable** but itself-unmeasured derating factor for handheld image shake in a vibrating
-  airframe, chosen so the two multiply back to exactly `BINOCULAR_RANGE_MULTIPLIER`). `Optic.
-  effective_magnification` (`magnification * handheld_effectiveness`) is the figure
-  `visibility.py`'s range-threshold formula and `_achieved_tier` actually consume — **never raw
-  `magnification` alone** — which is what keeps this split behaviour-preserving: `BINOCULAR_OPTIC.
-  effective_magnification == BINOCULAR_RANGE_MULTIPLIER == 4.0`, unchanged from before the split.
+  `boresight_azimuth_deg: float = 0.0`) and two named instances: `UNAIDED_OPTIC` (M=1.0, no FOV
+  restriction) and `BINOCULAR_OPTIC` (M=`BINOCULAR_RANGE_MULTIPLIER`, no FOV restriction) — the
+  latter is today's implicit, unconditional binocular default made explicit. **No derating
+  factor**: an intermediate 2026-09-20 pass split this into a realistic 8x magnification times a
+  `handheld_effectiveness=0.5` factor chosen to reproduce the old 4.0 exactly, preserving detection
+  *range* while relabelling it as physics; the user reversed that same session — a derating factor
+  invented only to cancel out a magnification change is a behaviour knob dressed as optics, exactly
+  the mislabelling problem one level down. `BINOCULAR_OPTIC.magnification` is now plainly 8.0, no
+  hidden second factor, no `effective_magnification` property (removed — it would only have
+  returned `magnification` unchanged). Detection range is taken to roughly double as a direct,
+  intended consequence ("take the range increase now and recalibrate afterwards," user) — where
+  range actually gets tuned is the acuity thresholds in `visibility.py`, against real sortie data.
   `within_optic_fov` tests a body-relative `(azimuth_deg, elevation_deg)` against an optic's own
   circular field of view (true angular separation from `(boresight_azimuth_deg, 0.0)`, spherical
   law of cosines, not an independent azimuth-box/elevation-box check); `None` means unrestricted.
