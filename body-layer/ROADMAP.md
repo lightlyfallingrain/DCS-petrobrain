@@ -401,8 +401,16 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   BL-4's `AttentionArea` registry): keep BL-8's eventual mission-end export/persistence boundary in
   mind, not as a design constraint yet, just don't shape something in a way that obviously fights it.
 
-- [ ] **BL-9 — Debug visualization.** Not started. Belief-vs-DCS-truth debug view. Arguably worth
-  pulling earlier if BL-2/BL-3 turn out hard to reason about textually.
+- [ ] **BL-9 — Debug visualization. PULLED FORWARD** (user, 2026-09-20: do it after inbound-speech
+  Stage 3). Belief-vs-DCS-truth debug view. Its own entry already allowed for this — "arguably worth
+  pulling earlier if BL-2/BL-3 turn out hard to reason about textually" — and the reason it moved is
+  stronger than legibility: it multiplies what a single sortie is worth.
+
+  Detection-range calibration has never been flown, and the loop above means the next sortie has to
+  serve calibration, the five outstanding acceptance debts, and BL-8's "run for real" gate at once.
+  Without this, calibration data is a pilot's recollection of roughly when a callout happened. With
+  it, it is what Petrovich believed next to what was actually there. Same flight, very different
+  evidence.
 
 - [~] **BL-10 — audio transport wiring (= PB-7 + PB-8, body's half only).** **First slice done
   2026-09-17 (outbound TTS, `plans/tts-voice-output/`); the rest not started.** Swaps BL-5a's
@@ -701,8 +709,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` listing); **the deep pass happens on the
   Windows box**, where the installed DCS tree can actually be read rather than inferred.
 
-  **It gates the cones milestone rather than merely informing it**, which is the reason it is
-  written here instead of in the backlog. Two of the questions it answers would change that
+  **It gates the cones milestone's *later* slices rather than the whole thing** (narrowed
+  2026-09-20, see the interdependence note below). The questions it answers are about dwell, scan
+  pattern and range uncertainty — none of which slice 1 builds — so slice 1 can proceed without it
+  and the deep read is needed before slice 2. Two of the questions it answers would change that
   milestone's design rather than its details:
 
   - Whether ED separates *detected / visible / type known / **distance known*** as distinct states.
@@ -742,6 +752,36 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   ED's approach would be wrong, and where we have reinvented something ED already does better.
   Nothing found may become a route to omniscience: a field that would let Petrovich know what a
   crew member could not perceive is unusable however readable it is.
+
+- **Cones, calibration and the sortie are interdependent — plan it as a loop, not a chain**
+  (user, 2026-09-20: *"I need the cone system to be able to tell whether detection ranges make
+  sense. It's all inspect and adapt."*).
+
+  The dependency was previously written as a chain: research, then cones; sortie, then calibration.
+  That is wrong in a way worth stating, because it would have produced bad data. **Today Petrovich
+  sees in every direction at once**, so a range-calibration sortie flown now measures "at what range
+  does an all-seeing observer first report" — not the quantity anyone wants. The confound is exactly
+  the thing cones exist to remove. And cones need flown numbers to set their own constants. Neither
+  can honestly go first.
+
+  **So the milestone gets sliced, and slice 1 is deliberately the part that needs no research and no
+  prior sortie:**
+
+  - **Slice 1 — the cone test and the optics table.** A direction, a field of view, and a
+    magnification per optic; apparent size = true angular size × M against the three thresholds
+    already calibrated. Static forward cone, no scanning, no dwell, no range uncertainty. This is
+    enough to make "scan north" mean something and to make the binocular default an explicit choice
+    — and enough that a calibration sortie is measuring a crew member rather than an omniscient one.
+    **Ungated.** The acuity ladder already generalises across optics (see
+    `perception/visibility.py`'s binocular premise), so the expensive part is bought.
+  - **Slice 2 — scanning, dwell and honest range.** The attention state machine, detection as a
+    process rather than a predicate, and range as a belief instead of a ground-truth figure.
+    **Gated on the ED research deep pass**, because that is precisely what those questions are
+    about.
+
+  **The loop, then:** slice 1 → fly it (with BL-9 making belief-vs-truth visible) → adapt the
+  constants and the FOV numbers → slice 2 once the ED read has happened. Inspect and adapt at
+  milestone boundaries, which is what root `CLAUDE.md` already asks for at merges.
 
 - **Attention direction and detection cones (much-later milestone).** Deliberately deferred, not
   started. **Now also owns range uncertainty** (moved here by the user, 2026-09-19), because that
