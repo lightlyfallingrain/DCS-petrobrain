@@ -22,10 +22,14 @@ slice 1 of the detection-cones milestone — as an explicit, opt-in extension of
 - **The mode set is the diagram's** (`docs/concept/STATE_TRANSITIONS.md`): Scan, Watch, Observ
   (scan with 9K113), Track (9K113 attack), Observ off (9K113 doors closed) — not the earlier
   "peripheral/naked eye/binoculars/APS-17" guess, which is superseded.
-- **Today's default is the binocular column.** `BINOCULAR_RANGE_MULTIPLIER = 4.0` in
-  `visibility.py` is what `NakedEyePerceptionSource` already uses for every candidate, unconditionally.
-  A calibration sortie is flying today and more will follow — **this plan must not change what gets
-  detected by default**, or pre/post-slice-1 calibration data stops being comparable.
+- **Today's default is the binocular column.** `BINOCULAR_RANGE_MULTIPLIER` in `visibility.py` is
+  what `NakedEyePerceptionSource` uses for every candidate, unconditionally.
+  **Superseded 2026-09-20:** this bullet originally read "a calibration sortie is flying today …
+  this plan must not change what gets detected by default." Both halves are now false — no sortie
+  has flown (the user stopped to investigate the optics figures first), and the constant is
+  deliberately changed from 4.0 to 8.0 by user direction. See "The binocular is 8×30" below. The
+  don't-change-the-default constraint governed the first two revisions of this plan and explains
+  several of its decisions, so it is left visible rather than deleted.
 
 ### Affected Modules / Files
 
@@ -67,13 +71,25 @@ The honest structure is one knob that states the instrument and a separate, cali
 thresholds (`LOWRES`/`MEDRES`/`HIRES_ANGULAR_RADIUS_RAD`) that say how well it is used. Range gets
 tuned there, against sortie data, where tuning is what the number is *for*.
 
-##### Consequence: calibration data taken before this change is stale
+##### Consequence: no calibration data is invalidated, because none has been taken
 
-Non-negotiable and must not be soft-pedalled. Every figure from a sortie flown before this commit
-was taken at effective ×4.0. The **central regression test of this slice — byte-identical default
-behaviour — is deliberately retired here**, replaced by a test that pins the new default with the
-4.0 → 8.0 transition named and dated in its docstring, so a later reader cannot mistake the change
-for a regression that slipped past.
+An earlier draft of this section warned that every pre-change sortie figure was now stale. **That
+turned out not to apply**: the user stopped short of flying in order to investigate these numbers
+first, so no detection-range data exists at ×4.0 and nothing is being thrown away. Recorded because
+the warning was written before the fact was known, and a reader finding only the warning would
+over-estimate the cost of this change.
+
+It also improves the sequencing rather than merely costing nothing. The multiplier change, BL-9's
+detection trace, and the recalibration pass all want to be in place *before* the first sortie, so a
+single flight yields trace data at the final multiplier instead of a flight at ×4.0 that would have
+had to be repeated.
+
+The **central regression test of this slice — byte-identical default behaviour — is still
+deliberately retired here**, replaced by a test that pins the new default with the 4.0 → 8.0
+transition named and dated in its docstring, so a later reader cannot mistake the change for a
+regression that slipped past. That test's purpose was protecting comparability of sortie data; with
+no data yet taken there is nothing to protect, which is the cleanest possible moment to make this
+change.
 
 This also points the *opposite* way from the project's own goal for a moment, and that is worth
 stating plainly: the user's standing criticism of ED's Petrovich is that he is "way too hawk-eyed
