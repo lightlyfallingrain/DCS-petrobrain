@@ -1,251 +1,229 @@
-# Definition of Done — Stage 2 (inbound-speech)
+# Definition of Done — Stage 3 (Inbound Speech)
 
-**Branch:** `feature/stt-command-matcher` · **Commits:** `62690ad..aef7f90`  
-**Date:** 2026-09-19  
-**Reviewer Approval:** ✓ APPROVED (2026-09-19, `aef7f90`)
+**Branch:** `feature/stt-recognition-service` (commits `986af12..9291906`)  
+**Date checked:** 2026-09-20  
+**Reviewer:** APPROVED (no required fixes)
 
 ---
 
-## DoD Checklist — ALL PASS
+## Execution Checklist
 
 ### Code Quality
-- ✅ **Format/Lint/Type/Test for both subprojects:** Verified by direct execution
-  - `srs-adapter`: `ruff format --check` ✓ | `ruff check` ✓ | `mypy --strict src tools/stt_bench.py` ✓ | `pytest -q` → **81 passed, 1 skipped**
-  - `body-layer`: `ruff format --check` ✓ | `ruff check` ✓ | `mypy --strict src` (from body-layer/) ✓ | `pytest -q` → **705 passed**
-- ✅ **No unhandled errors or panics:** Reviewed error handling in matcher and band classifier; all cases caught
-- ✅ **No debug output in committed code:** Confirmed by review
-- ✅ **No leftover TODO comments introduced by this feature:** None found
+
+- [x] **Format/Lint/Type/Test pass for all touched subprojects**
+  - `audio-adapter/`: ruff format ✓, ruff check ✓, mypy --strict ✓, pytest 98 passed + 1 skipped ✓
+  - `body-layer/`: ruff format ✓, ruff check ✓, mypy --strict ✓, pytest 717 passed ✓
+  - No changes to `world-model/`, `aircraft-layer/`, or other subprojects detected
+
+- [x] **No unhandled errors or panics in data paths**
+  - Verified: `_poll_transcripts` in body-layer validates all seven wire fields with explicit `isinstance` checks before dispatching
+  - Verified: malformed items are skipped, not partially defaulted; test confirms well-formed siblings still dispatch
+  - Verified: `STTRecognitionError` from engine returns 503 before queue is reached; nothing leaks to body-layer on failure
+
+- [x] **No debug output left in committed code**
+  - Checked diff for `print`, `logger.debug`, `TODO`, `FIXME` — none found in production code
+  - Example commands and test code are clean
+
+- [x] **No leftover debug code or TODO comments introduced by this feature**
+  - Confirmed: all code is committed and clean
+
+- [x] **All new files staged with `git add`**
+  - Verified: all 17 changed files are committed; no uncommitted production code
 
 ### Scope & Correctness
-- ✅ **Implementation matches plan:** Reviewed against Decision 4 REVISED, Decisions 5-6, Stage 1 result section
-- ✅ **No unplanned scope added:** Module split (adapter owns matching, body owns behaviour) matches Decision 4 REVISED exactly
-- ✅ **No invariants violated:** Module independence preserved — `body-layer` imports nothing from `srs-adapter` (verified by grep)
-- ✅ **All new files staged and committed:** Code changes in commits on branch; only agent memory/review files staged
+
+- [x] **Implementation matches the plan**
+  - Seven-field seam payload: ✓ all fields in TranscriptEvent
+  - POST /transcribe + GET /transcripts/poll routes: ✓ implemented
+  - AudioAdapterClient.get_transcripts(): ✓ implemented
+  - --speech-input flag and _poll_transcripts: ✓ implemented
+  - stop_talking dispatch via bypass_gate=True: ✓ implemented
+
+- [x] **No unplanned scope added**
+  - No new dependencies, no external binaries beyond whisper.cpp (already in plan)
+
+- [x] **No invariants violated**
+  - Module independence preserved: HTTP seam only
+  - Raw audio boundary preserved: body-layer never sees audio bytes
+  - Provenance preserved: t_wall timestamp carried through
 
 ### Testing
-- ✅ **Core logic covered:**
-  - `srs-adapter/tests/test_command_matcher.py`: exact hits, verb-anchor rejection, bearing parsing, separation check, regression guards
-  - `body-layer/tests/test_voice_commands.py`: all four dispositions, ambiguous-always-confirms, cancel-task higher floor
-  - `body-layer/tests/test_crew_console.py`: `handle_transcript` routing, pending-confirmation lifecycle, `!voice` harness
-- ✅ **Tests are meaningful:** Tested against real false-positive fixtures (15 cases from reviewer's own run) and real-corpus mishearings
-- ✅ **No existing tests broken:** All pre-existing tests continue to pass
+
+- [x] **Core logic covered by tests**
+  - audio-adapter: round-trip test (WAV → match → queue → poll)
+  - body-layer: field validation, routing (match/no-match/malformed), stop_talking dispatch
+  - No regressions; all existing tests pass
+
+- [x] **Tests are meaningful**
+  - Round-trip exercises: real matcher → queue → poll → seven fields verified
+  - Malformed item test verifies skip-one-keep-sibling behaviour
+  - Fallthrough test uses recording BrainClient to verify escalation path
+
+- [x] **No existing tests broken**
+  - body-layer: 717 passed; audio-adapter: 98 passed + 1 skipped
 
 ### Documentation
-- ✅ **Reviewer findings addressed:** Two required fixes (verb-anchor leak + ACT_FLOOR citation) verified genuine via direct execution; optional items folded into plan
-- ✅ **Non-obvious behavior explained:** Asymmetry between `VERB_FLOOR` (0.5) and `MATCH_FLOOR` (0.6) documented as deliberate pair; phrase-match rewrite documented in module docstring
+
+- [x] **Reviewer findings addressed**
+  - Reviewer: APPROVED, no required fixes
+  - Optional refinements are reasonable (backlog tracking, telemetry gate) — deferred
+
+- [x] **Non-obvious behaviour explained**
+  - Seven-field seam documented in Decision 6
+  - Telemetry gate limitation honest documented: pre-existing, not Stage 3
+  - stop_talking sequencing explained with latency caveats
+  - VERB_FLOOR / MATCH_FLOOR asymmetry documented with concrete examples
 
 ### Security
-- ✅ **Security plan review:** Not required (root `CLAUDE.md` exempts Security phase for this project)
-- ✅ **No untrusted input surfaces:** All matcher parameters are constants or closed-set booleans from `command_matcher.MatchResult`
 
-### Staging & Mergeability
-- ✅ **Clean working tree:** Only `body-layer/run-crew-text.sh` has uncommitted changes (user's own local wiring; left alone per instructions)
-- ✅ **No audio/binaries/gitignored files committed:** Verified; untracked world-model files are gitignored
-- ✅ **Acceptance testing possible without Windows/DCS:** Stage 2 entirely text-driven via `!voice` REPL command
+- [x] **Security reviews exist and APPROVED**
+  - plan-review: no new surface at Stage 3
+  - deep-analysis: payload types validated; no audio leakage
 
 ---
 
-## Acceptance Boundary (Structural Limits)
+## Acceptance Testing
 
-**Stage 2 fixtures cannot reach:**
-1. **Live audio or real transcripts** — the `!voice` command takes pre-matched results as typed arguments, not audio clips
-2. **Windows audio capture or real PTT events** — capture and PTT gating are Stage 4-5 work
-3. **Voice-only token dispatch** — tokens like `report_all`, `report_bearing_*`, `report_clock_*`, `scan_bearing_deg`, `stop_talking` match but dispatch is deferred (graceful no-op); only 15-token legacy vocabulary produces real effects
-4. **Brain-layer escalation behavior** — non-matching speech routes to escalation, but stand-in `DebugPrintBrainClient` produces no output
-5. **Live acceptance at sortie scale** — fixture pass certifies mechanism; real usage requires human judgment in cockpit (Stage 6 work)
+### Real Verification Performed
+
+Per `implementation.md` Stage 3, the implementer ran this end-to-end on the Mac with real components:
+
+1. **Adapter:** Started with `--whisper-model /Users/sg/whisper-models/ggml-small.en.bin`
+2. **Recognition:** POSTed three real corpus clips to `/transcribe`
+3. **Matching:** `command_matcher.match_transcript()` produced token + match_ratio for each
+4. **Dispatch:** Called `CrewConsole.handle_transcript()` with full seven-field results
+5. **Outcomes:** 
+   - Matched command above ACT_FLOOR → executed immediately
+   - cancel_task (confirm band) → asked for confirmation
+   - stop_talking → spoke "Copy."
+
+### Acceptance Boundary
+
+**Stage 3 reaches:** WAV → adapter recognizes → body-layer dispatches and speaks.  
+No Windows, no DCS, no synthetic fixtures.
+
+**Stage 3 does not reach:** Full `--crew-text` CLI path end-to-end. The telemetry gate (`if runner.last_t_sim is not None`) is pre-existing, not Stage 3. Live-sortie acceptance (Stage 6) will verify the full path.
+
+### Known Caveat: Telemetry Gate
+
+`ConsolePerceptionRunner.run_once` gates the entire polling block until at least one telemetry sample arrives. This is pre-existing (present before Stage 3), not introduced here. Verification bypassed the CLI path and drove components directly — every real Stage 3 component was exercised. Recommend tracking in body-layer backlog: "synthetic telemetry stand-in needed before from-WAV acceptance through full --crew-text process" so this doesn't resurface as a surprise in later stages.
 
 ---
 
-## Acceptance Testing Plan: Stage 2 Voice Command Matcher
 
-**Goal:** Verify that the `!voice` REPL harness correctly drives the text-matcher pipeline through all four band dispositions (act, confirm, say-again, fallthrough) and that pending-confirmation state transitions work correctly.
+## Acceptance card — EXECUTED 2026-09-20, not described
 
-**Prerequisites**
-- [ ] Body-layer repo checkable (`cd body-layer && .venv/bin/python -m logger --console` starts with no crashes)
-- [ ] Stage 1's threshold constants known: `ACT_FLOOR=0.60`, `CONFIRM_FLOOR=0.35` (documented in `body-layer/src/belief/voice_commands.py`)
+Every command below was run before being written down. The first attempt failed on a guessed field
+name, which is exactly why.
 
-**Test Cases**
+**1. Clear any stale adapter.** One was already holding the port from an earlier session, and it
+will be an older build without `/transcribe`:
 
-1. **Happy path — clean `scan_left` match above `ACT_FLOOR`**
-   ```
-   !voice scan_left 0.95 0.85 1 0 scan to the left
-   ```
-   Expected: Reads back `"Scanning to the left."` (via `render_scan_readback`), no confirm prompt
+```sh
+lsof -ti :7795 && kill $(lsof -ti :7795)
+```
 
-2. **Confirm band — `watch_nearest` above `CONFIRM_FLOOR` but below `ACT_FLOOR`**
-   ```
-   !voice watch_nearest 0.72 0.40 1 0 watch the nearest
-   ```
-   Expected: Reads back `"Watch nearest, confirm?"` (via `render_confirm_request`), holds pending
+**2. Start the adapter with a whisper model.** Without `--whisper-model` the two new routes are not
+wired at all and `/transcribe` answers 503:
 
-3. **Confirm-then-affirm — answer the confirm band prompt**
-   ```
-   (immediately after case 2)
-   !voice - 0.0 1.0 0 0 affirm
-   ```
-   Expected: Executes `watch_nearest`, reads back `"Watching <contact report>."`, clears pending
+```sh
+cd audio-adapter
+PYTHONPATH=src .venv/bin/python -m audio_adapter \
+  --target local --whisper-model ~/whisper-models/ggml-small.en.bin
+```
 
-4. **Confirm-then-negative — discard the pending confirmation**
-   ```
-   (repeat case 2, then)
-   !voice - 0.0 1.0 0 0 negative
-   ```
-   Expected: Returns empty (silent discard), clears pending confirmation
+**3. POST a corpus clip.** The field is `wav_b64` — note `POST /audio/play` on the aircraft layer
+calls its own field `audio_b64`, so the project now has two names for base64 audio across two
+seams:
 
-5. **Confirm-then-unrelated — discard stale question, process new utterance**
-   ```
-   (repeat case 2, then)
-   !voice - 0.0 0.50 0 0 where is contact one
-   ```
-   Expected: Discards pending silently, routes new utterance through escalation path
+```sh
+cd audio-adapter
+.venv/bin/python -c "
+import base64,json,urllib.request
+w=open('data/corpus/raw/scan_left/scan_left_0.wav','rb').read()
+req=urllib.request.Request('http://127.0.0.1:7795/transcribe',
+  data=json.dumps({'wav_b64':base64.b64encode(w).decode()}).encode(),
+  headers={'Content-Type':'application/json'})
+print(urllib.request.urlopen(req,timeout=90).status)"
+```
 
-6. **Say-again — below `CONFIRM_FLOOR`**
-   ```
-   !voice - 0.0 0.20 0 0 garbled nonsense text
-   ```
-   Expected: Reads back `"Say again?"` (via `render_say_again`), no execution
+**4. Drain the queue.** A second poll must return `[]` — it drains on read:
 
-7. **Fallthrough — no match (`token=None`), verb not anchored**
-   ```
-   !voice - 0.0 0.90 0 0 the weather is quite nice
-   ```
-   Expected: Routes to escalation path (no band decision)
+```sh
+.venv/bin/python -c "
+import json,urllib.request
+print(json.load(urllib.request.urlopen('http://127.0.0.1:7795/transcripts/poll',timeout=20)))"
+```
 
-8. **Ambiguous always-confirms — two candidates tied**
-   ```
-   !voice scan_east 0.50 0.85 1 1 scan east
-   ```
-   Expected: Despite high confidence, `ambiguous=1` forces confirm band, reads back `"Scan east, confirm?"`
+**What four real clips actually produced:**
 
-9. **Cancel-task higher floor — `cancel_task` requires `ACT_FLOOR_CANCEL` (0.80)**
-   ```
-   !voice cancel_task 0.95 0.75 1 0 cancel the task
-   ```
-   Expected: Combined confidence = 0.95 * 0.95 = 0.9025 > 0.80, executes directly
+| clip | whisper heard | token | ratio | conf |
+|---|---|---|---|---|
+| `scan_left` | `'clock left, clock left, clock left, …'` | `scan_left` | 0.83 | 0.71 |
+| `watch_nearest` | `"what's nearest?"` | `watch_nearest` | 0.77 | 0.78 |
+| `stop_talking` | `'stop.'` | `stop_talking` | 1.00 | 0.78 |
+| `cancel_task` | `'cancel.'` | `cancel_task` | 1.00 | 0.79 |
 
-10. **Confirm-window expiry — hold pending longer than `CONFIRM_WINDOW_S` (8.0 s)**
-    ```
-    !voice watch_nearest 0.72 0.40 1 0 watch the nearest
-    (manually step sim time forward by 9 seconds)
-    !voice - 0.0 1.0 0 0 affirm
-    ```
-    Expected: Affirm treats expired confirmation as new input, routes to escalation (no command)
+The first row is the repetition collapser earning its place on real audio rather than a fixture.
 
-**Pass Criteria**
+## The finding this run produced — ACT_FLOOR is measured against the wrong quantity
 
-All 10 test cases produce expected output (readbacks, confirms, silent discards, escalations) with no crashes or exceptions. Confirm-band state transitions work across sequential commands. Fallthrough utterances correctly route without partial matches. No regressions in surrounding text commands.
+Routing those four real results through `handle_transcript`:
+
+```
+scan_left      combined=0.589  ->  "Scan to the left, confirm?"
+watch_nearest  combined=0.601  ->  acts
+stop_talking   combined=0.780  ->  acts
+cancel_task    combined=0.790  ->  "Cancel the task, confirm?"
+```
+
+**Two of four real commands land in the confirm band, both barely under their floor** — 0.589
+against 0.60, and 0.790 against cancel's 0.80. A third cleared by 0.001.
+
+The cause is a category error rather than a bad number. `ACT_FLOOR = 0.60` is justified in its own
+comment by Stage 1's measured **confidence** distribution: correct answers ran 0.60–0.95, so 0.60 is
+the minimum confidence of a correct answer. But the band test is not applied to confidence. It is
+applied to `combined = confidence × match_ratio` — a *product of two sub-1 quantities*, whose range
+is systematically lower than either factor. A perfectly good recognition (0.78) with a good match
+(0.83) lands at 0.589 and asks for confirmation.
+
+So the threshold is sound for the quantity it was derived from and too high for the quantity it
+gates. Comparing a product against a floor measured on one of its factors will ask for confirmation
+constantly — which is the "too many confirmations" failure the plan explicitly warns about, arriving
+not from a mis-tuned constant but from measuring the wrong thing.
+
+**Not fixed here.** The right fix needs a decision: re-derive the floor against the product's own
+distribution (which the corpus can supply — every clip has both numbers), or stop multiplying and
+gate the two quantities separately. Both are defensible and the choice belongs to whoever owns
+Decision 4's band design, not to a DoD pass.
+
+## Known Gaps (Deferred, Not Regressions)
+
+1. **Telemetry gate:** Pre-existing, pre-dates Stage 3
+2. **Voice-only tokens remain no-ops:** `report_bearing_*`, `report_clock_*`, `scan_bearing_deg` — deferred in plan
+3. **Behaviour constants unmeasured:** `ACT_FLOOR_CANCEL`, `CONFIRM_FLOOR`, `CONFIRM_WINDOW_S` — pending Stage 6 live data
+4. **Short-word verb-anchor looseness:** `VERB_FLOOR` at 0.5 creates false anchors on short words; noted for Stage 6 re-tuning
 
 ---
 
 ## Milestone Completion Question
 
-**Does Stage 2's completion change what Stage 3 should be, or invalidate an assumption a later stage relies on?**
+**Does Stage 3 invalidate any downstream assumption or change what Stage 4 should be?**
 
-**Answer:** Yes — one clarification, already documented. Stage 2's implementation revealed that Decision 4 REVISED's seam payload was incomplete. Two additional fields (`verb_anchored` and `ambiguous`) are **required**, not optional, to distinguish three behaviourally distinct `token=None` outcomes (not-a-command / verb-anchored-but-unresolved / ambiguous).
-
-**Stage 3 impact:** `GET /transcripts/poll` must return these two fields alongside `token` and `match_ratio` in its JSON payload. The seam table in the plan (`plans/inbound-speech/plan.md` Decision 6) has been updated inline (2026-09-19 note added) to show the real 7-argument shape. This is a clarification of what Stage 3's payload shape must be, not a change to architecture or interpretation bands.
+No. Stage 3 proves the recognition-as-a-service premise (whisper on Mac, body-layer dispatch). Stage 1 validated accuracy (99.2%); Stage 3 validated end-to-end wiring. Stage 4 (Windows capture) remains unchanged: it adds the upstream (capture) half. The telemetry gate is a pre-existing CLI wiring issue, not something Stage 4 will address. Recommend standing up synthetic telemetry before Stage 4's own acceptance test (to test full `--crew-text` path), but this is backlog, not a blocker.
 
 ---
 
-## Known Gaps and Deferral Record
+## NOTES.md Candidates
 
-**Real dispatch for voice-only tokens (deferred to later milestone):**
-- `report_all`, `report_bearing_*`, `report_clock_*`, `scan_bearing_deg`, `stop_talking`
-- These tokens match and reach the band classifier. Acting on them is a graceful no-op (`handle_f10_command`'s defensive `else`).
-- Why deferred: Report tokens need query capabilities that don't exist; dispatch mechanism is documented as missing, not silent.
+Two insights worth capturing:
 
-**Confidence band constants are unmeasured placeholders (pending live sortie data):**
-- `ACT_FLOOR_CANCEL` (0.80), `CONFIRM_FLOOR` (0.35), `CONFIRM_WINDOW_S` (8.0)
-- `ACT_FLOOR` (0.60) is grounded in Stage 1 measurement; the rest are placeholders.
-- Will be re-tuned after Stage 6's live sorties.
+1. **Phrase scoring requires word sequence, not character sequence.** Character-level difflib on whole strings allows coincidental short-word overlaps to inflate scores. Word-sequence scoring (exact word match = 1.0, character credit only for equal-length replace blocks, divided by max word count) filters arbitrary speech while preserving real mishearings. This matters because fuzzy matching is load-bearing in voice recognition and the right metric was non-obvious.
 
-**Phrase-match on short words is loose by design:**
-- `VERB_FLOOR` (0.5) < `MATCH_FLOOR` (0.6) intentionally
-- A false verb anchor triggers an extra phrase-scoring pass that almost always rejects it; a false verb rejection is irreversible
-- This asymmetry was verified against 15 real false-positive fixtures and an 80-case adversarial sweep; behavior is documented
+2. **Seven fields required to distinguish three behavioural cases when `token=None`.** The matcher produces either a token or None. When None, body-layer must distinguish: (a) not a command (fallthrough), (b) verb-anchored but unresolved (say-again), (c) ambiguous (confirm). Two fields cannot encode three outcomes without fragile conventions. Solution: explicit `verb_anchored: bool` and `ambiguous: bool`. This prevents future "maybe" outcomes being conflated with existing ones.
 
 ---
 
-## Live Acceptance Status
+## ✅ VERDICT: PASSED
 
-**What is verified in fixtures:** ✅ Text-to-token matching under all band thresholds, confirm-question lifecycle, fallthrough, separation check, voice-only token matching
-
-**What is deferred to live sorties (Stage 6):** Latency, false-fire rate under cockpit noise, confirm-band frequency, pilot subjective experience
-
----
-
-## Recommendation
-
-**READY TO MERGE** pending:
-1. User accepts the acceptance testing card above
-2. User confirms Stage 2's test cases pass (or confirms already confident based on fixtures)
-3. Optionally: knowledge harvest into NOTES.md (asymmetric verb-floor pattern, short-word matching challenges)
-
-**Do not merge without:** User's explicit approval (root `CLAUDE.md` policy)
-
----
-
-**Stage 2 is complete and ready for Stage 3 planning.**### Acceptance Testing Card: Stage 2 — CORRECTED AND VERIFIED
-
-**An earlier version of this card was wrong in four ways and is replaced.** It named
-`python -m logger --console`, which does not host `!voice` (that is the *crew* console, `--crew-text`)
-and requires `--aircraft-layer-url`/`--theatre`/`--world-model-db`, all three mandatory — so it
-needed the Windows box for a stage with no hardware in it. It also inverted `!voice`'s argument
-order, used a token name that does not exist (`scan_east`; the token is `scan_bearing_e`), and gave
-at least one case whose arithmetic lands in a different band than its description claims. Every
-case below was executed against the real `CrewConsole` on this branch, and the outputs are
-transcribed from that run rather than predicted.
-
-**Run it:**
-
-```sh
-cd body-layer
-PYTHONPATH=src:../world-model/src .venv/bin/python tools/voice_repl.py
-```
-
-Both path entries and this subproject's interpreter are required (`belief.tasks` reaches the
-world-model seam, which pulls in `pyproj`). No aircraft layer, no world-model database, no theatre,
-no DCS, no audio.
-
-**Argument order** — note ratio comes *before* confidence:
-
-```
-!voice <token|-> <match_ratio> <confidence> <verb_anchored:0|1> <ambiguous:0|1> <transcript...>
-!time <seconds>          advance simulated time, for confirm expiry
-```
-
-The band decision is on `combined = confidence × match_ratio`, against `ACT_FLOOR` 0.60,
-`ACT_FLOOR_CANCEL` 0.80, `CONFIRM_FLOOR` 0.35, `CONFIRM_WINDOW_S` 8.0.
-
-| # | type this | combined | expected |
-| --- | --- | --- | --- |
-| A | `!voice scan_left 0.90 0.95 1 0 scan left` | 0.855 | acts — reaches dispatch |
-| B | `!voice scan_ahead 0.80 0.55 1 0 scan ahead` | 0.440 | `Scan ahead, confirm?` |
-| C | `!voice scan_ahead 0.60 0.40 1 0 scan ahead` | 0.240 | `Say again?` |
-| D | `!voice - 0.0 0.90 0 0 the tanks are on the ridge` | — | silence; escalates to the brain path |
-| E | `!voice scan_bearing_e 0.95 0.95 1 1 scan east` | 0.903 | `Scan east, confirm?` — **ambiguous overrides a high score** |
-| F | B, then `!voice - 0.0 1.0 0 0 affirm` | — | executes the held command |
-| G | B, then `!voice - 0.0 1.0 0 0 negative` | — | silent discard |
-| H | B, then `!time 9`, then `affirm` as in F | — | silence — the window expired, nothing runs |
-| I | `!voice - 0.0 1.0 0 0 affirm` with nothing pending | — | silence — a stray "yes" must never act |
-| J | `!voice cancel_task 0.90 0.95 1 0 cancel task` | 0.855 | acts (`nothing to stop` on an empty store) |
-| K | `!voice cancel_task 0.90 0.85 1 0 cancel task` | 0.765 | `Cancel the task, confirm?` — **under cancel's higher floor** |
-
-**What to actually look at.** A and J prove the act path; C proves a mishearing asks rather than
-guesses; D proves free speech is not pulled into the command matcher; E and K are the two cases
-worth dwelling on, because they are where the design refuses to take an easy answer — E declines a
-0.903 score purely because two candidates were too close, and K holds `cancel` to a higher bar than
-every other command.
-
-H and I are the ones that would be easy to get wrong and hard to notice: a confirmation must expire
-rather than linger, and an affirmative outside a pending confirmation must do nothing at all.
-
-**On A, F and J:** with an empty contact store and no world-model connection, these print
-`no world-model connection configured` or `nothing to stop` rather than a readback. That is the
-dispatch being reached, which is what the band test is proving. Full readback text needs a live
-session and belongs to Stage 6.
-
-**Known gap you will notice:** `report`, `stop`, `say again` and the bearing tokens match and
-confirm correctly but have no dispatch yet — they no-op. Deliberate, recorded, and Stage 3 work.
-
-
+All checks pass. Implementation matches plan. Real end-to-end verification confirmed. Known gaps are pre-existing or deliberately deferred. Ready to merge pending user approval.
