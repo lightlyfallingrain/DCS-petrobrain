@@ -179,6 +179,46 @@ def test_wav_player_protocol_is_satisfied_by_fake() -> None:
     assert hasattr(player, "stop")
 
 
+# --- interrupt() (plans/inbound-speech/plan.md Stage 3 follow-up) ----------
+#
+# The interrupt-only path `stop_talking` needs: stop whatever's playing and
+# drop whatever's queued, without enqueueing anything new.
+
+
+def test_interrupt_clears_queued_lines_and_stops_in_flight_playback() -> None:
+    player = _FakePlayer()
+    player.play_gate = threading.Event()
+    sender = AudioPlaybackSender(player=player)
+    sender.open()
+    try:
+        sender.play_audio(b"FIRST", urgent=False)
+        time.sleep(0.1)  # let the worker actually dequeue and block on FIRST
+
+        sender.play_audio(b"SECOND", urgent=False)
+        sender.play_audio(b"THIRD", urgent=False)
+
+        sender.interrupt()
+        assert _wait_until(lambda: player.stop_calls >= 1)
+        assert _wait_until(lambda: len(player.played) == 1, timeout=3.0)
+    finally:
+        sender.close()
+
+    # FIRST (already in flight) finishes; SECOND/THIRD were dropped and
+    # nothing new was ever enqueued by interrupt() itself.
+    assert player.played == ["FIRST"]
+
+
+def test_interrupt_with_nothing_playing_or_queued_is_a_clean_no_op() -> None:
+    player = _FakePlayer()
+    sender = AudioPlaybackSender(player=player)
+    sender.open()
+    try:
+        sender.interrupt()
+    finally:
+        sender.close()
+    assert player.played == []
+
+
 # --- wav_duration_s (stage 5 fix, 2026-09-18) -------------------------------
 #
 # `_WinsoundPlayer` now plays asynchronously and waits out the file's own
