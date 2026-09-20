@@ -640,3 +640,108 @@ Re-ran all three subprojects' full check sequences after the fix — all pass:
   dependent) or a fake stand-in binary, which is a bigger design decision than this targeted fix
   warrants. The coordinator's live run is the verification of record for this behaviour, consistent
   with how this file was already tested.
+
+---
+
+### Stage 3 follow-up, review round 2: single-slot interrupt tracking under concurrency (2026-09-20)
+
+**Context.** Review (`plans/inbound-speech/review.md`) came back APPROVED WITH MINOR FIXES on the
+previous hotfix (`dce0aac`). Two required fixes, both real, confirmed by direct code reading rather
+than accepted on report:
+
+1. `self._interrupted` was a single `Popen | None` slot. Two `/speak` calls can genuinely be in
+   flight at once (`ThreadingHTTPServer`), so a second `interrupt()` against a second process could
+   overwrite the first's pending entry before the first `deliver()`'s own `finally` read it — the
+   first process's intentional kill would then be misread as a genuine failure and 500 the
+   in-flight `/speak` call, reproducing the exact pre-fix bug under concurrency the earlier
+   single-request live test could not have exercised (only one `/speak` was ever in flight in that
+   test).
+2. No automated test covered the flag logic itself — the `__main__.py`-is-a-live-process-entrypoint
+   exemption didn't actually apply to `LocalPlaybackSink`, which is ordinary deterministic class
+   logic (the same shape as the already-tested `AudioPlaybackSender.interrupt` on the aircraft-layer
+   side); it only inherited the exemption by being defined in the same file as the CLI wiring.
+
+#### Files Changed
+
+- `audio-adapter/src/local_playback.py` (new) — `LocalPlaybackSink` extracted out of `__main__.py`,
+  plus a new `_InFlightTracker` class that owns the interrupted-vs-failed bookkeeping in isolation:
+  tracks every interrupted process **by identity** (`id(process)`, in a `set`, per the review's own
+  suggestion) rather than a single slot, with entries removed the moment they're consumed
+  (`finish()`) so the set cannot grow unbounded. `LocalPlaybackSink.__init__` gained an injectable
+  `spawn: Callable[[str], _PlaybackProcess]` parameter (default: real `Popen`) so tests can drive
+  the exact interleaving with a fake process, no real `afplay`. Docstring also fixes the now-stale
+  "afplay serialises concurrent calls" claim (true only under the old blocking `subprocess.run`,
+  false since the `Popen` move) and documents the `ThreadingHTTPServer` dependency load-bearing in
+  both directions (needed for `/stop` to reach `interrupt()` at all, *and* the reason two
+  `deliver()` calls can race in the first place).
+- `audio-adapter/src/audio_adapter/__main__.py` — `LocalPlaybackSink` removed; now imports it from
+  `local_playback`. Dropped now-unused `subprocess`/`tempfile`/`threading`/`AudioDeliveryError`
+  imports and the now-dead `_PLAYBACK_TIMEOUT_S` constant (moved to `local_playback.py` as
+  `PLAYBACK_TIMEOUT_S`).
+- `audio-adapter/tests/test_local_playback.py` (new) — `_InFlightTracker` tested directly with no
+  threads at all (`start`/`interrupt`/`finish` called by hand to reproduce the exact two-process
+  interleaving that broke the single-slot version deterministically, rather than racing real
+  threads); `LocalPlaybackSink` tested against a fake `_PlaybackProcess` (success, genuine non-zero
+  exit → `AudioDeliveryError`, missing binary → `AudioDeliveryError`, an interrupted `deliver()`
+  completing cleanly, and two concurrent `deliver()` calls each surviving their own interrupt — the
+  regression scenario end to end).
+- `audio-adapter/CLAUDE.md` — `__main__.py`'s "no automated test" note narrowed to just the CLI
+  wiring, with an explicit note that `LocalPlaybackSink` only inherited that exemption by
+  co-location and didn't actually qualify; new `local_playback.py`/`test_local_playback.py`
+  Structure/Testing entries.
+- `.claude/agent-memory/implementer/feedback_entrypoint_exemption_scope.md` (new) — durable lesson:
+  an entrypoint's "no automated test" exemption covers the CLI wiring genuinely tied to a live
+  process, not every class merely defined in the same file.
+- `plans/inbound-speech/plan.md` — not further edited this round; Decision 5 REVISED's existing
+  latency/defect account already covers the single-slot fix's context. (No new decision text added
+  here since this round is a correctness fix to that same fix, not a new design decision.)
+
+#### Tests Added
+
+`_InFlightTracker`: `test_finish_without_a_prior_interrupt_is_not_flagged`,
+`test_interrupt_then_finish_is_flagged_and_then_forgotten`,
+`test_interrupt_with_nothing_in_flight_returns_none`,
+`test_second_interrupt_does_not_clobber_the_first_pending_one` (the regression test, direct and
+deterministic), `test_finish_clears_current_only_for_the_matching_process`.
+
+`LocalPlaybackSink`: `test_deliver_success_does_not_raise`,
+`test_deliver_genuine_nonzero_exit_raises`, `test_deliver_missing_binary_raises_audio_delivery_error`,
+`test_interrupt_stops_in_flight_playback_without_raising_in_deliver`,
+`test_interrupt_with_nothing_playing_is_a_clean_no_op`,
+`test_two_concurrent_delivers_both_survive_being_interrupted` (thread-based, exercises the real
+race end to end — re-ran 5x locally with no flakes).
+
+#### Checks
+
+Re-ran all three subprojects' full check sequences — all pass:
+
+- **aircraft-layer/** — ruff format --check / ruff check / mypy --strict (15 files) / pytest (134
+  passed). Untouched by this round; re-run to confirm nothing regressed.
+- **audio-adapter/** — ruff format --check / ruff check / mypy --strict (10 files, up from 9 —
+  `local_playback.py` is new) / pytest (111 passed, 1 skipped, up from 100 — 11 new tests in
+  `test_local_playback.py`). `test_local_playback.py` alone re-run 5x in isolation to check for
+  timing flakiness in the two thread-based tests — stable every time (0.30s each run).
+- **body-layer/** — ruff format --check / ruff check / mypy --strict (`cd body-layer && mypy src`,
+  35 files) / pytest (`PYTHONPATH=src:../world-model/src`, 717 passed). Untouched by this round;
+  re-run to confirm nothing regressed.
+
+#### Notable Discoveries
+
+- **`Popen.communicate`'s real signature (`input` first, `timeout` second) broke the first draft of
+  the `_PlaybackProcess` Protocol.** Declaring `communicate(self, timeout: float | None = None)`
+  positionally put `timeout` at position 0, which `mypy --strict` compared against `Popen`'s actual
+  position-0 parameter (`input: bytes | None`) and rejected as an incompatible default for the
+  `spawn` constructor parameter. Fixed by making the Protocol's `timeout` keyword-only
+  (`def communicate(self, *, timeout: float | None = None)`), which checks by name against
+  keyword-callable positions rather than by position — `deliver()` already only ever calls
+  `communicate(timeout=...)` as a keyword, so this changes nothing about real behaviour, only the
+  Protocol's structural-typing shape.
+- **The direct, non-threaded `_InFlightTracker` tests are the ones that actually prove the fix.**
+  The thread-based `LocalPlaybackSink` tests (in particular
+  `test_two_concurrent_delivers_both_survive_being_interrupted`) exercise the real code path end to
+  end and are valuable as an integration check, but they rely on `time.sleep(0.1)` to get the
+  interleaving order right and could in principle pass by luck on a scheduler that happens to
+  serialize things. The `_InFlightTracker` unit tests call `start`/`interrupt`/`finish` directly in
+  the exact broken order with no timing dependency at all — those are the ones that would fail
+  immediately and deterministically against the old single-slot implementation, and are the
+  stronger evidence the underlying logic is actually fixed.
