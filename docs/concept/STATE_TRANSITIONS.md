@@ -46,12 +46,33 @@ flank. That is not a uniform sweep; it weights the forward arc at twice the rate
 which is what a crew member actually does and what the cones milestone would otherwise have had to
 invent.
 
-**There is no rear visibility at all.** Not "reduced" — none. That is a hard boundary for the cone
-model rather than a falloff curve, and it also means a rear-arc contact simply cannot be reported,
-however large or close.
+**There is a hard rear cutoff** — a boundary for the cone model rather than a falloff curve, so a
+contact beyond it cannot be reported however large or close.
 
-"Visibility limits from cockpit: TBD" is the diagram's own open item, and matches the existing
-cockpit occlusion mask in `perception/visibility.py`.
+**But the diagram's 9–3 figure is superseded by measurement, and this transcription got it wrong
+first time.** The diagram's own "visibility limits from cockpit: TBD" was the open item, and it has
+since been *closed by a real cockpit test* (user, 2026-09-20): visibility was confirmed out to
+**8–4 o'clock**, and `perception/cockpit_mask.py` already carries the angles read off a live
+cockpit view.
+
+The measured mask, relative to airframe boresight:
+
+| azimuth | limit |
+|---|---|
+| 0–60° | 22° down, flat across the nose arc |
+| 90° | 10° down, linear from 60° |
+| 130° | boresight plane — **rear cutoff, nothing beyond** |
+
+**±130° is what settles the clock range arithmetically.** Each clock hour is 30°, so 4 o'clock sits
+at 120° and falls *inside* the cutoff; 5 o'clock at 150° falls outside. The implemented voice
+vocabulary's 8–4 range is therefore correct, and the earlier note here — which called
+`report_clock_8` and `report_clock_4` directions Petrovich cannot see — was wrong. The diagram's
+9–3 is the coarser earlier statement; the mask is the measurement that replaced it.
+
+Worth carrying into the cones milestone: **the cockpit visibility envelope is already measured and
+implemented.** Slice 1 needs per-optic fields of view, but not the airframe envelope — that exists,
+and the mask's own docstring says to retune it only from a fresh cockpit measurement, never from a
+screenshot.
 
 ## Mission lifecycle
 
@@ -173,11 +194,10 @@ watch <unit> / <unit type> <where>
 
 **Two discrepancies against what is built, both worth a decision rather than a silent fix:**
 
-1. **Clock range.** The diagram says `9 … 3` (seven positions). The implemented voice vocabulary
-   uses `8 … 4` (nine), chosen on 2026-09-19 as "the forward hemisphere". The diagram's own sector
-   definitions put the forward hemisphere at exactly 9–3, so 8 and 4 fall in the rear arc that the
-   diagram says has **no visibility at all**. If that holds, `report_clock_8` and `report_clock_4`
-   name directions Petrovich cannot see.
+1. **Clock range — RESOLVED 2026-09-20, in favour of the code.** The diagram says `9 … 3`; the
+   implemented vocabulary uses `8 … 4`. A cockpit test confirmed visibility out to 8–4, and
+   `cockpit_mask.py`'s measured ±130° cutoff puts 4 o'clock (120°) inside it and 5 o'clock (150°)
+   outside. The vocabulary is correct; the diagram's figure is the coarser earlier statement.
 2. **`scan <location>`** — waypoint, landmark, or o'clock-and-distance — has no equivalent in the
    built vocabulary, which is sector- and bearing-based only. Landmark and waypoint scanning would
    need the world model and the mission route respectively, both of which exist.
@@ -188,7 +208,8 @@ For anyone picking up the cones milestone or BL-8:
 
 - The four attention modes, and that the 9K113 is the magnified one — with doors.
 - The scan loop: `ahead → left → ahead → right`, forward-weighted.
-- No rear visibility whatsoever — a boundary, not a falloff.
+- A hard rear cutoff at ±130° from boresight — a boundary, not a falloff — already measured and
+  implemented in `perception/cockpit_mask.py`, which is what puts 8 and 4 o'clock inside it.
 - Two memory lifetimes: briefing survives a replay, flight memory does not.
 - IFF belongs inside classification.
 - Behaviour changes are a reporting trigger, and movement is one of them.
