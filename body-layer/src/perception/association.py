@@ -49,6 +49,7 @@ against real multi-target scenes yet.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -105,6 +106,18 @@ class WorldObjectCandidate:
     #: is `True`; `None` is kept rather than silently coerced to "not
     #: ownship" or "is ownship" either way.
     is_ownship: bool | None
+    #: True heading, degrees -- converted once from the wire's
+    #: `heading_true_rad` (`aircraft-layer/src/schema/world_objects.py`'s
+    #: `WorldObjectSample`, a required, non-nullable field) by `from_dict`
+    #: below, matching this module's existing degree convention for
+    #: bearings. `None` only when a malformed/synthetic dict is missing the
+    #: key outright (defensive; unreachable from the real wire schema) --
+    #: never coerced to a guessed aspect, same tri-state discipline as
+    #: `is_ownship` above (`plans/aspect-aware-profiles/plan.md`). Consumed
+    #: by `visibility.check_visibility` for aspect-aware apparent extent
+    #: (`object_model.apparent_extent_m`); `associate()`/`filter_ownship()`
+    #: in this module don't need it.
+    heading_true_deg: float | None = None
 
     @staticmethod
     def from_dict(data: dict[str, Any], *, theatre: str) -> WorldObjectCandidate:
@@ -117,6 +130,7 @@ class WorldObjectCandidate:
         with plain `WorldObjectCandidate` instances."""
         x, z = wgs84_to_dcs(theatre, float(data["lat_deg"]), float(data["lon_deg"]))
         is_ownship_raw = data.get("is_ownship")
+        heading_true_rad = data.get("heading_true_rad")
         return WorldObjectCandidate(
             object_id=int(data["object_id"]),
             object_type=str(data["object_type"]),
@@ -124,6 +138,11 @@ class WorldObjectCandidate:
             z=z,
             alt_m=float(data["altitude_m"]),
             is_ownship=None if is_ownship_raw is None else bool(is_ownship_raw),
+            heading_true_deg=(
+                None
+                if heading_true_rad is None
+                else math.degrees(float(heading_true_rad))
+            ),
         )
 
 
