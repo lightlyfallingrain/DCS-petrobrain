@@ -22,13 +22,43 @@ setting is ×3.3. That is near enough that today's calibrated behaviour is appro
 at its wide setting*, which is worth knowing before anyone reasons about what the current numbers
 represent.
 
-## Control-console travel — NOT the sight's own limits
+## The sight's real angular limits — SOURCED (user, 2026-09-20)
 
-**Corrected 2026-09-20 by the user, who spotted the over-claim before it propagated.** An earlier
-version of this note reported ±40° azimuth and −15°/+20° elevation as *the 9K113 sight's slew
-limits*. They are not. They are the annotated travel of the **ПУ ПН control console** — the
-operator's handle (p.70, Рис. 4.20, "missile control console") — which is the input device, not the
-optical head.
+**Periscope lateral axis: ±60°. Periscope vertical axis: +20° / −15°.**
+
+Source: the **English-language** edition of the Mi-24P manual, §3 "RADUGA-SH COMPONENTS", §3.4
+"Missile Guidance Controls". **That document is not in this repository** — the Russian QuickStart
+PDF that is (`docs/concept/mi-24_info/`) organises the same material as §4.6.7 and does not carry
+these figures on any page searched. Supplied by the user, who located them after this note's first
+version got the azimuth wrong.
+
+This is the **field of regard for the magnified channel**: the sight head cannot be pointed outside
+it, so a contact beyond ±60° azimuth or outside +20°/−15° elevation is unreachable through the
+9K113 however visible it may be to the unaided eye. The cones model now has a sourced third bound,
+distinct from both the optic's own field of view and the cockpit occlusion mask.
+
+### Why the earlier mistake was plausible — worth keeping
+
+The first version of this note read ±40° azimuth and −15°/+20° elevation off the annotations on the
+ПУ ПН control-console photograph and reported them as the sight's limits. **The vertical pair was
+right. The azimuth was not.**
+
+That partial agreement is the interesting part. Had both been wrong the error would have announced
+itself; instead one axis matched the real figure exactly, which is precisely the shape of evidence
+that makes a wrong reading feel confirmed. The lesson is not "check your numbers" but something
+narrower: **a figure printed beside a photograph of a control describes that control**, and
+agreement on one axis is not evidence about the other.
+
+The underlying reason they cannot be the same quantity is now established independently — the
+manual states the operator commands an angular *rate*, not a position (see the second-pass section
+below), so console deflection and head angle are different kinds of thing. Any coincidence between
+them is just that.
+
+## Control-console travel — not the sight's own limits
+
+The ±40° azimuth and −15°/+20° elevation annotated on p.70 (Рис. 4.20) belong to the **ПУ ПН
+control console** — the operator's handle, the input device — not the optical head. See the
+sourced figures above for the head's own limits.
 
 The distinction matters for the cone model. The console's handle travel and the sight head's
 angular deflection need not map one to one, and the manual describes the linkage as a
@@ -37,9 +67,8 @@ rate-or-displacement control relationship rather than a direct angular mapping (
 4). Treating handle travel as a field of regard would have put a wrong bound into `optics.py` and
 made it look sourced.
 
-**The 9K113's own angular limits are in this manual** — the user confirms they are there — but not
-on the pages read so far. Until they are found and cited, the cone model has **no sourced field of
-regard for the sight**, and should say so rather than substituting these numbers.
+**Resolved:** the head's own limits are now sourced from the English edition — ±60° lateral,
++20°/−15° vertical. See the top of this note.
 
 The lesson generalises past this note: a figure printed next to a photograph of a control describes
 *that control*, and the temptation to read it as the system's limit is exactly the kind of
@@ -89,10 +118,15 @@ The user recalls seeing the 9K113's real limits in this manual — **azimuth ±6
 remembered. Searched pages **66–75** (all of §4.6.7), **80–81** (§4.11, which turns out to be an
 empty heading), **105–108** and **110–113** (the ПТУР employment procedure).
 
-**The elevation limit was not found on any of them.** Not recorded as absent from the manual — only
-as absent from the pages read. Still unread and plausible: §2.4 Прицел ПКИ (p.23), §1.6/4.5.4
-АСП-17ВП (p.15, 46–53), the tail of the ПТУР procedure (p.114–116), and §5.4–5.5 on sight modes and
-aiming angles (p.124–127).
+**The elevation limit was not found on any of them**, and the search was abandoned rather than
+completed — the user located both figures in the **English-language edition** instead (§3 "RADUGA-SH
+COMPONENTS", §3.4 "Missile Guidance Controls"), which states them outright. See the top of this note.
+
+Worth recording for the next person searching this PDF: the Russian edition organises the same
+material as §4.6.7 and, across every page read, never states the head's angular limits. The
+equivalent English section does so in two bullet points. **Where the two editions diverge in
+structure, the English one is worth checking first for a plain numeric specification** — it is not
+merely a translation of the same pages.
 
 The search turned up four things that matter more to the cones model than the limits would have.
 
