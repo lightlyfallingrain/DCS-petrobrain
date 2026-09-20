@@ -1012,7 +1012,12 @@ def test_handle_transcript_fallthrough_uses_handle_line_unchanged(
     """Behaviour #4: `verb_anchored=False` falls through to the exact same
     path a typed line takes -- proven here by checking the stand-in brain
     client actually received the escalation, not just that the returned
-    lines happen to match."""
+    lines happen to match. This is also Decision 4 REVISED AGAIN's 'second
+    route in' (`plans/inbound-speech/plan.md`, user 2026-09-20): a high
+    `confidence` (0.95, well above `ACT_FLOOR`) that matches no command at
+    all reaches the brain layer, not 'say again' -- the user's own words,
+    well-transcribed audio that does not match command patterns is
+    exactly what needs to be passed to the brain layer."""
     brain_client = _CapturingBrainClient()
     console = CrewConsole(store=ContactStore(), brain_client=brain_client)  # type: ignore[arg-type]
 
@@ -1064,13 +1069,13 @@ def test_handle_transcript_confirm_band_asks_and_holds_pending(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
-    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
 
     lines = console.handle_transcript(
         "scan ahead",
-        confidence=1.0,
+        confidence=confidence_mid,
         token="scan_ahead",
-        match_ratio=combined,
+        match_ratio=1.0,
         verb_anchored=True,
         ambiguous=False,
         now_sim=0.0,
@@ -1113,6 +1118,28 @@ def test_handle_transcript_says_again_below_confirm_floor() -> None:
     assert lines == ["Say again?"]
 
 
+def test_handle_transcript_unresolved_verb_says_again_even_when_heard_clearly() -> None:
+    """The subtle half of Decision 4 REVISED AGAIN's table (`plans/
+    inbound-speech/plan.md`, user 2026-09-20): "Scan somethinggarbled",
+    heard clearly (high confidence) but unresolved (no token), is *not*
+    free speech -- the player plainly tried to issue a command, so this
+    must say again, never fall through to the brain. `verb_anchored`
+    decides between the two right-hand table cells, not confidence."""
+    console = CrewConsole(store=ContactStore())
+
+    lines = console.handle_transcript(
+        "scan somethinggarbled",
+        confidence=0.95,  # heard clearly -- would clear ACT_FLOOR if matched
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == ["Say again?"]
+
+
 def test_handle_transcript_confirm_then_affirm_commits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1122,12 +1149,12 @@ def test_handle_transcript_confirm_then_affirm_commits(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
-    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     console.handle_transcript(
         "scan ahead",
-        confidence=1.0,
+        confidence=confidence_mid,
         token="scan_ahead",
-        match_ratio=combined,
+        match_ratio=1.0,
         verb_anchored=True,
         ambiguous=False,
         now_sim=0.0,
@@ -1158,12 +1185,12 @@ def test_handle_transcript_confirm_then_negative_discards_silently(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
-    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     console.handle_transcript(
         "scan ahead",
-        confidence=1.0,
+        confidence=confidence_mid,
         token="scan_ahead",
-        match_ratio=combined,
+        match_ratio=1.0,
         verb_anchored=True,
         ambiguous=False,
         now_sim=0.0,
@@ -1196,12 +1223,12 @@ def test_handle_transcript_confirm_then_unrelated_answer_discards_and_processes_
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
-    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     console.handle_transcript(
         "scan ahead",
-        confidence=1.0,
+        confidence=confidence_mid,
         token="scan_ahead",
-        match_ratio=combined,
+        match_ratio=1.0,
         verb_anchored=True,
         ambiguous=False,
         now_sim=0.0,
@@ -1232,12 +1259,12 @@ def test_handle_transcript_confirm_expires_after_window(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
-    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
     console.handle_transcript(
         "scan ahead",
-        confidence=1.0,
+        confidence=confidence_mid,
         token="scan_ahead",
-        match_ratio=combined,
+        match_ratio=1.0,
         verb_anchored=True,
         ambiguous=False,
         now_sim=0.0,
@@ -1271,12 +1298,14 @@ def test_handle_transcript_cancel_task_needs_the_higher_floor(
     console.handle_f10_command("scan_ahead", now_sim=0.0)
     assert len(tasks.tasks) == 1
 
-    combined = (ACT_FLOOR + CONFIRM_FLOOR) / 2  # clears ACT_FLOOR, not ACT_FLOOR_CANCEL
+    confidence_mid = (
+        ACT_FLOOR + CONFIRM_FLOOR
+    ) / 2  # clears ACT_FLOOR, not ACT_FLOOR_CANCEL
     lines = console.handle_transcript(
         "cancel",
-        confidence=1.0,
+        confidence=confidence_mid,
         token="cancel_task",
-        match_ratio=combined,
+        match_ratio=1.0,
         verb_anchored=True,
         ambiguous=False,
         now_sim=1.0,
