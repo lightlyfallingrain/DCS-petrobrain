@@ -6,7 +6,7 @@ still churning (15 -> 39 tokens in a day) and its normalisation rules
 recogniser-specific (whisper writes "180" for a spoken "one eight zero",
 loops short phrases, hears "report" as "record"). Both are facts about
 `vocabulary.py`/whisper, not about Petrovich's belief state, so they stay
-on this side of the seam. `srs-adapter` owns everything mechanical --
+on this side of the seam. `audio-adapter` owns everything mechanical --
 normalise, anchor a verb, fuzzy-match a phrase, check separation -- and
 hands body-layer a resolved `{token, match_ratio}` (plus two booleans this
 module adds, see `MatchResult`'s docstring) so body can decide what to do

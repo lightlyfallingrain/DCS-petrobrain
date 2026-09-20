@@ -3,8 +3,8 @@
 
 Mirrors `body-layer/src/aircraft_client.py`'s shape (a thin `urllib.request`
 wrapper, stdlib only, raise-on-failure for its one write call) -- this is
-`srs-adapter`'s own, independent copy rather than an import of that module:
-`srs-adapter` must stand alone (root `CLAUDE.md`'s module-independence
+`audio-adapter`'s own, independent copy rather than an import of that module:
+`audio-adapter` must stand alone (root `CLAUDE.md`'s module-independence
 rule), and the world-model<->body-layer in-process import is the sole
 sanctioned cross-subproject exception, not a precedent to extend here.
 

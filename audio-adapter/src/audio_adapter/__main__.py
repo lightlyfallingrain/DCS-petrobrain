@@ -1,4 +1,4 @@
-"""Run the `srs-adapter` process: `POST /speak` -> TTS synthesis -> one of
+"""Run the `audio-adapter` process: `POST /speak` -> TTS synthesis -> one of
 two delivery targets (`plans/tts-voice-output/plan.md` Decision 8).
 
 `--target local` (this stage's payoff, no other subproject required) plays
@@ -47,7 +47,7 @@ class LocalPlaybackSink:
     own process serialization, not a design this path optimizes for."""
 
     def deliver(self, audio: bytes, urgent: bool) -> None:
-        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="srs-adapter-play-")
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-play-")
         os.close(fd)
         try:
             with open(tmp_path, "wb") as f:
@@ -138,7 +138,7 @@ def main() -> None:
 
     server = TTSAdapterServer(engine, sink, host=args.host, port=args.port)
     server.open()
-    logger.info("srs-adapter ready (target=%s)", args.target)
+    logger.info("audio-adapter ready (target=%s)", args.target)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -9,7 +9,7 @@ sentence can be produced without a simulator.
 
 So this drives `speech.py`'s real rendering functions over hand-built `facts`
 dicts, prints the exact text, and can POST each line to a running
-`srs-adapter --target local` so it is heard rather than read.
+`audio-adapter --target local` so it is heard rather than read.
 
 Deliberately not a test. It asserts nothing -- it exists so a human can judge
 phrasing, which is the one thing the test suite structurally cannot do.
@@ -22,7 +22,7 @@ world-model seam, and that pulls in `pyproj`, which only exists in
     # print the table
     PYTHONPATH=src:../world-model/src .venv/bin/python tools/speak_samples.py
 
-    # print and speak (srs-adapter must be running on --target local)
+    # print and speak (audio-adapter must be running on --target local)
     PYTHONPATH=src:../world-model/src .venv/bin/python tools/speak_samples.py --speak
 
 Stdlib only, like the rest of this subproject.
@@ -179,7 +179,7 @@ def speak(url: str, text: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--speak", action="store_true", help="POST each line to a running srs-adapter"
+        "--speak", action="store_true", help="POST each line to a running audio-adapter"
     )
     parser.add_argument("--adapter-url", default=DEFAULT_ADAPTER_URL)
     parser.add_argument(

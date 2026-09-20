@@ -4,11 +4,11 @@
 Unlike `text_sender.py`/`command_sender.py` (UDP datagrams to a DCS-side
 listener), this sender plays audio **directly on the Windows box** via the
 stdlib `winsound` module -- no DCS process involvement needed for this
-channel, per the plan's recon (`srs-adapter/research/2026-09-17-tts-audio-
+channel, per the plan's recon (`audio-adapter/research/2026-09-17-tts-audio-
 transport-recon.md`): the collector alone can play a WAV file.
 
 **Queueing/preemption (plan Decision 4), decided here, not in
-`srs-adapter` or `body-layer`.** `winsound` (like any audio API) plays one
+`audio-adapter` or `body-layer`.** `winsound` (like any audio API) plays one
 sound at a time, and `logger.py`'s `--crew-text` poll loop can emit several
 lines in one poll -- garbled overlapping speech is worse than a short queue
 delay, so routine lines queue FIFO and play in order. A single background

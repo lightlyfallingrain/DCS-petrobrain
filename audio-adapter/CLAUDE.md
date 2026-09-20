@@ -1,12 +1,20 @@
-# srs-adapter/CLAUDE.md
+# audio-adapter/CLAUDE.md
 
-Subproject instructions for the SRS Adapter. Augments root `CLAUDE.md` — read that first for
+Subproject instructions for the Audio Adapter. Augments root `CLAUDE.md` — read that first for
 overall Petrobrain architecture; this file adds stack/testing/structure specifics that apply only
-within `srs-adapter/`.
+within `audio-adapter/`.
 
 See `plans/tts-voice-output/plan.md` for the full design rationale (Decisions 1-8) and
 `research/2026-09-17-tts-audio-transport-recon.md` for the DCS-SR-ExternalAudio/`winsound`/`say`
 recon this plan was built against.
+
+**Renamed from `srs-adapter` on 2026-09-20.** DCS-SRS was dropped as a planned dependency for
+outbound audio — Slice 1 already posts synthesized WAV to the aircraft-layer collector, which
+plays it via `winsound`, and never wired an `DCS-SR-ExternalAudio.exe` call. The rename tracks
+that reality; SRS ICS injection (Slice 2, "Next" in `ROADMAP.md`) remains the plan for going over
+the real DCS-SRS product, and every mention of the literal DCS-SRS product elsewhere in this file
+is unchanged — only this subproject's own name, module (`audio_adapter`), classes
+(`AudioAdapterClient`/`AudioAdapterError`), CLI flag (`--audio-adapter-url`), and paths moved.
 
 ## What this is
 
@@ -19,7 +27,7 @@ straight into body-layer (the world-model↔body-layer in-process import is the 
 exception).
 
 - `POST /speak` (`{"text": str, "urgent": bool}`) is the one inbound call, made by body-layer's
-  `SrsAdapterClient`.
+  `AudioAdapterClient`.
 - **`--target local`** (default) synthesizes and plays the WAV directly on this machine via
   `afplay` — no other subproject needs to be running. This is both the fastest way to iterate on
   voice/wording quality and the permanent guaranteed-deliverable dev path (plan's "Second-Order
@@ -82,23 +90,23 @@ to record a corpus and run the bench.
 ## Commands
 
 ```sh
-ruff format srs-adapter/src srs-adapter/tests   # format
-ruff check srs-adapter/src srs-adapter/tests    # lint
-mypy srs-adapter/src                            # type check (strict)
-pytest srs-adapter/tests -q                     # test
+ruff format audio-adapter/src audio-adapter/tests   # format
+ruff check audio-adapter/src audio-adapter/tests    # lint
+mypy audio-adapter/src                            # type check (strict)
+pytest audio-adapter/tests -q                     # test
 ```
 
-Run a single test: `pytest srs-adapter/tests/test_file.py::test_name -q`.
+Run a single test: `pytest audio-adapter/tests/test_file.py::test_name -q`.
 
 **Running the server** (`src/__main__.py`'s `main()`): `src` isn't installed as a package, same
 non-optional-`PYTHONPATH` situation as `aircraft-layer`'s collector and `body-layer`'s logger.
-From `cd srs-adapter`:
+From `cd audio-adapter`:
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m srs_adapter
+PYTHONPATH=src .venv/bin/python -m audio_adapter
 ```
 
-(Or `source .venv/bin/activate` first, then `python -m srs_adapter`.) Hear a spoken line with no
+(Or `source .venv/bin/activate` first, then `python -m audio_adapter`.) Hear a spoken line with no
 other subproject running (`--target local` is the default):
 
 ```sh
@@ -114,8 +122,8 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
 - `tests/test_stt_engine.py` — `WhisperCliEngine` against the **real** `whisper-cli` binary and a
   committed short WAV fixture (`tests/fixtures/sample.wav`), following `test_tts_engine.py`'s
   real-binary posture — but unlike `say`, whisper.cpp is not guaranteed present on every dev
-  machine, so that test class is `pytest.mark.skipif`-gated on `SRS_ADAPTER_WHISPER_BINARY`/
-  `SRS_ADAPTER_WHISPER_MODEL` env vars and skips cleanly (not a failure) when unset/absent — it is
+  machine, so that test class is `pytest.mark.skipif`-gated on `AUDIO_ADAPTER_WHISPER_BINARY`/
+  `AUDIO_ADAPTER_WHISPER_MODEL` env vars and skips cleanly (not a failure) when unset/absent — it is
   skipped in this repo's own dev environment as of authorship. A removed Windows engine's
   platform-gated behaviour (unavailable off Windows) is tested directly; its real `powershell.exe`
   path is untestable from a Mac.
@@ -151,14 +159,14 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   across targets.
 - `src/aircraft_client.py` — `AircraftLayerClient` (thin `POST /audio/play` HTTP client, base64
   WAV + `urgent` flag) and `AircraftLayerAudioSink` (the `--target aircraft-layer` `AudioSink`
-  implementation). This is `srs-adapter`'s own, independent copy of the same shape
+  implementation). This is `audio-adapter`'s own, independent copy of the same shape
   `body-layer/src/aircraft_client.py` already has — not an import of that module, since
-  `srs-adapter` must stand alone per root `CLAUDE.md`'s module-independence rule.
-- `src/srs_adapter/__main__.py` — CLI entrypoint (`python -m srs_adapter`;
+  `audio-adapter` must stand alone per root `CLAUDE.md`'s module-independence rule.
+- `src/audio_adapter/__main__.py` — CLI entrypoint (`python -m audio_adapter`;
   `--host`/`--port`/`--target local|aircraft-layer`/`--aircraft-layer-url`/`--voice`/`--debug`) and
   `LocalPlaybackSink`, the `--target local` `AudioSink` implementation (`afplay` on a temp WAV
-  file). Lives in its own `srs_adapter/` package (unlike the flat top-level modules below) purely
-  so `python -m srs_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py` stay flat
+  file). Lives in its own `audio_adapter/` package (unlike the flat top-level modules below) purely
+  so `python -m audio_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py` stay flat
   top-level modules on `src`'s `pythonpath`, imported directly by both this entrypoint and the
   test suite.
 - `src/stt_engine.py` (Slice 3 Stage 1) — `STTEngine` protocol + `WhisperCliEngine` +
@@ -167,7 +175,7 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
 - `src/vocabulary.py` (Slice 3 Stage 1) — the 15-token scan/watch/cancel command vocabulary, a
   **deliberate hand-synced duplicate** of `body-layer/src/belief/crew_console.py`'s
   `_RELATIVE_SCAN_TOKENS`/`_BEARING_SCAN_TOKENS` and `aircraft-layer`'s `ALLOWED_COMMANDS` —
-  `srs-adapter` cannot import either (module independence). `TOKENS`, `PHRASES` (several spoken
+  `audio-adapter` cannot import either (module independence). `TOKENS`, `PHRASES` (several spoken
   phrasings per token), and helpers (`spoken_phrases`, `token_for_phrase`, `to_gbnf` for
   whisper.cpp's `--grammar`). Keep in sync with those two sources by hand; there is no automated
   check tying the three together.

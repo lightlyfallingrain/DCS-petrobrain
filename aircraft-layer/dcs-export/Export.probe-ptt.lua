@@ -15,7 +15,7 @@
 --[[
 PILOT PTT / SPU-8 PROBE -- not the production script.
 
-Answers the one open question behind srs-adapter Slice 3's push-to-talk gate:
+Answers the one open question behind audio-adapter Slice 3's push-to-talk gate:
 does GetDevice(0):get_argument_value(738) actually reflect the pilot's
 two-stage intercom/radio trigger on THIS installed DCS version, and does it
 behave as a continuous "held" value (not an edge-triggered pulse) at the

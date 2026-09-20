@@ -140,13 +140,13 @@ real brain exists yet.
 **`--speech-audio` (BL-10 first slice, `plans/tts-voice-output/plan.md`)**:
 only meaningful alongside `--crew-text` (a true no-op otherwise, same
 additive posture as `--overlay`/`--f10-commands`). When set, `main()`
-builds a `belief.srs_client.SrsAdapterClient` from `--srs-adapter-url`
+builds a `belief.audio_client.AudioAdapterClient` from `--audio-adapter-url`
 (required together with `--speech-audio`) and passes it as `CrewConsole.
 speech_client`, so every line `CrewConsole` speaks is also synthesized and
-made audible via `srs-adapter`'s `POST /speak` -- the same lines
+made audible via `audio-adapter`'s `POST /speak` -- the same lines
 `--crew-text --overlay` mirrors to the in-cockpit text overlay, pushed
 through the identical `_print` funnel, just to a different sink and a
-different process (`srs-adapter`, not the aircraft layer). `--overlay` and
+different process (`audio-adapter`, not the aircraft layer). `--overlay` and
 `--speech-audio` are independent and combine freely.
 """
 
@@ -163,6 +163,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.audio_client import AudioAdapterClient
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
@@ -170,7 +171,6 @@ from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
-from belief.srs_client import SrsAdapterClient
 from belief.tasks import TaskStore
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
@@ -721,17 +721,17 @@ def main() -> None:
         action="store_true",
         help=(
             "synthesize and play every line CrewConsole speaks via "
-            "srs-adapter's POST /speak -- BL-10 first slice, plans/"
+            "audio-adapter's POST /speak -- BL-10 first slice, plans/"
             "tts-voice-output/plan.md. Only meaningful with --crew-text; "
             "defaults off, a true no-op when absent. Requires "
-            "--srs-adapter-url."
+            "--audio-adapter-url."
         ),
     )
     parser.add_argument(
-        "--srs-adapter-url",
+        "--audio-adapter-url",
         default=None,
         help=(
-            "srs-adapter base URL, e.g. http://127.0.0.1:7795 -- required "
+            "audio-adapter base URL, e.g. http://127.0.0.1:7795 -- required "
             "together with --speech-audio, unused otherwise"
         ),
     )
@@ -739,8 +739,8 @@ def main() -> None:
 
     if args.crew_text and args.console:
         parser.error("--crew-text is mutually exclusive with --console")
-    if args.speech_audio and args.srs_adapter_url is None:
-        parser.error("--speech-audio requires --srs-adapter-url")
+    if args.speech_audio and args.audio_adapter_url is None:
+        parser.error("--speech-audio requires --audio-adapter-url")
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
@@ -766,7 +766,7 @@ def main() -> None:
             mission_phase_tracker=mission_phase_tracker,
         )
         speech_client = (
-            SrsAdapterClient(base_url=args.srs_adapter_url)
+            AudioAdapterClient(base_url=args.audio_adapter_url)
             if args.speech_audio
             else None
         )

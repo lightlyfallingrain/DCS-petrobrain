@@ -77,7 +77,7 @@ Think microservice architechture. That tould naturally balance load on multiple 
     - player transmits on ICS -> Petrovich hears it
     - Petrovich transmits on ICS -> player hears it
     - same channel both directions, no separate mechanism for in/out
-- an **SRS adapter** owns the audio boundary. Proposed as its own thin component, sibling to the aircraft layer, not part of it
+- an **audio adapter** owns the audio boundary. Proposed as its own thin component, sibling to the aircraft layer, not part of it
     - justification: aircraft layer's contract is "DCS I/O". SRS is a separate application with its own client/protocol, not DCS. Folding it into the aircraft layer would put two unrelated external processes behind one API
     - but it follows the same rule as the aircraft layer: **sanitized data out over a sensible API**, raw audio never leaves it
     - runs on the Windows box (where SRS and DCS are). Emits transcripts over LAN, accepts text to speak
@@ -86,7 +86,7 @@ Think microservice architechture. That tould naturally balance load on multiple 
     - **debounce**: ignore transmissions shorter than a sanity-check interval (accidental transmit-key clicks)
     - **silence/noise gate**: drop transmissions that are silence or noise rather than running STT on garbage
     - STT -> transcript text -> body layer
-    - signal-level debounce and gating (duration, energy) live in the SRS adapter, not body. Raw audio never crosses into body, and body should never see a transmission that was not real speech
+    - signal-level debounce and gating (duration, energy) live in the audio adapter, not body. Raw audio never crosses into body, and body should never see a transmission that was not real speech
     - any later *context-dependent* suppression — e.g. a tighter tolerance mid-engagement — is body's, acting on already-transcribed text. Not needed initially
 - incoming routing gate (transcript -> action), decided by body
     - deterministic parse succeeds ("scan 2 o'clock", "watch that", "say again") -> body acts directly, no brain call
@@ -102,7 +102,7 @@ Think microservice architechture. That tould naturally balance load on multiple 
         - anything conversational, or anything answering a question the templates do not cover
 - outgoing audio path
     - chosen text -> TTS -> injected into SRS on ICS
-    - TTS lives in the SRS adapter, same as STT. Body and brain deal in text only
+    - TTS lives in the audio adapter, same as STT. Body and brain deal in text only
 - latency note: the deterministic paths exist largely so common interactions do not wait on an LLM. A readback should be near-instant; an advisory may take a beat
 - the text-only version of all of this (typed input standing in for STT, printed text standing in for TTS) is the thing to build first. The routing, parsing, templating and readback logic is not audio work and should not wait for audio
 

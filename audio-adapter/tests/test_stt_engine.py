@@ -34,11 +34,11 @@ _SAMPLE_WAV_PATH = _FIXTURES_DIR / "sample.wav"
 #: Overridable via environment variables so a dev machine that has
 #: whisper.cpp installed somewhere non-standard can point at it without
 #: editing this file -- mirrors `--whisper-binary`/`--whisper-model`
-#: (`srs-adapter/src/srs_adapter/__main__.py`'s later flags), kept
+#: (`audio-adapter/src/audio_adapter/__main__.py`'s later flags), kept
 #: independent of argparse here since pytest doesn't parse this project's
 #: own CLI args.
-_WHISPER_BINARY = os.environ.get("SRS_ADAPTER_WHISPER_BINARY", "whisper-cli")
-_WHISPER_MODEL = os.environ.get("SRS_ADAPTER_WHISPER_MODEL", "")
+_WHISPER_BINARY = os.environ.get("AUDIO_ADAPTER_WHISPER_BINARY", "whisper-cli")
+_WHISPER_MODEL = os.environ.get("AUDIO_ADAPTER_WHISPER_MODEL", "")
 
 
 def _whisper_ready() -> bool:
@@ -49,7 +49,7 @@ def _whisper_ready() -> bool:
     not _whisper_ready(),
     reason=(
         "whisper-cli binary and/or a model file not available -- set "
-        "SRS_ADAPTER_WHISPER_BINARY/SRS_ADAPTER_WHISPER_MODEL to run this "
+        "AUDIO_ADAPTER_WHISPER_BINARY/AUDIO_ADAPTER_WHISPER_MODEL to run this "
         "test class for real"
     ),
 )
