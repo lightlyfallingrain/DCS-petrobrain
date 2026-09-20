@@ -228,3 +228,152 @@ explicitly deferred by "recalibrate afterwards").
   MULTIPLIER` ... this test fails and names the range" — written before this pass existed. Worth
   noting as a case where the codebase's own prior documentation correctly predicted a future
   regression's shape.
+
+---
+
+## Final pass (same session, 2026-09-20): naked eye becomes the default
+
+The coordinator relayed a further, explicit user reversal of pass 4 (the M=8.0 excursion):
+**`check_visibility`'s default optic moves from `BINOCULAR_OPTIC` to `UNAIDED_OPTIC`.** Rationale
+(user's own words, preserved): modelling Petrovich as permanently glassed-up — binocular
+magnification across the whole cockpit-mask envelope, with no field-of-view cost — was the single
+biggest source of over-detection in this channel. Real observation is naked-eye by default;
+binoculars are a deliberate, narrower, raised act.
+
+### Changes (this pass)
+1. `check_visibility`'s `optic` default resolves to `UNAIDED_OPTIC` (M=1.0), not `BINOCULAR_OPTIC`.
+2. `BINOCULAR_OPTIC` becomes a real instrument: a Б-6 6x30. `magnification=4.0` (6x raw glass times
+   a ~0.67 unstabilised-platform penalty, stated in prose rather than a dataclass field this time —
+   the earlier, reversed `handheld_effectiveness` split is not resurrected). `fov_half_angle_deg=
+   4.25` (half an ~8.5 deg true field) — **set to a real value for the first time**, safe now
+   specifically because binoculars are no longer the default: no concrete `PerceptionSource` calls
+   `check_visibility` with this optic yet (plan Decision 4), so the value cannot misfire a gate in
+   the live path today.
+3. `UNAIDED_OPTIC` unchanged: `fov_half_angle_deg=None`.
+4. `BINOCULAR_RANGE_MULTIPLIER` completes its round trip: 4.0 → 8.0 → **4.0 again**, numerically
+   identical to the start but independently derived this time (6x × 0.67 penalty), and confirmed —
+   not assumed — to match what the 2026-09-17 screenshot ladder's binocular column independently
+   shows.
+5. The central default-behaviour test is replaced again:
+   `test_default_optic_argument_matches_pre_slice1_behaviour` → (pass 4)
+   `test_default_optic_is_binocular_at_the_new_8x_range_multiplier` → (this pass)
+   `test_default_optic_is_naked_eye`, pinning the current default explicitly with a worked
+   before/after tier comparison (Infantry at 300 m: `medres` under the pass-4-original
+   `BINOCULAR_OPTIC` M=4.0 baseline, `lowres` under the current `UNAIDED_OPTIC` M=1.0 default).
+6. `test_vision_calibration.py`'s `_STALE_AT_8X_MULTIPLIER` `xfail` set is **removed entirely, not
+   emptied** — verified green (46 passed, 0 xfailed) rather than assumed from the numbers matching
+   on paper.
+7. `NAKED_EYE_RANGE_CAP_M` re-checked at the new default (see "Consequences" below) — not changed.
+
+### Files Changed (this pass)
+- `body-layer/src/perception/optics.py` — `BINOCULAR_OPTIC.magnification = BINOCULAR_RANGE_
+  MULTIPLIER` (now 4.0) with a real `fov_half_angle_deg=4.25`. Module and class docstrings rewritten
+  for the Б-6 derivation and the "naked eye is now the default" rationale.
+- `body-layer/src/perception/visibility.py` — `BINOCULAR_RANGE_MULTIPLIER: Final[float] = 4.0`.
+  `check_visibility`'s default resolves to `UNAIDED_OPTIC`. The module's "Binocular premise" section
+  is marked superseded rather than deleted (the history it records — why every constant was
+  originally tuned against the binocular column — still matters); the `BINOCULAR_RANGE_MULTIPLIER`
+  constant's own docstring carries the full 4.0→8.0→4.0 round trip.
+- `body-layer/tests/test_optics.py` — the magnification test updated for 4.0; two new tests
+  (`test_binocular_optic_has_a_real_field_of_view`,
+  `test_binocular_optic_field_of_view_rejects_an_off_boresight_candidate`) cover the new FOV value.
+- `body-layer/tests/test_visibility.py` — every threshold-dependent case recomputed for the
+  `UNAIDED_OPTIC` (M=1.0) default. New `_MASK_ONLY_OPTIC` test constant (magnification=100,
+  fov=None) threaded explicitly into every cockpit-mask/banking/depression-focused test whose
+  candidate ranges (600–1000 m) no longer fit under the new, much shorter default range gate — these
+  tests exist to isolate the mask gate, not the range gate, and needed decoupling from whichever
+  optic happens to be the default. The Ural-truck gate test reverts to its **original** name and
+  premise (`test_ural_truck_gate_is_bound_by_the_size_curve_not_the_range_cap`) — at M=1.0 nothing
+  in the current table pushes a Ural-sized vehicle's threshold past the cap any more, undoing the
+  pass-4 finding.
+- `body-layer/tests/test_naked_eye_source.py` — every fixture literal recomputed. Two shared test
+  fixtures required real re-derivation, not just arithmetic: `_CAP_TEST_RANGES_M`/
+  `_CAP_TEST_CROSS_OFFSETS_M` (the 5-candidate cap/debounce spread) and
+  `test_a_cluster_splitting_gives_the_majority_child_continuity`'s geometry (merge-then-split under
+  a depression-angle axis) both had candidates beyond the new ~600 m naked-eye ceiling for Infantry.
+  Both were rescaled and **re-verified against the real pipeline/clustering functions** rather than
+  assumed to scale safely — shrinking range alone increases a candidate's apparent angular size
+  (`size_m / range_m`), which could silently collapse a separation or a merge/split boundary a test
+  depends on. Concretely: iterated candidate scale factors through the real
+  `NakedEyePerceptionSource`/`angular_separation_rad`/`angular_size_rad` functions until the required
+  merge/split/count outcomes reproduced, then hand-tuned to round numbers and re-confirmed.
+- `body-layer/tests/test_mock_flight_chain.py` — the full-chain fixture's object 102 (stationary
+  infantry) is now never naked-eye-visible anywhere across the 20-frame fixture (closest approach
+  ~689 m slant range, still beyond the 600 m naked-eye default threshold for a 1.8 m object) —
+  confirmed by running the full pipeline poll-by-poll, not derived on paper. Object 101 (the truck)
+  stays at `lowres`/presence tier on the naked-eye channel throughout, never reaching `medres`/
+  `hires` (this fixture's own track never gets close enough before the cockpit mask cuts naked-eye
+  visibility off). Contact/observation/event counts rewritten: 1 contact (was 2), 36 observations
+  (was 56), 1 `CONTACT_DETECTED` event (was 2 + a `CONTACT_CLASSIFICATION_CHANGED`). The fixture
+  JSON itself (`tests/fixtures/mock_flight_canonical.json`) was **not** touched — real DCS
+  coordinates through the real transform, explicitly not this test's data to edit.
+- `body-layer/tests/test_vision_calibration.py` — `_STALE_AT_8X_MULTIPLIER` and its `xfail` branch
+  removed; `test_computed_tier_matches_ground_truth` is a plain assertion again.
+- `body-layer/CLAUDE.md` — `visibility.py`/`optics.py` Structure entries rewritten for the final
+  state.
+
+### Checks (this pass)
+- ruff format --check: pass
+- ruff check: pass
+- mypy --strict (`cd body-layer && mypy src`): pass, 36 source files
+- pytest -q: pass, 732 passed, 0 xfailed (test_vision_calibration.py's xfails are gone, not just
+  passing)
+
+### Findings requested by the coordinator (report only, no action taken)
+
+**`NAKED_EYE_RANGE_CAP_M` at the new default: does not bind pathologically.** Computed the object
+size at which the 10000 m cap starts binding for `lowres` tier at M=1.0:
+`size_m > NAKED_EYE_RANGE_CAP_M * LOWRES_ANGULAR_RADIUS_RAD / 1.0 = 30 m`. Checked real object
+sizes: Infantry (1.8 m) → 600 m threshold, Ural-4320 (6 m) → 2000 m, T-72B (7 m) → 2333 m — all well
+under the cap. Only ship-class objects (e.g. `MOLNIYA`, 100 m → 33333 m uncapped) hit the cap, which
+is the sanity-bound role the cap was always meant to play. This is a healthier state than the M=8.0
+excursion's, where the cap bound every vehicle ≥3.75 m (Ural and T-72 both included) — that finding
+does not survive into this final state; not re-flagged as a problem here since it isn't one.
+
+**Four-column magnification-model arithmetic: the qualitative claim is confirmed, the specific
+numbers are not.** Extracted the 9 authoritative (`png-2026-09-17`) records from
+`tests/fixtures/vision_calibration.json` and read off, for both the `naked_eye` and `binocular`
+columns, the range bracket where each grade transition happens (largest object in every record is
+8 m):
+
+- **`class_recognizable` (medres) boundary**: naked_eye brackets to (503 m still class, 1000 m no
+  longer); binocular brackets to (1990 m still class, 2990 m no longer) — matches `visibility.py`'s
+  own "class first resolved at 1990 m" derivation comment exactly. Ratio of the tightest known
+  anchors (1990/503) ≈ **3.96**, i.e. close to 4 — consistent with the coordinator's "~4 at
+  class_recognizable" figure.
+- **`speck_no_class` (presence/lowres) boundary**: naked_eye brackets to (2990 m still speck, 3990 m
+  drops to `marginal_speck`); binocular is **still `speck_no_class` at 8890 m, the farthest
+  photographed range** — its true presence threshold is unmeasured, known only to be `> 8890 m`.
+  Every ratio computable from the tested data (8890/2990 ≈ 2.97, 8890/3990 ≈ 2.23) is **larger**
+  than naked_eye's own class-tier ratio's lower estimate, not smaller, and both are far from the
+  quoted **~1.3**. I could not reconstruct a reading of this fixture that produces ~1.3 at the
+  presence tier under any interpretation of "speck tier" I tried (`speck_no_class` boundary,
+  `marginal_speck` boundary — the latter is entirely unmeasured for binocular within the ladder).
+
+  **What the data does confirm**: the presence-tier ratio (≥2.2–3.0, and possibly much larger since
+  binocular's true threshold sits beyond the tested range) is measurably *different* from the
+  class-tier ratio (~4) — so the qualitative claim that a single multiplicative magnification model
+  can't fit both tiers with one threshold set is supported by this fixture. The specific "~1.3"
+  figure is not reproducible from it by any method I could construct; if it came from a different
+  calculation (e.g. against the `9k113_wide`/`9k113_narrow` columns, or a per-object rather than
+  largest-object reading), that wasn't checked here — flagging the discrepancy rather than silently
+  substituting my own number for the coordinator's.
+
+Neither finding was acted on, per instruction — both are input to a future recalibration pass.
+
+### Notable Discoveries (this pass)
+- **Rescaling a geometry fixture under a shorter range ceiling is not a linear operation.** Both
+  `test_naked_eye_source.py` fixtures that needed rescaling would have broken silently if scaled by
+  a flat distance factor alone: shrinking every candidate's range without also shrinking whatever
+  fixed offset defines their angular separation (a cross-range offset, or an AGL altitude difference)
+  changes the ratio those separations are judged against, since apparent angular size
+  (`size_m / range_m`) is not scale-invariant even though bearing angle between two uniformly-scaled
+  points is. Caught by actually re-running the real clustering/pipeline functions on candidate
+  rescalings rather than reasoning it through by hand and trusting the arithmetic.
+- Confirmed, a second time in this same slice, that a module's own predicted-failure-mode docstring
+  (`test_vision_calibration.py`'s "the moment someone changes `BINOCULAR_RANGE_MULTIPLIER` ...")
+  works symmetrically: it correctly predicted the pass-4 failure, and its resolution condition
+  ("un-xfail once a fresh calibration ladder lands") turned out to already be satisfied once the
+  multiplier round-tripped back to an equivalent value — worth remembering that "the multiplier
+  changed" and "the calibration is stale" are not the same fact; the second only follows from the
+  first if the *value* actually moved away from what was measured.
