@@ -45,13 +45,22 @@ exception).
   See `ROADMAP.md` in this directory for that slice's full requirements, including the
   always-available-regardless-of-selector property it has to satisfy.
 
-**Inbound speech (Slice 3, `plans/inbound-speech/plan.md`, Stage 1 only so far)**: recognises the
+**Inbound speech (Slice 3, `plans/inbound-speech/plan.md`, Stages 1-3 landed)**: recognises the
 same 15-token scan/watch/cancel command vocabulary `body-layer`'s F10 command path already
-dispatches, spoken instead of clicked. Stage 1 is a **stop/go gate**, not a working pipeline: it
-answers whether a recogniser can handle this user's Finnish-accented English on a closed
-vocabulary at all, before any capture/transit/PTT wiring is built. See "Structure" below for
-`stt_engine.py`/`vocabulary.py`/`tools/stt_bench.py`, and that tool's own module docstring for how
-to record a corpus and run the bench.
+dispatches, spoken instead of clicked. Stage 1 was a **stop/go gate** (99.2% top-1 on the user's
+own corpus, `research/2026-09-19-corpus-bench-results.md` — cleared) before any capture/transit/
+PTT wiring was built; Stage 2 added the matcher (`command_matcher.py`); Stage 3 wires it to HTTP:
+`POST /transcribe` (a base64 WAV in, `WhisperCliEngine.transcribe` -> `command_matcher.
+match_transcript` -> enqueued) and `GET /transcripts/poll` (drains `transcript_queue.
+TranscriptQueue`, the seven-field row `body-layer`'s `AudioAdapterClient.get_transcripts()`
+consumes). Both are optional-collaborator gated on `TTSAdapterServer`'s `stt_engine` param — pass
+`--whisper-model` to `python -m audio_adapter` to wire a real `WhisperCliEngine` (Stage 1's settled
+config: `small.en` + `--prompt`, never `--grammar`); without it, `POST /transcribe` answers `503`
+and `GET /transcripts/poll` always drains empty, a true no-op. See "Structure" below for
+`stt_engine.py`/`vocabulary.py`/`command_matcher.py`/`transcript_queue.py`/`tools/stt_bench.py`,
+and that tool's own module docstring for how to record a corpus and run the bench. Capture/PTT
+(Stages 4-5) are not built yet — Stage 3's own acceptance path is `POST /transcribe`ing a Stage 1
+corpus WAV directly, no Windows/DCS in the loop.
 
 ## Tech stack
 
@@ -117,6 +126,22 @@ Add `--target aircraft-layer --aircraft-layer-url http://<aircraft-layer-host>:7
 synthesized WAV to a running aircraft-layer collector instead (needs `aircraft-layer`'s collector
 running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.md`).
 
+Add `--whisper-model /path/to/ggml-small.en.bin` (Stage 1's settled model — `--whisper-binary`
+defaults to `whisper-cli` on `PATH`) to also wire inbound speech recognition. Recognise a WAV file
+end to end with no other subproject running:
+
+```sh
+python3 -c "import base64,json; print(json.dumps({'wav_b64': base64.b64encode(open('/path/to/clip.wav','rb').read()).decode()}))" > /tmp/transcribe.json
+curl -X POST http://127.0.0.1:7795/transcribe -d @/tmp/transcribe.json
+curl http://127.0.0.1:7795/transcripts/poll
+```
+
+`POST /transcribe`'s response is just `{"ok": true}` — the recognised text and match metadata land
+in the queue `GET /transcripts/poll` drains (`{"transcript", "confidence", "token", "match_ratio",
+"verb_anchored", "ambiguous", "t_wall"}` per entry, `[]` when nothing is pending), the same seven
+fields `body-layer`'s `AudioAdapterClient.get_transcripts()`/`CrewConsole.handle_transcript`
+consume.
+
 ## Testing
 
 - `tests/test_stt_engine.py` — `WhisperCliEngine` against the **real** `whisper-cli` binary and a
@@ -143,6 +168,15 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   `aircraft-layer/tests/test_text_push_api.py`'s pattern (valid speak, urgent-flag threading,
   missing/invalid/empty `text`, non-bool `urgent`, non-JSON body, synthesis failure -> `503`,
   delivery failure -> `500`, unknown path -> `404`).
+- `tests/test_transcribe_api.py` (Slice 3 Stage 3) — `POST /transcribe`/`GET /transcripts/poll`
+  against a real `TTSAdapterServer` with a recording `STTEngine` double (never a real whisper-cli
+  binary) — `command_matcher.match_transcript` itself runs for real against whatever text the
+  double returns, so these tests exercise the real match path. Covers the round trip (matched
+  command, non-command speech with a null token), drain-on-poll (empties after one poll, two
+  transcribes before a poll both survive), the optional-`stt_engine` gate (`503`/always-empty-poll
+  when unset), a recognition failure (`503`, never enqueued), and the same
+  missing/invalid-base64/empty-decoded/non-JSON `400` cases `test_server.py`'s `/speak` covers for
+  its own base64 field.
 - `src/__main__.py` (including `LocalPlaybackSink`, the `afplay` delivery target) has **no
   automated test** — a live-process entrypoint, same untested-by-design posture as
   `aircraft-layer/src/collector/__main__.py`'s and `body-layer/src/logger.py`'s own `main()`s.
@@ -152,23 +186,38 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
 
 - `src/tts_engine.py` — `TTSEngine` protocol + `MacSayEngine`, the one synthesis implementation
   this slice ships.
-- `src/server.py` — `TTSAdapterServer`, the `POST /speak` HTTP server. Target-agnostic: always
-  synthesizes via a `TTSEngine`, then calls one `AudioSink.deliver` — never knows whether that
-  sink plays locally or forwards to the aircraft layer. `AudioDeliveryError` is the one exception
-  type every `AudioSink` implementation raises on failure, keeping the sink contract uniform
-  across targets.
+- `src/server.py` — `TTSAdapterServer`, the `POST /speak` HTTP server, plus (Slice 3 Stage 3)
+  `POST /transcribe`/`GET /transcripts/poll`. Target-agnostic for outbound: always synthesizes via
+  a `TTSEngine`, then calls one `AudioSink.deliver` — never knows whether that sink plays locally
+  or forwards to the aircraft layer. `AudioDeliveryError` is the one exception type every
+  `AudioSink` implementation raises on failure, keeping the sink contract uniform across targets.
+  `POST /transcribe` decodes a base64 WAV (same shape `aircraft-layer`'s `POST /audio/play`
+  established), runs `STTEngine.transcribe` then `command_matcher.match_transcript`, and enqueues
+  one `transcript_queue.TranscriptEvent` — never the audio, a WAV path, or the engine name.
+  `stt_engine`/`transcript_queue` are optional constructor params (`stt_engine=None` is the
+  default): without a configured engine, `/transcribe` answers `503` and `/transcripts/poll`
+  always drains an empty `TranscriptQueue`, the same "optional collaborator, 503 when absent"
+  posture `aircraft-layer/src/api/server.py`'s own optional senders use.
+- `src/transcript_queue.py` (Slice 3 Stage 3) — `TranscriptEvent` (the seven-field row) +
+  `TranscriptQueue` (`push`/`drain_all`), a bounded FIFO mirroring `aircraft-layer/src/collector/
+  cache.py`'s `F10CommandQueue` shape and reasoning almost exactly — two transmissions landing
+  inside one body-layer poll interval must both survive, so a single-slot "latest" cache would be
+  wrong here too.
 - `src/aircraft_client.py` — `AircraftLayerClient` (thin `POST /audio/play` HTTP client, base64
   WAV + `urgent` flag) and `AircraftLayerAudioSink` (the `--target aircraft-layer` `AudioSink`
   implementation). This is `audio-adapter`'s own, independent copy of the same shape
   `body-layer/src/aircraft_client.py` already has — not an import of that module, since
   `audio-adapter` must stand alone per root `CLAUDE.md`'s module-independence rule.
 - `src/audio_adapter/__main__.py` — CLI entrypoint (`python -m audio_adapter`;
-  `--host`/`--port`/`--target local|aircraft-layer`/`--aircraft-layer-url`/`--voice`/`--debug`) and
-  `LocalPlaybackSink`, the `--target local` `AudioSink` implementation (`afplay` on a temp WAV
-  file). Lives in its own `audio_adapter/` package (unlike the flat top-level modules below) purely
-  so `python -m audio_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py` stay flat
+  `--host`/`--port`/`--target local|aircraft-layer`/`--aircraft-layer-url`/`--voice`/`--debug`,
+  plus (Slice 3 Stage 3) `--whisper-binary`/`--whisper-model`) and `LocalPlaybackSink`, the
+  `--target local` `AudioSink` implementation (`afplay` on a temp WAV file). Lives in its own
+  `audio_adapter/` package (unlike the flat top-level modules below) purely so
+  `python -m audio_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py` stay flat
   top-level modules on `src`'s `pythonpath`, imported directly by both this entrypoint and the
-  test suite.
+  test suite. `--whisper-model` (no default — omitted means no recogniser configured, a true
+  no-op) wires a `WhisperCliEngine` using Stage 1's settled config, `vocabulary.to_prompt()`
+  biasing and never `--grammar`.
 - `src/stt_engine.py` (Slice 3 Stage 1) — `STTEngine` protocol + `WhisperCliEngine` +
   the mirror image of `tts_engine.py`. See "Tech stack" above for the
   unverified-CLI-contract caveat.
@@ -187,8 +236,9 @@ running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.m
   `ambiguous`, `bearing_degrees`) is everything this subproject hands body-layer about one
   transcript — `VERB_FLOOR`/`MATCH_FLOOR`/`SEPARATION_MIN` are the matching constants (behaviour
   constants — `ACT_FLOOR`/`CONFIRM_FLOOR`/etc — live in body-layer's `belief.voice_commands`, per
-  the plan's constant split). Not wired to an HTTP route yet (`GET /transcripts/poll` is Stage 3);
-  Stage 2 exercises it directly from tests and from body-layer's `!voice` REPL test harness.
+  the plan's constant split). Wired into `POST /transcribe` as of Slice 3 Stage 3 (`server.py`
+  above) — Stage 2's own tests still exercise it directly, and body-layer's `!voice` REPL harness
+  is still how a developer drives the act/confirm/say-again pipeline without a real WAV.
 - `tools/stt_bench.py` (Slice 3 Stage 1) — the recognition bench, and the whole slice's stop/go
   gate. Runs whisper.cpp plain and with `--prompt` (and with `--grammar` behind `--with-grammar`) over
   a recorded corpus of the user's own voice, reporting top-1 token accuracy, every confusion pair
