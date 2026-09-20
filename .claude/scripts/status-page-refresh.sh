@@ -57,7 +57,7 @@ PROMPT='Regenerate the project status page, following .claude/skills/status-page
 
 Read the roadmap files FIRST, before opening the page: root ROADMAP.md, every
 subproject ROADMAP.md (world-model, aircraft-layer, body-layer,
-mission-interpreter, srs-adapter) and todo/todo.md. Reading the page first
+mission-interpreter, audio-adapter) and todo/todo.md. Reading the page first
 biases you toward patching what is already there instead of noticing what
 changed.
 

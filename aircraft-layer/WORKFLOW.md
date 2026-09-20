@@ -145,8 +145,8 @@ overlay script) rather than an error.
 The collector also constructs an `AudioPlaybackSender` unconditionally (BL-10 first slice,
 `plans/tts-voice-output/plan.md`) — no host/port of its own, since it plays audio directly on
 this box via `winsound` rather than sending anywhere. This is the other end of
-`srs-adapter --target aircraft-layer`'s `POST /audio/play` call (see
-`srs-adapter/CLAUDE.md`).
+`audio-adapter --target aircraft-layer`'s `POST /audio/play` call (see
+`audio-adapter/CLAUDE.md`).
 
 The collector also opens an `F10CommandReceiver` — a **listener**, not a
 sender, the reverse direction of `TextOverlaySender`/`CommandSender` above —
@@ -227,8 +227,8 @@ tts-voice-output/plan.md`) — `200 {"ok": true}` on success (same "attempted th
 `/text/push`: the audio was handed to the playback queue, not confirmation it was actually heard),
 `400` on missing/invalid `audio_b64`/`urgent` or non-JSON body, `503` if the collector wasn't
 built with an `audio_sender` (should not happen via `python -m collector`, which always constructs
-one). Normally called by `srs-adapter --target aircraft-layer`, not by hand — see
-`srs-adapter/CLAUDE.md`'s own run command for the full TTS-to-audible-speech path.
+one). Normally called by `audio-adapter --target aircraft-layer`, not by hand — see
+`audio-adapter/CLAUDE.md`'s own run command for the full TTS-to-audible-speech path.
 
 ```
 curl http://<windows-box-lan-ip>:7791/f10_commands/poll

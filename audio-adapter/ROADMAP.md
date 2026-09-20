@@ -1,4 +1,4 @@
-# SRS Adapter — Roadmap
+# Audio Adapter — Roadmap
 
 The process that turns Petrovich's text into sound the player actually hears. Everything audio
 lives here: TTS synthesis, delivery to a playback target, and (next) injection into DCS-SRS's
@@ -6,9 +6,15 @@ intercom. Body-layer and the brain deal in text only and never see audio bytes �
 `docs/concept/division-or-responsibility.md` settled and `plans/tts-voice-output/plan.md`
 Decision 1 confirmed.
 
+**Renamed from `srs-adapter` on 2026-09-20** — DCS-SRS was dropped as a planned dependency for
+outbound audio (Slice 1 already ships over `winsound` via the aircraft-layer collector, never a
+DCS-SRS call), so the subproject name now matches what it actually does. See `CLAUDE.md`'s own
+note for the full rationale; the "Next: SRS ICS injection" item below is unaffected — that is
+still the plan for the real DCS-SRS product.
+
 Why a separate subproject rather than part of aircraft-layer or body-layer: aircraft-layer's
 contract is DCS I/O and body-layer's is belief state; neither should grow a TTS dependency. The
-seam is HTTP end to end (body-layer → srs-adapter → aircraft-layer), so no new in-process
+seam is HTTP end to end (body-layer → audio-adapter → aircraft-layer), so no new in-process
 cross-subproject import exists — the body-layer↔world-model one remains the sole sanctioned
 exception (root `CLAUDE.md`).
 
@@ -36,8 +42,8 @@ body-side view and the slice numbering both files share.
   - [x] **Stage 3 — `--target aircraft-layer`.** POSTs synthesized WAV to a running collector.
     Verified against a real standalone collector on the Mac, including the expected non-Windows
     playback failure being logged and swallowed rather than crashing the chain.
-  - [x] **Stage 4 — body-layer wiring.** `SrsAdapterClient` + `CrewConsole.speech_client` +
-    `logger.py --speech-audio --srs-adapter-url`.
+  - [x] **Stage 4 — body-layer wiring.** `AudioAdapterClient` + `CrewConsole.speech_client` +
+    `logger.py --speech-audio --audio-adapter-url`.
   - [x] **Stage 5 — live Windows verification. Passed 2026-09-18**, after one real failure and a
     fix.
     - **Playback works.** `winsound` plays audio on the Windows box, cross-machine, end to end.
@@ -159,7 +165,7 @@ body-side view and the slice numbering both files share.
      Windows box only. So audio capture happens there regardless of where recognition runs.
   2. **Recognition uses whatever the host it runs on offers — Mac preferred, Windows required.**
      *"When on windows, use windows tools. When on mac, use Mac tools. I will prefer Mac, but it
-     must work on windows as well."* This is the same shape `srs-adapter`'s `TTSEngine` protocol
+     must work on windows as well."* This is the same shape `audio-adapter`'s `TTSEngine` protocol
      already has (`MacSayEngine` today, a `WindowsSapiEngine` droppable beside it), so an
      `STTEngine` protocol mirrors a pattern this subproject already proved.
   3. **Therefore a transit is needed** — *"A transit is needed"* — carrying captured audio from the
