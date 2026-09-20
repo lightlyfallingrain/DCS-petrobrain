@@ -36,6 +36,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 
 from server import DEFAULT_HOST, DEFAULT_PORT, AudioDeliveryError, TTSAdapterServer
 from stt_engine import DEFAULT_WHISPER_BINARY, WhisperCliEngine
@@ -56,7 +57,21 @@ class LocalPlaybackSink:
     Decision 4) is decided in the aircraft-layer's queueing sender, which
     this dev-only local path deliberately has none of -- a second `/speak`
     call while one is still playing simply plays after it via `afplay`'s
-    own process serialization, not a design this path optimizes for."""
+    own process serialization, not a design this path optimizes for.
+
+    `interrupt()` (`plans/inbound-speech/plan.md` Stage 3 follow-up) is
+    `--target local`'s own answer to `POST /stop`: kill whatever `afplay`
+    process is currently in flight. `deliver` now runs `afplay` via `Popen`
+    (rather than the blocking `subprocess.run` this class used before)
+    specifically so a reference to the live process is available to
+    `interrupt()` from another request-handling thread -- `_current` +
+    `_lock` are the one small piece of shared state that requires, mirroring
+    `AudioPlaybackSender`'s own worker-thread/queue split on the
+    aircraft-layer side, at dev-tool scale."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._current: subprocess.Popen[bytes] | None = None
 
     def deliver(self, audio: bytes, urgent: bool) -> None:
         fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="audio-adapter-play-")
@@ -64,30 +79,58 @@ class LocalPlaybackSink:
         try:
             with open(tmp_path, "wb") as f:
                 f.write(audio)
-            result = subprocess.run(
-                ["afplay", tmp_path],
-                capture_output=True,
-                timeout=_PLAYBACK_TIMEOUT_S,
-                check=False,
-            )
-            if result.returncode != 0:
-                stderr = result.stderr.decode("utf-8", errors="replace")
-                raise AudioDeliveryError(
-                    f"'afplay' exited {result.returncode}: {stderr.strip()}"
+
+            try:
+                process = subprocess.Popen(
+                    ["afplay", tmp_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
-        except FileNotFoundError as exc:
-            raise AudioDeliveryError(
-                "'afplay' binary not found (not on macOS?)"
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise AudioDeliveryError(
-                f"'afplay' timed out after {_PLAYBACK_TIMEOUT_S}s"
-            ) from exc
+            except FileNotFoundError as exc:
+                raise AudioDeliveryError(
+                    "'afplay' binary not found (not on macOS?)"
+                ) from exc
+
+            with self._lock:
+                self._current = process
+            try:
+                _stdout, stderr = process.communicate(timeout=_PLAYBACK_TIMEOUT_S)
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                process.communicate()
+                raise AudioDeliveryError(
+                    f"'afplay' timed out after {_PLAYBACK_TIMEOUT_S}s"
+                ) from exc
+            finally:
+                with self._lock:
+                    if self._current is process:
+                        self._current = None
+
+            if process.returncode != 0:
+                stderr_text = stderr.decode("utf-8", errors="replace")
+                raise AudioDeliveryError(
+                    f"'afplay' exited {process.returncode}: {stderr_text.strip()}"
+                )
         finally:
             try:
                 os.remove(tmp_path)
             except OSError:
                 logger.debug("could not remove temp file %s", tmp_path, exc_info=True)
+
+    def interrupt(self) -> None:
+        """Kill whatever `afplay` process is currently in flight, if any.
+        Never raises (same posture as `AudioPlaybackSender.interrupt` on
+        the aircraft-layer side) -- the killed process's own `deliver()`
+        call sees a non-zero return code and raises `AudioDeliveryError`
+        there, which is that request's own concern, not this one's."""
+        with self._lock:
+            process = self._current
+        if process is None:
+            return
+        try:
+            process.kill()
+        except OSError:
+            logger.debug("failed to kill in-flight afplay process", exc_info=True)
 
 
 def main() -> None:

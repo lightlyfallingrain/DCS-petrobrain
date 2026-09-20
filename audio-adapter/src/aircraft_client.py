@@ -26,6 +26,7 @@ from server import AudioDeliveryError
 _DEFAULT_TIMEOUT_S = 5.0
 
 _AUDIO_PLAY_PATH = "/audio/play"
+_AUDIO_STOP_PATH = "/audio/stop"
 
 
 class AircraftLayerError(RuntimeError):
@@ -67,6 +68,20 @@ class AircraftLayerClient:
         except (urllib.error.URLError, OSError) as exc:
             raise AircraftLayerError(f"request to {url} failed: {exc}") from exc
 
+    def stop_audio(self) -> None:
+        """`POST /audio/stop` (`plans/inbound-speech/plan.md` Stage 3
+        follow-up) -- no request body, mirroring `AudioPlaybackSender.
+        interrupt`'s no-argument contract on the aircraft-layer side.
+        Raises `AircraftLayerError` on any failure, same posture as
+        `play_audio`."""
+        url = f"{self._base_url}{_AUDIO_STOP_PATH}"
+        request = urllib.request.Request(url, data=b"", method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_s) as response:
+                response.read()
+        except (urllib.error.URLError, OSError) as exc:
+            raise AircraftLayerError(f"request to {url} failed: {exc}") from exc
+
 
 class AircraftLayerAudioSink:
     """`server.AudioSink` that forwards synthesized audio to a running
@@ -82,5 +97,15 @@ class AircraftLayerAudioSink:
     def deliver(self, audio: bytes, urgent: bool) -> None:
         try:
             self._client.play_audio(audio, urgent)
+        except AircraftLayerError as exc:
+            raise AudioDeliveryError(str(exc)) from exc
+
+    def interrupt(self) -> None:
+        """`server.AudioSink.interrupt` for `--target aircraft-layer` --
+        forwards to `AircraftLayerClient.stop_audio`, wrapping its
+        `AircraftLayerError` into `AudioDeliveryError` exactly as `deliver`
+        does for `play_audio`."""
+        try:
+            self._client.stop_audio()
         except AircraftLayerError as exc:
             raise AudioDeliveryError(str(exc)) from exc

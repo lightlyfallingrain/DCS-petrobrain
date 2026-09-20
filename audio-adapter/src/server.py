@@ -11,6 +11,21 @@ than inventing a second request-parsing idiom. `GET /transcripts/poll`
 copies that same file's `GET /f10_commands/poll` shape instead: drain a
 bounded FIFO queue on every call, empty state `[]`, never `null`.
 
+`POST /stop` (`plans/inbound-speech/plan.md` Stage 3 follow-up) is the
+interrupt-only counterpart to `/speak`: no body, no synthesis, just
+`AudioSink.interrupt()` -- stop whatever is currently playing/queued on the
+configured target and say nothing new. It exists because `stop_talking` is
+a stated exception to this project's usual readback/confirm rule (user
+direction, 2026-09-20: "no readback or confirmation, just stop talking...
+more of a debug tool than crew feature") -- reaching the aircraft-layer's
+`AudioPlaybackSender._interrupt_playback`/`_clear_queue` previously required
+pushing a new urgent audio line through `/speak`, which is what produced an
+audible "Copy." every time. `AudioSink.interrupt()` reaches the same
+mechanism (for `--target aircraft-layer`, forwarding to the aircraft
+layer's own new `POST /audio/stop`; for `--target local`, killing whatever
+`afplay` process is in flight) without ever synthesizing or delivering
+anything.
+
 This server is target-agnostic: it always synthesizes via a `TTSEngine`
 (`tts_engine.py`) and then calls one `AudioSink.deliver`, without knowing
 whether that sink plays the WAV locally (`--target local`, `afplay`) or
@@ -61,6 +76,7 @@ DEFAULT_PORT = 7795
 _SPEAK_PATH = "/speak"
 _TRANSCRIBE_PATH = "/transcribe"
 _TRANSCRIPTS_POLL_PATH = "/transcripts/poll"
+_STOP_PATH = "/stop"
 
 
 class AudioDeliveryError(RuntimeError):
@@ -75,6 +91,17 @@ class AudioSink(Protocol):
         `AudioDeliveryError` on failure -- this call itself never swallows
         anything; `_handle_speak` below is where the swallow-vs-fail
         decision for the HTTP response is made (plan Decision 5)."""
+        ...
+
+    def interrupt(self) -> None:
+        """Stop whatever this sink is currently delivering/playing and drop
+        anything queued, without delivering anything new (`plans/
+        inbound-speech/plan.md` Stage 3 follow-up -- `POST /stop`'s
+        interrupt-only path, `stop_talking`'s stated exception to this
+        project's usual readback/confirm rule). Raises `AudioDeliveryError`
+        on failure, same contract as `deliver` -- `_handle_stop` below
+        makes the same swallow-vs-fail call `_handle_speak` makes for
+        `deliver`."""
         ...
 
 
@@ -101,6 +128,9 @@ def _make_handler(
                 return
             if path == _TRANSCRIBE_PATH:
                 self._handle_transcribe()
+                return
+            if path == _STOP_PATH:
+                self._handle_stop()
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
@@ -204,6 +234,19 @@ def _make_handler(
                     t_wall=time.time(),
                 )
             )
+            self._respond_json(200, {"ok": True})
+
+        def _handle_stop(self) -> None:
+            """`POST /stop` (no request body -- `AudioSink.interrupt` takes
+            no arguments) -- forwards straight to `sink.interrupt()`. No
+            synthesis step, no engine involved: this is the interrupt-only
+            path, not a shorter `/speak` call."""
+            try:
+                sink.interrupt()
+            except AudioDeliveryError as exc:
+                logger.warning("audio interrupt failed: %s", exc)
+                self._respond_json(500, {"error": f"interrupt failed: {exc}"})
+                return
             self._respond_json(200, {"ok": True})
 
         def _respond_json(self, status: int, body: Any) -> None:

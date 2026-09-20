@@ -56,7 +56,10 @@ TranscriptQueue`, the seven-field row `body-layer`'s `AudioAdapterClient.get_tra
 consumes). Both are optional-collaborator gated on `TTSAdapterServer`'s `stt_engine` param — pass
 `--whisper-model` to `python -m audio_adapter` to wire a real `WhisperCliEngine` (Stage 1's settled
 config: `small.en` + `--prompt`, never `--grammar`); without it, `POST /transcribe` answers `503`
-and `GET /transcripts/poll` always drains empty, a true no-op. See "Structure" below for
+and `GET /transcripts/poll` always drains empty, a true no-op. A Stage 3 follow-up (user direction
+2026-09-20) adds `POST /stop`, the interrupt-only counterpart to `/speak` that `body-layer`'s
+`stop_talking` token needs to interrupt playback and say nothing — no readback, an exception to
+this project's usual readback/confirm rule; see `src/server.py`'s entry below. See "Structure" below for
 `stt_engine.py`/`vocabulary.py`/`command_matcher.py`/`transcript_queue.py`/`tools/stt_bench.py`,
 and that tool's own module docstring for how to record a corpus and run the bench. Capture/PTT
 (Stages 4-5) are not built yet — Stage 3's own acceptance path is `POST /transcribe`ing a Stage 1
@@ -167,7 +170,9 @@ consume.
   `TTSEngine`/`AudioSink` doubles, direct structural copy of
   `aircraft-layer/tests/test_text_push_api.py`'s pattern (valid speak, urgent-flag threading,
   missing/invalid/empty `text`, non-bool `urgent`, non-JSON body, synthesis failure -> `503`,
-  delivery failure -> `500`, unknown path -> `404`).
+  delivery failure -> `500`, unknown path -> `404`) plus (Stage 3 follow-up) `POST /stop`: a
+  successful interrupt (`sink.interrupt()` called, nothing synthesized/delivered) and an interrupt
+  failure -> `500`.
 - `tests/test_transcribe_api.py` (Slice 3 Stage 3) — `POST /transcribe`/`GET /transcripts/poll`
   against a real `TTSAdapterServer` with a recording `STTEngine` double (never a real whisper-cli
   binary) — `command_matcher.match_transcript` itself runs for real against whatever text the
@@ -187,31 +192,43 @@ consume.
 - `src/tts_engine.py` — `TTSEngine` protocol + `MacSayEngine`, the one synthesis implementation
   this slice ships.
 - `src/server.py` — `TTSAdapterServer`, the `POST /speak` HTTP server, plus (Slice 3 Stage 3)
-  `POST /transcribe`/`GET /transcripts/poll`. Target-agnostic for outbound: always synthesizes via
-  a `TTSEngine`, then calls one `AudioSink.deliver` — never knows whether that sink plays locally
-  or forwards to the aircraft layer. `AudioDeliveryError` is the one exception type every
-  `AudioSink` implementation raises on failure, keeping the sink contract uniform across targets.
-  `POST /transcribe` decodes a base64 WAV (same shape `aircraft-layer`'s `POST /audio/play`
-  established), runs `STTEngine.transcribe` then `command_matcher.match_transcript`, and enqueues
-  one `transcript_queue.TranscriptEvent` — never the audio, a WAV path, or the engine name.
-  `stt_engine`/`transcript_queue` are optional constructor params (`stt_engine=None` is the
-  default): without a configured engine, `/transcribe` answers `503` and `/transcripts/poll`
-  always drains an empty `TranscriptQueue`, the same "optional collaborator, 503 when absent"
-  posture `aircraft-layer/src/api/server.py`'s own optional senders use.
+  `POST /transcribe`/`GET /transcripts/poll` and (Stage 3 follow-up) `POST /stop`. Target-agnostic
+  for outbound: always synthesizes via a `TTSEngine`, then calls one `AudioSink.deliver` — never
+  knows whether that sink plays locally or forwards to the aircraft layer. `AudioDeliveryError` is
+  the one exception type every `AudioSink` implementation raises on failure, keeping the sink
+  contract uniform across targets. `POST /transcribe` decodes a base64 WAV (same shape
+  `aircraft-layer`'s `POST /audio/play` established), runs `STTEngine.transcribe` then
+  `command_matcher.match_transcript`, and enqueues one `transcript_queue.TranscriptEvent` — never
+  the audio, a WAV path, or the engine name. `stt_engine`/`transcript_queue` are optional
+  constructor params (`stt_engine=None` is the default): without a configured engine, `/transcribe`
+  answers `503` and `/transcripts/poll` always drains an empty `TranscriptQueue`, the same
+  "optional collaborator, 503 when absent" posture `aircraft-layer/src/api/server.py`'s own
+  optional senders use. `POST /stop` (`plans/inbound-speech/plan.md` Stage 3 follow-up) reads no
+  request body and never synthesizes — it is the interrupt-only counterpart to `/speak`, calling
+  `sink.interrupt()` directly (the `AudioSink` protocol's second method, alongside `deliver`) and
+  answering `500` if that raises `AudioDeliveryError`, `200 {"ok": true}` otherwise. This is what
+  lets `body-layer`'s `stop_talking` token interrupt playback and say nothing, rather than needing
+  to push a new audio line just to reach the interrupt mechanism.
 - `src/transcript_queue.py` (Slice 3 Stage 3) — `TranscriptEvent` (the seven-field row) +
   `TranscriptQueue` (`push`/`drain_all`), a bounded FIFO mirroring `aircraft-layer/src/collector/
   cache.py`'s `F10CommandQueue` shape and reasoning almost exactly — two transmissions landing
   inside one body-layer poll interval must both survive, so a single-slot "latest" cache would be
   wrong here too.
 - `src/aircraft_client.py` — `AircraftLayerClient` (thin `POST /audio/play` HTTP client, base64
-  WAV + `urgent` flag) and `AircraftLayerAudioSink` (the `--target aircraft-layer` `AudioSink`
-  implementation). This is `audio-adapter`'s own, independent copy of the same shape
-  `body-layer/src/aircraft_client.py` already has — not an import of that module, since
-  `audio-adapter` must stand alone per root `CLAUDE.md`'s module-independence rule.
+  WAV + `urgent` flag; `stop_audio()`, Stage 3 follow-up, is its `POST /audio/stop` sibling, no
+  request body) and `AircraftLayerAudioSink` (the `--target aircraft-layer` `AudioSink`
+  implementation — `interrupt()` wraps `stop_audio()`'s `AircraftLayerError` into
+  `AudioDeliveryError`, exactly as `deliver()` already does for `play_audio`). This is
+  `audio-adapter`'s own, independent copy of the same shape `body-layer/src/aircraft_client.py`
+  already has — not an import of that module, since `audio-adapter` must stand alone per root
+  `CLAUDE.md`'s module-independence rule.
 - `src/audio_adapter/__main__.py` — CLI entrypoint (`python -m audio_adapter`;
   `--host`/`--port`/`--target local|aircraft-layer`/`--aircraft-layer-url`/`--voice`/`--debug`,
   plus (Slice 3 Stage 3) `--whisper-binary`/`--whisper-model`) and `LocalPlaybackSink`, the
-  `--target local` `AudioSink` implementation (`afplay` on a temp WAV file). Lives in its own
+  `--target local` `AudioSink` implementation (`afplay` on a temp WAV file, now run via `Popen`
+  rather than the blocking `subprocess.run` this class started with — `interrupt()`, Stage 3
+  follow-up, needs a live reference to the in-flight process to `kill()` it, tracked under a small
+  lock so a `POST /stop` arriving on a different request-handling thread can reach it). Lives in its own
   `audio_adapter/` package (unlike the flat top-level modules below) purely so
   `python -m audio_adapter` works — `tts_engine.py`/`server.py`/`aircraft_client.py` stay flat
   top-level modules on `src`'s `pythonpath`, imported directly by both this entrypoint and the
