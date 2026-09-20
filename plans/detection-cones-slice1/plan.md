@@ -29,60 +29,38 @@ slice 1 of the detection-cones milestone — as an explicit, opt-in extension of
 
 ### Affected Modules / Files
 
-- `body-layer/src/perception/optics.py` (**new**) — `Optic` dataclass and a small table of named
-  optics. **Revised 2026-09-20: the 9K113's real figures are now known** (see
-  `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`), which changes the dataclass's
-  shape — see "Two bounds, not one" below. Fields:
-
-  | Field | Meaning |
-  |---|---|
-  | `name` | |
-  | `magnification: float` | |
-  | `fov_half_angle_deg: float \| None` | **what the eyepiece shows** once pointed; `None` = unrestricted |
-  | `boresight_azimuth_deg: float = 0.0` | where it is pointed (fixed in slice 1, Decision 3) |
-  | `regard_azimuth_half_deg: float \| None` | **how far it can be pointed**, lateral |
-  | `regard_elevation_min_deg: float \| None` | ditto, down |
-  | `regard_elevation_max_deg: float \| None` | ditto, up |
-
-  The table:
-
-  | Optic | M | FOV half-angle | Field of regard |
-  |---|---|---|---|
-  | `UNAIDED_OPTIC` | 1.0 | `None` | `None` (cockpit mask is the only envelope) |
-  | `BINOCULAR_OPTIC` | 4.0 | `None` | `None` — **today's implicit default, now a named value** |
-  | `SIGHT_WIDE_OPTIC` | 3.3 | 5.75° (11.5° full) | ±60° az, −15°/+20° el |
-  | `SIGHT_NARROW_OPTIC` | 10.0 | 3.0° (6.0° full) | same |
-
-  Provenance differs between those last two columns and **the docstrings must say which is which**:
-  the field-of-regard figures are *sourced* (English manual §3.4); the FOV figures are
-  *user-supplied and unverified*, and carry a known internal inconsistency (the magnification step
-  is 3.03× but the field narrows only 1.92×, so 6.0° is the figure to doubt first). Writing them
-  into the same table at equal apparent authority is exactly the failure that produced the earlier
-  console-travel error, so the distinction lives in the code, not only in the research note.
-
+- `body-layer/src/perception/optics.py` (**new**) — `Optic` dataclass (`name`, `magnification`,
+  `fov_half_angle_deg: float | None`, `boresight_azimuth_deg: float = 0.0`) and two named optics:
+  `UNAIDED_OPTIC` (M=1.0, `fov_half_angle_deg=None` — the cockpit mask is the only envelope) and
+  `BINOCULAR_OPTIC` (M=4.0, `None` — **today's implicit default, now an explicit named value**).
   Plus `within_optic_fov(optic, azimuth_deg, elevation_deg) -> bool`: true angular separation from
   `(boresight_azimuth_deg, 0.0)` compared against `fov_half_angle_deg`; `None` means "no
   restriction," always `True`.
 
-#### Two bounds, not one
+#### Scope cut 2026-09-20: the 9K113 is deferred (user direction)
 
-The original plan had a single `fov_half_angle_deg` doing duty for two independent quantities.
-They are not the same thing and differ by an order of magnitude:
+Slice 1 builds the unaided and binocular optics only. An earlier revision of this plan added two
+9K113 entries and four field-of-regard fields on the strength of figures that arrived the same day;
+the user's call is that this got ahead of the slice, and it did — the sight has no perception
+channel, no mode selector, and no caller, so every one of those entries would have been unreachable
+table data.
 
-- **Field of view** — how much the eyepiece shows: **5.75° / 3.0°** half-angle. Genuinely circular,
-  so Decision 2 stands unchanged.
-- **Field of regard** — how far the head can be slewed: **±60° azimuth, −15° to +20° elevation**.
-  A rectangle, and *asymmetric in elevation*, so it cannot be expressed as a half-angle at all.
+**The field-of-regard fields go with it.** They existed solely to carry the sight's ±60°/−15°/+20°
+bounds. With no 9K113 entry, both remaining optics would carry `None` on all four — fields nothing
+sets and no test can exercise, which is the same objection that kept the regard *gate* out even
+while those entries still existed. `Optic` is four fields, not seven.
 
-Collapsing them would have made the sight appear to see 5.75° of the world total, when in fact it
-sees 5.75° at a time anywhere within a 120°-wide arc — a very different detection model.
+The figures themselves are not lost and were not wasted: they live in
+`body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`, sourced and marked by
+confidence, ready for whichever slice wires the sight up. Research outliving the slice that prompted
+it is the normal case, not a loss.
 
-**In slice 1 the regard fields gate nothing.** Decision 3 pins the boresight dead ahead and there is
-no slew model, so the FOV cone always sits well inside the regard rectangle and a regard check could
-never fire. They are carried as *data* for slice 2, which is where pointing becomes possible. The
-implementer must **not** add a regard gate to `check_visibility` — an unreachable branch that no test
-can exercise is worse than an absent one. A test asserting the fields are present and correctly
-valued is the right coverage here.
+**The FOV gate stays** even though neither shipped optic restricts its field. `within_optic_fov` is
+the mechanism this slice exists to establish, its `None` path is exercised by both real optics, and
+its restricting path is exercised by a synthetic `Optic` in the tests — a reachable branch with a
+real caller, unlike the regard check. That asymmetry is the whole rule being applied here: carry
+mechanisms that something exercises, defer data that nothing reads.
+
 - `body-layer/src/perception/visibility.py` — `check_visibility` gains `optic: Optic =
   BINOCULAR_OPTIC` as a keyword-defaulted parameter. Internally: (a) after the existing cockpit-mask
   gate, add `within_optic_fov(optic, body_direction.azimuth_deg, body_direction.elevation_deg)` as a
@@ -119,12 +97,13 @@ valued is the right coverage here.
    coarseness philosophy ("no need to take to canopy beam, that's too much detail"). A single number
    per optic is enough for slice 1's static-forward-cone scope.
 
-   **Re-examined 2026-09-20 and kept.** The sourced ±60°/−15°/+20° figures first looked like a
-   refutation of this decision — an asymmetric rectangle that no half-angle can hold. They are not:
-   they describe the *field of regard*, a second bound the dataclass now carries separately. The
-   eyepiece's own field really is circular, so the circular cone was the right call and survives
-   unchanged. Recorded because the refutation was argued out loud and someone re-reading this
-   should find the resolution rather than the objection.
+   **Re-examined 2026-09-20 and kept.** The 9K113's sourced ±60°/−15°/+20° figures briefly looked
+   like a refutation — an asymmetric rectangle no half-angle can hold. They were not: those describe
+   the *field of regard*, where the head can be pointed, which is a different bound from what the
+   eyepiece shows once pointed. An eyepiece field genuinely is circular. The distinction is now moot
+   for this slice (the 9K113 is deferred) but is recorded because it will matter the moment the
+   sight is built, and because someone re-reading this should find the resolution rather than
+   rediscover the objection.
 3. **The 9K113 optics' `boresight_azimuth_deg` is fixed at `0.0` (dead ahead)** — this is the
    "static forward cone" the roadmap entry names for slice 1. No traverse/slew model exists; that is
    explicitly slice 2's attention/scanning territory.
@@ -138,11 +117,9 @@ valued is the right coverage here.
 
 ### Implementation Plan
 
-1. **`optics.py`**: `Optic` dataclass + `within_optic_fov` + the four named optics
-   (`UNAIDED_OPTIC`, `BINOCULAR_OPTIC`, `SIGHT_WIDE_OPTIC`, `SIGHT_NARROW_OPTIC`) with the figures
-   in the table above, each carrying its provenance in a docstring or comment — *sourced* for the
-   regard bounds, *unverified* for the two FOV figures. Pure, no I/O, no DCS/world-model dependency
-   — mirrors `cockpit_mask.py`'s own posture.
+1. **`optics.py`**: `Optic` dataclass + `within_optic_fov` + the two named optics
+   (`UNAIDED_OPTIC`, `BINOCULAR_OPTIC`). Pure, no I/O, no DCS/world-model dependency — mirrors
+   `cockpit_mask.py`'s own posture.
 2. **Wire into `visibility.py`**: add the `optic` parameter, the FOV gate, and thread
    `optic.magnification` through the range-threshold formula and `_achieved_tier`. Keep every
    existing call site (which passes no `optic` argument) producing identical output — this is the
@@ -171,14 +148,10 @@ loop.
   non-default optic into a channel that also clusters, `clustering.py`'s floor term would silently
   keep assuming binocular magnification.** Not fixed here — noted so slice 2 doesn't rediscover it
   the hard way.
-- **The two FOV figures (11.5° / 6.0°) are unverified and mutually inconsistent.** Adopted on user
-  direction so the table holds real-shaped numbers rather than round invented ones, but the
-  magnification step is 3.03× against a field narrowing of only 1.92× — a shared objective would
-  give ≈3.8° narrow. **If a sim measurement contradicts one, doubt 6.0° first.** The regard bounds
-  are on firmer ground (English manual §3.4) but still single-source. `optics.py` must mark the two
-  classes differently; a reader who cannot tell measured from adopted will eventually propagate the
-  weaker number as if it were the stronger one, which is precisely how the console-travel figure
-  got into this project's documentation.
+- **Neither shipped optic restricts its field**, so `within_optic_fov`'s restricting branch has no
+  production caller — only a synthetic `Optic` in the tests. That is deliberate (the mechanism is
+  what slice 1 buys) but it does mean the gate's real behaviour is unproven against live data until
+  something sets a non-`None` field. Worth knowing rather than discovering later.
 - **No mechanism yet decides which optic applies when.** Building the table without a selector is
   the deliberate scope cut (Decision 4) but means slice 1 alone cannot yet make "scan north" mean
   anything operationally — that requires slice 2's attention direction. Worth being explicit that
@@ -214,18 +187,15 @@ the default path is provably unchanged.
   `visibility.py`, but this is a naming/ownership call the user may want to weigh in on rather than
   have silently picked.
 - ~~**9K113 magnification and FOV half-angle** — genuinely unresearched placeholders.~~
-  **Resolved 2026-09-20.** Both are now in the table above: magnification ×3.3/×10 and field of
-  regard from the manual, FOV half-angles 5.75°/3.0° adopted unverified on user direction. No
-  placeholder convention is needed. The residual question is a *verification* one — measuring the
-  narrow field in the sim — not a design one, and it does not block slice 1.
-
-- **Two optics where the plan assumed one.** The sight's magnification is switchable in flight
-  (`LCtrl+X`), and the manual's own procedure is to search at ×3.3 and identify at ×10. A single
-  `magnification: float` cannot hold that, so `SIGHT_OPTIC_OBSERV`/`SIGHT_OPTIC_TRACK` (named for
-  *modes*) become `SIGHT_WIDE_OPTIC`/`SIGHT_NARROW_OPTIC` (named for *what the optic does*). Mode →
-  optic is then a slice-2 selection over the table rather than a second zoom state layered on top of
-  it. The rename is also more honest: Observ and Track differ in intent and in whether the missile
-  channel is live, not in magnification — either mode can use either field.
+  **Moot for slice 1 as of 2026-09-20** — the 9K113 is deferred (see the scope-cut note above). The
+  figures were researched anyway and are recorded, by confidence class, in
+  `body-layer/research/2026-09-20-9k113-sight-optics-from-manual.md`. Three things that slice will
+  need and this one does not resolve:
+  - magnification is **switchable in flight** (`LCtrl+X`, search at ×3.3 and identify at ×10), so a
+    single `magnification: float` per mode will not hold it — two optic entries, selected by mode,
+    rather than a zoom state layered on a mode;
+  - **field of view and field of regard are separate bounds** and must be separate fields;
+  - the **6.0° narrow field is the weakest number in the set** and wants a sim measurement.
 - **Whether Observ off (doors closed) should be modelled as a hard "9K113 optic unusable" flag now**,
   even with no caller to gate — cheap to add as a boolean on the optic table entry, but it's inventing
   state for a mechanism (doors) nothing in this codebase currently tracks. Left out of the
