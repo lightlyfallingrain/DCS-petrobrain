@@ -595,14 +595,29 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   sounds useless and is not: it builds the machinery so each row lights up as its own input lands,
   rather than arriving later as one large blocked milestone with a dozen prerequisites.
 
-  **No-omniscience constraint, to settle before any of it is built.** Rows like "enemy air defense,
-  not tracking self/flight → high" and "unit well outside its engagement envelope → not dangerous"
-  require knowing another unit's envelope and whether it has track on ownship — things Petrovich
-  cannot perceive. Threat band must therefore be computed from **believed** classification and carry
-  that belief's uncertainty: a contact held only as `lowres` presence has no type, so it cannot band
-  above unknown/medium. Computing the band from ground truth would be an omniscience backdoor
-  wearing a prioritisation label, and would be invisible in the output — the reports would simply be
-  well-prioritised in a way nobody could account for.
+  **No-omniscience constraint — corrected 2026-09-20 by the user, and the correction matters.** An
+  earlier version of this entry claimed that "unit well outside its engagement envelope" and "not
+  tracking self/flight" require knowing things Petrovich cannot perceive. **Both were wrong**, for
+  two different reasons worth keeping distinct:
+
+  - **An engagement envelope is knowledge, not perception.** A crewman knows what a Shilka can
+    reach; it is doctrine held in the head, not a fact sensed about the particular unit. The error
+    was conflating "cannot perceive X" with "cannot know X" — only the first is an omniscience
+    problem, and envelopes are the second.
+  - **"Tracking us" is observable.** Guns or a radar dish slewed onto you is a visible fact at
+    usable range, and radar lock is a real signal. (Simplification, user: only the pilot has RWR and
+    it is poor, but model it as radar lock rather than building an RWR fidelity model.)
+
+  What survives is narrower and still binding: **envelope knowledge is keyed on unit type, so it
+  inherits the classification tier.** A contact held only as `lowres` presence has no type, so there
+  is nothing to look the envelope up *for*, and it cannot band above unknown/medium. The band must
+  be computed from **believed** classification and carry that belief's uncertainty. Computed from
+  ground truth instead, it would be an omniscience backdoor wearing a prioritisation label — and an
+  invisible one, since the output would merely be unaccountably well prioritised.
+
+  **Open question for an Investigator pass** before the tracking-us rows are built: is turret or
+  dish azimuth actually exportable from DCS? `LoGetWorldObjects` gives position and heading; whether
+  a unit's *turret* bearing is reachable at all is unverified, and the rule depends on it.
 
   Also connects to two things already recorded: "urgent units must receive automatic tracking
   status" is the auto-watch-on-engaged rule in the STATE_TRANSITIONS autonomous half, and the
