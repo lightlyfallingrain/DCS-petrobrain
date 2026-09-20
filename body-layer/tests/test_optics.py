@@ -5,7 +5,9 @@ plan.md`.
 Pure mechanism tests, mirroring `test_cockpit_mask.py`'s posture: exercised
 against small synthetic `Optic` instances, not the shipped table, so a
 future change to `BINOCULAR_OPTIC`'s own numbers can't break the mechanism
-tests here.
+tests here. `test_visibility.py`'s own `test_default_optic_is_naked_eye`
+is where `check_visibility`'s default-optic choice is pinned -- this file
+only tests the two `Optic` values and the FOV mechanism themselves.
 """
 
 from __future__ import annotations
@@ -79,12 +81,32 @@ def test_binocular_optic_magnification_matches_the_range_multiplier() -> None:
     BINOCULAR_RANGE_MULTIPLIER` exactly, so the two can never silently
     drift apart -- an import, not a hand-copied literal (plan Decision 1).
 
-    As of 2026-09-20 (user direction, reversing a same-session derating
-    split) this is a plain, honestly-labelled 8.0 -- no separate
-    `handheld_effectiveness`/`effective_magnification` concept exists any
-    more. Was 4.0 before this change; every stale worked-example range
-    number elsewhere in this codebase's comments was calibrated against
-    that older value."""
+    As of 2026-09-20's final scope change this is 4.0 again -- but
+    independently derived (a Б-6 6x30's real 6x magnification times a
+    ~0.67 handheld/stabilisation penalty, `BINOCULAR_OPTIC`'s own
+    docstring has the arithmetic), not the inherited `extra_eyesight_ratio`
+    value this project started from, and not the 8.0 this same session
+    briefly used either -- see `visibility.py`'s `BINOCULAR_RANGE_
+    MULTIPLIER` docstring for the full round trip."""
     assert BINOCULAR_OPTIC.magnification == pytest.approx(BINOCULAR_RANGE_MULTIPLIER)
-    assert BINOCULAR_OPTIC.magnification == pytest.approx(8.0)
-    assert BINOCULAR_OPTIC.fov_half_angle_deg is None
+    assert BINOCULAR_OPTIC.magnification == pytest.approx(4.0)
+
+
+def test_binocular_optic_has_a_real_field_of_view() -> None:
+    """As of 2026-09-20's final scope change, `BINOCULAR_OPTIC` is no
+    longer FOV-unrestricted -- the first optic in this table to carry a
+    real `fov_half_angle_deg` value, half of a Б-6 6x30's ~8.5 deg true
+    field. Safe to set now specifically because binoculars are no longer
+    the default optic (see `test_visibility.py`'s `test_default_optic_is_
+    naked_eye`): nothing calls `check_visibility` with this optic in the
+    live path yet, so this value cannot misfire a gate today -- it exists
+    for slice 2's mode selection to enforce."""
+    assert BINOCULAR_OPTIC.fov_half_angle_deg == pytest.approx(4.25)
+
+
+def test_binocular_optic_field_of_view_rejects_an_off_boresight_candidate() -> None:
+    """The FOV value above is not just data -- confirms `within_optic_fov`
+    actually enforces it for the shipped `BINOCULAR_OPTIC`, not only for
+    synthetic test optics."""
+    assert within_optic_fov(BINOCULAR_OPTIC, azimuth_deg=0.0, elevation_deg=0.0)
+    assert not within_optic_fov(BINOCULAR_OPTIC, azimuth_deg=10.0, elevation_deg=0.0)
