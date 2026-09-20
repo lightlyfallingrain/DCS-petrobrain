@@ -64,6 +64,7 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Inbound speech Stage 2 matcher](project_inbound_speech_stage2_matcher.md) — plan's seam table under-specifies token=None (added verb_anchored/ambiguous bools); derived verb set is a deliberate superset; short-word fuzzy false-anchor found; voice-only tokens act as no-ops.
 - [Inbound speech Stage 3 recognition service](project_inbound_speech_stage3_recognition_service.md) — POST /transcribe + GET /transcripts/poll, stop_talking dispatch, --crew-text telemetry-gate blocks poll dispatch without real telemetry (verified via direct component drive instead).
 - [BL-9 detection trace](project_bl9_detection_trace.md) — mutable-record annotation pattern, ground-truth/belief join via Contact.contributing_observation_ids scan, verified via replay.py not live DCS.
+- [Aspect-aware profiles](project_aspect_aware_profiles.md) — apparent_extent_m formula, None-not-cube dimension semantics, S-300 sourcing (2 figures unsourced, flagged not invented), 45°-test mandate.
 
 - [Overlay speech callouts addendum](project_overlay_speech_callouts_addendum.md) — shared _contact_report_text helper fixes broken lifecycle callout text; facts["semantic"] is list[dict] not list[SemanticFact].
 - [Overlay speech callouts addendum 2](project_overlay_speech_callouts_addendum2.md) — round() ties-to-even on rounding boundaries, CONTACT_LOST no-template needs no route_event change, classification-changed relative_now needs EnrichmentContext.
