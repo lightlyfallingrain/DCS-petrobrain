@@ -104,6 +104,11 @@ from typing import Final
 from perception import object_model
 from perception.association import WorldObjectCandidate
 from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
+from perception.detection_trace import (
+    DetectionTrace,
+    DetectionTraceCollector,
+    GateOutcome,
+)
 from perception.geometry import (
     GeoPosition,
     bearing_deg,
@@ -296,16 +301,53 @@ def check_visibility(
     candidate: WorldObjectCandidate,
     conn: sqlite3.Connection,
     theatre: str,
+    trace: DetectionTraceCollector | None = None,
 ) -> VisibilityResult | None:
     """Run `candidate` through all three gates (see module docstring).
     Returns `None` on the first failing gate -- cheap geometric checks
     (cockpit mask, angular-radius range) before the expensive LOS
     terrain-sampling check, mirroring `association.associate()`'s own
-    cheap-before-expensive ordering."""
+    cheap-before-expensive ordering.
+
+    `trace` (`perception.detection_trace`, BL-9) is additive and defaults
+    to `None` -- a true no-op, same pattern `overlay_client`/`speech_client`
+    already use elsewhere in this codebase. When set, records exactly one
+    `DetectionTrace` entry per call, at whichever gate decided this
+    candidate's fate (or `ADMITTED` if it cleared all three) -- see that
+    module's docstring for why `range_threshold_m`/`threshold_bound` are
+    always populated regardless of which gate fired. No change to this
+    function's existing return value or gate order."""
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
 
     candidate_bearing_deg = bearing_deg(observer, target)
+    candidate_range_m = range_m(observer, target)
+    profile = object_model.profile_for(candidate.object_type)
+    size_curve_threshold_m = (
+        profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
+    ) * BINOCULAR_RANGE_MULTIPLIER
+    range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
+    threshold_bound = (
+        "range_cap" if NAKED_EYE_RANGE_CAP_M <= size_curve_threshold_m else "size_curve"
+    )
+
+    def _record(outcome: GateOutcome, achieved_tier: str | None = None) -> None:
+        if trace is None:
+            return
+        trace.record(
+            DetectionTrace(
+                object_id=candidate.object_id,
+                object_type=candidate.object_type,
+                t_sim=ownship.t_sim,
+                true_bearing_deg=candidate_bearing_deg,
+                true_range_m=candidate_range_m,
+                range_threshold_m=range_threshold_m,
+                threshold_bound=threshold_bound,
+                outcome=outcome,
+                achieved_tier=achieved_tier,
+            )
+        )
+
     body_direction = body_relative_direction(
         observer,
         target,
@@ -317,24 +359,21 @@ def check_visibility(
     if not is_visible(
         co_pilot_mask, body_direction.azimuth_deg, body_direction.elevation_deg
     ):
+        _record(GateOutcome.COCKPIT_MASK)
         return None
 
-    candidate_range_m = range_m(observer, target)
-    profile = object_model.profile_for(candidate.object_type)
-    range_threshold_m = min(
-        NAKED_EYE_RANGE_CAP_M,
-        (profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD)
-        * BINOCULAR_RANGE_MULTIPLIER,
-    )
     if candidate_range_m > range_threshold_m:
+        _record(GateOutcome.RANGE_OR_SIZE)
         return None
 
     if not line_of_sight_clear(conn, theatre, observer, target):
+        _record(GateOutcome.TERRAIN_LOS)
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
         candidate_range_m, profile.size_m
     )
+    _record(GateOutcome.ADMITTED, achieved_tier=achieved_tier)
     return VisibilityResult(
         bearing_deg=candidate_bearing_deg,
         range_m=candidate_range_m,
