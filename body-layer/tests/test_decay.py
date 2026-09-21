@@ -19,6 +19,7 @@ from belief.decay import (
     object_id_continuity_valid,
     position_confidence,
 )
+from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
 from perception.geometry import GeoPosition
 
 
@@ -42,6 +43,36 @@ def _contact(
         first_seen_sim=last_seen_sim,
         last_seen_sim=last_seen_sim,
     )
+
+
+# -- OBSERVED_WINDOW_S's two bounds (2C, plans/detection-cones-slice2/
+# plan.md hard part 8) -- each pins a real failure mode, not the current
+# value. --------------------------------------------------------------------
+
+
+def test_observed_window_is_derived_from_the_scan_cycle_period() -> None:
+    assert OBSERVED_WINDOW_S == pytest.approx(SCAN_CYCLE_PERIOD_S)
+    assert OBSERVED_WINDOW_S == pytest.approx(16.0)
+
+
+def test_observed_window_clears_the_worst_case_flank_gap() -> None:
+    # Lower bound: a flank o'clock is un-gazed for up to
+    # SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S (14 s) of every 16 s cycle while
+    # Petrovich is tracking it correctly. If OBSERVED_WINDOW_S ever dropped
+    # to or below that gap, a correctly-tracked flank contact would read
+    # as "not observed" for most of every scan cycle -- the exact defect
+    # this bound exists to prevent.
+    worst_case_flank_gap_s = SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S
+    assert worst_case_flank_gap_s < OBSERVED_WINDOW_S
+
+
+def test_observed_window_does_not_collapse_the_tracked_band() -> None:
+    # Upper bound: at or above POSITION_HALF_LIFE_S, `certainty_of`'s
+    # "tracked" band (between "observed" and "estimated") vanishes --
+    # `elapsed_s <= OBSERVED_WINDOW_S` and `elapsed_s <= POSITION_HALF_
+    # LIFE_S` would become the same test, so no elapsed time could ever
+    # land in "tracked".
+    assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S
 
 
 def test_certainty_is_observed_at_zero_elapsed() -> None:

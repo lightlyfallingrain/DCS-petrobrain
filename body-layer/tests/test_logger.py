@@ -45,7 +45,7 @@ from logger import (
     format_observation_line,
 )
 from perception import association
-from perception.gaze import Gaze
+from perception.gaze import FREE_SCAN_PLAN, ScanPlan
 from perception.geometry import GeoPosition
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import Observation, OwnshipState
@@ -643,8 +643,8 @@ def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
     assert projected.wedge_deg == (0.0, 30.0)
 
 
-# -- _active_gaze / _apply_active_gaze (slice 2B, plans/
-# detection-cones-slice2/plan.md) -------------------------------------------
+# -- _active_gaze / _apply_active_gaze (slice 2B; ScanPlan generalisation
+# by 2C, plans/detection-cones-slice2/plan.md) ------------------------------
 
 
 def _relative_area(area_id: str, relative_sector: str) -> AttentionArea:
@@ -675,8 +675,8 @@ def _naked_eye_source() -> NakedEyePerceptionSource:
     )
 
 
-def test_active_gaze_is_none_with_no_pending_scan_task() -> None:
-    assert _active_gaze(TaskStore()) is None
+def test_active_gaze_is_free_scan_with_no_pending_scan_task() -> None:
+    assert _active_gaze(TaskStore()) == FREE_SCAN_PLAN
 
 
 def test_active_gaze_resolves_a_pending_relative_sector_task() -> None:
@@ -684,14 +684,14 @@ def test_active_gaze_resolves_a_pending_relative_sector_task() -> None:
     tasks.create(
         "scan_area",
         _relative_area("AREA_1", "left"),
-        created_sim=0.0,
+        created_sim=3.0,
         deadline_sim=60.0,
         reason="scan-area",
     )
 
-    gaze = _active_gaze(tasks)
+    plan = _active_gaze(tasks)
 
-    assert gaze == Gaze(center_azimuth_deg=-60.0, half_width_deg=30.0, label="left")
+    assert plan == ScanPlan(commanded_sector="left", command_t_sim=3.0)
 
 
 def test_active_gaze_ignores_a_cancelled_task() -> None:
@@ -705,7 +705,7 @@ def test_active_gaze_ignores_a_cancelled_task() -> None:
     )
     tasks.cancel(task.id)
 
-    assert _active_gaze(tasks) is None
+    assert _active_gaze(tasks) == FREE_SCAN_PLAN
 
 
 def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
@@ -725,13 +725,12 @@ def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
         reason="scan-area",
     )
 
-    gaze = _active_gaze(tasks)
+    plan = _active_gaze(tasks)
 
-    assert gaze is not None
-    assert gaze.label == "right"
+    assert plan == ScanPlan(commanded_sector="right", command_t_sim=1.0)
 
 
-def test_apply_active_gaze_sets_gaze_only_on_naked_eye_sources() -> None:
+def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
     tasks = TaskStore()
     tasks.create(
         "scan_area",
@@ -746,19 +745,17 @@ def test_apply_active_gaze_sets_gaze_only_on_naked_eye_sources() -> None:
 
     _apply_active_gaze(sources, tasks)
 
-    assert naked_eye.gaze == Gaze(
-        center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead"
-    )
-    assert not hasattr(fake, "gaze")
+    assert naked_eye.scan_plan == ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+    assert not hasattr(fake, "scan_plan")
 
 
-def test_apply_active_gaze_clears_gaze_when_nothing_is_pending() -> None:
+def test_apply_active_gaze_resets_to_free_scan_when_nothing_is_pending() -> None:
     naked_eye = _naked_eye_source()
-    naked_eye.gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead")
+    naked_eye.scan_plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
 
     _apply_active_gaze([naked_eye], TaskStore())
 
-    assert naked_eye.gaze is None
+    assert naked_eye.scan_plan == FREE_SCAN_PLAN
 
 
 def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
@@ -786,9 +783,7 @@ def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
 
     runner.run_once()
 
-    assert naked_eye.gaze == Gaze(
-        center_azimuth_deg=-60.0, half_width_deg=30.0, label="left"
-    )
+    assert naked_eye.scan_plan == ScanPlan(commanded_sector="left", command_t_sim=0.0)
 
 
 # -- _poll_transcripts (plans/inbound-speech/plan.md Stage 3) ---------------
