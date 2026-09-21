@@ -63,15 +63,29 @@ Each `poll()`:
    this channel's internal bookkeeping of where the real objects actually
    are.
 4. **Per-object acquisition state, resolved at cluster granularity**
-   (`emit_mode="on_change"`, the default): tracks the set of `object_id`s
-   that were admitted into an *emitted* cluster on a previous poll
-   (`_previously_visible_ids`) -- state stays keyed on `object_id`, never on
+   (`emit_mode="on_change"`, the default): tracks the `object_id`s that
+   were admitted into an *emitted* cluster on a previous poll
+   (`_previously_seen_at`) -- state stays keyed on `object_id`, never on
    a cluster identity, because a cluster has no stable identity across polls
    (its membership can grow, shrink, split, or merge poll to poll; see
    point 6). A missing `/world_objects/latest` snapshot resets this state,
    mirroring `HybridPerceptionSource.poll()`'s debounce-reset-on-gap for
    `middle_list_text` -- so the next real snapshot's candidates are treated
    as newly-appearing rather than silently already-seen.
+4a. **Time-based, not poll-indexed** (`plans/detection-cones-slice2/
+    plan.md`'s 2C -- hard part 6). Both acquisition sets are
+    `dict[int, float]` of `object_id -> last-seen t_sim`, not a per-poll
+    `frozenset`: with the gaze filter now an *active, moving* o'clock cone
+    (point 7 below) rather than always-on, a per-poll frozenset would treat
+    every object the cone has swept off of as "gone" the instant it leaves
+    this poll's `currently_visible_ids`, and "newly visible" again the
+    moment the cone sweeps back -- defeating `_acquire_on_change`'s
+    debounce every single scan cycle. "Still known" instead means "seen
+    within `_ACQUISITION_RETENTION_WINDOW_S`" (== `perception.gaze.
+    SCAN_CYCLE_PERIOD_S`, not an invented constant -- the eviction window
+    has to span at least one full scan cycle or a flank object ages out
+    before the cone sweeps back to it), evaluated fresh each poll via
+    `_live_ids`/`_prune_stale`, never by dict membership alone.
 5. **Simultaneous-detection cap counts groups, not objects**
    (`NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`, `plans/detection-cones-slice2/
    plan.md`'s 2A.5 -- renamed from `NAKED_EYE_MAX_NEW_PER_POLL`, value
@@ -142,12 +156,14 @@ Each `poll()`:
    decay.object_id_continuity_valid`) -- this module only ever reports "most
    of this report's members were previously part of this other report."
 7. **Gaze filters every candidate before it reaches `check_visibility`**
-   (`plans/detection-cones-slice2/plan.md`'s 2B). `self.gaze`/`self.
-   peripheral_stimulus_ids` are resolved per candidate through `perception.
-   gaze.gaze_for` -- see those fields' own docstrings. Both default to a
-   true no-op (`None`/empty), so a test that constructs this source
-   directly and never touches either field behaves exactly as it did
-   before 2B.
+   (`plans/detection-cones-slice2/plan.md`'s 2B; generalised from a plain
+   `Gaze` to a `ScanPlan` by 2C's scan loop). Each poll resolves
+   `perception.gaze.gaze_at(now_sim, self.scan_plan)` once, then threads
+   that `Gaze` through `perception.gaze.gaze_for` per candidate alongside
+   `self.peripheral_stimulus_ids` -- see those fields' own docstrings.
+   `self.scan_plan` defaults to `perception.gaze.FREE_SCAN_PLAN` (the
+   o'clock scan loop, not "no restriction" -- 2C has no unrestricted
+   `ScanPlan` any more), `peripheral_stimulus_ids` to a true no-op (empty).
 """
 
 from __future__ import annotations
@@ -164,7 +180,13 @@ from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
 from perception.detection_trace import DetectionTraceCollector
-from perception.gaze import Gaze, gaze_for
+from perception.gaze import (
+    FREE_SCAN_PLAN,
+    SCAN_CYCLE_PERIOD_S,
+    ScanPlan,
+    gaze_at,
+    gaze_for,
+)
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.optics import UNAIDED_OPTIC
 from perception.reporting_names import reporting_name_for
@@ -187,6 +209,15 @@ from perception.visibility import VisibilityResult, check_visibility
 #: on the stated recommendation (not explicitly affirmed by the user),
 #: flagged as cheap to change mid-implementation.
 NAKED_EYE_MAX_NEW_GROUPS_PER_POLL: Final[int] = 3
+
+#: How long an object_id stays "known" (previously visible/acquired) after
+#: it was last actually seen, before the acquisition dicts evict it (2C,
+#: module docstring point 4a; `plans/detection-cones-slice2/plan.md` hard
+#: part 6) -- reused directly from `perception.gaze.SCAN_CYCLE_PERIOD_S`,
+#: not an invented constant: "still known" has to span at least one full
+#: scan cycle, or a flank object the cone has swept off of ages out before
+#: the cone sweeps back to it.
+_ACQUISITION_RETENTION_WINDOW_S: Final[float] = SCAN_CYCLE_PERIOD_S
 
 #: Reads differently from Hybrid's `"petrovich_indication+world_objects"` --
 #: a filter pass here is structurally weaker evidence than a real HelperAI
@@ -283,16 +314,19 @@ class NakedEyePerceptionSource:
     #: object_ids and the emitted `Observation.id` once clustering and
     #: emission are done (see `poll()`).
     trace_sink: DetectionTraceCollector | None = None
-    #: Slice 2B's gaze filter (`plans/detection-cones-slice2/plan.md`,
-    #: `perception.gaze`) -- `None` (the default) means no restriction,
-    #: exactly this channel's behaviour before 2B. `logger.py`'s poll loop
-    #: is the only writer, assigning a frozen `Gaze` each tick from
-    #: whatever ownship-relative scan sector is currently commanded (`None`
-    #: again when nothing is commanded) -- the same single-assignment,
+    #: The gaze/scan filter (`plans/detection-cones-slice2/plan.md`,
+    #: `perception.gaze`) -- a frozen `ScanPlan`, not a `Gaze` (2C: gaze
+    #: needs no state at all, module docstring point 1 of the plan's "hard
+    #: parts"). `FREE_SCAN_PLAN` (the default) is the o'clock scan loop,
+    #: not "no restriction" -- there is no unrestricted `ScanPlan` any more
+    #: (2C's whole point). `logger.py`'s poll loop is the only writer,
+    #: assigning a new `ScanPlan` each tick from whatever ownship-relative
+    #: scan sector is currently commanded (`FREE_SCAN_PLAN` again when
+    #: nothing is commanded) -- the same single-assignment,
     #: write-thread/read-thread pattern `last_t_sim` already uses safely.
-    #: A test that constructs this source directly and never sets `gaze`
-    #: gets the unrestricted default, same as every pre-2B test.
-    gaze: Gaze | None = None
+    #: `poll()` resolves the effective `Gaze` for this poll via
+    #: `perception.gaze.gaze_at(now_sim, self.scan_plan)`.
+    scan_plan: ScanPlan = field(default_factory=lambda: FREE_SCAN_PLAN)
     #: The peripheral channel's output (hard parts 2a/4 of the plan) --
     #: always empty until the attention-capture channel exists (out of
     #: scope this slice); resolved per candidate through `perception.gaze.
@@ -305,18 +339,25 @@ class NakedEyePerceptionSource:
         default_factory=frozenset, repr=False
     )
 
-    _previously_visible_ids: frozenset[int] = field(
-        default_factory=frozenset, init=False, repr=False
+    #: `object_id -> last-seen t_sim`, not a per-poll frozenset (2C, module
+    #: docstring point 4a) -- a moving cone makes poll-indexing wrong (a
+    #: sector the cone has swept off of would otherwise look "not visible"
+    #: every poll it isn't gazed, defeating the debounce this state exists
+    #: to provide the instant it swept back). "Still known" means "seen
+    #: within `_ACQUISITION_RETENTION_WINDOW_S`", evaluated at each poll's
+    #: own `now_sim` via `_live_ids` below, not "present in this poll's
+    #: `currently_visible_ids`".
+    _previously_seen_at: dict[int, float] = field(
+        default_factory=dict, init=False, repr=False
     )
     #: `emit_mode="every_poll"`'s own acquisition-set state -- deliberately
-    #: separate from `_previously_visible_ids` above (see module docstring
-    #: point 5); unused under `emit_mode="on_change"`.
-    _acquired_ids: frozenset[int] = field(
-        default_factory=frozenset, init=False, repr=False
-    )
+    #: separate from `_previously_seen_at` above (see module docstring
+    #: point 5); unused under `emit_mode="on_change"`. Same `object_id ->
+    #: last-seen t_sim` shape and eviction rule as `_previously_seen_at`.
+    _acquired_at: dict[int, float] = field(default_factory=dict, init=False, repr=False)
     #: Object-permanence correlation state (module docstring point 6) --
     #: deliberately a third, independent piece of state from
-    #: `_previously_visible_ids`/`_acquired_ids` above: never cleared,
+    #: `_previously_seen_at`/`_acquired_at` above: never cleared,
     #: including on a `world_objects is None` gap.
     _object_id_to_last_observation_id: dict[int, str] = field(
         default_factory=dict, init=False, repr=False
@@ -330,8 +371,8 @@ class NakedEyePerceptionSource:
             # snapshot's candidates are treated as newly-appearing, mirroring
             # HybridPerceptionSource's debounce-reset-on-gap for
             # middle_list_text (see that module's poll() docstring).
-            self._previously_visible_ids = frozenset()
-            self._acquired_ids = frozenset()
+            self._previously_seen_at = {}
+            self._acquired_at = {}
             return []
 
         candidates = filter_ownship(
@@ -341,6 +382,11 @@ class NakedEyePerceptionSource:
             ]
         )
 
+        # 2C: the effective Gaze is a pure function of this poll's own
+        # sim time and self.scan_plan (`perception.gaze.gaze_at`) -- never
+        # stored, recomputed every poll.
+        gaze = gaze_at(now_sim, self.scan_plan)
+
         visible: list[tuple[WorldObjectCandidate, VisibilityResult]] = []
         for candidate in candidates:
             # UNAIDED_OPTIC -- this channel has no optic-selection mechanism
@@ -349,7 +395,7 @@ class NakedEyePerceptionSource:
             # vision (module docstring on `peripheral_stimulus_ids`).
             candidate_gaze = gaze_for(
                 candidate.object_id,
-                self.gaze,
+                gaze,
                 self.peripheral_stimulus_ids,
                 UNAIDED_OPTIC,
             )
@@ -395,9 +441,9 @@ class NakedEyePerceptionSource:
         )
 
         if self.emit_mode == "every_poll":
-            to_emit = self._acquire_every_poll(clusters, currently_visible_ids)
+            to_emit = self._acquire_every_poll(now_sim, clusters, currently_visible_ids)
         else:
-            to_emit = self._acquire_on_change(clusters, currently_visible_ids)
+            to_emit = self._acquire_on_change(now_sim, clusters, currently_visible_ids)
 
         observations = self._build_observations(
             now_sim, ownship_state, to_emit, confidence_by_object_id
@@ -521,48 +567,96 @@ class NakedEyePerceptionSource:
         eligible.sort(key=lambda cluster: min(m.range_m for m in cluster.members))
         return eligible[:NAKED_EYE_MAX_NEW_GROUPS_PER_POLL]
 
+    @staticmethod
+    def _live_ids(seen_at: dict[int, float], now_sim: float) -> frozenset[int]:
+        """The `object_id`s in `seen_at` still within
+        `_ACQUISITION_RETENTION_WINDOW_S` of `now_sim` -- 2C's time-based
+        replacement for a per-poll frozenset (module docstring point 4a):
+        "still known" means "seen within the current scan cycle," not
+        "present in this exact poll's visible set", so an object the cone
+        has swept off of stays known for the rest of the cycle rather than
+        immediately reading as gone."""
+        return frozenset(
+            object_id
+            for object_id, last_seen_sim in seen_at.items()
+            if now_sim - last_seen_sim <= _ACQUISITION_RETENTION_WINDOW_S
+        )
+
+    @staticmethod
+    def _prune_stale(seen_at: dict[int, float], now_sim: float) -> dict[int, float]:
+        """Drops entries past `_ACQUISITION_RETENTION_WINDOW_S` -- called
+        once per poll after `seen_at` has been updated, so the dict itself
+        never grows without bound."""
+        return {
+            object_id: last_seen_sim
+            for object_id, last_seen_sim in seen_at.items()
+            if now_sim - last_seen_sim <= _ACQUISITION_RETENTION_WINDOW_S
+        }
+
     def _acquire_on_change(
-        self, clusters: list[Cluster], currently_visible_ids: frozenset[int]
+        self,
+        now_sim: float,
+        clusters: list[Cluster],
+        currently_visible_ids: frozenset[int],
     ) -> list[Cluster]:
         """Per-object debounce resolved at cluster granularity: a cluster is
         emitted only if it is among this poll's cap-admitted groups (module
-        docstring point 5). `_previously_visible_ids` only gains the members
-        of *emitted* clusters -- a currently-visible-but-not-emitted member
-        (steady-state or capped-out) is deliberately left out, so a
-        capped-out group is retried on a later poll instead of being marked
-        "already seen" forever (the `on_change` fix 2A.5 makes)."""
-        admitted = self._select_capped_clusters(clusters, self._previously_visible_ids)
+        docstring point 5). `_previously_seen_at` only gains a fresh
+        timestamp for the members of *emitted* clusters and for members
+        that were already known and are still currently visible
+        (`steady_ids`) -- a currently-visible-but-not-emitted member
+        (capped-out) is deliberately left un-refreshed, so a capped-out
+        group is retried on a later poll instead of being marked
+        "already seen" forever (the `on_change` fix 2A.5 makes). Eviction
+        is time-based, not poll-based (module docstring point 4a): an
+        object the cone has swept off of stays "known" for
+        `_ACQUISITION_RETENTION_WINDOW_S`, not just the one poll it was
+        last actually visible on."""
+        known_ids = self._live_ids(self._previously_seen_at, now_sim)
+        admitted = self._select_capped_clusters(clusters, known_ids)
         admitted_ids = frozenset(
             member.object_id for cluster in admitted for member in cluster.members
         )
 
-        steady_ids = currently_visible_ids & self._previously_visible_ids
-        self._previously_visible_ids = steady_ids | admitted_ids
+        steady_ids = currently_visible_ids & known_ids
+        for object_id in steady_ids | admitted_ids:
+            self._previously_seen_at[object_id] = now_sim
+        self._previously_seen_at = self._prune_stale(self._previously_seen_at, now_sim)
         return admitted
 
     def _acquire_every_poll(
-        self, clusters: list[Cluster], currently_visible_ids: frozenset[int]
+        self,
+        now_sim: float,
+        clusters: list[Cluster],
+        currently_visible_ids: frozenset[int],
     ) -> list[Cluster]:
         """`emit_mode="every_poll"`'s acquisition-rate throttle, resolved at
         cluster granularity: at most `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`
-        clusters holding a not-yet-acquired member join the acquired set
-        this poll (whole cluster, all members); every cluster whose members
-        are now entirely acquired is emitted, regardless of when each
-        member joined -- so a continuously-visible cluster emits every poll
-        instead of aging out (module docstring point 5)."""
-        newly_admitted = self._select_capped_clusters(clusters, self._acquired_ids)
+        clusters holding a not-yet-known member join the acquired set this
+        poll (whole cluster, all members); every cluster whose members are
+        all currently visible *and* known is emitted this poll, regardless
+        of when each member joined -- so a continuously-visible cluster
+        emits every poll instead of aging out, and a known-but-not-
+        currently-visible cluster (cone pointed elsewhere) emits nothing
+        this poll without losing its acquired status (module docstring
+        point 5; time-based eviction per point 4a, mirroring
+        `_acquire_on_change` above)."""
+        known_ids = self._live_ids(self._acquired_at, now_sim)
+        newly_admitted = self._select_capped_clusters(clusters, known_ids)
         newly_acquired_ids = frozenset(
             member.object_id for cluster in newly_admitted for member in cluster.members
         )
 
-        self._acquired_ids = (
-            self._acquired_ids & currently_visible_ids
-        ) | newly_acquired_ids
+        steady_ids = currently_visible_ids & known_ids
+        for object_id in steady_ids | newly_acquired_ids:
+            self._acquired_at[object_id] = now_sim
+        self._acquired_at = self._prune_stale(self._acquired_at, now_sim)
 
+        acquired_ids = frozenset(self._acquired_at)
         return [
             cluster
             for cluster in clusters
-            if all(member.object_id in self._acquired_ids for member in cluster.members)
+            if all(member.object_id in acquired_ids for member in cluster.members)
         ]
 
     def _build_observation(
