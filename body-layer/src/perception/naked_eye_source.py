@@ -22,21 +22,21 @@ Each `poll()`:
    earlier proximity heuristic found necessary via a live sortie,
    `plans/pb1.5-naked-eye-detection/debug.md`).
 2. Runs every candidate through `visibility.check_visibility()`.
-3. **Clusters the admitted candidates at the channel's own honest
-   resolution limit, then quantises per cluster** (`plans/
-   group-contact-model/plan.md` Stage 2 -- supersedes the per-object
-   quantisation this module originally did; see that plan for why per-object
-   emission was itself the defect). `_cluster_candidate` projects each
-   admitted `(candidate, result)` pair into `perception.clustering.
-   ClusterCandidate` (ground-truth x/z/alt, slant range, characteristic
-   size, and this candidate's own individually-resolved classification
-   claim); `perception.clustering.cluster_candidates` groups them by true
-   3D angular separability at ownship's own position (Stage 3b-i rev.2 --
-   the merge test is the angle subtended at the observer against each
-   candidate's own apparent angular size, not a world-space ellipse; see
-   `clustering.py`'s docstring); single-link, no chaining cap yet --
-   Stage 3b-ii's job. `_build_observation` emits exactly one `Observation`
-   per resulting
+3. **Clusters *every* gate-surviving candidate -- not yet the emission
+   cap's survivors -- then quantises per cluster** (`plans/
+   group-contact-model/plan.md` Stage 2, reordered ahead of the cap by
+   `plans/detection-cones-slice2/plan.md`'s 2A.5: see point 5 below for why
+   the cap now has to run *after* clustering rather than before it).
+   `_cluster_candidate` projects each gate-admitted `(candidate, result)`
+   pair into `perception.clustering.ClusterCandidate` (ground-truth x/z/alt,
+   slant range, characteristic size, and this candidate's own
+   individually-resolved classification claim); `perception.clustering.
+   cluster_candidates` groups them by true 3D angular separability at
+   ownship's own position (Stage 3b-i rev.2 -- the merge test is the angle
+   subtended at the observer against each candidate's own apparent angular
+   size, not a world-space ellipse; see `clustering.py`'s docstring);
+   single-link, no chaining cap yet -- Stage 3b-ii's job. `_build_observation`
+   emits exactly one `Observation` per resulting
    cluster: bearing/range quantised from the cluster's *centroid*, not any
    one member's own geometry (bearing snapped to the nearest of the 12
    `OP_A1H`...`OP_A12H` clock positions, relative to ownship heading then
@@ -62,57 +62,67 @@ Each `poll()`:
    (`bearing_deg`, `range_m`, `classification_raw`, `count_bucket`), not to
    this channel's internal bookkeeping of where the real objects actually
    are.
-4. **Per-object debounce** (`emit_mode="on_change"`, the default): tracks the
-   set of `object_id`s that passed the filter on the *previous* poll. Emits
-   one `Observation` only for an `object_id` newly entering the
-   currently-visible set (mirrors `HybridPerceptionSource`'s change-debounce,
-   but keyed on object-id set membership rather than text-equality, since
-   there's no text here). A missing `/world_objects/latest` snapshot resets
-   this state, mirroring `HybridPerceptionSource.poll()`'s
-   debounce-reset-on-gap for `middle_list_text` -- so the next real snapshot's
-   candidates are treated as newly-appearing rather than silently
-   already-seen.
-5. **Simultaneous-detection cap** (`NAKED_EYE_MAX_NEW_PER_POLL`) -- under
-   `emit_mode="on_change"`, caps how many *newly-appearing* objects one poll
-   can emit, nearest-first (by exact, un-quantised range). Objects
-   visible-but-not-emitted this poll still count as "previously visible" for
-   the next poll's debounce comparison -- per the plan's Affected Modules
-   wording ("tracks the set of `object_id`s that passed the filter on the
-   *previous* poll"), this cap gates *emission*, not visible-set membership;
-   a capped-out object is not retried on a later poll unless it actually
-   leaves and re-enters the visible set. Guards against an unrealistic
-   "instant global awareness" flood the moment the aircraft turns toward a
-   dense object cluster.
+4. **Per-object acquisition state, resolved at cluster granularity**
+   (`emit_mode="on_change"`, the default): tracks the set of `object_id`s
+   that were admitted into an *emitted* cluster on a previous poll
+   (`_previously_visible_ids`) -- state stays keyed on `object_id`, never on
+   a cluster identity, because a cluster has no stable identity across polls
+   (its membership can grow, shrink, split, or merge poll to poll; see
+   point 6). A missing `/world_objects/latest` snapshot resets this state,
+   mirroring `HybridPerceptionSource.poll()`'s debounce-reset-on-gap for
+   `middle_list_text` -- so the next real snapshot's candidates are treated
+   as newly-appearing rather than silently already-seen.
+5. **Simultaneous-detection cap counts groups, not objects**
+   (`NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`, `plans/detection-cones-slice2/
+   plan.md`'s 2A.5 -- renamed from `NAKED_EYE_MAX_NEW_PER_POLL`, value
+   unchanged at 3). The model this replaces treated a dense group as harder
+   to take in than a sparse one, purely because it had more members to
+   throttle one at a time -- backwards: a human looking straight at ten
+   co-located trucks sees ten trucks at once, and it is a *spread-out* ten
+   that trickles in gradually. Point 3's clustering now runs over every
+   gate-surviving candidate *before* this cap is applied, so the cap can
+   operate on clusters -- how many distinct things get registered in one
+   fixation -- rather than on individual candidates ahead of the grouping
+   that would have told it they were one thing.
+
+   `_select_capped_clusters` (shared by both acquisition modes below) finds
+   every cluster holding at least one `object_id` not yet in the acquisition
+   set passed to it, sorts those *eligible* clusters nearest-first (by their
+   nearest member's own exact, un-quantised range), and takes the first
+   `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` of them. **Admitting a cluster admits
+   all of its members at once** -- a ten-member cluster with even one
+   never-before-seen member is one admitted group, not up to three
+   individually-admitted members with the rest deferred; this is the
+   mechanism that lets a dense group be reported whole in a single poll.
+
+   Under `emit_mode="on_change"`: a cluster's members are added to
+   `_previously_visible_ids` only when that cluster is one of the polled
+   admitted clusters. A currently-visible cluster that was *not* admitted
+   this poll (steady-state, or capped-out) leaves its not-yet-previously-
+   visible members out of `_previously_visible_ids` -- unlike the pre-2A.5
+   behaviour, where every currently-visible object became "previously
+   visible" regardless of whether the cap let it emit. **This is the
+   `on_change` fix**: a capped-out group is retried on a later poll instead
+   of being dropped forever, because its members never got marked seen in
+   the first place (`test_a_capped_out_group_is_retried_and_the_backlog_
+   drains_over_polls`, which replaces the old permanently-dropped pin --
+   see that test's own docstring).
 
    `emit_mode="every_poll"` (`plans/pb2-contact-memory/plan.md` Stage 3, its
-   Interface confirmation gap 2) re-reads this same cap as an
-   *acquisition-rate* limit instead: a separate `_acquired_ids` set grows by
-   at most `NAKED_EYE_MAX_NEW_PER_POLL` newly-visible objects per poll
-   (nearest-first, same throttle), but every object already in that set
-   keeps emitting an `Observation` on *every* subsequent poll for as long as
-   it stays visible -- it is never capped out of its own repeat emission the
-   way `on_change` caps it out of re-*entering* the debounce set. This is
-   deliberately a second, independent piece of state from the `on_change`
-   debounce set below (`_previously_visible_ids`), not a re-read of the same
-   field: `on_change`'s existing behaviour (an object capped out of a
-   simultaneous flood is marked "already seen" and never retried at all,
-   `test_candidates_dropped_by_the_cap_are_not_retried_next_poll`) must stay
-   byte-for-byte, while `every_poll`'s acquisition set must instead keep
-   retrying a not-yet-acquired object every poll until the throttle admits
-   it. The two sets happen to evolve identically except in that overflow
-   case.
+   Interface confirmation gap 2) re-reads the same cap as a group
+   *acquisition-rate* limit instead: `_acquired_ids` grows by the members of
+   at most `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` newly-eligible clusters per
+   poll (same `_select_capped_clusters` helper, same nearest-first order),
+   but every object already in that set keeps emitting on *every* subsequent
+   poll for as long as it stays visible, as part of whichever cluster it
+   currently belongs to -- unaffected by whether that cluster is itself
+   "new" this poll. This stays a second, independent piece of state from the
+   `on_change` set above, not a re-read of the same field.
 
-   **Stage 2 scoping decision**: this cap still throttles admission of
-   individual *objects* into `to_emit`, exactly as before -- clustering
-   happens strictly after, over whatever `to_emit` this poll's cap allowed
-   through. `NAKED_EYE_MAX_NEW_PER_POLL` therefore does not yet cap
-   *clusters* directly (a real cluster larger than the cap can still only
-   have `NAKED_EYE_MAX_NEW_PER_POLL` of its members admitted in one poll,
-   under-reporting that cluster's true size until acquisition catches up
-   over several polls). Re-reading the cap as a true per-cluster limit is
-   Stage 3's explicit job (`plans/group-contact-model/plan.md`'s
-   Implementation Plan lists it under that stage's calibration work), not
-   pre-tuned here.
+   **Not yet re-read for 2B/2C/2D**: this remains purely an intake-bandwidth
+   limiter on cluster admission, with no gaze/scan/dwell awareness -- those
+   are separate, later mechanisms (`plans/detection-cones-slice2/plan.md`)
+   that this cap composes with rather than duplicates.
 6. **Object-permanence correlation, generalised to clusters** (`plans/
    contact-duplication-ambiguity-runaway/plan.md`, extended by `plans/
    group-contact-model/plan.md` Stage 2): a third, independent,
@@ -159,10 +169,16 @@ from perception.source import (
 )
 from perception.visibility import VisibilityResult, check_visibility
 
-#: Caps newly-emitted detections per poll tick, nearest-first. Plan
-#: Decision #2 -- proceeding on the stated recommendation (not explicitly
-#: affirmed by the user), flagged as cheap to change mid-implementation.
-NAKED_EYE_MAX_NEW_PER_POLL: Final[int] = 3
+#: Caps newly-admitted *clusters* (groups) per poll tick, nearest-first --
+#: how many distinct things register in one fixation, not how many
+#: individual objects (`plans/detection-cones-slice2/plan.md`'s 2A.5;
+#: renamed from `NAKED_EYE_MAX_NEW_PER_POLL`, which counted objects; value
+#: unchanged at 3, deliberately, so the 2C sortie can attribute a later
+#: change in behaviour to the scan loop rather than to a value that moved
+#: at the same time as its unit). Originally plan Decision #2 -- proceeding
+#: on the stated recommendation (not explicitly affirmed by the user),
+#: flagged as cheap to change mid-implementation.
+NAKED_EYE_MAX_NEW_GROUPS_PER_POLL: Final[int] = 3
 
 #: Reads differently from Hybrid's `"petrovich_indication+world_objects"` --
 #: a filter pass here is structurally weaker evidence than a real HelperAI
@@ -242,13 +258,14 @@ class NakedEyePerceptionSource:
     aircraft_client: AircraftLayerClient
     theatre: str
     world_model_conn: sqlite3.Connection
-    #: `"on_change"` (default) preserves the original per-object debounce
-    #: byte-for-byte -- every existing test constructs this class without
-    #: passing `emit_mode` and must keep passing untouched
-    #: (`plans/pb2-contact-memory/plan.md` Stage 3). `"every_poll"` emits one
-    #: `Observation` per currently-acquired, currently-visible object on
-    #: every poll -- see module docstring point 5 for how
-    #: `NAKED_EYE_MAX_NEW_PER_POLL` is re-read under this mode.
+    #: `"on_change"` (default) is the per-object debounce, resolved at
+    #: cluster granularity as of 2A.5 (module docstring point 5) --
+    #: `plans/pb2-contact-memory/plan.md` Stage 3 established this as the
+    #: default every existing test constructs without passing `emit_mode`.
+    #: `"every_poll"` emits one `Observation` per currently-acquired,
+    #: currently-visible cluster on every poll -- see module docstring
+    #: point 5 for how `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` governs both
+    #: modes.
     emit_mode: Literal["on_change", "every_poll"] = "on_change"
     #: BL-9's detection trace (`plans/bl9-debug-visualization/plan.md`) --
     #: additive, defaults to `None` (a true no-op, same pattern as every
@@ -310,22 +327,21 @@ class NakedEyePerceptionSource:
         currently_visible_ids = frozenset(
             candidate.object_id for candidate, _result in visible
         )
-
-        if self.emit_mode == "every_poll":
-            to_emit = self._acquire_every_poll(visible, currently_visible_ids)
-        else:
-            to_emit = self._acquire_on_change(visible, currently_visible_ids)
-
         confidence_by_object_id = {
-            candidate.object_id: result.confidence for candidate, result in to_emit
+            candidate.object_id: result.confidence for candidate, result in visible
         }
+
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
+        # Cluster *every* gate-surviving candidate first -- the cap below
+        # operates on the resulting groups, not on individual candidates
+        # ahead of the grouping that would have told it they were one thing
+        # (module docstring point 5, 2A.5).
         clusters = cluster_candidates(
             [
                 self._cluster_candidate(candidate, result)
-                for candidate, result in to_emit
+                for candidate, result in visible
             ],
             observer,
             # UNAIDED_OPTIC.presence_range_mult -- the only optic
@@ -337,11 +353,17 @@ class NakedEyePerceptionSource:
             # candidates -- see that module's docstring.
             UNAIDED_OPTIC.presence_range_mult,
         )
+
+        if self.emit_mode == "every_poll":
+            to_emit = self._acquire_every_poll(clusters, currently_visible_ids)
+        else:
+            to_emit = self._acquire_on_change(clusters, currently_visible_ids)
+
         observations = self._build_observations(
-            now_sim, ownship_state, clusters, confidence_by_object_id
+            now_sim, ownship_state, to_emit, confidence_by_object_id
         )
         if self.trace_sink is not None:
-            for cluster, observation in zip(clusters, observations):
+            for cluster, observation in zip(to_emit, observations):
                 member_ids = tuple(member.object_id for member in cluster.members)
                 for member in cluster.members:
                     self.trace_sink.annotate_admission(
@@ -437,47 +459,60 @@ class NakedEyePerceptionSource:
             classification_level=classification_level,
         )
 
-    def _acquire_on_change(
-        self,
-        visible: list[tuple[WorldObjectCandidate, VisibilityResult]],
-        currently_visible_ids: frozenset[int],
-    ) -> list[tuple[WorldObjectCandidate, VisibilityResult]]:
-        """Original per-object debounce: emit only newly-visible objects,
-        nearest-first, capped at `NAKED_EYE_MAX_NEW_PER_POLL`. Every
-        currently-visible object -- emitted or capped-out -- becomes
-        "already seen" for the next poll (see module docstring point 5)."""
-        newly_visible = [
-            (candidate, result)
-            for candidate, result in visible
-            if candidate.object_id not in self._previously_visible_ids
+    @staticmethod
+    def _select_capped_clusters(
+        clusters: list[Cluster], known_ids: frozenset[int]
+    ) -> list[Cluster]:
+        """Shared by both acquisition modes (module docstring point 5, 2A.5):
+        a cluster is *eligible* when at least one of its members is not yet
+        in `known_ids`; eligible clusters are sorted nearest-first (by their
+        nearest member's own exact, un-quantised range -- computed before
+        clustering, in `_cluster_candidate`) and the first
+        `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` are admitted whole. A cluster
+        already fully covered by `known_ids` never competes for a cap slot
+        at all, which is what lets a steady-state scene stay silent under
+        `on_change` and what lets `every_poll` keep re-emitting an
+        already-acquired cluster with no further cap cost."""
+        eligible = [
+            cluster
+            for cluster in clusters
+            if any(member.object_id not in known_ids for member in cluster.members)
         ]
-        newly_visible.sort(key=lambda item: item[1].range_m)
-        capped = newly_visible[:NAKED_EYE_MAX_NEW_PER_POLL]
+        eligible.sort(key=lambda cluster: min(m.range_m for m in cluster.members))
+        return eligible[:NAKED_EYE_MAX_NEW_GROUPS_PER_POLL]
 
-        self._previously_visible_ids = currently_visible_ids
-        return capped
+    def _acquire_on_change(
+        self, clusters: list[Cluster], currently_visible_ids: frozenset[int]
+    ) -> list[Cluster]:
+        """Per-object debounce resolved at cluster granularity: a cluster is
+        emitted only if it is among this poll's cap-admitted groups (module
+        docstring point 5). `_previously_visible_ids` only gains the members
+        of *emitted* clusters -- a currently-visible-but-not-emitted member
+        (steady-state or capped-out) is deliberately left out, so a
+        capped-out group is retried on a later poll instead of being marked
+        "already seen" forever (the `on_change` fix 2A.5 makes)."""
+        admitted = self._select_capped_clusters(clusters, self._previously_visible_ids)
+        admitted_ids = frozenset(
+            member.object_id for cluster in admitted for member in cluster.members
+        )
+
+        steady_ids = currently_visible_ids & self._previously_visible_ids
+        self._previously_visible_ids = steady_ids | admitted_ids
+        return admitted
 
     def _acquire_every_poll(
-        self,
-        visible: list[tuple[WorldObjectCandidate, VisibilityResult]],
-        currently_visible_ids: frozenset[int],
-    ) -> list[tuple[WorldObjectCandidate, VisibilityResult]]:
-        """`emit_mode="every_poll"`'s acquisition-rate throttle: at most
-        `NAKED_EYE_MAX_NEW_PER_POLL` not-yet-acquired objects (nearest-first)
-        join the acquired set this poll; every acquired object still visible
-        this poll is emitted, regardless of when it was acquired -- so a
-        continuously-visible object emits every poll instead of aging to
-        "lost" the way a blocked-cap re-entry would (module docstring
-        point 5)."""
-        not_yet_acquired = [
-            (candidate, result)
-            for candidate, result in visible
-            if candidate.object_id not in self._acquired_ids
-        ]
-        not_yet_acquired.sort(key=lambda item: item[1].range_m)
-        newly_acquired = not_yet_acquired[:NAKED_EYE_MAX_NEW_PER_POLL]
+        self, clusters: list[Cluster], currently_visible_ids: frozenset[int]
+    ) -> list[Cluster]:
+        """`emit_mode="every_poll"`'s acquisition-rate throttle, resolved at
+        cluster granularity: at most `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`
+        clusters holding a not-yet-acquired member join the acquired set
+        this poll (whole cluster, all members); every cluster whose members
+        are now entirely acquired is emitted, regardless of when each
+        member joined -- so a continuously-visible cluster emits every poll
+        instead of aging out (module docstring point 5)."""
+        newly_admitted = self._select_capped_clusters(clusters, self._acquired_ids)
         newly_acquired_ids = frozenset(
-            candidate.object_id for candidate, _result in newly_acquired
+            member.object_id for cluster in newly_admitted for member in cluster.members
         )
 
         self._acquired_ids = (
@@ -485,9 +520,9 @@ class NakedEyePerceptionSource:
         ) | newly_acquired_ids
 
         return [
-            (candidate, result)
-            for candidate, result in visible
-            if candidate.object_id in self._acquired_ids
+            cluster
+            for cluster in clusters
+            if all(member.object_id in self._acquired_ids for member in cluster.members)
         ]
 
     def _build_observation(
