@@ -300,6 +300,19 @@ two functions that must agree (2026-09-19).
   inequality it depends on, not just the conclusion — that turns the next constant change into a
   one-line check instead of a rediscovery (detection-cones-slice1 review, slice2A fix, 2026-09-21).
 
+- **A plan can hold both halves of a contradiction and still read as consistent, because nothing
+  ever puts the two numbers side by side.** Slice 2's plan stated, in two different sections, that
+  2B's default gaze is `FULL_GAZE` at ±90° (a coarse-sector diagram figure) and separately that the
+  cockpit mask's real rear cutoff is ±130° (a live measurement) — each sentence correct on its own,
+  each written by someone reasoning locally, neither writer cross-checking against the other's
+  number. Had the ±90° default shipped, it would have silently narrowed live detection through the
+  90°–130° band, the exact regression 2B's acceptance gate exists to rule out (caught by the
+  implementer during 2B, corrected in `e520e8b`). Same shape as the `_separable` slackness proof
+  above: a fact stated once reads as settled, and staleness or contradiction only surfaces when
+  something forces the two numbers into the same sentence. Worth checking for at plan-review time on
+  any milestone that restates a numeric constant in more than one section (detection-cones-slice2,
+  2B, 2026-09-21).
+
 - **When several measured effects each look like they need their own tuning parameter, check
   whether one is a consequence of another before giving each a knob.** Slice 2's naked-eye
   multipliers were derived from the BTR-60 alone specifically because infantry's presence/class/type

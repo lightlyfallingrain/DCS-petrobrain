@@ -309,10 +309,21 @@ rather than estimate.
 
 Two consequences to build in rather than discover:
 
-- **The saving arrives with 2C, not 2B.** 2B's default is `FULL_GAZE` (±90°), which by construction
-  rejects nothing the cockpit mask would not. 2B is therefore behaviour-preserving *and*
-  cost-neutral; the behaviour change and the saving land together in 2C, which is the same point
-  restated.
+- **The saving arrives with 2C, not 2B.** 2B's default narrows nothing, so it is behaviour-preserving
+  *and* cost-neutral; the behaviour change and the saving land together in 2C, which is the same
+  point restated.
+
+  **Corrected during implementation (2026-09-21): the default is `None`, not `FULL_GAZE`.** This
+  plan said `FULL_GAZE` (±90°) "by construction rejects nothing the cockpit mask would not." That is
+  false. `FULL_GAZE` reuses `RelativeSector.full`'s wedge at ±90°, while `cockpit_mask.py`'s
+  *measured* envelope reaches **±130°** — so assigning it unconditionally would have silently
+  narrowed real detection through the 90°–130° band, breaking the one property 2B exists to have.
+
+  The error is worth naming precisely because it is not arithmetic: both numbers were known and
+  written down in this plan, one derived from the diagram's coarse 9–3 sectors and the other from a
+  live cockpit measurement, and nobody put them side by side. `gaze=None` means "no narrowing" with
+  nothing to get wrong, and `test_default_gaze_is_none_and_does_not_narrow_the_cockpit_envelope`
+  pins it.
 - **Gaze-first costs the trace its cockpit-mask rejection rate.** A candidate behind the rear cutoff
   that is also outside the wedge will now record `GAZE`, not `COCKPIT_MASK`, so the 24.2% figure
   above stops being observable from a live trace. Accept this rather than reordering back: the mask
@@ -698,8 +709,9 @@ they are state, but they are a pure function of the frame sequence.
    `Optic.boresight_azimuth_deg` deleted. Document the ordering and its trace-attribution cost in
    `detection_trace.py` (hard part 3).
 9. `Optic.peripheral`; `NakedEyePerceptionSource.gaze` + `peripheral_stimulus_ids` fields and
-   `gaze_for`; `logger.py` resolves the commanded sector each poll and assigns it. Default stays
-   `FULL_GAZE` and an empty stimulus set, so both are no-ops.
+   `gaze_for`; `logger.py` resolves the commanded sector each poll and assigns it. Default is
+   **`gaze=None`** (not `FULL_GAZE` — see the correction above) and an empty stimulus set, so both
+   are no-ops.
 10. Regression test: with no command issued, the BL-9 trace over a fixture stream is identical to
     2A's. New tests: a commanded `left` gaze rejects a contact at 12 o'clock and admits one at
     10 o'clock; a candidate in `peripheral_stimulus_ids` clears the gaze gate at any azimuth **and
