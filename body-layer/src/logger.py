@@ -138,16 +138,17 @@ visibility; `null` is silent) -- neither produces spoken output, since no
 real brain exists yet.
 
 **Gaze steers the naked-eye channel (slice 2B, `plans/
-detection-cones-slice2/plan.md`)**: `ConsolePerceptionRunner.run_once`
-resolves whichever ownship-relative `scan_area` command is currently
-pending (`_active_gaze`) and assigns the resulting `perception.gaze.Gaze`
-(or `None`) onto whichever of `self.sources` is a `NakedEyePerceptionSource`
-(`_apply_active_gaze`), every poll, before the sources are polled -- this
-is what makes an F10 "scan left" command change what Petrovich can actually
-see, not just register a belief-level attention area. No command pending
-means `None` (no restriction), byte-identical to this channel's behaviour
-before 2B -- see `perception.gaze`'s own module docstring for why that is
-the explicit default rather than a named "full" gaze.
+detection-cones-slice2/plan.md`; the o'clock scan loop added by 2C)**:
+`ConsolePerceptionRunner.run_once` resolves whichever ownship-relative
+`scan_area` command is currently pending (`_active_gaze`) and assigns the
+resulting `perception.gaze.ScanPlan` onto whichever of `self.sources` is a
+`NakedEyePerceptionSource` (`_apply_active_gaze`), every poll, before the
+sources are polled -- this is what makes an F10 "scan left" command change
+what Petrovich can actually see, not just register a belief-level attention
+area. No command pending means `perception.gaze.FREE_SCAN_PLAN` (2C's
+default o'clock scan loop, not "no restriction" any more) -- see
+`perception.gaze`'s own module docstring for the free-scan/commanded-scan
+split this now resolves to.
 
 **`--speech-audio` (BL-10 first slice, `plans/tts-voice-output/plan.md`)**:
 only meaningful alongside `--crew-text` (a true no-op otherwise, same
@@ -186,7 +187,7 @@ from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
 from belief.tasks import TaskStore
 from detection_trace_writer import DetectionTraceWriter
 from perception.detection_trace import DetectionTraceCollector
-from perception.gaze import Gaze, gaze_from_relative_sector
+from perception.gaze import FREE_SCAN_PLAN, ScanPlan
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -420,23 +421,25 @@ class ConsolePerceptionRunner:
         return observations
 
 
-def _active_gaze(tasks: TaskStore) -> Gaze | None:
-    """The `Gaze` implied by whatever ownship-relative scan sector is
+def _active_gaze(tasks: TaskStore) -> ScanPlan:
+    """The `ScanPlan` implied by whatever ownship-relative scan sector is
     currently commanded (`plans/detection-cones-slice2/plan.md`'s 2B,
     closing `todo/todo.md`'s "Scan commands should drive naked-eye
-    perception") -- or `None` (no restriction, today's behaviour) when no
-    such command is pending.
+    perception"; generalised from a static `Gaze` to a `ScanPlan` by 2C) --
+    or `FREE_SCAN_PLAN` (the o'clock scan loop, `perception.gaze`'s own
+    module docstring) when no such command is pending.
 
-    Reads `PendingIntent.area.relative_sector` directly, never the store's
-    live re-projected `AttentionArea` (`ContactStore.reproject_relative_
-    areas`) -- a relative sector's *direction* is body-relative and
-    invariant under reprojection; only its absolute world-bearing
-    projection changes with ownship heading, which this function has no
-    use for (`perception.gaze.gaze_from_relative_sector` reads the same
-    body-relative wedge table `AttentionArea.wedge_deg`'s projection is
-    itself derived from). This also sidesteps `belief.tasks`'s own
+    Reads `PendingIntent.area.relative_sector`/`created_sim` directly,
+    never the store's live re-projected `AttentionArea` (`ContactStore.
+    reproject_relative_areas`) -- a relative sector's *direction* is
+    body-relative and invariant under reprojection; only its absolute
+    world-bearing projection changes with ownship heading, which this
+    function has no use for. This also sidesteps `belief.tasks`'s own
     documented staleness caveat around `task.area` (its module docstring)
     entirely, since nothing here needs the live area at all.
+    `task.created_sim` becomes `ScanPlan.command_t_sim` -- the sim time the
+    scan was ordered, which is what a commanded scan's o'clock legs cycle
+    from (`perception.gaze.gaze_at`'s own docstring).
 
     The most recently created still-`pending` `scan_area` task wins when
     more than one is pending -- a later scan command is what a player
@@ -447,8 +450,11 @@ def _active_gaze(tasks: TaskStore) -> Gaze | None:
             and task.status == "pending"
             and task.area.relative_sector is not None
         ):
-            return gaze_from_relative_sector(task.area.relative_sector)
-    return None
+            return ScanPlan(
+                commanded_sector=task.area.relative_sector,
+                command_t_sim=task.created_sim,
+            )
+    return FREE_SCAN_PLAN
 
 
 def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> None:
@@ -457,10 +463,10 @@ def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> Non
     for a `sources` list (e.g. in tests) that holds no naked-eye source at
     all. The same write-thread/single-assignment pattern `last_t_sim`
     already uses safely (`run_once`'s only caller)."""
-    gaze = _active_gaze(tasks)
+    scan_plan = _active_gaze(tasks)
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
-            source.gaze = gaze
+            source.scan_plan = scan_plan
 
 
 def _build_sources(

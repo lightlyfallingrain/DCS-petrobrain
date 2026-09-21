@@ -45,6 +45,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Final, Literal
 
+from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
+
 if TYPE_CHECKING:
     from belief.contacts import Contact
 
@@ -78,12 +80,46 @@ MOTION_HALF_LIFE_S: Final[float] = 60.0
 GENERAL_AREA_HALF_LIFE_S: Final[float] = 180.0
 
 #: The window within which a contact counts as "currently being perceived"
-#: rather than merely "recently tracked" -- deliberately close to one
-#: polling interval (`body-layer/CLAUDE.md`'s "at 1 Hz" note), since
-#: `certainty_of` has no direct signal for "was this contact in the most
-#: recent poll's observation batch," only elapsed time since its last
-#: recorded observation.
-OBSERVED_WINDOW_S: Final[float] = 5.0
+#: rather than merely "recently tracked" -- **re-derived from the naked-eye
+#: scan cycle (2C, `plans/detection-cones-slice2/plan.md` hard part 8),
+#: not left at its pre-scan-loop value of 5.0.** Once Petrovich scans
+#: rather than seeing the whole envelope at once, a flank o'clock is
+#: genuinely un-gazed for up to `perception.gaze.SCAN_CYCLE_PERIOD_S -
+#: perception.gaze.FOCUS_DWELL_S` (14 s) of every 16 s cycle while still
+#: being tracked perfectly well -- the old 5.0 s window would hedge
+#: "observed" language on nearly every tick for a flank contact he is
+#: watching correctly. `SCAN_CYCLE_PERIOD_S` (16.0) is the smallest value
+#: that clears the lower bound below with margin for a poll landing
+#: awkwardly, and reads as exactly what it means: "seen within the current
+#: scan cycle." Both assertions below test a real failure mode, not a
+#: tautology -- see `perception.gaze`'s own module docstring for the
+#: worked derivation and the plan-C fallback this bound anticipates.
+OBSERVED_WINDOW_S: Final[float] = SCAN_CYCLE_PERIOD_S
+
+# Lower bound: below `SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S` (the worst-case
+# flank gap -- a cone visited for one dwell, not revisited for the rest of
+# the cycle), a contact Petrovich is tracking correctly would read as
+# "not observed" for most of every cycle. A later tuning pass that shrinks
+# `OBSERVED_WINDOW_S` without noticing this relationship trips this
+# assertion instead of silently reintroducing that hedge.
+assert SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S < OBSERVED_WINDOW_S, (
+    "OBSERVED_WINDOW_S must clear the worst-case flank gap "
+    "(SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S) or a correctly-tracked flank "
+    "contact reads as unobserved for most of every scan cycle"
+)
+
+# Upper bound: at or above `POSITION_HALF_LIFE_S`, the "tracked" band
+# between "observed" and "estimated" (`certainty_of` below) vanishes
+# silently -- `elapsed_s <= OBSERVED_WINDOW_S` would already be false
+# exactly when `elapsed_s <= POSITION_HALF_LIFE_S` also turns false, so no
+# elapsed time could ever land in "tracked" at all. This assertion is what
+# stops a later widening of `OBSERVED_WINDOW_S` (e.g. hard part 8's plan-C
+# fallback, 16 -> 20) from silently collapsing that middle certainty band
+# instead of raising `POSITION_HALF_LIFE_S` alongside it.
+assert OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S, (
+    "OBSERVED_WINDOW_S must stay below POSITION_HALF_LIFE_S or the "
+    "'tracked' certainty band collapses to nothing"
+)
 
 #: Past this much elapsed time since last observed, a contact is considered
 #: lost outright rather than merely stale. Set to 4x `POSITION_HALF_LIFE_S`
