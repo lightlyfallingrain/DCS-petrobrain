@@ -46,3 +46,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [srs-adapter audio boundary](project_srs_adapter_audio_boundary.md) — mic capture stays inside srs-adapter, never aircraft-layer; Mac is always the HTTP client.
 - [Slice 3 riskiest-assumption-first](project_srs_adapter_stt_riskiest_first.md) — accent recognition bench is a stop/go gate before transit/PTT; sets the threshold constants.
 - [Tactical landmarks scoping](project_tactical_landmarks_scoping.md) - 2026-09-12 plan resolving whether world-model content is rich enough for Mission Interpreter — ridge/valley/flat, settlement boundaries, road junct...
+- [Resolution vs salience split](project_resolution_vs_salience_split.md) — presence threshold split in two; clustering floor (A) is coupled to the loosest admission threshold.
