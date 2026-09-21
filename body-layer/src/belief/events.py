@@ -3,8 +3,12 @@ plan.md` Stage 2, implementing the three lifecycle events BL-2 scopes out of
 `docs/concept/PETROBRAIN_RUNTIME.md`'s "Event model" candidate list
 (`CONTACT_DETECTED`, `CONTACT_LOST`, `CONTACT_REACQUIRED`), plus
 `CONTACT_CLASSIFICATION_CHANGED`, added by `plans/classification-refinement/
-plan.md` Stage 3 (`CONTACT_MOVED`/`CONTACT_BECAME_HIGH_THREAT`/the
-mission/player events remain later milestones' work, not this module's).
+plan.md` Stage 3, and `CONTACT_MOTION_CHANGED`, added by `plans/
+movement-detection/plan.md` Stage 3 -- superseding this docstring's own
+former `CONTACT_MOVED` placeholder (see `motion_event_kind`'s docstring
+below for why the name changed, not just the placeholder status).
+`CONTACT_BECAME_HIGH_THREAT`/the mission/player events remain later
+milestones' work, not this module's.
 
 `lifecycle_event_kind` is the pure comparison this module owns for the three
 lifecycle kinds: given a contact's last-emitted `belief.decay.Certainty` and
@@ -39,6 +43,27 @@ bl4-attention-events/plan.md`), over `belief.attention.Attention` instead of
 refined/contradicted direction to distinguish, unlike classification --
 attention is a flat rank, not a specificity lattice); `previous is None`
 produces no event, the same first-tick convention as the other two kinds.
+
+`motion_event_kind` is `plans/movement-detection/plan.md` Stage 3's twin,
+over `belief.motion.MotionBelief.state` (`"moving"`/`"stopped"`) instead of
+`Certainty`/`ClassificationBelief`/`Attention` -- the project's first
+behaviour-change event (`docs/concept/STATE_TRANSITIONS.md`'s `moving` /
+`stopped` reporting trigger, previously unimplemented). Same flat-comparison
+shape as `attention_event_kind`/`cardinality_event`: any state change fires
+`CONTACT_MOTION_CHANGED`, no refined/contradicted direction to distinguish.
+`previous is None` produces no event, the same first-tick convention --
+reachable here on a contact's very first tick *and* on every tick before
+its motion belief is ever established at all (`Contact.motion` starts and
+can stay `None` indefinitely, see `belief.motion`'s module docstring), in
+which case `current is None` too and the flat-equality check below already
+short-circuits with no event regardless.
+
+**Named `CONTACT_MOTION_CHANGED`, not the `events.py` docstring's own
+long-standing `CONTACT_MOVED` placeholder** (plan Decision 5): `CONTACT_
+MOVED` describes a position change, while this event is a `moving`/
+`stopped` *state* transition -- the same shape as `CONTACT_ATTENTION_
+CHANGED`/`CONTACT_CARDINALITY_CHANGED`, which consistency favours over the
+old placeholder name.
 
 `EVENT_COOLDOWN_S` is BL-4's emission-suppression mechanism, applied
 uniformly by `ContactStore.tick` to all three event kinds above (`belief.
@@ -76,6 +101,7 @@ from belief.decay import Certainty
 
 if TYPE_CHECKING:
     from belief.classification import ClassificationBelief
+    from belief.motion import MotionState
 
 EventKind = Literal[
     "CONTACT_DETECTED",
@@ -84,6 +110,7 @@ EventKind = Literal[
     "CONTACT_CLASSIFICATION_CHANGED",
     "CONTACT_ATTENTION_CHANGED",
     "CONTACT_CARDINALITY_CHANGED",
+    "CONTACT_MOTION_CHANGED",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
@@ -92,6 +119,7 @@ CONTACT_REACQUIRED: Final[EventKind] = "CONTACT_REACQUIRED"
 CONTACT_CLASSIFICATION_CHANGED: Final[EventKind] = "CONTACT_CLASSIFICATION_CHANGED"
 CONTACT_ATTENTION_CHANGED: Final[EventKind] = "CONTACT_ATTENTION_CHANGED"
 CONTACT_CARDINALITY_CHANGED: Final[EventKind] = "CONTACT_CARDINALITY_CHANGED"
+CONTACT_MOTION_CHANGED: Final[EventKind] = "CONTACT_MOTION_CHANGED"
 
 ClassificationDirection = Literal["refined", "contradicted"]
 
@@ -147,6 +175,14 @@ class Event:
     attention: Attention | None = None
     previous_cardinality: tuple[int, float] | None = None
     cardinality: tuple[int, float] | None = None
+    #: `plans/movement-detection/plan.md` Stage 3's addition, same
+    #: default-`None`-everywhere-else shape as every belief-snapshot pair
+    #: above -- only a `CONTACT_MOTION_CHANGED` event populates them. Plain
+    #: `MotionState` strings (`"moving"`/`"stopped"`), not `belief.motion.
+    #: MotionBelief` itself, mirroring `attention`/`cardinality`'s own
+    #: "the other belief snapshots are already plain values" precedent.
+    previous_motion: MotionState | None = None
+    motion: MotionState | None = None
 
 
 def lifecycle_event_kind(
@@ -242,3 +278,43 @@ def attention_event_kind(
     if previous == current:
         return None
     return CONTACT_ATTENTION_CHANGED
+
+
+def motion_event_kind(
+    previous: MotionState | None, current: MotionState | None
+) -> EventKind | None:
+    """What motion transition, if any, `previous -> current` implies --
+    `plans/movement-detection/plan.md` Stage 3's twin of
+    `attention_event_kind`/`cardinality_event`'s flat-comparison shape (no
+    refined/contradicted direction, unlike `classification_event`).
+
+    **Deliberately does NOT follow the other four kinds' "`previous is None`
+    means first tick, emit nothing" convention.** For every other kind,
+    `previous is None` only ever happens on a contact's very first tick,
+    because the attribute it tracks (`Certainty`/`ClassificationBelief`/
+    `Attention`/cardinality's `(lo, hi)`) is always established the moment
+    the contact is founded -- so suppressing it avoids a synthetic,
+    redundant pair alongside `CONTACT_DETECTED`. `Contact.motion` is
+    different: it can legitimately stay `None` for many ticks after
+    founding (a contact seen only through the scope/hybrid channel, or a
+    naked-eye contact founded on a poll with no velocity match -- `belief.
+    motion`'s module docstring), so `previous is None` most often means
+    "motion has just been established for the first time," not "this is
+    tick one" -- exactly the transition this milestone exists to report.
+    A `CONTACT_MOTION_CHANGED` firing on the same tick as `CONTACT_DETECTED`
+    (a founding percept that already carries real motion evidence) is not
+    treated as redundant here either: "contact, and it's moving" is real
+    information a crew member would actually say, unlike classification's
+    case where the founding claim *is* the detection.
+
+    `current is None` produces no event regardless of `previous` -- there is
+    no real transition to report when the current state is itself unknown
+    (and per `fold_motion`, an established `MotionBelief` is never un-set
+    back to `None`, so `previous` non-`None`/`current` `None` should not
+    occur in practice; this comparison does not assume that, it simply has
+    nothing to say about "became unknown")."""
+    if current is None:
+        return None
+    if previous == current:
+        return None
+    return CONTACT_MOTION_CHANGED

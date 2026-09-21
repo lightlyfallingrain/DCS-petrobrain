@@ -11,14 +11,17 @@ from belief.contacts import Contact
 from belief.decay import (
     IDENTITY_HALF_LIFE_S,
     LOST_THRESHOLD_S,
+    MOTION_HALF_LIFE_S,
     OBJECT_ID_MEMORY_S,
     OBSERVED_WINDOW_S,
     POSITION_HALF_LIFE_S,
     certainty_of,
     classification_confidence_at,
+    motion_confidence_at,
     object_id_continuity_valid,
     position_confidence,
 )
+from belief.motion import MotionBelief
 from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
 from perception.geometry import GeoPosition
 
@@ -192,6 +195,33 @@ def test_classification_confidence_negative_elapsed_time_is_clamped() -> None:
     assert classification_confidence_at(contact, now_sim=0.0) == (
         contact.classification.confidence
     )
+
+
+def test_motion_confidence_is_unchanged_at_zero_elapsed() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    contact.motion = MotionBelief(state="moving", confidence=0.5, established_sim=0.0)
+    assert motion_confidence_at(contact, now_sim=0.0) == pytest.approx(0.5)
+
+
+def test_motion_confidence_halves_at_the_motion_half_life() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    contact.motion = MotionBelief(state="moving", confidence=0.5, established_sim=0.0)
+    decayed = motion_confidence_at(contact, now_sim=MOTION_HALF_LIFE_S)
+    assert decayed == pytest.approx(0.25)
+
+
+def test_motion_confidence_keys_off_established_sim_not_last_seen_sim() -> None:
+    contact = _contact(last_seen_sim=1000.0)
+    contact.motion = MotionBelief(state="stopped", confidence=0.5, established_sim=0.0)
+    decayed = motion_confidence_at(contact, now_sim=MOTION_HALF_LIFE_S)
+    assert decayed == pytest.approx(0.25)
+
+
+def test_motion_confidence_requires_motion_to_be_set() -> None:
+    contact = _contact(last_seen_sim=0.0)
+    assert contact.motion is None
+    with pytest.raises(AssertionError):
+        motion_confidence_at(contact, now_sim=0.0)
 
 
 def test_object_id_continuity_is_valid_at_exactly_the_memory_window_boundary() -> None:

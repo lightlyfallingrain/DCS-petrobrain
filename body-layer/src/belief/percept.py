@@ -55,7 +55,13 @@ class Percept:
     `count_bucket` carries `Observation.count_bucket` through unchanged, for
     the same reason -- a channel's own honest statement of how many real
     objects this report stands for, `plans/group-contact-model/plan.md`
-    Stage 2."""
+    Stage 2.
+
+    `apparent_motion` carries `Observation.apparent_motion` through
+    unchanged, for the same reason (`plans/movement-detection/plan.md`):
+    `perception.motion.is_apparently_moving`'s tri-state verdict is
+    perceived metadata, not a truth field -- the velocity vector it was
+    computed from never reaches this side of the boundary at all."""
 
     t_sim: float
     source: str
@@ -67,6 +73,7 @@ class Percept:
     classification_level: int = 2
     continues_observation_id: str | None = None
     count_bucket: str | None = None
+    apparent_motion: bool | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -86,4 +93,5 @@ def percept_of(observation: Observation) -> Percept:
         classification_level=observation.classification_level,
         continues_observation_id=observation.continues_observation_id,
         count_bucket=observation.count_bucket,
+        apparent_motion=observation.apparent_motion,
     )
