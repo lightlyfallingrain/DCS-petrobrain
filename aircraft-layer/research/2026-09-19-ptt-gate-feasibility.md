@@ -188,12 +188,24 @@ deliberate press (including the short one) produced at least one logged sample.
 
 ### Unresolved
 
-- **Arg 738's exact live values on this project's installed DCS version are not yet confirmed** —
-  this finding rests on SRS's own shipped source plus indirect cross-validation via two adjacent
-  args (455/456), not a direct read of 738 itself. `Export.probe-ptt.lua` is the way to close this;
-  it has not been run.
-- **Whether the copilot-seat equivalent (arg 856, per the same `Mi24P.lua` file's `else` branch)
-  matters at all** — out of scope unless the player ever flies from the gunner seat, which this
+> **Addendum 2026-09-20 (Windows box, `clickabledata.lua` read directly).** Two of the four items
+> below are closed, and a third is explained. `elements["STICK-PTT-PTR"]` declares
+> `arg = {738, 738}`, `arg_value = {1.0, 0.5}`, `arg_lim = {{0.0, 1.0}, {0.0, 0.5}}`,
+> `crew_member_access = {0}` — so **738 is the pilot stick trigger, full press (LMB, radio) = 1.0,
+> right press (RMB, intercom) = 0.5, released 0.0**, first-party and no longer inferred from SRS.
+> `elements["OP-STICK-PTT-PTR"]` is the operator's, **arg 856**, identical encoding. The reason 738
+> was missing from `mi24p-command-surface.md` is a generator blind spot, not a stale arg: that dump
+> captures the `default_*(…)` helper forms only, and 13 of `clickabledata.lua`'s 749 elements are
+> raw table literals — including both PTTs and both collectives. Full detail:
+> `2026-09-20-dcs-install-detection-deep-read.md` finding 11.
+
+- ~~**Arg 738's exact live values on this project's installed DCS version are not yet confirmed**~~
+  — **the declared values are now read first-party** (addendum above). What a live probe would still
+  add is what `get_argument_value` actually *returns* mid-sortie, which is a different claim from
+  what `clickabledata.lua` declares; `Export.probe-ptt.lua` remains the way to close that, and has
+  not been run.
+- **Whether the copilot-seat equivalent (arg 856 — now confirmed first-party as
+  `OP-STICK-PTT-PTR`, `crew_member_access = {1}`) matters at all** — out of scope unless the player ever flies from the gunner seat, which this
   project's design (pilot seat, AI gunner) does not do; noted only so a future reader doesn't
   wonder why it wasn't checked.
 - **Whether a genuinely spare/unbound control exists as an alternative to reusing arg 738** — not
@@ -202,6 +214,6 @@ deliberate press (including the short one) produced at least one logged sample.
   intercom-trigger-reuse option above looks mechanically clean and requires no new binding, this is
   probably not worth pursuing unless Architect specifically wants a control independent of the real
   intercom function.
-- **Full-press (radio-transmit) numeric value of arg 738** — inferred to be higher than 0.5 but the
-  exact number (likely ~1.0) is not stated anywhere read this session; the probe script will
-  capture it.
+- ~~**Full-press (radio-transmit) numeric value of arg 738**~~ — **RESOLVED 2026-09-20: 1.0**,
+  stated directly by `arg_value = {1.0, 0.5}` in `clickabledata.lua:1009-1025`. The guess of "~1.0"
+  was right.
