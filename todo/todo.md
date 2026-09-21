@@ -124,6 +124,64 @@ Prioritize any open task here over any other task in this file or roadmap files.
   `find_place` (`belief/tools.py`, backed by `query.search.find_place_by_name`) already resolves
   names to positions, so *name → place* is not the blocker. *Deixis → referent* is.
 
+
+### Cones 2C sortie findings (flown 2026-09-21)
+
+First flight of the o'clock scan loop. Six findings; two share a root cause.
+
+- [ ] **Show where Petrovich is looking. DO THIS FIRST — it gates the other judgements.** The pilot
+  could not evaluate two of the card's four blocks: *"very difficult to judge when I don't visually
+  see where Petrovich is looking"*. The scan loop, the dwell, and whether a 16 s flank revisit feels
+  attentive are all unjudgeable without it. An overlay line naming the current gaze o'clock
+  (`gaze_at(t_sim, plan)` is pure, so this is a read, not new state) would make the next sortie
+  evaluable instead of impressionistic. Cheap, and everything else waits behind it.
+
+- [ ] **Scan and Watch must be standing modes, not one-shot tasks.** Root cause of two findings.
+  `belief/tasks.py`'s `tick` marks a task `succeeded` **the moment any contact is found in its
+  area**, and `logger._active_gaze` only honours `status == "pending"` — so a commanded scan reverts
+  to free scan on first contact, silently.
+  - Observed: *"commanded scan left, still got reports from 12 o'clock"* — free scan visits 12
+    twice per 16 s cycle.
+  - Observed: `watch closest` → flew past and back → `cancel task` → *"nothing to stop"*. The task
+    had already succeeded.
+  - Pilot's expectation, and it matches `docs/concept/STATE_TRANSITIONS.md` where Scan and Watch are
+    **modes**: *"should have been watching target and scanning forward"*. A mode persists until
+    cancelled or replaced; a task completes.
+  - `DEFAULT_SCAN_DEADLINE_S = 60.0` is secondary — it only bites when nothing is found. Do not tune
+    it as a fix; the semantics are the defect.
+  - Note the shape: the code is correct for what it was designed as. The design was wrong.
+
+- [ ] **Callouts must not be backlogged.** Observed: *"I got callouts for unit at 12 o'clock when I
+  had already flown past it several seconds ago."* A queue built ahead of time plays out stale.
+  Pilot's own statement of the fix, and it is the right one: **"when a message ends, then determine
+  what to say next."** Decide at speech time, from current belief — not at detection time.
+
+- [ ] **Aggregate repetitive callouts.** Seven lines observed where two would do:
+  ```
+  infantry, 12 o'clock, 0.5 kilometres.
+  infantry, 1 o'clock, 0.5 kilometres.
+  infantry, 12 o'clock, 0.5 kilometres.
+  unit at 1 o'clock, very close is BTR-70.
+  infantry, 2 o'clock, very close.
+  infantry, 2 o'clock, very close.
+  unit at 12 o'clock, very close is truck.
+  ```
+  Each line is *technically correct* — different units — which is why this is not a bug report but a
+  model gap: three infantry at 0.5 km across 12–1 o'clock is **one group**, and the crew layer
+  should say so. Interacts with the group-contact work (stage 4b/5) and with 2A.5's group intake
+  cap, which already established that co-located units are one perceptual event.
+
+- [ ] **No identification on a very close pass.** Observed: *"flying so close by a unit that I could
+  clearly identify it, brought no identification."* Most likely the 30° focus cone missing it during
+  a fast pass — a real crewman tracks a thing he has noticed. This is the attention-capture/dwell
+  gap (2D, plus the peripheral channel that has no triggers). Confirm against a BL-9 trace before
+  designing: if the unit never entered the cone, this is dwell; if it did and still did not reach
+  the type tier, it is calibration.
+
+- [ ] **16 s flank revisit — provisionally accepted, needs another look.** Pilot: *"seemed alright,
+  needs more testing and fine tuning later."* Re-judge once gaze is visible.
+
+
 ## Cross-cutting / unscoped backlog
 
 - [>] **Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
