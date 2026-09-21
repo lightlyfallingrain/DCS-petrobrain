@@ -117,11 +117,22 @@ flies the aircraft, not for someone tracking the build.
 - **What they must do** — fly it, run it on Windows, check a branch. Name the branch.
 - **Status, in one line** — done / in review / blocked on X.
 
+**Show the reasoning — compressed, not hidden.** This is the exception to brevity and it is not
+optional. Most of this project's important corrections came from the user reading *why* something
+was believed and spotting the flaw: a slew limit read off the wrong instrument, a "no velocity
+anywhere" finding refuted by naming a tool that gets velocity, aspect angle mattering to
+recognition, ten trucks in one glance being one perceptual event, the naked eye belonging as the
+default optic. None of those could have come from a status line.
+
+So state **the inference and what it rests on**, in a line or two — enough that a wrong premise is
+visible. Drop the walkthrough, keep the load-bearing step. "X, because Y — which assumes Z" is
+checkable; three paragraphs deriving X are not, and are *less* likely to be read.
+
 **Keep internal** unless it changes their decision: how something was verified, which agent did
-what, commit hashes, test counts beyond pass/fail, intermediate reasoning, procedure followed,
-self-corrections about process. These matter to the work and are recorded in commits, plans and
-research notes — which is where they belong. Repeating them in chat is not transparency, it is
-noise that buries the one line that mattered.
+what, commit hashes, test counts beyond pass/fail, procedure followed, self-corrections about
+process. These are recorded in commits, plans and research notes — which is where they belong.
+Repeating them in chat is noise that buries the line that mattered. **This is about mechanics, not
+about reasoning** — do not use it to justify dropping the "why".
 
 **Detail is earned, not default.** Give it when the user asks, when a finding genuinely rests on
 it, or when they cannot judge a recommendation without it. A number that changes their mind is
