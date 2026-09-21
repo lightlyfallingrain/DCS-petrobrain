@@ -796,6 +796,33 @@ def test_scan_then_cancel_task_actually_cancels_it() -> None:
     assert resolved is not None and resolved.status == "cancelled"
 
 
+def test_cancel_task_reaches_an_already_succeeded_scan() -> None:
+    # Cones 2C sortie fix: a scan_area task can resolve to "succeeded"
+    # within seconds of being issued (tick() the instant any contact
+    # appears in its area) -- "Cancel Task" must still be able to end that
+    # standing mode, not report "nothing to stop" the way it used to when
+    # the task fell out of the old "status == pending" filter.
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
+    )
+
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    task = tasks.tasks[0]
+    task.status = "succeeded"
+
+    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+
+    assert lines == ["Copy, stopping the scan ahead."]
+    resolved = tasks.get(task.id)
+    assert resolved is not None and resolved.status == "cancelled"
+
+
 def test_cancel_task_without_tasks_configured_reports_nothing_to_stop() -> None:
     console = CrewConsole(store=ContactStore())
     assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["nothing to stop"]

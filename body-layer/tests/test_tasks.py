@@ -198,6 +198,43 @@ def test_cancel_unknown_task_returns_false() -> None:
     assert tasks.cancel("TASK_999") is False
 
 
+def test_cancel_reaches_an_already_succeeded_task() -> None:
+    # Cones 2C sortie fix: a scan_area task is a standing mode, so a
+    # cancel issued after the task has already succeeded (the common case
+    # -- tick resolves it the instant any contact is seen) must still be
+    # able to end it, not leave it stuck in a terminal-looking state.
+    store = ContactStore()
+    tasks = TaskStore()
+    area = _area()
+    task = tasks.create(
+        kind="scan_area", area=area, created_sim=10.0, deadline_sim=40.0, reason="test"
+    )
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=15.0, range_m=100.0)], now_sim=15.0
+    )
+    tasks.tick(store, now_sim=15.0)
+    assert tasks.get(task.id).status == "succeeded"  # type: ignore[union-attr]
+
+    assert tasks.cancel(task.id) is True
+
+    assert tasks.get(task.id).status == "cancelled"  # type: ignore[union-attr]
+
+
+def test_cancel_reaches_an_already_failed_task() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+    area = _area()
+    task = tasks.create(
+        kind="scan_area", area=area, created_sim=10.0, deadline_sim=40.0, reason="test"
+    )
+    tasks.tick(store, now_sim=40.0)  # nothing observed -> "failed" by deadline
+    assert tasks.get(task.id).status == "failed"  # type: ignore[union-attr]
+
+    assert tasks.cancel(task.id) is True
+
+    assert tasks.get(task.id).status == "cancelled"  # type: ignore[union-attr]
+
+
 def test_tick_is_idempotent_for_the_same_now_sim() -> None:
     store = ContactStore()
     tasks = TaskStore()

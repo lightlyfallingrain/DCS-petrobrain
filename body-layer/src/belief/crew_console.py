@@ -575,27 +575,39 @@ class CrewConsole:
         return "the scan"
 
     def _handle_cancel_task(self) -> list[str]:
-        """Cancels the most-recently-created still-`pending` task in
+        """Cancels the most-recently-created still-active task in
         `self.tasks`, regardless of source (plan Decision 3). Every
         `scan_*` token registers a real task via `_handle_scan` above (D5,
         `plans/f10-command-vocabulary/plan.md`), so this is no longer the
         always-"no pending task" dead path it was before that fix -- a scan
         followed by "Cancel Task" genuinely cancels it.
 
+        **Cones 2C sortie fix: "still-active" means `status != "cancelled"`,
+        not `status == "pending"`.** A `scan_area` task is a standing mode
+        (`belief.tasks.TaskStatus`'s own docstring) that `TaskStore.tick`
+        can flip to `"succeeded"` within seconds of being issued (the
+        moment any contact is seen in its area) -- under the old
+        `"pending"`-only filter, that task had already dropped out of this
+        list by the time a player heard it and said "Cancel Task," which
+        produced the sortie's "'nothing to stop'" finding. `TaskStore.
+        cancel` itself was fixed the same way, so cancelling a resolved
+        task here now genuinely ends its mode (`logger._active_gaze` stops
+        honouring it), not just a bookkeeping no-op.
+
         The readback names *what* was cancelled, never the task id
         (live-test finding 2026-09-16: the player heard `"cancelled task
         TASK_4"`). See `speech.render_cancel_readback` for why -- the same
         no-ids-in-speech rule this codebase already applies to contacts."""
-        # Both no-store and nothing-pending say the same thing, and it is
+        # Both no-store and nothing-active say the same thing, and it is
         # deliberately *not* `render_cancel_readback` -- that template says
         # "Copy, stopping", which would claim to have stopped something
         # when nothing was cancelled at all.
         if self.tasks is None:
             return [_NOTHING_TO_STOP]
-        pending = [task for task in self.tasks.tasks if task.status == "pending"]
-        if not pending:
+        active = [task for task in self.tasks.tasks if task.status != "cancelled"]
+        if not active:
             return [_NOTHING_TO_STOP]
-        task = pending[-1]  # most recently created (TaskStore.tasks is insertion order)
+        task = active[-1]  # most recently created (TaskStore.tasks is insertion order)
         description = self._describe_task_for_speech(task)
         cancel_task(self.store, self.tasks, task.id)
         return [render_cancel_readback(description).text]

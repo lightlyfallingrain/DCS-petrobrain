@@ -476,3 +476,70 @@ model, with the derivation in a comment beside it:
 2D (dwell as an act); the live gate-outcome measurement (plan item 16) and the fly-it acceptance
 (item 17), both of which need a sortie.
 
+## Cones 2C sortie fixes (2026-09-21, branch `fix/gaze-visibility-and-standing-modes`)
+
+Two of `todo/todo.md`'s "Cones 2C sortie findings" fixed directly, out of the two ranked "do this
+first" in the sortie writeup.
+
+### Fix 1 — show where Petrovich is looking
+
+`gaze_at(t_sim, plan)` is pure, so this is a read, not new state. `ConsolePerceptionRunner.run_once`
+now keeps its resolved `perception.gaze.ScanPlan` on itself (`runner.scan_plan`), and both poll
+loops (`_run_console_poll_loop`/`_run_crew_text_poll_loop`) push a short overlay line — `"Petrovich:
+looking <hour> o'clock (free scan|commanded <sector> scan)"` — through a new `_push_gaze_line`
+helper whenever the resolved o'clock cone changes. Deliberately *not* unconditional: `FOCUS_DWELL_S`
+(2 s) is close to the default 1 s poll interval, and the overlay Hook script is an `AutoScrollText`
+log, not a single-line display, so pushing every poll would crowd out real content. `_format_gaze_line`
+reads `Gaze.label` for display, which is exactly what that field's own docstring says it is for
+("debug/trace output"), not a branch on it.
+
+### Fix 2 — Scan and Watch are standing modes, not one-shot tasks
+
+**Root cause, confirmed exactly as the backlog described it**: `belief.tasks.TaskStore.tick` flips a
+`scan_area` task to `"succeeded"` the instant any contact is seen in its area, and
+`logger._active_gaze` used to honour only `status == "pending"` — so a commanded scan silently
+reverted to free scan on first contact.
+
+**The fix stayed a one-line-per-site status-filter change, not a data-model redesign**, once traced
+all the way through — three sites needed the same change, not one:
+
+1. `logger._active_gaze`: `task.status == "pending"` → `task.status != "cancelled"`. A `scan_area`
+   task now keeps steering the gaze through `"succeeded"`/`"failed"`; only `"cancelled"` (or a newer
+   scan command winning the "most recently created" tie-break) ends it. This also means the
+   `DEFAULT_SCAN_DEADLINE_S` timeout path silently reverted to free scan the same way `"succeeded"`
+   did — a second instance of the identical defect the sortie only caught via the success path.
+2. `belief.tasks.TaskStore.cancel`: previously left `"succeeded"`/`"failed"` tasks untouched
+   ("terminal status never overwritten") — now always sets `"cancelled"` regardless of prior status.
+   Without this, fix 1 above would be hollow: a resolved scan would keep steering the gaze forever,
+   uncancellable, since `cancel` could never actually flip it.
+3. `belief.crew_console.CrewConsole._handle_cancel_task`: its own task-selection filter
+   (`status == "pending"`) had the identical bug independently — a resolved-but-not-yet-cancelled
+   scan had already fallen out of the list "Cancel Task" searches, so the player's command found
+   nothing even before reaching `TaskStore.cancel`. Filter is now `status != "cancelled"`.
+
+No `PendingIntent`/`TaskStore` schema change, no new field, no new task kind — `TaskStatus` keeps its
+four values, `tick()`'s own resolution logic is untouched. The three call sites above were the whole
+"design a mode" question in practice: what ends a mode is "not cancelled, and not superseded" reread
+consistently everywhere a caller had baked in the old "pending is the only live state" assumption.
+
+**Watch was already a standing mode and needed no change.** `watch_nearest`/typed `"watch <x>"` call
+`belief.tools.set_attention` directly on a `Contact` — there was never a `PendingIntent` involved, so
+watch and scan were already two independent, already-coexisting mechanisms (`Contact.attention`
+vs. `TaskStore`), matching the pilot's "should have been watching target and scanning forward"
+expectation structurally, once fix 2's scan-side bug stopped masking it.
+
+**Flagged, not fixed — different root cause than the backlog assumed:** the sortie's "watch closest →
+flew past → cancel task → 'nothing to stop'" finding cannot be *this* bug on its own reading of the
+code — `watch_nearest` never creates a task, so there is nothing in `TaskStore` for "Cancel Task" to
+find regardless of the status-filter fix, unless a scan was also independently pending/active at the
+time. "Cancel Task" has no path to stopping a watch today; only `unwatch-area` (a `--console`-only
+dev command, not reachable from `--crew-text`/F10) can. If the pilot's real ask was "let Cancel Task
+also stop the currently-watched contact," that is a new, separate F10/crew-text feature, not covered
+by this fix, and worth a decision before it's built (what "Cancel Task" should mean when both a scan
+and a watch are active, whether it cancels one or both).
+
+Tests added (`test_tasks.py` ×2, `test_logger.py` ×2, `test_crew_console.py` ×1, `test_tools.py` ×1):
+cancel reaching an already-`"succeeded"`/`"failed"` task at every layer (`TaskStore`, `tools.
+cancel_task`, `CrewConsole._handle_cancel_task`), and `_active_gaze` continuing to steer a
+`"succeeded"`/`"failed"` scan task rather than falling back to `FREE_SCAN_PLAN`.
+
