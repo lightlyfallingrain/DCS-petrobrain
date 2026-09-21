@@ -59,6 +59,24 @@ Prioritize any open task here over any other task in this file or roadmap files.
     **~3 minutes** from power-on before it is ready; and launch entry requires the sight line within
     0.86° of the airframe axis, which is a *firing* constraint and not a *seeing* one.
 
+
+### Probe the mission-sandbox bridge (Investigator + Windows box)
+
+- [ ] **Probe whether `net.dostring_in` into the DCS mission scripting sandbox is reachable** from
+  this project's `Export.lua`/Hook setup in single-player, and what it costs per poll. Raised
+  2026-09-21. **This one probe unblocks two parked items**, which is why it is worth its own entry
+  rather than sitting inside either:
+  - **Unit velocity** for movement detection — `Object.getVelocity()` lives in the mission scripting
+    environment and returns a vec3 per unit (`aircraft-layer/research/
+    2026-09-21-unit-velocity-via-mission-scripting.md`). With the bridge, movement detection gets an
+    exact `v⊥` instead of differencing two samples of a 5 Hz position feed.
+  - **Fog and visibility state** — "detection under real world conditions", factor 3. The
+    2026-09-20 deep read found Export carries no fog at all and named this bridge as the only
+    candidate route.
+  Deliverables: does it work in single-player; per-poll cost; whether results can be returned
+  synchronously or must be pushed back through a side channel. **Do not design against the bridge
+  before this is answered** — differencing positions remains the fallback for movement.
+
 ## Cross-cutting / unscoped backlog
 
 - [>] **Re-enable the performance-reviewer and security roles, and run a catch-up audit of what

@@ -631,10 +631,18 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   The middle row is the one that argues for the number: a slow truck at 5 km genuinely does not read
   as moving at a glance, and a threshold that flagged it would be modelling a machine, not a crewman.
 
-  **Still needed before building:** whether unit velocity is directly available from
-  `LoGetWorldObjects` or must be differenced in the collector — if it must be differenced, the
-  compute saving this design buys is smaller than it appears, though still cheaper than keeping
-  per-candidate bearing history in the body layer. Note that no screenshot ladder can ever supply
+  **Velocity source — resolved 2026-09-21, and not where the design assumed.**
+  `LoGetWorldObjects` carries no velocity (confirmed by a full `pairs()` dump), but
+  `Object.getVelocity()` in the **Mission Scripting** environment returns a vec3 for every unit —
+  which is how Tacview records speed for everything on the map. See
+  `aircraft-layer/research/2026-09-21-unit-velocity-via-mission-scripting.md`.
+
+  That makes the design **simpler and more accurate than planned** if the mission-sandbox bridge is
+  reachable: an exact `v⊥` per unit, with no differencing, no accumulated sampling noise, and no
+  per-candidate position history in the collector. **Gated on probing that bridge**
+  (`net.dostring_in` into the mission sandbox from this project's Export/Hook setup) — which also
+  gates the fog half of "detection under real world conditions", so one probe unblocks both. Do not
+  design against it until it is probed; differencing remains the fallback. Note that no screenshot ladder can ever supply
   the threshold the way it supplied the detection-range constants: a still frame cannot show
   motion, so this constant's only calibration path is a purpose-built sortie.
 
