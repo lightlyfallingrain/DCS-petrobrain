@@ -114,13 +114,21 @@ def _world_object(
 
 
 class FakeAircraftClient:
-    def __init__(self, world_objects: dict[str, Any] | None) -> None:
+    def __init__(
+        self,
+        world_objects: dict[str, Any] | None,
+        unit_velocity: dict[str, Any] | None = None,
+    ) -> None:
         self._world_objects = world_objects
+        self._unit_velocity = unit_velocity
         self.world_objects_calls = 0
 
     def get_world_objects_latest(self) -> dict[str, Any] | None:
         self.world_objects_calls += 1
         return self._world_objects
+
+    def get_unit_velocity_latest(self) -> dict[str, Any] | None:
+        return self._unit_velocity
 
 
 @pytest.fixture(autouse=True)

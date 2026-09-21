@@ -57,6 +57,7 @@ from typing import Any, Final
 
 from coordinates import wgs84_to_dcs
 from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.motion import Vec3
 from perception.reporting_names import reporting_name_for
 from perception.source import OwnshipState
 
@@ -118,19 +119,55 @@ class WorldObjectCandidate:
     #: (`object_model.apparent_extent_m`); `associate()`/`filter_ownship()`
     #: in this module don't need it.
     heading_true_deg: float | None = None
+    #: DCS-native velocity, m/s (`perception.motion.Vec3`) -- `plans/
+    #: movement-detection/plan.md`. `None` means "no velocity sample joined
+    #: for this object this poll", which is **unknown, never "stopped"**:
+    #: absent `UnitName`, a non-unique `UnitName` among this poll's
+    #: candidates, or the velocity sample too stale/missing to trust (see
+    #: `naked_eye_source.py`'s join step, which resolves this field --
+    #: `associate()`/`filter_ownship()` in this module don't need it, same
+    #: footing as `heading_true_deg` above). Deliberately never crosses out
+    #: of `perception/` as a vector -- `perception.motion.is_apparently_
+    #: moving` is the only thing allowed to turn it into something `belief/`
+    #: can see.
+    velocity: Vec3 | None = None
 
     @staticmethod
-    def from_dict(data: dict[str, Any], *, theatre: str) -> WorldObjectCandidate:
+    def from_dict(
+        data: dict[str, Any],
+        *,
+        theatre: str,
+        velocity: dict[str, float] | None = None,
+    ) -> WorldObjectCandidate:
         """Build a candidate from one aircraft-layer `GET /world_objects/latest`
         object dict (`aircraft-layer/src/schema/world_objects.py`'s
         `WorldObjectSample.to_dict` shape), converting its lat/lon to
         DCS-native x/z via world-model's coordinate subsystem -- the one
         seam this module has to a real dependency, kept out of the pure
         `associate()` function below so that function stays fixture-testable
-        with plain `WorldObjectCandidate` instances."""
+        with plain `WorldObjectCandidate` instances.
+
+        `velocity` is an already-resolved `{"vx", "vy", "vz"}` dict (the
+        unit-velocity feed's own per-sample shape, `aircraft-layer/src/
+        schema/unit_velocity.py`'s `UnitVelocitySample.to_dict`) -- the
+        caller (`naked_eye_source.py`) is responsible for the unit_name join
+        and skew check; this method's only job is the raw-floats -> `Vec3`
+        conversion, the same "converted once in `from_dict`" pattern
+        `heading_true_rad` -> degrees already uses above. `None` (the
+        default) keeps every existing `from_dict` call site -- test
+        fixtures included -- compiling and behaving exactly as before."""
         x, z = wgs84_to_dcs(theatre, float(data["lat_deg"]), float(data["lon_deg"]))
         is_ownship_raw = data.get("is_ownship")
         heading_true_rad = data.get("heading_true_rad")
+        resolved_velocity = (
+            None
+            if velocity is None
+            else Vec3(
+                x=float(velocity["vx"]),
+                y=float(velocity["vy"]),
+                z=float(velocity["vz"]),
+            )
+        )
         return WorldObjectCandidate(
             object_id=int(data["object_id"]),
             object_type=str(data["object_type"]),
@@ -143,6 +180,7 @@ class WorldObjectCandidate:
                 if heading_true_rad is None
                 else math.degrees(float(heading_true_rad))
             ),
+            velocity=resolved_velocity,
         )
 
 

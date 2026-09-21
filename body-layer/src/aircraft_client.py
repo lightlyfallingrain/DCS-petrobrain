@@ -39,6 +39,15 @@ absent" state. `get_petrovich_wheel_latest` is an ordinary `get_*` read
 `list_indication(10)`'s wheel-state feed instead of `list_indication(6)`'s
 classification feed.
 
+`get_unit_velocity_latest` (`plans/movement-detection/plan.md`) is this
+seam's `GET /unit_velocity/latest` counterpart to `get_world_objects_latest`
+above -- same "not an error" empty-cache posture, same `dict[str, Any]`
+shallow pass-through (`aircraft-layer/src/schema/unit_velocity.py`'s
+`UnitVelocitySnapshot.to_dict`). `naked_eye_source.py` is the one caller,
+resolving the per-`unit_name` join against a world-objects snapshot itself
+-- this client does no joining or interpretation, mirroring every other
+`get_*` method here.
+
 `get_f10_commands` (`plans/f10-crew-commands/plan.md`) is this seam's
 first *inbound* read -- `GET /f10_commands/poll` drains the aircraft
 layer's F10-command queue, so unlike every other `get_*` method here, its
@@ -116,6 +125,21 @@ class AircraftLayerClient:
         if not isinstance(result, dict):
             raise AircraftLayerError(
                 f"expected a JSON object or null from /petrovich_indication/latest, got {type(result).__name__}"
+            )
+        return result
+
+    def get_unit_velocity_latest(self) -> dict[str, Any] | None:
+        """`GET /unit_velocity/latest` -> the most recent `UnitVelocitySnapshot`
+        as a dict (see `aircraft-layer/src/schema/unit_velocity.py`'s
+        `UnitVelocitySnapshot.to_dict`), or `None` if nothing has been
+        received yet -- same "not an error" posture as `get_world_objects_
+        latest` (`plans/movement-detection/plan.md`)."""
+        result = self._get_json("/unit_velocity/latest")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise AircraftLayerError(
+                f"expected a JSON object or null from /unit_velocity/latest, got {type(result).__name__}"
             )
         return result
 

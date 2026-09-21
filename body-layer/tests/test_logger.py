@@ -622,6 +622,9 @@ class FakeConsoleAircraftClient:
     def get_world_objects_latest(self) -> dict[str, Any] | None:
         return self._world_objects
 
+    def get_unit_velocity_latest(self) -> dict[str, Any] | None:
+        return None
+
     def get_petrovich_indication_latest(self) -> dict[str, Any] | None:
         return None
 
