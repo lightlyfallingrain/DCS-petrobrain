@@ -115,6 +115,7 @@ from belief.decay import (
     cardinality_confidence_at,
     certainty_of,
     classification_confidence_at,
+    motion_confidence_at,
     position_confidence,
 )
 from belief.enrichment import (
@@ -240,6 +241,25 @@ def _cardinality_facts(contact: Contact, now_sim: float) -> dict[str, object] | 
     }
 
 
+def _motion_facts(contact: Contact, now_sim: float) -> dict[str, object] | None:
+    """`facts.motion`'s shape (`plans/movement-detection/plan.md` Stage 4)
+    -- `_cardinality_facts`'s sibling: `{state, confidence}` read off
+    `Contact.motion` the same way that function reads `Contact.cardinality`,
+    `confidence` through `belief.decay.motion_confidence_at` (decaying),
+    `state` straight off the held claim (sticky, never decays). Returns
+    `None` -- omitted from `facts` entirely, this module's documented
+    absent-not-null convention -- whenever `Contact.motion` is itself `None`
+    (never observed for movement at all; see `belief.motion`'s module
+    docstring for why that is a real, common, honest state rather than an
+    edge case to work around)."""
+    if contact.motion is None:
+        return None
+    return {
+        "state": contact.motion.state,
+        "confidence": motion_confidence_at(contact, now_sim),
+    }
+
+
 def _contact_facts(
     contact: Contact,
     now_sim: float,
@@ -268,6 +288,9 @@ def _contact_facts(
     cardinality_facts = _cardinality_facts(contact, now_sim)
     if cardinality_facts is not None:
         facts["cardinality"] = cardinality_facts
+    motion_facts = _motion_facts(contact, now_sim)
+    if motion_facts is not None:
+        facts["motion"] = motion_facts
     if enrichment is not None:
         _add_enrichment_facts(facts, contact, now_sim, store, enrichment)
     return facts
