@@ -103,19 +103,26 @@ Prioritize any open task here over any other task in this file or roadmap files.
   scan steers perception, "unbounded" means "as far as the optics and conditions allow", which is
   the honest answer and needs no constant at all.
 
-- [>] **Anchored limited scan — "scan around that landmark / that unit" — deferred to the voice
-  era.** The other half of the same user direction: *"on purpose command a limited scan, probably
+- [>] **Anchored limited scan — "scan around that landmark / that unit" — deferred to the brain
+  layer.** The other half of the same user direction: *"on purpose command a limited scan, probably
   around a landmark or another known unit."* A radius is genuinely meaningful there, and it comes
   from the thing being scanned rather than from a constant — a landmark's own extent, or a
   contact's position uncertainty.
 
-  **Deferred on an existing precedent, not on effort.** When the F10 command vocabulary was scoped
-  the user ruled that richer command forms belong to BL-10/SRS, because a dynamically rebuilt
-  contact list means collector-to-Hook menu pushes and `removeItemForGroup` traffic mid-flight for
-  a menu the player still has to click through. *"Scan around that unit"* is exactly that class.
-  Landmarks are the softer case — a static list could work — but the natural form is spoken, and
+  **This needs the brain layer, not merely voice** (user, 2026-09-21). An earlier draft of this
+  entry deferred it to the voice era on the F10-scoping precedent — that richer command forms belong
+  to BL-10/SRS, since a dynamically rebuilt contact list means collector-to-Hook menu pushes and
+  `removeItemForGroup` traffic mid-flight for a menu the player still clicks through. That reasoning
+  holds for the *input channel* but understates the requirement.
+
+  Resolving *"that landmark"* or *"that unit"* is not transcription, it is **reference resolution
+  against shared crew context** — which of the things we have both seen, and talked about, does
+  "that" mean. That is the runtime cognition layer's job (`docs/concept/PETROBRAIN_RUNTIME.md`), not
+  the transport's. A perfect transcript of "scan around that ridge" still leaves the hard part
+  undone.
+
   `find_place` (`belief/tools.py`, backed by `query.search.find_place_by_name`) already resolves
-  names, so the resolution half is not the blocker.
+  names to positions, so *name → place* is not the blocker. *Deixis → referent* is.
 
 ## Cross-cutting / unscoped backlog
 
