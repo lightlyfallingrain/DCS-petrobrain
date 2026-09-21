@@ -99,7 +99,7 @@ Present this to the user before proposing any changes.
 For each real finding, propose a specific, mapped change — not a vague "improve X":
 
 - A recurring mistake a role's own instructions already name but didn't prevent → a **hook**
-  (PreToolUse gate; see `.claude/skills/update-config.md`-style skill or invoke the
+  (PreToolUse gate; see `.claude/skills/update-config/SKILL.md`-style skill or invoke the
   `update-config` skill directly) that catches it before the mistake happens, not after.
 - A process step skipped because it depends on someone remembering → a **mechanical backstop**
   (a script wired into an existing hook point, e.g. gating `git push`/`git commit`) rather than

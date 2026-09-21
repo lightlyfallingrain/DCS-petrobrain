@@ -138,7 +138,7 @@ The user's 2026-09-16 direction stated that BL-10 "owns the rich command vocabul
 
 ## Roadmap Updates Required
 
-The user must approve and merge the following ROADMAP changes in this same push as the feature merge (per `.claude/skills/merge.md`):
+The user must approve and merge the following ROADMAP changes in this same push as the feature merge (per `.claude/skills/merge/SKILL.md`):
 
 1. **`body-layer/ROADMAP.md` — BL-10 entry**
    - Mark `[ ]` → `[~]` (in progress) or `[x]` (done, first slice) — user's choice based on whether "first slice" counts as "started"

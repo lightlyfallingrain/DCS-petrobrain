@@ -1,6 +1,6 @@
 #!/bin/bash
 # Hook script: PreToolUse gate on `git push`. Mechanical backstop for the rule in
-# .claude/skills/merge.md and .claude/agents/dod.md: a feature merge into main must update the
+# .claude/skills/merge/SKILL.md and .claude/agents/dod.md: a feature merge into main must update the
 # relevant ROADMAP.md in the same push. Added 2026-09-10 after an integrity check found todo.md
 # had drifted stale across several merges (BL-3, BL-4, BL-5, overlay-clock-range-summary) where
 # that step was skipped. Fails open on any error or uncertainty -- this is a safety net, not a

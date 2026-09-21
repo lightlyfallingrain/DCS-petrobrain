@@ -260,4 +260,4 @@ body-side view and the slice numbering both files share.
 
 Same discipline as the sibling subprojects: this file is the source of truth for this
 subproject's milestone status, and a merge is not finished until it reflects what merged (see
-`.claude/skills/merge.md` and the root `ROADMAP.md`).
+`.claude/skills/merge/SKILL.md` and the root `ROADMAP.md`).

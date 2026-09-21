@@ -93,7 +93,7 @@ The original rule had a second, independent justification worth keeping: cross-c
 (skill edits, backlog notes, workflow-doc fixes) does not belong in a feature branch's commits. That
 still holds. With the main checkout free, the way to honour it is simply to commit such work on
 `main` directly rather than on the feature branch — no worktree needed, same outcome.
-See `.claude/skills/merge.md` for the worktree pattern as it applies to merging.
+See `.claude/skills/merge/SKILL.md` for the worktree pattern as it applies to merging.
 - Prefer the simplest solution that satisfies correctness, performance, and architectural clarity.
 - Do not switch roles unnecessarily mid-task.
 - For small features, one role may handle the whole task.
@@ -123,7 +123,7 @@ Full per-role responsibilities, priorities, checklists, and output-style detail:
 
 **Before an Architect pass on anything consequential, talk to the user first** — a new subsystem, a
 data-model change, a hard-to-reverse decision, or anything touching how Petrovich behaves in the
-cockpit. The procedure is `.claude/skills/explore.md` (`/explore`).
+cockpit. The procedure is `.claude/skills/explore/SKILL.md` (`/explore`).
 
 **This cannot be delegated to an agent.** Subagents run in the background with no channel to the
 user; only the main loop can hold a conversation. Treat it as a phase, not a role.

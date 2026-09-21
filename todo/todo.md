@@ -29,7 +29,7 @@ Prioritize any open task here over any other task in this file or roadmap files.
   `body-layer/ROADMAP.md`. Reason: an integrity check found this file had drifted — three merged
   milestones (BL-3, BL-4, BL-5) and one merged feature (`overlay-clock-range-summary`) were
   missing entirely, because the "update the backlog" step was easy to skip and not enforced at
-  merge time. Fix applied at the process level, not just the data level: `.claude/skills/merge.md`
+  merge time. Fix applied at the process level, not just the data level: `.claude/skills/merge/SKILL.md`
   and `.claude/agents/dod.md` now both require the relevant `ROADMAP.md` to be updated *in the
   same push* as any merge — see root `ROADMAP.md`'s "Keeping this current" note.
 
