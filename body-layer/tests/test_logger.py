@@ -39,13 +39,15 @@ from logger import (
     PerceptionLogger,
     _active_gaze,
     _apply_active_gaze,
+    _format_gaze_line,
     _poll_transcripts,
+    _push_gaze_line,
     _run_console_poll_loop,
     _run_console_repl,
     format_observation_line,
 )
 from perception import association
-from perception.gaze import FREE_SCAN_PLAN, ScanPlan
+from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
 from perception.geometry import GeoPosition
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import Observation, OwnshipState
@@ -370,6 +372,127 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
         "CONTACT_2: CONTACT_DETECTED, Ural truck, observed, currently visible.",
         "CONTACT_3: CONTACT_DETECTED, Mi-8 helicopter, observed, currently visible.",
     ]
+
+
+# --- Cones 2C sortie finding: "show where Petrovich is looking" ------------
+#
+# The pilot could not judge two of the acceptance card's four blocks without
+# this -- `_format_gaze_line`/`_push_gaze_line` are the overlay-facing read
+# of `perception.gaze.gaze_at`, wired into both poll loops' existing
+# per-poll overlay hook point.
+
+
+def test_format_gaze_line_names_the_oclock_hour_in_free_scan() -> None:
+    gaze = gaze_at(0.0, FREE_SCAN_PLAN)  # t_sim=0 -> SCAN_PLAN[0] == 12
+    assert gaze.label == "12_oclock"
+
+    line = _format_gaze_line(FREE_SCAN_PLAN, gaze)
+
+    assert line == "Petrovich: looking 12 o'clock (free scan)"
+
+
+def test_format_gaze_line_names_the_commanded_sector() -> None:
+    plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
+    gaze = gaze_at(0.0, plan)  # left's own legs start at 11 o'clock
+
+    line = _format_gaze_line(plan, gaze)
+
+    assert line == "Petrovich: looking 11 o'clock (commanded left scan)"
+
+
+def test_push_gaze_line_pushes_once_and_is_a_no_op_on_no_change() -> None:
+    overlay_client = FakeOverlayClient()
+
+    # t_sim=0.0 and t_sim=1.0 both fall in FOCUS_DWELL_S's first 2 s window
+    # (12 o'clock) -- the second call must not push a duplicate line.
+    label_after_first = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        0.0,
+        None,  # type: ignore[arg-type]
+    )
+    label_after_second = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        1.0,
+        label_after_first,  # type: ignore[arg-type]
+    )
+
+    assert label_after_first == "12_oclock"
+    assert label_after_second == label_after_first
+    assert overlay_client.pushed == ["Petrovich: looking 12 o'clock (free scan)"]
+
+
+def test_push_gaze_line_pushes_again_when_the_cone_changes() -> None:
+    overlay_client = FakeOverlayClient()
+
+    label = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        0.0,
+        None,  # type: ignore[arg-type]
+    )
+    # FOCUS_DWELL_S is 2.0 s -- t_sim=2.0 has stepped to the next cone (11).
+    label = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        2.0,
+        label,  # type: ignore[arg-type]
+    )
+
+    assert label == "11_oclock"
+    assert overlay_client.pushed == [
+        "Petrovich: looking 12 o'clock (free scan)",
+        "Petrovich: looking 11 o'clock (free scan)",
+    ]
+
+
+def test_push_gaze_line_failure_is_isolated_and_still_advances_the_label() -> None:
+    # Same per-push isolation as the lifecycle-event overlay pushes: a
+    # failed gaze push must not raise, and the dedup label must still
+    # advance so a later successful push isn't suppressed by a stale label.
+    failing_text = "Petrovich: looking 12 o'clock (free scan)"
+    overlay_client = FakeOverlayClient(fail_on=frozenset({failing_text}))
+
+    label = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        0.0,
+        None,  # type: ignore[arg-type]
+    )
+
+    assert label == "12_oclock"
+    assert overlay_client.pushed == []
+
+
+def test_console_runner_run_once_updates_scan_plan() -> None:
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([])],
+    )
+    assert runner.scan_plan == FREE_SCAN_PLAN
+
+    runner.tasks.create(
+        "scan_area",
+        AttentionArea(
+            id="AREA_1",
+            center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+            radius_m=None,
+            level="watch",
+            source="scan_area",
+            relative_sector="right",
+        ),
+        created_sim=ownship.t_sim,
+        deadline_sim=ownship.t_sim + 60.0,
+        reason="test",
+    )
+    runner.run_once()
+
+    assert runner.scan_plan == ScanPlan(
+        commanded_sector="right", command_t_sim=ownship.t_sim
+    )
 
 
 def test_console_runner_prints_a_periodic_contact_count_line() -> None:
