@@ -39,13 +39,15 @@ from logger import (
     PerceptionLogger,
     _active_gaze,
     _apply_active_gaze,
+    _format_gaze_line,
     _poll_transcripts,
+    _push_gaze_line,
     _run_console_poll_loop,
     _run_console_repl,
     format_observation_line,
 )
 from perception import association
-from perception.gaze import Gaze
+from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
 from perception.geometry import GeoPosition
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import Observation, OwnshipState
@@ -372,6 +374,127 @@ def test_console_runner_overlay_push_failure_is_isolated_per_push() -> None:
     ]
 
 
+# --- Cones 2C sortie finding: "show where Petrovich is looking" ------------
+#
+# The pilot could not judge two of the acceptance card's four blocks without
+# this -- `_format_gaze_line`/`_push_gaze_line` are the overlay-facing read
+# of `perception.gaze.gaze_at`, wired into both poll loops' existing
+# per-poll overlay hook point.
+
+
+def test_format_gaze_line_names_the_oclock_hour_in_free_scan() -> None:
+    gaze = gaze_at(0.0, FREE_SCAN_PLAN)  # t_sim=0 -> SCAN_PLAN[0] == 12
+    assert gaze.label == "12_oclock"
+
+    line = _format_gaze_line(FREE_SCAN_PLAN, gaze)
+
+    assert line == "Petrovich: looking 12 o'clock (free scan)"
+
+
+def test_format_gaze_line_names_the_commanded_sector() -> None:
+    plan = ScanPlan(commanded_sector="left", command_t_sim=0.0)
+    gaze = gaze_at(0.0, plan)  # left's own legs start at 11 o'clock
+
+    line = _format_gaze_line(plan, gaze)
+
+    assert line == "Petrovich: looking 11 o'clock (commanded left scan)"
+
+
+def test_push_gaze_line_pushes_once_and_is_a_no_op_on_no_change() -> None:
+    overlay_client = FakeOverlayClient()
+
+    # t_sim=0.0 and t_sim=1.0 both fall in FOCUS_DWELL_S's first 2 s window
+    # (12 o'clock) -- the second call must not push a duplicate line.
+    label_after_first = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        0.0,
+        None,  # type: ignore[arg-type]
+    )
+    label_after_second = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        1.0,
+        label_after_first,  # type: ignore[arg-type]
+    )
+
+    assert label_after_first == "12_oclock"
+    assert label_after_second == label_after_first
+    assert overlay_client.pushed == ["Petrovich: looking 12 o'clock (free scan)"]
+
+
+def test_push_gaze_line_pushes_again_when_the_cone_changes() -> None:
+    overlay_client = FakeOverlayClient()
+
+    label = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        0.0,
+        None,  # type: ignore[arg-type]
+    )
+    # FOCUS_DWELL_S is 2.0 s -- t_sim=2.0 has stepped to the next cone (11).
+    label = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        2.0,
+        label,  # type: ignore[arg-type]
+    )
+
+    assert label == "11_oclock"
+    assert overlay_client.pushed == [
+        "Petrovich: looking 12 o'clock (free scan)",
+        "Petrovich: looking 11 o'clock (free scan)",
+    ]
+
+
+def test_push_gaze_line_failure_is_isolated_and_still_advances_the_label() -> None:
+    # Same per-push isolation as the lifecycle-event overlay pushes: a
+    # failed gaze push must not raise, and the dedup label must still
+    # advance so a later successful push isn't suppressed by a stale label.
+    failing_text = "Petrovich: looking 12 o'clock (free scan)"
+    overlay_client = FakeOverlayClient(fail_on=frozenset({failing_text}))
+
+    label = _push_gaze_line(
+        overlay_client,
+        FREE_SCAN_PLAN,
+        0.0,
+        None,  # type: ignore[arg-type]
+    )
+
+    assert label == "12_oclock"
+    assert overlay_client.pushed == []
+
+
+def test_console_runner_run_once_updates_scan_plan() -> None:
+    telemetry = _telemetry_dict()
+    ownship = OwnshipState.from_telemetry_dict(telemetry)
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[FakeSource([])],
+    )
+    assert runner.scan_plan == FREE_SCAN_PLAN
+
+    runner.tasks.create(
+        "scan_area",
+        AttentionArea(
+            id="AREA_1",
+            center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+            radius_m=None,
+            level="watch",
+            source="scan_area",
+            relative_sector="right",
+        ),
+        created_sim=ownship.t_sim,
+        deadline_sim=ownship.t_sim + 60.0,
+        reason="test",
+    )
+    runner.run_once()
+
+    assert runner.scan_plan == ScanPlan(
+        commanded_sector="right", command_t_sim=ownship.t_sim
+    )
+
+
 def test_console_runner_prints_a_periodic_contact_count_line() -> None:
     telemetry = _telemetry_dict()
     ownship = OwnshipState.from_telemetry_dict(telemetry)
@@ -643,8 +766,8 @@ def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
     assert projected.wedge_deg == (0.0, 30.0)
 
 
-# -- _active_gaze / _apply_active_gaze (slice 2B, plans/
-# detection-cones-slice2/plan.md) -------------------------------------------
+# -- _active_gaze / _apply_active_gaze (slice 2B; ScanPlan generalisation
+# by 2C, plans/detection-cones-slice2/plan.md) ------------------------------
 
 
 def _relative_area(area_id: str, relative_sector: str) -> AttentionArea:
@@ -675,8 +798,8 @@ def _naked_eye_source() -> NakedEyePerceptionSource:
     )
 
 
-def test_active_gaze_is_none_with_no_pending_scan_task() -> None:
-    assert _active_gaze(TaskStore()) is None
+def test_active_gaze_is_free_scan_with_no_pending_scan_task() -> None:
+    assert _active_gaze(TaskStore()) == FREE_SCAN_PLAN
 
 
 def test_active_gaze_resolves_a_pending_relative_sector_task() -> None:
@@ -684,14 +807,14 @@ def test_active_gaze_resolves_a_pending_relative_sector_task() -> None:
     tasks.create(
         "scan_area",
         _relative_area("AREA_1", "left"),
-        created_sim=0.0,
+        created_sim=3.0,
         deadline_sim=60.0,
         reason="scan-area",
     )
 
-    gaze = _active_gaze(tasks)
+    plan = _active_gaze(tasks)
 
-    assert gaze == Gaze(center_azimuth_deg=-60.0, half_width_deg=30.0, label="left")
+    assert plan == ScanPlan(commanded_sector="left", command_t_sim=3.0)
 
 
 def test_active_gaze_ignores_a_cancelled_task() -> None:
@@ -705,7 +828,50 @@ def test_active_gaze_ignores_a_cancelled_task() -> None:
     )
     tasks.cancel(task.id)
 
-    assert _active_gaze(tasks) is None
+    assert _active_gaze(tasks) == FREE_SCAN_PLAN
+
+
+def test_active_gaze_keeps_steering_a_succeeded_scan_task() -> None:
+    # Cones 2C sortie fix: tick() resolves a scan_area task to "succeeded"
+    # the instant any contact is seen in its area -- a commanded scan must
+    # keep steering the gaze after that, not silently revert to free scan
+    # (the sortie's "commanded scan left, still got reports from 12
+    # o'clock" finding).
+    tasks = TaskStore()
+    task = tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "left"),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+    # Direct assignment rather than a real tick()/contact: the point under
+    # test is _active_gaze's own status filter, not tick's resolution logic
+    # (covered by test_tasks.py).
+    task.status = "succeeded"
+
+    plan = _active_gaze(tasks)
+
+    assert plan == ScanPlan(commanded_sector="left", command_t_sim=3.0)
+
+
+def test_active_gaze_keeps_steering_a_failed_scan_task() -> None:
+    # Same fix, the deadline-timeout path: "failed" must not silently
+    # revert to free scan either -- only an explicit cancel (or a newer
+    # scan command) may end the mode.
+    tasks = TaskStore()
+    task = tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "right"),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+    task.status = "failed"
+
+    plan = _active_gaze(tasks)
+
+    assert plan == ScanPlan(commanded_sector="right", command_t_sim=3.0)
 
 
 def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
@@ -725,13 +891,12 @@ def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
         reason="scan-area",
     )
 
-    gaze = _active_gaze(tasks)
+    plan = _active_gaze(tasks)
 
-    assert gaze is not None
-    assert gaze.label == "right"
+    assert plan == ScanPlan(commanded_sector="right", command_t_sim=1.0)
 
 
-def test_apply_active_gaze_sets_gaze_only_on_naked_eye_sources() -> None:
+def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
     tasks = TaskStore()
     tasks.create(
         "scan_area",
@@ -746,19 +911,17 @@ def test_apply_active_gaze_sets_gaze_only_on_naked_eye_sources() -> None:
 
     _apply_active_gaze(sources, tasks)
 
-    assert naked_eye.gaze == Gaze(
-        center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead"
-    )
-    assert not hasattr(fake, "gaze")
+    assert naked_eye.scan_plan == ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
+    assert not hasattr(fake, "scan_plan")
 
 
-def test_apply_active_gaze_clears_gaze_when_nothing_is_pending() -> None:
+def test_apply_active_gaze_resets_to_free_scan_when_nothing_is_pending() -> None:
     naked_eye = _naked_eye_source()
-    naked_eye.gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead")
+    naked_eye.scan_plan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
 
     _apply_active_gaze([naked_eye], TaskStore())
 
-    assert naked_eye.gaze is None
+    assert naked_eye.scan_plan == FREE_SCAN_PLAN
 
 
 def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
@@ -786,9 +949,7 @@ def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
 
     runner.run_once()
 
-    assert naked_eye.gaze == Gaze(
-        center_azimuth_deg=-60.0, half_width_deg=30.0, label="left"
-    )
+    assert naked_eye.scan_plan == ScanPlan(commanded_sector="left", command_t_sim=0.0)
 
 
 # -- _poll_transcripts (plans/inbound-speech/plan.md Stage 3) ---------------

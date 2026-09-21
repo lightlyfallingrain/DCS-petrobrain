@@ -76,6 +76,29 @@ As a fraction of nominal magnification: binocular **0.61×**, 9K113 wide **1.08�
 **0.58×**. The binocular figure is close to the ~0.67 stabilisation penalty adopted on 2026-09-20 by
 argument alone — an independent arrival at roughly the same number.
 
+> **CORRECTION 2026-09-21 (same-day audit) — the binocular figure above is not an independent
+> arrival, and the number is wrong.** The `M` column gives the binocular as **4.0**, but 4.0 is not
+> its nominal magnification: `BINOCULAR_OPTIC` is a **Б-6 6×30**, and 4.0 is *already* 6× glass
+> times the ~0.67 handheld-stabilisation penalty (`optics.py`'s `BINOCULAR_OPTIC` docstring,
+> `plans/detection-cones-slice1/plan.md` "The binocular is 8×30", `NOTES.md`). So dividing the
+> measured 2.42 by 4.0 divides by a figure that has the penalty baked in, and recovering ~0.67
+> from it is **circular, not confirmatory** — the penalty was put in and then read back out.
+>
+> Against the real nominal magnification of **6×**, the measured presence gain is
+> **2.42 / 6 = 0.40×**, not 0.61×. The true stabilisation penalty this sortie measures is
+> therefore materially harsher than the 0.67 adopted by argument, not "roughly the same number."
+> The 9K113 figures (wide 1.08×, narrow 0.58×) are unaffected — ×3.3 and ×10 are genuine nominal
+> magnifications.
+>
+> **Why it was plausible:** every other row in that table takes its `M` straight from the
+> instrument's real magnification, so reading the binocular's `M` the same way is the natural
+> move — and 0.61 landing next to 0.67 supplied exactly the confirmation that stops a second look.
+> A derived constant sitting in a column of measured ones is the trap.
+>
+> Nothing else in this section changes: the stabilised-sight-beats-handheld-binocular result
+> (3.55 presence at ×3.3 against 2.42 at a handheld instrument) stands on the raw numbers and does
+> not depend on this ratio at all, and no multiplier in `optics.py` was derived from it.
+
 The ×10 fall-off is a different effect: not stabilisation (the sight is stabilised) but the
 atmospheric-contrast limit at 18 km. Magnification cannot magnify contrast that is not there.
 

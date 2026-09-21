@@ -174,7 +174,20 @@ mission runs, fully consistent.
 
 `data/raw/dem/` holds only `N39E036.hgt` (the Gemerek/M4 tile). The Latakia region's lat/lon
 envelope (~35.0-35.5N, ~35.85-35.95E) needs a **different** tile (`N35E035.hgt`), which is not
-present. An attempted automated fetch this session (viewfinderpanoramas.org / USGS mirrors) was
+present.
+
+> **CORRECTION 2026-09-21 — the longitude range is wrong, and the single-tile answer follows
+> from the error.** `2026-09-04-m5-stage0-census.md` §2 computes the same region's WGS84 bounding
+> box from the same definition: **35.335238 / 35.834131 / 35.520883 / 36.060946**
+> (south/west/north/east). The east edge is **36.06°E, not ~35.95°E** — so the region **straddles
+> the `E035`/`E036` SRTM tile boundary** and `N35E035.hgt` alone would not cover it; both
+> `N35E035` and `N35E036` are needed. (The latitude range given here is also loose — 35.34-35.52,
+> not 35.0-35.5 — but that stays inside `N35`, so it changes no tile.)
+>
+> **The note guesses at this two paragraphs later** — *"the region may straddle a tile boundary,
+> unconfirmed"* — while its own sibling note had already computed the number that settles it.
+> Nothing downstream was affected: the Latakia store was deliberately built with no `--srtm-tile`
+> at all, which this section records as the honest choice and which remains correct. An attempted automated fetch this session (viewfinderpanoramas.org / USGS mirrors) was
 blocked by the sandbox's network policy, consistent with M4's own precedent of the *user*
 manually fetching the DEM tile via viewfinderpanoramas.org's interactive map (not an automated
 pipeline step). **The real Latakia rebuild therefore proceeds without `--srtm-tile`** --

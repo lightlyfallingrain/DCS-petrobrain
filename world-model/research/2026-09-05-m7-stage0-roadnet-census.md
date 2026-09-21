@@ -43,7 +43,22 @@ inside the boundary, not hugging it.
 `sync_loss_events` (220, ~1.48%) is identical to M5's previously-measured whole-file rate
 (`world-model/research/2026-09-04-m5-roadnet-stage2.md`, 220/14,833) -- expected, since this is
 a property of the `.routes` file itself (parser resync loss during the walk), not of the region
-bbox being applied afterward. This is the same ~1.5% known, accepted gap the plan's "Deferred /
+bbox being applied afterward.
+
+> **CORRECTION 2026-09-21 — the citation above points at a file that does not exist.**
+> `world-model/research/2026-09-04-m5-roadnet-stage2.md` has never existed; the only M5 roadnet
+> notes are `2026-09-03-m5-roadnet-file-recon.md` and `2026-09-04-m5-roadnet-byte-decode.md`.
+> **The 220/14,833 figures are real and the claim is correct** — they are recorded in
+> `2026-09-04-m5-stage4-validation.md` (Correction table) and `2026-09-04-m5-stage5-perf.md`.
+> Only the source pointer is wrong.
+>
+> Kept rather than silently repointed, because this is the failure mode a citation is supposed to
+> prevent and instead performed: a filename reconstructed from the milestone's own naming pattern
+> (`m5-roadnet-` + `stage2`) reads exactly like a real one, and nothing in the sentence signals
+> that the source was recalled rather than opened. A reader following it finds nothing; a reader
+> not following it is more convinced than they should be.
+
+This is the same ~1.5% known, accepted gap the plan's "Deferred /
 Out of Scope" section already tracks (the full-theatre resync audit is a separate follow-up
 task, not part of M7).
 

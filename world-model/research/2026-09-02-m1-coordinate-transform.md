@@ -1,3 +1,19 @@
+> **SUPERSEDED 2026-09-03 for Finding 7's residual figure — see
+> [`2026-09-03-m1-coordinate-transform-verification.md`](2026-09-03-m1-coordinate-transform-verification.md)
+> Finding 3.** Finding 7 below reports Damascus as **1594 m** from the published ARP. That number
+> is inflated, because the point it measured from was pydcs's own hardcoded `Damascus` `Point`,
+> not a live-DCS value — and **the pydcs point and the live `coord.LOtoLL` Damascus airbase point
+> are themselves ~1741 m apart in DCS-native x/z**. pydcs's hardcoded airport point was itself
+> imprecise. The measured live residual is **1137.5 m**.
+>
+> Finding 7's *conclusions* survive the correction intact — the projection type and parameters are
+> confirmed plausible, and the residual is still ~1 km rather than sub-km, so the caution it
+> recommends still applies. What the live check reassigns is the figure and the blame: of the
+> three explanations Finding 7 offers, it is **not** (b) "pydcs's fitted parameters carry residual
+> fitting error" — the projection fit was fine, the *point* fed into it was not. Worth keeping,
+> because the note did the right thing in listing candidate explanations and the wrong one was
+> the most technical-sounding of the three.
+
 # M1 — DCS local x/z ↔ WGS84 coordinate transform (Syria)
 
 **Date:** 2026-09-02

@@ -407,3 +407,139 @@ to the previous slice").
   using the `Edit` tool for every test-file append instead of shell heredocs. Worth knowing for the
   next isolated-implementer run: plan on `Edit`/`Write`, not `cat >>`, for appending large test
   blocks.
+
+## 2C — the o'clock scan loop
+
+**Merged into this log after review flagged its absence** (2026-09-21): the work existed only as an
+implementer memory note, which no future reader of this plan would find.
+
+### What was built
+
+`gaze.py` gains `ScanPlan`, `gaze_at`, `FREE_SCAN_PLAN`, `SCAN_PLAN`, `_SECTOR_LEGS` and the three
+constants `FOCUS_CONE_HALF_WIDTH_DEG` / `FOCUS_DWELL_S` / `SCAN_CYCLE_PERIOD_S`.
+`gaze_from_relative_sector` is retired — dead once the static wedge was replaced.
+
+The loop, verified by running it rather than by reading the table:
+
+```
+t= 0s  12_oclock     t= 8s  12_oclock
+t= 2s  11_oclock     t=10s   1_oclock
+t= 4s  10_oclock     t=12s   2_oclock
+t= 6s   9_oclock     t=14s   3_oclock
+```
+
+30° cones, 2 s each, 16 s cycle, forward arc twice per cycle, every o'clock visited exactly once.
+
+`naked_eye_source.py`'s acquisition state moves from `frozenset[int]` to `dict[int, float]`
+(`_previously_seen_at` / `_acquired_at`), evicted at a retention window equal to the cycle. Poll-
+indexed sets were wrong the moment the cone started moving: a contact would have been dropped and
+re-acquired on every sweep, so the group intake cap would re-throttle each pass and a busy sector
+would never fully report.
+
+`decay.OBSERVED_WINDOW_S` moves **5.0 → 16.0**, with both bounds asserted at import.
+
+### The plan defect found, and how it was resolved
+
+Implementation-plan step 12 named a single o'clock table, which reads as: a *commanded* sector is a
+static wide wedge, and only the free scan cycles. But hard part 1 makes a commanded scan a function
+of sim time relative to the command, and hard part 2a quotes the user directly — *"within a sector it
+is itself a smaller cone moving in a scan pattern."* Those cannot both be satisfied by a static wedge.
+
+Resolved in favour of the generalisation: `ahead`→`(12,)`, `left`→`(11,10,9)`, `right`→`(1,2,3)`,
+`full`→the free-scan table, each cycled from `command_t_sim`. **This is what makes
+`ScanPlan.command_t_sim` load-bearing rather than inert data** — under the static reading it would
+have been a field nothing consumed.
+
+Reviewed and upheld: it matches the user's own words, breaks no downstream consumer (`Gaze.label`
+has no reader outside `gaze.py` and its tests), and carries four dedicated tests.
+
+### Moved expectations
+
+Many, and unlike 2B that is expected — 2C is a deliberate behaviour change. Each derived from the
+model, with the derivation in a comment beside it:
+
+- **Dozens of `NakedEyePerceptionSource` tests** had their poll `now_sim` shifted into the free-scan
+  12-o'clock window. For fixtures whose real subject is pipeline wiring rather than the scan loop
+  (`test_emission_pipeline.py`, `test_mock_flight_chain.py`, one `test_detection_trace.py` replay),
+  an explicit persistent `ScanPlan` or `scan_area` task was used instead — so they keep exercising
+  what they were written for rather than passing by accident of timing.
+- **`_CAP_TEST_CROSS_OFFSETS_M` rescaled 0.85×**, not linearly, to clear the new ±15° gate with real
+  margin; re-verified against `clustering.angular_separation_rad` directly.
+- **Two debounce tests' "leave" gaps widened past 16 s** — a brief absence within one cycle is now
+  deliberately "still known", which is the point of time-based acquisition.
+- **One trace test's expected `GateOutcome` moved `COCKPIT_MASK` → `GAZE`** for a rear candidate.
+  Gaze runs first and no o'clock cone reaches the rear cutoff, so the trace loses its cockpit-mask
+  rejection rate — the plan's own stated consequence, now observed.
+
+### Not done here, by design
+
+2D (dwell as an act); the live gate-outcome measurement (plan item 16) and the fly-it acceptance
+(item 17), both of which need a sortie.
+
+## Cones 2C sortie fixes (2026-09-21, branch `fix/gaze-visibility-and-standing-modes`)
+
+Two of `todo/todo.md`'s "Cones 2C sortie findings" fixed directly, out of the two ranked "do this
+first" in the sortie writeup.
+
+### Fix 1 — show where Petrovich is looking
+
+`gaze_at(t_sim, plan)` is pure, so this is a read, not new state. `ConsolePerceptionRunner.run_once`
+now keeps its resolved `perception.gaze.ScanPlan` on itself (`runner.scan_plan`), and both poll
+loops (`_run_console_poll_loop`/`_run_crew_text_poll_loop`) push a short overlay line — `"Petrovich:
+looking <hour> o'clock (free scan|commanded <sector> scan)"` — through a new `_push_gaze_line`
+helper whenever the resolved o'clock cone changes. Deliberately *not* unconditional: `FOCUS_DWELL_S`
+(2 s) is close to the default 1 s poll interval, and the overlay Hook script is an `AutoScrollText`
+log, not a single-line display, so pushing every poll would crowd out real content. `_format_gaze_line`
+reads `Gaze.label` for display, which is exactly what that field's own docstring says it is for
+("debug/trace output"), not a branch on it.
+
+### Fix 2 — Scan and Watch are standing modes, not one-shot tasks
+
+**Root cause, confirmed exactly as the backlog described it**: `belief.tasks.TaskStore.tick` flips a
+`scan_area` task to `"succeeded"` the instant any contact is seen in its area, and
+`logger._active_gaze` used to honour only `status == "pending"` — so a commanded scan silently
+reverted to free scan on first contact.
+
+**The fix stayed a one-line-per-site status-filter change, not a data-model redesign**, once traced
+all the way through — three sites needed the same change, not one:
+
+1. `logger._active_gaze`: `task.status == "pending"` → `task.status != "cancelled"`. A `scan_area`
+   task now keeps steering the gaze through `"succeeded"`/`"failed"`; only `"cancelled"` (or a newer
+   scan command winning the "most recently created" tie-break) ends it. This also means the
+   `DEFAULT_SCAN_DEADLINE_S` timeout path silently reverted to free scan the same way `"succeeded"`
+   did — a second instance of the identical defect the sortie only caught via the success path.
+2. `belief.tasks.TaskStore.cancel`: previously left `"succeeded"`/`"failed"` tasks untouched
+   ("terminal status never overwritten") — now always sets `"cancelled"` regardless of prior status.
+   Without this, fix 1 above would be hollow: a resolved scan would keep steering the gaze forever,
+   uncancellable, since `cancel` could never actually flip it.
+3. `belief.crew_console.CrewConsole._handle_cancel_task`: its own task-selection filter
+   (`status == "pending"`) had the identical bug independently — a resolved-but-not-yet-cancelled
+   scan had already fallen out of the list "Cancel Task" searches, so the player's command found
+   nothing even before reaching `TaskStore.cancel`. Filter is now `status != "cancelled"`.
+
+No `PendingIntent`/`TaskStore` schema change, no new field, no new task kind — `TaskStatus` keeps its
+four values, `tick()`'s own resolution logic is untouched. The three call sites above were the whole
+"design a mode" question in practice: what ends a mode is "not cancelled, and not superseded" reread
+consistently everywhere a caller had baked in the old "pending is the only live state" assumption.
+
+**Watch was already a standing mode and needed no change.** `watch_nearest`/typed `"watch <x>"` call
+`belief.tools.set_attention` directly on a `Contact` — there was never a `PendingIntent` involved, so
+watch and scan were already two independent, already-coexisting mechanisms (`Contact.attention`
+vs. `TaskStore`), matching the pilot's "should have been watching target and scanning forward"
+expectation structurally, once fix 2's scan-side bug stopped masking it.
+
+**Flagged, not fixed — different root cause than the backlog assumed:** the sortie's "watch closest →
+flew past → cancel task → 'nothing to stop'" finding cannot be *this* bug on its own reading of the
+code — `watch_nearest` never creates a task, so there is nothing in `TaskStore` for "Cancel Task" to
+find regardless of the status-filter fix, unless a scan was also independently pending/active at the
+time. "Cancel Task" has no path to stopping a watch today; only `unwatch-area` (a `--console`-only
+dev command, not reachable from `--crew-text`/F10) can. If the pilot's real ask was "let Cancel Task
+also stop the currently-watched contact," that is a new, separate F10/crew-text feature, not covered
+by this fix, and worth a decision before it's built (what "Cancel Task" should mean when both a scan
+and a watch are active, whether it cancels one or both).
+
+Tests added (`test_tasks.py` ×2, `test_logger.py` ×2, `test_crew_console.py` ×1, `test_tools.py` ×1):
+cancel reaching an already-`"succeeded"`/`"failed"` task at every layer (`TaskStore`, `tools.
+cancel_task`, `CrewConsole._handle_cancel_task`), and `_active_gaze` continuing to steer a
+`"succeeded"`/`"failed"` scan task rather than falling back to `FREE_SCAN_PLAN`.
+

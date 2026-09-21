@@ -1,3 +1,23 @@
+> **CORRECTED 2026-09-12 (same day) by
+> [`2026-09-12-miz-validation-against-real-sample.md`](2026-09-12-miz-validation-against-real-sample.md),
+> which read a real `.miz`'s actual bytes. Two path claims below are wrong**, and this note's own
+> header says why: nothing here was verified against a sample — it is secondhand from Hoggit,
+> pydcs and how-to guides. `mission-interpreter/CLAUDE.md` states the validation note "is the
+> load-bearing one wherever it disagrees with the earlier secondhand note."
+>
+> | claim below | actual |
+> |---|---|
+> | `mapResource` is a bare top-level member | it is nested: **`l10n/DEFAULT/mapResource`** |
+> | kneeboard pages live under `KNEEBOARD/<AIRCRAFT_NAME>/IMAGES/` | a flat **`KNEEBOARD/IMAGES/`** tree |
+>
+> The validation pass also found a top-level **`theatre`** file this note did not know existed.
+> Everything else here — the zip-plus-Lua shape, the `mission` table's subsections, the
+> standalone-parseability finding, and the prior-art survey — held up against the real sample.
+>
+> **Worth keeping:** the two wrong claims are both *paths*, and paths are exactly what secondhand
+> documentation gets wrong, because they are the part a reader reconstructs from memory rather
+> than copies. The subsection *shapes*, which the sources described structurally, were fine.
+
 # .miz File Structure and Lua Parsing Approach
 
 **Date:** 2026-09-12

@@ -94,8 +94,16 @@ from belief.contacts import ContactStore
 #: type-checked, additive change, not a silent string-typo risk.
 TaskKind = Literal["scan_area"]
 
-#: `"pending"` is the only mutable state; the other three are terminal --
-#: once set, `tick`/`TaskStore.cancel` never touch that task again.
+#: **`"cancelled"` is the only true terminal state (cones 2C sortie fix,
+#: `docs/concept/STATE_TRANSITIONS.md`'s "Modes" section).** `tick` still
+#: only ever touches a `"pending"` task (its own docstring, unchanged) --
+#: but `"succeeded"`/`"failed"` are no longer terminal to `TaskStore.cancel`:
+#: a `scan_area` task is a standing *mode*, not a one-shot job, so finding
+#: something (`"succeeded"`) or timing out (`"failed"`) is an event about
+#: what the search has (not) confirmed, never the end of the mode. Only an
+#: explicit cancel, or a newer scan command superseding it (`logger.
+#: _active_gaze`'s own "most recently created" tie-break), ends it. See
+#: `TaskStore.cancel`'s own docstring for the fix this replaced.
 TaskStatus = Literal["pending", "succeeded", "failed", "cancelled"]
 
 #: `TaskStore`-minted `PendingIntent.id` prefix, distinct in shape from
@@ -173,21 +181,33 @@ class TaskStore:
         return self._tasks.get(task_id)
 
     def cancel(self, task_id: str) -> bool:
-        """Mark a still-`pending` task `cancelled`. Returns whether
-        `task_id` was found -- a task already resolved (`succeeded`/
-        `failed`) or already `cancelled` is left untouched either way (its
-        terminal status is not overwritten), but the lookup still reports
-        `True` since the id genuinely exists; only an unknown id returns
-        `False`, mirroring `ContactStore.remove_area`'s own "unknown id"
-        convention. Does not touch `task.area` -- removing the
-        `AttentionArea` a cancelled task registered is `tools.cancel_task`'s
-        job (it also needs the `ContactStore`, which this store does not
-        hold), per the plan's Decision 3."""
+        """Mark `task_id` `cancelled`, regardless of its current status.
+        Returns whether `task_id` was found -- mirrors `ContactStore.
+        remove_area`'s own "unknown id" convention. Does not touch
+        `task.area` -- removing the `AttentionArea` a cancelled task
+        registered is `tools.cancel_task`'s job (it also needs the
+        `ContactStore`, which this store does not hold), per the plan's
+        Decision 3.
+
+        **Cones 2C sortie fix.** This used to leave a task already resolved
+        (`succeeded`/`failed`) untouched -- its terminal status was never
+        overwritten, only reported as found. That was the second half of
+        the sortie's "watch closest -> flew past -> cancel task -> 'nothing
+        to stop'"-shaped bug: `tick` resolves a `scan_area` task the moment
+        any contact appears in its area, so a task could become
+        uncancellable within seconds of being issued, while `logger.
+        _active_gaze` (which used to honour only `"pending"` tasks) had
+        already, silently, reverted to free scan. A `scan_area` task is a
+        standing mode (`TaskStatus`'s own docstring, `docs/concept/
+        STATE_TRANSITIONS.md`): `"succeeded"`/`"failed"` say what the
+        search has (not) confirmed, never that the mode ended, so cancel
+        must still be able to end it from either state. Idempotent on an
+        already-`"cancelled"` task -- no functional change, same as
+        before."""
         task = self._tasks.get(task_id)
         if task is None:
             return False
-        if task.status == "pending":
-            task.status = "cancelled"
+        task.status = "cancelled"
         return True
 
     def tick(self, store: ContactStore, now_sim: float) -> None:

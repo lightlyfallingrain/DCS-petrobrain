@@ -16,6 +16,7 @@ a genuine, un-mocked detectability decision underneath.
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 from typing import Any, Final
 
@@ -23,7 +24,6 @@ import pytest
 
 from perception import association, object_model, visibility
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
-from perception.gaze import Gaze
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
@@ -32,6 +32,7 @@ from perception.naked_eye_source import (
     _quantise_range_m,
 )
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
+from replay import replay
 
 _THEATRE = "Syria"
 _FAKE_CONN = sqlite3.connect(":memory:")
@@ -62,8 +63,30 @@ _FAKE_CONN = sqlite3.connect(":memory:")
 #: apparent angular size (`size_m / range_m`), so the old cross-offsets
 #: could not simply be scaled down by the same factor without risking a
 #: spurious merge -- offsets were grown relative to range to compensate.
+#:
+#: **Rescaled again, 2C** (`plans/detection-cones-slice2/plan.md`): the
+#: naked-eye channel now gazes through a +/-15 deg o'clock cone by default
+#: (`perception.gaze.FOCUS_CONE_HALF_WIDTH_DEG`) rather than seeing the
+#: whole cockpit envelope, so every candidate's own azimuth from boresight
+#: -- not just its pairwise angular separation from its neighbours -- is
+#: now a live constraint. The pre-2C offsets put candidate 2 (150 m range,
+#: 40 m offset) at 14.93 deg azimuth, 0.07 deg inside the +/-15 deg gate --
+#: correct, but not a margin any later retune of the gate or the fixture
+#: should have to respect exactly. **Offsets were not simply scaled down**
+#: (verified, not assumed): shrinking every offset by the same factor pulls
+#: the whole spread toward candidate 1's own zero-offset boresight position,
+#: which is exactly the degenerate same-bearing case this fixture's own
+#: 2026-09-20 rescale exists to avoid -- at a 0.5x scale the nearest pair
+#: (candidates 1-2) already fails to separate. `0.85x` was chosen instead
+#: (computed against `perception.clustering.angular_separation_rad`/
+#: `angular_size_rad`, not guessed): every candidate's azimuth drops to
+#: 12.77 deg at most (2.23 deg of margin against the +/-15 deg gate) while
+#: the tightest pairwise separation margin only narrows from 0.37 deg to
+#: 0.30 deg -- both properties this fixture needs (inside the gate, no
+#: spurious merge) hold with real margin, not a coincidence of the old
+#: numbers.
 _CAP_TEST_RANGES_M: Final[tuple[float, ...]] = (60.0, 150.0, 260.0, 390.0, 540.0)
-_CAP_TEST_CROSS_OFFSETS_M: Final[tuple[float, ...]] = (0.0, 40.0, 65.0, 85.0, 105.0)
+_CAP_TEST_CROSS_OFFSETS_M: Final[tuple[float, ...]] = (0.0, 34.0, 55.0, 72.0, 89.0)
 
 
 def _ownship() -> OwnshipState:
@@ -127,7 +150,7 @@ def _source(
 def test_no_world_objects_snapshot_returns_empty() -> None:
     source, _client = _source(None)
 
-    assert source.poll(100.0, _ownship()) == []
+    assert source.poll(0.0, _ownship()) == []
 
 
 def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
@@ -144,7 +167,7 @@ def test_ownship_echo_in_world_objects_is_not_emitted() -> None:
     }
     source, _client = _source(world_objects)
 
-    assert source.poll(100.0, _ownship()) == []
+    assert source.poll(0.0, _ownship()) == []
 
 
 def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
@@ -163,55 +186,115 @@ def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
     }
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     assert observations[0].classification_raw == "OP_INFANTRY"
 
 
-# -- Gaze filtering (slice 2B, plans/detection-cones-slice2/plan.md) --------
+# -- Gaze filtering (slice 2B; 2C's o'clock scan loop replaces the plain
+# Gaze default -- plans/detection-cones-slice2/plan.md) -------------------
 
 
-def test_gaze_filters_a_candidate_outside_its_wedge() -> None:
-    # lat_deg=0, lon_deg=100 (identity-mapped x=0, z=100) is dead abeam
-    # (azimuth 90 relative to heading 0) -- well outside a 30 deg
-    # dead-ahead gaze.
+def test_default_scan_plan_narrows_to_whichever_cone_is_active() -> None:
+    # 2C: the default is no longer "no restriction" (`None`, 2B) -- it is
+    # `perception.gaze.FREE_SCAN_PLAN`, the o'clock scan loop, and a source
+    # constructed with no `scan_plan` override gets it. At t_sim=0.0
+    # (`SCAN_PLAN`'s index 0, clock 12 -- `perception.gaze.gaze_at`) the
+    # active gaze is a +/-15 deg dead-ahead cone: a dead-ahead candidate
+    # (lat_deg=100, azimuth 0) is admitted, an abeam one (lon_deg=100,
+    # azimuth 90 relative to heading 0) is not -- well outside +/-15 deg
+    # either way.
+    ahead_world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0)]
+    }
+    abeam_world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=100.0)]
+    }
+    ahead_source, _client = _source(ahead_world_objects)
+    abeam_source, _client = _source(abeam_world_objects)
+
+    assert len(ahead_source.poll(0.0, _ownship())) == 1
+    assert abeam_source.poll(0.0, _ownship()) == []
+
+
+def test_naked_eye_source_only_sees_a_flank_contact_when_its_cone_is_gazed() -> None:
+    # The scan-loop integration case item 15 of the plan's Implementation
+    # Plan asks for: a contact at a fixed bearing is detected on the cycles
+    # when its o'clock is gazed and not on the others. A contact at 9
+    # o'clock (lon_deg=-100, azimuth -90 relative to heading 0) sits inside
+    # `SCAN_PLAN`'s active cone only during the "9" leg -- index 3, elapsed
+    # in [6, 8) s of the 16 s cycle (`SCAN_PLAN = (12, 11, 10, 9, 12, 1, 2,
+    # 3)` at `FOCUS_DWELL_S = 2.0` s/cone). Nothing about the contact
+    # changes between the two polls -- only `now_sim`, and therefore which
+    # cone `gaze_at` returns.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=-100.0)]
+    }
+    source, _client = _source(world_objects)
+
+    ahead_leg = source.poll(0.5, _ownship())  # index 0 -> clock 12
+    nine_leg = source.poll(6.5, _ownship())  # index 3 -> clock 9
+
+    assert ahead_leg == []
+    assert len(nine_leg) == 1
+
+
+def test_replaying_the_same_stream_twice_yields_identical_observations() -> None:
+    # Determinism (plan item 15, hard part 9): `gaze_at` is a pure function
+    # of sim time, so replaying the identical frame sequence through two
+    # independent, freshly-constructed sources must yield byte-identical
+    # Observations -- nothing here is wall-clock- or instance-order-
+    # dependent. A fixed 9 o'clock contact (lon_deg=-100) is only ever
+    # admitted during the free-scan cycle's "9" leg (t in [6, 8) mod 16 s),
+    # so this also exercises the scan loop actually varying poll to poll,
+    # not just a trivially-static gaze.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=-100.0)]
+    }
+    frames = [
+        OwnshipState(t_sim=t, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0)
+        for t in (0.0, 4.0, 6.0, 7.0, 8.0, 12.0, 16.0, 22.0)
+    ]
+
+    def _run() -> list[Any]:
+        source = NakedEyePerceptionSource(
+            aircraft_client=FakeAircraftClient(world_objects),  # type: ignore[arg-type]
+            theatre=_THEATRE,
+            world_model_conn=_FAKE_CONN,
+            emit_mode="every_poll",
+        )
+        observations = []
+        for _frame, obs in replay(source, frames):
+            observations.extend(obs)
+        return observations
+
+    first_run = _run()
+    second_run = _run()
+
+    # A fixed contact only clears the gaze gate during the "9" leg -- both
+    # runs must admit it on exactly the same subset of frames, not merely
+    # produce the same *count*.
+    assert len(first_run) == 3  # t=6.0, 7.0 (inside [6, 8)); t=22.0 (== 6.0 mod 16)
+    assert [obs.t_sim for obs in first_run] == [6.0, 7.0, 22.0]
+    assert [dataclasses.replace(obs, t_wall=0.0) for obs in first_run] == [
+        dataclasses.replace(obs, t_wall=0.0) for obs in second_run
+    ]
+
+
+def test_peripheral_stimulus_bypasses_the_active_gaze() -> None:
+    # Same abeam, excluded-by-gaze candidate as above, but flagged as a
+    # captured peripheral stimulus -- this channel always resolves
+    # `gaze_for` against `UNAIDED_OPTIC` (module docstring point 7), which
+    # has `peripheral=True`, so the bypass applies regardless of which
+    # o'clock cone is currently active.
     world_objects = {
         "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=100.0)]
     }
     source, _client = _source(world_objects)
-    source.gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead")
-
-    assert source.poll(100.0, _ownship()) == []
-
-
-def test_default_gaze_is_none_and_does_not_filter() -> None:
-    # Same candidate as above, but the source's `gaze` field is left at
-    # its default (`None`) -- must still be admitted, confirming 2B's
-    # default path is unchanged from before this slice.
-    world_objects = {
-        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=100.0)]
-    }
-    source, _client = _source(world_objects)
-
-    observations = source.poll(100.0, _ownship())
-
-    assert len(observations) == 1
-
-
-def test_peripheral_stimulus_bypasses_a_narrow_gaze() -> None:
-    # Same excluded-by-gaze candidate as above, but flagged as a captured
-    # peripheral stimulus -- this channel always resolves `gaze_for`
-    # against `UNAIDED_OPTIC` (module docstring point 7), which has
-    # `peripheral=True`, so the bypass applies.
-    world_objects = {
-        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=100.0)]
-    }
-    source, _client = _source(world_objects)
-    source.gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead")
     source.peripheral_stimulus_ids = frozenset({1})
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
 
@@ -224,7 +307,7 @@ def test_hires_range_candidate_with_a_known_reporting_name_reaches_type_level() 
     world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=200.0, lon_deg=0.0)]}
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     obs = observations[0]
@@ -244,7 +327,7 @@ def test_medres_range_candidate_stays_at_class_level() -> None:
     world_objects = {"objects": [_world_object(1, "T-72B", lat_deg=400.0, lon_deg=0.0)]}
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     obs = observations[0]
@@ -265,7 +348,7 @@ def test_hires_range_candidate_with_no_reporting_name_falls_back_to_class() -> N
     }
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     obs = observations[0]
@@ -294,7 +377,7 @@ def test_lowres_range_candidate_reaches_presence_level() -> None:
     }
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     obs = observations[0]
@@ -316,7 +399,7 @@ def test_no_visible_candidates_returns_empty() -> None:
     }
     source, _client = _source(world_objects)
 
-    assert source.poll(100.0, _ownship()) == []
+    assert source.poll(0.0, _ownship()) == []
 
 
 def test_a_newly_visible_candidate_emits_one_observation() -> None:
@@ -329,7 +412,7 @@ def test_a_newly_visible_candidate_emits_one_observation() -> None:
     }
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     obs = observations[0]
@@ -347,14 +430,27 @@ def test_still_visible_candidate_is_not_re_emitted_on_the_next_poll() -> None:
     }
     source, _client = _source(world_objects)
 
-    first = source.poll(100.0, _ownship())
-    second = source.poll(100.2, _ownship())
+    first = source.poll(0.0, _ownship())
+    second = source.poll(0.2, _ownship())
 
     assert len(first) == 1
     assert second == []
 
 
 def test_candidate_leaving_and_re_entering_the_visible_set_re_emits() -> None:
+    # 2C: acquisition state is time-based, not poll-indexed (module
+    # docstring point 4a) -- an object stays "known" for
+    # `_ACQUISITION_RETENTION_WINDOW_S` (== `perception.gaze.
+    # SCAN_CYCLE_PERIOD_S`, 16.0 s) after it was last actually seen, not
+    # just the one poll it was last visible on. A brief absence (under one
+    # scan cycle) is exactly what the fix is *for* -- a cone sweeping off a
+    # sector and back must not read as "gone" -- so re-emission on
+    # reappearance now needs a gap wider than one cycle to be a genuine
+    # re-emission rather than the tolerated-brief-gap case. Poll 2 sits
+    # 16.5 s after poll 1 (> `SCAN_CYCLE_PERIOD_S`, evicting the object),
+    # and poll 3, 0.2 s later, still lands in the same "12 o'clock" free-
+    # scan leg as poll 1 (16.1 % 16.0 == 0.1, inside `SCAN_PLAN`'s index-0
+    # dwell) so the gaze gate is not itself the reason for re-emission.
     visible = {"objects": [_world_object(1, "Infantry", lat_deg=500.0, lon_deg=0.0)]}
     empty: dict[str, Any] = {"objects": []}
     client = FakeAircraftClient(visible)
@@ -364,11 +460,11 @@ def test_candidate_leaving_and_re_entering_the_visible_set_re_emits() -> None:
         world_model_conn=_FAKE_CONN,
     )
 
-    first = source.poll(100.0, _ownship())
+    first = source.poll(0.0, _ownship())
     client._world_objects = empty
-    second = source.poll(100.2, _ownship())
+    second = source.poll(16.1, _ownship())
     client._world_objects = visible
-    third = source.poll(100.4, _ownship())
+    third = source.poll(16.3, _ownship())
 
     assert len(first) == 1
     assert second == []
@@ -386,11 +482,11 @@ def test_missing_snapshot_resets_visible_set_state() -> None:
         world_model_conn=_FAKE_CONN,
     )
 
-    first = source.poll(100.0, _ownship())
+    first = source.poll(0.0, _ownship())
     client._world_objects = None
-    second = source.poll(100.2, _ownship())
+    second = source.poll(0.2, _ownship())
     client._world_objects = visible
-    third = source.poll(100.4, _ownship())
+    third = source.poll(0.4, _ownship())
 
     assert len(first) == 1
     assert second == []
@@ -416,19 +512,19 @@ def test_continuity_resolves_across_a_multi_poll_gap_including_a_missing_snapsho
         world_model_conn=_FAKE_CONN,
     )
 
-    first = source.poll(100.0, _ownship())
+    first = source.poll(0.0, _ownship())
     assert len(first) == 1
     assert first[0].continues_observation_id is None
 
     client._world_objects = empty
-    assert source.poll(100.2, _ownship()) == []
+    assert source.poll(0.2, _ownship()) == []
     client._world_objects = None
-    assert source.poll(100.4, _ownship()) == []
+    assert source.poll(0.4, _ownship()) == []
     client._world_objects = empty
-    assert source.poll(100.6, _ownship()) == []
+    assert source.poll(0.6, _ownship()) == []
 
     client._world_objects = visible
-    reacquired = source.poll(100.8, _ownship())
+    reacquired = source.poll(0.8, _ownship())
 
     assert len(reacquired) == 1
     assert reacquired[0].continues_observation_id == first[0].id
@@ -447,10 +543,19 @@ def test_continuity_never_cross_tags_two_different_objects() -> None:
     # (range ~127.3 m) stays inside its own hires threshold (214.29 m for
     # a 6 m object). Confirmed by actually running this scenario, not
     # assumed.
+    #
+    # **Rescaled again, 2C** (`plans/detection-cones-slice2/plan.md`): the
+    # original 90-deg cross-offset put the Ural dead abeam, well outside
+    # the default +/-15 deg gaze cone this slice adds -- moved to (125, 22)
+    # (range 126.9 m, azimuth 9.98 deg, comfortably inside the gate and
+    # still inside the 214.29 m hires threshold) while confirming (not
+    # assuming) the two candidates stay angularly separable at the new,
+    # tighter geometry (`perception.clustering.angular_separation_rad`
+    # margin 9.98 deg against a 1.87 deg merge threshold).
     world_objects = {
         "objects": [
             _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),
-            _world_object(2, "Ural-4320", lat_deg=90.0, lon_deg=90.0),
+            _world_object(2, "Ural-4320", lat_deg=125.0, lon_deg=22.0),
         ]
     }
     empty: dict[str, Any] = {"objects": []}
@@ -461,15 +566,21 @@ def test_continuity_never_cross_tags_two_different_objects() -> None:
         world_model_conn=_FAKE_CONN,
     )
 
-    first = source.poll(100.0, _ownship())
+    first = source.poll(0.0, _ownship())
     assert len(first) == 2
     assert all(obs.continues_observation_id is None for obs in first)
 
     # Force both back through the debounce cycle (leave, then re-enter).
+    # 2C: acquisition is time-based (`_ACQUISITION_RETENTION_WINDOW_S` ==
+    # `perception.gaze.SCAN_CYCLE_PERIOD_S`, 16.0 s), so the gap has to
+    # exceed one full scan cycle for a genuine re-emission -- see
+    # `test_candidate_leaving_and_re_entering_the_visible_set_re_emits`'s
+    # own docstring for the same derivation. 16.1/16.3 both still land in
+    # the same "12 o'clock" free-scan leg as t=0.0 (16.1 % 16.0 == 0.1).
     client._world_objects = empty
-    assert source.poll(100.2, _ownship()) == []
+    assert source.poll(16.1, _ownship()) == []
     client._world_objects = world_objects
-    second = source.poll(100.4, _ownship())
+    second = source.poll(16.3, _ownship())
 
     assert len(second) == 2
     infantry_first = next(
@@ -511,7 +622,7 @@ def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> 
     }
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
     ranges = [obs.derived_world_position.x for obs in observations]  # type: ignore[union-attr]
@@ -556,9 +667,9 @@ def test_a_capped_out_group_is_retried_and_the_backlog_drains_over_polls() -> No
     }
     source, _client = _source(world_objects)
 
-    first = source.poll(100.0, _ownship())
-    second = source.poll(100.2, _ownship())
-    third = source.poll(100.4, _ownship())
+    first = source.poll(0.0, _ownship())
+    second = source.poll(0.2, _ownship())
+    third = source.poll(0.4, _ownship())
 
     assert len(first) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
     assert len(second) == len(_CAP_TEST_RANGES_M) - NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
@@ -581,9 +692,9 @@ def test_every_poll_mode_re_emits_a_continuously_visible_candidate() -> None:
         emit_mode="every_poll",
     )
 
-    first = source.poll(100.0, _ownship())
-    second = source.poll(100.2, _ownship())
-    third = source.poll(100.4, _ownship())
+    first = source.poll(0.0, _ownship())
+    second = source.poll(0.2, _ownship())
+    third = source.poll(0.4, _ownship())
 
     assert len(first) == 1
     assert len(second) == 1
@@ -601,9 +712,9 @@ def test_every_poll_mode_stops_emitting_once_the_candidate_leaves() -> None:
         emit_mode="every_poll",
     )
 
-    first = source.poll(100.0, _ownship())
+    first = source.poll(0.0, _ownship())
     client._world_objects = empty
-    second = source.poll(100.2, _ownship())
+    second = source.poll(0.2, _ownship())
 
     assert len(first) == 1
     assert second == []
@@ -629,7 +740,7 @@ def test_every_poll_mode_still_throttles_first_time_acquisition() -> None:
         emit_mode="every_poll",
     )
 
-    first = source.poll(100.0, _ownship())
+    first = source.poll(0.0, _ownship())
 
     assert len(first) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
 
@@ -656,8 +767,8 @@ def test_every_poll_mode_progressively_acquires_capped_overflow() -> None:
         emit_mode="every_poll",
     )
 
-    first = source.poll(100.0, _ownship())
-    second = source.poll(100.2, _ownship())
+    first = source.poll(0.0, _ownship())
+    second = source.poll(0.2, _ownship())
 
     assert len(first) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
     # first poll's 3 acquired objects re-emit, plus the 2 remaining
@@ -694,7 +805,7 @@ def test_a_dense_group_larger_than_the_cap_admits_whole_in_one_poll() -> None:
         trace_sink=trace,
     )
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
 
@@ -781,7 +892,7 @@ def test_two_close_candidates_emit_one_clustered_observation() -> None:
     }
     source, _client = _source(world_objects)
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     assert observations[0].count_bucket == "OP_1UNIT"
@@ -866,7 +977,7 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
         emit_mode="every_poll",
     )
 
-    first = source.poll(100.0, _high_ownship())
+    first = source.poll(0.0, _high_ownship())
     assert len(first) == 1
     # All 4 are acquired together this first poll: they are all one cluster
     # (module docstring point 5, 2A.5) -- `NAKED_EYE_MAX_NEW_GROUPS_PER_
@@ -875,7 +986,7 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     # never binds here at all.
 
     client._world_objects = split
-    second = source.poll(100.2, _high_ownship())
+    second = source.poll(0.2, _high_ownship())
 
     assert len(second) == 2
     # Identified by position, not `count_bucket` -- both the majority
@@ -939,11 +1050,11 @@ def test_continuity_survives_a_cluster_whose_membership_grows_between_polls() ->
         world_model_conn=_FAKE_CONN,
     )
 
-    first = source.poll(100.0, _high_ownship())
+    first = source.poll(0.0, _high_ownship())
     assert len(first) == 1
 
     client._world_objects = four_members
-    second = source.poll(100.2, _high_ownship())
+    second = source.poll(0.2, _high_ownship())
 
     assert len(second) == 1
     assert second[0].continues_observation_id == first[0].id

@@ -10,6 +10,20 @@ voice, headset, Windows-recorded · all rows use `--prompt` (`vocabulary.to_prom
 | `small.en` | 465 MB | 99.2% | 2 | **0** | 0.50 / 1.46 / 1.68 s | 231/250 |
 | `medium.en` | 1.4 GB | 99.6% | 1 | **0** | 1.07 / 1.14 / 3.20 s | 236/251 |
 
+> **FLAG 2026-09-21 — the `tiny.en` row does not balance, by one.** 95.2% of 252 is 240 correct
+> (and the verbatim column's own denominator agrees: `208/240`), which leaves **12** errors — but
+> the row lists 4 safe + 7 unsafe = **11**. Every other row balances exactly: `base.en`
+> 246 + 4 + 2 = 252, `small.en` 250 + 2 + 0 = 252, `medium.en` 251 + 1 + 0 = 252. So either the
+> accuracy or one of `tiny.en`'s two error counts is off by one.
+>
+> **Which one is wrong cannot be determined from this repository** — the 252-clip corpus is not
+> committed, so the bench cannot be re-run. Recorded as unresolved rather than guessed.
+>
+> **Nothing in this note's conclusions depends on it.** The argument is that unsafe errors are the
+> column that matters and that `tiny.en`'s 7 (or 6, or 8) of them is disqualifying against
+> `small.en`'s 0 — a one-count difference in either direction leaves that untouched, as it does
+> the "roughly one every 36 transmissions" figure downstream.
+
 ## Accuracy is the wrong column to read
 
 Errors are not interchangeable, and the split matters more than the total.

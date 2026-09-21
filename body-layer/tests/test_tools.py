@@ -981,3 +981,18 @@ def test_cancel_task_returns_false_for_unknown_id() -> None:
     store = ContactStore()
     tasks = TaskStore()
     assert cancel_task(store, tasks, "TASK_999") is False
+
+
+def test_cancel_task_reaches_an_already_succeeded_task_and_removes_its_area() -> None:
+    # Cones 2C sortie fix: a scan_area task is a standing mode, so cancel
+    # must still be able to end one that has already resolved.
+    store = ContactStore()
+    tasks = TaskStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    task = scan_area(store, tasks, center, radius_m=500.0, reason="check", now_sim=0.0)
+    task.status = "succeeded"
+
+    assert cancel_task(store, tasks, task.id) is True
+
+    assert get_task_status(tasks, task.id).status == "cancelled"  # type: ignore[union-attr]
+    assert list_areas(store) == []

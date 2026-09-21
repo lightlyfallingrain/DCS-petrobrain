@@ -104,7 +104,9 @@ from support.mock_aircraft_layer import MockAircraftLayerServer
 from support.mock_world_model import build_mock_world_model
 
 from aircraft_client import AircraftLayerClient
+from belief.attention import AttentionArea
 from belief.console import Console
+from belief.tasks import TaskStore
 from belief.tools import describe_contact, get_contacts
 from logger import (
     ConsolePerceptionRunner,
@@ -210,8 +212,45 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         sources = _build_sources(
             aircraft_client, _THEATRE, world_model_conn, emit_mode="every_poll"
         )
+        # 2C (`plans/detection-cones-slice2/plan.md`): a persistent
+        # commanded "ahead" scan, not the free-scan default -- object 101
+        # sits dead ahead the whole flight, and this fixture exists to
+        # prove out the full pipeline's wiring/threading, not the scan
+        # loop (covered in `test_naked_eye_source.py`/`test_gaze.py`).
+        # "ahead" degenerates to a static gaze by construction (a single
+        # o'clock leg, `perception.gaze.gaze_at`'s own docstring), so the
+        # naked-eye channel's per-poll gating is otherwise byte-identical
+        # to before this slice and the 16/20/36 counts below are unchanged.
+        # A `scan_area` task, not a direct field assignment, is what makes
+        # this survive `run_once`'s own `_apply_active_gaze` call -- every
+        # poll re-resolves `self.sources`' scan plan from `tasks`, which
+        # would otherwise reset a directly-assigned `scan_plan` back to
+        # `FREE_SCAN_PLAN` on the very first poll. `created_sim`/
+        # `deadline_sim` are set far past this fixture's own 0-95 s span
+        # (not `0.0`/a realistic deadline) so `TaskStore.tick`'s success
+        # check (`contact.last_seen_sim > task.created_sim`) can never
+        # fire and flip this task to "succeeded" mid-fixture -- a task
+        # created at a realistic `created_sim` would complete (and stop
+        # being picked up by `_active_gaze`) the very first poll a contact
+        # is confirmed inside it, exactly like a real "scan ahead" command
+        # would, which is not what this wiring-proof fixture needs.
+        tasks = TaskStore()
+        tasks.create(
+            "scan_area",
+            AttentionArea(
+                id="AREA_AHEAD",
+                center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+                radius_m=None,
+                level="watch",
+                source="scan_area",
+                relative_sector="ahead",
+            ),
+            created_sim=1_000_000.0,
+            deadline_sim=1_000_000_000.0,
+            reason="test-fixture-ahead-scan",
+        )
         runner = ConsolePerceptionRunner(
-            aircraft_client=aircraft_client, sources=sources
+            aircraft_client=aircraft_client, sources=sources, tasks=tasks
         )
 
         for _ in frames:
