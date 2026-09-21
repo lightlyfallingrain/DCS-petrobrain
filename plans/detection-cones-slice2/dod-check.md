@@ -180,3 +180,223 @@ declared) and `belief/decay.py`'s existing `POSITION_HALF_LIFE_S`. 2A has zero d
 `belief/decay.py` (confirmed above and independently by the Reviewer's own grep) and does not touch
 scan cadence, gaze, or attention timing in any way — it only changes *which* range a tier is
 achieved at, not *when* a poll looks in a given direction. Nothing here bears on that derivation.
+
+---
+---
+
+## DoD Check — Cones Slice 2A.5 (intake cap counts groups, not objects)
+
+Branch: `feature/cones-2a5-group-intake`. Implementation commits `1d501c0`, `43c67aa`, `b973784`,
+`02d2abd`. Review commit `8f7b1d0` (Reviewer: **APPROVED WITH MINOR FIXES**, full-read confidence,
+both fixes applied in the same commit).
+
+Ran against commit `8f7b1d061` (checked out detached in this agent's own worktree, since the branch
+tip was already checked out in the shared checkout this agent is isolated from — same tree, no
+divergence).
+
+### Code Quality
+
+- **Subprojects touched**: `git diff --name-only 46b0e3c...8f7b1d0` (merge-base of `main`) shows
+  only `body-layer/CLAUDE.md`, `body-layer/src/perception/{detection_trace,naked_eye_source}.py`,
+  `body-layer/tests/test_{detection_trace,naked_eye_source}.py`, and
+  `plans/detection-cones-slice2/{implementation,review}.md`. `world-model/` and `aircraft-layer/`
+  untouched. The three untracked files under `world-model/` at repo root (`run.sh`,
+  `syria-full-build.log`, `syria-theatre-unfiltered.osm.pbf`) are pre-existing, unrelated to this
+  branch, and were **not** staged.
+- Ran the full body-layer verification sequence myself, per `body-layer/CLAUDE.md` "Commands" (had
+  to build a fresh `.venv` in this isolated worktree first — `pip install -e . ruff mypy pytest`):
+  - `ruff format --check src tests` → `81 files already formatted` (PASS)
+  - `ruff check src tests` → `All checks passed!` (PASS)
+  - `cd body-layer && mypy src` → `Success: no issues found in 38 source files` (PASS)
+  - `pytest tests -q` → **780 passed, 4 xfailed** (PASS — exact match to review's and
+    implementation.md's claimed result)
+  - All 4 2A.5-specific tests also run individually and confirmed passing:
+    `test_a_dense_group_larger_than_the_cap_admits_whole_in_one_poll`,
+    `test_a_capped_out_group_is_retried_and_the_backlog_drains_over_polls`,
+    `test_continuity_survives_a_cluster_whose_membership_grows_between_polls`,
+    `test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first` → `4 passed`.
+  - Confirmed the 4 xfails via `pytest tests -q -rx`: all four carry explicit reasons naming slice
+    **2A**'s `presence_range_mult=2.42` vs. `LOWRES_ANGULAR_RADIUS_RAD`'s old-flat-4.0 derivation
+    (`test_visibility.py::test_armored_vehicle_is_visible_at_the_farthest_photographed_range`,
+    `test_vision_calibration.py::test_computed_tier_matches_ground_truth[C-1000m]`,
+    `test_gate_admits_every_photographed_range[C-8890m]`, `[C-6580m]`). None reference 2A.5,
+    clustering, or the group-intake cap. **2A.5 added zero new xfails, as claimed.**
+- No debug output/TODO/FIXME/`pdb`/`breakpoint` introduced: grepped the diff over touched
+  `body-layer/src`/`body-layer/tests` for `print(`/`TODO`/`FIXME`/`pdb.set_trace`/`breakpoint(` —
+  no hits.
+- No unhandled errors/panics in data paths — pure reordering of an existing pure-function pipeline
+  (`poll()`'s gate → cluster → cap → emit sequence); no new I/O.
+- **Review's stale-constant fix verified landed**: grepped `body-layer/` for
+  `NAKED_EYE_MAX_NEW_PER_POLL` post-fix — the three remaining hits are all "renamed from X"
+  historical references in comments/docstrings (`CLAUDE.md:350`, `test_detection_trace.py:264`,
+  `naked_eye_source.py:77,175`), not stale live usages. The one the review flagged as wrong
+  (`test_detection_trace.py:259`'s old comment) now correctly reads
+  `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` and explains why that scenario is unaffected by the unit
+  change.
+- **Review's cost-verification fix verified landed**: `implementation.md`'s new "Cost verification
+  (plan step 6d)" section states the measured figure (17,487 admissions / 4,719 polls, ~3.7/poll)
+  the review asked for.
+
+### Scope & Correctness
+
+- Matches the plan's 2A.5 sections exactly (slicing table row, "2A.5 sits where it does" rationale,
+  hard part 6a, implementation steps 6a-6d): `poll()` reorders to gate → cluster all survivors →
+  cap clusters → emit; acquisition state stays keyed on `object_id` per hard part 6a (clusters have
+  no stable cross-poll identity); the constant is renamed, value unchanged at 3, per step 6c
+  ("changing unit and value together makes the sortie unattributable").
+- **The real defect fix is in scope, not scope creep**: `naked_eye_source.py`'s own pre-existing
+  docstring already recorded "a capped-out object is never retried" as a known limitation, and step
+  6b explicitly calls for fixing it as part of this slice.
+- No unplanned scope: confirmed via diff — no `gaze.py`, no `ScanPlan`, no scan-loop/dwell code
+  (2B/2C/2D untouched), no touches to `visibility.py`/`optics.py`/`object_model.py`/`decay.py`, no
+  `perception → belief` import.
+- No CLAUDE.md invariants violated: no omniscience leak (review hand-traced that `visible` — what
+  gets clustered — is built strictly from candidates that already individually cleared
+  `check_visibility`, and every acquired object traces back to a per-candidate `ADMITTED` gate
+  outcome recorded before clustering runs); single-player scope untouched; no world-model data
+  committed.
+- **The one escalation-worthy item was correctly escalated, not silently done**: 2A.5 rewrites a
+  pinned test (`test_candidates_dropped_by_the_cap_are_not_retried_next_poll` →
+  `test_a_capped_out_group_is_retried_and_the_backlog_drains_over_polls`) rather than extending it,
+  which the plan itself flags against `AGENTS.md`'s escalation list ("existing tests must be
+  rewritten rather than extended"). Plan records explicit user approval, dated 2026-09-21, before
+  implementation proceeded.
+- All new/modified files staged with `git add` — confirmed via `git status --short` in the checked-
+  out commit: clean (the one untracked item, `body-layer/src/dcs_body_layer.egg-info/`, is this
+  agent's own local `pip install -e .` build artifact from setting up a venv in an isolated
+  worktree that had none checked out — gitignored via `.venv/`'s sibling entries, not part of the
+  branch, not staged).
+
+### Testing
+
+- Core logic covered: the four new/rewritten tests exercise exactly the headline claims — a
+  cap-exceeding dense group admits whole in one poll; a capped-out group is retried and the backlog
+  drains over subsequent polls (the real defect fix, with counts derived from the model rather than
+  observed); acquisition-state continuity survives a cluster whose membership grows between polls
+  (proving the `object_id`-keyed design decision actually works); angularly-separated singleton
+  groups are still capped at N per poll (renamed-constant regression coverage).
+- Tests are meaningful, not decorative: reviewer independently hand-traced the acquisition-state
+  split and hand-derived the rewritten test's expected counts (3, then 2, then 0) against the code
+  rather than trusting the stated derivation, and confirmed no path exists for an object to be
+  marked acquired without its observation being emitted or vice versa.
+- No existing tests broken: 780 passed vs. 2A's baseline of 778 (net +2: one pinned test replaced
+  1:1, two new tests added), 4 xfails unchanged and all attributable to 2A, not 2A.5.
+
+### Documentation
+
+- Reviewer findings addressed: both required fixes (stale constant-name comment, missing
+  cost-verification line) applied in `8f7b1d0`, confirmed above by re-reading the actual diff, not
+  just the commit message.
+- Non-obvious behavior explained: `naked_eye_source.py`'s module docstring points 3-5 rewritten to
+  describe the new order and the cap's new unit; `body-layer/CLAUDE.md`'s Structure entries for
+  `naked_eye_source.py`/`detection_trace.py` updated to describe 2A.5's actual behavior rather than
+  the superseded per-object cap.
+
+### Security
+
+- `plans/detection-cones-slice2/` has no `security-plan-review.md` or `security-review.md`, and
+  none is expected: root `CLAUDE.md` "Agents" section exempts Security for this project phase
+  ("this phase is an offline single-user local pipeline with no hot path and no untrusted-input
+  surface yet... Only run either when the user explicitly asks for it") — not requested here. N/A,
+  not a gap.
+
+### Verdict
+
+**PASS.** No FAILs. Two reviewer-required fixes both verified landed by re-reading the diff, not
+the commit message.
+
+---
+
+### Acceptance boundary — what this feature's fixtures structurally cannot reach
+
+The headline claim — a dense group admits whole in one poll instead of trickling over three — is
+**fully verifiable at fixture level and was just verified above.** The clustering geometry, the
+gate-then-cluster-then-cap ordering, and the retry/backlog-drain fix are all deterministic pure
+functions over synthetic candidate positions; nothing about them requires a live DCS session to
+exercise correctly.
+
+What fixtures **cannot** reach: whether the cap's *value* (still 3, unchanged) is right for real
+group sizes and real angular geometry Petrovich will actually encounter, and whether "reported
+whole in one poll" reads correctly in the crew-facing callout language once it reaches
+`belief`/`CrewConsole`. The plan is explicit that this is deliberately deferred, not overlooked:
+step 6c keeps the value unchanged specifically so a future sortie can attribute any felt difference
+to the unit change alone, not a conflated unit-and-value change. The user's own existing sortie
+data (referenced throughout the plan's calibration sections) was gathered on **single units at
+known ranges** — it contains no group-density scenarios and cannot retroactively validate or refute
+this slice's group behavior.
+
+### Milestone-completion question
+
+1. **Is 2B still genuinely next and behaviour-preserving?** Yes. 2A.5's entire purpose was to land
+   *before* 2B specifically because it changes the default path (plan: "it changes the default
+   path, so it cannot ride in 2B without destroying 2B's acceptance gate"). With 2A.5 now reviewed
+   and its default behavior settled, 2B's acceptance gate ("with no command issued, the trace is
+   identical to the previous slice") now correctly means *identical to 2A.5's trace*, not 2A's.
+   Confirmed via diff that 2A.5 touched nothing 2B's plan depends on (`gaze.py` doesn't exist yet;
+   `visibility.py`, `optics.py` untouched). The ordering premise holds.
+
+2. **Is the intermediate-density prediction still sound, and is it recorded where the 2C sortie
+   will be read against it?** Sound — it's a structural consequence of what was actually built, not
+   a separate claim: dense groups now admit whole (cap doesn't bind), sparse objects spread across
+   the whole envelope also spread across cones (few groups per cone), so only "many
+   angularly-resolvable groups inside one 30° cone at similar range" can still bind the cap. Yes, it
+   is recorded — in `plans/detection-cones-slice2/plan.md`'s "Risks & Unknowns" section ("The
+   intake limit under a 2 s cone dwell — and the earlier finding here inverts"), which is the same
+   document the plan's own slicing table designates as where 2C's sortie gets judged. No action
+   needed; flagging here only to confirm it wasn't left to be rediscovered.
+
+3. **Does 2A.5 affect `OBSERVED_WINDOW_S` or the 9-3 scan-coverage decision?** No. Confirmed by
+   diff: `belief/decay.py` (home of `OBSERVED_WINDOW_S`) and the scan-coverage table (plan hard
+   part 8, not yet implemented — 2C is plan-only on this branch) are both untouched. The group-
+   intake cap and the scan-cycle timing answer genuinely different questions per the plan's own
+   "third intake limiter would double-count" risk note, and 2A.5 only touches the former.
+
+---
+
+### Acceptance Testing Plan: Cones Slice 2A.5 — Group-Level Intake Cap
+
+**Goal:** Verify that a dense group of objects is now admitted whole in one poll instead of
+trickling in over multiple polls, and that a capped-out group is retried rather than dropped
+permanently — at the level this can actually be checked today (fixture/desk level; **not** a live
+DCS sortie — see boundary above).
+
+**Prerequisites**
+- [x] Type-checked and importable: `cd body-layer && mypy src` → `Success: no issues found in 38
+      source files` (ran above, PASS).
+- [x] Full test suite green: `pytest tests -q` → `780 passed, 4 xfailed` (ran above, PASS).
+
+**Test Cases (already run, results below — not hypothetical)**
+
+1. Ten co-located Infantry candidates (single-link-chained, 10 m spacing) polled once — expected:
+   one `Observation` covering all ten. **Result: PASS**
+   (`test_a_dense_group_larger_than_the_cap_admits_whole_in_one_poll`).
+2. Five angularly-separated singleton groups with cap=3, polled across three polls — expected:
+   poll 1 admits 3 nearest, poll 2 admits the remaining 2 (not dropped), poll 3 emits nothing new.
+   **Result: PASS** (`test_a_capped_out_group_is_retried_and_the_backlog_drains_over_polls`).
+3. A 3-member cluster observed, then a 4th member joins on the next poll — expected: continuity
+   resolves via object-id majority vote to the original observation. **Result: PASS**
+   (`test_continuity_survives_a_cluster_whose_membership_grows_between_polls`).
+4. Five angularly-separated singleton groups, cap=3 — expected: only 3 nearest admitted this poll.
+   **Result: PASS** (`test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first`).
+
+**Edge Cases Probed**
+- No-omniscience-leak: every member of an admitted cluster individually reached
+  `GateOutcome.ADMITTED` before clustering ran — verified via `DetectionTraceCollector` assertions
+  inside test 1, and independently hand-traced by the Reviewer against the code.
+- Stale-comment regression: `test_a_cluster_splitting_gives_the_majority_child_continuity`'s
+  4-candidate fixture, which happens to produce the same `len(first)==1` result under both the old
+  per-object and new per-group cap (for different reasons) — comment corrected, assertions
+  unaffected. Re-ran, still passes.
+
+**Pass Criteria**
+All four test cases produce the expected result (they do) and the full suite shows no regressions
+against 2A's 778-passed baseline (confirmed: 780 passed, same 4 xfails, all attributable to 2A).
+
+**What this plan does NOT and cannot cover (see boundary above):** whether the cap value of 3
+groups per fixation feels right against a real mission's group density and geometry, and whether
+the resulting callout phrasing ("ten trucks" vs. three separate reports growing over time) sounds
+right in the cockpit. Both require the group-behavior sortie the plan defers to 2B/2C's flights.
+No test-card artifact is published for this slice — there is nothing new for the user to *do* in
+DCS specifically for 2A.5 that isn't already covered by whatever sortie eventually exercises the
+group-intake cap in practice; publishing one now would be inventing a thin live test the instructions
+explicitly warn against.

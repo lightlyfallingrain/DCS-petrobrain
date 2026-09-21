@@ -326,6 +326,28 @@ two functions that must agree (2026-09-19).
   trig formula's "no-regression" claim must include a non-axis-aligned angle, not just the fixed
   points (aspect-aware-profiles plan and DoD, 2026-09-21).
 
+- **A constant can be correctly valued and wrongly dimensioned — no amount of tuning the value
+  fixes that.** `NAKED_EYE_MAX_NEW_PER_POLL = 3` was not a bad number; as an object-per-poll cap it
+  matched a real reported constraint on Petrovich's attention. But it was counting the wrong thing —
+  a dense ten-vehicle group and ten scattered singles cost the same 3-per-poll budget, so the group
+  trickled in over three polls when a human takes it in as one glance. Slice 2A.5 fixed this by
+  clustering *before* capping (cap groups, not objects) and left the value unchanged at 3, precisely
+  so a later sortie could attribute any felt difference to the unit change alone. The general form:
+  when a knob keeps producing the wrong-shaped behaviour across a range of values, check what it is
+  a constant *of* before adjusting what it *equals* — the fix may be a dimension change, not a
+  retune (detection-cones-slice2, 2A.5 plan and DoD, 2026-09-21).
+
+- **A documented limitation is not the same as an examined one.** `naked_eye_source.py`'s own
+  docstring had recorded, in plain language, that a capped-out object is never retried — the exact
+  defect 2A.5 fixed. It sat there as an accepted scoping cut for multiple slices. What changed it
+  from "known and accepted" to "a modelling error worth fixing" was not rereading the code but a
+  user's perceptual observation (a dense group is *easier* to take in whole than a scattered one, so
+  capping its members under-reports the case a human reports fastest) — an outside frame the
+  docstring's author didn't have when writing it down. Writing a limitation down is necessary but not
+  sufficient; it stays inert until something re-examines *why* it was accepted, and that re-framing
+  is as likely to come from a domain observation as from more code-reading (detection-cones-slice2,
+  2A.5 plan, 2026-09-21).
+
 ## Voice Recognition & Command Matching
 
 - **Phrase scoring requires word-sequence matching, not character-sequence matching.** Early approach using whole-string character-level difflib (`SequenceMatcher` over the full normalized transcript) inflated scores for arbitrary speech with short-word overlap — "look at that" scored 0.727 against "scan_ahead", "watch out" scored 0.636 against "watch_nearest", both clearing action threshold under normal recognition confidence. Word-sequence scoring (SequenceMatcher over word lists, exact word matches score 1.0, character credit for equal-length "replace" opcodes only, divided by `max(len(heard), len(phrase))`) filters false positives while preserving real mishearings (e.g., "skin bearing 315" for "scan bearing 315"). This matters because fuzzy matching is a load-bearing defense in voice recognition against misheard words, and the right metric determines whether you catch mishearings or false-execute arbitrary speech (Inbound Speech Stage 2 review finding).
