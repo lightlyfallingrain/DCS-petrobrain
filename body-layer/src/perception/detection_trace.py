@@ -34,6 +34,25 @@ class GateOutcome(str, Enum):
     fate this poll, or that it cleared all three. A plain `str` subclass
     so `.value` serializes directly to JSON without a custom encoder."""
 
+    #: `perception.gaze.within_gaze` rejected it -- the first gate
+    #: `check_visibility` evaluates, ahead of `COCKPIT_MASK`
+    #: (`plans/detection-cones-slice2/plan.md`'s 2B, hard part 3: attention
+    #: direction *is* the optimisation, so it has to be the cheapest,
+    #: most-selective test and run first). **This reorders what
+    #: `COCKPIT_MASK`'s own trace count means once a real gaze restriction
+    #: is active**: a rear-hemisphere candidate that both a narrow gaze and
+    #: the cockpit mask would reject now records `GAZE`, not
+    #: `COCKPIT_MASK` -- the mask's own rejection rate stops being directly
+    #: observable from a live trace at that point. Deliberate, not a defect
+    #: to "fix" by reordering back: the mask is a static, already-measured
+    #: envelope (`cockpit_mask.py`) that can be characterised offline,
+    #: while the gaze rejection count is the number 2C's scan loop will
+    #: actually be tuned against. 2B's own default gaze (`None`, no
+    #: restriction -- `perception.gaze`'s module docstring) never fires
+    #: this outcome, so the attribution shift only becomes observable once
+    #: a real gaze restriction lands (a commanded scan sector here, the
+    #: free-scan loop in 2C).
+    GAZE = "gaze"
     COCKPIT_MASK = "cockpit_mask"
     #: The optic's own field of view rejected it -- a narrower cone on top
     #: of the cockpit mask (`perception.optics`, cones slice 1). Never fires

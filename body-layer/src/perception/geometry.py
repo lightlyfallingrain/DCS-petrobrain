@@ -73,6 +73,18 @@ def bearing_deg(observer: GeoPosition, target: GeoPosition) -> float:
     return math.degrees(math.atan2(delta_z, delta_x)) % 360.0
 
 
+def angular_delta_deg(a: float, b: float) -> float:
+    """Smallest absolute angle between two bearings, in degrees (0-180) --
+    moved here from `belief.attention`'s own private `_angular_delta_deg`
+    by `plans/detection-cones-slice2/plan.md`'s 2B (hard part 5): it is the
+    one piece genuinely shared between `belief.attention.area_contains`'s
+    absolute-bearing wedge test and `perception.gaze.within_gaze`'s
+    body-relative one -- small, frame-independent shortest-angle
+    arithmetic, not a parallel implementation of either predicate. Both
+    modules import this function rather than each defining their own copy."""
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
 def range_m(observer: GeoPosition, target: GeoPosition) -> float:
     """Straight-line (slant) range from `observer` to `target`, metres.
     Includes the altitude component -- ground range alone would understate

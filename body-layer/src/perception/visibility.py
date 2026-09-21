@@ -56,13 +56,29 @@ needs anything from this module, so `Optic`/`UNAIDED_OPTIC`/
 `within_optic_fov` are now an ordinary top-level import here, not the
 `TYPE_CHECKING`/function-local workaround this docstring used to explain.
 
-Composes four independent plausibility gates over one
+Composes five independent plausibility gates over one
 `association.WorldObjectCandidate` (reused, not duplicated) against one
-`OwnshipState`. All four must pass; failing any one returns `None`
+`OwnshipState`. All five must pass; failing any one returns `None`
 (absence, not a fabricated weak-confidence guess -- deliberately stricter
 than `association.py`'s ambiguous-match compromise, since there is no real
 detection here to be ambiguous *about*):
 
+0. **Gaze** (`plans/detection-cones-slice2/plan.md`'s 2B, `perception.gaze`)
+   -- evaluated **first**, ahead of every other gate. `perception.gaze.
+   within_gaze` tests the same body-relative azimuth the cockpit mask below
+   also consumes against `gaze`'s wedge; `gaze is None` means "no
+   restriction," a true no-op (today's behaviour, and this parameter's
+   default). The ordering is load-bearing, not incidental: a bearing
+   comparison against a wedge is the cheapest, most selective test
+   available, and skipping every downstream gate for a candidate outside
+   the current gaze is what makes attention direction *the* optimisation
+   rather than a pass added on top of a correct model (plan's hard part
+   3) -- the saving only actually lands once something narrower than the
+   full envelope is gazed (2C), but the ordering is fixed here so that
+   later slice doesn't have to reorder anything. **This does move which
+   gate a rear-hemisphere candidate is recorded against once a real gaze
+   restriction is active** -- see `detection_trace.py`'s own docstring on
+   `GateOutcome.GAZE`.
 1. **Cockpit occlusion mask** (`plans/cockpit-visibility/plan.md`,
    superseding the old flat `NAKED_EYE_FOV_HALF_WIDTH_DEG` azimuth cone --
    see below) -- `perception.geometry.body_relative_direction` rotates the
@@ -152,6 +168,7 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
+from perception.gaze import Gaze, within_gaze
 from perception.geometry import (
     GeoPosition,
     bearing_deg,
@@ -437,15 +454,28 @@ def check_visibility(
     theatre: str,
     *,
     optic: Optic | None = None,
+    gaze: Gaze | None = None,
     trace: DetectionTraceCollector | None = None,
 ) -> VisibilityResult | None:
-    """Run `candidate` through all four gates: cockpit mask, per-optic field
-    of view (`plans/detection-cones-slice1/plan.md`), angular-radius range,
-    terrain LOS (see module docstring for the latter two). Returns `None`
-    on the first failing gate -- cheap geometric checks (cockpit mask, FOV,
-    angular-radius range) before the expensive LOS terrain-sampling check,
-    mirroring `association.associate()`'s own cheap-before-expensive
-    ordering.
+    """Run `candidate` through all five gates: gaze, cockpit mask, per-optic
+    field of view (`plans/detection-cones-slice1/plan.md`), angular-radius
+    range, terrain LOS (see module docstring for all but the first).
+    Returns `None` on the first failing gate -- cheap geometric checks
+    (gaze, cockpit mask, FOV, angular-radius range) before the expensive
+    LOS terrain-sampling check, mirroring `association.associate()`'s own
+    cheap-before-expensive ordering; gaze goes first among the cheap ones
+    (module docstring, gate 0).
+
+    `gaze` (`plans/detection-cones-slice2/plan.md`'s 2B) defaults to `None`
+    -- no restriction, today's behaviour. A caller resolves the effective
+    per-candidate gaze *before* calling this function (`perception.gaze.
+    gaze_for`, which also implements the peripheral-stimulus bypass) --
+    this function only ever applies whatever `Gaze | None` it is handed.
+    `gaze.center_azimuth_deg` (or `0.0` if `gaze is None`) also becomes the
+    boresight `within_optic_fov` is tested against below -- an optic is
+    pointed by the head, not bolted to the airframe (`optics.py`'s own
+    docstring), so the optic FOV cone follows wherever the gaze is
+    currently centred.
 
     `optic` defaults to `optics.UNAIDED_OPTIC`, as of 2026-09-20 -- this
     was `BINOCULAR_OPTIC` for most of that slice's development but is now
@@ -547,6 +577,11 @@ def check_visibility(
         pitch_deg=ownship.pitch_deg,
         bank_deg=ownship.bank_deg,
     )
+
+    if gaze is not None and not within_gaze(gaze, body_direction.azimuth_deg):
+        _record(GateOutcome.GAZE)
+        return None
+
     co_pilot_mask = COCKPIT_MASKS[STATION_CO_PILOT]
     if not is_visible(
         co_pilot_mask, body_direction.azimuth_deg, body_direction.elevation_deg
@@ -554,8 +589,12 @@ def check_visibility(
         _record(GateOutcome.COCKPIT_MASK)
         return None
 
+    boresight_azimuth_deg = gaze.center_azimuth_deg if gaze is not None else 0.0
     if not within_optic_fov(
-        optic, body_direction.azimuth_deg, body_direction.elevation_deg
+        optic,
+        boresight_azimuth_deg,
+        body_direction.azimuth_deg,
+        body_direction.elevation_deg,
     ):
         _record(GateOutcome.OPTIC_FOV)
         return None
