@@ -29,6 +29,7 @@ from perception.detection_trace import (
     DetectionTraceCollector,
     GateOutcome,
 )
+from perception.gaze import ScanPlan
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import OwnshipState
 from perception.visibility import check_visibility
@@ -223,7 +224,11 @@ def test_admitted_candidates_are_annotated_with_cluster_and_observation_id() -> 
         trace_sink=trace,
     )
 
-    observations = source.poll(100.0, _ownship())
+    # t_sim=0.0: SCAN_PLAN's index 0, the "12 o'clock" free-scan leg
+    # (`perception.gaze.gaze_at`) -- the candidate sits dead ahead
+    # (azimuth 0), inside the default +/-15 deg gaze cone active at this
+    # sim time (`plans/detection-cones-slice2/plan.md`'s 2C).
+    observations = source.poll(0.0, _ownship())
 
     assert len(observations) == 1
     entry = next(record for record in trace.records if record.object_id == 7)
@@ -233,8 +238,18 @@ def test_admitted_candidates_are_annotated_with_cluster_and_observation_id() -> 
 
 
 def test_gate_rejected_candidates_are_never_annotated() -> None:
+    # Directly astern (azimuth 180 relative to heading 0) -- rejected by
+    # the cockpit mask's own rear cutoff, but 2C's gaze gate now runs
+    # *first* in the chain (`plans/detection-cones-slice2/plan.md` hard
+    # part 3) and no o'clock cone reaches anywhere near 180 deg (the
+    # widest any cone's centre gets from boresight is 90 deg, plus a 15
+    # deg half-width), so this candidate is rejected by GAZE, not
+    # COCKPIT_MASK, under any `ScanPlan` -- the plan's own accepted
+    # consequence ("the trace stops observing the mask's rejection rate"),
+    # not a bug. `test_cockpit_mask_failure_is_recorded_with_no_achieved_
+    # tier` above still exercises the mask gate directly via
+    # `check_visibility` (gaze=None), unaffected by this change.
     world_objects = {
-        # Directly astern -- rejected by the cockpit mask.
         "objects": [_world_object(9, "Infantry", lat_deg=-100.0, lon_deg=0.0)]
     }
     trace = DetectionTraceCollector()
@@ -246,11 +261,11 @@ def test_gate_rejected_candidates_are_never_annotated() -> None:
         trace_sink=trace,
     )
 
-    observations = source.poll(100.0, _ownship())
+    observations = source.poll(0.0, _ownship())
 
     assert observations == []
     entry = trace.records[0]
-    assert entry.outcome == GateOutcome.COCKPIT_MASK
+    assert entry.outcome == GateOutcome.GAZE
     assert entry.cluster_member_object_ids is None
     assert entry.observation_id is None
 
@@ -263,26 +278,25 @@ def test_admitted_but_throttled_candidate_stays_unannotated() -> None:
     # with no cluster/observation detail (DetectionTrace's own docstring
     # point). Renamed from NAKED_EYE_MAX_NEW_PER_POLL by slice 2A.5, which
     # changed the cap's unit from objects to groups -- this scenario is
-    # unaffected because its candidates never clustered. Cross-offsets follow
-    # test_naked_eye_source.py's own _CAP_TEST_CROSS_OFFSETS_M pattern --
-    # candidates on the exact same bearing have zero angular separation and
-    # always merge (Stage 3b-i rev.2), which would confound this test's own
-    # per-candidate throttle assertion with clustering; these offsets keep
-    # every admitted pair separable.
+    # unaffected because its candidates never clustered.
+    #
+    # **Rescaled again, 2C** (`plans/detection-cones-slice2/plan.md`): the
+    # original 190 deg spread put objects 3/4 far outside the default
+    # +/-15 deg gaze cone -- reuses `test_naked_eye_source.py`'s own
+    # rescaled `_CAP_TEST_RANGES_M`/`_CAP_TEST_CROSS_OFFSETS_M` values
+    # (first four of five), whose derivation (in that module's own
+    # docstring) already confirms, against `perception.clustering.
+    # angular_separation_rad`/`angular_size_rad`, both that every candidate
+    # stays inside +/-15 deg (max 12.77 deg) and that no pair merges
+    # (worst separability margin 0.30 deg) -- a subset of an already-
+    # verified separable set stays separable, so this is a direct reuse,
+    # not a fresh derivation.
     world_objects = {
         "objects": [
-            _world_object(1, "Infantry", lat_deg=100.0, lon_deg=0.0),
-            _world_object(2, "Infantry", lat_deg=250.0, lon_deg=60.0),
-            _world_object(3, "Infantry", lat_deg=430.0, lon_deg=90.0),
-            # 535 m, inside the naked eye's ~600 m Infantry threshold.
-            # Was 650 m, which cleared the old binocular default's 2400 m
-            # threshold but is rejected outright by the naked eye -- and a
-            # rejected fourth candidate cannot exercise a throttle that
-            # only applies to gate-admitted ones. Moved inward, and given a
-            # wider bearing offset so it stays angularly separable from
-            # object 3 (see this test's own clustering note above) while
-            # remaining the furthest of the four.
-            _world_object(4, "Infantry", lat_deg=500.0, lon_deg=190.0),
+            _world_object(1, "Infantry", lat_deg=60.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=150.0, lon_deg=34.0),
+            _world_object(3, "Infantry", lat_deg=260.0, lon_deg=55.0),
+            _world_object(4, "Infantry", lat_deg=390.0, lon_deg=72.0),
         ]
     }
     trace = DetectionTraceCollector()
@@ -293,7 +307,9 @@ def test_admitted_but_throttled_candidate_stays_unannotated() -> None:
         trace_sink=trace,
     )
 
-    observations = source.poll(100.0, _ownship())
+    # t_sim=0.0: the "12 o'clock" free-scan leg, active for this whole
+    # single poll.
+    observations = source.poll(0.0, _ownship())
 
     admitted_ids = {
         record.object_id
@@ -319,12 +335,23 @@ def _replay_with_trace_sink(
             _world_object(102, "T-72B", lat_deg=9995.0, lon_deg=20040.0),
         ]
     }
+    # 2C (`plans/detection-cones-slice2/plan.md`): the default o'clock scan
+    # loop only gazes a +/-15 deg cone at a time, and neither candidate sits
+    # dead ahead of this fixture's fixed heading -- object 102 (T-72B, true
+    # azimuth ~97.1 deg) is inside a commanded "right" scan's "3 o'clock"
+    # leg (90 deg, 7.1 deg of margin), which is active across this fixture's
+    # whole 0.4 s span (`command_t_sim=96.0` puts elapsed time at 4.0-4.4 s,
+    # inside the 3 o'clock leg's [4, 6) s window). This test is about the
+    # trace sink not perturbing behaviour, not about the scan loop itself,
+    # so a persistent commanded scan (rather than free scan) is the right
+    # tool -- it only needs *some* admission to exercise the comparison.
     source = NakedEyePerceptionSource(
         aircraft_client=FakeAircraftClient(world_objects),  # type: ignore[arg-type]
         theatre=_THEATRE,
         world_model_conn=_FAKE_CONN,
         emit_mode="every_poll",
         trace_sink=trace_sink,
+        scan_plan=ScanPlan(commanded_sector="right", command_t_sim=96.0),
     )
     store = ContactStore()
     all_observations = []
@@ -391,8 +418,10 @@ def test_writer_joins_admitted_entry_to_its_contact(tmp_path: Any) -> None:
         trace_sink=trace,
     )
 
-    observations = source.poll(100.0, _ownship())
-    store.ingest(observations, now_sim=100.0)
+    # t_sim=0.0: the "12 o'clock" free-scan leg, active for this whole
+    # single poll.
+    observations = source.poll(0.0, _ownship())
+    store.ingest(observations, now_sim=0.0)
     assert len(store.contacts) == 1
     contact = store.contacts[0]
 
