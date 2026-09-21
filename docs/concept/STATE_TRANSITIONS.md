@@ -128,10 +128,15 @@ unit changed behaviour?
 -> report if significant (using report prioritization rules)
 ```
 
-**None of this exists yet.** The built event set is lifecycle plus classification plus cardinality;
-there is no behaviour-change channel at all. Note `moving / stopped` also connects to the ED gap
-analysis, which found neither ED nor this project models movement — the diagram says movement
-matters, as a *reporting trigger* rather than a detection term.
+**`moving / stopped` now exists** (`plans/movement-detection/plan.md`) — the first behaviour-change
+event this project built: `CONTACT_MOTION_CHANGED`, alongside `belief.motion.MotionBelief` on
+`Contact`. The remaining three rows (`tracking us / stopped tracking`, `engaging us / disengaged`,
+`engaging flight / package / friendlies`) still don't exist — the built event set is now lifecycle
+plus classification plus cardinality plus motion, with no other behaviour-change channel. Movement
+is exactly the *reporting trigger* the diagram frames it as, not a detection term: an apparent-
+angular-rate gate on real DCS unit velocity (`Object.getVelocity()`, mission-scripting) decides
+whether a crew member would notice motion at all, and only that tri-state verdict — never the
+velocity vector itself — crosses into belief.
 
 ## Weapons — deliberate optimisation
 

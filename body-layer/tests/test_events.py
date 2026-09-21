@@ -1,8 +1,9 @@
 """Tests for `belief.events` -- `lifecycle_event_kind` (`plans/pb2-contact-
 memory/plan.md` Stage 2), `classification_event` (`plans/
 classification-refinement/plan.md` Stage 3), `attention_event_kind`
-(`plans/bl4-attention-events/plan.md`, BL-4), and `cardinality_event`
-(`plans/group-contact-model/plan.md` Stage 4b). Each transition case gets
+(`plans/bl4-attention-events/plan.md`, BL-4), `cardinality_event`
+(`plans/group-contact-model/plan.md` Stage 4b), and `motion_event_kind`
+(`plans/movement-detection/plan.md` Stage 3). Each transition case gets
 its own test."""
 
 from __future__ import annotations
@@ -13,11 +14,13 @@ from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_DETECTED,
     CONTACT_LOST,
+    CONTACT_MOTION_CHANGED,
     CONTACT_REACQUIRED,
     attention_event_kind,
     cardinality_event,
     classification_event,
     lifecycle_event_kind,
+    motion_event_kind,
 )
 
 
@@ -137,4 +140,28 @@ def test_cardinality_interval_change_is_contact_cardinality_changed() -> None:
     fire the event."""
     assert cardinality_event((1, 1), (2, 2)) == CONTACT_CARDINALITY_CHANGED
     assert cardinality_event((2, 5), (4, 5)) == CONTACT_CARDINALITY_CHANGED
+
+
+def test_motion_established_for_the_first_time_emits_contact_motion_changed() -> None:
+    """Unlike every other kind in this module, `previous is None` does NOT
+    suppress the event here -- see `motion_event_kind`'s own docstring for
+    why: `Contact.motion` can legitimately stay `None` for many ticks, so
+    its first real establishment is exactly the transition worth reporting,
+    not a synthetic first-tick artifact."""
+    assert motion_event_kind(None, "moving") == CONTACT_MOTION_CHANGED
+    assert motion_event_kind(None, "stopped") == CONTACT_MOTION_CHANGED
+
+
+def test_current_none_never_emits() -> None:
+    assert motion_event_kind(None, None) is None
+
+
+def test_unchanged_motion_emits_nothing() -> None:
+    assert motion_event_kind("moving", "moving") is None
+    assert motion_event_kind("stopped", "stopped") is None
+
+
+def test_motion_state_change_is_contact_motion_changed() -> None:
+    assert motion_event_kind("stopped", "moving") == CONTACT_MOTION_CHANGED
+    assert motion_event_kind("moving", "stopped") == CONTACT_MOTION_CHANGED
     assert cardinality_event((4, 5), (4, float("inf"))) == CONTACT_CARDINALITY_CHANGED

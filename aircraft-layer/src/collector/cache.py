@@ -38,6 +38,7 @@ from schema import (
     PetrovichIndicationSample,
     PetrovichWheelSample,
     TelemetrySample,
+    UnitVelocitySnapshot,
     WorldObjectsSnapshot,
 )
 
@@ -117,6 +118,26 @@ class PetrovichWheelCache:
 
     def latest(self) -> PetrovichWheelSample | None:
         """Return the most recently pushed sample, or `None` if empty."""
+        return self._latest
+
+
+class UnitVelocityCache:
+    """Holds the latest `UnitVelocitySnapshot` (`plans/movement-detection/
+    plan.md` Stage 1). Same "latest of one" shape as `WorldObjectsCache`,
+    kept as its own small concrete class for the same reason that one is --
+    one class per feed is clearer at `unit_velocity_receiver`'s (and, unlike
+    every cache above, the receiver's own, not `collector.server`'s) call
+    site than a generic "latest of anything" cache."""
+
+    def __init__(self) -> None:
+        self._latest: UnitVelocitySnapshot | None = None
+
+    def push(self, snapshot: UnitVelocitySnapshot) -> None:
+        """Record a newly-received snapshot as the current latest state."""
+        self._latest = snapshot
+
+    def latest(self) -> UnitVelocitySnapshot | None:
+        """Return the most recently pushed snapshot, or `None` if empty."""
         return self._latest
 
 

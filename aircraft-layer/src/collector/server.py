@@ -74,7 +74,16 @@ logger = logging.getLogger(__name__)
 #: every poll, 4113 times in one flight, and a Windows probe plus an hour of
 #: tracing went into a bug that did not exist in the code. A mismatch warning
 #: costs one log line and makes that failure loud instead of invisible.
-EXPECTED_EXPORT_VERSION = "2026-09-22"
+EXPECTED_EXPORT_VERSION = "2026-09-22b"
+#: Bumped again 2026-09-22 (`b` suffix, `plans/movement-detection/plan.md`
+#: Stage 1) for the `unit_name` field added to `WorldObjectSample` -- the
+#: join key the unit-velocity feed needs (see `schema/world_objects.py`'s
+#: docstring). Additive-only (an old deployed script keeps working, it just
+#: never sends `unit_name`, and the schema tolerates its absence), but the
+#: version string still moves so a stale-Export.lua sortie's `dcs.log`
+#: reflects that this field cannot be trusted yet -- same "make the mismatch
+#: loud" reasoning as the paragraph above, not a claim that this specific
+#: change is unsafe to skip.
 #: Loopback-only by design -- Export.lua and the collector run on the same
 #: Windows box (plan decision 2); nothing outside this machine should be able
 #: to push telemetry samples.

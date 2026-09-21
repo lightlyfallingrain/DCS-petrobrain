@@ -101,6 +101,7 @@ def _observation(
     classification_raw: str = "BMP-2",
     classification_level: int = 2,
     count_bucket: str | None = None,
+    apparent_motion: bool | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -118,6 +119,7 @@ def _observation(
         provenance="test_fixture",
         classification_level=classification_level,
         count_bucket=count_bucket,
+        apparent_motion=apparent_motion,
     )
 
 
@@ -174,6 +176,31 @@ def test_render_contact_report_follows_unit_type_clock_range_format() -> None:
     # ("class") with a non-OP_-bucketed raw value falls back to the value
     # itself; no coalition token.
     assert speech.text == "BMP-2."
+
+
+def test_render_contact_report_appends_moving_clause_when_moving() -> None:
+    """`plans/movement-detection/plan.md` Stage 4's one clause."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=True)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    speech = render_contact_report(store, contact_id, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "BMP-2, moving."
+
+
+def test_render_contact_report_omits_moving_clause_when_stopped_or_unknown() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=False)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    speech = render_contact_report(store, contact_id, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "BMP-2."  # "stopped" is the unremarked default
 
 
 def test_render_contact_report_maps_op_class_to_display_word() -> None:

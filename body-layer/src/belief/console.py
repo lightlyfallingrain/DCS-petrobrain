@@ -161,6 +161,7 @@ _ATTENTION_LEVELS: tuple[Attention, ...] = ("ignore", "normal", "watch", "priori
 _SHOW_FACT_KEYS: tuple[str, ...] = (
     "classification",
     "cardinality",
+    "motion",
     "certainty",
     "visible",
     "last_seen_ago_s",
