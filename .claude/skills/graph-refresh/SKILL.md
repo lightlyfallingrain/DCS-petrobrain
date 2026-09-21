@@ -72,6 +72,23 @@ If nothing needs extraction, skip to **Finish**. Otherwise run `/graphify` — i
 extracts only the uncached files, and rebuilds. Dispatch extraction subagents with
 `subagent_type="general-purpose"`; `Explore` is read-only and silently drops results.
 
+**Delete stale chunk files before dispatching, and count them after:**
+
+```sh
+rm -f graphify-out/.graphify_chunk_*.json      # BEFORE dispatching
+ls graphify-out/.graphify_chunk_*.json | wc -l # AFTER — must equal the number dispatched
+```
+
+This is not housekeeping. Extraction writes `.graphify_chunk_NN.json`, and the merge step globs
+**every** chunk file present — including any left by a previous run. On 2026-09-21 a rebuild
+dispatched three chunks and the merge found four: the fourth was from the day before and held
+world-model research notes in their *pre-triage* form. Merging it would have reintroduced the exact
+claims that run existed to correct, with fresh citations attached — the laundering failure this
+whole procedure is built to prevent, arriving through the cleanup step rather than the documents.
+
+It was caught only because the merge printed a count that did not match. **So print the count and
+check it**, rather than trusting the glob.
+
 **One corpus-specific instruction belongs in every extraction prompt.** This project preserves
 superseded decisions in place, with the replacement above and a `SUPERSEDED — see ...` pointer in
 the original. Where a section carries that marker, the edge to its successor matters more than the
@@ -81,13 +98,28 @@ failure the graph exists to prevent.
 ## Finish
 
 ```sh
-rm -f graphify-out/.needs_update graphify-out/.corpus.txt graphify-out/.uncached.txt
+rm -f graphify-out/.needs_update graphify-out/.corpus.txt graphify-out/.uncached.txt \
+      graphify-out/.graphify_chunk_*.json graphify-out/.graphify_semantic_new.json
 .claude/scripts/gq.sh "<something this merge changed>"
 ```
+
+The chunk files are in that list deliberately — see the warning above. Leaving them is how the
+*next* run silently merges *this* run's work into a corpus it no longer matches.
 
 That last line is the check that matters: query for something the merge changed and confirm the
 graph answers from the new state. A rebuild that produced a graph still describing the old one is
 the failure this whole procedure exists to prevent, and it is invisible unless you look.
+
+## `graphify-out/` is gitignored — there is no undo
+
+Everything under `graphify-out/` — `graph.json`, the extraction cache, the chunk files — is
+gitignored and therefore unrecoverable. A careless write truncated `graph.json` during the
+2026-09-21 rebuild; it was recovered only because the *cache* happened to survive in the same
+untracked directory, which is luck rather than a property.
+
+So: **write `graph.json` through `paths.write_json_atomic`, never with an inline expression**, and
+if you are about to overwrite it, remember the cache is the only thing standing between a slip and
+a full re-extraction of every uncached file.
 
 ## What this does not fix
 
