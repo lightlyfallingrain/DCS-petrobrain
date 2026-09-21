@@ -253,9 +253,14 @@ def test_group_salient_candidate_beyond_the_resolution_threshold_is_still_reject
 ):
     """Group salience relaxes the presence threshold, it does not remove
     it -- a candidate beyond even `RESOLUTION_ANGULAR_RADIUS_RAD`'s own
-    (5384.6 m) threshold is rejected regardless of `group_salient`."""
+    threshold is rejected regardless of `group_salient`.
+
+    Boundary is `7.0 / 0.00128 = 5468.75 m`; 5470 m clears it by 1.25 m.
+    (Was 5386 m against a 5384.6 m boundary, when the constant was the
+    plan's 0.0013 -- rounded the wrong way, see that constant's own
+    docstring.)"""
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("T-72B", x=5386.0, z=0.0)
+    candidate = _candidate("T-72B", x=5470.0, z=0.0)
 
     result = check_visibility(
         ownship, candidate, _FAKE_CONN, _THEATRE, group_salient=True

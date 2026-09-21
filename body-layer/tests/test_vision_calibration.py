@@ -467,57 +467,46 @@ def test_group_admitted_at_3km() -> None:
 
 
 def test_group_admission_at_the_derived_resolution_boundary() -> None:
-    """**A real discrepancy this stage's implementation found, not fixed
-    here** -- `RESOLUTION_ANGULAR_RADIUS_RAD`'s own value is the plan's
-    explicit choice (Stage 1, already merged), so this test documents what
-    the built code actually does rather than relitigating the constant.
+    """The photographed 5.44 km rung -- "barely visible group if I look
+    intently" -- is **admitted**, which is the property
+    `RESOLUTION_ANGULAR_RADIUS_RAD` exists to have.
 
-    The photographed 5.44 km rung ("barely visible group if I look
-    intently") sits at 5440 m. `RESOLUTION_ANGULAR_RADIUS_RAD = 0.0013`
-    derives from `7 / 5440 = 0.0012868`, **rounded UP** to 0.0013 -- the
-    opposite direction from `LOWRES_ANGULAR_RADIUS_RAD`'s own precedent
-    (`7 / 8890 * 4 = 0.00315` rounded DOWN to 0.003, deliberately
-    loosening the threshold so the exact calibration point it was derived
-    from stayed admitted -- see `visibility.py`'s own `LOWRES_ANGULAR_
-    RADIUS_RAD` docstring). Rounding up here tightens the threshold
-    instead: the derived boundary is `7 / 0.0013 = 5384.6 m`, ~55 m (1%)
-    *short* of the photographed 5440 m rung -- at exactly 5440 m a
-    member's own `theta_size` (0.0012868) sits fractionally below
-    `RESOLUTION_ANGULAR_RADIUS_RAD` (0.0013), so it fails `_resolvable`
-    outright, no group ever forms, and `check_visibility` rejects it even
-    with `group_salient=True` forced. The plan's own worked table already
-    shows this (`"5385 m"` against a `"5.44 km"` rung), but its prose
-    still calls the rung "admitted (marginal)" -- reported here rather
-    than silently patched, since moving `RESOLUTION_ANGULAR_RADIUS_RAD`
-    is not this stage's decision."""
+    The constant derives from that rung: `7 / 5440 = 0.00128676`, rounded
+    **down** to `0.00128` so the observation it was derived from stays
+    inside the threshold. That is `LOWRES_ANGULAR_RADIUS_RAD`'s own
+    convention and the reason for it -- a threshold derived from an
+    observation must admit that observation, or the derivation cannot be
+    reproduced from the data it cites.
+
+    The plan specified `0.0013`, the same figure rounded the other way,
+    which put the boundary at 5384.6 m and left this rung 55 m outside.
+    Caught during implementation and corrected; this test is the guard.
+    Boundary is now `7 / 0.00128 = 5468.75 m`."""
     ownship = _group_ownship()
     observer = _observer()
 
-    # 5380 m, not 5384.6 m -- the outermost members of the 200 m line sit
-    # ~100 m off-axis, so their own *slant* range is a little longer than
-    # the line's centre range; 5380 m leaves enough margin that every
-    # member, including the two at the ends, still clears the 5384.6 m
-    # boundary (`sqrt(5380^2 + 100^2) = 5380.9 m`).
-    inside = _line_candidates(5380.0, start_id=2000)
-    salient_inside = group_salient_ids(inside, observer, UNAIDED_OPTIC)
-    assert salient_inside == frozenset(c.object_id for c in inside)
-    result_inside = check_visibility(
-        ownship, inside[0], _GROUP_CONN, _GROUP_THEATRE, group_salient=True
-    )
-    assert result_inside is not None
-    assert result_inside.tier == "lowres"
-
     photographed = _line_candidates(5440.0, start_id=3000)
-    salient_photographed = group_salient_ids(photographed, observer, UNAIDED_OPTIC)
-    # No member individually clears RESOLUTION_ANGULAR_RADIUS_RAD at this
-    # range, so `_resolvable` excludes every one of them and no group
-    # forms at all -- not a cohesion failure (cohesion is range-invariant,
-    # see `group_salience.py`'s own docstring).
-    assert salient_photographed == frozenset()
-    result_photographed = check_visibility(
+    salient = group_salient_ids(photographed, observer, UNAIDED_OPTIC)
+    assert salient == frozenset(c.object_id for c in photographed)
+    result = check_visibility(
         ownship, photographed[0], _GROUP_CONN, _GROUP_THEATRE, group_salient=True
     )
-    assert result_photographed is None
+    assert result is not None
+    assert result.tier == "lowres"
+
+    # Beyond the boundary no member is resolvable, so no group forms at
+    # all -- not a cohesion failure (cohesion is range-invariant, see
+    # `group_salience.py`'s docstring). The outermost members of the
+    # 200 m line sit ~100 m off-axis, so 5600 m centre range puts even
+    # the nearest member past 5468.75 m.
+    beyond = _line_candidates(5600.0, start_id=4000)
+    assert group_salient_ids(beyond, observer, UNAIDED_OPTIC) == frozenset()
+    assert (
+        check_visibility(
+            ownship, beyond[0], _GROUP_CONN, _GROUP_THEATRE, group_salient=True
+        )
+        is None
+    )
 
 
 def test_lone_unit_at_4km_is_not_admitted() -> None:
@@ -549,7 +538,7 @@ def test_infantry_group_admitted_ceiling_predicts_the_1_91km_rejection() -> None
     rescued by its conspicuous neighbours because it isn't resolvable at
     that range at all, independent of the group predicate."""
     ceiling_m = 1.8 / visibility.RESOLUTION_ANGULAR_RADIUS_RAD
-    assert ceiling_m == pytest.approx(1384.6, abs=0.1)
+    assert ceiling_m == pytest.approx(1406.25, abs=0.1)
     # The photographed rung the plan claims this predicts, unprompted:
     assert ceiling_m < 1910.0
 

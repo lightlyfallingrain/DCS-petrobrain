@@ -272,7 +272,17 @@ IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
 #: must stay arithmetically identical (see `_achieved_tier`'s own
 #: docstring), so both read the same `_presence_angular_radius_rad`
 #: selection below rather than duplicating the ternary.
-RESOLUTION_ANGULAR_RADIUS_RAD: Final[float] = 0.0013
+#:
+#: **Rounded DOWN from 7/5440 = 0.00128676, not up.** The plan specified
+#: 0.0013, which is the same figure rounded the other way and puts the
+#: boundary at 5385 m -- 55 m SHORT of the 5.44 km rung the plan's own prose
+#: calls "admitted (marginal)", so the calibration point it is derived from
+#: would have fallen outside it. `LOWRES_ANGULAR_RADIUS_RAD` above already
+#: sets the convention of rounding down for exactly this reason: a threshold
+#: derived from an observation must admit that observation, or the derivation
+#: is not reproducible from the data it cites. At 0.00128 the boundary is
+#: 5469 m and the rung clears.
+RESOLUTION_ANGULAR_RADIUS_RAD: Final[float] = 0.00128
 
 #: The tier this filter gates on. `lowres` over `medres`
 #: (`plans/classification-refinement/plan.md` Stage 7, Decision 2, the
