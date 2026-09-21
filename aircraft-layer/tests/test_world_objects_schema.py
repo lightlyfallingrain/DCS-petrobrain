@@ -166,6 +166,49 @@ def test_to_dict_round_trips_is_ownship() -> None:
     assert snapshot.to_dict()["objects"][0]["is_ownship"] is True
 
 
+def test_from_json_line_accepts_unit_name() -> None:
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"BMP-2","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"unit_name":"Redfor-1-1"}]}\n'
+    )
+
+    snapshot = WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+    assert snapshot.objects[0].unit_name == "Redfor-1-1"
+
+
+def test_from_json_line_defaults_unit_name_to_none_when_absent() -> None:
+    snapshot = WorldObjectsSnapshot.from_json_line(
+        VALID_LINE, received_wall_clock_s=1.0
+    )
+
+    assert snapshot.objects[0].unit_name is None
+
+
+def test_from_json_line_rejects_non_string_unit_name() -> None:
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"BMP-2","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"unit_name":42}]}\n'
+    )
+
+    with pytest.raises(WorldObjectParseError, match="must be a string or null"):
+        WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+
+def test_to_dict_round_trips_unit_name() -> None:
+    line = (
+        '{"t":1.0,"objects":[{"id":1,"type":"BMP-2","coalition":1,'
+        '"lat":1.0,"lon":2.0,"alt_m":3.0,"heading_true_rad":0.0,'
+        '"unit_name":"Redfor-1-1"}]}\n'
+    )
+
+    snapshot = WorldObjectsSnapshot.from_json_line(line, received_wall_clock_s=1.0)
+
+    assert snapshot.to_dict()["objects"][0]["unit_name"] == "Redfor-1-1"
+
+
 def test_to_dict_round_trips_field_names() -> None:
     snapshot = WorldObjectsSnapshot.from_json_line(
         VALID_LINE, received_wall_clock_s=1000.0
