@@ -78,14 +78,26 @@ there is not an implementation detail — it is how they know what they are flyi
 - **Never leave the main checkout on a worktree branch or a detached HEAD.** Those are agent
   scaffolding and mean nothing to the person flying the aircraft.
 
-### Status
+### Status: all three rules in force
 
-Rules 1 and 3 are in force now. Rule 2 (implementer isolation) is **to be trialled on the next
-implementer run** before being written in as settled — the untested part is the fast-forward handoff
-and whether an implementer told to "commit in small steps" stays clear about which branch it is on.
-Until then, an implementer may run in the main checkout, and while one does, **the main loop must
-not touch git there at all** — that is the discipline this change exists to stop depending on, so
-treat it as a temporary exception with a short life.
+Rule 2 was trialled on cones 2B (2026-09-21) and **worked** — the agent committed cleanly on its own
+branch, reported the sha, and nothing raced. Two frictions surfaced, both now handled:
+
+- **The agent-memory hook denied the worktree path.** It allowed only
+  `$CLAUDE_PROJECT_DIR/.claude/agent-memory/`, so an isolated agent had no correct move: write into
+  the main checkout and violate rule 3, or skip the memory. 2B's implementer skipped it and
+  *reported the contradiction*, which is how it was found — had it silently written to the main
+  checkout instead, nobody would have noticed. `agent-memory-path-gate.sh` now accepts any worktree
+  root while still denying subproject-relative paths, including a subproject path nested inside a
+  worktree.
+- **Bash heredocs and `>>` redirection are refused inside a worktree** ("too complex to verify it
+  stays inside the worktree"). Not a bug to fix — use the `Edit` and `Write` tools for file content
+  there, which is better practice anyway. **Say this in an isolated agent's prompt**, or it will
+  discover it mid-task and improvise.
+
+A memory that is never written is the most expensive loss in this system, because its entire purpose
+is to stop a later agent repeating a mistake. A hook that silently prevents one is worse than no
+hook.
 
 ### Why a feature branch's history still stays clean
 
