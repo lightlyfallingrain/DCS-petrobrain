@@ -150,3 +150,104 @@ suite), not back-fit from observed output:
   to presence). This is correct/intended per decision 3, but the blast radius was wider than a
   quick read of the plan implies — five separate test functions across three files needed a
   different (non-distinctive) test object, not just a value tweak.
+
+---
+
+## 2A.5: intake cap counts groups, not objects (2026-09-21)
+
+### Implementation Summary
+
+Implemented sub-slice **2A.5 only**, on top of merged 2A. `NakedEyePerceptionSource.poll()` now
+clusters every gate-surviving candidate before the simultaneous-detection cap is applied, instead
+of capping individual objects ahead of clustering. Admitting a cluster admits all of its members at
+once, so a dense group larger than the cap is reported whole in one poll. Acquisition state stays
+keyed on `object_id` (clusters have no stable cross-poll identity). The `on_change` defect — a
+capped-out object/cluster being marked "previously visible" and never retried — is fixed: a
+capped-out group's members are now excluded from `_previously_visible_ids` until actually admitted,
+so the backlog drains over subsequent polls. No gaze/`ScanPlan`/scan-loop/dwell code touched (2B/2C/
+2D out of scope, per the task).
+
+### Files Changed
+
+- `body-layer/src/perception/naked_eye_source.py` — `poll()` reordered: gate → cluster all
+  survivors → cap clusters → emit. `NAKED_EYE_MAX_NEW_PER_POLL` renamed
+  `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` (value unchanged, 3). New shared static
+  `_select_capped_clusters(clusters, known_ids)`: finds clusters with ≥1 member not in `known_ids`,
+  sorts nearest-first by each cluster's nearest member's own range, takes the first
+  `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`. `_acquire_on_change` and `_acquire_every_poll` now take/
+  return `Cluster`s: `_acquire_on_change` computes `steady_ids = currently_visible_ids &
+  _previously_visible_ids` and sets the new state to `steady_ids | admitted_ids` — this is the
+  concrete fix (a capped-out cluster's not-yet-previously-visible members are excluded from both
+  terms, so they stay eligible next poll). `_acquire_every_poll` mirrors this against `_acquired_ids`
+  and emits every cluster whose members are now *all* in the acquired set. Module docstring points
+  3-5 rewritten to describe the new order and the cap's new unit.
+- `body-layer/src/perception/detection_trace.py` — one docstring reference to the renamed constant
+  updated.
+- `body-layer/tests/test_naked_eye_source.py` — see Tests Added below.
+- `body-layer/CLAUDE.md` — the `naked_eye_source.py` and `detection_trace.py` Structure entries'
+  descriptions of the old "Stage 2 scoping decision" (cap runs ahead of clustering, per-object)
+  updated to describe 2A.5's actual behaviour; these were the only two references to the renamed
+  constant outside code/tests.
+
+### Tests Added
+
+- `test_a_dense_group_larger_than_the_cap_admits_whole_in_one_poll` — the headline case: ten
+  co-located, single-link-chained Infantry (10 m down-range spacing, confirmed by running the
+  scenario to merge into one cluster, not assumed from the 20 m pairwise-merge case already in the
+  suite) produce one `Observation`. Also asserts, via `DetectionTraceCollector`, that all ten
+  `object_id`s individually reached `GateOutcome.ADMITTED` before clustering — the no-omniscience-
+  leak check the task asked for.
+- `test_a_capped_out_group_is_retried_and_the_backlog_drains_over_polls` — **replaces**
+  `test_candidates_dropped_by_the_cap_are_not_retried_next_poll` per explicit user approval
+  (2026-09-21). Reuses the existing 5-singleton-group fixture (`_CAP_TEST_RANGES_M`, cap=3).
+  Expected counts derived from the model, not observed: poll 1 admits the 3 nearest (5 eligible,
+  cap 3); poll 2 (same snapshot) — the 2 remaining groups are still eligible (their members were
+  excluded from `_previously_visible_ids` last poll) and both fit under the cap, so both are
+  admitted (`5 - 3 = 2`); poll 3 — nothing eligible, true steady state, `[]`. Docstring states what
+  the test replaces and why, per the task's rewrite instructions.
+- `test_continuity_survives_a_cluster_whose_membership_grows_between_polls` — object-keyed
+  acquisition state check: a 3-member cluster emits `Observation` A; a 4th member joins on the next
+  poll (still one cluster, confirmed by running the scenario); the grown cluster's
+  `continues_observation_id` resolves to A via majority object-id overlap (3 of 4 members vote for
+  A), which a per-cluster-id scheme could not do since no cluster id survives poll to poll.
+- `test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first` — unchanged assertions
+  (renamed constant only); already exercises "angularly separated singleton groups are still capped
+  at N groups per poll" since each of its 5 candidates is its own group under this fixture's
+  geometry, so a separate test for that scenario would have been a near-duplicate.
+
+Also fixed a now-stale comment in `test_a_cluster_splitting_gives_the_majority_child_continuity`
+(`test_naked_eye_source.py`): its 4 candidates are one cluster, so under 2A.5 the cap never
+throttles that scenario at all (a group is admitted whole regardless of member count) — the old
+comment's "only 3 of 4 acquired" claim, true under the pre-2A.5 per-object cap, no longer describes
+what the code does. The test's own assertions were unaffected (still `len(first) == 1`); only the
+comment was wrong.
+
+### Checks (body-layer/)
+
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass (`cd body-layer && mypy src`, per the CWD-only config-discovery note)
+- `pytest tests -q`: pass — **780 passed, 4 xfailed** (baseline 778 passed / 4 xfailed; net +2 new
+  tests, since the rewritten pinned test replaces one 1-for-1 and two new tests were added)
+
+### Notable Discoveries
+
+- **The plan's own affected-modules note ("Not touched: `clustering.py`") held exactly as stated.**
+  `cluster_candidates`'s existing signature (a `Sequence[ClusterCandidate]` plus observer/presence-
+  multiplier) already accepted "all gate survivors" just as readily as "the capped subset" — the
+  reorder in `poll()` needed zero changes to `clustering.py` itself, confirming the plan's claim
+  that this slice's whole cost sits on the calling side.
+- **One existing test's own *comment* (not its assertions) went stale**, in
+  `test_a_cluster_splitting_gives_the_majority_child_continuity`: its 4-candidate merged-cluster
+  fixture happened to exercise exactly the case where per-object throttling and per-group throttling
+  produce the same `len(first) == 1` result, but for different reasons (per-object: 3 of 4
+  acquired, capped; per-group: 1 cluster admitted whole, cap never binds). The plan's own test-impact
+  list didn't name this file, and a grep for the renamed constant caught it — worth flagging since
+  it's exactly the "silent, not loud" class of miss the role instructions warn about: the assertions
+  still passed, only the explanation was wrong.
+- **`_select_capped_clusters`'s nearest-first ordering uses each cluster's *nearest member's own
+  individually-computed range*, not a recomputed centroid distance.** `ClusterCandidate.range_m` is
+  already the slant range `check_visibility` derived per-candidate before clustering ever runs, so
+  reusing it avoids a second geometry computation and keeps "nearest-first" tied to the same range
+  figure the pre-2A.5 code sorted on (just now taken as a per-cluster minimum instead of a per-object
+  value). Not specified by the plan at this level of detail; recorded here as the design call.
