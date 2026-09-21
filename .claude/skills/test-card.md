@@ -26,6 +26,12 @@ unusable at the controls.
 
 ## What a card must contain
 
+**The branch, first.** The user tests in the main checkout and does not use worktrees, so the card
+must open with which branch to check out and the command to do it — `git checkout <branch>`. Work
+that has not merged yet lives somewhere specific, and "it's ready" is not actionable if they cannot
+tell what to check out. This is the most common thing a card can silently omit, because whoever
+writes it already knows the answer.
+
 **Setup, verbatim and verified.** Every command exactly as it must be typed, with the paths and
 flags this repository uses today. Run them, or mark them unverified. This role has a documented
 history of publishing commands that were never executed — see `.claude/agents/dod.md` — and a card
