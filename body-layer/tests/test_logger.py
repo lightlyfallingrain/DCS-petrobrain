@@ -831,6 +831,49 @@ def test_active_gaze_ignores_a_cancelled_task() -> None:
     assert _active_gaze(tasks) == FREE_SCAN_PLAN
 
 
+def test_active_gaze_keeps_steering_a_succeeded_scan_task() -> None:
+    # Cones 2C sortie fix: tick() resolves a scan_area task to "succeeded"
+    # the instant any contact is seen in its area -- a commanded scan must
+    # keep steering the gaze after that, not silently revert to free scan
+    # (the sortie's "commanded scan left, still got reports from 12
+    # o'clock" finding).
+    tasks = TaskStore()
+    task = tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "left"),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+    # Direct assignment rather than a real tick()/contact: the point under
+    # test is _active_gaze's own status filter, not tick's resolution logic
+    # (covered by test_tasks.py).
+    task.status = "succeeded"
+
+    plan = _active_gaze(tasks)
+
+    assert plan == ScanPlan(commanded_sector="left", command_t_sim=3.0)
+
+
+def test_active_gaze_keeps_steering_a_failed_scan_task() -> None:
+    # Same fix, the deadline-timeout path: "failed" must not silently
+    # revert to free scan either -- only an explicit cancel (or a newer
+    # scan command) may end the mode.
+    tasks = TaskStore()
+    task = tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "right"),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+    task.status = "failed"
+
+    plan = _active_gaze(tasks)
+
+    assert plan == ScanPlan(commanded_sector="right", command_t_sim=3.0)
+
+
 def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
     tasks = TaskStore()
     tasks.create(

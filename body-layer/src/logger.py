@@ -466,13 +466,29 @@ def _active_gaze(tasks: TaskStore) -> ScanPlan:
     scan was ordered, which is what a commanded scan's o'clock legs cycle
     from (`perception.gaze.gaze_at`'s own docstring).
 
-    The most recently created still-`pending` `scan_area` task wins when
-    more than one is pending -- a later scan command is what a player
-    issuing "scan left" then "scan right" would expect to take effect."""
+    The most recently created still-active `scan_area` task wins when more
+    than one is active -- a later scan command is what a player issuing
+    "scan left" then "scan right" would expect to take effect.
+
+    **Cones 2C sortie fix: honours any status except `"cancelled"`, not
+    only `"pending"`.** `belief.tasks.TaskStore.tick` flips a `scan_area`
+    task to `"succeeded"` the instant any contact is seen inside its area
+    -- with the old `status == "pending"` check here, that meant a
+    commanded scan silently reverted to free scan on first contact, which
+    is what produced the sortie's "commanded scan left, still got reports
+    from 12 o'clock" finding (free scan revisits 12 o'clock twice per
+    cycle). A `scan_area` task is a standing *mode* (`belief.tasks.
+    TaskStatus`'s own docstring, `docs/concept/STATE_TRANSITIONS.md`'s
+    "Modes" section): finding something, or timing out
+    (`DEFAULT_SCAN_DEADLINE_S`), is an event about what the search has
+    (not) confirmed, never the end of the mode. Only an explicit cancel
+    (`TaskStore.cancel`, also fixed by this same sortie finding to actually
+    reach a resolved task) or a newer scan command (via this function's own
+    "most recent" tie-break) ends it."""
     for task in reversed(tasks.tasks):
         if (
             task.kind == "scan_area"
-            and task.status == "pending"
+            and task.status != "cancelled"
             and task.area.relative_sector is not None
         ):
             return ScanPlan(
