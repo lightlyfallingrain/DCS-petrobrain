@@ -13,9 +13,36 @@ attention is elsewhere will keep being broken. This one is structural instead.
 ### The three rules
 
 1. **Read-mostly agents always run with `isolation: "worktree"`** — Reviewer, Definition of Done,
-   Architect, Investigator, Security, Performance Reviewer. They produce documents, so the only
-   handoff is copying the file back. There is no reason not to, and it makes them immune to anything
-   the main loop does.
+   Architect, Investigator, Security, Performance Reviewer. It makes them immune to anything the
+   main loop does.
+
+   **Their handoff is not "copy the report back", and getting this wrong loses work silently.** An
+   agent writes far more than its headline document:
+
+   | output | where it lands |
+   |---|---|
+   | the role's report (`review.md`, `dod-check.md`, `plan.md`) | worktree |
+   | **agent-memory files** (`.claude/agent-memory/<role>/…`) | worktree |
+   | **`NOTES.md` harvest** (Definition of Done) | worktree |
+   | research notes, roadmap and `todo/` edits | worktree |
+
+   All of it is invisible to the main checkout, and `git worktree remove --force` destroys anything
+   uncommitted without warning. That nearly happened on the first isolated run: only the report was
+   copied back, and it was luck that the agent had written no memory file that time.
+
+   **So the handoff is:**
+
+   - **Instruct the agent, in its prompt, to commit everything it writes** inside the worktree — a
+     detached-HEAD commit is fine, it is reachable by sha — and to **report the sha, the file list,
+     and a clean `git status --porcelain`** in its final message.
+   - **Cherry-pick the sha**, then verify against the agent's own file list rather than assuming the
+     pick caught everything.
+   - **Only then remove the worktree.** Before removing any agent worktree, run
+     `git -C <worktree> status --porcelain` and account for every line. An empty result is the
+     only safe basis for `--force`.
+
+   The failure mode is silent by construction: the report arrives, the work looks done, and the
+   memory file that would have stopped the next agent repeating a mistake is simply gone.
 
 2. **Implementers also get a worktree**, with one extra handoff step. Git will not check the same
    branch out twice, so an implementer in a worktree commits to `worktree-agent-<id>`, and the main
