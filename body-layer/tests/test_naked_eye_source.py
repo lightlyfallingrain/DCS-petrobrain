@@ -22,8 +22,9 @@ from typing import Any, Final
 import pytest
 
 from perception import association, object_model, visibility
+from perception.detection_trace import DetectionTraceCollector, GateOutcome
 from perception.naked_eye_source import (
-    NAKED_EYE_MAX_NEW_PER_POLL,
+    NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
     _quantise_bearing,
@@ -444,7 +445,7 @@ def test_continuity_never_cross_tags_two_different_objects() -> None:
 
 def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> None:
     # 5 simultaneously-new infantry candidates (well within the naked-eye
-    # default's 600 m threshold), cap = NAKED_EYE_MAX_NEW_PER_POLL = 3 --
+    # default's 600 m threshold), cap = NAKED_EYE_MAX_NEW_GROUPS_PER_POLL = 3 --
     # only the 3 nearest are emitted this poll. Spacing (`_CAP_TEST_RANGES_M`)
     # is wide enough in true angular separation that no two of these
     # candidates merge under `perception.clustering`'s predicate -- computed,
@@ -464,16 +465,39 @@ def test_more_new_candidates_than_the_cap_emits_only_the_cap_nearest_first() -> 
 
     observations = source.poll(100.0, _ownship())
 
-    assert len(observations) == NAKED_EYE_MAX_NEW_PER_POLL
+    assert len(observations) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
     ranges = [obs.derived_world_position.x for obs in observations]  # type: ignore[union-attr]
     assert ranges == sorted(ranges)
-    assert ranges == list(_CAP_TEST_RANGES_M[:NAKED_EYE_MAX_NEW_PER_POLL])
+    assert ranges == list(_CAP_TEST_RANGES_M[:NAKED_EYE_MAX_NEW_GROUPS_PER_POLL])
 
 
-def test_candidates_dropped_by_the_cap_are_not_retried_next_poll() -> None:
-    # Per the module docstring: a capped-out-but-still-visible candidate
-    # counts as "previously visible" for the next poll's debounce, so it is
-    # not retried unless it actually leaves and re-enters the visible set.
+def test_a_capped_out_group_is_retried_and_the_backlog_drains_over_polls() -> None:
+    # REPLACES test_candidates_dropped_by_the_cap_are_not_retried_next_poll
+    # (2026-09-21, `plans/detection-cones-slice2/plan.md`'s 2A.5, user-
+    # approved rewrite -- "Behaviour changes, test needs to reflect that").
+    # The old test pinned a defect: a candidate that lost a simultaneous-
+    # admission cap roll was marked "already seen" and silently never
+    # retried, permanently under-reporting a scene the pilot never actually
+    # stopped being able to see. 2A.5 fixes this at group granularity --
+    # a capped-out cluster's members are deliberately kept OUT of
+    # `_previously_visible_ids` (`_acquire_on_change`'s new steady_ids/
+    # admitted_ids split), so they are still "new" on the next poll and
+    # compete for a cap slot again.
+    #
+    # Derivation of the expected counts (not observed and back-fit): 5
+    # candidates, no two of which merge into a shared cluster (see
+    # `_CAP_TEST_RANGES_M`'s own docstring), so each is its own singleton
+    # group -- 5 eligible groups, cap = NAKED_EYE_MAX_NEW_GROUPS_PER_POLL =
+    # 3. Poll 1: all 5 groups are eligible (nothing previously visible
+    # yet); the 3 nearest are admitted and their members become previously
+    # visible, leaving the 2 furthest groups' members out of that set.
+    # Poll 2 (identical snapshot, nothing left or re-entered): only those 2
+    # groups are still eligible (their members are still absent from
+    # `_previously_visible_ids`) -- both fit under the cap of 3, so both
+    # are admitted this poll, and the backlog is now fully drained. Poll 3
+    # (same snapshot again): every group's members are now previously
+    # visible, so nothing is eligible and no observation is emitted --
+    # true steady state, not a further backlog.
     world_objects = {
         "objects": [
             _world_object(i, "Infantry", lat_deg=lat_deg, lon_deg=lon_deg)
@@ -486,9 +510,11 @@ def test_candidates_dropped_by_the_cap_are_not_retried_next_poll() -> None:
 
     first = source.poll(100.0, _ownship())
     second = source.poll(100.2, _ownship())
+    third = source.poll(100.4, _ownship())
 
-    assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
-    assert second == []
+    assert len(first) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
+    assert len(second) == len(_CAP_TEST_RANGES_M) - NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
+    assert third == []
 
 
 def test_every_poll_mode_re_emits_a_continuously_visible_candidate() -> None:
@@ -557,14 +583,14 @@ def test_every_poll_mode_still_throttles_first_time_acquisition() -> None:
 
     first = source.poll(100.0, _ownship())
 
-    assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
+    assert len(first) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
 
 
 def test_every_poll_mode_progressively_acquires_capped_overflow() -> None:
     # Unlike on_change (where a capped-out object is never retried), every_
     # poll's acquisition set must keep retrying a not-yet-acquired object on
     # later polls until the throttle admits it -- the whole point of
-    # re-reading NAKED_EYE_MAX_NEW_PER_POLL as an acquisition-rate limit
+    # re-reading NAKED_EYE_MAX_NEW_GROUPS_PER_POLL as an acquisition-rate limit
     # rather than an emission cap.
     world_objects = {
         "objects": [
@@ -585,10 +611,58 @@ def test_every_poll_mode_progressively_acquires_capped_overflow() -> None:
     first = source.poll(100.0, _ownship())
     second = source.poll(100.2, _ownship())
 
-    assert len(first) == NAKED_EYE_MAX_NEW_PER_POLL
+    assert len(first) == NAKED_EYE_MAX_NEW_GROUPS_PER_POLL
     # first poll's 3 acquired objects re-emit, plus the 2 remaining
     # overflow objects are now acquired and emitted for the first time.
     assert len(second) == 5
+
+
+def test_a_dense_group_larger_than_the_cap_admits_whole_in_one_poll() -> None:
+    # The headline 2A.5 case (`plans/detection-cones-slice2/plan.md`): ten
+    # co-located vehicles must produce one Observation of ten, not three
+    # observations growing over three polls -- because the cap now counts
+    # *groups*, and admitting a group admits every one of its members at
+    # once, however many that is.
+    #
+    # Ten Infantry, 10 m apart down-range (well inside the down-range
+    # merge distance `test_two_close_candidates_emit_one_clustered_
+    # observation` above already establishes at 20 m), single-link chains
+    # the whole run into one cluster -- confirmed by actually running this
+    # scenario (not assumed to chain just because pairwise merge holds):
+    # `trace.records` below shows all ten `object_id`s sharing one
+    # `cluster_member_object_ids` tuple and one `observation_id`.
+    world_objects = {
+        "objects": [
+            _world_object(i, "Infantry", lat_deg=500.0 + (i - 1) * 10.0, lon_deg=0.0)
+            for i in range(1, 11)
+        ]
+    }
+    trace = DetectionTraceCollector()
+    client = FakeAircraftClient(world_objects)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+        trace_sink=trace,
+    )
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+
+    # No-omniscience leak check: every one of the ten members that ended up
+    # in the emitted cluster must have individually cleared
+    # `check_visibility`'s own gate -- clustering/capping never admits a
+    # candidate the gate itself rejected.
+    admitted_ids = {
+        record.object_id
+        for record in trace.records
+        if record.outcome == GateOutcome.ADMITTED
+    }
+    assert admitted_ids == set(range(1, 11))
+    for record in trace.records:
+        assert record.cluster_member_object_ids == tuple(range(1, 11))
+        assert record.observation_id == observations[0].id
 
 
 def test_quantise_bearing_snaps_to_nearest_clock_position() -> None:
@@ -746,10 +820,11 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
 
     first = source.poll(100.0, _high_ownship())
     assert len(first) == 1
-    # Only 3 of the 4 are acquired this first poll -- `NAKED_EYE_MAX_NEW_
-    # PER_POLL` (3) still throttles first-time acquisition per-object, even
-    # under `emit_mode="every_poll"` (module docstring point 5's "Stage 2
-    # scoping decision"); the 4th joins on the next poll.
+    # All 4 are acquired together this first poll: they are all one cluster
+    # (module docstring point 5, 2A.5) -- `NAKED_EYE_MAX_NEW_GROUPS_PER_
+    # POLL` (3) caps how many *groups* are admitted per poll, and one
+    # cluster is one group regardless of its member count, so the cap
+    # never binds here at all.
 
     client._world_objects = split
     second = source.poll(100.2, _high_ownship())
@@ -774,3 +849,53 @@ def test_a_cluster_splitting_gives_the_majority_child_continuity() -> None:
     )
     assert majority.continues_observation_id == first[0].id
     assert minority.continues_observation_id is None
+
+
+def test_continuity_survives_a_cluster_whose_membership_grows_between_polls() -> None:
+    # Acquisition state stays object-keyed even though the cap now operates
+    # on clusters (module docstring point 4/5, 2A.5): a cluster has no
+    # stable identity across polls, so continuity has to be resolved from
+    # its *members'* own history, not from "the same cluster as last time."
+    # Three Infantry (lat 545, lon 0.0/0.4/0.75 -- the same chained-single-
+    # link spacing `test_a_cluster_splitting_gives_the_majority_child_
+    # continuity` above already establishes merges into one cluster) form
+    # one cluster and emit one Observation. A fourth (lon 1.1, chaining on
+    # to object 3) then joins on the next poll -- confirmed by actually
+    # running this scenario, not assumed to chain just because the first
+    # three do: the whole group is still one cluster, now with different
+    # membership. Because object_ids 1-3 each carry a vote for the first
+    # poll's Observation and that is the whole (and therefore majority)
+    # vote, `_build_observations`' majority-overlap rule must resolve the
+    # grown cluster's continuity onto that same Observation, not found
+    # fresh -- the thing a per-cluster-id scheme could not have done, since
+    # no cluster id survives poll to poll at all.
+    three_members = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=545.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=545.0, lon_deg=0.4),
+            _world_object(3, "Infantry", lat_deg=545.0, lon_deg=0.75),
+        ]
+    }
+    four_members = {
+        "objects": [
+            _world_object(1, "Infantry", lat_deg=545.0, lon_deg=0.0),
+            _world_object(2, "Infantry", lat_deg=545.0, lon_deg=0.4),
+            _world_object(3, "Infantry", lat_deg=545.0, lon_deg=0.75),
+            _world_object(4, "Infantry", lat_deg=545.0, lon_deg=1.1),
+        ]
+    }
+    client = FakeAircraftClient(three_members)
+    source = NakedEyePerceptionSource(
+        aircraft_client=client,  # type: ignore[arg-type]
+        theatre=_THEATRE,
+        world_model_conn=_FAKE_CONN,
+    )
+
+    first = source.poll(100.0, _high_ownship())
+    assert len(first) == 1
+
+    client._world_objects = four_members
+    second = source.poll(100.2, _high_ownship())
+
+    assert len(second) == 1
+    assert second[0].continues_observation_id == first[0].id
