@@ -20,7 +20,7 @@ def _area(
     *,
     area_id: str = "AREA_1",
     center: GeoPosition | None = None,
-    radius_m: float = 1000.0,
+    radius_m: float | None = 1000.0,
     level: Attention = "watch",
     sector: Sector | None = None,
     relative_sector: RelativeSector | None = None,
@@ -61,6 +61,46 @@ def test_area_contains_sector_boundary_is_inclusive() -> None:
     area = _area(radius_m=1000.0, sector="N")
     edge = GeoPosition(x=500.0, z=500.0, alt_m=0.0)
     assert area_contains(area, edge) is True
+
+
+def test_unbounded_area_contains_a_contact_far_outside_any_previous_radius() -> None:
+    """`radius_m=None` skips the range test entirely -- a contact well
+    beyond any radius this codebase has ever used (the old, invented
+    `F10_SCAN_RADIUS_M = 3000.0` included) is still contained, as long as
+    it is inside the wedge."""
+    area = _area(radius_m=None, sector="N")
+    far_north = GeoPosition(x=50000.0, z=0.0, alt_m=0.0)
+    assert area_contains(area, far_north) is True
+
+
+def test_unbounded_area_still_excludes_a_contact_outside_the_wedge() -> None:
+    """The wedge is doing real work on an unbounded area -- it must not be
+    lost along with the radius."""
+    area = _area(radius_m=None, sector="N")
+    far_south = GeoPosition(x=-50000.0, z=0.0, alt_m=0.0)
+    assert area_contains(area, far_south) is False
+
+
+def test_bounded_area_behaves_exactly_as_before() -> None:
+    """Regression guard for the typed `scan-area`/`watch-area` console
+    path, which keeps supplying a real, player-chosen radius."""
+    area = _area(radius_m=1000.0, sector="N")
+    inside = GeoPosition(x=500.0, z=0.0, alt_m=0.0)
+    outside = GeoPosition(x=1500.0, z=0.0, alt_m=0.0)
+    assert area_contains(area, inside) is True
+    assert area_contains(area, outside) is False
+
+
+def test_unbounded_area_finds_the_s300_mast_a_bounded_one_would_have_missed() -> None:
+    """The real motivation, worked concretely (`todo/todo.md`, "Scan
+    geometry: drop the invented radius"): an S-300 mast at 8000 m, well
+    inside the wedge, is excluded by the old 3000 m radius but contained
+    by an unbounded area."""
+    mast = GeoPosition(x=8000.0, z=0.0, alt_m=0.0)
+    old_invented_radius = _area(radius_m=3000.0, sector="N")
+    unbounded = _area(radius_m=None, sector="N")
+    assert area_contains(old_invented_radius, mast) is False
+    assert area_contains(unbounded, mast) is True
 
 
 def test_effective_attention_ignore_always_wins_over_area() -> None:

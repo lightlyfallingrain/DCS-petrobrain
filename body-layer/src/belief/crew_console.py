@@ -132,16 +132,6 @@ _UTTERANCE_ID_PREFIX = "UTTERANCE"
 #: so a plain text prefix is the only available distinction.
 _URGENT_OVERLAY_PREFIX = "!! "
 
-#: The radius (meters) an F10 scan command's `AttentionArea`/`PendingIntent`
-#: is registered with (`plans/f10-command-vocabulary/plan.md` Stage 6). An
-#: F10 button carries no player-supplied geometry the way a typed
-#: `scan-area <bearing> <range> <radius> <reason>` command does (`console.py`'s
-#: `_handle_scan_area`), so this is an uncalibrated placeholder pending live
-#: sortie feedback -- same debt class as `belief.tools.
-#: DEFAULT_SCAN_DEADLINE_S` and `perception.visibility.py`'s tier constants,
-#: not a derived or justified figure.
-F10_SCAN_RADIUS_M: float = 3000.0
-
 #: `scan_ahead`/`scan_left`/`scan_right`/`scan_full` -> `belief.attention.
 #: RelativeSector` -- the ownship-relative half of the F10 scan vocabulary
 #: (`plans/f10-command-vocabulary/plan.md` D1/D4). Also doubles as the
@@ -497,9 +487,13 @@ class CrewConsole:
     ) -> list[str]:
         """Registers a real `belief.tasks.PendingIntent` via `belief.tools.
         scan_area`, with `center`/`radius_m`/`reason` all fixed (ownship's
-        own position, `F10_SCAN_RADIUS_M`, `_F10_SCAN_REASON`) rather than
+        own position, `None` (unbounded), `_F10_SCAN_REASON`) rather than
         player-supplied, since an F10 button carries no bearing/range/
-        free-text the way a typed `scan-area` command does. Exactly one of
+        free-text the way a typed `scan-area` command does. `radius_m=None`
+        is a deliberate choice, not a missing value: an F10 sector scan
+        should get everything visible within its wedge, per `todo/todo.md`'s
+        "Scan geometry: drop the invented radius" -- the area's own
+        `radius_m` field documents the reasoning in full. Exactly one of
         `sector`/`relative_sector` is set by the caller
         (`handle_f10_command`'s two lookup tables), never both --
         `scan_area`/`ContactStore.add_area` would raise `ValueError` if
@@ -550,7 +544,7 @@ class CrewConsole:
             self.store,
             self.tasks,
             center,
-            F10_SCAN_RADIUS_M,
+            None,
             _F10_SCAN_REASON,
             now_sim,
             sector=sector,
