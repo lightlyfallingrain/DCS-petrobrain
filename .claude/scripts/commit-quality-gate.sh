@@ -24,19 +24,26 @@ $this_out"
     fi
 }
 
-if printf '%s\n' "$STAGED" | grep -q '^world-model/'; then
-    run "world-model ruff format" ruff format --check world-model/src world-model/tests
-    run "world-model ruff check" ruff check world-model/src world-model/tests
-    run "world-model mypy" mypy world-model/src
-    run "world-model pytest" pytest world-model/tests -q
-fi
 
-if printf '%s\n' "$STAGED" | grep -q '^aircraft-layer/'; then
-    run "aircraft-layer ruff format" ruff format --check aircraft-layer/src aircraft-layer/tests
-    run "aircraft-layer ruff check" ruff check aircraft-layer/src aircraft-layer/tests
-    run "aircraft-layer mypy" mypy aircraft-layer/src
-    run "aircraft-layer pytest" pytest aircraft-layer/tests -q
-fi
+
+
+# Every subproject with src/ and tests/ gets its own checks. DISCOVERED, NOT
+# ENUMERATED -- and that distinction is the point. This script hardcoded one
+# subproject until the 2026-09-10 integrity audit, which fixed it by hardcoding
+# three; the 2026-09-21 audit then found audio-adapter/ and mission-interpreter/
+# running zero checks on a commit that touched only them, while root CLAUDE.md
+# claimed the gate enforced per-subproject verification. Enumerating five would
+# have set up the same finding a year out. A new subproject is now covered the
+# moment it has src/ and tests/, with nothing to remember.
+for sub in */; do
+    sub=${sub%/}
+    [ -d "$sub/src" ] && [ -d "$sub/tests" ] || continue
+    printf '%s\n' "$STAGED" | grep -q "^$sub/" || continue
+    run "$sub ruff format" ruff format --check "$sub/src" "$sub/tests"
+    run "$sub ruff check" ruff check "$sub/src" "$sub/tests"
+    run "$sub mypy" mypy "$sub/src"
+    run "$sub pytest" pytest "$sub/tests" -q
+done
 
 # Lua syntax (parse-only, Lua 5.1 = the version DCS embeds) for staged aircraft-layer Lua files.
 STAGED_LUA=$(printf '%s\n' "$STAGED" | grep -E '^aircraft-layer/.*\.lua$' || true)
@@ -55,13 +62,6 @@ luac5.1 not installed; needed to syntax-check staged DCS Lua before commit. Inst
     fi
 fi
 
-if printf '%s\n' "$STAGED" | grep -q '^body-layer/'; then
-    run "body-layer ruff format" ruff format --check body-layer/src body-layer/tests
-    run "body-layer ruff check" ruff check body-layer/src body-layer/tests
-    # mypy config discovery is CWD-only for body-layer (see body-layer/CLAUDE.md) — must cd.
-    run "body-layer mypy" bash -c "cd body-layer && mypy src"
-    run "body-layer pytest" pytest body-layer/tests -q
-fi
 
 # Reject agent-memory files written under a subproject-relative path instead of repo-root
 # .claude/agent-memory/ (recurring mistake — see feedback_agent_memory_path_recurrence.md).
@@ -98,6 +98,39 @@ check_memory '^plans/[^/]+/review\.md$'         reviewer     "a review"
 check_memory '^plans/[^/]+/debug\.md$'          debugger     "a debug report"
 check_memory '^plans/[^/]+/dod-check\.md$'      dod          "a DoD check"
 check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a research finding"
+
+# Agent-memory index: APPEND, never rewrite. On 2026-09-20 one commit replaced
+# the reviewer index's 27 entries with 1, leaving 73 memory files on disk and
+# unreachable by the role that wrote them -- undetected for a day, and found
+# only by an integrity audit. The files were never lost; only the index was.
+# A memory nothing can reach is the most expensive loss in this system, since
+# its whole purpose is to stop a later agent repeating a mistake.
+SHRUNK_INDEX=""
+for idx in $(printf '%s\n' "$STAGED" | grep -E '^\.claude/agent-memory/[^/]+/MEMORY\.md$' || true); do
+    added=$(git diff --cached --numstat -- "$idx" | cut -f1)
+    removed=$(git diff --cached --numstat -- "$idx" | cut -f2)
+    [ -z "$added" ] && continue
+    # A rewrite removes far more than it adds. Editing a hook removes ~1 line.
+    if [ "$removed" -gt 3 ] && [ "$removed" -gt "$added" ]; then
+        SHRUNK_INDEX="$SHRUNK_INDEX
+  $idx (removed $removed lines, added $added)"
+    fi
+done
+if [ -n "$SHRUNK_INDEX" ]; then
+    FAIL=1
+    OUT="$OUT
+
+## agent-memory index shrank -- FAIL
+$SHRUNK_INDEX
+
+An agent-memory MEMORY.md is append-only. Removing more lines than it adds
+means entries were dropped, and the memory files they point to become
+unreachable while still sitting on disk.
+
+If you meant to edit one hook, that removes one line and this will not fire.
+If an entry is genuinely obsolete, delete its file in the same commit so the
+index and the directory stay in step."
+fi
 
 # Skill layout: a skill must be .claude/skills/<name>/SKILL.md, never a flat
 # .claude/skills/<name>.md, or Claude Code cannot discover it (invisible to

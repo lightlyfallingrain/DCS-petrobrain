@@ -37,7 +37,7 @@
           },
           {
             "type": "command",
-            "if": "jq -e '.command | startswith(\"git commit\")'",
+            "if": "jq -e '.command | test(\"(^|[;&|]\\\\s*)git\\\\s+([^;&|]*\\\\s)?commit(\\\\s|$)\")'",
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/commit-quality-gate.sh",
             "timeout": 180,
             "statusMessage": "Quality gate: per-subproject ruff format / ruff check / mypy / pytest..."
