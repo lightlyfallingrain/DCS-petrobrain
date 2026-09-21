@@ -513,21 +513,22 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 20 Sep 2026</span>
+      <span>Derived from ROADMAP.md · 21 Sep 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Five subsystems, one hundred and six tracked items, one question worth answering at a glance:
-      what is actually blocking a crew member who sees, remembers, and talks back. He has a voice, he
-      counts what he cannot individually resolve — and as of this week he can be spoken to.</p>
+    <p class="lede">Five subsystems, one hundred and fifteen tracked items, one question worth answering at a
+      glance: what is actually blocking a crew member who sees, remembers, and talks back. This week his
+      eyesight stopped being a guess — a sortie measured it, and the measurements changed the model rather
+      than its constants.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>64</b><span>Done</span></div>
-    <div class="count is-active"><b>6</b><span>In progress</span></div>
-    <div class="count is-open"><b>30</b><span>Open</span></div>
-    <div class="count is-hold"><b>6</b><span>Deferred</span></div>
-    <div class="count is-block"><b>3</b><span>Await a sortie</span></div>
+    <div class="count is-done"><b>72</b><span>Done</span></div>
+    <div class="count is-active"><b>5</b><span>In progress</span></div>
+    <div class="count is-open"><b>27</b><span>Open</span></div>
+    <div class="count is-hold"><b>11</b><span>Deferred</span></div>
+    <div class="count is-block"><b>4</b><span>Await a sortie</span></div>
   </div>
 
   <section>
@@ -568,21 +569,22 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       <article class="sys" role="button" tabindex="0" data-detail="bl">
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
-        <div class="bar"><i style="width:84%"></i></div>
-        <span class="chip active">Group contacts, 5 of 9 stages</span>
-        <p class="next">BL-0–BL-7 complete. Contacts are now clusters, and separability is angular.
-          <b>Next:</b> Stage 4b — the first stage you can actually <em>hear</em>.</p>
+        <div class="bar"><i style="width:88%"></i></div>
+        <span class="chip active">Detection cones, 2 of 5 sub-slices</span>
+        <p class="next">BL-0–BL-9 complete. The naked eye replaced binoculars as the default optic —
+          detection range fell roughly 4× — and an optic now has a multiplier per tier rather than one
+          magnification. <b>Next:</b> 2B, where a scan command finally steers what he can see.</p>
         <span class="more">Details</span>
       </article>
 
       <article class="sys" role="button" tabindex="0" data-detail="srs">
         <h3>Audio Adapter</h3>
         <span class="path">audio-adapter/</span>
-        <div class="bar"><i style="width:62%"></i></div>
-        <span class="chip active">Voice out done · speech in, stages 1–2</span>
-        <p class="next">He is audible, urgent calls cut in mid-word, and speech recognition now clears
-          its gate at 99.2% on the pilot's own voice. <b>Next:</b> recognition as a service, then
-          Windows-side capture.</p>
+        <div class="bar"><i style="width:68%"></i></div>
+        <span class="chip active">Voice out done · speech in, stages 1–3</span>
+        <p class="next">He is audible, urgent calls cut in mid-word, and recognition runs as a service
+          behind a matcher that prefers saying "say again" to guessing. <b>Next:</b> Windows-side
+          capture and a real PTT — both of which need the other machine.</p>
         <span class="more">Details</span>
       </article>
 
@@ -675,13 +677,13 @@ flowchart LR
 
   subgraph PERC ["Perception"]
     direction LR
-    SORTIE["Cones + BL-9 sortie<br/>card is published"]:::block
-    CAL["Adapt the constants<br/>from the trace"]:::open
-    EDR["ED detection model<br/>read on Windows"]:::block
-    C2["Cones slice 2<br/>scan, dwell, honest range"]:::hold
+    CAL["Dots-off ladder re-shoot<br/>last recalibration blocker"]:::block
+    C2B["2B — gaze as a filter<br/>scans steer perception"]:::active
+    C2C["2C — the o'clock scan loop<br/>16 s cycle"]:::hold
+    C2D["2D — dwell as an act"]:::hold
+    RECAL["Threshold recalibration"]:::hold
     K9["9K113 as an optic"]:::hold
-    SCAN["Scan commands drive<br/>the naked eye"]:::open
-    MOV["Movement detection<br/>designed, 8 arcmin/s"]:::hold
+    MOV["Movement detection<br/>8 arcmin/s"]:::hold
   end
 
   subgraph SPEECH ["Speech"]
@@ -689,10 +691,9 @@ flowchart LR
     S4["Stage 4<br/>Windows capture"]:::block
     S5["Stage 5<br/>real PTT in DCS"]:::block
     S6["Stage 6<br/>sortie acceptance"]:::block
-    TTS6["TTS Stage 6<br/>live sortie"]:::block
     BL10["BL-10<br/>audio transport"]:::active
-    SPU8["Cockpit audio state<br/>SPU-8"]:::hold
     VOICE["Voice character<br/>accent + prosody"]:::open
+    SPU8["Cockpit audio state<br/>SPU-8"]:::hold
   end
 
   subgraph REPORT ["Reporting"]
@@ -700,25 +701,25 @@ flowchart LR
     BEH["Behaviour channel<br/>tracking / engaging"]:::hold
     TERR["Terrain control<br/>world-model"]:::hold
     IFF["Coalition / IFF<br/>inferred, never truth"]:::hold
-    THR["Threat banding<br/>urgent &hellip; ignore"]:::hold
+    THR["Threat banding"]:::hold
     GC4B["Group stage 4b<br/>counts, spoken"]:::open
     GC5["Stage 5<br/>composition"]:::hold
   end
 
+  BRIDGE["Mission-sandbox probe<br/>velocity + fog"]:::block
   BL8["BL-8<br/>memory interfaces"]:::open
   BRAIN["Brain layer<br/>not started"]:::hold
 
-  SORTIE --> CAL --> C2
-  EDR --> C2
-  C2 --> K9
-  C2 --> SCAN
-  MOV --> BEH --> THR
+  C2B --> C2C --> C2D
+  C2C --> K9
+  CAL --> RECAL --> K9
+  C2C -.->|"same sortie"| CAL
+  BRIDGE --> MOV --> BEH --> THR
   TERR --> IFF --> THR
   S4 --> S5 --> S6 --> BL10 --> BRAIN
   GC4B --> GC5
-  SORTIE -.->|"can ride along"| TTS6
-  SORTIE -.->|"judge after flying"| GC5
-  SORTIE -.->|"needs many flights"| BL8
+  CAL -.->|"judge after flying"| GC5
+  CAL -.->|"needs many flights"| BL8
   BL8 --> BRAIN
   THR -.->|"needs judgement"| BRAIN
 </pre>
@@ -732,19 +733,26 @@ flowchart LR
       <span class="chip hold">Deferred or gated</span>
     </div>
 
-    <p class="section-note"><strong>Two things this map makes obvious that a list does not.</strong>
-      One sortie sits upstream of four separate branches &mdash; it is the single highest-leverage
-      thing on the board, and it is waiting on you rather than on code. And the reporting chain is
-      almost entirely dashed: threat banding needs believed coalition, which needs terrain control,
-      which does not exist in world-model yet. That chain is longer than it looks from
-      <code>threat-levels.md</code>, which reads like one table.</p>
+    <p class="section-note"><strong>What the drawing shows that the lists do not.</strong>
+      <strong>Two red nodes gate almost everything.</strong> One sortie &mdash; re-shooting the
+      calibration ladder with DCS's detection-aid dots switched off &mdash; is the last blocker on
+      threshold recalibration, and sits upstream of the 9K113, of group composition, and of BL-8.
+      One probe &mdash; whether the mission sandbox is reachable from this project's Export hook
+      &mdash; gates unit velocity <em>and</em> fog, and movement detection in turn gates the entire
+      reporting chain. Neither is large work. Both are the kind that only the other machine can
+      answer.</p>
+    <p class="section-note">The reporting chain stays almost entirely dashed for a second reason
+      worth seeing: threat banding needs believed coalition, which needs terrain control, which does
+      not exist in world-model at all. <code>threat-levels.md</code> reads like one table; drawn out,
+      it is the longest unbuilt chain in the project.</p>
   </section>
 
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Down from three — the Windows-box work is done and passed. What is left needs a real flight,
-        and the voice test carries the accumulated debt along with it.</p>
+      <p>The Windows box answered five parked questions this week, including ED's own detection model.
+        What is left needs a real flight or a probe on that machine — and one sortie now clears most
+        of it, because the detection work was deliberately sequenced so a single flight could read it.</p>
       <ul class="blockers">
         <li class="bl" role="button" tabindex="0" data-detail="stage6">
           <span class="chip block">Sortie</span>
@@ -756,11 +764,24 @@ flowchart LR
           </div>
         </li>
         <li class="bl" role="button" tabindex="0" data-detail="debt">
-          <span class="chip block">Debt</span>
+          <span class="chip block">Sortie</span>
           <div>
-            <b>Accumulated live-acceptance debt</b>
-            <p>BL-4's attention tools may never have had a live run; the F10 vocabulary is half-cleared.
-              Both clear on the same flight as the voice test.</p>
+            <b>Re-shoot the calibration ladder, dots off</b>
+            <p>The nine-range photographic ladder everything was fitted to was captured with DCS's
+              detection-aid dots enabled, so it overstates unaided visibility by an unmeasured amount
+              that grows with range. It is the last of four blockers on threshold recalibration — the
+              other three cleared this week. Same setup as before; the aid switched off. Worth adding
+              aspect angle per reading, and one pass over trees for the first condition modifier.</p>
+          </div>
+        </li>
+        <li class="bl" role="button" tabindex="0" data-detail="bridge">
+          <span class="chip block">Probe</span>
+          <div>
+            <b>Is the mission sandbox reachable?</b>
+            <p>Unit velocity and fog both live in DCS's mission scripting environment, not the Export
+              API this project uses. One probe of whether <code>net.dostring_in</code> reaches it from
+              our Export hook unblocks movement detection and the weather half of detection conditions
+              at once. Movement in turn gates the whole reporting chain.</p>
           </div>
         </li>
       </ul>
@@ -1036,14 +1057,24 @@ const DETAIL = {
     src: "audio-adapter/ROADMAP.md"
   },
   debt: {
-    kicker: "body-layer/ - debt", title: "Live-acceptance debt", chip: ["block", "Clears on one flight"],
-    facts: [["Tracked since", "2026-09-10"], ["Items", "Two open"]],
+    kicker: "body-layer/ - blocker", title: "Re-shoot the calibration ladder", chip: ["block", "Last recalibration blocker"],
+    facts: [["Blocked since", "2026-09-21"], ["Blockers cleared", "3 of 4"]],
     sections: [
-      { h: "Why this is tracked at all", p: "A milestone can honestly pass on fixture testing when its plan scopes live acceptance out deliberately. This list is for the other kind — acceptance that was <em>deferred</em>, not waived. It was added after a retro found the same caveat being logged repeatedly without anyone tracking it as accumulating risk." },
-      { h: "BL-4's attention and events tools", p: "<code>set_attention</code>, <code>watch_area</code>, <code>get_attention_state</code>, <code>list_events</code>, <code>acknowledge_event</code> — live acceptance was bundled with BL-5's transport layer, but BL-5's own sortie exercised different tools. It is unclear whether these have ever had a live run." },
-      { h: "F10 command vocabulary", p: "Partially cleared by the 2026-09-16/17 sortie: the menu tree works, scans register real tasks, and cancel genuinely cancels. Two defects were found and fixed. Still unexercised: relative-versus-bearing sector rotation through a heading sweep across 0/360, and the placeholder scan radius and deadline constants." }
-    ],
-    src: "body-layer/ROADMAP.md"
+      { h: "What went wrong with the existing ladder", p: "The nine-range photographic ladder every detection constant was fitted to — 503 m to 8.89 km, four optics per range — was captured with DCS's <em>detection-aid dots</em> enabled. DCS draws a small marker at a target to make it findable at long range. Every grade therefore records what was visible <em>with that aid</em>, optimistically, by an unmeasured amount that grows with range. The fixture now carries that warning at the top of both the JSON and its test module." },
+      { h: "Why the tests were kept rather than deleted", p: "They still pin the model against the data it was actually fitted to, which catches an accidental constant change. What they no longer support is any claim of the form \"this is what a person can see\". Four of them sit as <code>xfail</code> — a deliberate tripwire: if recalibration lands and they do not turn green, the recalibration was wrong." },
+      { h: "Three of four blockers cleared this week", p: "Tier-dependent magnification and silhouette distinctiveness were both model-shape problems, and slice 2A built them. The calibration <em>target</em> was settled by the user: calibrate against what can be seen on the monitor, because there is no other instrument — and conditions like foliage, weather and dusk can only be learned by flying in them and looking. The contaminated ladder is what remains." },
+      { h: "Worth adding to the same flight", p: "Aspect angle per reading, now that aspect drives recognition — \"broadside, class at 350 m\" is worth far more than \"class at 350 m\". And one pass over trees, which would give the first condition modifier. Modifiers measured as ratios against the clear-day baseline largely cancel whatever bias the monitor carries, so they transfer even where the absolute baseline does not." }
+    ]
+  },
+  bridge: {
+    kicker: "aircraft-layer/ - blocker", title: "Is the mission sandbox reachable?", chip: ["block", "One probe, two unblocks"],
+    facts: [["Raised", "2026-09-21"], ["Items gated", "Velocity and fog"]],
+    sections: [
+      { h: "What was wrong, and how it was caught", p: "A deep read of the DCS install concluded <code>LoGetWorldObjects</code> carries no velocity, which is true — a full enumeration of the returned table lists a dozen fields this project never requests, so no synonym could have hidden. That correct finding was then recorded, and relayed, as <em>\"no velocity under any name\"</em>. The user caught it with a counterexample rather than a better search: Tacview records speed for every unit on the map, so it must come from somewhere." },
+      { h: "Where it actually lives", p: "<code>Object.getVelocity()</code> returns a vec3 for every unit — in the <em>Mission Scripting</em> environment, not the Export environment this project uses. Three sessions of searching the Export surface could never have found it." },
+      { h: "Why one probe unblocks two things", p: "The same sandbox bridge is the only candidate route to fog and visibility state, which Export does not carry at all. So a single question — whether <code>net.dostring_in</code> reaches the sandbox from this project's Export hook, and at what cost per poll — decides both movement detection and the weather half of detection conditions." },
+      { h: "What it changes if it works", p: "Movement detection gets an exact perpendicular velocity per unit instead of differencing two samples of a 5 Hz position feed: no accumulated sampling noise, no per-candidate position history in the collector. If it does not work, differencing remains the fallback and the design already accounts for it. Until then, nothing should be designed against the bridge." }
+    ]
   },
 
   s2: {
