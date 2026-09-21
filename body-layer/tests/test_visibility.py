@@ -36,6 +36,8 @@ import pytest
 
 from perception import object_model, visibility
 from perception.association import WorldObjectCandidate
+from perception.detection_trace import DetectionTraceCollector, GateOutcome
+from perception.gaze import Gaze
 from perception.object_model import ObjectTypeProfile
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import OwnshipState
@@ -956,3 +958,148 @@ def test_infantry_class_clamps_to_presence_at_every_optic() -> None:
             f"presence ({presence_threshold_m} m), but a range just inside "
             f"it resolved {tier!r}, not 'medres'"
         )
+
+
+# -- Gaze gate (slice 2B, plans/detection-cones-slice2/plan.md) ------------
+
+
+def test_gaze_gate_rejects_outside_wedge_and_admits_inside_it() -> None:
+    """A commanded 'left' gaze (9-11 o'clock) rejects a dead-ahead contact
+    and admits one at 10 o'clock -- the concrete "scan left changes what
+    he can see" acceptance case (plan Implementation Plan step 10)."""
+    left_gaze = Gaze(center_azimuth_deg=-60.0, half_width_deg=30.0, label="left")
+    ownship = _ownship()
+    ahead = _candidate("Infantry", x=500.0, z=0.0)  # dead ahead, azimuth 0
+    ten_oclock = _candidate(
+        "Infantry",
+        x=500.0 * math.cos(math.radians(-60.0)),
+        z=500.0 * math.sin(math.radians(-60.0)),
+    )
+
+    assert (
+        check_visibility(
+            ownship, ahead, _FAKE_CONN, _THEATRE, optic=_MASK_ONLY_OPTIC, gaze=left_gaze
+        )
+        is None
+    )
+    assert (
+        check_visibility(
+            ownship,
+            ten_oclock,
+            _FAKE_CONN,
+            _THEATRE,
+            optic=_MASK_ONLY_OPTIC,
+            gaze=left_gaze,
+        )
+        is not None
+    )
+
+
+def test_gaze_gate_runs_before_the_cockpit_mask() -> None:
+    """Gaze is evaluated first in the gate chain (module docstring, gate
+    0) -- a candidate outside both the gaze wedge and the cockpit mask's
+    130 deg rear cutoff records `GAZE`, not `COCKPIT_MASK`, confirming the
+    ordering rather than merely the outcome (`plans/
+    detection-cones-slice2/plan.md` hard part 3's trace-attribution note,
+    `detection_trace.GateOutcome.GAZE`'s own docstring)."""
+    narrow_gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=10.0, label="ahead")
+    ownship = _ownship()
+    rear = _candidate("Infantry", x=-500.0, z=0.0)  # azimuth 180
+    collector = DetectionTraceCollector()
+
+    result = check_visibility(
+        ownship,
+        rear,
+        _FAKE_CONN,
+        _THEATRE,
+        optic=_MASK_ONLY_OPTIC,
+        gaze=narrow_gaze,
+        trace=collector,
+    )
+
+    assert result is None
+    assert len(collector.records) == 1
+    assert collector.records[0].outcome is GateOutcome.GAZE
+
+
+def test_default_gaze_is_none_and_does_not_narrow_the_cockpit_envelope() -> None:
+    """`gaze=None` (the default, and what `NakedEyePerceptionSource`/
+    `logger.py` assign when no scan command is pending) applies no
+    restriction at all -- a candidate 100 deg off the nose (inside the
+    cockpit mask's 130 deg rear cutoff, but outside `FULL_GAZE`'s own 90
+    deg half-width) is still admitted. This is what makes 2B's default
+    path byte-identical to pre-2B behaviour by construction, not merely
+    close to it on whatever a given fixture happens to exercise --
+    `perception.gaze`'s own module docstring explains why `FULL_GAZE`
+    itself is deliberately not this default."""
+    ownship = _ownship()
+    off_axis = _candidate(
+        "Infantry",
+        x=500.0 * math.cos(math.radians(100.0)),
+        z=500.0 * math.sin(math.radians(100.0)),
+    )
+
+    assert (
+        check_visibility(
+            ownship, off_axis, _FAKE_CONN, _THEATRE, optic=_MASK_ONLY_OPTIC
+        )
+        is not None
+    )
+
+
+def test_bypassed_gaze_still_respects_the_cockpit_mask() -> None:
+    """The bypass invariant (plan hard part 4): `perception.gaze.gaze_for`
+    returning `None` for a peripheral-stimulus candidate is handed to this
+    function exactly like the ordinary unrestricted default -- it clears
+    the gaze gate only, never the cockpit mask. A candidate behind the
+    rear cutoff is still rejected even with `gaze=None`."""
+    ownship = _ownship()
+    rear = _candidate("Infantry", x=-500.0, z=0.0)  # azimuth 180
+
+    assert (
+        check_visibility(
+            ownship, rear, _FAKE_CONN, _THEATRE, optic=_MASK_ONLY_OPTIC, gaze=None
+        )
+        is None
+    )
+
+
+def test_optic_fov_boresight_follows_the_active_gaze() -> None:
+    """`within_optic_fov`'s boresight (slice 2B) is the active gaze's own
+    center, not a fixed dead-ahead value -- an optic is pointed by the
+    head (`optics.py`'s own docstring). A narrow-FOV optic pointed by a
+    'left' gaze admits a candidate centred on that wedge's azimuth; the
+    same optic with no gaze active (boresight defaults to dead ahead)
+    rejects it."""
+    narrow_optic = Optic(
+        name="test_narrow",
+        presence_range_mult=4.0,
+        class_range_mult=4.0,
+        type_range_mult=4.0,
+        fov_half_angle_deg=5.0,
+    )
+    left_gaze = Gaze(center_azimuth_deg=-60.0, half_width_deg=30.0, label="left")
+    ownship = _ownship()
+    ten_oclock = _candidate(
+        "Infantry",
+        x=250.0 * math.cos(math.radians(-60.0)),
+        z=250.0 * math.sin(math.radians(-60.0)),
+    )
+
+    assert (
+        check_visibility(
+            ownship,
+            ten_oclock,
+            _FAKE_CONN,
+            _THEATRE,
+            optic=narrow_optic,
+            gaze=left_gaze,
+        )
+        is not None
+    )
+    assert (
+        check_visibility(
+            ownship, ten_oclock, _FAKE_CONN, _THEATRE, optic=narrow_optic, gaze=None
+        )
+        is None
+    )

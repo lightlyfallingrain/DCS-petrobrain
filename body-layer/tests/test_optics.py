@@ -1,6 +1,7 @@
 """Tests for `perception.optics.within_optic_fov` and the two named optics
 (`UNAIDED_OPTIC`, `BINOCULAR_OPTIC`) -- `plans/detection-cones-slice1/
-plan.md`.
+plan.md`, updated by slice 2B (`plans/detection-cones-slice2/plan.md`) for
+`within_optic_fov`'s new boresight parameter and `Optic.peripheral`.
 
 Pure mechanism tests, mirroring `test_cockpit_mask.py`'s posture: exercised
 against small synthetic `Optic` instances, not the shipped table, so a
@@ -22,9 +23,7 @@ from perception.optics import (
 )
 
 
-def _optic(
-    fov_half_angle_deg: float | None, boresight_azimuth_deg: float = 0.0
-) -> Optic:
+def _optic(fov_half_angle_deg: float | None, peripheral: bool = True) -> Optic:
     """A synthetic test `Optic` -- the per-tier multipliers are irrelevant
     to `within_optic_fov` (a pure geometry test), so they're pinned at 1.0
     here rather than repeated at every call site."""
@@ -34,16 +33,23 @@ def _optic(
         class_range_mult=1.0,
         type_range_mult=1.0,
         fov_half_angle_deg=fov_half_angle_deg,
-        boresight_azimuth_deg=boresight_azimuth_deg,
+        peripheral=peripheral,
     )
 
 
 def test_none_fov_half_angle_always_passes() -> None:
     unrestricted = _optic(fov_half_angle_deg=None)
 
-    assert within_optic_fov(unrestricted, azimuth_deg=0.0, elevation_deg=0.0)
+    assert within_optic_fov(
+        unrestricted, boresight_azimuth_deg=0.0, azimuth_deg=0.0, elevation_deg=0.0
+    )
     # Far off-boresight in every axis -- still no restriction.
-    assert within_optic_fov(unrestricted, azimuth_deg=179.0, elevation_deg=89.0)
+    assert within_optic_fov(
+        unrestricted,
+        boresight_azimuth_deg=0.0,
+        azimuth_deg=179.0,
+        elevation_deg=89.0,
+    )
 
 
 def test_boundary_case_exactly_at_the_half_angle_passes() -> None:
@@ -51,24 +57,36 @@ def test_boundary_case_exactly_at_the_half_angle_passes() -> None:
 
     # Pure azimuth offset of exactly the half-angle, zero elevation --
     # angular separation is exactly 10 deg.
-    assert within_optic_fov(optic, azimuth_deg=10.0, elevation_deg=0.0)
+    assert within_optic_fov(
+        optic, boresight_azimuth_deg=0.0, azimuth_deg=10.0, elevation_deg=0.0
+    )
 
 
 def test_just_outside_the_half_angle_fails() -> None:
     optic = _optic(fov_half_angle_deg=10.0)
 
-    assert not within_optic_fov(optic, azimuth_deg=10.001, elevation_deg=0.0)
+    assert not within_optic_fov(
+        optic, boresight_azimuth_deg=0.0, azimuth_deg=10.001, elevation_deg=0.0
+    )
 
 
 def test_off_boresight_azimuth_case() -> None:
     """A non-zero `boresight_azimuth_deg` shifts the cone's centre --
-    confirms `within_optic_fov` measures separation from the optic's own
-    boresight, not from world azimuth 0."""
-    optic = _optic(fov_half_angle_deg=5.0, boresight_azimuth_deg=45.0)
+    confirms `within_optic_fov` measures separation from the supplied
+    boresight, not from world azimuth 0. Slice 2B moved this from an
+    `Optic` field to a call-time parameter (`optics.py`'s "an optic is
+    pointed by the head" note) -- the geometry it tests is unchanged."""
+    optic = _optic(fov_half_angle_deg=5.0)
 
-    assert within_optic_fov(optic, azimuth_deg=45.0, elevation_deg=0.0)
-    assert within_optic_fov(optic, azimuth_deg=48.0, elevation_deg=0.0)
-    assert not within_optic_fov(optic, azimuth_deg=0.0, elevation_deg=0.0)
+    assert within_optic_fov(
+        optic, boresight_azimuth_deg=45.0, azimuth_deg=45.0, elevation_deg=0.0
+    )
+    assert within_optic_fov(
+        optic, boresight_azimuth_deg=45.0, azimuth_deg=48.0, elevation_deg=0.0
+    )
+    assert not within_optic_fov(
+        optic, boresight_azimuth_deg=45.0, azimuth_deg=0.0, elevation_deg=0.0
+    )
 
 
 def test_elevation_offset_alone_can_fail_the_gate() -> None:
@@ -77,8 +95,12 @@ def test_elevation_offset_alone_can_fail_the_gate() -> None:
     exceeds the half-angle, exactly as a pure azimuth offset does."""
     optic = _optic(fov_half_angle_deg=10.0)
 
-    assert within_optic_fov(optic, azimuth_deg=0.0, elevation_deg=9.0)
-    assert not within_optic_fov(optic, azimuth_deg=0.0, elevation_deg=11.0)
+    assert within_optic_fov(
+        optic, boresight_azimuth_deg=0.0, azimuth_deg=0.0, elevation_deg=9.0
+    )
+    assert not within_optic_fov(
+        optic, boresight_azimuth_deg=0.0, azimuth_deg=0.0, elevation_deg=11.0
+    )
 
 
 def test_unaided_optic_has_no_fov_restriction() -> None:
@@ -117,5 +139,23 @@ def test_binocular_optic_field_of_view_rejects_an_off_boresight_candidate() -> N
     """The FOV value above is not just data -- confirms `within_optic_fov`
     actually enforces it for the shipped `BINOCULAR_OPTIC`, not only for
     synthetic test optics."""
-    assert within_optic_fov(BINOCULAR_OPTIC, azimuth_deg=0.0, elevation_deg=0.0)
-    assert not within_optic_fov(BINOCULAR_OPTIC, azimuth_deg=10.0, elevation_deg=0.0)
+    assert within_optic_fov(
+        BINOCULAR_OPTIC, boresight_azimuth_deg=0.0, azimuth_deg=0.0, elevation_deg=0.0
+    )
+    assert not within_optic_fov(
+        BINOCULAR_OPTIC, boresight_azimuth_deg=0.0, azimuth_deg=10.0, elevation_deg=0.0
+    )
+
+
+# -- Optic.peripheral (slice 2B, plans/detection-cones-slice2/plan.md) ------
+
+
+def test_unaided_optic_has_peripheral_vision() -> None:
+    assert UNAIDED_OPTIC.peripheral is True
+
+
+def test_binocular_optic_has_no_peripheral_vision() -> None:
+    """The binocular's real cost is more than a narrow field of view --
+    raising it trades away the wide, change-detecting peripheral channel
+    entirely (hard part 2a, `plans/detection-cones-slice2/plan.md`)."""
+    assert BINOCULAR_OPTIC.peripheral is False

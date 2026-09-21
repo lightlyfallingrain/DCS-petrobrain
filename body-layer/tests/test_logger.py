@@ -14,6 +14,7 @@ fake needed -- it's already pure/fixture-testable per `test_contacts.py`).
 from __future__ import annotations
 
 import io
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -22,6 +23,7 @@ from typing import Any
 import pytest
 
 from aircraft_client import AircraftLayerError
+from belief.attention import AttentionArea
 from belief.audio_client import AudioAdapterError
 from belief.console import Console
 from belief.contacts import ContactStore
@@ -31,16 +33,21 @@ from belief.mission_phase import (
     MissionPhaseTracker,
     MissionUnderstandingData,
 )
+from belief.tasks import TaskStore
 from logger import (
     ConsolePerceptionRunner,
     PerceptionLogger,
+    _active_gaze,
+    _apply_active_gaze,
     _poll_transcripts,
     _run_console_poll_loop,
     _run_console_repl,
     format_observation_line,
 )
 from perception import association
+from perception.gaze import Gaze
 from perception.geometry import GeoPosition
+from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import Observation, OwnshipState
 from store.writer import open_for_build
 
@@ -634,6 +641,154 @@ def test_console_runner_reprojects_relative_areas_before_ingest() -> None:
         x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
     )
     assert projected.wedge_deg == (0.0, 30.0)
+
+
+# -- _active_gaze / _apply_active_gaze (slice 2B, plans/
+# detection-cones-slice2/plan.md) -------------------------------------------
+
+
+def _relative_area(area_id: str, relative_sector: str) -> AttentionArea:
+    return AttentionArea(
+        id=area_id,
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=None,
+        level="watch",
+        source="scan_area",
+        relative_sector=relative_sector,  # type: ignore[arg-type]
+    )
+
+
+class _NoWorldObjectsClient:
+    """Duck-typed stand-in carrying only the one method
+    `NakedEyePerceptionSource.poll` needs -- always reports no snapshot, so
+    `poll()` returns `[]` without needing a real `AircraftLayerClient`."""
+
+    def get_world_objects_latest(self) -> dict[str, Any] | None:
+        return None
+
+
+def _naked_eye_source() -> NakedEyePerceptionSource:
+    return NakedEyePerceptionSource(
+        aircraft_client=_NoWorldObjectsClient(),  # type: ignore[arg-type]
+        theatre="Syria",
+        world_model_conn=sqlite3.connect(":memory:"),
+    )
+
+
+def test_active_gaze_is_none_with_no_pending_scan_task() -> None:
+    assert _active_gaze(TaskStore()) is None
+
+
+def test_active_gaze_resolves_a_pending_relative_sector_task() -> None:
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "left"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    gaze = _active_gaze(tasks)
+
+    assert gaze == Gaze(center_azimuth_deg=-60.0, half_width_deg=30.0, label="left")
+
+
+def test_active_gaze_ignores_a_cancelled_task() -> None:
+    tasks = TaskStore()
+    task = tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "ahead"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+    tasks.cancel(task.id)
+
+    assert _active_gaze(tasks) is None
+
+
+def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "ahead"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_2", "right"),
+        created_sim=1.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    gaze = _active_gaze(tasks)
+
+    assert gaze is not None
+    assert gaze.label == "right"
+
+
+def test_apply_active_gaze_sets_gaze_only_on_naked_eye_sources() -> None:
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "ahead"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+    naked_eye = _naked_eye_source()
+    fake = FakeSource([])
+    sources = [fake, naked_eye]
+
+    _apply_active_gaze(sources, tasks)
+
+    assert naked_eye.gaze == Gaze(
+        center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead"
+    )
+    assert not hasattr(fake, "gaze")
+
+
+def test_apply_active_gaze_clears_gaze_when_nothing_is_pending() -> None:
+    naked_eye = _naked_eye_source()
+    naked_eye.gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead")
+
+    _apply_active_gaze([naked_eye], TaskStore())
+
+    assert naked_eye.gaze is None
+
+
+def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
+    # End-to-end: a pending scan-left task registered on the store the
+    # runner ticks must be visible to a real NakedEyePerceptionSource by
+    # the time `run_once` polls it -- this is the wiring that makes an F10
+    # "scan left" command change what Petrovich can actually see.
+    telemetry = _telemetry_dict()
+    store = ContactStore()
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _relative_area("AREA_1", "left"),
+        created_sim=0.0,
+        deadline_sim=600.0,
+        reason="scan-area",
+    )
+    naked_eye = _naked_eye_source()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[naked_eye],
+        store=store,
+        tasks=tasks,
+    )
+
+    runner.run_once()
+
+    assert naked_eye.gaze == Gaze(
+        center_azimuth_deg=-60.0, half_width_deg=30.0, label="left"
+    )
 
 
 # -- _poll_transcripts (plans/inbound-speech/plan.md Stage 3) ---------------
