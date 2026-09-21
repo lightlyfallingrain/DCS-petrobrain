@@ -157,6 +157,26 @@ Two related questions, both aimed at deciding whether DCS-native *static files*
   `landscape4::` magic** (that magic string was only searched for in
   filenames, not contents, in this pass — see the new deep-dive probe
   script below for a real content check):
+
+  > **CORRECTION 2026-09-05 (recorded here 2026-09-21) — the content check was run, and this
+  > claim is false.** `surface/Syria.onlay.sup4` (680 MB) carries the header
+  > **`landscape4::lSuperficialFile`** — *the same `landscape4` magic family* as `.routes`/`.rn4`
+  > (`2026-09-05-m7-terrain-mesh-elevation-relitigation.md` Finding 4; raw bytes in
+  > `2026-09-04-m5-terrain-files-deep-probe-raw-2.txt` from line 446). The same pass identified
+  > `Syria.ng5` as `navGraph5File` (guessed "unclear" below) and `Syria.surface5` as
+  > `landscape5::Surface5File`, carrying LOD-quadtree mesh vocabulary.
+  >
+  > **So the terrain-mesh NO-GO this section argues for was resting on a premise the bytes
+  > contradict.** The practical outcome did not change — the relitigation deferred the mesh route
+  > on decode *cost*, not on impossibility, and called `Syria.surface5` "a genuinely new,
+  > non-trivial lead" rather than a dead end. But the reason changed completely, and that matters
+  > for anyone reopening it.
+  >
+  > **This note flagged its own weakness in the same breath** — the parenthesis right here says
+  > the magic string was matched against *filenames, not contents*, and proposes the probe that
+  > later disproved it. The hedge was correct and was written down; the bolded sentence in front
+  > of it is what a reader (or a graph query) carries away. **A caveat inside the claim does not
+  > weaken the claim as it travels.**
   - `Mods/terrains/Syria/Scenes/Syria.scn5` — exactly one file, the only
     entry under `Scenes/`; by file naming convention (`.scn5` "scene v5")
     this is plausibly the terrain's master scene graph and could reference

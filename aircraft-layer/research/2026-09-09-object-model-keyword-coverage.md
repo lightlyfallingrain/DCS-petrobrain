@@ -129,6 +129,17 @@ matches that analysis.
   `OP_ARMORED`, not the ships/SAM-SPAAG scope this session's fix covers. Worth a small follow-up
   (likely: a more specific keyword, or an explicit exclusion list for the tanker/rail-wagon false
   positives) the next time `object_model.py` is touched.
+
+  > **CORRECTION 2026-09-21 — this has since been fixed, and so has the addendum's restatement of
+  > it below.** `object_model.py` carries **no bare `"tank"` keyword** any more; the follow-up took
+  > the "remove it" option rather than the exclusion-list one, with the reasoning recorded in the
+  > module itself: *"Real armour is named T-72/Leopard/Merkava/Challenger2, never 'tank', while
+  > 'tank' matches fuel trailers (ATZ-60_TANK, TZ-22_TANK), fuel trucks (M978 HEMTT Tanker),
+  > railway tank cars, and the S-3B Tanker aircraft"*
+  > (`body-layer/src/perception/object_model.py`, the comment above `_KEYWORD_PROFILES`).
+  > So the Addendum's *"`S-3B Tanker` … still gets `OP_ARMORED` from the old raw keyword"* is also
+  > no longer true. Anyone reproducing this document's before/after coverage numbers should expect
+  > the `OP_ARMORED` column to differ for that reason.
 - **The 595-row source file itself is not committed to the repo** (gitignored, per this
   project's convention for install-derived Lua under `win-mac-sync/from-windows/`) — only a
   curated ~90-entry sample of individual real type-name strings is committed, at

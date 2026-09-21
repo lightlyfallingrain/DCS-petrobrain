@@ -1,3 +1,32 @@
+> **CORRECTIONS — two claims below were later contradicted by this project's own live runs.**
+> Everything else in this desk-research pass held up well and the recommended architecture is the
+> one that shipped; only these two are wrong.
+>
+> 1. **`LuaExportActivityNextEvent` does not throttle anything.** Finding 1 calls it "the
+>    documented mechanism for throttling export/network load", and the recommended approach below
+>    proposes running "at a throttled rate via `LuaExportActivityNextEvent` (e.g. 10-20 Hz)". It
+>    was implemented that way and **it did not work**: `LuaExportAfterNextFrame` fires every DCS
+>    frame regardless of that function's return value. The real 5 Hz gate is a `last_export_t`
+>    check at the top of `LuaExportAfterNextFrame` itself. This is a **documented-behaviour vs.
+>    observed-behaviour divergence in DCS**, not a misreading of the doc — see
+>    `plans/aircraft-layer/implementation.md` stage 5 part 1, and `aircraft-layer/CLAUDE.md`
+>    "Tech stack", which states the rule as *"Do not rely on `LuaExportActivityNextEvent`'s return
+>    value to throttle anything."* (It is also why the ~8 ms inter-call figure that
+>    `2026-09-19-ptt-gate-feasibility.md` relies on exists at all — the callback runs at frame
+>    rate, which turned out to be a feature for the PTT gate.)
+>
+> 2. **Finding 5's "there is no confirmed API that hands back 'what Petrovich/the Mi-24P's sensors
+>    currently perceive' as structured data" is false**, though its reasoning about the functions
+>    it actually tested is sound. `list_indication(6)` — the HelperAI indicator device — returns
+>    Petrovich's own classified contact list as parseable text, confirmed live and in production
+>    use today (`2026-09-08-pb1-live-spike-results.md` finding 1,
+>    `2026-09-11-petrovich-detection-readout.md`). The finding surveyed the *sensor-export*
+>    family (`LoGetTargetInformation`/`LoGetTWSInfo`/…) and was right about every one of them —
+>    they return `nil` for this module, confirmed live. What it missed is that the answer was not
+>    in the sensor API at all but in the **cockpit-indicator** API, a different surface entirely.
+>    Same shape of error as finding 10 of `2026-09-20-dcs-install-detection-deep-read.md`: a
+>    thorough negative over one surface, reported as a fact about DCS.
+
 # Aircraft Layer: Live-Runtime DCS I/O (Export environment, DCS-BIOS, commanding, LAN transport)
 
 **Date:** 2026-09-06

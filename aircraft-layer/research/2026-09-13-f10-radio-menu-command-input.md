@@ -186,6 +186,34 @@ Still open: the minimal opt-in (whether `"gui"` in `allow_unsafe_api` and anythi
 
 ### Reproducible Test
 
+> **CORRECTION 2026-09-21 — this section and the "Unresolved" section below were never updated
+> when Findings 7-11 were appended to this same file, and they now contradict it.** Findings 7-11
+> record a same-day follow-up on the DCS machine that included **two live probe runs**, so:
+>
+> - *"No live test was run this session"* — false; see Findings 10 and 11.
+> - Unresolved: *"Whether `net.dostring_in` is still functional … once the `autoexec.cfg` opt-in
+>   is created … still untested now"* — **resolved: it works.** Finding 11 registered an F10 item
+>   via `net.dostring_in("scripting", …)`, selected it, and read the callback's effect back
+>   through the same bridge. Use `"scripting"`, **not** `"mission"`/`a_do_script`.
+> - Unresolved: *"Whether `missionCommands.addCommand` calls made via the bridge can be correctly
+>   scoped"* — resolved in practice for single-player: registration and callback both worked, and
+>   re-registered correctly on a second mission at `onSimulationStart`. (Multiplayer group scoping
+>   is out of scope per root `CLAUDE.md`.)
+> - Unresolved: *"Contents of the installed `AddCommandRadioF10.lua` were not read this session"* —
+>   read; Finding 7 quotes it and cites its line numbers.
+> - Unresolved: *"No ED-authored Mission-Scripting-environment API doc … has been synced"* — still
+>   true, but Finding 7 notes `$DCS_INSTALL_PATH/API/` has no other doc mentioning
+>   `missionCommands`, so there is nothing further to sync.
+>
+> What remains genuinely open is narrower and is stated in Finding 11's own status line: **the
+> minimal opt-in** (whether `"gui"` in `allow_unsafe_api`, and anything beyond `"scripting"` in
+> `allow_dostring_in`, is actually needed — run 2 enabled all of them), and what
+> `onRadioCommand`'s `command_message` contains (moot for the chosen approach).
+>
+> The steps below are kept as the reproduction recipe, but note step 3's `autoexec.cfg` stanza is
+> the *narrow* version; run 2 used a wider one. Approach B shipped
+> (`plans/f10-crew-commands/plan.md`, `dcs-export/petrobrain-f10-commands-hook.lua`).
+
 No live test was run this session (no DCS box access). Exact steps for the user to run on the
 Windows DCS machine, to resolve Findings 4 and 6:
 
