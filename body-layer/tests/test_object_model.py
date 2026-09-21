@@ -7,15 +7,133 @@ Mirrors `test_association.py`'s fixture-only, no-network-I/O posture --
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
+
+import pytest
 
 from perception.object_model import (
     DEFAULT_OP_CLASS,
     DEFAULT_SIZE_M,
+    ObjectTypeProfile,
+    apparent_extent_m,
     profile_for,
 )
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+#: Known L/W/H triple with `L != W` -- `plans/aspect-aware-profiles/plan.md`'s
+#: own mandated test rule: `apparent_extent_m` must be exercised at a
+#: non-axis-aligned angle (45 deg), not just 0/90, since those two are
+#: exactly the fixed points of `sin`/`cos` that hid the original
+#: cubic-fallback bug (see that plan's "Correction, coordinator review"
+#: section). `length_m=10` (long axis), `width_m=4` (narrow axis),
+#: `height_m=6` (taller than the narrow axis, shorter than the long one),
+#: so the `max(projected_width, height)` branch is exercised meaningfully
+#: at more than one angle.
+_DIMENSIONED_PROFILE = ObjectTypeProfile(
+    size_m=10.0, op_class="OP_TEST", length_m=10.0, width_m=4.0, height_m=6.0
+)
+
+#: A profile with no measured dimensions at all -- the common case for
+#: every un-migrated row in the real tables.
+_UNDIMENSIONED_PROFILE = ObjectTypeProfile(size_m=5.5, op_class="OP_TEST")
+
+
+def test_apparent_extent_nose_on_is_the_narrow_width() -> None:
+    # aspect=0: viewed from directly ahead/astern -- the narrow width
+    # dominates, and it's still less than height, so height wins.
+    assert apparent_extent_m(_DIMENSIONED_PROFILE, 0.0) == pytest.approx(6.0)
+
+
+def test_apparent_extent_broadside_is_the_long_length() -> None:
+    # aspect=90: broadside -- the full length dominates over height.
+    assert apparent_extent_m(_DIMENSIONED_PROFILE, 90.0) == pytest.approx(10.0)
+
+
+def test_apparent_extent_at_45_degrees_is_the_true_trig_projection() -> None:
+    # The mandated non-axis-aligned check. At 45 deg the projected width is
+    # length*sin(45)+width*cos(45) = 10*0.70711 + 4*0.70711 = 9.8995, still
+    # more than height (6.0), so this is the value that must come out --
+    # NOT a naive average of the 0/90 answers (8.0) and NOT the un-projected
+    # size_m (10.0), either of which a broken formula could coincidentally
+    # produce.
+    expected = 10.0 * abs(math.sin(math.radians(45.0))) + 4.0 * abs(
+        math.cos(math.radians(45.0))
+    )
+    assert expected == pytest.approx(9.8994949)
+    assert apparent_extent_m(_DIMENSIONED_PROFILE, 45.0) == pytest.approx(expected)
+
+
+def test_apparent_extent_at_135_degrees_mirrors_45() -> None:
+    # A second non-axis-aligned angle, on the other side of broadside --
+    # |sin|/|cos| make this symmetric with the 45 deg case.
+    assert apparent_extent_m(_DIMENSIONED_PROFILE, 135.0) == pytest.approx(
+        apparent_extent_m(_DIMENSIONED_PROFILE, 45.0)
+    )
+
+
+@pytest.mark.parametrize("aspect_deg", [0.0, 30.0, 45.0, 60.0, 90.0, 135.0, 180.0])
+def test_apparent_extent_without_dimensions_returns_size_m_unchanged(
+    aspect_deg: float,
+) -> None:
+    # Regression guard for the original cubic-fallback defect: a profile
+    # with no measured dimensions must return plain size_m at EVERY aspect
+    # tested, including 45 deg -- 0/90 alone would have hidden the bug (see
+    # the plan's "Correction, coordinator review" section: the cube formula
+    # agreed with size_m only at those two fixed points and diverged by up
+    # to 41% everywhere else).
+    assert apparent_extent_m(_UNDIMENSIONED_PROFILE, aspect_deg) == pytest.approx(5.5)
+
+
+def test_apparent_extent_with_dimensions_but_unknown_aspect_returns_size_m() -> None:
+    # aspect_deg=None ("unknown aspect this tick") must not be coerced to a
+    # guessed angle -- falls back to size_m even though real dimensions
+    # exist, exactly like the no-dimensions case above.
+    assert apparent_extent_m(_DIMENSIONED_PROFILE, None) == pytest.approx(10.0)
+
+
+@pytest.mark.parametrize("aspect_deg", [0.0, 30.0, 45.0, 60.0, 90.0, 135.0, 180.0])
+def test_every_unmigrated_table_row_is_unaffected_by_aspect(aspect_deg: float) -> None:
+    # Full sweep over every real, currently-shipped profile except the two
+    # S-300 rows this pass migrated -- confirms the ~150 unmigrated rows'
+    # source-literal ObjectTypeProfile(size_m=X, op_class=Y) calls really do
+    # carry no dimensions, at a real non-axis-aligned angle, not just 0/90.
+    sample_object_types = [
+        "Ural-4320",
+        "T-72B",
+        "Infantry AK-74",
+        "5p73 s-125 ln",
+        "Kub 2P25 ln",
+        "Shilka",
+        "MOSCOW",
+    ]
+    for object_type in sample_object_types:
+        profile = profile_for(object_type)
+        assert apparent_extent_m(profile, aspect_deg) == pytest.approx(profile.size_m)
+
+
+def test_s300_40b6m_tr_has_real_dimensions_and_op_lrsam() -> None:
+    # The tall-mast row this pass migrated -- see body-layer/research/
+    # 2026-09-21-s300-radar-dimensions.md for sourcing.
+    profile = profile_for("S-300PS 40B6M tr")
+
+    assert profile.length_m == pytest.approx(10.0)
+    assert profile.width_m == pytest.approx(3.0)
+    assert profile.height_m == pytest.approx(24.0)
+    assert profile.op_class == "OP_LRSAM"
+
+
+def test_s300_64h6e_sr_has_real_dimensions_and_op_lrsam() -> None:
+    # The low-trailer row this pass migrated -- see body-layer/research/
+    # 2026-09-21-s300-radar-dimensions.md for sourcing.
+    profile = profile_for("S-300PS 64H6E sr")
+
+    assert profile.length_m == pytest.approx(13.2)
+    assert profile.width_m == pytest.approx(3.0)
+    assert profile.height_m == pytest.approx(10.0)
+    assert profile.op_class == "OP_LRSAM"
+
 
 # The fixture's "ground" bucket is a full enumeration of every real
 # `dcs_object_type` in the 595-row catalogue that is neither a ship, a WWII
