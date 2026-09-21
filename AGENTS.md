@@ -37,9 +37,22 @@ attention is elsewhere will keep being broken. This one is structural instead.
      and a clean `git status --porcelain`** in its final message.
    - **Cherry-pick the sha**, then verify against the agent's own file list rather than assuming the
      pick caught everything.
-   - **Only then remove the worktree.** Before removing any agent worktree, run
-     `git -C <worktree> status --porcelain` and account for every line. An empty result is the
-     only safe basis for `--force`.
+   - **Only then remove the worktree**, with a plain `git worktree remove` — **never `--force`,
+     which is now in the deny list** (`.claude/settings.json`).
+
+     `--force` is not needed, and that was established by testing rather than assumed: a plain
+     remove succeeds on a clean worktree, succeeds when the only leftovers are **gitignored** build
+     artifacts, and refuses only when genuinely untracked files are present. **That refusal is the
+     safety check** — it fires in exactly the case where something unaccounted-for would be
+     destroyed, so overriding it is always either losing work or papering over a missing
+     `.gitignore` entry.
+
+     The one artifact that ever forced it here was `*.egg-info/`, which agents generate by
+     `pip install -e .` and which no subproject `.gitignore` covered. Now they all do. If a plain
+     remove ever refuses again, **read what it names** and fix that, rather than reaching for the
+     flag: it is telling you about work you have not harvested, or an artifact that should be
+     ignored. A worktree whose directory has already been deleted externally needs
+     `git worktree prune`, not force.
 
    The failure mode is silent by construction: the report arrives, the work looks done, and the
    memory file that would have stopped the next agent repeating a mistake is simply gone.
