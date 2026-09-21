@@ -1,5 +1,13 @@
 # Unit velocity is available — through the mission scripting environment, not Export
 
+> **CORRECTION 2026-09-22 — this note called the bridge "unprobed". It was already in production.**
+> `petrobrain-f10-commands-hook.lua` has used `net.dostring_in("scripting", …)` since 2026-09-13,
+> polling at 1 Hz, and the user has flown and accepted it. Nothing below about *where velocity
+> lives* changes; what changes is that reaching it needs no new channel and no probe. See
+> `2026-09-22-mission-bridge-already-shipping.md`, which also records why the false "unprobed" claim
+> propagated into a backlog item, a status blocker, a test card and a probe.
+
+
 **Date:** 2026-09-21. Prompted by the user pushing back on a claim I had relayed as settled:
 *"Trackview \[Tacview\] (for example) does get speed. It's such a basic information for an aircraft
 simulator that I find it hard to believe it would not be exported somehow."*

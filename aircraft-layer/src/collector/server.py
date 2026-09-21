@@ -61,6 +61,20 @@ from schema import (
 
 logger = logging.getLogger(__name__)
 
+
+#: Wire-format version this collector expects the deployed `Export.lua` to
+#: report on connect. Bump BOTH this and `EXPORT_SCRIPT_VERSION` in
+#: `aircraft-layer/dcs-export/Export.lua` in the same commit whenever the wire
+#: format changes.
+#:
+#: Export.lua is deployed by *copying* into `Saved Games\DCS\Scripts\`, so the
+#: running copy can lag this repository silently and indefinitely. On
+#: 2026-09-21 a sortie ran an `Export.lua` predating the `is_ownship` flag
+#: (shipped 2026-09-09): ownship was evaluated as a detection candidate on
+#: every poll, 4113 times in one flight, and a Windows probe plus an hour of
+#: tracing went into a bug that did not exist in the code. A mismatch warning
+#: costs one log line and makes that failure loud instead of invisible.
+EXPECTED_EXPORT_VERSION = "2026-09-22"
 #: Loopback-only by design -- Export.lua and the collector run on the same
 #: Windows box (plan decision 2); nothing outside this machine should be able
 #: to push telemetry samples.
@@ -162,6 +176,22 @@ class CollectorServer:
             return
         if not isinstance(data, dict):
             logger.warning("dropping non-object line: %r", line)
+            return
+
+        if "export_version" in data:
+            reported = str(data.get("export_version"))
+            if reported == EXPECTED_EXPORT_VERSION:
+                logger.info("Export.lua wire-format version %s (matches)", reported)
+            else:
+                logger.warning(
+                    "Export.lua VERSION MISMATCH: deployed copy reports %s, this "
+                    "collector expects %s. The deployed script is a COPY in "
+                    "Saved Games\\DCS\\Scripts\\ and may be stale -- re-copy it "
+                    "from aircraft-layer/dcs-export/Export.lua. Data from this "
+                    "session may be missing fields this collector assumes.",
+                    reported,
+                    EXPECTED_EXPORT_VERSION,
+                )
             return
 
         if "objects" in data:
