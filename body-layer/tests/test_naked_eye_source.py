@@ -898,6 +898,77 @@ def test_two_close_candidates_emit_one_clustered_observation() -> None:
     assert observations[0].count_bucket == "OP_1UNIT"
 
 
+#: Three T-72B (`size_m=7.0`, `OP_ARMORED`) at 3000 m -- beyond `LOWRES_
+#: ANGULAR_RADIUS_RAD`'s own 2333.33 m threshold (so a lone one is
+#: rejected), well inside `RESOLUTION_ANGULAR_RADIUS_RAD`'s 5384.6 m
+#: threshold. Cross-range spacing of ~18.18 m matches the ladder's own
+#: "200 m / 12 units" figure: well past `clustering.py`'s own merge
+#: boundary at this range (~7 m, so these stay three separate resolution
+#: clusters, not one), well inside `group_salience.py`'s own ~70 m
+#: cohesion boundary at this range (`GROUP_COHESION_GAP_UNIT_WIDTHS=10.0`)
+#: -- exactly the "separable but still reads as one structure" case the
+#: two modules' docstrings both describe. Each candidate's azimuth
+#: (`atan(18.18 / 3000) ~= 0.35 deg`) is comfortably inside the default
+#: scan plan's +/-15 deg gaze cone.
+_GROUP_SALIENCE_RANGE_M: Final[float] = 3000.0
+_GROUP_SALIENCE_SPACING_M: Final[float] = 18.18
+
+
+def test_group_salience_wiring_admits_beyond_lowres_via_the_full_poll_pipeline() -> (
+    None
+):
+    """`plans/group-detectability/plan.md` Stage 2's wiring, exercised
+    through the real `poll()` pipeline (not `visibility.py` directly, as
+    `test_vision_calibration.py`'s own group-detectability tests do) --
+    `NakedEyePerceptionSource.poll` resolves `group_salient_ids` once per
+    poll and threads it into every `check_visibility` call. None of these
+    three candidates would individually clear `LOWRES_ANGULAR_RADIUS_RAD`
+    at 3000 m (see `test_group_salience_wiring_does_not_admit_a_lone_
+    candidate_at_the_same_range` below); together, they do."""
+    world_objects = {
+        "objects": [
+            _world_object(
+                1,
+                "T-72B",
+                lat_deg=_GROUP_SALIENCE_RANGE_M,
+                lon_deg=-_GROUP_SALIENCE_SPACING_M,
+            ),
+            _world_object(2, "T-72B", lat_deg=_GROUP_SALIENCE_RANGE_M, lon_deg=0.0),
+            _world_object(
+                3,
+                "T-72B",
+                lat_deg=_GROUP_SALIENCE_RANGE_M,
+                lon_deg=_GROUP_SALIENCE_SPACING_M,
+            ),
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(0.0, _ownship())
+
+    assert len(observations) > 0
+    for observation in observations:
+        assert observation.range_m >= _GROUP_SALIENCE_RANGE_M - 1000.0
+
+
+def test_group_salience_wiring_does_not_admit_a_lone_candidate_at_the_same_range() -> (
+    None
+):
+    """The regression this wiring must not introduce: with no group
+    around it, the same candidate at the same range stays rejected --
+    group salience never applies to a unit the group pass hasn't
+    separately found to be a member of a cohesive, resolvable group of
+    at least `GROUP_MIN_MEMBERS`."""
+    world_objects = {
+        "objects": [
+            _world_object(1, "T-72B", lat_deg=_GROUP_SALIENCE_RANGE_M, lon_deg=0.0)
+        ]
+    }
+    source, _client = _source(world_objects)
+
+    assert source.poll(0.0, _ownship()) == []
+
+
 def _high_ownship() -> OwnshipState:
     """An 85 m AGL variant of `_ownship()` (500 m target altitude + 85 m)
     -- needed by `test_a_cluster_splitting_gives_the_majority_child_
