@@ -102,6 +102,25 @@ the flag file. The branch is a no-op when the flag is absent.
 -- we use here, so no other change is needed.
 local socket = require("socket.core")
 
+-- WIRE-FORMAT VERSION of this script, stamped into the collector's log on
+-- every connect so a sortie's data carries the provenance of the script that
+-- produced it.
+--
+-- Bump this whenever the wire format changes -- a field added, removed, or
+-- given a new meaning -- and update EXPECTED_EXPORT_VERSION in
+-- `aircraft-layer/src/collector/server.py` in the same commit. The collector
+-- compares the two and warns loudly on a mismatch, which is the point: this
+-- file is DEPLOYED BY COPYING to Saved Games\DCS\Scripts\, so the running
+-- copy can silently lag the repository indefinitely.
+--
+-- That is not hypothetical. On 2026-09-21 a sortie's every naked-eye
+-- evaluation included ownship itself -- 4113 wasted gate chains in one flight,
+-- polluting the never-detected list. The `is_ownship` flag that prevents it
+-- shipped 2026-09-09 and the whole chain was correct end to end; a Windows
+-- probe and an hour of tracing went into a bug that did not exist in the code,
+-- because nothing recorded which version of this file had produced the data.
+local EXPORT_SCRIPT_VERSION = "2026-09-22"
+
 local HOST = "127.0.0.1"
 local PORT = 7790
 local EXPORT_INTERVAL_S = 0.2 -- 5 Hz, per plan's confirmed conservative starting rate
@@ -218,6 +237,9 @@ local function try_connect()
     if ok then
         sock:settimeout(0) -- non-blocking sends once connected
         debug_log("connected to collector")
+        -- Announce the wire-format version first, before any data line, so the
+        -- collector logs it at the head of every session.
+        sock:send('{"export_version":"' .. EXPORT_SCRIPT_VERSION .. '"}\n')
         return sock
     end
     debug_log("connect failed: " .. tostring(err))
