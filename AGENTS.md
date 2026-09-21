@@ -1,17 +1,59 @@
 ## General Rules
 
 - Follow `CLAUDE.md` as the primary project contract.
-- **"Side quests"** — a non-code or cross-cutting update that is not part of the milestone
-  currently in progress on the active feature branch (skill/config edits, backlog notes,
-  cross-milestone bookkeeping, workflow-doc fixes like this one) — go through a disposable
-  `git worktree` checked out on `main`, commit and push there, then remove the worktree. Do not
-  make them in the active feature branch's working directory. Two independent reasons converge on
-  this: (1) it keeps a feature branch's history to that feature's own work, not bundled with
-  unrelated bookkeeping; (2) role-sequence agents (Architect/Implementer/Reviewer/DoD) run in that
-  same working directory without worktree isolation by default, so any `git` operation there while
-  one is active risks racing it — a stray commit can sweep up another agent's staged-but-uncommitted
-  work. See `.claude/skills/merge.md` for the same worktree pattern applied to merging a finished
-  branch into `main`.
+## Where work happens: agents get worktrees, the main checkout is the user's
+
+**Changed 2026-09-21, after the same race condition occurred twice in one session.** The previous
+rule was the inverse — agents ran in the shared checkout and *side quests* went to a worktree — and
+it failed the way rules relying on main-loop discipline fail: the main loop did a bare
+`git checkout main` to write a document while an implementer was mid-task on a feature branch, twice,
+having quoted the rule at agents in between. A rule that must be remembered at the exact moment
+attention is elsewhere will keep being broken. This one is structural instead.
+
+### The three rules
+
+1. **Read-mostly agents always run with `isolation: "worktree"`** — Reviewer, Definition of Done,
+   Architect, Investigator, Security, Performance Reviewer. They produce documents, so the only
+   handoff is copying the file back. There is no reason not to, and it makes them immune to anything
+   the main loop does.
+
+2. **Implementers also get a worktree**, with one extra handoff step. Git will not check the same
+   branch out twice, so an implementer in a worktree commits to `worktree-agent-<id>`, and the main
+   loop fast-forwards that into the feature branch afterwards. **Trial this before relying on it**
+   (see "Status" below).
+
+3. **The main checkout belongs to the main loop and the user.** This is the inversion: side quests
+   no longer need a worktree, because nothing else is using the checkout.
+
+### The main checkout's branch is a contract with the user
+
+**The user tests on the main checkout. They do not operate in worktrees.** So the branch checked out
+there is not an implementation detail — it is how they know what they are flying.
+
+- **Leave the main checkout on the branch the user should test.** If work has just landed on a
+  feature branch, the main checkout stays on that branch until it merges.
+- **Name the branch, explicitly, whenever asking the user to test anything.** Every test card, every
+  "can you fly this", every acceptance request states the branch and the checkout command. "It's
+  ready" is not actionable if they cannot tell what to check out.
+- **Never leave the main checkout on a worktree branch or a detached HEAD.** Those are agent
+  scaffolding and mean nothing to the person flying the aircraft.
+
+### Status
+
+Rules 1 and 3 are in force now. Rule 2 (implementer isolation) is **to be trialled on the next
+implementer run** before being written in as settled — the untested part is the fast-forward handoff
+and whether an implementer told to "commit in small steps" stays clear about which branch it is on.
+Until then, an implementer may run in the main checkout, and while one does, **the main loop must
+not touch git there at all** — that is the discipline this change exists to stop depending on, so
+treat it as a temporary exception with a short life.
+
+### Why a feature branch's history still stays clean
+
+The original rule had a second, independent justification worth keeping: cross-cutting bookkeeping
+(skill edits, backlog notes, workflow-doc fixes) does not belong in a feature branch's commits. That
+still holds. With the main checkout free, the way to honour it is simply to commit such work on
+`main` directly rather than on the feature branch — no worktree needed, same outcome.
+See `.claude/skills/merge.md` for the worktree pattern as it applies to merging.
 - Prefer the simplest solution that satisfies correctness, performance, and architectural clarity.
 - Do not switch roles unnecessarily mid-task.
 - For small features, one role may handle the whole task.
