@@ -58,6 +58,11 @@ baseline carries the monitor's unknown bias, and the modifiers largely do not.
 four blockers were cleared by slice 2A (tier-dependent magnification, silhouette distinctiveness);
 this clears the third.
 
+**Scope narrowed 2026-09-21 (user):** the dots affect the **naked-eye and binocular columns only**
+— the 9K113 views are unaffected, so `9k113_wide` and `9k113_narrow` remain valid data. The re-shoot
+covers two of the four columns, not all four, and the sight's own calibration survives intact. That
+matters for the deferred 9K113 optic slice, which already has its calibration ground truth.
+
 **Still blocking:** the 2026-09-17 calibration ladder was shot with **DCS detection-aid dots
 enabled** and overstates unaided visibility by an unmeasured amount that grows with range
 (`body-layer/tests/fixtures/vision_calibration.json` carries the warning). A **dots-off re-shoot is
