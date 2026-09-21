@@ -23,14 +23,16 @@ never turn into spoken output (see `escalation.py`'s module docstring) --
 consistent with §3.5's "if the brain does nothing, body says nothing."
 
 **`drain_events`.** Called from the same poll-loop hook point BL-2.5's
-`--overlay` already uses (after each `ContactStore.tick()`), it runs every
-currently-unacknowledged event through `belief.speech.route_event`. Reading
-`store.unacknowledged_events` rather than tracking a separate high-water
-mark works because `route_event` itself acknowledges any event it renders
-a template for -- so a handled kind naturally drops out of this list on the
-next call, and a kind with no template (`CONTACT_ATTENTION_CHANGED`, see
-`speech.py`) is harmlessly re-checked and re-skipped every poll rather than
-needing its own suppression bookkeeping here.
+`--overlay` already uses (after each `ContactStore.tick()`), it delegates
+to `self.scheduler.tick` (`belief.callouts.CalloutScheduler`, `plans/
+callout-scheduling/plan.md`) rather than rendering every currently-
+unacknowledged event itself. The scheduler picks **at most one** thing to
+say per call -- re-rendered from current belief the instant it is chosen,
+never pre-rendered ahead of time -- which is the fix for the "callouts
+backlogged" sortie finding: nothing is ever spoken later than the moment it
+was decided true. See `belief.callouts`' own module docstring for the full
+design (speech-time scheduling, sim-time occupancy, report-space
+aggregation).
 
 **`handle_f10_command`.** `plans/f10-crew-commands/plan.md`'s second,
 non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
@@ -58,6 +60,7 @@ from typing import TextIO
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import RelativeSector, Sector
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
+from belief.callouts import CalloutScheduler
 from belief.classification import parent_class_of
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
@@ -298,6 +301,14 @@ class CrewConsole:
     #: independent of `--overlay`'s own `AircraftLayerClient` wiring (a
     #: different process, a different URL).
     speech_client: AudioAdapterClient | None = None
+    #: `plans/callout-scheduling/plan.md` -- the speech-time scheduler
+    #: `drain_events` delegates to. One scheduler per `CrewConsole`
+    #: (per-session occupancy state), mirroring every other optional-sink
+    #: field above in spirit though it is never `None`: unlike
+    #: `overlay_client`/`speech_client`, scheduling applies to *every*
+    #: sink (the plan's Decision 1 -- "One crew voice, one channel"), so
+    #: there is no no-op state for this field to have.
+    scheduler: CalloutScheduler = field(default_factory=CalloutScheduler)
     _next_utterance_number: int = field(default=0, repr=False)
     #: Stage 2 of `plans/inbound-speech/plan.md`'s confirm-band state --
     #: set by `handle_transcript` when a matched command lands in the
@@ -312,27 +323,25 @@ class CrewConsole:
             return []
         if stripped.startswith("!inject-urgent"):
             lines, bypass_gate = self._handle_inject_urgent(stripped, now_sim)
-            self._print(lines, bypass_gate=bypass_gate)
+            self._print(lines, now_sim, bypass_gate=bypass_gate)
             return lines
         if stripped.startswith("!voice"):
             return self._handle_voice_test_command(stripped, now_sim)
         lines = self._handle_utterance(stripped, now_sim)
-        self._print(lines, bypass_gate=False)
+        self._print(lines, now_sim, bypass_gate=False)
         return lines
 
     def drain_events(self, now_sim: float) -> list[str]:
-        """Speak every currently-unacknowledged event that has a template
-        (see module docstring). Called once per poll from `logger.py`'s
+        """Speak at most one currently-unacknowledged event, chosen and
+        rendered fresh from current belief by `self.scheduler.tick`
+        (`belief.callouts.CalloutScheduler`, see that module's docstring
+        and `_print`'s docstring). Called once per poll from `logger.py`'s
         `--crew-text` loop, after `ContactStore.tick()`."""
-        spoken: list[str] = []
-        for event in self.store.unacknowledged_events:
-            speech = route_event(self.store, event, now_sim, self.enrichment)
-            if speech is not None:
-                spoken.append(speech.text)
-        # A lifecycle/classification `Event` never carries `bypass_gate=True`
-        # (only an injected `UrgentCall`, routed through `handle_line`'s
+        spoken = self.scheduler.tick(self.store, now_sim, self.enrichment)
+        # A scheduler-drained line never carries `bypass_gate=True` (only an
+        # injected `UrgentCall`, routed through `handle_line`'s
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
-        self._print(spoken, bypass_gate=False)
+        self._print(spoken, now_sim, bypass_gate=False)
         return spoken
 
     def handle_f10_command(self, token: str, now_sim: float) -> list[str]:
@@ -375,7 +384,7 @@ class CrewConsole:
             return []
         else:
             return []
-        self._print(lines)
+        self._print(lines, now_sim)
         return lines
 
     def _believed_air_defence(self, facts: dict[str, object]) -> bool:
@@ -720,7 +729,7 @@ class CrewConsole:
             lines = [render_confirm_request(description).text]
         else:  # "say_again"
             lines = [render_say_again().text]
-        self._print(lines)
+        self._print(lines, now_sim)
         return lines
 
     def _handle_voice_test_command(self, line: str, now_sim: float) -> list[str]:
@@ -746,7 +755,7 @@ class CrewConsole:
         ]
         parts = line.split(maxsplit=6)
         if len(parts) != 7:
-            self._print(usage)
+            self._print(usage, now_sim)
             return usage
         _, token_arg, ratio_arg, confidence_arg, verb_arg, ambiguous_arg, transcript = (
             parts
@@ -755,10 +764,10 @@ class CrewConsole:
             match_ratio = float(ratio_arg)
             confidence = float(confidence_arg)
         except ValueError:
-            self._print(usage)
+            self._print(usage, now_sim)
             return usage
         if verb_arg not in ("0", "1") or ambiguous_arg not in ("0", "1"):
-            self._print(usage)
+            self._print(usage, now_sim)
             return usage
         token = None if token_arg == "-" else token_arg
         return self.handle_transcript(
@@ -830,7 +839,9 @@ class CrewConsole:
         # re-deriving it, so this stays the single source of truth.
         return [speech.text], speech.bypass_gate
 
-    def _print(self, lines: list[str], bypass_gate: bool = False) -> None:
+    def _print(
+        self, lines: list[str], now_sim: float, bypass_gate: bool = False
+    ) -> None:
         """Prints each line to `output` (unchanged) and, when
         `overlay_client`/`speech_client` are configured, pushes the same
         line to the in-cockpit text overlay (`AircraftLayerClient.
@@ -857,7 +868,20 @@ class CrewConsole:
         `urgent` argument instead (plan Decision 3/4: no new signal
         invented -- an injected urgent call is the only line that ever
         sets it, and the aircraft-layer's `AudioPlaybackSender` is what
-        actually preempts routine playback for it)."""
+        actually preempts routine playback for it).
+
+        `now_sim` (`plans/callout-scheduling/plan.md`) is needed for
+        exactly one thing here: when `bypass_gate` is True, this call is an
+        urgent line that just pre-empted whatever the scheduler thought was
+        in flight (`AudioPlaybackSender.interrupt`, on the real audio path,
+        clears the routine queue and kills in-flight playback) --
+        `self.scheduler.note_urgent` resets `busy_until_sim` to the urgent
+        line's own duration so the scheduler does not keep believing a
+        routine line the audio layer has already destroyed is still
+        playing. An urgent call is always exactly one line
+        (`_handle_inject_urgent`'s only caller of this path), but this
+        loops over `lines` rather than assuming that, so it degrades
+        correctly if that ever changes."""
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
@@ -880,3 +904,5 @@ class CrewConsole:
                         "speech push failed for crew-text line (continuing)",
                         exc_info=True,
                     )
+            if bypass_gate:
+                self.scheduler.note_urgent(now_sim, line)
