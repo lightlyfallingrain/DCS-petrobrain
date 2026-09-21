@@ -21,6 +21,18 @@ Each `poll()`:
    `is_ownship` flag (see that function's docstring; the flag replaced an
    earlier proximity heuristic found necessary via a live sortie,
    `plans/pb1.5-naked-eye-detection/debug.md`).
+1a. **Group salience is resolved once per poll, over the whole candidate
+    pool, before the per-candidate gate loop** (`plans/
+    group-detectability/plan.md` Stage 2) -- `perception.group_salience.
+    group_salient_ids` runs on the un-gazed, un-LOS-filtered candidates
+    from point 1 (a group is a property of the scene, not of what's
+    currently gazed; see that module's docstring), against `UNAIDED_
+    OPTIC` (this channel's only optic today). The resulting `object_id`
+    set is threaded into `check_visibility`'s `group_salient` keyword,
+    exactly the way `gaze_for`'s per-candidate `Gaze` resolution already
+    happens one step ahead of that same call -- the caller resolves a
+    per-candidate input once, `check_visibility` only ever applies
+    whatever it's handed.
 2. Runs every candidate through `visibility.check_visibility()`.
 3. **Clusters *every* gate-surviving candidate -- not yet the emission
    cap's survivors -- then quantises per cluster** (`plans/
@@ -188,6 +200,7 @@ from perception.gaze import (
     gaze_for,
 )
 from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.group_salience import group_salient_ids
 from perception.optics import UNAIDED_OPTIC
 from perception.reporting_names import reporting_name_for
 from perception.source import (
@@ -387,6 +400,18 @@ class NakedEyePerceptionSource:
         # stored, recomputed every poll.
         gaze = gaze_at(now_sim, self.scan_plan)
 
+        observer = GeoPosition(
+            x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
+        )
+        # `plans/group-detectability/plan.md` Stage 2: group membership is
+        # computed once per poll, over the whole un-gazed, un-LOS-filtered
+        # candidate pool -- before check_visibility runs, not after (module
+        # docstring's own "Where the set-ness lives" reasoning: a group is
+        # a property of the scene, not of what's currently gazed).
+        # UNAIDED_OPTIC -- this channel has no optic-selection mechanism yet
+        # (2D's job), same reason gaze_for below is always called against it.
+        salient_ids = group_salient_ids(candidates, observer, UNAIDED_OPTIC)
+
         visible: list[tuple[WorldObjectCandidate, VisibilityResult]] = []
         for candidate in candidates:
             # UNAIDED_OPTIC -- this channel has no optic-selection mechanism
@@ -406,6 +431,7 @@ class NakedEyePerceptionSource:
                 self.theatre,
                 gaze=candidate_gaze,
                 trace=self.trace_sink,
+                group_salient=candidate.object_id in salient_ids,
             )
             if result is not None:
                 visible.append((candidate, result))
@@ -417,9 +443,6 @@ class NakedEyePerceptionSource:
             candidate.object_id: result.confidence for candidate, result in visible
         }
 
-        observer = GeoPosition(
-            x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
-        )
         # Cluster *every* gate-surviving candidate first -- the cap below
         # operates on the resulting groups, not on individual candidates
         # ahead of the grouping that would have told it they were one thing
