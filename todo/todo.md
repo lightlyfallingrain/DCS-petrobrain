@@ -77,6 +77,46 @@ Prioritize any open task here over any other task in this file or roadmap files.
   synchronously or must be pushed back through a side channel. **Do not design against the bridge
   before this is answered** — differencing positions remains the fallback for movement.
 
+
+### Scan geometry: drop the invented radius (user direction, 2026-09-21)
+
+- [ ] **Remove `F10_SCAN_RADIUS_M` and make a sector scan unbounded.** User direction: *"get
+  everything visible within a sector"* instead of a made-up cutoff. `belief/crew_console.py`'s
+  `F10_SCAN_RADIUS_M = 3000.0` exists only because an F10 button carries no geometry the way the
+  typed `scan-area <bearing> <range> <radius> <reason>` does, so the code had to invent a number.
+
+  **The real objection is not that 3000 m is the wrong value — it is that the radius is a second,
+  arbitrary limit layered on top of the real one.** What should bound a sector scan is what
+  Petrovich can actually see. Measured against the current naked-eye envelope the constant is
+  *non-binding for every ground unit* (armour 2333 m, Ural 2000 m, infantry 600 m are all inside
+  3 km) and *wrongly binding* for the one thing that beats it — the S-300 mast at 8000 m, which a
+  3 km area would have excluded from a scan that should have found it. A cutoff that does nothing
+  except in the cases where it does the wrong thing is worse than no cutoff.
+
+  Shape: `AttentionArea.radius_m` becomes `float | None`, `None` meaning unbounded, and
+  `area_contains` skips the range test for it. The wedge still applies. The typed `scan-area`/
+  `watch-area` console commands keep supplying a real radius — nothing about explicit geometry
+  changes. Touches `belief/attention.py`, `tools.py`, `crew_console.py` and the task store, so it
+  is a small data-model change rather than a constant deletion.
+
+  Note it composes with the open "Scan commands should drive naked-eye perception" item: once a
+  scan steers perception, "unbounded" means "as far as the optics and conditions allow", which is
+  the honest answer and needs no constant at all.
+
+- [>] **Anchored limited scan — "scan around that landmark / that unit" — deferred to the voice
+  era.** The other half of the same user direction: *"on purpose command a limited scan, probably
+  around a landmark or another known unit."* A radius is genuinely meaningful there, and it comes
+  from the thing being scanned rather than from a constant — a landmark's own extent, or a
+  contact's position uncertainty.
+
+  **Deferred on an existing precedent, not on effort.** When the F10 command vocabulary was scoped
+  the user ruled that richer command forms belong to BL-10/SRS, because a dynamically rebuilt
+  contact list means collector-to-Hook menu pushes and `removeItemForGroup` traffic mid-flight for
+  a menu the player still has to click through. *"Scan around that unit"* is exactly that class.
+  Landmarks are the softer case — a static list could work — but the natural form is spoken, and
+  `find_place` (`belief/tools.py`, backed by `query.search.find_place_by_name`) already resolves
+  names, so the resolution half is not the blocker.
+
 ## Cross-cutting / unscoped backlog
 
 - [>] **Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
