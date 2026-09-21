@@ -113,14 +113,40 @@ detection here to be ambiguous *about*):
    ambient-detection.md`, Session 5 Finding 3) is ED's own range-by-target-
    size curve, expressed as a threshold angular radius per recognition tier
    rather than a flat range. This module works it backwards into a range
-   threshold: `range_threshold = object_model.size_m(object_type) /
-   NAKED_EYE_GATING_ANGULAR_RADIUS_RAD * BINOCULAR_RANGE_MULTIPLIER`, capped
-   at `NAKED_EYE_RANGE_CAP_M` as a sanity bound
-   regardless of what the formula computes for a given object's looked-up
-   size -- this project's own derivation from ED's published constants, not
-   a verified reproduction of ED's actual formula (see the plan's Risks
-   section: the native code also folds in `min_contrast_f`/
-   `min_fog_transparency`, which this project has no input for).
+   threshold: `range_threshold = size / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
+   * BINOCULAR_RANGE_MULTIPLIER`, capped at `NAKED_EYE_RANGE_CAP_M` as a
+   sanity bound regardless of what the formula computes for a given
+   object's looked-up size -- this project's own derivation from ED's
+   published constants, not a verified reproduction of ED's actual formula
+   (see the plan's Risks section: the native code also folds in
+   `min_contrast_f`/`min_fog_transparency`, which this project has no input
+   for). This gate uses `profile.size_m` (see point 4 of the next
+   paragraph for why), so it is the exact same threshold as the `lowres`
+   tier below -- gate admission and achieving at least `lowres` can never
+   disagree.
+
+   **`object_model.apparent_extent_m` is aspect-aware, but only
+   `medres`/`hires` use it -- the gate above and the `lowres` tier do
+   not** (`plans/aspect-aware-profiles/plan.md`, corrected by
+   `body-layer/research/2026-09-21-aspect-magnification-and-
+   distinctiveness.md` Finding 1, the same day the aspect-aware branch was
+   first merged). A four-instrument BTR-60 measurement found *presence*
+   identical at every aspect tested (1.00x ratio, 90 deg vs. 0/20 deg AOB,
+   across binoculars and both 9K113 FOV settings) while *class*/*type*
+   moved by 1.33x-2.31x with aspect. Physically: detection is a contrast
+   event against terrain, driven by presented area regardless of which
+   silhouette the object turns; recognition is a shape event and needs the
+   shape. So `apparent_extent_m` (real `length_m`/`width_m`/`height_m`
+   projected onto the observer's line of sight, using the angle between
+   the candidate's heading and the observer-to-candidate bearing --
+   `_aspect_deg` below) feeds only `_achieved_tier`'s `medres`/`hires`
+   thresholds; the gate here and `_achieved_tier`'s `lowres` threshold use
+   the plain, aspect-invariant `profile.size_m` -- see that function's own
+   docstring for the full reasoning and why the two size measures must
+   stay split, not unified. `apparent_extent_m` falls back to plain
+   `profile.size_m` anyway whenever a profile carries no measured
+   dimensions (every row except the two S-300 ones migrated so far) or the
+   candidate's heading is unknown this tick.
 4. **Terrain LOS** -- reuses `geometry.line_of_sight_clear` as-is; the piece
    `geometry.py`'s own docstring already anticipated needing ("turning
    'clear line of sight' into an actual detectability decision... [is] a
@@ -348,41 +374,96 @@ class VisibilityResult:
     confidence: float
 
 
+def _aspect_deg(
+    candidate_heading_true_deg: float | None, candidate_bearing_deg: float
+) -> float | None:
+    """The angle between the candidate's heading and the observer-to-
+    candidate bearing, wrapped to `[0, 180]` -- 0 deg means the candidate is
+    viewed from directly ahead or astern (its heading is aligned with, or
+    opposite to, the line of sight), 90 deg means broadside
+    (`plans/aspect-aware-profiles/plan.md`'s "The formula" section).
+    `None` whenever the candidate's heading is unknown this tick
+    (`WorldObjectCandidate.heading_true_deg`'s tri-state contract) -- never
+    guessed, since a wrong guess here would fabricate a specific aspect
+    `object_model.apparent_extent_m` would then silently trust."""
+    if candidate_heading_true_deg is None:
+        return None
+    delta = (candidate_heading_true_deg - candidate_bearing_deg + 180.0) % 360.0 - 180.0
+    return abs(delta)
+
+
 def _achieved_tier(
     range_m: float,
-    size_m: float,
+    presence_size_m: float,
+    recognition_extent_m: float,
     magnification: float = BINOCULAR_RANGE_MULTIPLIER,
 ) -> tuple[str, float]:
-    """The tightest recognition tier `range_m` still satisfies for an object
-    of characteristic size `size_m`, and that tier's confidence
-    (Stage 6's worked table: presence low / class medium / type high). Each
-    tier's threshold is independently capped at `NAKED_EYE_RANGE_CAP_M`, the
-    same sanity bound `check_visibility`'s gate applies (module docstring
-    gate #2) -- a very large object's `hires`/`medres` thresholds can both
-    collapse onto the cap, which is expected, not a bug.
+    """The tightest recognition tier `range_m` still satisfies, and that
+    tier's confidence (Stage 6's worked table: presence low / class medium
+    / type high). Each tier's threshold is independently capped at
+    `NAKED_EYE_RANGE_CAP_M`, the same sanity bound `check_visibility`'s
+    gate applies (module docstring gate #2) -- a very large object's
+    `hires`/`medres` thresholds can both collapse onto the cap, which is
+    expected, not a bug.
+
+    **Two different size measures, deliberately, per `body-layer/research/
+    2026-09-21-aspect-magnification-and-distinctiveness.md` Finding 1 --
+    do not unify them.** A same-day, four-instrument BTR-60 measurement
+    found presence identical at every aspect tested (1.00x ratio, 90 deg
+    vs. 0/20 deg AOB, in all three instruments) while class/type moved
+    1.33x-2.31x. Physically: detection is a contrast event against terrain,
+    driven by presented area, not by which silhouette the object happens to
+    turn; recognition is a shape event and needs the shape. So:
+
+    - `presence_size_m` (aspect-invariant, `profile.size_m`) drives the
+      `lowres` threshold below -- and must be the exact same value
+      `check_visibility`'s own range-admission gate uses, so a candidate
+      can never be admitted by the gate and then fail to achieve even
+      `lowres` here, or the reverse. This is why the `lowres` threshold is
+      computed explicitly below rather than left as an implicit "anything
+      that reaches this point" fallback: an explicit, self-contained
+      computation is the only way this function can't silently drift out
+      of sync with the gate's own arithmetic if either is edited later.
+    - `recognition_extent_m` (aspect-aware, `object_model.apparent_extent_m`)
+      drives `medres`/`hires` -- where the measured aspect effect actually
+      belongs.
 
     `magnification` generalises the old hardcoded `BINOCULAR_RANGE_
     MULTIPLIER` reference (`plans/detection-cones-slice1/plan.md`) --
     defaults to it, so every existing call site (which passes no
     `magnification` argument) is unaffected.
 
-    The `lowres` branch is unreachable while `NAKED_EYE_GATING_ANGULAR_
-    RADIUS_RAD` gates at `medres` (Stage 6) -- `check_visibility` already
-    drops anything beyond the gating threshold before this function is ever
-    called on it. It becomes reachable once Stage 7 moves the gate to
-    `lowres`."""
+    The final fallback return (range beyond even the `lowres` threshold) is
+    unreachable from `check_visibility` -- its own gate already drops
+    anything beyond that exact threshold before calling this function --
+    but is kept as an explicit, best-effort `lowres` result rather than a
+    crash, since `test_vision_calibration.py` calls this function directly
+    against screenshot ground truth without going through that gate."""
     hires_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
-        (size_m / HIRES_ANGULAR_RADIUS_RAD) * magnification,
+        (recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD) * magnification,
     )
     medres_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
-        (size_m / MEDRES_ANGULAR_RADIUS_RAD) * magnification,
+        (recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD) * magnification,
+    )
+    lowres_threshold_m = min(
+        NAKED_EYE_RANGE_CAP_M,
+        (presence_size_m / LOWRES_ANGULAR_RADIUS_RAD) * magnification,
     )
     if range_m <= hires_threshold_m:
         return "hires", NAKED_EYE_TYPE_CONFIDENCE
     if range_m <= medres_threshold_m:
         return "medres", NAKED_EYE_VISIBILITY_CONFIDENCE
+    if range_m <= lowres_threshold_m:
+        return "lowres", NAKED_EYE_PRESENCE_CONFIDENCE
+    # Beyond even the lowres threshold -- unreachable from check_visibility
+    # itself (its own gate already dropped this candidate at the identical
+    # presence_size_m-derived threshold before calling this function), but
+    # test_vision_calibration.py calls this function directly against
+    # screenshot ground truth without going through that gate. Explicit
+    # best-effort fallback rather than a crash, matching this function's
+    # pre-existing contract of always returning a tier.
     return "lowres", NAKED_EYE_PRESENCE_CONFIDENCE
 
 
@@ -458,6 +539,15 @@ def check_visibility(
     candidate_bearing_deg = bearing_deg(observer, target)
     candidate_range_m = range_m(observer, target)
     profile = object_model.profile_for(candidate.object_type)
+    aspect_deg = _aspect_deg(candidate.heading_true_deg, candidate_bearing_deg)
+    recognition_extent_m = object_model.apparent_extent_m(profile, aspect_deg)
+    # The range-admission gate (and, below, the lowres/presence tier) use
+    # the aspect-INVARIANT profile.size_m, not the aspect-aware extent
+    # above -- `body-layer/research/2026-09-21-aspect-magnification-and-
+    # distinctiveness.md` Finding 1 measured presence identical at every
+    # aspect (1.00x ratio across three instruments), while only class/type
+    # moved with aspect. See `_achieved_tier`'s own docstring for the full
+    # reasoning; the two size measures must not be unified.
     size_curve_threshold_m = (
         profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
     ) * optic.magnification
@@ -512,7 +602,7 @@ def check_visibility(
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
-        candidate_range_m, profile.size_m, optic.magnification
+        candidate_range_m, profile.size_m, recognition_extent_m, optic.magnification
     )
     _record(GateOutcome.ADMITTED, achieved_tier=achieved_tier)
     return VisibilityResult(

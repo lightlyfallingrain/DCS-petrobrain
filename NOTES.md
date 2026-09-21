@@ -288,6 +288,20 @@ two functions that must agree (2026-09-19).
   through the real clustering/pipeline functions until the required merge/split outcomes reproduced,
   rather than trusting a flat distance rescale (detection-cones-slice1, 2026-09-20).
 
+- **A trig "collapses back to the same constant" claim, checked only at 0°/90°, is exactly the
+  proof-by-convenient-example that hides the bug at every other angle.** The aspect-aware-profiles
+  plan's first draft gave every unmigrated profile a cubic fallback (`length_m = width_m = height_m
+  = size_m`) and claimed `apparent_extent_m` returned the unchanged constant "at any aspect,"
+  verified only at 0° and 90° — the two fixed points of `sin`/`cos` where the error cancels. At 45°
+  the formula gives `s·√2`, a 41% increase. Caught before implementation by evaluating one oblique
+  angle. Same shape as the `ACT_FLOOR` dimensionality mismatch above (a wrong constant, unnoticed
+  because the check happened to land on the value's blind spot) — worth noting here too: the error
+  would have *increased* detection range at a moment the model was already known to under-detect,
+  so it would have read as the feature working, not as a bug. A wrong number that moves in the
+  direction you're hoping for is the hardest kind to catch. Standing rule: any test of an angular/
+  trig formula's "no-regression" claim must include a non-axis-aligned angle, not just the fixed
+  points (aspect-aware-profiles plan and DoD, 2026-09-21).
+
 ## Voice Recognition & Command Matching
 
 - **Phrase scoring requires word-sequence matching, not character-sequence matching.** Early approach using whole-string character-level difflib (`SequenceMatcher` over the full normalized transcript) inflated scores for arbitrary speech with short-word overlap — "look at that" scored 0.727 against "scan_ahead", "watch out" scored 0.636 against "watch_nearest", both clearing action threshold under normal recognition confidence. Word-sequence scoring (SequenceMatcher over word lists, exact word matches score 1.0, character credit for equal-length "replace" opcodes only, divided by `max(len(heard), len(phrase))`) filters false positives while preserving real mishearings (e.g., "skin bearing 315" for "scan bearing 315"). This matters because fuzzy matching is a load-bearing defense in voice recognition against misheard words, and the right metric determines whether you catch mishearings or false-execute arbitrary speech (Inbound Speech Stage 2 review finding).
