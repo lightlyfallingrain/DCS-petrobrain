@@ -88,3 +88,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Vision calibration research doc error](project_vision_calibration_research_doc_error.md) - Pass 1 vision-range-calibration reviewed with one required fix — a "confirmed live" claim in the research doc that reproduction disproved.
 - [Provenance confidence pattern](provenance_confidence_pattern.md) - The dataclass+confidence+source shape from coordinates/projections.py is this project's template for any empirically-fitted registration/transform...
 - [Cones 2C implementation-log gap](project_cones_2c_implementation_log_gap.md) — implementer skipped implementation.md, wrote only agent-memory; check each sub-slice has its own implementation.md section, not just memory.
+- [Group detectability roadmap lag](project_group_detectability_roadmap_lag.md) — group-detectability APPROVED WITH MINOR FIXES; ROADMAP.md entry lagged a same-day constant-correction commit, cited stale 0.0013 figure.
