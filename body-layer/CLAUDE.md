@@ -345,11 +345,18 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   follows the majority" splitting rule (ties broken deterministically, not physically meaningfully).
   The presence-tier merge veto that used to live in `belief.association_over_time.passes_gate` is
   **removed** as of this stage — see that module's own docstring for why a cluster's presence-tier
-  report must be allowed to fold onto its contact, unlike a raw per-object one. `NAKED_EYE_MAX_
-  NEW_PER_POLL` still throttles individual-*object* admission into a poll's candidate pool exactly
-  as before; it does not yet cap cluster size directly (a real cluster larger than the cap
-  under-reports until acquisition catches up over several polls) — re-reading it as a true
-  per-cluster limit is Stage 3's explicit job, not pre-tuned here. `trace_sink: perception.
+  report must be allowed to fold onto its contact, unlike a raw per-object one. **`NAKED_EYE_MAX_
+  NEW_GROUPS_PER_POLL` caps cluster admission per poll, not individual-object admission**
+  (`plans/detection-cones-slice2/plan.md`'s 2A.5, renamed from `NAKED_EYE_MAX_NEW_PER_POLL` —
+  supersedes the Stage 2 scoping decision this paragraph originally described, where the cap ran
+  ahead of clustering over individual objects and could under-report a cluster larger than the cap
+  for several polls). Clustering (`cluster_candidates`) now runs over *every* gate-surviving
+  candidate before the cap is applied, so admitting a cluster admits all of its members at once —
+  a dense group larger than the cap is reported whole in one poll, not throttled member-by-member.
+  Acquisition state (`_previously_visible_ids`/`_acquired_ids`) stays keyed on `object_id`, since a
+  cluster has no stable identity across polls; `_acquire_on_change` only marks the members of
+  *emitted* clusters as previously visible, so a capped-out group is retried on a later poll rather
+  than dropped forever, unlike the earlier per-object behaviour. `trace_sink: perception.
   detection_trace.DetectionTraceCollector | None = None` (BL-9) is threaded into every
   `check_visibility` call this poll, and `poll()` annotates each admitted candidate's trace entry
   with its cluster's member `object_id`s and the emitted `Observation.id` once clustering/emission
@@ -654,7 +661,7 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   row has a uniform shape. `NakedEyePerceptionSource.poll` then annotates each admitted
   candidate's own entry, in place, with its cluster's member `object_id`s and the emitted
   `Observation.id` once clustering/emission are done — an `ADMITTED` outcome does not by itself
-  guarantee that annotation exists, since `NAKED_EYE_MAX_NEW_PER_POLL` can still throttle a
+  guarantee that annotation exists, since `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` can still throttle a
   gate-admitted candidate out of a given poll's emission (a documented, intentional gap: "visible,
   but throttled" is itself useful debrief information). `trace`/`trace_sink` default to `None`
   everywhere, a true no-op — proven, not just asserted, by
