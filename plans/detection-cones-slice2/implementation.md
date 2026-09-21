@@ -407,3 +407,72 @@ to the previous slice").
   using the `Edit` tool for every test-file append instead of shell heredocs. Worth knowing for the
   next isolated-implementer run: plan on `Edit`/`Write`, not `cat >>`, for appending large test
   blocks.
+
+## 2C — the o'clock scan loop
+
+**Merged into this log after review flagged its absence** (2026-09-21): the work existed only as an
+implementer memory note, which no future reader of this plan would find.
+
+### What was built
+
+`gaze.py` gains `ScanPlan`, `gaze_at`, `FREE_SCAN_PLAN`, `SCAN_PLAN`, `_SECTOR_LEGS` and the three
+constants `FOCUS_CONE_HALF_WIDTH_DEG` / `FOCUS_DWELL_S` / `SCAN_CYCLE_PERIOD_S`.
+`gaze_from_relative_sector` is retired — dead once the static wedge was replaced.
+
+The loop, verified by running it rather than by reading the table:
+
+```
+t= 0s  12_oclock     t= 8s  12_oclock
+t= 2s  11_oclock     t=10s   1_oclock
+t= 4s  10_oclock     t=12s   2_oclock
+t= 6s   9_oclock     t=14s   3_oclock
+```
+
+30° cones, 2 s each, 16 s cycle, forward arc twice per cycle, every o'clock visited exactly once.
+
+`naked_eye_source.py`'s acquisition state moves from `frozenset[int]` to `dict[int, float]`
+(`_previously_seen_at` / `_acquired_at`), evicted at a retention window equal to the cycle. Poll-
+indexed sets were wrong the moment the cone started moving: a contact would have been dropped and
+re-acquired on every sweep, so the group intake cap would re-throttle each pass and a busy sector
+would never fully report.
+
+`decay.OBSERVED_WINDOW_S` moves **5.0 → 16.0**, with both bounds asserted at import.
+
+### The plan defect found, and how it was resolved
+
+Implementation-plan step 12 named a single o'clock table, which reads as: a *commanded* sector is a
+static wide wedge, and only the free scan cycles. But hard part 1 makes a commanded scan a function
+of sim time relative to the command, and hard part 2a quotes the user directly — *"within a sector it
+is itself a smaller cone moving in a scan pattern."* Those cannot both be satisfied by a static wedge.
+
+Resolved in favour of the generalisation: `ahead`→`(12,)`, `left`→`(11,10,9)`, `right`→`(1,2,3)`,
+`full`→the free-scan table, each cycled from `command_t_sim`. **This is what makes
+`ScanPlan.command_t_sim` load-bearing rather than inert data** — under the static reading it would
+have been a field nothing consumed.
+
+Reviewed and upheld: it matches the user's own words, breaks no downstream consumer (`Gaze.label`
+has no reader outside `gaze.py` and its tests), and carries four dedicated tests.
+
+### Moved expectations
+
+Many, and unlike 2B that is expected — 2C is a deliberate behaviour change. Each derived from the
+model, with the derivation in a comment beside it:
+
+- **Dozens of `NakedEyePerceptionSource` tests** had their poll `now_sim` shifted into the free-scan
+  12-o'clock window. For fixtures whose real subject is pipeline wiring rather than the scan loop
+  (`test_emission_pipeline.py`, `test_mock_flight_chain.py`, one `test_detection_trace.py` replay),
+  an explicit persistent `ScanPlan` or `scan_area` task was used instead — so they keep exercising
+  what they were written for rather than passing by accident of timing.
+- **`_CAP_TEST_CROSS_OFFSETS_M` rescaled 0.85×**, not linearly, to clear the new ±15° gate with real
+  margin; re-verified against `clustering.angular_separation_rad` directly.
+- **Two debounce tests' "leave" gaps widened past 16 s** — a brief absence within one cycle is now
+  deliberately "still known", which is the point of time-based acquisition.
+- **One trace test's expected `GateOutcome` moved `COCKPIT_MASK` → `GAZE`** for a rear candidate.
+  Gaze runs first and no o'clock cone reaches the rear cutoff, so the trace loses its cockpit-mask
+  rejection rate — the plan's own stated consequence, now observed.
+
+### Not done here, by design
+
+2D (dwell as an act); the live gate-outcome measurement (plan item 16) and the fly-it acceptance
+(item 17), both of which need a sortie.
+
