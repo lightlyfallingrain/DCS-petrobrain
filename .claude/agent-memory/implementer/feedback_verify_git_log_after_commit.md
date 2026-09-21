@@ -25,3 +25,16 @@ only this session's changes. If `git reflog` shows an unexpected `reset` between
 the same message, that is the concurrent-session signature seen here; re-diff the affected files
 against what was actually written before recommitting, don't just trust "nothing to commit."
 See [[project_bl5_tool_api_stages]] for the concrete incident this was learned from.
+
+**Second variant (cones 2A.5, 2026-09-21): a concurrent session can also `git checkout` the
+shared working directory to a different branch entirely**, not just reset/recommit on the same
+one. Mid-task, `git branch --show-current` was still expected to say the feature branch but said
+`main` -- `git reflog` showed `checkout: moving from feature/<mine> to main` inserted between my
+own commits and a later `git status` check, and a new commit had landed on `main` that was not
+mine. My own commits were untouched (a checkout doesn't rewrite other branches), but a subsequent
+`git add`/edit I made while unknowingly back on `main` had to be rescued: `git restore --staged`,
+`git stash push -- <file>`, `git checkout <my-branch>`, `git stash pop`, then commit there. Lesson
+generalizes: don't just check `git log`/`git status` after a commit -- also check
+`git branch --show-current` before trusting that a `git add`/edit lands on the branch you think
+you're on, especially after any tool call that could have taken a while (giving another session a
+window to switch branches in between).
