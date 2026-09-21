@@ -91,3 +91,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Callout scheduling approved](project_callout_scheduling_approved.md) — CalloutScheduler reviewed APPROVED clean; how to hand-verify sim-time-only occupancy and clock-merge boundaries beyond the test suite.
 - [Boundary only tested via fixture](feedback_boundary_only_tested_via_fixture.md) — a merge/chain-cap boundary can be correct but only incidentally covered by one large fixture; call the private helper directly with hand-built boundary cases.
 - [Group detectability roadmap lag](project_group_detectability_roadmap_lag.md) — group-detectability APPROVED WITH MINOR FIXES; ROADMAP.md entry lagged a same-day constant-correction commit, cited stale 0.0013 figure.
+- [Movement detection review approved](project_movement_detection_review_approved.md) — APPROVED clean; grep-for-absence technique to verify omniscience-boundary/replay-determinism claims structurally.
