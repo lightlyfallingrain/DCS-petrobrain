@@ -42,7 +42,7 @@ Two candidates `a`, `b` seen from an `observer` are **separable** when:
     theta_sep      = angular_separation_rad(observer, a, b)      [true 3D angle]
     theta_size(i)  = angular_size_rad(i.size_m, i.range_m)
     theta_sep >= 0.5 * (theta_size(a) + theta_size(b))                        ... (S)
-    theta_sep * M >= LOWRES_ANGULAR_RADIUS_RAD                               ... (A)
+    theta_sep * M >= RESOLUTION_ANGULAR_RADIUS_RAD                           ... (A)
 
 where `M` is the *active optic's* `presence_range_mult` (`cluster_
 candidates`' own parameter, module docstring's "The clustering floor is no
@@ -55,14 +55,21 @@ is under `(d_a + d_b) / 2`. No new constant and no magnification term --
 same optic.
 
 **(A) is a named floor, slack for anything the channel actually detected
-*at the same optic's own presence multiplier*, and no longer for granted
-across every optic (slice 2A fix, see below)**: `visibility.py` admits a
-candidate exactly when `theta_size * M >= LOWRES_ANGULAR_RADIUS_RAD`.
-Combined with (S): `theta_sep * M >= 0.5*(theta_size_a + theta_size_b)*M
->= LOWRES_ANGULAR_RADIUS_RAD`, so (A) can never be the binding constraint
-for a pair detected *under that same M* -- kept anyway, as a one-line
-self-consistency check (see `test_clustering.py`'s own test for it), not
-because it ever fires for the optic that did the detecting.
+*at the same optic's own presence multiplier and admission threshold*,
+and no longer for granted across every optic (slice 2A fix) or every
+admission path (`plans/group-detectability/plan.md` Stage 1 fix, see
+both sections below)**: `visibility.py` admits a candidate exactly when
+`theta_size * M >= RESOLUTION_ANGULAR_RADIUS_RAD` (a group-admitted
+candidate) or the tighter `theta_size * M >= LOWRES_ANGULAR_RADIUS_RAD`
+(a lone one) -- either way, `theta_size * M >= RESOLUTION_ANGULAR_
+RADIUS_RAD`, since `RESOLUTION_ANGULAR_RADIUS_RAD <=
+LOWRES_ANGULAR_RADIUS_RAD`. Combined with (S): `theta_sep * M >=
+0.5*(theta_size_a + theta_size_b)*M >= RESOLUTION_ANGULAR_RADIUS_RAD`, so
+(A), checked against `RESOLUTION_ANGULAR_RADIUS_RAD`, can never be the
+binding constraint for a pair detected under either admission path at
+that same `M` -- kept anyway, as a one-line self-consistency check (see
+`test_clustering.py`'s own tests for it), not because it ever fires for
+the optic/threshold pair that did the detecting.
 
 ### The clustering floor is no longer benign (slice 2A fix)
 
@@ -83,6 +90,29 @@ so far. `naked_eye_source.py`, the only caller, passes `UNAIDED_OPTIC.
 presence_range_mult` today (no optic-selection mechanism exists until
 slice 2B) -- the parameterisation itself is what future-proofs this
 against the day a narrower sight is actually selectable.
+
+### Group-detectability: the floor must use the loosest admission threshold
+
+`plans/group-detectability/plan.md` Stage 1 fixes a second, concrete
+instance of the same class of defect. `perception.group_salience` lets
+`visibility.check_visibility` admit a group-salient candidate at
+`RESOLUTION_ANGULAR_RADIUS_RAD` instead of the tighter
+`LOWRES_ANGULAR_RADIUS_RAD` (see that module's docstring, and
+`visibility.py`'s own "Resolution vs. salience" section). (A)'s
+slack-by-construction proof, as it stood before this fix, assumed every
+admission happened at `LOWRES_ANGULAR_RADIUS_RAD` -- a group-admitted
+pair can satisfy `theta_sep * M >= RESOLUTION_ANGULAR_RADIUS_RAD` while
+failing `theta_sep * M >= LOWRES_ANGULAR_RADIUS_RAD`, so checking (A)
+against `LOWRES_ANGULAR_RADIUS_RAD` would have silently merged two
+genuinely separable, group-admitted contacts -- the exact defect this
+module exists to prevent, and not theoretical: this is the third time
+this floor has needed attention (the slice 2A hardcoded-constant defect
+above, a since-expired slackness premise this docstring warned about,
+now this). Pointing (A) at `RESOLUTION_ANGULAR_RADIUS_RAD` -- the
+loosest presence threshold *any* admission path can use, group-salient or
+not -- restores the theorem for every path, present and future, the same
+"parameterise against the loosest bound, not the one path examined so
+far" fix slice 2A already applied to the optic multiplier.
 
 Two candidates merge into one cluster when either (S) or (A) fails.
 
@@ -141,7 +171,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from perception.geometry import GeoPosition
-from perception.visibility import LOWRES_ANGULAR_RADIUS_RAD
+from perception.visibility import RESOLUTION_ANGULAR_RADIUS_RAD
 
 #: `perception.naked_eye_source._CLASSIFICATION_LEVEL_CLASS`'s twin for the
 #: presence level (1) -- unreachable from that module's own bare-int mirror
@@ -200,7 +230,13 @@ def _separable(
     2A's floor fix, module docstring's "The clustering floor is no longer
     benign" section) -- (A) is slack for anything the channel actually
     detected under that same optic; kept as a named, explicit check rather
-    than assumed."""
+    than assumed. (A) is checked against `RESOLUTION_ANGULAR_RADIUS_RAD`,
+    not `LOWRES_ANGULAR_RADIUS_RAD` (`plans/group-detectability/plan.md`
+    Stage 1, module docstring's "Group-detectability: the floor must use
+    the loosest admission threshold" section below) -- a group-admitted
+    candidate can be admitted at `RESOLUTION_ANGULAR_RADIUS_RAD`, a
+    smaller angle than `LOWRES_ANGULAR_RADIUS_RAD`, so checking (A)
+    against the tighter constant would no longer be slack for it."""
     theta_sep = angular_separation_rad(
         observer,
         GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m),
@@ -209,7 +245,7 @@ def _separable(
     theta_size_a = angular_size_rad(a.size_m, a.range_m)
     theta_size_b = angular_size_rad(b.size_m, b.range_m)
     resolvable = theta_sep >= 0.5 * (theta_size_a + theta_size_b)
-    above_floor = theta_sep * presence_range_mult >= LOWRES_ANGULAR_RADIUS_RAD
+    above_floor = theta_sep * presence_range_mult >= RESOLUTION_ANGULAR_RADIUS_RAD
     return resolvable and above_floor
 
 
