@@ -71,6 +71,9 @@ class FakeAircraftClient:
     def get_world_objects_latest(self) -> dict[str, Any]:
         return self._world_objects
 
+    def get_unit_velocity_latest(self) -> dict[str, Any] | None:
+        return None
+
 
 @pytest.fixture(autouse=True)
 def identity_wgs84_to_dcs(monkeypatch: pytest.MonkeyPatch) -> None:

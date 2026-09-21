@@ -33,6 +33,27 @@ Each `poll()`:
     happens one step ahead of that same call -- the caller resolves a
     per-candidate input once, `check_visibility` only ever applies
     whatever it's handed.
+1b. **Movement (`plans/movement-detection/plan.md`) is resolved per candidate,
+    right where `check_visibility` already runs, once per gate-admitted
+    candidate.** `_resolve_velocity_by_object_id` joins this poll's
+    `GET /unit_velocity/latest` snapshot onto the raw world-objects dicts by
+    `unit_name` (the join key -- `LoGetWorldObjects` and mission scripting
+    share no other identifier, plan Decision 1), subject to
+    `perception.motion.MOTION_VELOCITY_MAX_SKEW_S` and a same-poll
+    uniqueness check (a `unit_name` shared by two or more of this poll's
+    candidates drops to unresolved for all of them, rather than guessing
+    which one it belongs to -- the plan's own Risks note). The resolved
+    `Vec3 | None` lands on `WorldObjectCandidate.velocity` via `from_dict`'s
+    `velocity=` keyword, then `perception.motion.evaluate_motion_gate` runs
+    for every candidate `check_visibility` admits, recording each verdict in
+    `motion_by_object_id` and annotating the detection trace (module
+    docstring's own trace point, mirroring `confidence_by_object_id`'s
+    shape). A cluster's own `apparent_motion` (`_build_observation`) is its
+    members' shared verdict when all agree (including all-`None`), else
+    `None` -- the same "identical keeps, disagreement degrades" rule
+    `Cluster`'s aggregate classification already follows
+    (`clustering.py`'s docstring), generalised to a tri-state boolean since
+    there is no presence-root equivalent to degrade *to* here.
 2. Runs every candidate through `visibility.check_visibility()`.
 3. **Clusters *every* gate-surviving candidate -- not yet the emission
    cap's survivors -- then quantises per cluster** (`plans/
@@ -185,9 +206,9 @@ import sqlite3
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
-from aircraft_client import AircraftLayerClient
+from aircraft_client import AircraftLayerClient, AircraftLayerError
 from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
@@ -201,6 +222,11 @@ from perception.gaze import (
 )
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.group_salience import group_salient_ids
+from perception.motion import (
+    MOTION_ANGULAR_THRESHOLD_RAD_S,
+    MOTION_VELOCITY_MAX_SKEW_S,
+    evaluate_motion_gate,
+)
 from perception.optics import UNAIDED_OPTIC
 from perception.reporting_names import reporting_name_for
 from perception.source import (
@@ -388,10 +414,32 @@ class NakedEyePerceptionSource:
             self._acquired_at = {}
             return []
 
+        raw_objects = world_objects.get("objects", [])
+        # `plans/movement-detection/plan.md` Decision 2: the velocity feed
+        # must be independently degradable -- an aircraft-layer instance
+        # with no `autoexec.cfg` opt-in (or a deployed collector predating
+        # this endpoint) has no `/unit_velocity/latest` route at all, which
+        # is a transport-level `AircraftLayerError` (e.g. 404), not the
+        # `None`-on-empty-cache case `get_world_objects_latest` handles on
+        # its own. Falling back to `None` here reproduces exactly that
+        # "no velocity -> motion unknown everywhere" degradation rather than
+        # taking this whole poll (and every other candidate's visibility
+        # gate) down with it.
+        try:
+            unit_velocity = self.aircraft_client.get_unit_velocity_latest()
+        except AircraftLayerError:
+            unit_velocity = None
+        velocity_by_object_id, motion_skew_s = _resolve_velocity_by_object_id(
+            raw_objects, world_objects.get("dcs_model_time_s"), unit_velocity
+        )
         candidates = filter_ownship(
             [
-                WorldObjectCandidate.from_dict(obj, theatre=self.theatre)
-                for obj in world_objects.get("objects", [])
+                WorldObjectCandidate.from_dict(
+                    obj,
+                    theatre=self.theatre,
+                    velocity=velocity_by_object_id.get(obj.get("object_id")),
+                )
+                for obj in raw_objects
             ]
         )
 
@@ -443,6 +491,25 @@ class NakedEyePerceptionSource:
             candidate.object_id: result.confidence for candidate, result in visible
         }
 
+        # `plans/movement-detection/plan.md`: the movement gate runs once
+        # per gate-admitted candidate, mirroring confidence_by_object_id's
+        # shape immediately above (module docstring point 1b).
+        motion_by_object_id: dict[int, bool | None] = {}
+        for candidate, _result in visible:
+            target = GeoPosition(x=candidate.x, z=candidate.z, alt_m=candidate.alt_m)
+            motion_result = evaluate_motion_gate(observer, target, candidate.velocity)
+            motion_by_object_id[candidate.object_id] = motion_result.moving
+            if self.trace_sink is not None:
+                self.trace_sink.annotate_motion(
+                    candidate.object_id,
+                    speed_mps=motion_result.speed_mps,
+                    perp_speed_mps=motion_result.perp_speed_mps,
+                    angular_rate_rad_s=motion_result.angular_rate_rad_s,
+                    threshold_rad_s=MOTION_ANGULAR_THRESHOLD_RAD_S,
+                    skew_s=motion_skew_s,
+                    apparent_motion=motion_result.moving,
+                )
+
         # Cluster *every* gate-surviving candidate first -- the cap below
         # operates on the resulting groups, not on individual candidates
         # ahead of the grouping that would have told it they were one thing
@@ -469,7 +536,11 @@ class NakedEyePerceptionSource:
             to_emit = self._acquire_on_change(now_sim, clusters, currently_visible_ids)
 
         observations = self._build_observations(
-            now_sim, ownship_state, to_emit, confidence_by_object_id
+            now_sim,
+            ownship_state,
+            to_emit,
+            confidence_by_object_id,
+            motion_by_object_id,
         )
         if self.trace_sink is not None:
             for cluster, observation in zip(to_emit, observations):
@@ -486,6 +557,7 @@ class NakedEyePerceptionSource:
         ownship_state: OwnshipState,
         clusters: list[Cluster],
         confidence_by_object_id: dict[int, float],
+        motion_by_object_id: dict[int, bool | None],
     ) -> list[Observation]:
         """One `Observation` per `clusters` entry, resolving majority-overlap
         continuity (module docstring point 6) across the *whole* batch before
@@ -539,6 +611,7 @@ class NakedEyePerceptionSource:
                     ownship_state,
                     cluster,
                     confidence_by_object_id,
+                    motion_by_object_id,
                     continues_observation_id,
                 )
             )
@@ -688,6 +761,7 @@ class NakedEyePerceptionSource:
         ownship_state: OwnshipState,
         cluster: Cluster,
         confidence_by_object_id: dict[int, float],
+        motion_by_object_id: dict[int, bool | None],
         continues_observation_id: str | None,
     ) -> Observation:
         """One `Observation` for `cluster` -- `plans/group-contact-model/
@@ -698,7 +772,13 @@ class NakedEyePerceptionSource:
         for a cluster is "that group, over there," not any individual
         member's exact bearing. `continues_observation_id` is resolved by
         `_build_observations` across the whole batch, not here -- see that
-        method's docstring."""
+        method's docstring.
+
+        `apparent_motion` (`plans/movement-detection/plan.md`, module
+        docstring point 1b) is the cluster's members' shared movement
+        verdict when they all agree (including all-`None`), else `None` --
+        `Cluster.classification_raw`'s own "identical keeps, disagreement
+        degrades" rule, generalised to a tri-state boolean."""
         observer = GeoPosition(
             x=ownship_state.x, z=ownship_state.z, alt_m=ownship_state.alt_m
         )
@@ -720,6 +800,12 @@ class NakedEyePerceptionSource:
         confidence = min(
             confidence_by_object_id[member.object_id] for member in cluster.members
         )
+        member_motions = {
+            motion_by_object_id.get(member.object_id) for member in cluster.members
+        }
+        apparent_motion = (
+            next(iter(member_motions)) if len(member_motions) == 1 else None
+        )
         return Observation(
             id=observation_id,
             contact_id=None,
@@ -740,6 +826,7 @@ class NakedEyePerceptionSource:
             classification_level=cluster.classification_level,
             continues_observation_id=continues_observation_id,
             count_bucket=cluster.count_bucket,
+            apparent_motion=apparent_motion,
         )
 
 
@@ -752,6 +839,59 @@ class NakedEyePerceptionSource:
 #: be `"lowres"`.
 _CLASSIFICATION_LEVEL_CLASS: Final[int] = 2
 _CLASSIFICATION_LEVEL_TYPE: Final[int] = 3
+
+
+def _resolve_velocity_by_object_id(
+    objects: list[dict[str, Any]],
+    world_objects_t_sim: Any,
+    unit_velocity: dict[str, Any] | None,
+) -> tuple[dict[int, dict[str, float]], float | None]:
+    """Join this poll's unit-velocity snapshot onto `objects` (raw
+    `GET /world_objects/latest` object dicts, `unit_name` field included --
+    `plans/movement-detection/plan.md` Decision 1) by `unit_name`. Returns
+    `(velocity_by_object_id, skew_s)`: the first only ever contains entries
+    that actually resolved, so `.get(object_id)` returning `None` covers
+    every "unknown" case uniformly (no snapshot, stale skew, missing/
+    non-unique `unit_name`) without the caller needing to distinguish them;
+    `skew_s` is `None` on any of those same failure paths, or the actual
+    `|world_objects_t - unit_velocity_t|` otherwise, for the detection trace
+    (module docstring point 1b).
+
+    **Non-unique `unit_name` collision handling** (the plan's own Risks
+    note): a `unit_name` shared by two or more of *this poll's* `objects`
+    drops to unresolved for every one of them, rather than guessing which
+    one a matched velocity sample belongs to."""
+    if unit_velocity is None:
+        return {}, None
+    try:
+        skew_s = abs(
+            float(world_objects_t_sim) - float(unit_velocity["dcs_model_time_s"])
+        )
+    except (KeyError, TypeError, ValueError):
+        return {}, None
+    if skew_s > MOTION_VELOCITY_MAX_SKEW_S:
+        return {}, skew_s
+
+    samples = unit_velocity.get("samples")
+    if not isinstance(samples, dict):
+        return {}, skew_s
+
+    name_counts: Counter[str] = Counter(
+        name for obj in objects if isinstance(name := obj.get("unit_name"), str)
+    )
+
+    resolved: dict[int, dict[str, float]] = {}
+    for obj in objects:
+        name = obj.get("unit_name")
+        object_id = obj.get("object_id")
+        if not isinstance(name, str) or not isinstance(object_id, int):
+            continue
+        if name_counts[name] > 1:
+            continue
+        sample = samples.get(name)
+        if isinstance(sample, dict):
+            resolved[object_id] = sample
+    return resolved, skew_s
 
 
 def _classification_for_tier(

@@ -214,6 +214,15 @@ class Observation:
     #: level`: a channel's own honest statement of how many real objects one
     #: report stands for, not a truth field.
     count_bucket: str | None = None
+    #: `plans/movement-detection/plan.md` -- the movement gate's tri-state
+    #: verdict (`perception.motion.is_apparently_moving`), the *only* thing
+    #: allowed to cross the `perception`/`belief` boundary for movement; the
+    #: velocity vector itself never does (that module's own docstring).
+    #: `None` is the default and means "not evaluated" (a source that
+    #: doesn't compute movement, or no velocity sample was available this
+    #: poll) -- unknown, never "stopped", same tri-state discipline as
+    #: `is_ownship`/`heading_true_deg` elsewhere in this package.
+    apparent_motion: bool | None = None
 
 
 @runtime_checkable
