@@ -251,3 +251,14 @@ comment was wrong.
   reusing it avoids a second geometry computation and keeps "nearest-first" tied to the same range
   figure the pre-2A.5 code sorted on (just now taken as a per-cluster minimum instead of a per-object
   value). Not specified by the plan at this level of detail; recorded here as the design call.
+
+#### Cost verification (plan step 6d)
+
+Clustering now runs over every gate survivor rather than over at most the cap's worth. Verified
+rather than assumed: `visible` is the same population either way — the 2026-09-21 trace measured
+**17,487 admissions over 4,719 polls, ~3.7 per poll** — because clustering was always fed
+gate-survivors; the cap merely truncated the list first. The union-find pair loop is therefore on
+the order of a dozen comparisons per poll, and moving the cap after it changes which entries are
+*emitted*, not how many are *compared*. Under `emit_mode="every_poll"` — what `--console` and
+`--crew-text` actually run — clustering already covered essentially all visible candidates, so this
+is a real ordering change only for `on_change`.
