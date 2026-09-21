@@ -99,6 +99,29 @@ check_memory '^plans/[^/]+/debug\.md$'          debugger     "a debug report"
 check_memory '^plans/[^/]+/dod-check\.md$'      dod          "a DoD check"
 check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a research finding"
 
+# Skill layout: a skill must be .claude/skills/<name>/SKILL.md, never a flat
+# .claude/skills/<name>.md, or Claude Code cannot discover it (invisible to
+# /skills, not invokable, not loadable via the Skill tool). The PreToolUse
+# hook catches Write/Edit; this catches everything else -- a heredoc, a mv, a
+# script. 24 of this project's skills were flat and undiscoverable until
+# 2026-09-21, and nobody noticed because the main loop read them as documents.
+FLAT_SKILLS=$(printf '%s\n' "$STAGED" \
+    | grep -E '^\.claude/skills/[^/]+\.md$' || true)
+if [ -n "$FLAT_SKILLS" ]; then
+    FAIL=1
+    OUT="$OUT
+
+## skill layout — FAIL
+These are staged as flat files and would not be discoverable:
+$(printf '%s\n' "$FLAT_SKILLS" | sed 's/^/  /')
+
+Move each to .claude/skills/<name>/SKILL.md:
+$(printf '%s\n' "$FLAT_SKILLS" | while IFS= read -r f; do
+    n=$(basename "$f" .md)
+    printf '  mkdir -p .claude/skills/%s && git mv %s .claude/skills/%s/SKILL.md\n' "$n" "$f" "$n"
+done)"
+fi
+
 if [ $FAIL -ne 0 ]; then
     printf '{"continue":false,"stopReason":%s}' "$(printf '%s' "$OUT" | jq -Rs .)"
 elif [ -n "$MEM_WARN" ]; then

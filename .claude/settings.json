@@ -61,6 +61,16 @@
             "statusMessage": "Checking agent-memory path..."
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/skill-layout-gate.sh",
+            "statusMessage": "Checking skill file layout..."
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
