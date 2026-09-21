@@ -707,6 +707,21 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   The middle row is the one that argues for the number: a slow truck at 5 km genuinely does not read
   as moving at a glance, and a threshold that flagged it would be modelling a machine, not a crewman.
 
+  **Velocity source — resolved, and the bridge to it was already shipping (2026-09-22).**
+
+  `Object.getVelocity()` in the Mission Scripting environment is reachable **today**, through
+  machinery this project already deploys: `petrobrain-f10-commands-hook.lua` has used
+  `net.dostring_in("scripting", …)` since 2026-09-13, polling at 1 Hz, and the user has flown and
+  accepted it. **The "gated on probing that bridge" condition below is already satisfied**, and the
+  differencing fallback — with its per-`object_id` position history, poll-interval sensitivity and
+  load-bearing id continuity — is not needed. What remains unknown is the per-call cost at the rate
+  movement detection would need: a performance question, not a feasibility one. The same bridge
+  reaches fog, so the weather half of detection conditions is unblocked with it.
+  See `aircraft-layer/research/2026-09-22-mission-bridge-already-shipping.md`, which also records
+  why the false "unprobed" claim propagated into four places before anyone grepped for it.
+
+  Original entry follows, still correct about *where* velocity lives.
+
   **Velocity source — resolved 2026-09-21, and not where the design assumed.**
 
   `LoGetWorldObjects` carries **no velocity**, under any name. Its complete per-object field set is
