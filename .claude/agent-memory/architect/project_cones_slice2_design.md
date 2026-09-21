@@ -60,12 +60,29 @@ operative and testable with zero triggers wired — and gives binoculars a real 
 detection) rather than a free acuity upgrade. Deferred: expectation suppression ("mind overrides
 instinct" for expected changes) needs belief-side knowledge, wrong import direction.
 
-**Scan-period arithmetic, settled:** 2 s per o'clock hour, sectors are 2 hours -> 4 s legs ->
-`SCAN_CYCLE_PERIOD_S = 16`, `FOCUS_DWELL_S = 2`. Worst-case unobserved gap for a flank contact is
-`CYCLE - FOCUS_DWELL = 14 s`. The bound is two-sided and both sides are real:
-`CYCLE - FOCUS_DWELL < OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` (14 < x < 30) — the upper bound
-exists because reaching 30 collapses `certainty_of`'s middle band entirely. Set
-`OBSERVED_WINDOW_S = SCAN_CYCLE_PERIOD_S = 16`.
+**Scan plan, settled (user):** scan steps o'clock cone by cone, 2 s each — a 30 deg focus cone IS
+one o'clock hour, so there is no within-sector sweep to model. Plan `12,11,10,9,12,1,2,3` ->
+`SCAN_CYCLE_PERIOD_S = 16`, `FOCUS_DWELL_S = 2`, worst flank gap `CYCLE - DWELL = 14 s`.
+`CYCLE - DWELL < OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` (14 < x < 30); upper bound exists because
+reaching 30 collapses `certainty_of`'s middle band. Set `OBSERVED_WINDOW_S = CYCLE = 16`.
+**The decisive argument for 16 s over longer plans is the decay ladder, not tidiness:** a missed
+sweep costs `2*CYCLE - DWELL`, which at 16 s is exactly 30 (inside `POSITION_HALF_LIFE_S`) and at
+20 s is 38 (skips a whole certainty band). Known gap: free scan covers 9-3 (210 deg) while
+`cockpit_mask` admits 8-4 (260 deg) — he can report an 8 o'clock contact but never find one.
+
+**Intake cap counts groups, not objects** (user, 2026-09-21). `NAKED_EYE_MAX_NEW_PER_POLL` capped
+objects *before* clustering; a dense group is easier to take in whole, so capping its members is
+backwards. Reorder: cluster all gate-survivors, then cap clusters. Acquisition state stays keyed on
+`object_id` — clusters have no stable cross-poll identity (which is why `_build_observation` already
+resolves continuity by majority object overlap).
+**Why:** the module docstring framed object-capping as a coarse-but-right measure; the user showed
+it measures the wrong quantity. That distinction is what turned it from a tuning item into a slice.
+**How to apply:** this resolves the scan-loop/cap overlap — scan loop = *where* he looks, clustering
+= *what counts as one thing*, intake cap = *how many distinct things per fixation*. Three questions,
+not three spellings of one. Corollary worth keeping: the binding case for intake is **intermediate**
+density (many resolvable groups in one 30 deg cone), not dense and not sparse.
+Never change a constant's unit and its value in the same slice — the sortie cannot attribute the
+difference.
 
 **`perception` cannot reuse `belief.attention.area_contains` for the gaze wedge** — different frame
 (body-relative azimuth vs absolute bearing from an area centre) and no radius. Only the shortest-
