@@ -108,3 +108,70 @@ read the actual diff for every changed source file (`optics.py`, `object_model.p
 the arithmetic behind every re-derived fixture value named in the priorities rather than trusting
 the stated derivation; re-ran the full body-layer format/lint/type/test sequence myself from its
 own venv and got the exact claimed result (778 passed, 4 xfailed).
+
+---
+
+## 2A.5: intake cap counts groups, not objects (review, 2026-09-21)
+
+Commits reviewed: `1d501c0`, `43c67aa`, `b973784`, `02d2abd`, scoped to the plan's 2A.5 sections
+("2A.5 sits where it does..." and hard part 6a) and `implementation.md`'s 2A.5 log.
+
+### Review Summary
+
+`poll()` now clusters every gate-surviving candidate before the simultaneous-detection cap runs,
+and the cap operates on clusters (`NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`, value unchanged at 3).
+Traced the acquisition-state split by hand against both `_acquire_on_change` and
+`_acquire_every_poll`: `steady_ids | admitted_ids` correctly excludes a capped-out cluster's
+not-yet-seen members from `_previously_visible_ids`, and every cluster returned from either
+acquisition method is proven 1:1 with `_build_observations`' output (`_build_observation` always
+emits exactly one `Observation` per cluster entry, so the `zip(to_emit, observations)` trace-sink
+loop in `poll()` cannot desync) — no path exists for an object to be marked acquired without its
+observation actually being emitted, or vice versa. Hand-derived the expected counts (3, then 2,
+then 0) for the rewritten pinned test and they match the code exactly. No-omniscience-leak check
+holds structurally: `visible` (what gets clustered) is built strictly from candidates that already
+individually cleared `check_visibility`, and `DetectionTraceCollector.record()` is called by
+`check_visibility` itself per-candidate before any clustering runs — the test's
+`GateOutcome.ADMITTED` assertion is therefore checking the real gate, not something clustering
+later asserts about itself. Only one other pinned test's *comment* (not assertions) was touched,
+exactly as claimed. Re-ran the full body-layer verification sequence myself from its own venv:
+`ruff format --check`, `ruff check`, `mypy src`, `pytest -q` all pass, 780 passed / 4 xfailed,
+matching `implementation.md` exactly. Scope holds — no gaze/`ScanPlan`/dwell code, no touches to
+`visibility.py`/`optics.py`/`object_model.py`/`decay.py`, no `perception → belief` import.
+
+### Required Fixes
+
+- **Stale reference to the renamed constant left in a live test file.** `body-layer/tests/
+  test_detection_trace.py:259`, in `test_admitted_but_throttled_candidate_stays_unannotated`,
+  still reads `# NAKED_EYE_MAX_NEW_PER_POLL is 3 -- four simultaneous admissions means...`. This
+  file wasn't touched by any of the four 2A.5 commits, so the rename in `naked_eye_source.py`
+  didn't propagate to it. The test's behavior is unaffected (each of its four candidates is its
+  own separable group, so per-object and per-group throttling agree here too), but the task's own
+  scope item 6 explicitly calls for "no stale references to the old constant name anywhere," and a
+  grep confirms this is the one place in `body-layer/src`/`body-layer/tests` that was missed.
+  Trivial one-line comment fix.
+
+### Optional Refinements
+
+- **Plan step 6d's cost-verification note is missing from `implementation.md`.** The plan
+  explicitly asks for "one line" confirming the clustering pair-loop stays cheap now that it runs
+  over all gate-surviving candidates rather than the pre-cap subset. `implementation.md`'s 2A.5
+  section documents the reordering, the tests, and the checks, but doesn't carry this line. I
+  verified it myself: `cluster_candidates` is O(n²) over `visible`, and `visible` is exactly the
+  set of candidates that individually passed `check_visibility` — the same population the plan's
+  own trace measured at ~3.7 admissions/poll on average, so this is not a new unbounded quantity,
+  just a reordering of when the same small population gets clustered. Not a functional risk, but
+  worth adding the one-line confirmation to the log so the plan's own explicit ask isn't silently
+  dropped. (Optional — verified independently, no defect found.)
+
+### Verdict
+APPROVED WITH MINOR FIXES
+
+### Review Confidence
+Full read — read the plan's 2A.5-relevant sections (slicing table, hard part 6a, implementation
+steps 6a-6d) and `implementation.md`'s 2A.5 log in full; read the complete diff for all four
+commits (`naked_eye_source.py`'s reorder and both acquisition methods, `detection_trace.py`,
+`body-layer/CLAUDE.md`, the full test diff); hand-traced the acquisition-state split and the
+rewritten pinned test's expected counts against the code rather than trusting the stated
+derivation; grepped the full repo for the old constant name to check the "no stale references"
+scope item; re-ran the full body-layer format/lint/type/test sequence myself from its own venv
+(`body-layer/.venv`) and got the exact claimed result (780 passed, 4 xfailed).

@@ -256,10 +256,14 @@ def test_gate_rejected_candidates_are_never_annotated() -> None:
 
 
 def test_admitted_but_throttled_candidate_stays_unannotated() -> None:
-    # NAKED_EYE_MAX_NEW_PER_POLL is 3 -- four simultaneous admissions means
-    # the fourth (furthest) is gate-admitted but emission-throttled this
-    # poll, so its trace entry stays ADMITTED with no cluster/observation
-    # detail (DetectionTrace's own docstring point). Cross-offsets follow
+    # NAKED_EYE_MAX_NEW_GROUPS_PER_POLL is 3 -- and the cross-offsets below
+    # keep every candidate angularly separable, so four admissions are four
+    # *groups*, not one. The fourth (furthest) is therefore gate-admitted
+    # but emission-throttled this poll, so its trace entry stays ADMITTED
+    # with no cluster/observation detail (DetectionTrace's own docstring
+    # point). Renamed from NAKED_EYE_MAX_NEW_PER_POLL by slice 2A.5, which
+    # changed the cap's unit from objects to groups -- this scenario is
+    # unaffected because its candidates never clustered. Cross-offsets follow
     # test_naked_eye_source.py's own _CAP_TEST_CROSS_OFFSETS_M pattern --
     # candidates on the exact same bearing have zero angular separation and
     # always merge (Stage 3b-i rev.2), which would confound this test's own
