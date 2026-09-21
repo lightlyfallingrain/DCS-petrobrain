@@ -42,6 +42,23 @@ the same `_print` funnel `handle_line`/`drain_events` already use --
 `CrewConsole` has no separate "what F10 says" path to keep in sync with
 what typed/spoken output produces.
 
+**Watch is a cancellable standing mode, coexisting with scan.**
+(`plans/watch-as-standing-mode/plan.md`, fixing a 2026-09-21 sortie finding:
+`_handle_watch_nearest` used to call `belief.tools.set_attention` directly,
+registering nothing "Cancel Task" could ever find -- "watch closest" then
+"cancel task" reported "nothing to stop".) `_handle_watch_nearest` now also
+registers a `belief.tasks.PendingIntent` of kind `"watch_contact"`
+(`belief.tools.watch_contact_task`) when `self.tasks` is configured. A
+`watch_contact` task has no success/timeout lifecycle -- unlike
+`scan_area`, watching does not "succeed" or "time out" -- it just persists
+until cancelled. It is independent of `scan_area`'s own task, so scan and
+watch can be commanded and cancelled without either disturbing the other
+(`logger._active_gaze` only ever reads `scan_area` tasks). Because one F10
+"Cancel Task" item has no vocabulary to say *which* standing mode to end,
+`_handle_cancel_task` cancels every currently-governing kind at once
+(`_active_tasks_by_kind`) rather than guessing -- see that method's own
+docstring for the full reasoning.
+
 **`!inject-urgent <contact_id> <text...>`.** Stage 5's manual bypass_gate
 proof (the plan's accepted decision: no real threat-detection channel
 exists yet, so this is a clearly-labelled test harness, not a production
@@ -80,13 +97,14 @@ from belief.speech import (
     render_watch_nearest_readback,
     route_event,
 )
-from belief.tasks import PendingIntent, TaskStore
+from belief.tasks import PendingIntent, TaskKind, TaskStore
 from belief.tools import (
     cancel_task,
     describe_contact,
     get_contacts,
     scan_area,
     set_attention,
+    watch_contact_task,
 )
 from belief.utterance import PartialParse, PlayerUtterance, parse_utterance
 from belief.voice_commands import (
@@ -238,6 +256,43 @@ def _describe_token_for_confirm(token: str) -> str:
     if token in _BEARING_SCAN_TOKENS:
         return f"scan {_SECTOR_SCAN_LABELS[_BEARING_SCAN_TOKENS[token]]}"
     return _TOKEN_DESCRIPTIONS.get(token, token.replace("_", " "))
+
+
+def _active_tasks_by_kind(tasks: list[PendingIntent]) -> list[PendingIntent]:
+    """The single most-recently-created non-`"cancelled"` task per `kind`
+    (`plans/watch-as-standing-mode/plan.md`) -- generalises `logger.
+    _active_gaze`'s own "most recent wins" selection (there, scoped to
+    `scan_area` alone for gaze purposes) to any kind, for `_handle_
+    cancel_task`'s "what is currently governing" question. `tasks` is
+    already insertion order (`TaskStore.tasks`'s own docstring), so a plain
+    left-to-right overwrite into a per-kind dict leaves each kind's
+    *latest* active task as the final value -- an older, superseded task of
+    the same kind (e.g. a since-replaced `scan_area` command) is real
+    history but not currently active by this definition, even though its
+    own `status` may still read `"pending"`/`"succeeded"` rather than
+    `"cancelled"`."""
+    latest_by_kind: dict[TaskKind, PendingIntent] = {}
+    for task in tasks:
+        if task.status == "cancelled":
+            continue
+        latest_by_kind[task.kind] = task
+    return list(latest_by_kind.values())
+
+
+def _join_task_descriptions(descriptions: list[str]) -> str | None:
+    """Joins `_describe_task_for_speech`'s per-task phrases into one
+    readback subject for `_handle_cancel_task` -- `None` when there is
+    nothing to name, the phrase itself when there is exactly one, or an
+    `"and"`-joined list when several kinds were cancelled at once
+    (`"the scan ahead and the watch"`). Kept deliberately plain (no
+    Oxford comma logic, no more than the two kinds this milestone has) --
+    a fancier list formatter is not worth building for a set that can only
+    ever hold two items today."""
+    if not descriptions:
+        return None
+    if len(descriptions) == 1:
+        return descriptions[0]
+    return " and ".join(descriptions)
 
 
 logger = logging.getLogger(__name__)
@@ -463,11 +518,21 @@ class CrewConsole:
     ) -> list[str]:
         """The F10 "Watch -> Nearest" and "Watch -> Nearest Air Defence"
         items. The two differ only in the selection predicate; everything
-        after it -- `set_attention`, the readback -- is shared, since what
-        "watch this" *means* does not change with how the contact was
+        after it -- marking the contact, the readback -- is shared, since
+        what "watch this" *means* does not change with how the contact was
         picked. The empty-result wording does differ: "no air defence
         contact" is a materially different statement from "no contact",
-        and collapsing them would let the crew hear the wrong one."""
+        and collapsing them would let the crew hear the wrong one.
+
+        **Registers a cancellable `belief.tasks.PendingIntent` when
+        `self.tasks` is configured** (`plans/watch-as-standing-mode/
+        plan.md`, closing the root cause the 2026-09-21 sortie flagged:
+        this used to call `set_attention` directly with nothing behind it
+        for "Cancel Task" to find). Without a task store this falls back to
+        the old direct `set_attention` call -- the same graceful-
+        degradation shape `_handle_scan` already follows for a missing
+        `enrichment`, so watch still works standalone, it just is not
+        cancellable."""
         contact_id = self._nearest_contact_id(
             now_sim,
             predicate=self._believed_air_defence if air_defence_only else None,
@@ -478,7 +543,13 @@ class CrewConsole:
                 if air_defence_only
                 else "no contact to watch"
             ]
-        found = set_attention(self.store, contact_id, "watch", source="player")
+        if self.tasks is not None:
+            task = watch_contact_task(
+                self.store, self.tasks, contact_id, now_sim, source="player"
+            )
+            found = task is not None
+        else:
+            found = set_attention(self.store, contact_id, "watch", source="player")
         result = describe_contact(
             self.store, contact_id, now_sim, enrichment=self.enrichment
         )
@@ -563,20 +634,30 @@ class CrewConsole:
 
     def _describe_task_for_speech(self, task: PendingIntent) -> str | None:
         """A plain human phrase for `task`, for `speech.render_cancel_
-        readback` -- `"the scan to the left"`, `"the scan north"` -- or
-        `None` when the task's shape yields nothing better than "whatever
-        you last asked for".
+        readback` -- `"the scan to the left"`, `"the scan north"`,
+        `"the watch"` -- or `None` when the task's shape yields nothing
+        better than "whatever you last asked for".
 
-        Reads the frame fields (`relative_sector`/`sector`) straight off the
-        task's captured `area`. Unlike the geometry fields, those two are
-        never rewritten by `ContactStore.reproject_relative_areas` -- it
-        replaces `center`/`wedge_deg` only -- so the captured reference is
-        safe to read here, and going through `store.get_area` would return
-        the same frame anyway. (`TaskStore.tick` *does* have to resolve the
-        live area; see its own docstring for why the two differ.)"""
+        For a `scan_area` task, reads the frame fields (`relative_sector`/
+        `sector`) straight off the task's captured `area`. Unlike the
+        geometry fields, those two are never rewritten by `ContactStore.
+        reproject_relative_areas` -- it replaces `center`/`wedge_deg` only
+        -- so the captured reference is safe to read here, and going
+        through `store.get_area` would return the same frame anyway.
+        (`TaskStore.tick` *does* have to resolve the live area; see its own
+        docstring for why the two differ.)
+
+        For a `watch_contact` task (`plans/watch-as-standing-mode/
+        plan.md`), always `"the watch"` -- never the watched contact's id
+        or type, matching `render_cancel_readback`'s own "no ids in
+        speech" rule and keeping the phrase as terse as the scan
+        fallback's own bare `"the scan"`."""
+        if task.kind == "watch_contact":
+            return "the watch"
         if task.kind != "scan_area":
             return None
         area = task.area
+        assert area is not None  # every scan_area task carries an area
         if area.relative_sector is not None:
             return f"the scan {_RELATIVE_SCAN_LABELS[area.relative_sector]}"
         if area.sector is not None:
@@ -584,24 +665,54 @@ class CrewConsole:
         return "the scan"
 
     def _handle_cancel_task(self) -> list[str]:
-        """Cancels the most-recently-created still-active task in
+        """Cancels the single currently-*governing* task of each kind in
         `self.tasks`, regardless of source (plan Decision 3). Every
         `scan_*` token registers a real task via `_handle_scan` above (D5,
-        `plans/f10-command-vocabulary/plan.md`), so this is no longer the
-        always-"no pending task" dead path it was before that fix -- a scan
-        followed by "Cancel Task" genuinely cancels it.
+        `plans/f10-command-vocabulary/plan.md`), and every `watch_nearest*`
+        token now does too (`plans/watch-as-standing-mode/plan.md`), so this
+        is no longer the always-"no pending task" dead path it was before
+        those fixes -- a scan and/or a watch followed by "Cancel Task"
+        genuinely cancels them.
 
-        **Cones 2C sortie fix: "still-active" means `status != "cancelled"`,
-        not `status == "pending"`.** A `scan_area` task is a standing mode
-        (`belief.tasks.TaskStatus`'s own docstring) that `TaskStore.tick`
-        can flip to `"succeeded"` within seconds of being issued (the
-        moment any contact is seen in its area) -- under the old
+        **One F10 item, no per-kind vocabulary -- so "Cancel Task" cancels
+        every currently-active kind at once, not just one.** There is no
+        voice/menu way to say "cancel the watch" specifically as opposed to
+        the scan, so rather than guess which one the player meant (or
+        arbitrarily pick "most recent" across kinds, which could silently
+        leave the other running), this ends every standing mode that is
+        still governing something. That is the predictable reading of a
+        single Cancel button: it stops *everything currently commanded*,
+        and the readback names each thing it stopped so the player can hear
+        it was not partial.
+
+        **"Currently governing" means the single most-recently-created
+        still-active task *per kind*, not literally every non-cancelled
+        task ever created.** Superseding a scan with a newer one (or a
+        watch with a newer one) does not retroactively cancel the earlier
+        task -- `logger._active_gaze` already only honours the newest
+        `scan_area` task via its own "most recent wins" tie-break, and an
+        older, superseded task of either kind is inert but not `cancelled`.
+        Treating every merely-inert task as "active" would make one Cancel
+        Task press cancel a whole session's worth of stale scans, so this
+        groups active tasks by `kind` and keeps only each group's newest
+        (`_active_tasks_by_kind`) before acting -- exactly the selection
+        `logger._active_gaze` already uses for gaze, generalised to any
+        kind and to cancellation rather than gaze.
+
+        **Cones 2C sortie fix, unchanged: "active" means `status !=
+        "cancelled"`, not `status == "pending"`.** A `scan_area` task is a
+        standing mode (`belief.tasks.TaskStatus`'s own docstring) that
+        `TaskStore.tick` can flip to `"succeeded"` within seconds of being
+        issued (the moment any contact is seen in its area) -- under a
         `"pending"`-only filter, that task had already dropped out of this
         list by the time a player heard it and said "Cancel Task," which
         produced the sortie's "'nothing to stop'" finding. `TaskStore.
-        cancel` itself was fixed the same way, so cancelling a resolved
-        task here now genuinely ends its mode (`logger._active_gaze` stops
-        honouring it), not just a bookkeeping no-op.
+        cancel` itself is fixed the same way, so cancelling a resolved task
+        here now genuinely ends its mode (`logger._active_gaze` stops
+        honouring it), not just a bookkeeping no-op. A `watch_contact` task
+        never leaves `"pending"` on its own (`TaskStore.tick` skips any task
+        with no `area`), so this same "active" definition covers it too
+        without a separate case.
 
         The readback names *what* was cancelled, never the task id
         (live-test finding 2026-09-16: the player heard `"cancelled task
@@ -613,13 +724,16 @@ class CrewConsole:
         # when nothing was cancelled at all.
         if self.tasks is None:
             return [_NOTHING_TO_STOP]
-        active = [task for task in self.tasks.tasks if task.status != "cancelled"]
+        active = _active_tasks_by_kind(self.tasks.tasks)
         if not active:
             return [_NOTHING_TO_STOP]
-        task = active[-1]  # most recently created (TaskStore.tasks is insertion order)
-        description = self._describe_task_for_speech(task)
-        cancel_task(self.store, self.tasks, task.id)
-        return [render_cancel_readback(description).text]
+        descriptions: list[str] = []
+        for task in active:
+            description = self._describe_task_for_speech(task)
+            cancel_task(self.store, self.tasks, task.id)
+            if description is not None:
+                descriptions.append(description)
+        return [render_cancel_readback(_join_task_descriptions(descriptions)).text]
 
     def _handle_stop_talking(self) -> None:
         """`stop_talking` -- interrupts whatever is currently playing and
