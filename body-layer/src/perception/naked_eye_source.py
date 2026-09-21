@@ -109,11 +109,11 @@ Each `poll()`:
    individually-admitted members with the rest deferred; this is the
    mechanism that lets a dense group be reported whole in a single poll.
 
-   Under `emit_mode="on_change"`: a cluster's members are added to
-   `_previously_visible_ids` only when that cluster is one of the polled
+   Under `emit_mode="on_change"`: a cluster's members are stamped into
+   `_previously_seen_at` only when that cluster is one of the polled
    admitted clusters. A currently-visible cluster that was *not* admitted
-   this poll (steady-state, or capped-out) leaves its not-yet-previously-
-   visible members out of `_previously_visible_ids` -- unlike the pre-2A.5
+   this poll (steady-state, or capped-out) leaves its not-yet-seen members
+   out of `_previously_seen_at` -- unlike the pre-2A.5
    behaviour, where every currently-visible object became "previously
    visible" regardless of whether the cap let it emit. **This is the
    `on_change` fix**: a capped-out group is retried on a later poll instead
@@ -124,7 +124,7 @@ Each `poll()`:
 
    `emit_mode="every_poll"` (`plans/pb2-contact-memory/plan.md` Stage 3, its
    Interface confirmation gap 2) re-reads the same cap as a group
-   *acquisition-rate* limit instead: `_acquired_ids` grows by the members of
+   *acquisition-rate* limit instead: `_acquired_at` grows by the members of
    at most `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` newly-eligible clusters per
    poll (same `_select_capped_clusters` helper, same nearest-first order),
    but every object already in that set keeps emitting on *every* subsequent
