@@ -30,7 +30,7 @@ rests on an unverified DCS internal.
 
 ## Slicing
 
-Four sub-slices. **2A is first**, and the reason is the slice-1 lesson restated: *the valuable part
+Five sub-slices. **2A is first**, and the reason is the slice-1 lesson restated: *the valuable part
 is not the part the slice is named for.* Slice 1 was named for the cone test and its real payload
 was the naked-eye default. Here the milestone is named for scanning and dwell, but:
 
@@ -44,11 +44,18 @@ was the naked-eye default. Here the milestone is named for scanning and dwell, b
 - **2C's calibration is unreadable until 2A has landed.** 2A changes *whether* something is
   detected; 2C changes *when*. Flown together, a sortie cannot attribute a changed range to either.
 
+**2A.5 sits where it does for the same reason.** It is not gaze work, so it does not belong in 2C;
+but it changes the default path, so it cannot ride in 2B without destroying 2B's acceptance gate
+("with no command issued, the trace is identical to the previous slice"). It is a standalone
+correction of a documented modelling error, independently mergeable and independently measurable —
+which is the definition of its own slice. See hard part 6a.
+
 So the ordering is forced by measurability, not preference.
 
 | | Slice | Default behaviour changes? | Gate to the next slice |
 |---|---|---|---|
 | **2A** | Per-tier multipliers, distinctiveness, the clamp, clustering floor fix | **Yes** — class-tier ranges move for infantry and radars | A sortie with BL-9 tracing: infantry class ≈ presence; S-300 class within ~1.5× of 4500 m; vehicle class/presence unchanged within noise |
+| **2A.5** | Intake counts **groups, not objects**: cluster first, cap clusters | **Yes** — a tight group is reported whole in one poll instead of three members at a time | BL-9 trace: a 10-vehicle group admits as one observation of ten, not three observations growing over three polls; nothing else moves |
 | **2B** | Gaze as a filter; `Optic.peripheral`; the stimulus seam; F10 scan commands steer perception | **No** — default gaze is the forward hemisphere, i.e. today | In flight: "scan left" demonstrably changes which contacts are detected; with no command issued, the BL-9 trace is byte-identical to 2A's |
 | **2C** | Default gaze becomes the o'clock-cone scan loop `12, 11, 10, 9, 12, 1, 2, 3` (2 s each, 16 s cycle); peripheral structure with no triggers wired | **Yes** — this is the big one | A sortie judged by the user on *feel*: does he find things at a plausible rate, and does the callout language stay stable as contacts cycle in and out of gaze |
 | **2D** | Dwell as an act: fix on it, check for more nearby, then glass up or resume | **Yes** | Conditional — only built if 2C's sortie shows a real need (see effort/value below) |
@@ -80,6 +87,20 @@ So the ordering is forced by measurability, not preference.
   into `cluster_candidates`. No other change.
 - Tests: `test_visibility.py`, `test_vision_calibration.py`, `test_clustering.py`, `test_optics.py`,
   plus a new tier-monotonicity property test (below).
+
+**2A.5**
+- `body-layer/src/perception/naked_eye_source.py` — `poll()` reorders: cluster **all** gate-surviving
+  candidates, then cap clusters, then emit. `_acquire_on_change` / `_acquire_every_poll` take and
+  return `Cluster`s rather than `(candidate, result)` pairs; acquisition state stays keyed on
+  `object_id` (hard part 6a — clusters have no stable cross-poll identity). `_acquire_on_change`
+  marks only the members of *emitted* clusters, so a capped-out group is retried rather than lost.
+  `NAKED_EYE_MAX_NEW_PER_POLL` renamed to a group-per-fixation name, **value unchanged at 3**.
+- `body-layer/tests/test_naked_eye_source.py` — the never-retried test is **rewritten, not
+  extended** (see Decisions). New tests: a ten-member tight group admits whole in one poll; N+1
+  angularly separated groups in view admit N this poll and the remainder next; every member of an
+  admitted cluster individually passed the gates.
+- **Not touched**: `clustering.py` (its interface already takes a candidate sequence and returns
+  clusters — the reorder is entirely on the calling side), `visibility.py`, anything under `belief/`.
 
 **2B**
 - `body-layer/src/perception/gaze.py` (**new**) — `Gaze(center_azimuth_deg, half_width_deg, label)`,
@@ -371,11 +392,11 @@ after a retention window ≥ one scan cycle. "Still acquired" then means "seen w
 sweep," which is what it always physically meant; the poll-indexed version was only ever correct
 because the cone never moved.
 
-**`NAKED_EYE_MAX_NEW_PER_POLL = 3` is an existing mechanism governing the same concept.** It is
-already an attention-bandwidth model — a cap on how many new things he can take in at once — written
-before any attention machinery existed. Do not add a second bandwidth limiter in 2C or 2D without
-first deciding whether this one is the same thing under another name. (Recommendation: keep it
-in 2C unchanged, and re-examine it only if the 2C sortie shows sectors being under-reported.)
+**`NAKED_EYE_MAX_NEW_PER_POLL = 3` is an existing mechanism governing the same concept** — already
+an attention-bandwidth model, written before any attention machinery existed. **Resolved in hard
+part 6a**: once it counts groups rather than objects it stops overlapping the scan loop and the two
+compose. The rule that survives is the general one: do not add a *third* intake limiter in 2C or 2D
+without first naming which question it answers that these two do not.
 
 **`clustering.py`**: clusters are built per-poll from whatever is visible, so a gaze edge that
 bisects a group splits it into two clusters reported separately at different times — against the
@@ -384,6 +405,89 @@ individually." At the 30° o'clock cone this is occasional (a group tight enough
 rarely astride a cone boundary, but 30° is half the width the earlier design assumed); at 2D's 8.5°
 binocular field it is routine. Flagged as a 2C acceptance
 item and a 2D design constraint, not fixed pre-emptively.
+
+#### 6a. The intake cap counts the wrong thing — and fixing it dissolves the tension
+
+User, 2026-09-21: *"How many objects we can detect at once is highly dependent on where they are in
+relation to each other. If I look straight at a group of 10 trucks, I can immediately see 10 trucks
+(unless they obscure each other). If the same 10 trucks are spread around a large area (angular
+perception difference), then I don't see them at once."*
+
+`NAKED_EYE_MAX_NEW_PER_POLL = 3` caps **objects**, and clustering runs strictly after it. The code
+already records this as a known limitation — `naked_eye_source.py`'s "Stage 2 scoping decision" says
+in as many words that a real cluster larger than the cap has only three members admitted per poll,
+*"under-reporting that cluster's true size until acquisition catches up."*
+
+**The user's framing is not the same as the docstring's, and the difference decides what to do.**
+The docstring treats object-capping as a scoping cut to be refined later — the right quantity,
+measured coarsely. The user's point is that it is the **wrong quantity**: a dense group is *easier*
+to take in whole, not harder, so capping its members is backwards. It throttles hardest exactly
+where a human reports fastest. That converts an accepted approximation into a confirmed modelling
+error, and it is why this earns a slice rather than a tuning pass.
+
+**This also dissolves the tension hard part 6 raises.** I warned that the cap and the scan loop are
+"two models of the same thing" and that the constant must not be raised reflexively. With groups as
+the unit they are three distinct questions that compose cleanly:
+
+| mechanism | question |
+|---|---|
+| scan loop (2C) | *where* is he looking |
+| clustering | *what counts as one thing* at that angular separation |
+| intake cap | *how many distinct things* he registers per fixation |
+
+None is a proxy for another, so all three can coexist and the constant finally means something
+defensible.
+
+##### Where the cap moves, and what must not move with it
+
+`poll()` today is: gate every candidate → **cap objects** → cluster the survivors → emit. It becomes:
+gate every candidate → **cluster all survivors** → cap clusters → emit.
+
+**The unit of the cap changes; the unit of acquisition state does not.** Acquisition stays keyed on
+`object_id`, because **clusters have no stable identity across polls** — membership shifts with
+geometry, which is precisely why `_build_observation` already resolves continuity by *majority
+object overlap* rather than by any cluster id. Admitting a cluster admits all its members and marks
+each acquired. That is the whole of "I see ten trucks at once."
+
+**No omniscience leak:** every member of an admitted cluster passed `check_visibility` individually
+(gaze, mask, range, LOS). Admitting them together removes an artificial throttle; it does not grant
+sight of anything not already individually visible.
+
+**Cost is negligible and worth checking rather than assuming.** Clustering now runs over `visible`
+rather than `to_emit`, and it is union-find over pairs. The 2026-09-21 trace gives 17,487 admissions
+over 4,719 polls — **~3.7 admitted candidates per poll**, so n≈4 and the pair loop is ~16
+comparisons. Under `emit_mode="every_poll"` (what `--console`/`--crew-text` actually run) clustering
+already covers essentially all visible candidates, so this is a real change only for `on_change`.
+
+##### The `on_change` retry semantics, which do need rethinking
+
+`_acquire_on_change` currently sets `_previously_visible_ids = currently_visible_ids` — *all*
+visible, including capped-out ones — so **a capped-out object is never retried**. Under
+cluster-capping that becomes "a capped-out **cluster** is never retried," which loses a whole group
+permanently. That is strictly worse than the object-level wart it inherits.
+
+The fix is already in the codebase: `_acquire_every_poll` adds only newly-acquired ids to its set,
+so capped-out candidates are naturally retried next poll. `on_change` should adopt the same rule —
+mark only the members of *emitted* clusters. A backlog then drains at N groups per poll instead of
+being silently dropped.
+
+**Flagged as an `AGENTS.md` escalation, not slipped through:** this **rewrites a pinned test rather
+than extending it** (the existing test fixes today's never-retried behaviour). Recommendation is to
+proceed — the behaviour it pins is documented in the module's own docstring as a limitation, and
+under cluster-capping it stops being a wart and becomes a group-sized hole — but the rewrite should
+be a deliberate, called-out commit rather than an incidental fixture edit.
+
+##### What the constant should mean, and what not to do to it
+
+It becomes *"how many distinct things he registers in one fixation"* and should be renamed to say
+so (`NAKED_EYE_MAX_NEW_PER_POLL` → a group-per-fixation name). The value is **unmeasured**, and the
+user has not been asked for one.
+
+**Keep it at 3 for this slice.** Changing a constant's unit and its value in the same slice makes
+the sortie unable to attribute the difference to either — the identical argument that put 2A first
+in this plan. Measure the reordering alone; treat any change of value as a separate, evidence-led
+step afterwards. A small number remains plausible on the far side of that measurement, but this plan
+should not manufacture a figure to fill the gap.
 
 #### 7. The clustering floor is no longer benign — verified, not assumed
 
@@ -565,6 +669,17 @@ they are state, but they are a pure function of the frame sequence.
    detection-aid dots were enabled). Expect infantry and radar rows to move; **vehicle rows must
    not**, and that is the regression guard worth writing explicitly.
 
+**2A.5 — intake counts groups, not objects**
+
+6a. Reorder `poll()`: cluster all gate-surviving candidates, then cap clusters. Acquisition state
+    stays keyed on `object_id`; admitting a cluster marks every member acquired.
+6b. `_acquire_on_change` marks only emitted clusters' members, adopting `_acquire_every_poll`'s
+    already-correct retry rule. **This rewrites a pinned test** — see Decisions.
+6c. Rename the constant to name its new unit; **do not change its value in this slice** (hard part
+    6a — changing unit and value together makes the sortie unattributable).
+6d. Verify the cost assumption rather than trusting it: clustering now runs over ~3.7 candidates per
+    poll instead of ≤3, so the pair loop stays trivial. Confirm against a trace, one line.
+
 **2B — gaze as a filter (default behaviour preserved)**
 
 7. `gaze.py` with `Gaze`, `FULL_GAZE`, and the `RelativeSector` vocabulary moved down from
@@ -695,15 +810,23 @@ they are state, but they are a pure function of the frame sequence.
 - **A missed sweep drops a contact two certainty bands at once** (hard part 8: `2 × CYCLE −
   FOCUS_DWELL` = 30 s, exactly `POSITION_HALF_LIFE_S`). Defensible but it will read as abrupt; first
   thing to check if 2C shows confidence flickering.
-- **`NAKED_EYE_MAX_NEW_PER_POLL = 3` is tighter than it looks under a 2 s cone dwell.** Two polls
-  per o'clock cone means at most six new objects taken in per visit to that bearing, and the rest
-  wait a full 16 s cycle. A dense sector will under-report. Do not raise it reflexively — it is the
-  pre-existing attention-bandwidth model (hard part 6) and the scan loop is the new one; decide
-  which is real before touching either.
+- **The intake limit under a 2 s cone dwell — and the earlier finding here inverts.** This plan
+  previously warned that "a dense sector will under-report," six *objects* per cone visit being
+  tight. Under cluster-capping (hard part 6a) that is **refuted**: a dense sector is now the *easy*
+  case — ten trucks in one glance is one group, admitted whole — and six *groups* per cone visit is
+  permissive rather than tight.
+
+  But the replacement is not simply "sparse is the constraint," which would be the other easy
+  answer and is also wrong: objects sparse enough to spread across the whole envelope are spread
+  across *cones* too, so each fixation sees few groups. **The binding case is intermediate density —
+  many angularly-resolvable groups inside a single 30° cone at similar range.** Neither extreme
+  binds. That is the case the 2C sortie should be read for, and it is not the case anyone would
+  have looked at before working this through.
 - **The measured saving assumes candidate counts stay near ~74 per poll.** A denser mission moves
   the absolute numbers but not the ~23% retention ratio, which is a property of the wedge geometry.
-- **`NAKED_EYE_MAX_NEW_PER_POLL` may double-count with the scan loop** — both limit intake rate.
-  Do not add a third such limiter without deciding which of these two is the real one.
+- **A third intake limiter would double-count.** The cap-vs-scan-loop overlap is resolved by hard
+  part 6a (they answer different questions once the cap counts groups); the standing rule is that
+  anything added alongside them must name a question neither already answers.
 - **The 2026-09-17 screenshot ladder is compromised** (detection-aid dots enabled), so
   `test_vision_calibration.py` grades against optimistic ground truth. 2A will move rows in that
   suite; a moved row is not automatically a regression, and each change needs judging against the
@@ -732,7 +855,7 @@ ED's model.
 **Why the value is smaller than it looks, and the o'clock-cone plan makes this stronger:** the scan
 loop already produces "detection takes time," and now produces a lot of it — a contact at a flank
 o'clock waits up to 14 s for the focus cone to reach it (hard part 8), not the few seconds the
-earlier 8 s design implied. `NAKED_EYE_MAX_NEW_PER_POLL` throttles intake on top of that. A third
+earlier 8 s design implied. The group-intake cap throttles on top of that. A third
 delay mechanism would be physically double-counting the same lag, and separating the three would
 need its own calibration sortie. ED's figures are also quoted for a different skill model under its
 own stated ideal conditions, so they are not directly transplantable.
@@ -796,7 +919,15 @@ retention window) follow arithmetically rather than by taste. The one genuine fo
 open — which cones belong to which leg, since the diagram's arcs share boundaries — is resolved to
 plan A in hard part 8 on a decay-ladder argument, with plan C pre-worked as the alternative.
 
-Two things are **flagged rather than asked**, because they are consequences the user should see
+**One `AGENTS.md` escalation, raised because the rule says to raise it rather than because it looks
+contentious.** 2A.5 **rewrites an existing test rather than extending it** — the one pinning
+`_acquire_on_change`'s "a capped-out object is never retried" behaviour. Under cluster-capping that
+behaviour would drop a whole group permanently, and `naked_eye_source.py`'s own docstring already
+records it as a limitation. Recommendation: proceed, as a deliberate called-out commit rather than
+an incidental fixture edit. Flagged because "existing tests must be rewritten rather than extended"
+is on the escalation list and this is exactly that.
+
+Three things are **flagged rather than asked**, because they are consequences the user should see
 land rather than decisions needing an answer now:
 
 - **`OBSERVED_WINDOW_S` moves 5.0 → 16.0**, which changes how confidently Petrovich phrases
@@ -805,6 +936,10 @@ land rather than decisions needing an answer now:
 - **From 2C onward nothing outside the focus cone can capture his attention** until the
   attention-capture channel exists (hard part 4). The seam is built and empty. Worth knowing before
   flying 2C rather than after.
+- **The group-intake constant keeps its value of 3 while changing its meaning** (hard part 6a).
+  Three *groups* per fixation is a materially more permissive limit than three objects, so 2A.5 will
+  make him report groups faster — the intended fix — but the number itself is unmeasured and
+  deliberately left alone until the reordering has been flown.
 - **Free scan covers 9-3, the cockpit admits 8-4** (hard part 8). He will not find an 8 o'clock
   contact unprompted, though he can report one if directed. Closing it costs a 24 s cycle and both
   decay properties — an "iterate later" call for after 2C flies, priced here so it need not be
