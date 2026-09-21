@@ -52,18 +52,38 @@ first case of this actually happening, see `_KNOWN_TIER_REGRESSIONS`/
    folding those rows back in: at two of its four ranges the JPEG grade is
    strictly worse than what the PNG ladder shows at a comparable or longer
    range, which is only explicable as compression loss.
+5. **Group-detectability rungs** (`plans/group-detectability/plan.md`
+   Stage 3, `body-layer/research/2026-09-22-four-column-calibration-
+   ladder.md`) -- not drawn from the JSON fixture above (that fixture has
+   no group geometry at all, only per-record `objects`/`size_m`), but
+   hand-built here directly against the twelve-unit, 200 m-line complex
+   the ladder describes: `test_group_admitted_at_4km`/`_3km` (comfortably
+   admitted, no rounding sensitivity), `test_group_admission_at_the_
+   derived_resolution_boundary` (the 5.44 km rung -- see that test's own
+   docstring for a real discrepancy this stage's implementation found:
+   the literal `RESOLUTION_ANGULAR_RADIUS_RAD = 0.0013` the plan
+   specifies derives a 5384.6 m threshold, ~55 m *short* of the
+   photographed 5440 m rung), and
+   `test_infantry_group_admitted_ceiling_predicts_the_1_91km_rejection`
+   -- the plan's own claimed out-of-sample prediction, checked directly.
 """
 
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from perception import object_model, visibility
-from perception.optics import BINOCULAR_OPTIC
+from perception.association import WorldObjectCandidate
+from perception.geometry import GeoPosition
+from perception.group_salience import group_salient_ids
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
+from perception.source import OwnshipState
+from perception.visibility import check_visibility
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _FIXTURE_PATH = _FIXTURES_DIR / "vision_calibration.json"
@@ -339,3 +359,262 @@ def test_jpeg_set_is_excluded_and_understates() -> None:
         for r in _load_records()
         if r["source_set"] == "jpeg-2026-09-17"
     )
+
+
+# --------------------------------------------------------------------------
+# Group-detectability rungs (`plans/group-detectability/plan.md` Stage 3)
+# --------------------------------------------------------------------------
+#
+# Hand-built against the twelve-unit, 200 m-line complex `body-layer/
+# research/2026-09-22-four-column-calibration-ladder.md` describes, not the
+# JSON fixture above (which has no group geometry). The observer sits at
+# the origin, heading 0 deg, and the line runs cross-range (perpendicular
+# to the line of sight) at a fixed slant range -- the same "dead ahead,
+# offset in z" convention `test_visibility.py`/`test_clustering.py` already
+# use for their own range-threshold tests.
+
+_GROUP_CONN = sqlite3.connect(":memory:")
+_GROUP_THEATRE = "Syria"
+
+
+@pytest.fixture(autouse=True)
+def _clear_line_of_sight_for_group_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(visibility, "line_of_sight_clear", lambda *a, **k: True)
+
+
+def _group_ownship() -> OwnshipState:
+    return OwnshipState(
+        t_sim=100.0,
+        x=0.0,
+        z=0.0,
+        alt_m=500.0,
+        heading_true_deg=0.0,
+        pitch_deg=0.0,
+        bank_deg=0.0,
+    )
+
+
+def _line_candidates(
+    range_m: float,
+    *,
+    object_type: str = "T-72B",
+    count: int = 12,
+    line_length_m: float = 200.0,
+    start_id: int = 1000,
+) -> list[WorldObjectCandidate]:
+    """`count` candidates evenly spaced across a `line_length_m` line,
+    cross-range (z) at a fixed slant range (x) -- the ladder's own "spread
+    along a 200 m line" geometry. Adjacent spacing is `200 / (count - 1) ~=
+    18.2 m` for the default `count=12`, matching the plan's own worked
+    "200 m / 12 units ~ 18 m spacing" figure."""
+    spacing_m = line_length_m / (count - 1)
+    return [
+        WorldObjectCandidate(
+            object_id=start_id + i,
+            object_type=object_type,
+            x=range_m,
+            z=(i - (count - 1) / 2.0) * spacing_m,
+            alt_m=500.0,
+            is_ownship=False,
+        )
+        for i in range(count)
+    ]
+
+
+def _observer() -> GeoPosition:
+    ownship = _group_ownship()
+    return GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+
+
+def test_group_admitted_at_4km() -> None:
+    """4.00 km ("detection, group, cannot count") -- comfortably inside
+    `RESOLUTION_ANGULAR_RADIUS_RAD`'s own threshold (`7 / 4000 = 0.00175`
+    vs. `0.0013`), no rounding sensitivity. A member is rejected as a lone
+    unit (well beyond `LOWRES_ANGULAR_RADIUS_RAD`'s own 2333.33 m
+    threshold) but admitted once the group pass marks it salient."""
+    ownship = _group_ownship()
+    observer = _observer()
+    candidates = _line_candidates(4000.0)
+
+    salient_ids = group_salient_ids(candidates, observer, UNAIDED_OPTIC)
+    assert salient_ids == frozenset(c.object_id for c in candidates)
+
+    member = candidates[0]
+    assert check_visibility(ownship, member, _GROUP_CONN, _GROUP_THEATRE) is None
+    result = check_visibility(
+        ownship, member, _GROUP_CONN, _GROUP_THEATRE, group_salient=True
+    )
+    assert result is not None
+    assert result.tier == "lowres"
+
+
+def test_group_admitted_at_3km() -> None:
+    """3.00 km ("detection, 'many'") -- same reasoning as the 4 km rung,
+    `7 / 3000 = 0.00233` well above `RESOLUTION_ANGULAR_RADIUS_RAD`."""
+    ownship = _group_ownship()
+    observer = _observer()
+    candidates = _line_candidates(3000.0)
+
+    salient_ids = group_salient_ids(candidates, observer, UNAIDED_OPTIC)
+    assert salient_ids == frozenset(c.object_id for c in candidates)
+
+    member = candidates[0]
+    result = check_visibility(
+        ownship, member, _GROUP_CONN, _GROUP_THEATRE, group_salient=True
+    )
+    assert result is not None
+    assert result.tier == "lowres"
+
+
+def test_group_admission_at_the_derived_resolution_boundary() -> None:
+    """The photographed 5.44 km rung -- "barely visible group if I look
+    intently" -- is **admitted**, which is the property
+    `RESOLUTION_ANGULAR_RADIUS_RAD` exists to have.
+
+    The constant derives from that rung: `7 / 5440 = 0.00128676`, rounded
+    **down** to `0.00128` so the observation it was derived from stays
+    inside the threshold. That is `LOWRES_ANGULAR_RADIUS_RAD`'s own
+    convention and the reason for it -- a threshold derived from an
+    observation must admit that observation, or the derivation cannot be
+    reproduced from the data it cites.
+
+    The plan specified `0.0013`, the same figure rounded the other way,
+    which put the boundary at 5384.6 m and left this rung 55 m outside.
+    Caught during implementation and corrected; this test is the guard.
+    Boundary is now `7 / 0.00128 = 5468.75 m`."""
+    ownship = _group_ownship()
+    observer = _observer()
+
+    photographed = _line_candidates(5440.0, start_id=3000)
+    salient = group_salient_ids(photographed, observer, UNAIDED_OPTIC)
+    assert salient == frozenset(c.object_id for c in photographed)
+    result = check_visibility(
+        ownship, photographed[0], _GROUP_CONN, _GROUP_THEATRE, group_salient=True
+    )
+    assert result is not None
+    assert result.tier == "lowres"
+
+    # Beyond the boundary no member is resolvable, so no group forms at
+    # all -- not a cohesion failure (cohesion is range-invariant, see
+    # `group_salience.py`'s docstring). The outermost members of the
+    # 200 m line sit ~100 m off-axis, so 5600 m centre range puts even
+    # the nearest member past 5468.75 m.
+    beyond = _line_candidates(5600.0, start_id=4000)
+    assert group_salient_ids(beyond, observer, UNAIDED_OPTIC) == frozenset()
+    assert (
+        check_visibility(
+            ownship, beyond[0], _GROUP_CONN, _GROUP_THEATRE, group_salient=True
+        )
+        is None
+    )
+
+
+def test_lone_unit_at_4km_is_not_admitted() -> None:
+    """The failure mode the plan's brief names explicitly: a single 7 m
+    vehicle, with no group around it, stays rejected at the 4 km rung
+    that the *group* is admitted at -- group salience never applies to a
+    unit the group pass hasn't separately found to be a member of a
+    cohesive, resolvable group of at least `GROUP_MIN_MEMBERS`."""
+    ownship = _group_ownship()
+    candidate = WorldObjectCandidate(
+        object_id=4000,
+        object_type="T-72B",
+        x=4000.0,
+        z=0.0,
+        alt_m=500.0,
+        is_ownship=False,
+    )
+
+    assert check_visibility(ownship, candidate, _GROUP_CONN, _GROUP_THEATRE) is None
+
+
+def test_infantry_group_admitted_ceiling_predicts_the_1_91km_rejection() -> None:
+    """The plan's own claimed out-of-sample prediction, checked directly:
+    infantry (`size_m=1.8`) has a group-admitted ceiling of
+    `1.8 / RESOLUTION_ANGULAR_RADIUS_RAD` -- computed here and reported
+    against the photographed 1.91 km rung ("detection + unit count (no
+    infantry)"), where the twelve-unit naked-eye ladder shows every other
+    unit detected but infantry specifically still not. Infantry is not
+    rescued by its conspicuous neighbours because it isn't resolvable at
+    that range at all, independent of the group predicate."""
+    ceiling_m = 1.8 / visibility.RESOLUTION_ANGULAR_RADIUS_RAD
+    assert ceiling_m == pytest.approx(1406.25, abs=0.1)
+    # The photographed rung the plan claims this predicts, unprompted:
+    assert ceiling_m < 1910.0
+
+    ownship = _group_ownship()
+    infantry = WorldObjectCandidate(
+        object_id=5000,
+        object_type="Infantry",
+        x=1910.0,
+        z=0.0,
+        alt_m=500.0,
+        is_ownship=False,
+    )
+    # Forcing group_salient=True is the best case for admission -- even
+    # then, infantry at 1.91 km is still rejected.
+    assert (
+        check_visibility(
+            ownship, infantry, _GROUP_CONN, _GROUP_THEATRE, group_salient=True
+        )
+        is None
+    )
+
+    # And the full pipeline agrees: infantry fails `_resolvable` at this
+    # range on its own, so a real group pass excludes it from the group
+    # outright -- it is never even offered the relaxed threshold.
+    observer = _observer()
+    vehicles = _line_candidates(1910.0, count=11, start_id=6000)
+    candidates = [*vehicles, infantry]
+    salient_ids = group_salient_ids(candidates, observer, UNAIDED_OPTIC)
+    assert infantry.object_id not in salient_ids
+    assert salient_ids == frozenset(c.object_id for c in vehicles)
+
+
+def test_group_salience_does_not_affect_medres_or_hires_thresholds() -> None:
+    """`group_salient` only ever relaxes the presence threshold
+    (`visibility.py`'s own "Resolution vs. salience" section) -- the
+    `medres`/`hires` tiers, and the ranges at which they're achieved, are
+    identical whether or not a candidate is group-salient. Checked at
+    500 m (`medres` for a 7 m T-72B: `7 / 0.014 = 500 m`) and 250 m
+    (`hires`: `7 / 0.028 = 250 m`) -- the two ranges the plan's own
+    constraints name explicitly ("Do not change MEDRES/HIRES -- the
+    ladder matches them exactly at 500 m and 250 m")."""
+    ownship = _group_ownship()
+    medres_candidate = WorldObjectCandidate(
+        object_id=7000,
+        object_type="T-72B",
+        x=500.0,
+        z=0.0,
+        alt_m=500.0,
+        is_ownship=False,
+    )
+    hires_candidate = WorldObjectCandidate(
+        object_id=7001,
+        object_type="T-72B",
+        x=250.0,
+        z=0.0,
+        alt_m=500.0,
+        is_ownship=False,
+    )
+
+    for group_salient in (False, True):
+        medres_result = check_visibility(
+            ownship,
+            medres_candidate,
+            _GROUP_CONN,
+            _GROUP_THEATRE,
+            group_salient=group_salient,
+        )
+        assert medres_result is not None
+        assert medres_result.tier == "medres"
+
+        hires_result = check_visibility(
+            ownship,
+            hires_candidate,
+            _GROUP_CONN,
+            _GROUP_THEATRE,
+            group_salient=group_salient,
+        )
+        assert hires_result is not None
+        assert hires_result.tier == "hires"

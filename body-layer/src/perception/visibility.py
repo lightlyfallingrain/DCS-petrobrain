@@ -150,6 +150,21 @@ detection here to be ambiguous *about*):
    'clear line of sight' into an actual detectability decision... [is] a
    concrete tier's job... not this shared helper's").
 
+**Resolution vs. salience (`plans/group-detectability/plan.md`).** Gate 3's
+`profile.size_m`-based presence threshold above conflated two different
+questions with one constant: *can the eye register a mark at all*
+(resolution) and *would a lone mark be noticed while scanning*
+(salience). `LOWRES_ANGULAR_RADIUS_RAD` is the salience threshold every
+candidate is still held to by default; `RESOLUTION_ANGULAR_RADIUS_RAD`
+is the looser resolution threshold, and this module's optional
+`group_salient` parameter (`check_visibility`/`_achieved_tier`) lets a
+candidate the caller has separately identified as a member of a
+cohesive, resolvable group (`perception.group_salience.
+group_salient_ids`) be admitted at the looser threshold instead -- the
+group supplies the salience a single dot at that range does not have.
+Only the presence threshold moves; every other gate above, and the
+`class`/`type` thresholds below, are unaffected.
+
 Pure aside from the LOS gate's `sqlite3.Connection` (the world-model seam,
 mirroring `geometry.py`'s own posture) -- no network I/O.
 """
@@ -228,6 +243,46 @@ HIRES_ANGULAR_RADIUS_RAD: Final[float] = 0.028
 #: (plan Risks, "no coalition/IFF filtering"). Named anyway so the full
 #: `min_angular_radius` table is visible in one place.
 IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
+
+#: **Resolution, not salience** (`plans/group-detectability/plan.md`) --
+#: the loosest presence-tier threshold any admission path may use, an
+#: *upper bound on whether the eye can register a mark at all*, distinct
+#: from `LOWRES_ANGULAR_RADIUS_RAD` (whether a *lone* mark would be
+#: noticed while scanning -- salience). The dots-off calibration ladder
+#: (`body-layer/research/2026-09-22-four-column-calibration-ladder.md`)
+#: shows a twelve-unit, 200 m-line group still "barely visible... if I
+#: look intently" at the farthest naked-eye rung photographed, 5.44 km,
+#: for 7 m vehicles: `7 / 5440 = 0.001287`, rounded to `0.0013` (5385 m
+#: for a 7 m object) -- **an upper bound, not a measured boundary**,
+#: exactly the same honesty `LOWRES_ANGULAR_RADIUS_RAD` already carries
+#: for its own farthest-photographed rung (nothing in the naked-eye
+#: column was observed beyond 5.44 km, and the 9.3 km "nothing" rung
+#: cannot bound this from the other side -- it is a different target,
+#: the S-300 complex, near the ~10.4 km atmospheric limit, so it may be
+#: haze rather than acuity; see the plan's Risks section).
+#:
+#: A lone candidate must still clear the tighter `LOWRES_ANGULAR_RADIUS_
+#: RAD` (salience) on its own -- this constant only ever relaxes the
+#: presence threshold for a candidate `perception.group_salience.
+#: group_salient_ids` has separately found to be a member of a cohesive,
+#: resolvable group of at least `GROUP_MIN_MEMBERS`; see that module's
+#: docstring. `check_visibility`'s `group_salient` parameter selects which
+#: of the two thresholds is in effect, in both the admission gate and
+#: `_achieved_tier`'s own `presence_threshold_m` -- these two computations
+#: must stay arithmetically identical (see `_achieved_tier`'s own
+#: docstring), so both read the same `_presence_angular_radius_rad`
+#: selection below rather than duplicating the ternary.
+#:
+#: **Rounded DOWN from 7/5440 = 0.00128676, not up.** The plan specified
+#: 0.0013, which is the same figure rounded the other way and puts the
+#: boundary at 5385 m -- 55 m SHORT of the 5.44 km rung the plan's own prose
+#: calls "admitted (marginal)", so the calibration point it is derived from
+#: would have fallen outside it. `LOWRES_ANGULAR_RADIUS_RAD` above already
+#: sets the convention of rounding down for exactly this reason: a threshold
+#: derived from an observation must admit that observation, or the derivation
+#: is not reproducible from the data it cites. At 0.00128 the boundary is
+#: 5469 m and the rung clears.
+RESOLUTION_ANGULAR_RADIUS_RAD: Final[float] = 0.00128
 
 #: The tier this filter gates on. `lowres` over `medres`
 #: (`plans/classification-refinement/plan.md` Stage 7, Decision 2, the
@@ -310,6 +365,31 @@ NAKED_EYE_PRESENCE_CONFIDENCE: Final[float] = 0.2
 NAKED_EYE_TYPE_CONFIDENCE: Final[float] = 0.55
 
 
+def _presence_angular_radius_rad(
+    base_angular_radius_rad: float, group_salient: bool
+) -> float:
+    """The effective presence-tier angular-radius threshold for one
+    candidate -- `RESOLUTION_ANGULAR_RADIUS_RAD` (looser, group-admitted)
+    when `group_salient`, else `base_angular_radius_rad` unchanged
+    (`plans/group-detectability/plan.md`). `group_salient=False` always
+    returns `base_angular_radius_rad` untouched, which is what makes
+    Stage 1's own regression test able to pin `check_visibility`'s trace
+    and tier output byte-identical to before this parameter existed --
+    no caller passes `group_salient=True` until Stage 2's
+    `group_salience.py` wiring lands.
+
+    The one function both of `check_visibility`'s presence-threshold
+    computations call, so they can never drift out of sync with each
+    other (see `_achieved_tier`'s own docstring on why that arithmetic
+    identity is load-bearing): `check_visibility`'s admission gate passes
+    `NAKED_EYE_GATING_ANGULAR_RADIUS_RAD` as `base_angular_radius_rad`,
+    `_achieved_tier`'s own `presence_threshold_m` passes
+    `LOWRES_ANGULAR_RADIUS_RAD` -- today the same value by definition
+    (`NAKED_EYE_GATING_ANGULAR_RADIUS_RAD = LOWRES_ANGULAR_RADIUS_RAD`),
+    so both resolve identically for any given `group_salient`."""
+    return RESOLUTION_ANGULAR_RADIUS_RAD if group_salient else base_angular_radius_rad
+
+
 @dataclass(frozen=True, slots=True)
 class VisibilityResult:
     """The outcome of a successful `check_visibility()` call -- always
@@ -357,10 +437,24 @@ def _achieved_tier(
     recognition_extent_m: float,
     optic: Optic = UNAIDED_OPTIC,
     distinctiveness: float = 1.0,
+    group_salient: bool = False,
 ) -> tuple[str, float]:
     """The tightest recognition tier `range_m` still satisfies, and that
     tier's confidence (Stage 6's worked table: presence low / class medium
     / type high).
+
+    **`group_salient` (`plans/group-detectability/plan.md`) relaxes only
+    the `presence` threshold**, from `LOWRES_ANGULAR_RADIUS_RAD`
+    (salience -- would a lone mark be noticed) to the looser
+    `RESOLUTION_ANGULAR_RADIUS_RAD` (resolution -- can the eye register a
+    mark at all) via `_presence_angular_radius_rad`, when this candidate
+    is a member of a cohesive, resolvable group
+    (`perception.group_salience.group_salient_ids`). `class`/`type`
+    thresholds are untouched -- a group supplies mass and cohesion, not
+    resolved shape detail, so recognition still needs its own
+    `recognition_extent_m`/`distinctiveness` regardless of group
+    membership. Default `False`, behaviour-identical to before this
+    parameter existed.
 
     **Slice 2A (`plans/detection-cones-slice2/plan.md`) replaces the old
     single `magnification` with `optic`'s three per-tier multipliers, and
@@ -419,7 +513,11 @@ def _achieved_tier(
     against screenshot ground truth without going through that gate."""
     presence_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
-        (presence_size_m / LOWRES_ANGULAR_RADIUS_RAD) * optic.presence_range_mult,
+        (
+            presence_size_m
+            / _presence_angular_radius_rad(LOWRES_ANGULAR_RADIUS_RAD, group_salient)
+        )
+        * optic.presence_range_mult,
     )
     class_threshold_m = min(
         presence_threshold_m,
@@ -456,6 +554,7 @@ def check_visibility(
     optic: Optic | None = None,
     gaze: Gaze | None = None,
     trace: DetectionTraceCollector | None = None,
+    group_salient: bool = False,
 ) -> VisibilityResult | None:
     """Run `candidate` through all five gates: gaze, cockpit mask, per-optic
     field of view (`plans/detection-cones-slice1/plan.md`), angular-radius
@@ -465,6 +564,20 @@ def check_visibility(
     LOS terrain-sampling check, mirroring `association.associate()`'s own
     cheap-before-expensive ordering; gaze goes first among the cheap ones
     (module docstring, gate 0).
+
+    `group_salient` (`plans/group-detectability/plan.md`, default `False`,
+    behaviour-identical to before this parameter existed) relaxes the
+    angular-radius range gate's presence threshold from
+    `LOWRES_ANGULAR_RADIUS_RAD` (salience) to the looser
+    `RESOLUTION_ANGULAR_RADIUS_RAD` (resolution) when the caller has
+    separately determined this candidate is a member of a cohesive,
+    resolvable group (`perception.group_salience.group_salient_ids`) --
+    the caller resolves group membership once per poll, over the whole
+    candidate list, exactly as it already resolves a per-candidate `gaze`
+    one line above the call to this function. Every other gate (cockpit
+    mask, optic FOV, gaze, terrain LOS) is unaffected -- group salience
+    supplies mass and cohesion, not a wider field of view or an X-ray
+    through terrain.
 
     `gaze` (`plans/detection-cones-slice2/plan.md`'s 2B) defaults to `None`
     -- no restriction, today's behaviour. A caller resolves the effective
@@ -545,13 +658,24 @@ def check_visibility(
     # aspect (1.00x ratio across three instruments), while only class/type
     # moved with aspect. See `_achieved_tier`'s own docstring for the full
     # reasoning; the two size measures must not be unified.
+    effective_gating_angular_radius_rad = _presence_angular_radius_rad(
+        NAKED_EYE_GATING_ANGULAR_RADIUS_RAD, group_salient
+    )
     size_curve_threshold_m = (
-        profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
+        profile.size_m / effective_gating_angular_radius_rad
     ) * optic.presence_range_mult
     range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
-    threshold_bound = (
-        "range_cap" if NAKED_EYE_RANGE_CAP_M <= size_curve_threshold_m else "size_curve"
-    )
+    if NAKED_EYE_RANGE_CAP_M <= size_curve_threshold_m:
+        threshold_bound = "range_cap"
+    elif group_salient:
+        # The relaxed (RESOLUTION, not LOWRES) threshold was the binding
+        # term -- `plans/group-detectability/plan.md` Stage 4: BL-9 traces
+        # can show *why* a distant candidate was admitted, distinct from
+        # an ordinary size-curve admission at the tighter salience
+        # threshold.
+        threshold_bound = "group_resolution"
+    else:
+        threshold_bound = "size_curve"
 
     def _record(outcome: GateOutcome, achieved_tier: str | None = None) -> None:
         if trace is None:
@@ -613,6 +737,7 @@ def check_visibility(
         recognition_extent_m,
         optic,
         object_model.distinctiveness_of(profile),
+        group_salient,
     )
     _record(GateOutcome.ADMITTED, achieved_tier=achieved_tier)
     return VisibilityResult(

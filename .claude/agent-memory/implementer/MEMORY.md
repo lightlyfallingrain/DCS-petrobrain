@@ -67,7 +67,6 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Aspect-aware profiles](project_aspect_aware_profiles.md) — apparent_extent_m formula, None-not-cube dimension semantics, S-300 sourcing; POST-DOD CORRECTED: aspect affects recognition only, never detection (gate/lowres use size_m, medres/hires use apparent_extent_m).
 - [Unbounded sector scan](project_unbounded_sector_scan.md) — AttentionArea.radius_m -> float | None, F10_SCAN_RADIUS_M deleted; only 2 direct .radius_m reads existed outside tests, tasks.py untouched.
 - [Cones slice 2A multipliers](project_cones_slice2a_multipliers.md) — per-tier optic multipliers move vehicle calibration rows too (not just distinctiveness); infantry's distinctiveness=5.0 eliminates its lowres band structurally; clustering floor fix exposed a fixture's hidden binocular-range assumption.
-
 - [Overlay speech callouts addendum](project_overlay_speech_callouts_addendum.md) — shared _contact_report_text helper fixes broken lifecycle callout text; facts["semantic"] is list[dict] not list[SemanticFact].
 - [Overlay speech callouts addendum 2](project_overlay_speech_callouts_addendum2.md) — round() ties-to-even on rounding boundaries, CONTACT_LOST no-template needs no route_event change, classification-changed relative_now needs EnrichmentContext.
 - [BL-7 mission phase](project_bl7_mission_phase.md) — get_situation's only caller is console.py; MissionPhaseTracker needs no cross-thread sync (built once, shared by reference); verified real asdict() JSON shape before writing parser/fixture.
@@ -92,3 +91,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Cones 2C scan loop](project_cones_2c_scan_loop.md) — ScanPlan per-sector legs (plan defect flagged), default gaze now restrictive breaks ~40 fixtures, TaskStore success-check trap for persistent commanded scans in long fixtures.
 - [Cones 2C sortie fixes](project_cones_2c_sortie_fixes.md) — gaze overlay read + scan/watch mode fix touched 3 call sites not 1; wrong worktree base caught by grepping for a symbol the task named; a backlog root-cause claim turned out wrong for one finding.
 - [Callout scheduling Slice A/B](project_callout_scheduling_stages.md) — build full design first then split for revertible commits; bunched-at-t0 fixture undercounts spoken lines vs. staggered; plan's "three infantry" example contradicts its own reused mechanism.
+- [BL-2.6 1-4 classification](project_bl2_6_stages1_4_classification_lattice.md) — refine/contradict derivable from level+value alone.
+- [Group detectability](project_group_detectability.md) — RESOLUTION_ANGULAR_RADIUS_RAD split; plan's 0.0013 rounds wrong direction vs LOWRES precedent.

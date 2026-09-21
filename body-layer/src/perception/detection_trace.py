@@ -76,10 +76,15 @@ class DetectionTrace:
     answers "how close would it have had to get" even for a candidate that
     never got that far. `threshold_bound` is `"range_cap"` when
     `NAKED_EYE_RANGE_CAP_M` is the binding term of the `min()` in
-    `visibility.py`, else `"size_curve"` -- the angular-size and range-cap
+    `visibility.py`, `"group_resolution"` when the size-curve term bound
+    instead *and* the relaxed group-salience threshold
+    (`RESOLUTION_ANGULAR_RADIUS_RAD`, `plans/group-detectability/plan.md`)
+    was the one applied, else `"size_curve"` (the ordinary,
+    salience-threshold admission) -- the angular-size and range-cap
     checks are one arithmetic expression there, not two separable gates,
-    so this field recovers the two distinct *reasons* ("outside the range
-    cap" vs "angular size too small for this tier") without inventing a
+    so this field recovers the distinct *reasons* ("outside the range
+    cap" vs "angular size too small for this tier" vs "admitted only
+    because a salient group relaxed the threshold") without inventing a
     code-level distinction `visibility.py` doesn't have.
 
     `achieved_tier`/`cluster_member_object_ids`/`observation_id` are

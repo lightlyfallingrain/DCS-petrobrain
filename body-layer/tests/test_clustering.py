@@ -24,7 +24,10 @@ from perception.clustering import (
 )
 from perception.geometry import GeoPosition
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
-from perception.visibility import LOWRES_ANGULAR_RADIUS_RAD
+from perception.visibility import (
+    LOWRES_ANGULAR_RADIUS_RAD,
+    RESOLUTION_ANGULAR_RADIUS_RAD,
+)
 
 _OBSERVER = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
 
@@ -307,6 +310,70 @@ def test_floor_would_have_broken_under_the_old_hardcoded_constant() -> None:
     )
     clusters = cluster_candidates(
         [a_candidate, b_candidate], _OBSERVER, active_presence_range_mult
+    )
+    assert len(clusters) == 2
+
+
+def test_group_admitted_pair_would_have_wrongly_merged_under_the_old_lowres_floor() -> (
+    None
+):
+    """The group-detectability defect this module's docstring's "Group-
+    detectability: the floor must use the loosest admission threshold"
+    section documents, proven directly (`plans/group-detectability/
+    plan.md` Stage 1, this plan's own Risks section): a pair
+    `visibility.check_visibility` admits via its relaxed
+    `group_salient=True` path clears (A) only against the looser
+    `RESOLUTION_ANGULAR_RADIUS_RAD`, not the tighter
+    `LOWRES_ANGULAR_RADIUS_RAD` a lone admission is held to. Placed exactly
+    at (S)'s own merge boundary, at the *resolution* detection limit, at
+    `UNAIDED_OPTIC.presence_range_mult` (1.0 -- the only multiplier this
+    channel passes today; the same mismatch is sharper still at a
+    narrower sight's higher multiplier, mirroring the previous test's own
+    escalation)."""
+    presence_range_mult = UNAIDED_OPTIC.presence_range_mult
+    size_m = 7.0
+    range_at_resolution_limit_m = (
+        size_m / RESOLUTION_ANGULAR_RADIUS_RAD * presence_range_mult
+    )
+    unit_rad = size_m / range_at_resolution_limit_m
+    separation_m = math.tan(unit_rad) * range_at_resolution_limit_m
+    a = GeoPosition(x=range_at_resolution_limit_m, z=0.0, alt_m=500.0)
+    b = GeoPosition(x=range_at_resolution_limit_m, z=separation_m, alt_m=500.0)
+
+    theta_sep = angular_separation_rad(_OBSERVER, a, b)
+
+    # Checked with the constant this module actually uses (RESOLUTION,
+    # since Stage 1's fix): (A) holds, same floating-point epsilon
+    # accommodation as the tests above.
+    assert theta_sep * presence_range_mult >= RESOLUTION_ANGULAR_RADIUS_RAD - 1e-9
+    # Checked with the OLD, tighter LOWRES floor instead: (A) fails -- the
+    # concrete defect the plan's Risks section names, reproduced directly.
+    assert theta_sep * presence_range_mult < LOWRES_ANGULAR_RADIUS_RAD
+
+    # `cluster_candidates`, correctly parameterised against RESOLUTION,
+    # still resolves these two as separate clusters -- the fix in effect.
+    a_candidate = ClusterCandidate(
+        object_id=1,
+        x=range_at_resolution_limit_m,
+        z=0.0,
+        alt_m=500.0,
+        range_m=range_at_resolution_limit_m,
+        size_m=size_m,
+        classification_raw="OP_ARMORED",
+        classification_level=2,
+    )
+    b_candidate = ClusterCandidate(
+        object_id=2,
+        x=range_at_resolution_limit_m,
+        z=separation_m,
+        alt_m=500.0,
+        range_m=range_at_resolution_limit_m,
+        size_m=size_m,
+        classification_raw="OP_ARMORED",
+        classification_level=2,
+    )
+    clusters = cluster_candidates(
+        [a_candidate, b_candidate], _OBSERVER, presence_range_mult
     )
     assert len(clusters) == 2
 
