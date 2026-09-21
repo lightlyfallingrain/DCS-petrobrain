@@ -1030,6 +1030,152 @@ def test_cancel_task_names_a_bearing_scan_by_its_compass_word() -> None:
     assert lines == ["Copy, stopping the scan southeast."]
 
 
+# --- plans/watch-as-standing-mode/plan.md: watch as a cancellable mode -----
+
+
+def test_watch_nearest_registers_a_cancellable_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 2026-09-21 sortie's root cause: `_handle_watch_nearest` used to
+    call `belief.tools.set_attention` directly, registering nothing
+    `cancel_task` could ever find. With a `TaskStore` configured, watching
+    the nearest contact must now also register a `"watch_contact"`
+    `PendingIntent` for it."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    console.handle_f10_command("watch_nearest", now_sim=0.0)
+
+    assert contact.attention == "watch"
+    assert len(tasks.tasks) == 1
+    task = tasks.tasks[0]
+    assert task.kind == "watch_contact"
+    assert task.contact_id == contact.id
+    assert task.status == "pending"
+    assert task.area is None
+
+
+def test_watch_then_cancel_task_stops_the_watch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sortie's own scripted sequence, fixed: "watch closest" ->
+    "cancel task" must now stop the watch, not report "nothing to stop"."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    assert contact.attention == "watch"
+
+    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+
+    assert lines == ["Copy, stopping the watch."]
+    assert contact.attention == "normal"
+    assert tasks.tasks[0].status == "cancelled"
+
+
+def test_watch_nearest_without_tasks_still_falls_back_to_a_bare_mark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a `TaskStore` configured, `watch_nearest` degrades to the
+    old direct `set_attention` behaviour -- watching still works, it just
+    is not cancellable (the same graceful-degradation shape `_handle_scan`
+    already follows for a missing `enrichment`). Regression guard for
+    `test_watch_nearest_selects_the_nearest_contact_by_range`'s existing
+    no-tasks scenario."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_f10_command("watch_nearest", now_sim=0.0)
+
+    assert contact.attention == "watch"
+    assert lines != ["no such contact: " + contact.id]
+
+
+def test_scan_and_watch_coexist_and_cancel_task_stops_both(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The finding's full scripted sequence: "scan ahead" then "watch
+    closest" must leave *both* standing modes active at once (a single
+    "current task" field could not express this), and a single "Cancel
+    Task" -- the only F10 item and the only vocabulary available -- ends
+    both, naming each in the readback rather than silently dropping one."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    assert len(tasks.tasks) == 2
+    assert contact.attention == "watch"
+
+    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+
+    assert lines == ["Copy, stopping the scan ahead and the watch."]
+    assert contact.attention == "normal"
+    assert all(task.status == "cancelled" for task in tasks.tasks)
+
+
+def test_cancel_task_only_cancels_the_newest_task_per_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A superseded scan (never explicitly cancelled, just no longer
+    honoured by `logger._active_gaze`) must not be swept up by a later
+    "Cancel Task" alongside the current watch -- only the newest task of
+    each kind is "currently governing" (`_active_tasks_by_kind`)."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    console.handle_f10_command("scan_left", now_sim=1.0)
+    first_scan, second_scan = tasks.tasks
+    console.handle_f10_command("watch_nearest", now_sim=1.0)
+
+    lines = console.handle_f10_command("cancel_task", now_sim=2.0)
+
+    assert lines == ["Copy, stopping the scan to the left and the watch."]
+    assert first_scan.status == "pending"
+    assert second_scan.status == "cancelled"
+
+
 # --- Stage 2 of plans/inbound-speech/plan.md: handle_transcript ------------
 
 

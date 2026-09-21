@@ -67,6 +67,12 @@ summary, phrasing_hints}` wrapping around them (plan's Q2 decision).
 
 **`scan_area`/`get_task_status`/`cancel_task`.** BL-6 (`plans/
 bl6-commands-inspect-adapt/plan.md`), §3.3's tool-set freeze point.
+`watch_contact_task` (`plans/watch-as-standing-mode/plan.md`) joins
+`scan_area` as this freeze point's second composing function -- not a new
+named tool itself (`belief.crew_console`'s F10 "Watch" items are the only
+caller), it exists so a watch, like a scan, is something `cancel_task` can
+find and end rather than a bare `set_attention` call with nothing behind
+it to cancel.
 `scan_area` composes two existing pieces of machinery rather than adding
 new belief logic: it registers a `"watch"`-level `belief.attention.
 AttentionArea` (exactly `watch_area`'s own call into `store.add_area`) and,
@@ -91,6 +97,7 @@ success/timeout bookkeeping."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict
 from typing import Literal, TypedDict
 
@@ -917,19 +924,63 @@ def get_task_status(tasks: TaskStore, task_id: str) -> PendingIntent | None:
     return tasks.get(task_id)
 
 
+def watch_contact_task(
+    store: ContactStore,
+    tasks: TaskStore,
+    contact_id: str,
+    now_sim: float,
+    reason: str = "watch",
+    source: str = "console",
+) -> PendingIntent | None:
+    """Mark a contact watched and register a cancellable standing task for
+    it (`plans/watch-as-standing-mode/plan.md`) -- composes `set_attention`
+    (the existing direct-mark tool) with a `belief.tasks.PendingIntent` of
+    kind `"watch_contact"`, the same "one command, two existing registries"
+    pattern `scan_area` already established for areas. Unlike `scan_area`'s
+    task, a `watch_contact` task has no success/timeout lifecycle
+    (`TaskStore.tick` never resolves a task whose `area` is `None`) --
+    watching a contact does not "succeed" or "time out," it just continues
+    until cancelled (`cancel_task`, which for this kind also returns the
+    contact's attention to `"normal"`).
+
+    Returns `None` -- no task registered, contact left untouched -- when
+    `contact_id` does not exist, mirroring `set_attention`'s own "return
+    whether found" contract, but as a task-or-nothing result since callers
+    need the task to report or cancel it."""
+    found = set_attention(store, contact_id, "watch", source=source)
+    if not found:
+        return None
+    kind: TaskKind = "watch_contact"
+    return tasks.create(
+        kind=kind,
+        area=None,
+        created_sim=now_sim,
+        deadline_sim=math.inf,
+        reason=reason,
+        contact_id=contact_id,
+    )
+
+
 def cancel_task(store: ContactStore, tasks: TaskStore, task_id: str) -> bool:
-    """Cancel a still-pending task and remove the `AttentionArea` it
-    registered (the plan's Decision 3, user-resolved 2026-09-11: cancelling
-    a scan stops watching that area entirely, not just its own
-    success/timeout bookkeeping). Returns whether `task_id` was found --
-    mirrors `unwatch_area`'s/`TaskStore.cancel`'s own "unknown id returns
-    `False`" convention. Reads `task.area.id` off the found task before
-    calling `store.remove_area`, since `TaskStore` itself never holds a
-    `ContactStore` reference (see `belief.tasks.TaskStore.cancel`'s
-    docstring)."""
+    """Cancel a still-pending task and undo the belief-state effect it
+    registered -- an `AttentionArea` for a `scan_area` task (the plan's
+    Decision 3, user-resolved 2026-09-11: cancelling a scan stops watching
+    that area entirely, not just its own success/timeout bookkeeping), or
+    the watched contact's attention mark for a `watch_contact` task
+    (`plans/watch-as-standing-mode/plan.md`: cancelling a watch returns the
+    contact to `"normal"` attention, the same way cancelling a scan removes
+    its area rather than leaving a dangling registration behind). Returns
+    whether `task_id` was found -- mirrors `unwatch_area`'s/`TaskStore.
+    cancel`'s own "unknown id returns `False`" convention. Reads `task.area`/
+    `task.contact_id` off the found task before acting, since `TaskStore`
+    itself never holds a `ContactStore` reference (see `belief.tasks.
+    TaskStore.cancel`'s docstring)."""
     task = tasks.get(task_id)
     if task is None:
         return False
     tasks.cancel(task_id)
-    store.remove_area(task.area.id)
+    if task.area is not None:
+        store.remove_area(task.area.id)
+    if task.contact_id is not None:
+        set_attention(store, task.contact_id, "normal", source="cancel_task")
     return True
