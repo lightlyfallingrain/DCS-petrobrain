@@ -80,7 +80,7 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ### Scan geometry: drop the invented radius (user direction, 2026-09-21)
 
-- [ ] **Remove `F10_SCAN_RADIUS_M` and make a sector scan unbounded.** User direction: *"get
+- [x] **Remove `F10_SCAN_RADIUS_M` and make a sector scan unbounded. DONE, merged 2026-09-21.** User direction: *"get
   everything visible within a sector"* instead of a made-up cutoff. `belief/crew_console.py`'s
   `F10_SCAN_RADIUS_M = 3000.0` exists only because an F10 button carries no geometry the way the
   typed `scan-area <bearing> <range> <radius> <reason>` does, so the code had to invent a number.
