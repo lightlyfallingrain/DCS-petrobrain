@@ -99,6 +99,39 @@ check_memory '^plans/[^/]+/debug\.md$'          debugger     "a debug report"
 check_memory '^plans/[^/]+/dod-check\.md$'      dod          "a DoD check"
 check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a research finding"
 
+# Agent-memory index: APPEND, never rewrite. On 2026-09-20 one commit replaced
+# the reviewer index's 27 entries with 1, leaving 73 memory files on disk and
+# unreachable by the role that wrote them -- undetected for a day, and found
+# only by an integrity audit. The files were never lost; only the index was.
+# A memory nothing can reach is the most expensive loss in this system, since
+# its whole purpose is to stop a later agent repeating a mistake.
+SHRUNK_INDEX=""
+for idx in $(printf '%s\n' "$STAGED" | grep -E '^\.claude/agent-memory/[^/]+/MEMORY\.md$' || true); do
+    added=$(git diff --cached --numstat -- "$idx" | cut -f1)
+    removed=$(git diff --cached --numstat -- "$idx" | cut -f2)
+    [ -z "$added" ] && continue
+    # A rewrite removes far more than it adds. Editing a hook removes ~1 line.
+    if [ "$removed" -gt 3 ] && [ "$removed" -gt "$added" ]; then
+        SHRUNK_INDEX="$SHRUNK_INDEX
+  $idx (removed $removed lines, added $added)"
+    fi
+done
+if [ -n "$SHRUNK_INDEX" ]; then
+    FAIL=1
+    OUT="$OUT
+
+## agent-memory index shrank -- FAIL
+$SHRUNK_INDEX
+
+An agent-memory MEMORY.md is append-only. Removing more lines than it adds
+means entries were dropped, and the memory files they point to become
+unreachable while still sitting on disk.
+
+If you meant to edit one hook, that removes one line and this will not fire.
+If an entry is genuinely obsolete, delete its file in the same commit so the
+index and the directory stay in step."
+fi
+
 # Skill layout: a skill must be .claude/skills/<name>/SKILL.md, never a flat
 # .claude/skills/<name>.md, or Claude Code cannot discover it (invisible to
 # /skills, not invokable, not loadable via the Skill tool). The PreToolUse
