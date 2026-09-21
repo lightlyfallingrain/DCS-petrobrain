@@ -317,6 +317,48 @@ def test_tick_resolves_relative_scan_area_against_its_live_projection() -> None:
     ]
 
 
+def test_watch_contact_task_never_resolves_via_tick() -> None:
+    """A `watch_contact` task (`plans/watch-as-standing-mode/plan.md`) has
+    no `area` and no success/timeout lifecycle -- `tick` must leave it
+    `"pending"` forever, regardless of contacts appearing or the deadline
+    passing, since there is nothing here for it to check containment
+    against."""
+    store = ContactStore()
+    tasks = TaskStore()
+    task = tasks.create(
+        kind="watch_contact",
+        area=None,
+        created_sim=10.0,
+        deadline_sim=40.0,
+        reason="watch",
+        contact_id="CONTACT_1",
+    )
+
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=15.0, range_m=100.0)], now_sim=15.0
+    )
+    tasks.tick(store, now_sim=100.0)
+
+    resolved = tasks.get(task.id)
+    assert resolved is not None
+    assert resolved.status == "pending"
+
+
+def test_watch_contact_task_is_cancellable() -> None:
+    tasks = TaskStore()
+    task = tasks.create(
+        kind="watch_contact",
+        area=None,
+        created_sim=10.0,
+        deadline_sim=40.0,
+        reason="watch",
+        contact_id="CONTACT_1",
+    )
+
+    assert tasks.cancel(task.id) is True
+    assert tasks.get(task.id).status == "cancelled"  # type: ignore[union-attr]
+
+
 def test_tick_falls_back_to_captured_area_when_the_live_area_is_gone() -> None:
     """`TaskStore.tick`'s `store.get_area(task.area.id) or task.area`
     fallback -- documented as a safety net for an invariant violation, not
