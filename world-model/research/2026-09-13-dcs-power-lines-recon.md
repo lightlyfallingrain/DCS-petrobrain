@@ -14,6 +14,28 @@ terrain (consistent with the project's general OSM-vs-DCS residual, see
 offsets). Can pylon/tower and line geometry be extracted from DCS itself,
 with exact DCS x/z, for Syria?
 
+> **FLAG 2026-09-21 — "consistent with the project's general OSM-vs-DCS residual" is not
+> supported by this project's own measurements, and there is no measurement of power-line
+> displacement at all.** Two different residuals are being run together:
+>
+> | figure | what it measures | value |
+> |---|---|---|
+> | M1's ~1.0–1.3 km | DCS terrain-art placement of **point objects** (airport ARPs/buildings) vs. published real-world coordinates | ~1137 m at Damascus |
+> | M5 Stage 4 Finding 2 | DCS-vs-OSM displacement of **linear features** (roads), measured | **median 5.3 m, p90 47.0 m** |
+>
+> That finding exists *specifically* because the checklist predicted "~M1's 1.0–1.3 km residual"
+> for roads and the measurement came back **two orders of magnitude tighter**, with an
+> investigation written up explaining why the point-object figure does not transfer to
+> linear features. Power lines are linear features.
+>
+> **This does not overturn the decision** — DCS-native sourcing is the project's standing
+> invariant regardless, and the user's preference for it stands on its own. What is unsupported
+> is the *stated justification*: nobody has measured OSM-vs-DCS power-line displacement, and the
+> nearest analogue this project has measured points at metres, not a kilometre. Recorded as
+> **unresolved**, not as a correction to the decision. Note `world-model/ROADMAP.md` carries the
+> same "~1 km offset rules it out" line, so this is a project-wide assumption rather than a slip
+> in one note — if it is ever load-bearing, it needs measuring rather than re-citing.
+
 ### Findings
 
 - **Syria's own model catalog contains real power-line/pylon/substation

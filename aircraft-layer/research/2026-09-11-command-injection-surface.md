@@ -435,6 +435,9 @@ where manual slewing had stopped, not a mechanical limit.
 
 ### CORRECTION: the axes are NOT positional
 
+*(This heading is itself reversed 90 lines below, in "Live probe run 5 — RESOLVED": the **AI** axis
+is positional and linear; only the **player** axis is not. Read both before quoting either.)*
+
 After run 3 this file's author concluded `SetCommand` set a *position*, because
 `SetCommand(3026, 1.0)` reached the stop in under 0.3 s. **Run 4 disproves it:**
 
@@ -584,6 +587,14 @@ findings that shape it:
   (`OFF / GM / URS / NPU`). That is the concrete, testable form of the
   player-mode-vs-AI-mode question. — **evidence: reproduced-locally** for the
   emptiness, **forum-claim-unverified** for the cause.
+  **[DISCONFIRMED same day — the gate is NABL (observation mode), not weapon
+  mode. Arg 523 read 0.000 = OFF for five of six populated samples; every
+  populated sample had `NABL = 1.000`. See
+  `2026-09-11-petrovich-detection-readout.md` finding 2. The hypothesis was
+  correctly flagged `forum-claim-unverified` here and was still worth testing —
+  the probe this section designs is what disproved it, which is the system
+  working. Recorded so a reader arriving at this paragraph alone does not carry
+  the weapon-mode gate forward.]**
 
 - **`av9K113` exposes a `getHelperIsOn()`** — the sight itself knows whether
   the helper is operating it. Native-only, so not directly readable, but it

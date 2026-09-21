@@ -206,6 +206,20 @@ detection, then a module-specific reporting filter), which is exactly our
 
 #### 6. ED separates detected from recognised, by a **distance ratio** — and gives optics a bigger ratio
 
+> **STATUS 2026-09-21 — this disagreement was raised in slice 2 and resolved in ED's favour.**
+> The passages below and in finding 7 that describe `perception/optics.py` as modelling "an optic
+> as magnification plus a field-of-view cone, with the same three angular tiers behind it", and
+> finding 7's `M=4.0` binocular row, describe code that **no longer exists**. Cones slice 2A
+> replaced the single per-optic magnification with **per-tier multipliers**
+> (`BINOCULAR_OPTIC` 2.42/3.50/3.00) and retired `BINOCULAR_RANGE_MULTIPLIER` outright. ED's
+> `recognition_distance_ratio_threshold` split (0.25 naked / 0.5 optic) was one of the two
+> independent reasons; the other was a live sortie measuring the same direction
+> (`body-layer/research/2026-09-21-slice2-model-decisions.md` decision 1,
+> `2026-09-21-aspect-magnification-and-distinctiveness.md` Finding 2).
+>
+> The recommendation "do not copy ED's optic recognition ratio without a decision" was followed:
+> the decision was taken deliberately, with our own measurement, not by copying ED's constant.
+
 — **evidence:** reproduced-locally — **source:** `Detection.lua:27`, `:110`
 
 `recognition_distance_ratio_threshold` = **0.25** for the naked eye, **0.5** for optic sensors:
@@ -302,6 +316,20 @@ contact against forest is a different problem again"*) — ED resolves it by onl
   changes during a mission. Anything built here must sample, not read once.
 
 #### 10. `LoGetWorldObjects` carries **no velocity** — the movement design must difference in the collector
+
+> **CORRECTION 2026-09-21 — the first clause stands, the heading's conclusion does not.**
+> `Object.getVelocity()` returns a vec3 in m/s for every unit, in the **Mission Scripting**
+> environment (Hoggit `DCS_func_getVelocity`; it is how Tacview records speed). So "we must
+> difference in the collector" was never the only option — the mission-sandbox bridge is a second
+> route, and a more accurate one. Full finding:
+> [`2026-09-21-unit-velocity-via-mission-scripting.md`](2026-09-21-unit-velocity-via-mission-scripting.md).
+>
+> Note this finding **already named `Unit.getVelocity()`** in its own last paragraph, correctly, as
+> costing "the whole Hook bridge." The error is in the heading and the framing, not the evidence:
+> the question asked was "is velocity available *from `LoGetWorldObjects`*", the answer was correct
+> and rigorous (a full `pairs()` enumeration, so no synonym could hide), and that correct narrow
+> answer was then recorded and relayed as the answer to the broader question "can we get unit
+> velocity". A negative result from searching one surface only ever bounds that surface.
 
 — **evidence:** reproduced-locally — **source:** `Scripts/Export.lua:129-136`;
 `$DCS_SAVED_GAMES_PATH/Logs/aircraft_layer_debug.log` (10.4 MB, 2026-09-19 sortie), one-shot dump

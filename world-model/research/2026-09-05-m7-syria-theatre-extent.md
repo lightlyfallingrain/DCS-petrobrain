@@ -46,7 +46,27 @@ as inferred background, not an independently confirmed bbox.
   | source | x range (m) | z range (m) | lat range | lon range |
   |---|---|---|---|---|
   | airbases (n=225) | -420,022.1 to 341,729.7 (762 km) | -320,441.1 to 389,224.3 (710 km) | 31.211-38.006°N | 32.286-40.204°E |
-  | beacons (n=151) | -421,912.2 to 345,432.4 (767 km) | -320,235.1 to 390,774.9 (711 km) | 31.195-38.999°N | 32.288-40.208°E |
+  | beacons (n=151) | -421,912.2 to 345,432.4 (767 km) | -320,235.1 to 390,774.9 (711 km) | 31.195-38.999°N [**typo — read 37.999°N**, see below] | 32.288-40.208°E |
+
+> **CORRECTION 2026-09-21 — the beacon latitude maximum above is a transcription typo: it is
+> `37.999`, not `38.999`.** Re-running this note's own Reproducible Test against the committed
+> capture (`2026-09-03-m5-nodes-lua-probe.txt`) gives the beacon extremes as
+> `lat 31.194762 … 37.999037`, `lon 32.288303 … 40.208231`, `x -421912.21875 … 345432.4375`,
+> `z -320235.13614 … 390774.875`. **Every other figure in the row reproduces exactly**; only this
+> one digit is wrong. (The x-max beacon is the same object: `position = { 345432.437500, …}`,
+> `positionGeo = { latitude = 37.999037, … }`.)
+>
+> **The typo is also self-refuting from inside the table**, which is why it is worth keeping
+> rather than silently fixing: the beacon and airbase x-maxima differ by ~3.7 km, and a 1.0°
+> latitude difference is ~110 km. So the sentence "the two independent point sets agree to within
+> ~2-4 km on every edge" cannot be true of the row as printed — it is true of the *corrected*
+> row. The corroboration conclusion is right; the number under it was mistyped.
+>
+> **Downstream:** `2026-09-06-m8-geofabrik-osm-recon.md` takes its working envelope from this
+> table ("lat 31.2–39.0 N, lon 32.3–40.2 E") and so carries the wrong northern edge through its
+> coverage reasoning. The built `syria-full` region is unaffected — it is defined in DCS x/z
+> (`world-model/src/build/region.py`, x-max 375,432.4 = beacon x-max + 30 km padding), not in
+> latitude, so no code ever read the mistyped degree figure.
 
   The two independent point sets agree to within ~2-4 km on every edge — strong
   corroboration. Extremal points: `Nevatim` (SW, x-min), `Konya`/beacon near Konya (N,

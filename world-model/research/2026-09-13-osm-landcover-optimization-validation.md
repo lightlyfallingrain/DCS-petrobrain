@@ -125,6 +125,22 @@ post-simplification polygon vertex count... if it stays in the tens of thousands
 follow-up, not a redesign"): **3,359 is nowhere near the tens-of-thousands range** — no tiling
 follow-up needed based on this evidence.
 
+> **CORRECTION 2026-09-16 (recorded here 2026-09-21) — the gate was cleared against the wrong
+> polygon.** Lake Assad is the largest polygon *in the Latakia extract*, not in the theatre. A
+> full `syria-full` store holds a considerably larger one — **Atatürk Baraj Gölü at 13,097 outer
+> + 127 hole = 13,224 vertices**. That is inside "the tens of thousands," so the honest margin is
+> **~1.5×, not the ~6× the small-extract figure implied**
+> (`world-model/CLAUDE.md`, OSM-landcover decision entry).
+>
+> **The decision this sentence supported still stands — no tiling — but it now rests on a
+> re-measurement at theatre scale rather than on this figure.** What is false is the *evidence
+> claim*: that 3,359 was representative and the headroom large.
+>
+> This note's own "What the user should verify" section anticipated exactly this, which is why
+> the error is instructive rather than careless: **a validation run on a deliberately small
+> extract answers "does the pipeline work", not "how big does this get" — and a threshold gate
+> is the second question wearing the first one's clothes.**
+
 **`describe_position` timings (300 random points in-region):** mean 14.45ms, p50 10.01ms, p95
 29.20ms, p99 34.04ms, max 34.45ms. Noticeably higher than `latakia-20km`'s (4-7ms) — expected,
 since many query points in this region have a bbox overlapping Lake Assad's large polygon,

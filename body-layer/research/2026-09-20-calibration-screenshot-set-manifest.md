@@ -1,3 +1,19 @@
+> **CORRECTION 2026-09-21 — this set is contaminated as evidence about unaided visibility.**
+> The 52 PNGs described below were captured with DCS's **"detection aid dots" enabled** (user,
+> 2026-09-21): DCS draws a small dark dot at a target to make it findable at long range. So
+> "targets are visible only as faint marks on the horizon in the longer-range frames — that
+> faintness *is* the measurement" is **wrong as stated**: part of what was measured is the aid.
+> Everything in "What was derived from them" is therefore fitted to aided data and awaits a
+> dots-off re-shoot before any constant is re-derived
+> (`2026-09-21-calibration-target-decided.md`, `body-layer/tests/fixtures/vision_calibration.json`).
+>
+> The "If the directory has emptied" method section is still correct and still the right protocol —
+> with one line added to it: **detection aid dots must be OFF.** That is the whole lesson here.
+> This note was written specifically to record what an opaque image set contained before it could
+> vanish, and it recorded everything visible in the frames; the setting that invalidated them was
+> not in the frames at all. **Capture conditions that live outside the artefact have to be asked
+> for, not read off it.**
+
 # The vision-calibration screenshot set — what it is, recorded before it disappears
 
 **Date recorded:** 2026-09-20 · **Images captured:** 2026-09-17, 15:05:33 → 15:29:57

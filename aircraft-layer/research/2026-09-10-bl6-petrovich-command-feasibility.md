@@ -1,3 +1,25 @@
+> **SUPERSEDED 2026-09-11 — three of this note's conclusions are false, and the milestone's
+> blocking premise was answered the next day.** This session had no DCS install and could confirm
+> only that file *paths* existed; the install was read, and then flown against, on 2026-09-11.
+> Read `2026-09-11-SUMMARY-petrovich-control.md` first, then
+> `2026-09-11-petrovich-detection-readout.md` and `2026-09-11-command-injection-surface.md`.
+>
+> | claim below | status |
+> |---|---|
+> | "No evidence … of any **read-side signal** that directly reports 'Petrovich is scanning' vs 'found N' vs 'idle' as a discrete state" | **False.** The AI wheel's down slot carries `SEARCHING` / `TRACKING` / `WAITING` as readable text in `list_indication(10)`. (detection-readout, finding 5 — which quotes this sentence by name) |
+> | Unresolved: "**Whether the AI Wheel … offers anything resembling 'scan this area/bearing'** … the single biggest open question" | **Answered: yes.** `SRCH 9K113 LOS`, `SRCH PILOT LOS`, `SRCH BRST`, `SRCH FWD`. The wheel's options are *dynamic text*, invisible in the static Lua — which is why a file read (2026-09-11 static pass) also got this wrong before the probe ran. (detection-readout, finding 4) |
+> | "`list_indication(6)`'s target list is **weapon-selection/attack-mode-gated**" | **Disconfirmed.** The gate is **NABL** (observation mode). This was a forum search-snippet, correctly labelled `forum-claim-unverified` here, that got used as an assumption anyway. (detection-readout, finding 2) |
+> | Unresolved: "Relationship between `AI_Wheel` and `g_panel`/`AI_Gunners`" | **Answered: different things**, not successor/predecessor — `g_panel` is indicator 8, owned by `devices.WEAP_SYS` (6), not `HELPER_AI` (30). (command-injection-surface) |
+>
+> Still true and worth keeping: `LoSetCommand` exists and is first-party documented in 2.9.29, but
+> it is the *global* command channel and cannot address a cockpit device — the working effector
+> turned out to be `GetDevice(n):SetCommand(...)` / `:performClickableAction(...)` instead.
+>
+> **The transferable lesson is the one the table makes visible twice:** two of these four were
+> negative conclusions drawn from a surface that could not have shown a positive — a static Lua
+> read cannot see dynamically-generated wheel text, and a path listing cannot see file contents.
+> "Not found in X" is a fact about X.
+
 # BL-6 Feasibility: Can Petrovich's scan behavior be commanded externally?
 
 **Date:** 2026-09-10

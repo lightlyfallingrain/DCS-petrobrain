@@ -138,16 +138,29 @@ visibility; `null` is silent) -- neither produces spoken output, since no
 real brain exists yet.
 
 **Gaze steers the naked-eye channel (slice 2B, `plans/
-detection-cones-slice2/plan.md`)**: `ConsolePerceptionRunner.run_once`
-resolves whichever ownship-relative `scan_area` command is currently
-pending (`_active_gaze`) and assigns the resulting `perception.gaze.Gaze`
-(or `None`) onto whichever of `self.sources` is a `NakedEyePerceptionSource`
-(`_apply_active_gaze`), every poll, before the sources are polled -- this
-is what makes an F10 "scan left" command change what Petrovich can actually
-see, not just register a belief-level attention area. No command pending
-means `None` (no restriction), byte-identical to this channel's behaviour
-before 2B -- see `perception.gaze`'s own module docstring for why that is
-the explicit default rather than a named "full" gaze.
+detection-cones-slice2/plan.md`; the o'clock scan loop added by 2C)**:
+`ConsolePerceptionRunner.run_once` resolves whichever ownship-relative
+`scan_area` command is currently pending (`_active_gaze`) and assigns the
+resulting `perception.gaze.ScanPlan` onto whichever of `self.sources` is a
+`NakedEyePerceptionSource` (`_apply_active_gaze`), every poll, before the
+sources are polled -- this is what makes an F10 "scan left" command change
+what Petrovich can actually see, not just register a belief-level attention
+area. No command pending means `perception.gaze.FREE_SCAN_PLAN` (2C's
+default o'clock scan loop, not "no restriction" any more) -- see
+`perception.gaze`'s own module docstring for the free-scan/commanded-scan
+split this now resolves to. `ConsolePerceptionRunner.scan_plan` keeps that
+same resolved value visible after `run_once` returns.
+
+**Gaze is shown on the overlay, not just applied (cones 2C sortie finding,
+"show where Petrovich is looking")**: `_run_console_poll_loop` and
+`_run_crew_text_poll_loop` both call `_push_gaze_line` after every
+`run_once()`, whenever their respective overlay client (`runner.
+overlay_client` for `--console --overlay`, `crew_console.overlay_client` for
+`--crew-text --overlay`) is set -- a read of `runner.scan_plan` via
+`perception.gaze.gaze_at`, pushed only when the resolved o'clock cone
+changes so it does not crowd out the overlay's real content on every poll.
+A pure display of existing state, same posture as the lifecycle-event
+mirror already on this hook point: it changes nothing about detection.
 
 **`--speech-audio` (BL-10 first slice, `plans/tts-voice-output/plan.md`)**:
 only meaningful alongside `--crew-text` (a true no-op otherwise, same
@@ -186,7 +199,7 @@ from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
 from belief.tasks import TaskStore
 from detection_trace_writer import DetectionTraceWriter
 from perception.detection_trace import DetectionTraceCollector
-from perception.gaze import Gaze, gaze_from_relative_sector
+from perception.gaze import FREE_SCAN_PLAN, Gaze, ScanPlan, gaze_at
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -325,6 +338,15 @@ class ConsolePerceptionRunner:
     #: no-op: `run_once` never touches this field, `get_situation` reports
     #: no phase data, unchanged from before this milestone.
     mission_phase_tracker: MissionPhaseTracker | None = None
+    #: The `perception.gaze.ScanPlan` this poll resolved (`_active_gaze`) --
+    #: `FREE_SCAN_PLAN` until the first poll runs. A read, not new state:
+    #: `run_once` already computes this every poll to hand it to
+    #: `NakedEyePerceptionSource` (`_apply_active_gaze`); this field just
+    #: keeps the same value visible to a poll loop that wants to show the
+    #: pilot where Petrovich is currently looking (cones 2C sortie finding
+    #: "show where Petrovich is looking") without recomputing it or reaching
+    #: into `self.sources` to find the naked-eye one back out.
+    scan_plan: ScanPlan = field(default_factory=lambda: FREE_SCAN_PLAN)
 
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
@@ -386,6 +408,10 @@ class ConsolePerceptionRunner:
         # gaze`'s own docstring) -- a no-op for every other source, and
         # when no scan command is pending.
         _apply_active_gaze(self.sources, self.tasks)
+        # Same resolution, kept on the runner (`scan_plan`'s own docstring)
+        # so a poll loop can show the pilot where Petrovich is currently
+        # looking without recomputing it or reaching into `self.sources`.
+        self.scan_plan = _active_gaze(self.tasks)
         observations = [
             observation
             for source in self.sources
@@ -420,35 +446,56 @@ class ConsolePerceptionRunner:
         return observations
 
 
-def _active_gaze(tasks: TaskStore) -> Gaze | None:
-    """The `Gaze` implied by whatever ownship-relative scan sector is
+def _active_gaze(tasks: TaskStore) -> ScanPlan:
+    """The `ScanPlan` implied by whatever ownship-relative scan sector is
     currently commanded (`plans/detection-cones-slice2/plan.md`'s 2B,
     closing `todo/todo.md`'s "Scan commands should drive naked-eye
-    perception") -- or `None` (no restriction, today's behaviour) when no
-    such command is pending.
+    perception"; generalised from a static `Gaze` to a `ScanPlan` by 2C) --
+    or `FREE_SCAN_PLAN` (the o'clock scan loop, `perception.gaze`'s own
+    module docstring) when no such command is pending.
 
-    Reads `PendingIntent.area.relative_sector` directly, never the store's
-    live re-projected `AttentionArea` (`ContactStore.reproject_relative_
-    areas`) -- a relative sector's *direction* is body-relative and
-    invariant under reprojection; only its absolute world-bearing
-    projection changes with ownship heading, which this function has no
-    use for (`perception.gaze.gaze_from_relative_sector` reads the same
-    body-relative wedge table `AttentionArea.wedge_deg`'s projection is
-    itself derived from). This also sidesteps `belief.tasks`'s own
+    Reads `PendingIntent.area.relative_sector`/`created_sim` directly,
+    never the store's live re-projected `AttentionArea` (`ContactStore.
+    reproject_relative_areas`) -- a relative sector's *direction* is
+    body-relative and invariant under reprojection; only its absolute
+    world-bearing projection changes with ownship heading, which this
+    function has no use for. This also sidesteps `belief.tasks`'s own
     documented staleness caveat around `task.area` (its module docstring)
     entirely, since nothing here needs the live area at all.
+    `task.created_sim` becomes `ScanPlan.command_t_sim` -- the sim time the
+    scan was ordered, which is what a commanded scan's o'clock legs cycle
+    from (`perception.gaze.gaze_at`'s own docstring).
 
-    The most recently created still-`pending` `scan_area` task wins when
-    more than one is pending -- a later scan command is what a player
-    issuing "scan left" then "scan right" would expect to take effect."""
+    The most recently created still-active `scan_area` task wins when more
+    than one is active -- a later scan command is what a player issuing
+    "scan left" then "scan right" would expect to take effect.
+
+    **Cones 2C sortie fix: honours any status except `"cancelled"`, not
+    only `"pending"`.** `belief.tasks.TaskStore.tick` flips a `scan_area`
+    task to `"succeeded"` the instant any contact is seen inside its area
+    -- with the old `status == "pending"` check here, that meant a
+    commanded scan silently reverted to free scan on first contact, which
+    is what produced the sortie's "commanded scan left, still got reports
+    from 12 o'clock" finding (free scan revisits 12 o'clock twice per
+    cycle). A `scan_area` task is a standing *mode* (`belief.tasks.
+    TaskStatus`'s own docstring, `docs/concept/STATE_TRANSITIONS.md`'s
+    "Modes" section): finding something, or timing out
+    (`DEFAULT_SCAN_DEADLINE_S`), is an event about what the search has
+    (not) confirmed, never the end of the mode. Only an explicit cancel
+    (`TaskStore.cancel`, also fixed by this same sortie finding to actually
+    reach a resolved task) or a newer scan command (via this function's own
+    "most recent" tie-break) ends it."""
     for task in reversed(tasks.tasks):
         if (
             task.kind == "scan_area"
-            and task.status == "pending"
+            and task.status != "cancelled"
             and task.area.relative_sector is not None
         ):
-            return gaze_from_relative_sector(task.area.relative_sector)
-    return None
+            return ScanPlan(
+                commanded_sector=task.area.relative_sector,
+                command_t_sim=task.created_sim,
+            )
+    return FREE_SCAN_PLAN
 
 
 def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> None:
@@ -457,10 +504,54 @@ def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> Non
     for a `sources` list (e.g. in tests) that holds no naked-eye source at
     all. The same write-thread/single-assignment pattern `last_t_sim`
     already uses safely (`run_once`'s only caller)."""
-    gaze = _active_gaze(tasks)
+    scan_plan = _active_gaze(tasks)
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
-            source.gaze = gaze
+            source.scan_plan = scan_plan
+
+
+def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
+    """One short overlay line naming where Petrovich is currently looking
+    and whether that is free scan or a commanded sector (cones 2C sortie
+    finding, "show where Petrovich is looking" -- the pilot could not judge
+    the scan loop at all without this). `gaze.label` is always an o'clock
+    hour under `gaze_at` (`"11_oclock"`, `perception.gaze.Gaze`'s own
+    docstring: a label meant for exactly this kind of debug/trace display),
+    reformatted here rather than branched on."""
+    where = gaze.label.replace("_oclock", " o'clock")
+    if scan_plan.commanded_sector is not None:
+        return (
+            f"Petrovich: looking {where} (commanded {scan_plan.commanded_sector} scan)"
+        )
+    return f"Petrovich: looking {where} (free scan)"
+
+
+def _push_gaze_line(
+    overlay_client: AircraftLayerClient,
+    scan_plan: ScanPlan,
+    t_sim: float,
+    last_gaze_label: str | None,
+) -> str | None:
+    """Pushes one overlay line naming Petrovich's current gaze
+    (`_format_gaze_line`) when it has changed since the last push, and
+    returns the label to compare against next poll -- called from both
+    `_run_console_poll_loop` and `_run_crew_text_poll_loop`. Deliberately
+    only pushes on change: the focus cone holds for `perception.gaze.
+    FOCUS_DWELL_S` (2 s), well above a typical 1 s poll interval, so pushing
+    unconditionally would repeat the same line on most polls and crowd out
+    the overlay's real content (lifecycle/contact-report lines, an
+    `AutoScrollText` log, not a single-line display -- see
+    `petrobrain-overlay-hook.lua`'s own docstring). Same per-push isolation
+    as every other overlay push in this file: a failed push is logged and
+    swallowed, never allowed to stop the poll loop."""
+    gaze = gaze_at(t_sim, scan_plan)
+    if gaze.label == last_gaze_label:
+        return last_gaze_label
+    try:
+        overlay_client.push_text_line(_format_gaze_line(scan_plan, gaze))
+    except AircraftLayerError:
+        logger.warning("gaze overlay push failed (continuing)", exc_info=True)
+    return gaze.label
 
 
 def _build_sources(
@@ -543,10 +634,18 @@ def _run_console_poll_loop(
         # connection, so it must be handed the connection, not build its own.
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
+        last_gaze_label: str | None = None
         while not stop_event.is_set():
             runner.run_once()
             if trace_writer is not None and trace_collector is not None:
                 trace_writer.write_poll(trace_collector, runner.store)
+            if runner.overlay_client is not None and runner.last_t_sim is not None:
+                last_gaze_label = _push_gaze_line(
+                    runner.overlay_client,
+                    runner.scan_plan,
+                    runner.last_t_sim,
+                    last_gaze_label,
+                )
             stop_event.wait(poll_interval_s)
     finally:
         if trace_writer is not None:
@@ -752,6 +851,7 @@ def _run_crew_text_poll_loop(
         )
         runner.world_model_conn = world_model_conn
         runner.theatre = theatre
+        last_gaze_label: str | None = None
         while not stop_event.is_set():
             runner.run_once()
             if trace_writer is not None and trace_collector is not None:
@@ -763,6 +863,13 @@ def _run_crew_text_poll_loop(
                     _poll_f10_commands(aircraft_client, crew_console, runner.last_t_sim)
                 if speech_input_enabled and speech_client is not None:
                     _poll_transcripts(speech_client, crew_console, runner.last_t_sim)
+                if crew_console.overlay_client is not None:
+                    last_gaze_label = _push_gaze_line(
+                        crew_console.overlay_client,
+                        runner.scan_plan,
+                        runner.last_t_sim,
+                        last_gaze_label,
+                    )
             stop_event.wait(poll_interval_s)
     finally:
         if trace_writer is not None:

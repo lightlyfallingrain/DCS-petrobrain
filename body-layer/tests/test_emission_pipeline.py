@@ -24,8 +24,19 @@ import pytest
 from belief.contacts import ContactStore
 from belief.decay import certainty_of
 from perception import association, visibility
+from perception.gaze import ScanPlan
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.source import OwnshipState
+
+#: A persistent commanded "ahead" scan (`plans/detection-cones-slice2/
+#: plan.md`'s 2C) rather than the free-scan default -- this fixture's
+#: whole point is a *continuously* visible candidate, which the o'clock
+#: scan loop no longer gives for free (a dead-ahead candidate is only
+#: gazed 2 of every 16 s under free scan). A single-leg sector degenerates
+#: to a static gaze by construction (`perception.gaze.gaze_at`'s own
+#: docstring), so this reproduces exactly what "continuously visible"
+#: needs without touching the scan-loop mechanism this file isn't testing.
+_PERSISTENT_AHEAD_SCAN: ScanPlan = ScanPlan(commanded_sector="ahead", command_t_sim=0.0)
 
 _THEATRE = "Syria"
 _FAKE_CONN = sqlite3.connect(":memory:")
@@ -86,6 +97,7 @@ def _run_pipeline(emit_mode: str) -> tuple[ContactStore, list[float]]:
         theatre=_THEATRE,
         world_model_conn=_FAKE_CONN,
         emit_mode=emit_mode,  # type: ignore[arg-type]
+        scan_plan=_PERSISTENT_AHEAD_SCAN,
     )
     store = ContactStore()
     emitted_at: list[float] = []

@@ -283,7 +283,10 @@ and evaluate whether the `x{N}_z{N}` filename grid is a viable registration sche
   1024×1024 px, each 32m tile spans 32×1024 = 32,768 m (32.768 km) and each 64m tile
   spans 64×1024 = 65,536 m (65.536 km) in DCS x/z ground units. An 8×8 grid of 64m tiles
   (one sheet) therefore spans 8 × 65,536 m ≈ 524 km per side — which is in the right
-  order of magnitude for the full Syria theatre's known extent (~500–600 km), a
+  order of magnitude for the full Syria theatre's known extent (~500–600 km) [**superseded: the
+  measured extent is 762 × 710 km — `2026-09-05-m7-syria-theatre-extent.md`, which says so
+  itself. The ~524 km/side arithmetic below is unchanged and still "the right order of
+  magnitude"; only the figure it is compared against was a guess**], a
   plausible match for the `aa00`/`64m` sheet being (at least close to) the whole map at
   coarse resolution. The 32m tier's 4 sheets (aa, ab, xab, xac), each an independent 8×8
   grid spanning ~262 km/side at double resolution, would need to be arranged roughly
@@ -584,7 +587,16 @@ User captured three F10 map-mode screenshots at the same view (Aleppo region,
   subdirectory — location unconfirmed), which would place it natively in DCS's own x/z
   coordinate space with no independent chart geodesy to reconcile — unlike the paper-map
   chart, which is a real external cartographic product (confirmed Turkish military
-  chart series, session 3) with its own datum/registration. If confirmed, this asset
+  chart series, session 3) with its own datum/registration.
+  > **CORRECTION 2026-09-21 — session 3 says neither "confirmed" nor "Turkish".** Its actual
+  > words are *"consistent with a standard 1:250,000-scale-class military/aeronautical chart
+  > series (JOG-A … or a close equivalent), **moderate confidence**"* — a NATO-standard series,
+  > identified by graticule/navaid convention, not attributed to any nation's military. What
+  > session 3 established as Turkish is the **terrain the chart depicts** (Erzincan, the Turkish
+  > interior), which is a different claim entirely. Two hops in one parenthesis: a hedge became a
+  > confirmation, and the subject of "Turkish" slid from the ground to the publisher. Nothing
+  > downstream depends on either — the sentence's real point (an external chart carries its own
+  > datum, unlike a DCS-native asset) is unaffected. If confirmed, this asset
   would fit root `CLAUDE.md`'s "DCS geometry is always authoritative" invariant more
   cleanly than `RasterCharts` does. — **evidence:** inferred / unresolved — **source:**
   user screenshot; no filesystem or content evidence yet.
