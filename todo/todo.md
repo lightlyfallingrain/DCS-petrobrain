@@ -62,7 +62,9 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 ### Probe the mission-sandbox bridge (Investigator + Windows box)
 
-- [ ] **Probe whether `net.dostring_in` into the DCS mission scripting sandbox is reachable** from
+- [x] **~~Probe whether `net.dostring_in` into the DCS mission scripting sandbox is reachable~~ — ALREADY ANSWERED, closed 2026-09-22.** It has been in production since 2026-09-13 (`petrobrain-f10-commands-hook.lua`, `net.dostring_in("scripting", …)` at 1 Hz). Closed as already-answered rather than as done — no work was performed. See `aircraft-layer/research/2026-09-22-mission-bridge-already-shipping.md`. Original text follows.
+
+  **Probe whether `net.dostring_in` into the DCS mission scripting sandbox is reachable** from
   this project's `Export.lua`/Hook setup in single-player, and what it costs per poll. Raised
   2026-09-21. **This one probe unblocks two parked items**, which is why it is worth its own entry
   rather than sitting inside either:
