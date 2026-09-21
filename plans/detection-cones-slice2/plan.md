@@ -50,7 +50,7 @@ So the ordering is forced by measurability, not preference.
 |---|---|---|---|
 | **2A** | Per-tier multipliers, distinctiveness, the clamp, clustering floor fix | **Yes** — class-tier ranges move for infantry and radars | A sortie with BL-9 tracing: infantry class ≈ presence; S-300 class within ~1.5× of 4500 m; vehicle class/presence unchanged within noise |
 | **2B** | Gaze as a filter; `Optic.peripheral`; the stimulus seam; F10 scan commands steer perception | **No** — default gaze is the forward hemisphere, i.e. today | In flight: "scan left" demonstrably changes which contacts are detected; with no command issued, the BL-9 trace is byte-identical to 2A's |
-| **2C** | Default gaze becomes the two-level scan loop: sector `ahead → left → ahead → right`, focus cone stepping o'clock hours within it | **Yes** — this is the big one | A sortie judged by the user on *feel*: does he find things at a plausible rate, and does the callout language stay stable as contacts cycle in and out of gaze |
+| **2C** | Default gaze becomes the o'clock-cone scan loop `12, 11, 10, 9, 12, 1, 2, 3` (2 s each, 16 s cycle); peripheral structure with no triggers wired | **Yes** — this is the big one | A sortie judged by the user on *feel*: does he find things at a plausible rate, and does the callout language stay stable as contacts cycle in and out of gaze |
 | **2D** | Dwell as an act: fix on it, check for more nearby, then glass up or resume | **Yes** | Conditional — only built if 2C's sortie shows a real need (see effort/value below) |
 
 ---
@@ -86,8 +86,9 @@ So the ordering is forced by measurability, not preference.
   `FULL_GAZE` (0°, 90° — the forward hemisphere, i.e. no narrowing), `within_gaze(gaze, azimuth_deg)`,
   `gaze_for(object_id, gaze, stimulus_ids, optic)`, and **the `RelativeSector` vocabulary moved down
   from `belief/attention.py`**: the `Literal`, `RELATIVE_SECTORS`, and `_RELATIVE_SECTOR_WEDGE_DEG`.
-  Also the o'clock-hour table, since the two-level gaze (sector, then focus cone within it) resolves
-  to one hour.
+  Also the o'clock-cone table: with a 30° focus cone and 30° per o'clock hour, **the cone is the
+  o'clock position**, so `RelativeSector` (used by F10 commands) and the o'clock cones (used by free
+  scan) are two granularities over the same wedge arithmetic.
 - `body-layer/src/belief/attention.py` — re-imports `RelativeSector` / the wedge table from
   `perception.gaze` instead of defining them. `belief → perception` is the allowed direction (it
   already imports `perception.geometry`); the reverse is forbidden, which is exactly why the
@@ -128,11 +129,11 @@ So the ordering is forced by measurability, not preference.
 **2C**
 - `body-layer/src/perception/gaze.py` — `ScanPlan` (frozen: the commanded sector or `None`, plus the
   sim time the command was issued) and `gaze_at(t_sim, plan) -> Gaze`. **A pure function of sim
-  time, not a state machine** (see "Determinism" below), and **two-level**: the plan selects the
-  sector, the same function resolves which o'clock hour within it the focus cone is resting on.
-  Constants `SCAN_CYCLE_PERIOD_S = 16.0` and `FOCUS_DWELL_S = 2.0` (hard part 8). The finer level is
-  a longer leg table, not new machinery — which is precisely why it is cheap to fold in now rather
-  than retrofit.
+  time, not a state machine** (see "Determinism" below). The free-scan plan is an **ordered table of
+  o'clock cones with one dwell each** — `12, 11, 10, 9, 12, 1, 2, 3` at 2 s — so `gaze_at` is a
+  modulo and a table index. Constants `FOCUS_CONE_HALF_WIDTH_DEG = 15.0`, `FOCUS_DWELL_S = 2.0`,
+  `SCAN_CYCLE_PERIOD_S = 16.0` (hard part 8). This is *less* machinery than the continuous
+  within-sector sweep an earlier revision planned, not more.
 - `body-layer/src/perception/naked_eye_source.py` — holds a `ScanPlan` instead of a `Gaze`, computes
   `gaze_at(now_sim, plan)` per poll; **and its acquisition sets become time-based**
   (`frozenset[int]` → `dict[int, float]` of object_id → last-seen sim time, evicted after a
@@ -183,8 +184,9 @@ would be geometrically incoherent. Dwell must be a narrow gaze at a *specific be
 precisely the user's "looking at something with intent."
 
 The user's focus/peripheral model (hard part 2a) turns this into a clean three-level nesting rather
-than a two-term mismatch: **sector 60° → focus cone 30° → binocular 8.5°.** Each level is a
-deliberate narrowing bought at a cost, and the binocular's cost is now more than field of view.
+than a two-term mismatch: **scan leg 60-90° → focus cone 30° (one o'clock) → binocular 8.5°.** Each
+level is a deliberate narrowing bought at a cost, and the binocular's cost is now more than field of
+view.
 
 A corollary worth carrying: **2D is the slice that finally gives `BINOCULAR_OPTIC` a caller.**
 Without it, the binocular table entry and its measured 2.42/3.50/3.00 multipliers stay unreachable
@@ -204,7 +206,7 @@ and never *why*, and every future addition is an arbitration. A second channel w
 — wide field, change-only, no acuity — answers *why*, and the list falls out of it. **Peripheral
 vision is what the bypass seam was groping for.**
 
-It also gives binoculars a real cost. Not merely 8.5° against a 60° sector, but **the loss of
+It also gives binoculars a real cost. Not merely 8.5° against a 30° focus cone, but **the loss of
 change detection entirely**: glass up and you stop noticing the launch flash behind your shoulder.
 That makes "raise binoculars or keep scanning" a genuine trade rather than a free acuity upgrade,
 which is what 2D's decision point was missing.
@@ -219,8 +221,9 @@ cost model is: full chain on the focus cone's small share, plus a cheap azimuth 
 whatever changed. The two-channel model is *cheaper* than one wide channel, not more expensive —
 and that is a consequence of the physics being right, which is the same point hard part 3 makes.
 
-**What to build now, and what not to.** The structural split determines the shape of the attention
-gate, so getting it wrong now is expensive later; but peripheral fires on change events and there is
+**What to build now, and what not to — settled by the user, 2026-09-21.** Build the structure, wire
+the triggers later. The structural split determines the shape of the attention gate, so getting it
+wrong now is expensive later; but peripheral fires on change events and there is
 no behaviour-change channel in this codebase at all (`body-layer/ROADMAP.md` records movement
 detection as designed-not-built, gated on the unprobed mission bridge). So: build the structure in
 2B/2C with **no triggers wired**, and make it operative today through one field —
@@ -268,12 +271,20 @@ poll):
 arithmetic and a threshold comparison, with terrain-LOS sampling behind the survivors. A 60° wedge
 inside the ~260° cockpit envelope keeps roughly 23% of them — **about 61,000 instead of 266,000**.
 
-**The focus cone sharpens this further.** With the two-channel model (hard part 2a) the gate is the
-**30° focus cone**, not the 60° sector, so retention roughly halves again to ~12% — on the order of
-**31,000 instead of 266,000**. Treat the 61,000 as measured-and-scaled and the 31,000 as an
-estimate scaling linearly in wedge width from the same baseline; step 16 re-measures rather than
-assuming either. This is the only per-poll hot path in the body layer, and the one place in this
-plan where a cost claim rests on measurement rather than estimate.
+**The o'clock cone sharpens this, and the basis is now arithmetic rather than a scaling guess.**
+The user's decision that the scan steps cone by cone (hard part 8) makes the gate **exactly 30°
+wide** — one o'clock hour — inside a ~260° cockpit azimuth envelope:
+
+```
+30 / 260 = 11.5%  ->  265,965 x 0.115 ~= 31,000 evaluations
+```
+
+**The assumption to name, because step 16 is what tests it:** that candidates are distributed
+uniformly in azimuth. They are not — a mission is flown *toward* things, so the 12 o'clock cone
+holds more than its share, and the scan plan below visits 12 twice per cycle. Both effects push
+real retention **above** 11.5%. Treat ~31,000 as a floor, not a forecast. This is the only per-poll
+hot path in the body layer, and the one place in this plan where a cost claim rests on measurement
+rather than estimate.
 
 Two consequences to build in rather than discover:
 
@@ -369,8 +380,9 @@ in 2C unchanged, and re-examine it only if the 2C sortie shows sectors being und
 **`clustering.py`**: clusters are built per-poll from whatever is visible, so a gaze edge that
 bisects a group splits it into two clusters reported separately at different times — against the
 diagram's explicit "group of units at same location → treat as a single threat, do not report
-individually." At 60° sector width this is rare (a group tight enough to cluster is rarely
-astride a sector boundary); at 2D's 8.5° binocular field it is routine. Flagged as a 2C acceptance
+individually." At the 30° o'clock cone this is occasional (a group tight enough to cluster is
+rarely astride a cone boundary, but 30° is half the width the earlier design assumed); at 2D's 8.5°
+binocular field it is routine. Flagged as a 2C acceptance
 item and a 2D design constraint, not fixed pre-emptively.
 
 #### 7. The clustering floor is no longer benign — verified, not assumed
@@ -395,66 +407,104 @@ is one parameter: pass the active optic's `presence_range_mult` in place of the 
 makes the floor slack **by construction for every optic**, present and future. Three lines, done in
 2A while the multipliers are being introduced, rather than left as a trap for the 9K113 slice.
 
-#### 8. The scan period, worked: `OBSERVED_WINDOW_S` must be derived, and the bounds are tight
+#### 8. The scan plan, worked: o'clock cones, and the fork that moves a derived constant
 
-**The dwell number is settled by the user (2026-09-21): 2 s per o'clock sector for a quick scan.**
-An o'clock hour is 30°; the diagram's scan sectors are 60°, i.e. two hours each. So:
+**Two user decisions, 2026-09-21.** *"2 s per o'clock sector for a quick scan"*, and *"let's start
+with this: scan per o'clock cone. It's an easy simplification and we can iterate later."*
+
+The second one removes an invented geometry rather than adding one. A focus cone is 30° and an
+o'clock hour is 30°, so **the cone *is* the o'clock position** — there is no separate
+within-sector sweep to model. The scan plan becomes an ordered list of o'clock positions with a
+dwell each: a table, which is less machinery than the continuous sweep this plan previously carried,
+not more.
+
+##### The fork
+
+`docs/concept/STATE_TRANSITIONS.md` gives `ahead = 11-1`, `left = 9-11`, `right = 1-3`. As *cones*
+that double-counts 11 and 1, because the diagram is describing arcs with shared **boundaries**, not
+sets of cones. Four readings are available, and they do not cost the same:
+
+| plan | cones covered | cycle | worst gap | middle certainty band | after one missed sweep |
+|---|---|---|---|---|---|
+| **A** — `ahead={12}`, `left={11,10,9}`, `right={1,2,3}` | 9-3 (7) | **16 s** | 14 s | **14 s wide** | **30.0 s — just inside** |
+| C — partition, `ahead={11,12,1}`, flanks `{10,9}`/`{2,3}` | 9-3 (7) | 20 s | 18 s | 10 s wide | 38 s — band skipped |
+| B — literal, overlapping `ahead={11,12,1}` | 9-3 (7) | 24 s | 22 s | 6 s wide | 46 s — band skipped |
+| D — A extended to the measured mask | 8-4 (9) | 24 s | 22 s | 6 s wide | 46 s — band skipped |
+
+**Adopt A**, and the deciding argument is not tidiness — it is `belief/decay.py` pricing the choice:
+
+1. **A is the *unique* 16 s plan** at 2 s per cone covering the diagram's 9-3. Sixteen seconds is
+   eight slots; seven distinct cones leaves exactly one to double, and 12 is the right one.
+2. **16 s is the largest cycle for which a single missed sweep still lands inside
+   `POSITION_HALF_LIFE_S`.** A missed visit costs `2 x CYCLE - FOCUS_DWELL`; at 16 s that is exactly
+   30.0 s, at 20 s it is 38 s. **Above 16 s, one dropped sweep skips an entire certainty band** —
+   terrain-LOS flicker or the `NAKED_EYE_MAX_NEW_PER_POLL` cap would make a contact jump two levels
+   of confidence at once. That is a real behavioural cliff, not a rounding concern.
+3. The middle band is `POSITION_HALF_LIFE_S - CYCLE` wide: 14 s under A, 6 s under B or D. A 6 s
+   band between two certainty levels is close to no band at all.
+
+**What adopting A costs, stated rather than glossed.** The diagram's `ahead` is the 11-1 *arc*, and
+A revisits only the nose (12), so 11 and 1 get flank-level attention. C is the faithful reading of
+the diagram's forward weighting and costs 4 s of cycle and the missed-sweep property. If the 2C
+sortie shows the forward arc being under-scanned, C is the pre-worked alternative and
+`OBSERVED_WINDOW_S` moves to 20.0 with it — which is the whole reason the table above exists.
+
+##### The constants, and why `OBSERVED_WINDOW_S` survives unchanged
 
 ```
-ahead 11-1 (2h) -> 4 s ;  left 9-11 (2h) -> 4 s ;  ahead -> 4 s ;  right 1-3 (2h) -> 4 s
-SCAN_CYCLE_PERIOD_S = 16 ;  forward arc every 8 s ;  each flank every 16 s
-FOCUS_DWELL_S = 2   (the focus cone rests on one o'clock hour for 2 s)
+FOCUS_CONE_HALF_WIDTH_DEG = 15    (one o'clock hour, 30 deg wide)
+FOCUS_DWELL_S             = 2
+SCAN_PLAN                 = 12, 11, 10, 9, 12, 1, 2, 3
+SCAN_CYCLE_PERIOD_S       = 16    (8 slots x 2 s)
 ```
 
-`logger.py` polls at **1.0 s**, so a 2 s focus dwell is 2 polls — the aliasing floor is comfortably
-cleared, and it is cleared at the *finest* level of the two-level gaze, which is the level that
-matters. The earlier 8 s recommendation in this plan is superseded.
-
-**Now the relationship that has to be worked rather than noted.** `belief/decay.py`'s
-`certainty_of` returns `"observed"` while `now_sim - contact.last_seen_sim <= OBSERVED_WINDOW_S`,
-currently **5.0**. The worst case is a contact at one specific o'clock in a flank sector: the focus
-cone rests on it for 2 s and does not return for a full cycle. So
+`belief/decay.py`'s `certainty_of` returns `"observed"` while
+`now_sim - contact.last_seen_sim <= OBSERVED_WINDOW_S`, currently **5.0**. The worst case is a flank
+cone: visited for 2 s, not returned to for a full cycle.
 
 ```
 max_unobserved_gap_s = SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S = 16 - 2 = 14 s
 ```
 
-against a 5.0 s window — **a flank contact is out of "observed" for 14 of every 16 seconds.** He is
-tracking it perfectly well and the crew layer hedges its language about it on nearly every tick.
-The constant's 5.0 was chosen when he looked everywhere at once, where "seen in the last 5 s" and
-"currently seen" were the same statement; once he scans, the physically correct meaning of
-"observed" is *"seen within the current scan cycle."*
+against a 5.0 s window — **a flank contact is out of "observed" for 14 of every 16 seconds** while
+he tracks it perfectly well, and the crew layer hedges its language about it on nearly every tick.
+The 5.0 was chosen when he looked everywhere at once, where "seen in the last 5 s" and "currently
+seen" were the same statement; once he scans, the physically correct meaning of "observed" is *"seen
+within the current scan cycle."*
 
-There is also an **upper** bound, and it is not the one stated earlier. `certainty_of`'s ladder is
-`elapsed <= OBSERVED_WINDOW_S` → observed, then `elapsed <= POSITION_HALF_LIFE_S` (30.0) → the next
-band down. If `OBSERVED_WINDOW_S` reaches 30.0 that middle band **vanishes entirely** — a silent
-collapse of a certainty level, not a gradual degradation. So:
+The **upper** bound is the band-collapse above: if `OBSERVED_WINDOW_S` reaches
+`POSITION_HALF_LIFE_S` the middle band vanishes silently. So
 
 ```
 SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S  <  OBSERVED_WINDOW_S  <  POSITION_HALF_LIFE_S
                               14  <  OBSERVED_WINDOW_S  <  30
 ```
 
-**Recommended: `OBSERVED_WINDOW_S = SCAN_CYCLE_PERIOD_S` = 16.0.** It reads as exactly what it
-means — observed iff seen within the last complete scan cycle — clears the lower bound with 2 s of
-margin for a poll landing awkwardly, and leaves a real 16-30 s band below it. `belief/decay.py`
-imports `perception.gaze` for the period (the allowed direction).
-
-Two assertions, both testing a real failure and neither a tautology:
+**`OBSERVED_WINDOW_S = SCAN_CYCLE_PERIOD_S` = 16.0** — reads as exactly what it means, clears the
+lower bound with 2 s of margin for a poll landing awkwardly, leaves a real 16-30 s band.
+`belief/decay.py` imports `perception.gaze` for the period (the allowed direction). Two assertions,
+each testing a real failure:
 
 - `SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S < OBSERVED_WINDOW_S` — a later tuning pass cannot silently
   push contacts he is holding out of "observed".
 - `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` — the middle certainty band cannot be collapsed.
 
-**One consequence to carry into 2C's sortie rather than discover in it.** A *missed* visit doubles
-the gap to `2 x CYCLE - FOCUS_DWELL = 30 s`, which lands exactly on `POSITION_HALF_LIFE_S`. A
-contact dropped for one sweep — terrain LOS flicker, or the `NAKED_EYE_MAX_NEW_PER_POLL` cap — falls
-two certainty bands at once rather than one. That is arguably correct (he genuinely lost it for half
-a minute) but it will read as abrupt, and it is the first thing to look at if the 2C sortie shows
-contacts flickering in confidence.
+At 1.0 s polls a 2 s dwell is two samples per cone, so the aliasing floor is cleared at the finest
+level of the plan, which is the level that matters. **And the acquisition retention window is the
+same number**: hard part 6's eviction window is `SCAN_CYCLE_PERIOD_S`, not an invented constant.
 
-**And the acquisition retention window follows from the same number**: hard part 6's eviction
-window must be at least one full cycle, so `SCAN_CYCLE_PERIOD_S` is the value, not an invented one.
+##### The coverage gap this creates — flagged, not fixed
+
+Seven cones spans **9-3, i.e. 210°**. But `cockpit_mask.py`'s measured envelope admits **8-4
+(260°)**, and the implemented voice vocabulary already speaks `report_clock_8` and `report_clock_4`
+— `docs/concept/STATE_TRANSITIONS.md` records that this exact conflict was already resolved once
+**in favour of the mask**, because the diagram's 9-3 is the coarser earlier statement.
+
+So under A, Petrovich can *report* a contact at 8 o'clock if attention is directed there, but while
+free-scanning he will never *find* one. Closing it is plan D: 9 cones, 24 s, and both decay
+properties lost. That is a real price for 50° of coverage, and it is the user's own "iterate later"
+call to make after flying 2C — recorded here with its cost so the 2C sortie can judge it rather
+than rediscover it.
 
 This is the item most likely to have been discovered mid-implementation rather than during design,
 and it is why the decay constants were read before this plan was written rather than after.
@@ -537,11 +587,11 @@ they are state, but they are a pure function of the frame sequence.
 
 **2C — the scan loop**
 
-12. `ScanPlan` + two-level `gaze_at`; `SCAN_CYCLE_PERIOD_S = 16.0`, `FOCUS_DWELL_S = 2.0`, the
-    sector leg table (`ahead`, `left`, `ahead`, `right`, 4 s each) and the o'clock-hour step within
-    a leg (2 s each). If the first implementation runs whole sectors, the constants and the function
-    shape must still be the two-level ones — the finer level is a table, and retrofitting the shape
-    later is what this step exists to avoid.
+12. `ScanPlan` + `gaze_at` over the o'clock-cone table `12, 11, 10, 9, 12, 1, 2, 3` at
+    `FOCUS_DWELL_S = 2.0`, giving `SCAN_CYCLE_PERIOD_S = 16.0` and a 30°
+    (`FOCUS_CONE_HALF_WIDTH_DEG = 15.0`) gate. Keep the table a named constant, not an inlined
+    literal — hard part 8's plan C is the pre-worked alternative if the 2C sortie says the forward
+    arc is under-scanned, and swapping it must be a table edit plus one constant, nothing more.
 13. Time-based acquisition dicts in `naked_eye_source.py` (hard part 6), eviction window
     `SCAN_CYCLE_PERIOD_S`.
 14. `OBSERVED_WINDOW_S = SCAN_CYCLE_PERIOD_S` (16.0) in `belief/decay.py`, plus **both** assertion
@@ -623,7 +673,7 @@ they are state, but they are a pure function of the frame sequence.
   but it changes crew-facing language, so the 2C sortie must listen for hedging on contacts he is
   actually holding.
 - **Group splitting at gaze edges (hard part 6)** — occasional at the 30° focus cone, routine at
-  2D's 8.5° binocular field. The two-level gaze makes this more likely than the earlier 60° design
+  2D's 8.5° binocular field. The 30° o'clock cone makes this more likely than the earlier 60° design
   did, and 2D's "check for more nearby" step is partly a mitigation as well as a behaviour.
 - **From 2C onward, nothing outside the current sector can capture his attention** — no flash, no
   tracer, no missile. The seam exists and is empty. This regresses no working behaviour (nothing
@@ -635,11 +685,18 @@ they are state, but they are a pure function of the frame sequence.
   what he is looking at, and the cockpit mask (which does have depression limits) is what catches
   that. Correct for a head that turns rather than tilts; worth revisiting only if the 2C sortie
   shows it reading wrong in hard manoeuvring.
+- **Free scan covers 9-3 (210°) while the cockpit mask admits 8-4 (260°)** and the voice vocabulary
+  already speaks 8 and 4 (hard part 8). He can report an 8 o'clock contact if directed there, but
+  will never find one unprompted. Closing it costs a 24 s cycle and both decay properties; recorded
+  with its price for the 2C sortie to judge.
+- **Plan A weights only the nose, not the diagram's 11-1 forward arc.** Plan C is pre-worked and
+  costs 4 s of cycle plus the missed-sweep property; if 2C shows the forward arc under-scanned, the
+  change is a table edit and `OBSERVED_WINDOW_S` 16 → 20.
 - **A missed sweep drops a contact two certainty bands at once** (hard part 8: `2 × CYCLE −
   FOCUS_DWELL` = 30 s, exactly `POSITION_HALF_LIFE_S`). Defensible but it will read as abrupt; first
   thing to check if 2C shows confidence flickering.
-- **`NAKED_EYE_MAX_NEW_PER_POLL = 3` is tighter than it looks under a 2 s focus dwell.** Two polls
-  per o'clock hour means at most six new objects taken in per visit to that bearing, and the rest
+- **`NAKED_EYE_MAX_NEW_PER_POLL = 3` is tighter than it looks under a 2 s cone dwell.** Two polls
+  per o'clock cone means at most six new objects taken in per visit to that bearing, and the rest
   wait a full 16 s cycle. A dense sector will under-report. Do not raise it reflexively — it is the
   pre-existing attention-bandwidth model (hard part 6) and the scan loop is the new one; decide
   which is real before touching either.
@@ -672,7 +729,7 @@ partially-accumulated time, a defined interaction with the cone sweeping off mid
 either a random draw (destroying replay determinism) or a deterministic surrogate that is no longer
 ED's model.
 
-**Why the value is smaller than it looks, and the two-level gaze makes this stronger:** the scan
+**Why the value is smaller than it looks, and the o'clock-cone plan makes this stronger:** the scan
 loop already produces "detection takes time," and now produces a lot of it — a contact at a flank
 o'clock waits up to 14 s for the focus cone to reach it (hard part 8), not the few seconds the
 earlier 8 s design implied. `NAKED_EYE_MAX_NEW_PER_POLL` throttles intake on top of that. A third
@@ -688,8 +745,8 @@ where they are not (whether a passive glance finds a tank).
 
 **And 2D should be gated on 2C's sortie**, not built speculatively: if the scan loop already makes
 detection feel gradual, the cheapest correct outcome is that 2D is never needed in this milestone.
-The two-level gaze raises the odds of that outcome considerably, which is worth saying now rather
-than after 2D is half-built.
+The o'clock-cone plan raises the odds of that outcome considerably, which is worth saying now
+rather than after 2D is half-built.
 
 One thing does argue the other way and should be weighed at the 2C gate rather than pre-judged:
 with `Optic.peripheral` landing in 2B, **2D is the only slice that ever exercises `peripheral=False`
@@ -732,10 +789,12 @@ rather than settled boundaries.
 ### Decisions Requiring User Input
 
 **None outstanding.** The one question this plan carried — how long he should look at each sector —
-was answered by the user on 2026-09-21: **2 s per o'clock sector**, which works out to a 16 s cycle
-(hard part 8). That is recorded as a decision, not a recommendation, and the two constants derived
-from it (`OBSERVED_WINDOW_S`, the acquisition retention window) follow arithmetically rather than
-by taste.
+was answered by the user on 2026-09-21: **2 s per o'clock cone**, with the scan stepping cone by
+cone, which works out to a 16 s cycle (hard part 8). That is recorded as a decision, not a
+recommendation, and the two constants derived from it (`OBSERVED_WINDOW_S`, the acquisition
+retention window) follow arithmetically rather than by taste. The one genuine fork the decision left
+open — which cones belong to which leg, since the diagram's arcs share boundaries — is resolved to
+plan A in hard part 8 on a decay-ladder argument, with plan C pre-worked as the alternative.
 
 Two things are **flagged rather than asked**, because they are consequences the user should see
 land rather than decisions needing an answer now:
@@ -746,3 +805,7 @@ land rather than decisions needing an answer now:
 - **From 2C onward nothing outside the focus cone can capture his attention** until the
   attention-capture channel exists (hard part 4). The seam is built and empty. Worth knowing before
   flying 2C rather than after.
+- **Free scan covers 9-3, the cockpit admits 8-4** (hard part 8). He will not find an 8 o'clock
+  contact unprompted, though he can report one if directed. Closing it costs a 24 s cycle and both
+  decay properties — an "iterate later" call for after 2C flies, priced here so it need not be
+  rediscovered.
