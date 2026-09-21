@@ -400,3 +400,237 @@ No test-card artifact is published for this slice — there is nothing new for t
 DCS specifically for 2A.5 that isn't already covered by whatever sortie eventually exercises the
 group-intake cap in practice; publishing one now would be inventing a thin live test the instructions
 explicitly warn against.
+
+---
+
+## DoD Check — Cones Slice 2B (gaze as a filter)
+
+Branch: `feature/cones-2b-gaze-filter`. Implementation commit `5728841`, plan correction `e520e8b`
+(the `FULL_GAZE`→`None` default fix, filed by the implementer after catching the plan's own
+internal contradiction). Review commit `b2d76e6` (Reviewer: **APPROVED**, full-read confidence,
+zero required fixes).
+
+Ran against commit `b2d76e6`, checked out detached in this agent's own isolated worktree (the
+branch tip was already checked out in the shared main checkout this agent is isolated from — same
+tree, confirmed no divergence: `git log feature/cones-2b-gaze-filter --oneline` and `git merge-base
+main b2d76e6` both resolve to `c4d4f22`, current `main` tip, so the branch forked cleanly with
+nothing else landed on `main` since).
+
+### Code Quality
+
+- **Subprojects touched**: `git show 5728841 --stat` shows only `body-layer/` (`src/perception/
+  {gaze.py (new), geometry.py, optics.py, visibility.py, detection_trace.py, naked_eye_source.py}`,
+  `src/belief/attention.py`, `src/logger.py`, six test files) plus `plans/detection-cones-slice2/
+  implementation.md` and `todo/todo.md`. `world-model/` and `aircraft-layer/` untouched — confirmed
+  by `git diff --name-only` against the merge-base.
+- Ran the full body-layer verification sequence myself (using the pre-built venv at
+  `/Users/sg/Code/DCS-petrobrain/body-layer/.venv`, since this worktree had none and this
+  environment has no Python 3.11/3.12 interpreter to build a fresh one — same interpreter/deps the
+  main checkout's venv uses, confirmed by `python --version` → 3.14.7 matching both):
+  - `ruff format --check body-layer/src body-layer/tests` → `83 files already formatted` (PASS)
+  - `ruff check body-layer/src body-layer/tests` → `All checks passed!` (PASS)
+  - `cd body-layer && mypy src` → `Success: no issues found in 39 source files` (PASS)
+  - `pytest body-layer/tests -q` → **810 passed, 4 xfailed** (PASS — exact match to
+    `implementation.md`'s and the review's claimed result; baseline before 2B was 780
+    passed/4 xfailed, so 2B added exactly 30 new tests and zero new xfails)
+  - Confirmed via `pytest -q -rx`: all four xfails carry reasons naming slice **2A**'s
+    `presence_range_mult=2.42`/`type_range_mult=3.00` vs. `LOWRES_ANGULAR_RADIUS_RAD`'s
+    flat-4.0 derivation (`test_visibility.py::
+    test_armored_vehicle_is_visible_at_the_farthest_photographed_range`,
+    `test_vision_calibration.py::test_computed_tier_matches_ground_truth[C-1000m]`,
+    `test_gate_admits_every_photographed_range[C-8890m]`/`[C-6580m]`). None mention `gaze`,
+    `peripheral`, `Optic.boresight`, or anything 2B touched. **2B added zero new xfails, as claimed
+    by both the implementer and the reviewer.**
+- No debug output/TODO/FIXME/`pdb`/`breakpoint` introduced: grepped the full diff for `print(`,
+  `TODO`, `FIXME`, `pdb.set_trace`, `breakpoint(` — no hits in any touched source or test file.
+- No unhandled errors/panics in data paths: `within_gaze`, `gaze_for`, `gaze_from_relative_sector`
+  are pure functions over floats/enums; the one new I/O-adjacent path (`logger._active_gaze`
+  reading `TaskStore.tasks`) is a plain iteration with no exception-suppressing `except` added.
+- **`Optic.peripheral` field addition verified inert by default**: `peripheral: bool = True` on the
+  dataclass, so the three pre-existing synthetic `Optic(...)` call sites in `test_visibility.py`
+  construct unchanged — confirmed by reading the diff to `test_visibility.py`, not just trusting
+  the implementer's note. Only `BINOCULAR_OPTIC` sets it `False` explicitly.
+
+### Scope & Correctness
+
+- Matches the plan's 2B sections exactly (slicing table row 2B, hard parts 1/2a/3/4/5, Implementation
+  Plan steps 6-10): `Gaze`/`within_gaze`/`gaze_for`/`gaze_from_relative_sector` in a new
+  `perception/gaze.py`; `RelativeSector` vocabulary moved down from `belief/attention.py`;
+  `check_visibility(gaze=...)` evaluated first in the gate chain; `Optic.peripheral` plus the
+  bypass rule; F10 scan commands wired through `logger._active_gaze`/`_apply_active_gaze`. No
+  `ScanPlan`, `gaze_at`, `FOCUS_DWELL_S`, or `SCAN_CYCLE_PERIOD_S` anywhere in source — grepped
+  myself, confirming the reviewer's own claim rather than trusting it. `clustering.py`,
+  `object_model.py`, `decay.py`, `association.py`, `belief/contacts.py` untouched (2C/2D scope,
+  correctly not touched).
+- **The one deliberate deviation from the plan's literal text is correctly scoped, not scope
+  creep**: the plan's Implementation Plan step 9 and Hard Part 3 both said the 2B default is
+  `FULL_GAZE` (±90°) and called it a no-op; the implementer found this false against
+  `cockpit_mask.py`'s measured `rear_cutoff_deg=130.0` and shipped `gaze=None` instead — read
+  `e520e8b`'s diff to `plan.md` myself, and it corrects exactly this without adding, removing, or
+  softening any other requirement. This is a plan *correction*, filed transparently as its own
+  commit, not a silent implementation shortcut — exactly the "if you find yourself changing an
+  expected value, stop and report it" instinct working as intended.
+- No unplanned scope added: diffed the full file list against the plan's own 2B "Affected Modules"
+  list (13 files named, 13 files touched, one-to-one).
+- No CLAUDE.md invariants violated: **no-omniscience checked specifically**, since a bypass rule is
+  exactly the shape of leak this invariant guards against — `gaze_for`'s bypass clears the gaze gate
+  only, never cockpit mask/range/terrain LOS (`test_bypassed_gaze_still_respects_the_cockpit_mask`,
+  read and re-traced against `visibility.py`'s actual gate order, not just the test name); single-
+  player scope untouched; no world-model data committed; `perception` still does not import `belief`
+  (checked via grep, matching the reviewer's own claim).
+- All new/modified files staged with `git add`: confirmed via `git status --porcelain` at the
+  reviewed commit — clean.
+
+### Testing
+
+- Core logic covered: `test_gaze.py` (13 tests: shape, boundary, a genuinely non-axis-aligned
+  37°/42° case, a 180°-seam wraparound, the bypass rule under both optics plus a synthetic
+  non-peripheral optic, all four relative-sector mappings); gate-ordering/rejection/admission/
+  bypass-invariant/boresight-follows-gaze tests in `test_visibility.py`; filter/default/bypass tests
+  in `test_naked_eye_source.py`; `_active_gaze`/`_apply_active_gaze`/one `run_once` integration test
+  in `test_logger.py` that wires a real pending `scan_area` task onto a real
+  `NakedEyePerceptionSource` through the actual poll loop, not just a unit-level mock.
+- Tests are meaningful, not decorative: the reviewer independently traced `FULL_GAZE`'s definition
+  against `cockpit_mask.py`'s `rear_cutoff_deg` rather than trusting the implementer's claim, and
+  the wraparound/non-axis-aligned angle tests exist specifically because (per the plan's own
+  standing note) a prior bug in this codebase hid behind an axis-aligned-only test suite — read that
+  test's assertions myself and confirmed they'd actually catch the class of bug they're named for.
+- No existing tests broken: every change to a pre-existing test file is either a pure addition or a
+  mechanical call-site update forced by `within_optic_fov` gaining a required `boresight_azimuth_deg`
+  parameter (same expected values, new parameter threaded through) — confirmed by reading the diff,
+  not the commit message. 810 passed vs. 780 baseline (net +30, all additions), 4 xfails unchanged
+  and all attributable to 2A.
+
+### Documentation
+
+- Reviewer findings addressed: **zero required fixes** — nothing to address. The review's two
+  "Optional Refinements" (peripheral=False not exercised through FOV-gate tests; `_active_gaze`'s
+  insertion-order assumption undocumented in its own docstring) are correctly optional — neither is
+  a defect in the reviewed commit, and leaving them unaddressed does not block DoD.
+- Non-obvious behavior explained: `GateOutcome.GAZE`'s own docstring records the trace-attribution
+  cost (a rear-hemisphere rejection now records `GAZE` instead of `COCKPIT_MASK` once a gaze is
+  active) and why that's accepted rather than "fixed" by reordering — read it, it's there.
+  `plan.md`'s "What is unprotected until the capture channel exists, stated plainly" section names
+  the peripheral-channel gap directly (see milestone-completion answers below). `implementation.md`'s
+  2B section is thorough and its "Notable Discoveries" correctly flags the plan-contradiction finding
+  as worth a plan correction before 2C.
+
+### Security
+
+- No `security-plan-review.md`/`security-review.md` exists for this feature, and none is expected:
+  root `CLAUDE.md` "Agents" section exempts Security for this project phase, unrequested here. N/A,
+  not a gap.
+
+### Verdict
+
+**PASS.** No FAILs. Reviewer approved with zero required fixes; nothing for this gate to send back.
+
+---
+
+### Acceptance boundary — what 2B's fixtures structurally cannot reach
+
+**2B's own defining property is that it changes nothing observable by default** — the trace with no
+scan command issued is byte-identical to 2A.5's. That property is fully provable at fixture level
+and was just proven above (`test_default_gaze_is_none_and_does_not_narrow_the_cockpit_envelope` and
+its `NakedEyePerceptionSource`-layer twin, both placing a candidate specifically in the 90°–130°
+band a wrong default would have silently dropped). Fixtures cannot reach past that: whether a real
+"scan left" command, issued mid-flight, actually changes what the pilot hears reported, on real DCS
+geometry, on the real `logger.py` poll loop wired to a real aircraft-layer feed — that is a live-DCS
+question by nature, and 2B's own fixtures were never going to answer it. Naming the two prior
+sortie-found defects that no fixture caught for exactly this reason: `Scan` driving the wrong
+subsystem (9K113 sight instead of naked-eye perception — the bug 2B exists to fix, found only by
+flying it), and `Cancel Task` speaking a raw task id aloud (only a defect when a human *hears* it;
+as text in a log it looked correct). Neither class of gap is closed by more unit tests; both are
+closed by a flight.
+
+### Answers to the milestone-completion question (root `CLAUDE.md`)
+
+1. **2B is behaviour-preserving, so nothing observable changed for the pilot. Does that make 2C
+   genuinely next, and is 2C still the slice that makes the difference audible?** Yes to both.
+   2B's entire acceptance gate was "identical trace with no command issued" — confirmed structurally
+   above — so there is, by design, nothing for a sortie to feel yet from 2B alone. 2C (default gaze
+   becomes the 12-11-10-9-12-1-2-3 o'clock scan loop, 2 s/sector, 16 s cycle) is exactly the slice
+   the plan's own slicing table marks "Yes — this is the big one" for live acceptance, judged on
+   whether the user finds things at a plausible rate and whether callout language stays stable as
+   contacts cycle in and out of gaze. Confirmed via diff that 2B touched nothing 2C's plan depends
+   on (`ScanPlan`, `FOCUS_DWELL_S`, `SCAN_CYCLE_PERIOD_S` don't exist in source yet) — the ordering
+   premise from 2A.5's own DoD check still holds one slice later.
+
+2. **2C moves `decay.OBSERVED_WINDOW_S` from 5.0 to 16.0. Does anything in 2B affect that
+   derivation?** No. `body-layer/src/belief/decay.py` is untouched by 2B — confirmed both by `git
+   show 5728841 --stat` (not in the file list) and by reading the file directly:
+   `OBSERVED_WINDOW_S: Final[float] = 5.0`, unchanged. The derivation depends on the 16 s scan-cycle
+   period and the two bounds named in the task (`CYCLE − DWELL = 14` below, `POSITION_HALF_LIFE_S =
+   30` above); 2B introduces gaze-as-a-filter but not the scan cycle itself, so none of the three
+   quantities the 2C derivation depends on moved.
+
+3. **`Optic.peripheral` exists with the bypass rule wired but no triggers. Is that gap recorded
+   somewhere a later reader will find it, and is the exposure stated plainly?** Yes, on both counts.
+   `plans/detection-cones-slice2/plan.md`'s "What is unprotected until the capture channel exists,
+   stated plainly" section (read directly, not taken on the implementer's word): "from 2C onward, an
+   incoming missile or a muzzle flash outside the current 30° focus cone is simply not noticed,"
+   explicitly noting this doesn't regress anything working today (nothing detects incoming weapons
+   yet) but adds a second, independent reason it won't work, and that the capture channel "must land
+   alongside whatever finally builds the weapon detector, not after it." `GateOutcome.GAZE`'s
+   docstring and `gaze_for`'s own module-level placement in `gaze.py` reinforce this at the code
+   level. This is recorded in the one place a later reader planning the capture channel or the
+   weapon-detector work would actually look — the plan document itself, in the section named for
+   exactly this purpose — not buried in a commit message or a review aside.
+
+---
+
+### Acceptance Testing Plan: Cones Slice 2B — Gaze as a Filter
+
+**Goal:** Verify 2B is behaviour-preserving by default (desk-verifiable now) and identify what
+should wait for a live sortie rather than being tested prematurely.
+
+**Prerequisites**
+- [x] Type-checked and importable: `cd body-layer && mypy src` → `Success: no issues found in 39
+      source files` (ran above, PASS).
+- [x] Full test suite green: `pytest body-layer/tests -q` → `810 passed, 4 xfailed` (ran above,
+      PASS, exact match to claimed result).
+
+**What is desk-verifiable now, and was just verified above (not hypothetical):**
+
+1. With no scan command issued, `check_visibility`'s gaze gate is a true no-op — proven by
+   `test_default_gaze_is_none_and_does_not_narrow_the_cockpit_envelope` and its
+   `NakedEyePerceptionSource`-layer twin, both against a candidate placed specifically in the
+   90°–130° band a wrong default would silently drop. **Result: PASS.**
+2. A narrow gaze correctly filters an off-axis candidate and admits an on-axis one, at both the
+   `check_visibility` unit layer and the `NakedEyePerceptionSource` integration layer. **Result:
+   PASS** (`test_gaze_gate_rejects_outside_wedge_and_admits_inside_it` and
+   `test_naked_eye_source.py`'s narrow-gaze filter test).
+3. `GateOutcome.GAZE` fires ahead of `GateOutcome.COCKPIT_MASK` in the trace when both would reject
+   the same candidate — proven directly, not just by pass/fail outcome. **Result: PASS**
+   (`test_gaze_gate_runs_before_the_cockpit_mask`).
+4. The peripheral bypass clears the gaze gate only, never cockpit mask/range/terrain LOS. **Result:
+   PASS** (`test_bypassed_gaze_still_respects_the_cockpit_mask`).
+5. A pending `scan_area` F10 task actually reaches a real `NakedEyePerceptionSource.gaze` through
+   `ConsolePerceptionRunner.run_once`'s actual poll loop, not a mock. **Result: PASS**
+   (`test_logger.py`'s `run_once` integration test).
+
+**What is live-testable today but should wait for 2C's sortie, and why:**
+
+An F10 "scan left"/"scan right" command now genuinely steers what naked-eye perception reports —
+that is a real, live-testable behaviour change today, not one artificially deferred. But it is a
+poor sortie on its own: with only a fixed narrow gaze available (no free-scan default yet), the
+pilot has nothing to contrast the scanned state against except memory of an earlier, different
+flight — exactly the attribution problem the plan's own slicing table names for why 2A/2C were
+split ("flown together, a sortie cannot attribute a changed range to either"). The same reasoning
+applies here in miniature: a scan command's effect reads clearly only against a baseline the pilot
+can fly in the same sortie, and 2C's free-scan gaze *is* that baseline. Recommend folding this into
+2C's flight rather than flying it in isolation now.
+
+**No test-card artifact is published for 2B.** There is genuinely something new the user *could* do
+in DCS (issue a scan command and notice a change), but flying it in isolation before 2C would
+produce a weaker signal than the same test flown alongside 2C's scan-loop sortie, and publishing a
+card now risks the user flying a thin test and drawing a conclusion from it that 2C's sortie would
+have made clearer. This is the "deferred, not waived" case from `body-layer/ROADMAP.md`'s Live
+acceptance debt section — it belongs on that list at merge time, pointing at 2C's sortie as the
+flight that clears it, not treated as a standalone card.
+
+**Pass Criteria**
+All five desk-verifiable cases above produce the expected result (they do) and the full suite shows
+no regressions against 2A.5's 780-passed baseline (confirmed: 810 passed, same 4 xfails, all
+attributable to 2A). Live acceptance for the scan-steers-perception behaviour itself is explicitly
+**not** part of this slice's pass criteria — see above.
