@@ -597,7 +597,7 @@ At 1.0 s polls a 2 s dwell is two samples per cone, so the aliasing floor is cle
 level of the plan, which is the level that matters. **And the acquisition retention window is the
 same number**: hard part 6's eviction window is `SCAN_CYCLE_PERIOD_S`, not an invented constant.
 
-##### The coverage gap this creates — flagged, not fixed
+##### The coverage gap this creates — DECIDED 2026-09-21: keep 9-3
 
 Seven cones spans **9-3, i.e. 210°**. But `cockpit_mask.py`'s measured envelope admits **8-4
 (260°)**, and the implemented voice vocabulary already speaks `report_clock_8` and `report_clock_4`
@@ -606,9 +606,18 @@ Seven cones spans **9-3, i.e. 210°**. But `cockpit_mask.py`'s measured envelope
 
 So under A, Petrovich can *report* a contact at 8 o'clock if attention is directed there, but while
 free-scanning he will never *find* one. Closing it is plan D: 9 cones, 24 s, and both decay
-properties lost. That is a real price for 50° of coverage, and it is the user's own "iterate later"
-call to make after flying 2C — recorded here with its cost so the 2C sortie can judge it rather
-than rediscover it.
+properties lost.
+
+**User decision 2026-09-21: keep 9-3.** 50° of extra coverage is not worth a 24 s cycle, and the
+decay properties it costs are the reason 16 s was chosen — above that, one missed sweep drops a
+contact two certainty bands at once. The asymmetry is also defensible on its own terms rather than
+merely cheap: **directing attention to 8 o'clock is exactly what a pilot would do**, and the voice
+vocabulary already supports it. Petrovich not sweeping his own far rear quarter unprompted is a
+limitation a real crewman shares.
+
+The scan table stays a named constant, so revisiting this is a table edit plus `OBSERVED_WINDOW_S`
+16 → 20 or 24, and nothing else. The 2C sortie should still note whether 8/4 o'clock contacts feel
+missed in practice — this decision is cheap to reverse and the data is free to collect.
 
 This is the item most likely to have been discovered mid-implementation rather than during design,
 and it is why the decay constants were read before this plan was written rather than after.
