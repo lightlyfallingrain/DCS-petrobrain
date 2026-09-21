@@ -181,8 +181,14 @@ Prioritize any open task here over any other task in this file or roadmap files.
   the kind of contradictory precedent a future reader would follow in the wrong direction.
 
 
-- [ ] **Scan commands should drive naked-eye perception.** Raised 2026-09-16 from the first live
+- [x] **Scan commands should drive naked-eye perception.** Raised 2026-09-16 from the first live
   F10 test of `f10-command-vocabulary`; narrowed 2026-09-17 once `cockpit-visibility` shipped.
+  **Closed 2026-09-21 by cones slice 2B** (`plans/detection-cones-slice2/plan.md`): a pending
+  `scan_area` task's relative sector now resolves to a `perception.gaze.Gaze` each poll
+  (`logger.py`'s `_active_gaze`/`_apply_active_gaze`) and filters `NakedEyePerceptionSource`'s
+  candidates via a new gate ahead of the cockpit mask, so "scan left" now changes which contacts
+  Petrovich can detect, not just which he is attending to. The "full version" (dwell time,
+  naked-eye-vs-binocular tier varying with time-looking) below is 2C/2D's job, not this one's.
 
   **A scan changes attention, not perception.** `perception/visibility.py`'s naked-eye gate uses a
   fixed cockpit occlusion mask (`perception.cockpit_mask`, `plans/cockpit-visibility/plan.md`) that

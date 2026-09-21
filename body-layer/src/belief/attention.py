@@ -17,6 +17,21 @@ the *area's own center* to the candidate position, never from ownship: the
 predicate is pure geometry over absolute values, with no dependency on live
 state.
 
+**`RelativeSector`/`RELATIVE_SECTORS`/the relative-sector wedge table, and
+the shortest-angle helper `area_contains` uses, now live in `perception.
+gaze`/`perception.geometry` (slice 2B, `plans/detection-cones-slice2/
+plan.md`, hard parts 5 and 8).** `perception.gaze.Gaze` (a filter
+`perception.visibility.check_visibility` applies) needed the exact same
+ownship-relative wedge vocabulary this module already had for
+`AttentionArea.relative_sector`, and `perception` must not import `belief`
+-- so the vocabulary moved down and this module re-imports it, rather than
+the gate moving up. This module's own `AttentionArea`/`area_contains`/
+`project_relative_area` are otherwise unchanged: `area_contains` stays a
+pure absolute-geometry predicate over `GeoPosition`s, with no dependency on
+`perception.gaze.Gaze`'s body-relative frame (that module's own docstring,
+hard part 5, on why the two wedge tests cannot share more than the
+shortest-angle arithmetic).
+
 **Two kinds of area, and the second one moves** (`plans/
 f10-command-vocabulary/plan.md` D1-D3). BL-4's original areas are fixed
 patches of *ground* -- a bearing/range circle, optionally narrowed to one
@@ -59,7 +74,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Final, Literal
 
-from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.gaze import _RELATIVE_SECTOR_WEDGE_DEG
+from perception.gaze import RelativeSector as RelativeSector  # noqa: PLC0414
+from perception.geometry import GeoPosition, angular_delta_deg, bearing_deg, range_m
 
 #: The closed four-state set -- see module docstring for why there is no
 #: `"track"`. Ranked strictly `ignore < normal < watch < priority`;
@@ -100,33 +117,6 @@ _SECTOR_CENTER_DEG: dict[Sector, float] = {
 #: Half-width of each sector's wedge -- 45 degrees either side of its
 #: center exactly tiles the 8 sectors across the full 360 degrees.
 _SECTOR_HALF_WIDTH_DEG: Final[float] = 45.0
-
-#: The crew-facing, ownship-relative sectors from `docs/concept/
-#: state-transitions.jpg` -- the frame a pilot actually speaks in ("scan
-#: left"), as opposed to `Sector`'s compass-absolute one. Unlike `SECTORS`
-#: these deliberately do **not** tile the circle: the spec states "there is
-#: no visibility to rear hemisphere", so `full` spans the forward
-#: hemisphere only and no rear sector is offered.
-RelativeSector = Literal["ahead", "left", "right", "full"]
-
-RELATIVE_SECTORS: Final[tuple[RelativeSector, ...]] = (
-    "ahead",
-    "left",
-    "right",
-    "full",
-)
-
-#: Each relative sector as `(center, half_width)` in **relative bearing
-#: degrees**, 12 o'clock = 0, positive clockwise (so 3 o'clock = +90,
-#: 9 o'clock = -90). Straight from the spec's o'clock bounds: `ahead`
-#: 11-1, `left` 9-11, `right` 1-3, `full` 9-3. One o'clock hour is 30
-#: degrees.
-_RELATIVE_SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = {
-    "ahead": (0.0, 30.0),
-    "left": (-60.0, 30.0),
-    "right": (60.0, 30.0),
-    "full": (0.0, 90.0),
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +166,6 @@ class AttentionArea:
     #: rate, and far below the precision a 60-degree-wide sector implies,
     #: but it is an approximation, not an exact track.
     relative_sector: RelativeSector | None = None
-
-
-def _angular_delta_deg(a: float, b: float) -> float:
-    """Smallest absolute angle between two bearings, in degrees (0-180)."""
-    return abs((a - b + 180.0) % 360.0 - 180.0)
 
 
 def area_wedge_deg(area: AttentionArea) -> tuple[float, float] | None:
@@ -255,7 +240,7 @@ def area_contains(area: AttentionArea, position: GeoPosition) -> bool:
     if wedge is None:
         return True
     center, half_width = wedge
-    return _angular_delta_deg(bearing_deg(area.center, position), center) <= half_width
+    return angular_delta_deg(bearing_deg(area.center, position), center) <= half_width
 
 
 def effective_attention(

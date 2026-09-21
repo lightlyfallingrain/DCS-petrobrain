@@ -23,6 +23,7 @@ import pytest
 
 from perception import association, object_model, visibility
 from perception.detection_trace import DetectionTraceCollector, GateOutcome
+from perception.gaze import Gaze
 from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
@@ -166,6 +167,53 @@ def test_ownship_echo_does_not_suppress_a_real_nearby_target() -> None:
 
     assert len(observations) == 1
     assert observations[0].classification_raw == "OP_INFANTRY"
+
+
+# -- Gaze filtering (slice 2B, plans/detection-cones-slice2/plan.md) --------
+
+
+def test_gaze_filters_a_candidate_outside_its_wedge() -> None:
+    # lat_deg=0, lon_deg=100 (identity-mapped x=0, z=100) is dead abeam
+    # (azimuth 90 relative to heading 0) -- well outside a 30 deg
+    # dead-ahead gaze.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=100.0)]
+    }
+    source, _client = _source(world_objects)
+    source.gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead")
+
+    assert source.poll(100.0, _ownship()) == []
+
+
+def test_default_gaze_is_none_and_does_not_filter() -> None:
+    # Same candidate as above, but the source's `gaze` field is left at
+    # its default (`None`) -- must still be admitted, confirming 2B's
+    # default path is unchanged from before this slice.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=100.0)]
+    }
+    source, _client = _source(world_objects)
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
+
+
+def test_peripheral_stimulus_bypasses_a_narrow_gaze() -> None:
+    # Same excluded-by-gaze candidate as above, but flagged as a captured
+    # peripheral stimulus -- this channel always resolves `gaze_for`
+    # against `UNAIDED_OPTIC` (module docstring point 7), which has
+    # `peripheral=True`, so the bypass applies.
+    world_objects = {
+        "objects": [_world_object(1, "Infantry", lat_deg=0.0, lon_deg=100.0)]
+    }
+    source, _client = _source(world_objects)
+    source.gaze = Gaze(center_azimuth_deg=0.0, half_width_deg=30.0, label="ahead")
+    source.peripheral_stimulus_ids = frozenset({1})
+
+    observations = source.poll(100.0, _ownship())
+
+    assert len(observations) == 1
 
 
 def test_hires_range_candidate_with_a_known_reporting_name_reaches_type_level() -> None:

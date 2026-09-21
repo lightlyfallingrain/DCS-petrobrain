@@ -175,3 +175,135 @@ rewritten pinned test's expected counts against the code rather than trusting th
 derivation; grepped the full repo for the old constant name to check the "no stale references"
 scope item; re-ran the full body-layer format/lint/type/test sequence myself from its own venv
 (`body-layer/.venv`) and got the exact claimed result (780 passed, 4 xfailed).
+
+## 2B: gaze as a filter (review, 2026-09-21)
+
+Implementation commits: `5728841` (2B), `e520e8b` (plan correction on the `FULL_GAZE`/`None`
+default, filed after the implementer caught the plan's own internal contradiction). Reviewed in an
+isolated worktree per `AGENTS.md` "Where work happens" (rule 1); verification was run against
+`e520e8b` in a separate temporary worktree since the branch was already checked out at
+`/Users/sg/Code/DCS-petrobrain`.
+
+### Review Summary
+
+2B does exactly what its own acceptance gate demands and does it by construction, not by fixture
+luck. The one interesting event in this slice is that the implementer caught a real error in the
+plan itself — Hard Part 3 asserted `FULL_GAZE` (±90°) as the 2B default and called it a no-op,
+but the cockpit mask's measured rear cutoff is ±130° (`cockpit_mask.py`, `rear_cutoff_deg=130.0`),
+so a `FULL_GAZE` default would have silently narrowed live detection through the 90°–130° band —
+the exact regression 2B exists to rule out. The implementer used `gaze=None` instead, and filed
+`e520e8b` to correct the plan text rather than quietly building around the contradiction. Traced
+this independently (`FULL_GAZE`'s definition in `gaze.py`, `cockpit_mask.py`'s `rear_cutoff_deg`,
+`e520e8b`'s diff) — the deviation is correct, complete, and every default path (`check_visibility`'s
+`gaze` parameter, `NakedEyePerceptionSource.gaze` field, `logger._active_gaze`'s no-pending-task
+case) resolves to `None`, never to a narrowing value.
+
+- **Behaviour-preservation (priority 1)**: confirmed structurally. `check_visibility(gaze=None)`
+  skips the gaze gate entirely (`visibility.py`: `if gaze is not None and not within_gaze(...)`).
+  `NakedEyePerceptionSource.gaze` defaults to `None`. `logger._active_gaze` returns `None` when no
+  `scan_area` task is pending — there is no code path that manufactures a non-`None` gaze without an
+  explicit F10 scan command. `test_default_gaze_is_none_and_does_not_narrow_the_cockpit_envelope`
+  and `test_default_gaze_is_none_and_does_not_filter` pin this at both the `check_visibility` and
+  `NakedEyePerceptionSource` layers with a candidate placed specifically in the 90°–130° band that a
+  `FULL_GAZE` default would have wrongly rejected.
+- **Vocabulary move (priority 2)**: `RelativeSector`/`RELATIVE_SECTORS`/the wedge table moved to
+  `perception/gaze.py` verbatim; `belief/attention.py` re-imports `RelativeSector` (needed by three
+  other importers) but does not re-export `RELATIVE_SECTORS` — grepped the full repo at the reviewed
+  commit and nothing outside `gaze.py` itself ever imported `RELATIVE_SECTORS` from `belief.attention`,
+  so this is dead-name removal, not a break. `angular_delta_deg` in `perception/geometry.py` is
+  character-for-character the same formula as the deleted `belief.attention._angular_delta_deg`
+  (`abs((a - b + 180.0) % 360.0 - 180.0)`), and both modules now import the one copy. `belief.attention.
+  area_contains`'s own logic is otherwise untouched — confirmed by diff, not just by the module
+  docstring's own claim. `perception` still does not import `belief` anywhere in this diff.
+- **Gaze-first ordering (priority 3)**: `GateOutcome.GAZE` is a new enum member, evaluated and
+  recorded before `COCKPIT_MASK`; `test_gaze_gate_runs_before_the_cockpit_mask` proves the ordering
+  directly (a candidate that fails both records `GAZE`, not `COCKPIT_MASK`), not merely the pass/fail
+  outcome. The trace's cost — losing the cockpit-mask rejection rate once a real gaze restriction is
+  active — is documented in `GateOutcome.GAZE`'s own docstring exactly as the plan's hard part 3
+  requires, and is inert under 2B's own default (`gaze=None` never fires `GAZE`), so nothing about
+  today's trace output actually changes yet.
+- **`Optic.peripheral` and the bypass rule (priority 4)**: `gaze_for` is a four-line pure function;
+  tested in both directions in `test_gaze.py`
+  (`test_gaze_for_bypasses_the_gate_for_a_peripheral_stimulus_under_unaided_optic`,
+  `test_gaze_for_does_not_bypass_under_binocular_optic`, plus a third test against a synthetic
+  non-peripheral `Optic` proving the rule reads `optic.peripheral` and not a hardcoded identity check
+  against `BINOCULAR_OPTIC`). `test_gaze_for_returns_gaze_unchanged_for_a_non_stimulus_candidate` and
+  `test_gaze_for_returns_none_when_no_gaze_is_active` confirm the rule is a true no-op against an
+  empty `stimulus_ids` set (the only state that exists today, since no capture channel is wired). The
+  bypass invariant — clears the gaze gate only, never cockpit mask/range/LOS — is separately pinned
+  in `visibility.py`'s own test suite (`test_bypassed_gaze_still_respects_the_cockpit_mask`).
+- **`Optic.boresight_azimuth_deg` removal (priority 5)**: became a required parameter on
+  `within_optic_fov`; every existing call site (production and test) was updated to pass `0.0`
+  explicitly where no gaze is active, reproducing the old pinned default exactly — confirmed no
+  caller silently lost the boresight value. `check_visibility` now derives the boresight from
+  `gaze.center_azimuth_deg` when a gaze is active, so the FOV cone genuinely follows the head rather
+  than staying pinned forward; `test_optic_fov_boresight_follows_the_active_gaze` demonstrates both
+  the admitted-with-gaze and rejected-without-gaze cases for the same off-axis candidate.
+- **Angular-formula test coverage**: `test_within_gaze_at_a_non_axis_aligned_angle` (37°/42°) and
+  `test_within_gaze_wraps_across_the_180_seam` (170° center, tested at −170° and 35°) both exercise
+  genuinely non-axis-aligned angles and a wraparound case, per this review's own instruction and the
+  plan's "milestone's own standing constraint" note (a prior bug in this codebase hid behind an
+  axis-aligned-only suite). `test_gaze_gate_rejects_outside_wedge_and_admits_inside_it` uses a −60°
+  gaze center at the `check_visibility` integration layer too, not just the unit layer.
+- **Scope (priority 6)**: diffed the full file list touched between the 2A.5 merge point and this
+  slice's tip — exactly the 13 files the plan's own "Affected Modules" 2B list names (`gaze.py`,
+  `geometry.py`, `optics.py`, `visibility.py`, `detection_trace.py`, `naked_eye_source.py`,
+  `belief/attention.py`, `logger.py`, and their six test files). No `ScanPlan`, `gaze_at`,
+  `FOCUS_DWELL_S`, or `SCAN_CYCLE_PERIOD_S` anywhere in source (grepped). `clustering.py`,
+  `object_model.py`, `decay.py`, `association.py`, `belief/contacts.py` untouched, as the plan
+  requires.
+- **The "zero existing expectations changed" claim**: verified against the diff, not merely trusted.
+  Every change to an existing test file is either a pure addition (new test functions) or a
+  mechanical call-site update forced by a signature change (`within_optic_fov` gaining a required
+  `boresight_azimuth_deg` parameter) — same assertions, same expected values, just the new parameter
+  threaded through. No existing assertion value moved. 810 passed / 4 xfailed reproduced exactly by
+  re-running the suite myself (see Review Confidence).
+
+The one thing worth naming without it being a fix: `Optic.peripheral` defaults to `True` on the
+dataclass itself (rather than being a required field), so three synthetic `Optic(...)` instances in
+`test_visibility.py` construct without ever setting it. This is the same "make the new field
+inert-by-default so unrelated fixtures don't need touching" pattern the plan itself uses everywhere
+else in this slice (`gaze=None`, `peripheral_stimulus_ids=frozenset()`), and the implementer's own
+"Notable Discoveries" note calls it out explicitly as a deliberate, minimal-footprint choice rather
+than an oversight. Confirmed correct: nothing turns on the FOV-gate tests' optics having peripheral
+vision.
+
+### Required Fixes
+
+None.
+
+### Optional Refinements
+
+- **`test_optics.py`'s three test-site `_optic()` helper doesn't exercise `peripheral=False`
+  through the FOV-gate tests** — every `within_optic_fov` test in that file uses the default
+  `peripheral=True`, since `peripheral` has no bearing on `within_optic_fov`'s own geometry. Not a
+  gap in this slice (the field is orthogonal to FOV geometry and is tested where it matters, in
+  `test_gaze.py`/`test_optics.py`'s two dedicated `peripheral` tests) — noted only so a future reader
+  doesn't mistake the absence for an oversight. (Optional — no defect, documentation note only.)
+- **`logger._active_gaze`'s "most recently created wins" tie-break** iterates `reversed(tasks.tasks)`
+  and returns on the first match, which assumes `TaskStore.tasks` is insertion-ordered. That
+  assumption is correct today (confirmed by reading `belief/tasks.py`) and is exercised by
+  `test_active_gaze_picks_the_most_recently_created_pending_task`, but the function's own docstring
+  could say one sentence about relying on insertion order rather than a `created_sim` comparison, so
+  a future change to `TaskStore`'s internal ordering doesn't silently break this in a way the test
+  suite might not catch if a test ever inserts tasks with `created_sim` out of insertion order.
+  (Optional — a documentation clarity note, not a correctness gap in the current implementation.)
+
+### Verdict
+APPROVED
+
+### Review Confidence
+Full read — read the plan's 2B section in full (module/hard-part list, hard parts 1/2a/3/4/5,
+Implementation Plan steps 6-10) and `e520e8b`'s diff to `plan.md`; read every changed source file's
+diff in full (`gaze.py` new module including its docstring, `geometry.py`, `optics.py`,
+`visibility.py`, `detection_trace.py`, `naked_eye_source.py`, `belief/attention.py`, `logger.py`);
+read every changed/added test file in full (`test_gaze.py`, `test_optics.py`, `test_visibility.py`,
+`test_naked_eye_source.py`, `test_logger.py`); hand-verified `angular_delta_deg`'s formula is
+identical to the deleted `belief.attention._angular_delta_deg` rather than trusting the docstring's
+claim; grepped the full repo for `RELATIVE_SECTORS` and `within_optic_fov` call sites to confirm no
+import broke and no caller lost the boresight value; grepped for 2C/2D-only names (`ScanPlan`,
+`gaze_at`, `FOCUS_DWELL_S`, `SCAN_CYCLE_PERIOD_S`) to confirm scope; re-ran the full body-layer
+format/lint/type/test sequence myself, in a separate temporary worktree checked out at `e520e8b`
+(the branch tip was already checked out in the main working directory), using a fresh venv with
+`ruff`/`mypy`/`pytest` installed, and got the exact claimed result (`ruff format --check`: pass,
+`ruff check`: pass, `mypy src`: pass/39 files, `pytest -q`: 810 passed, 4 xfailed).

@@ -262,3 +262,148 @@ the order of a dozen comparisons per poll, and moving the cap after it changes w
 *emitted*, not how many are *compared*. Under `emit_mode="every_poll"` — what `--console` and
 `--crew-text` actually run — clustering already covered essentially all visible candidates, so this
 is a real ordering change only for `on_change`.
+
+## 2B: gaze as a filter (2026-09-21)
+
+Implemented in an isolated worktree (agent trial, `AGENTS.md` "Where work happens") on top of
+`1e1f3f0` (tip of `feature/cones-2b-gaze-filter`, itself `main` + nothing). Scope: 2B only — no 2C
+scan loop, no 2D dwell.
+
+### Implementation Summary
+
+- New `perception/gaze.py`: `Gaze` (frozen `center_azimuth_deg`/`half_width_deg`/`label`),
+  `FULL_GAZE`, `within_gaze`, `gaze_for` (the peripheral-bypass rule), `gaze_from_relative_sector`,
+  plus `RelativeSector`/`RELATIVE_SECTORS`/`_RELATIVE_SECTOR_WEDGE_DEG` moved down from
+  `belief/attention.py` (hard part 5/8's setup) — `belief/attention.py` now re-imports them.
+- `perception/geometry.py` gains `angular_delta_deg` (moved from `belief/attention.py`'s private
+  `_angular_delta_deg`), imported by both `belief/attention.py` (`area_contains`) and
+  `perception/gaze.py` (`within_gaze`) — the one piece genuinely shared between the two wedge tests
+  (hard part 5).
+- `perception/optics.py`: `Optic.boresight_azimuth_deg` deleted; `within_optic_fov` now takes the
+  boresight as a call-time parameter. New `Optic.peripheral: bool` (default `True` so every existing
+  synthetic test `Optic(...)` keeps constructing unchanged); `UNAIDED_OPTIC.peripheral=True`,
+  `BINOCULAR_OPTIC.peripheral=False`.
+- `perception/visibility.py`: `check_visibility` gains `gaze: Gaze | None = None`, evaluated first
+  in the gate chain (ahead of the cockpit mask); `within_optic_fov`'s boresight is
+  `gaze.center_azimuth_deg` when a gaze is active, else `0.0` (unchanged from the old pinned
+  default) — an optic is pointed by the head, not the airframe.
+- `perception/detection_trace.py`: new `GateOutcome.GAZE`, with a docstring note that a
+  rear-hemisphere candidate now records `GAZE` instead of `COCKPIT_MASK` once a real gaze
+  restriction is active, and why that attribution shift is accepted rather than "fixed" by
+  reordering back (hard part 3).
+- `perception/naked_eye_source.py`: `NakedEyePerceptionSource` gains `gaze: Gaze | None = None` and
+  `peripheral_stimulus_ids: frozenset[int] = frozenset()`; each candidate's effective gaze is
+  resolved through `gaze_for(candidate.object_id, self.gaze, self.peripheral_stimulus_ids,
+  UNAIDED_OPTIC)` before `check_visibility` — `UNAIDED_OPTIC` hardcoded since this channel has no
+  optic-selection mechanism yet (2D's job).
+- `logger.py`: new `_active_gaze(tasks)` (the most recently created still-`pending` `scan_area` task
+  carrying a `relative_sector`, resolved to a `Gaze` via `gaze_from_relative_sector`, or `None`) and
+  `_apply_active_gaze(sources, tasks)` (assigns it onto whichever `sources` entry is a
+  `NakedEyePerceptionSource`, a no-op for anything else). `ConsolePerceptionRunner.run_once` calls
+  `_apply_active_gaze` every poll, after reprojecting relative areas and before polling sources.
+- `todo/todo.md`: closed "Scan commands should drive naked-eye perception" with a note pointing at
+  this slice and clarifying that dwell/tier-varies-with-time is still 2C/2D's job.
+
+### Deliberate deviation from the plan's literal Implementation Plan step 9 wording
+
+Step 9 says "Default stays `FULL_GAZE`… so both are no-ops." Hard part 3 also states "2B's default
+is `FULL_GAZE` (±90°), which by construction rejects nothing the cockpit mask would not." **That
+second claim does not hold**: `FULL_GAZE`'s half-width is 90° (reusing `RelativeSector.full`'s own
+existing wedge), while the cockpit mask's `rear_cutoff_deg` is 130° (`cockpit_mask.py`) — a
+candidate between 90° and 130° off the nose that the mask would admit would be silently rejected by
+a `FULL_GAZE` default, which is not a no-op in the real cockpit envelope (only on fixtures that
+happen not to place a candidate in that 40° band).
+
+Implemented instead so the **regression gate is exact rather than approximate**: `check_visibility`'s
+`gaze` parameter default is `None` (skip the gate entirely), `NakedEyePerceptionSource.gaze` field
+default is `None`, and `logger.py`'s `_active_gaze` returns `None` (not `FULL_GAZE`) when no scan
+command is pending. `FULL_GAZE` still exists exactly as specified (a named forward-hemisphere
+constant, matching `RelativeSector.full`), but is reserved for an explicit "full" scan command
+rather than being silently assigned as the always-on default. `test_visibility.py`'s
+`test_default_gaze_is_none_and_does_not_narrow_the_cockpit_envelope` proves the distinction matters:
+a candidate at 100° azimuth is admitted under the real default (`gaze=None`) and would *not* be
+under a `FULL_GAZE` default. Flagged per the role instructions' "if you find yourself changing an
+expected value, stop and report it" — this isn't a changed test expectation, it's a design choice
+that resolves an internal inconsistency in the plan's own two statements about the same default,
+in favor of the one that is this slice's own defining, named acceptance property
+("2B must be behaviour-preserving by construction... with no command issued, the trace is identical
+to the previous slice").
+
+### Files Changed
+
+- `src/perception/gaze.py` (new) — see above.
+- `src/perception/geometry.py` — `angular_delta_deg` added.
+- `src/perception/optics.py` — boresight moved off `Optic`, `peripheral` field added.
+- `src/perception/visibility.py` — gaze gate (first in chain), boresight-from-gaze wiring.
+- `src/perception/detection_trace.py` — `GateOutcome.GAZE`.
+- `src/perception/naked_eye_source.py` — `gaze`/`peripheral_stimulus_ids` fields, per-candidate
+  `gaze_for` resolution.
+- `src/belief/attention.py` — re-imports `RelativeSector`/`_RELATIVE_SECTOR_WEDGE_DEG`/
+  `angular_delta_deg` from `perception`, instead of defining them.
+- `src/logger.py` — `_active_gaze`, `_apply_active_gaze`, wired into `ConsolePerceptionRunner.
+  run_once`.
+- `tests/test_gaze.py` (new) — unit tests for `Gaze`/`within_gaze`/`gaze_for`/
+  `gaze_from_relative_sector`.
+- `tests/test_optics.py` — `within_optic_fov` call sites updated for the new boresight parameter
+  (mandated by the plan, not an incidental rewrite); two new `Optic.peripheral` tests.
+- `tests/test_visibility.py` — gaze gate ordering/rejection/admission tests, the bypass invariant,
+  the boresight-follows-gaze test, the default-is-None regression test.
+- `tests/test_naked_eye_source.py` — gaze filtering, default-is-None, peripheral-bypass tests.
+- `tests/test_logger.py` — `_active_gaze`/`_apply_active_gaze` unit tests plus one `run_once`
+  integration test wiring a pending scan task onto a real `NakedEyePerceptionSource`.
+- `todo/todo.md` — closed the "Scan commands should drive naked-eye perception" item.
+
+### Tests Added
+
+- `test_gaze.py` (13 tests) — `Gaze`/`FULL_GAZE` shape, `within_gaze` boundary + a genuinely
+  non-axis-aligned angle (37°/42°) + a 180°-seam wraparound case, `gaze_for`'s bypass rule under
+  both optics plus a synthetic non-peripheral optic, `gaze_from_relative_sector` parametrized over
+  all four sectors.
+- `test_optics.py` — `test_unaided_optic_has_peripheral_vision`,
+  `test_binocular_optic_has_no_peripheral_vision`.
+- `test_visibility.py` — gate-order/rejection/admission (`left` gaze), `GAZE` fires ahead of
+  `COCKPIT_MASK` in the trace, the `gaze=None` default does not narrow the cockpit envelope (the
+  test that pins the deviation above), the bypass invariant (rear-cutoff candidate still rejected
+  with `gaze=None`), boresight-follows-gaze for a narrow synthetic optic.
+- `test_naked_eye_source.py` — a narrow gaze filters an off-axis candidate, the default (`gaze`
+  unset) does not filter, a peripheral-stimulus id bypasses a narrow gaze.
+- `test_logger.py` — `_active_gaze` (none pending / resolves a pending relative-sector task /
+  ignores a cancelled task / picks the most recently created pending task),
+  `_apply_active_gaze` (sets gaze only on `NakedEyePerceptionSource` instances / clears it when
+  nothing is pending), and one `run_once` integration test proving a pending `scan_area` task
+  actually reaches a real `NakedEyePerceptionSource.gaze` through the poll loop.
+
+### Checks (body-layer/)
+
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (`cd body-layer && mypy src`): pass, 39 source files, no issues
+- `pytest tests -q`: pass — **810 passed, 4 xfailed** (baseline 780 passed / 4 xfailed; net +30 new
+  tests, no existing expectation changed, xfailed count unchanged)
+
+### Notable Discoveries
+
+- **The plan's own two statements about 2B's default gaze conflict with each other** — see the
+  "Deliberate deviation" section above. Worth a plan correction before 2C, since 2C's own docs
+  ("Free scan covers 9-3 (210°) while the cockpit mask admits 8-4 (260°)") already correctly treat
+  the mask's real envelope as wider than any single gaze wedge; only the 2B default-gaze claim was
+  inconsistent with that.
+- **`Optic.peripheral` defaulting to `True`** (rather than a required field) was a deliberate,
+  minimal-footprint choice: `test_visibility.py` constructs three synthetic `Optic(...)` instances
+  (`_MASK_ONLY_OPTIC` and two `narrow_optic`s) with no `peripheral` argument; making the field
+  required would have forced touching those construction sites for a property irrelevant to what
+  they test. Only `BINOCULAR_OPTIC` sets it explicitly `False`.
+- **`_active_gaze` deliberately never reads the store's re-projected `AttentionArea`** — it reads
+  `PendingIntent.area.relative_sector` directly and looks that up in `gaze.
+  gaze_from_relative_sector`'s own body-relative wedge table, sidestepping `belief/tasks.py`'s
+  documented `task.area` staleness caveat entirely (a relative sector's *direction* never goes
+  stale, only its absolute world-bearing projection does, and this function never needs the
+  latter). Not spelled out at this level of detail in the plan; recorded here as the design call.
+- **Worktree-isolation trial (`AGENTS.md` "Where work happens", rule 2)**: ran cleanly end to end.
+  No `git` conflicts, `body-layer/.venv` created ad hoc in the worktree (mirrors the standing
+  pattern from earlier milestones — no dependency tooling existed before M1 either). The one
+  friction point: this environment's Bash tool refuses heredoc/`>>` redirection from a
+  worktree-isolated agent ("too complex to verify it stays inside the worktree") — worked around by
+  using the `Edit` tool for every test-file append instead of shell heredocs. Worth knowing for the
+  next isolated-implementer run: plan on `Edit`/`Write`, not `cat >>`, for appending large test
+  blocks.

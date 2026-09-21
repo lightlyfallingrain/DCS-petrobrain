@@ -137,6 +137,18 @@ utterances (`debug`, the default, prints escalations to stderr for session
 visibility; `null` is silent) -- neither produces spoken output, since no
 real brain exists yet.
 
+**Gaze steers the naked-eye channel (slice 2B, `plans/
+detection-cones-slice2/plan.md`)**: `ConsolePerceptionRunner.run_once`
+resolves whichever ownship-relative `scan_area` command is currently
+pending (`_active_gaze`) and assigns the resulting `perception.gaze.Gaze`
+(or `None`) onto whichever of `self.sources` is a `NakedEyePerceptionSource`
+(`_apply_active_gaze`), every poll, before the sources are polled -- this
+is what makes an F10 "scan left" command change what Petrovich can actually
+see, not just register a belief-level attention area. No command pending
+means `None` (no restriction), byte-identical to this channel's behaviour
+before 2B -- see `perception.gaze`'s own module docstring for why that is
+the explicit default rather than a named "full" gaze.
+
 **`--speech-audio` (BL-10 first slice, `plans/tts-voice-output/plan.md`)**:
 only meaningful alongside `--crew-text` (a true no-op otherwise, same
 additive posture as `--overlay`/`--f10-commands`). When set, `main()`
@@ -174,6 +186,7 @@ from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
 from belief.tasks import TaskStore
 from detection_trace_writer import DetectionTraceWriter
 from perception.detection_trace import DetectionTraceCollector
+from perception.gaze import Gaze, gaze_from_relative_sector
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -368,6 +381,11 @@ class ConsolePerceptionRunner:
                 )
             else:
                 self.enrichment.ownship = ownship
+        # 2B: resolve whatever scan sector is currently commanded and hand
+        # the naked-eye source a frozen Gaze before it polls (`_active_
+        # gaze`'s own docstring) -- a no-op for every other source, and
+        # when no scan command is pending.
+        _apply_active_gaze(self.sources, self.tasks)
         observations = [
             observation
             for source in self.sources
@@ -400,6 +418,49 @@ class ConsolePerceptionRunner:
                 file=self.output,
             )
         return observations
+
+
+def _active_gaze(tasks: TaskStore) -> Gaze | None:
+    """The `Gaze` implied by whatever ownship-relative scan sector is
+    currently commanded (`plans/detection-cones-slice2/plan.md`'s 2B,
+    closing `todo/todo.md`'s "Scan commands should drive naked-eye
+    perception") -- or `None` (no restriction, today's behaviour) when no
+    such command is pending.
+
+    Reads `PendingIntent.area.relative_sector` directly, never the store's
+    live re-projected `AttentionArea` (`ContactStore.reproject_relative_
+    areas`) -- a relative sector's *direction* is body-relative and
+    invariant under reprojection; only its absolute world-bearing
+    projection changes with ownship heading, which this function has no
+    use for (`perception.gaze.gaze_from_relative_sector` reads the same
+    body-relative wedge table `AttentionArea.wedge_deg`'s projection is
+    itself derived from). This also sidesteps `belief.tasks`'s own
+    documented staleness caveat around `task.area` (its module docstring)
+    entirely, since nothing here needs the live area at all.
+
+    The most recently created still-`pending` `scan_area` task wins when
+    more than one is pending -- a later scan command is what a player
+    issuing "scan left" then "scan right" would expect to take effect."""
+    for task in reversed(tasks.tasks):
+        if (
+            task.kind == "scan_area"
+            and task.status == "pending"
+            and task.area.relative_sector is not None
+        ):
+            return gaze_from_relative_sector(task.area.relative_sector)
+    return None
+
+
+def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> None:
+    """Assigns `_active_gaze(tasks)` onto whichever `sources` entry is a
+    `NakedEyePerceptionSource` -- a true no-op for every other source, and
+    for a `sources` list (e.g. in tests) that holds no naked-eye source at
+    all. The same write-thread/single-assignment pattern `last_t_sim`
+    already uses safely (`run_once`'s only caller)."""
+    gaze = _active_gaze(tasks)
+    for source in sources:
+        if isinstance(source, NakedEyePerceptionSource):
+            source.gaze = gaze
 
 
 def _build_sources(

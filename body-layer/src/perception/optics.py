@@ -39,8 +39,25 @@ and unexercised by any test, so those fields were cut along with the
 9K113 entries that were their only reason to exist. A future 9K113 slice
 adds them back, sourced fields intact in the research note above.
 
-`Optic.boresight_azimuth_deg` is pinned to `0.0` (dead ahead, Decision 3
-of the plan) -- there is no slew model in this slice.
+**`Optic.boresight_azimuth_deg` is deleted (slice 2B, `plans/
+detection-cones-slice2/plan.md`).** `within_optic_fov` now takes the
+boresight as a parameter instead of reading it off the optic -- an optic is
+pointed by the head, not bolted to the airframe, and slice 2B is what makes
+the head's own direction (`perception.gaze.Gaze.center_azimuth_deg`) a real
+runtime value. Every existing call passed `boresight_azimuth_deg=0.0`
+(dead ahead, no slew model), so `visibility.check_visibility` passes `0.0`
+whenever no gaze is active, reproducing the old pinned behaviour exactly.
+
+**`Optic.peripheral: bool` (slice 2B).** `UNAIDED_OPTIC` is `True`,
+`BINOCULAR_OPTIC` is `False` -- the naked eye keeps its wide,
+change-detecting peripheral channel; raised binoculars trade it away
+entirely, not just field of view. This is the one field that makes the
+two-channel eyesight model (`plans/detection-cones-slice2/plan.md` hard
+part 2a) operative today with no attention-capture channel wired: a
+candidate in `perception.gaze.gaze_for`'s `stimulus_ids` bypasses the gaze
+gate only when the active optic's `peripheral` is `True` -- see that
+function's own docstring for the invariant this does *not* relax (a bypass
+never grants vision the cockpit mask/range/LOS gates would otherwise deny).
 
 **Naked eye is now the default, not binoculars (final scope change,
 2026-09-20, same session).** `visibility.check_visibility`'s `optic`
@@ -98,14 +115,20 @@ class Optic:
     `fov_half_angle_deg` is `None` for an optic with no FOV restriction
     (the naked eye -- the cockpit occlusion mask is its only envelope);
     `BINOCULAR_OPTIC` below is the first optic in this table to carry a
-    real value."""
+    real value.
+
+    `peripheral` (slice 2B) is `True` iff this optic retains a wide,
+    change-detecting peripheral channel alongside its focused view --
+    module docstring."""
 
     name: str
     presence_range_mult: float
     class_range_mult: float
     type_range_mult: float
     fov_half_angle_deg: float | None
-    boresight_azimuth_deg: float = 0.0
+    #: Defaults `True` so every existing synthetic test `Optic(...)` still
+    #: constructs unchanged -- only `BINOCULAR_OPTIC` sets this `False`.
+    peripheral: bool = True
 
 
 #: 1.0 on every tier, no FOV restriction -- the cockpit mask is the naked
@@ -119,6 +142,7 @@ UNAIDED_OPTIC: Final[Optic] = Optic(
     class_range_mult=1.0,
     type_range_mult=1.0,
     fov_half_angle_deg=None,
+    peripheral=True,
 )
 
 #: **No longer the default -- a deliberate, narrower, raised-to-the-eyes
@@ -152,26 +176,36 @@ BINOCULAR_OPTIC: Final[Optic] = Optic(
     class_range_mult=3.50,
     type_range_mult=3.00,
     fov_half_angle_deg=4.25,
+    peripheral=False,
 )
 
 
-def within_optic_fov(optic: Optic, azimuth_deg: float, elevation_deg: float) -> bool:
+def within_optic_fov(
+    optic: Optic,
+    boresight_azimuth_deg: float,
+    azimuth_deg: float,
+    elevation_deg: float,
+) -> bool:
     """True if `(azimuth_deg, elevation_deg)` -- a body-relative direction,
     same convention as `perception.geometry.BodyRelativeDirection` -- falls
-    inside `optic`'s field of view.
+    inside `optic`'s field of view, centred on `boresight_azimuth_deg`
+    (module docstring's "an optic is pointed by the head" note -- the
+    caller supplies where the head/eyes currently point, typically
+    `perception.gaze.Gaze.center_azimuth_deg`, or `0.0` when no gaze is
+    active).
 
     `optic.fov_half_angle_deg is None` means "no restriction," always
     `True` (`UNAIDED_OPTIC`). Otherwise compares the true angular
     separation between `(azimuth_deg, elevation_deg)` and
-    `(optic.boresight_azimuth_deg, 0.0)` against the half-angle --
-    small-angle-safe great-circle-style separation via the standard
-    spherical law of cosines, not a flat azimuth/elevation box (an optic's
-    circular eyepiece does not admit a target only because it clears an
-    azimuth check and an elevation check independently)."""
+    `(boresight_azimuth_deg, 0.0)` against the half-angle -- small-angle-
+    safe great-circle-style separation via the standard spherical law of
+    cosines, not a flat azimuth/elevation box (an optic's circular eyepiece
+    does not admit a target only because it clears an azimuth check and an
+    elevation check independently)."""
     if optic.fov_half_angle_deg is None:
         return True
 
-    az_delta_rad = math.radians(azimuth_deg - optic.boresight_azimuth_deg)
+    az_delta_rad = math.radians(azimuth_deg - boresight_azimuth_deg)
     el_rad = math.radians(elevation_deg)
     boresight_el_rad = 0.0
 

@@ -141,6 +141,13 @@ Each `poll()`:
    whether to trust this reference (subject to its own expiry check, `belief.
    decay.object_id_continuity_valid`) -- this module only ever reports "most
    of this report's members were previously part of this other report."
+7. **Gaze filters every candidate before it reaches `check_visibility`**
+   (`plans/detection-cones-slice2/plan.md`'s 2B). `self.gaze`/`self.
+   peripheral_stimulus_ids` are resolved per candidate through `perception.
+   gaze.gaze_for` -- see those fields' own docstrings. Both default to a
+   true no-op (`None`/empty), so a test that constructs this source
+   directly and never touches either field behaves exactly as it did
+   before 2B.
 """
 
 from __future__ import annotations
@@ -157,6 +164,7 @@ from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
 from perception.detection_trace import DetectionTraceCollector
+from perception.gaze import Gaze, gaze_for
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.optics import UNAIDED_OPTIC
 from perception.reporting_names import reporting_name_for
@@ -275,6 +283,27 @@ class NakedEyePerceptionSource:
     #: object_ids and the emitted `Observation.id` once clustering and
     #: emission are done (see `poll()`).
     trace_sink: DetectionTraceCollector | None = None
+    #: Slice 2B's gaze filter (`plans/detection-cones-slice2/plan.md`,
+    #: `perception.gaze`) -- `None` (the default) means no restriction,
+    #: exactly this channel's behaviour before 2B. `logger.py`'s poll loop
+    #: is the only writer, assigning a frozen `Gaze` each tick from
+    #: whatever ownship-relative scan sector is currently commanded (`None`
+    #: again when nothing is commanded) -- the same single-assignment,
+    #: write-thread/read-thread pattern `last_t_sim` already uses safely.
+    #: A test that constructs this source directly and never sets `gaze`
+    #: gets the unrestricted default, same as every pre-2B test.
+    gaze: Gaze | None = None
+    #: The peripheral channel's output (hard parts 2a/4 of the plan) --
+    #: always empty until the attention-capture channel exists (out of
+    #: scope this slice); resolved per candidate through `perception.gaze.
+    #: gaze_for` before each `check_visibility` call below, so a member of
+    #: this set clears the gaze gate at any azimuth *only* when the active
+    #: optic still has peripheral vision (`UNAIDED_OPTIC` -- this channel
+    #: has no optic-selection mechanism yet, so `gaze_for` is always called
+    #: with `UNAIDED_OPTIC`).
+    peripheral_stimulus_ids: frozenset[int] = field(
+        default_factory=frozenset, repr=False
+    )
 
     _previously_visible_ids: frozenset[int] = field(
         default_factory=frozenset, init=False, repr=False
@@ -314,11 +343,22 @@ class NakedEyePerceptionSource:
 
         visible: list[tuple[WorldObjectCandidate, VisibilityResult]] = []
         for candidate in candidates:
+            # UNAIDED_OPTIC -- this channel has no optic-selection mechanism
+            # yet (2D's job), so `gaze_for`'s peripheral-bypass rule is
+            # always evaluated against the naked eye's own peripheral
+            # vision (module docstring on `peripheral_stimulus_ids`).
+            candidate_gaze = gaze_for(
+                candidate.object_id,
+                self.gaze,
+                self.peripheral_stimulus_ids,
+                UNAIDED_OPTIC,
+            )
             result = check_visibility(
                 ownship_state,
                 candidate,
                 self.world_model_conn,
                 self.theatre,
+                gaze=candidate_gaze,
                 trace=self.trace_sink,
             )
             if result is not None:
