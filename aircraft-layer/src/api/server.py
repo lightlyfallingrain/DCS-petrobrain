@@ -99,6 +99,17 @@ the body/brain process, on either Windows or Mac (compute topology note in
   unconfigured -- there is no live effector here to be "not configured,"
   only an always-valid, possibly-empty queue.
 
+- `GET /unit_velocity/latest` -> the most recent `UnitVelocitySnapshot`
+  (`plans/movement-detection/plan.md` Stage 1) as JSON, or JSON `null` on
+  the same "not an error" basis as every other `/latest` endpoint. A
+  **separate endpoint from `/world_objects/latest`, not merged into it**
+  (that plan's Decision 2): merging would mean either holding a world-objects
+  snapshot back until a matching velocity snapshot arrives, or emitting one
+  timestamp for two feeds whose sim-clock stamps genuinely differ (5 Hz vs.
+  1 Hz polls) -- silently destroying the provenance the dual-clock schema
+  exists to preserve. The join (by `unit_name`, within a skew bound) is
+  `perception.motion`'s job on the body-layer side, not this layer's.
+
 A `GET /telemetry/since/{timestamp}` delta-query endpoint was implemented
 and then dropped (stage 5): its cursor filtered on receipt time, not
 content, so during a paused mission it returned every motionless sample as
@@ -131,6 +142,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     TelemetryCache,
+    UnitVelocityCache,
     WorldObjectsCache,
 )
 from collector.command_sender import CommandSender, CommandSendError, SearchMode
@@ -144,6 +156,7 @@ DEFAULT_PORT = 7791
 
 _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
+_UNIT_VELOCITY_LATEST_PATH = "/unit_velocity/latest"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
@@ -164,6 +177,13 @@ def _handle_telemetry_latest(cache: TelemetryCache) -> dict[str, Any] | None:
 
 def _handle_world_objects_latest(
     cache: WorldObjectsCache,
+) -> dict[str, Any] | None:
+    snapshot = cache.latest()
+    return None if snapshot is None else snapshot.to_dict()
+
+
+def _handle_unit_velocity_latest(
+    cache: UnitVelocityCache,
 ) -> dict[str, Any] | None:
     snapshot = cache.latest()
     return None if snapshot is None else snapshot.to_dict()
@@ -196,6 +216,7 @@ def _make_handler(
     text_sender: TextOverlaySender | None,
     command_sender: CommandSender | None,
     audio_sender: AudioPlaybackSender | None,
+    unit_velocity_cache: UnitVelocityCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -206,6 +227,11 @@ def _make_handler(
             if path == _WORLD_OBJECTS_LATEST_PATH:
                 self._respond_json(
                     200, _handle_world_objects_latest(world_objects_cache)
+                )
+                return
+            if path == _UNIT_VELOCITY_LATEST_PATH:
+                self._respond_json(
+                    200, _handle_unit_velocity_latest(unit_velocity_cache)
                 )
                 return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
@@ -384,16 +410,17 @@ class TelemetryAPIServer:
         command_sender: CommandSender | None = None,
         f10_command_queue: F10CommandQueue | None = None,
         audio_sender: AudioPlaybackSender | None = None,
+        unit_velocity_cache: UnitVelocityCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
-        # `petrovich_wheel_cache`/`f10_command_queue` default to a fresh,
-        # never-populated cache/queue rather than being required -- keeps
-        # every existing `TelemetryAPIServer(cache, host=..., port=...)`
-        # call site (tests included) working unchanged; the corresponding
-        # `/latest` (or `/f10_commands/poll`) endpoint on such a server
-        # just always answers `null` (or `[]`), same as an empty cache
-        # would. `text_sender`/`command_sender`/`audio_sender` default to
-        # `None` rather than a real sender for the same reason --
+        # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`
+        # default to a fresh, never-populated cache/queue rather than being
+        # required -- keeps every existing `TelemetryAPIServer(cache,
+        # host=..., port=...)` call site (tests included) working unchanged;
+        # the corresponding `/latest` (or `/f10_commands/poll`) endpoint on
+        # such a server just always answers `null` (or `[]`), same as an
+        # empty cache would. `text_sender`/`command_sender`/`audio_sender`
+        # default to `None` rather than a real sender for the same reason --
         # `/text/push`/`/command/petrovich_search`/`/audio/play` answer
         # `503` rather than crashing when they aren't configured.
         self._cache = cache
@@ -414,6 +441,11 @@ class TelemetryAPIServer:
         )
         self._f10_command_queue = (
             f10_command_queue if f10_command_queue is not None else F10CommandQueue()
+        )
+        self._unit_velocity_cache = (
+            unit_velocity_cache
+            if unit_velocity_cache is not None
+            else UnitVelocityCache()
         )
         self._text_sender = text_sender
         self._command_sender = command_sender
@@ -454,6 +486,7 @@ class TelemetryAPIServer:
                 self._text_sender,
                 self._command_sender,
                 self._audio_sender,
+                self._unit_velocity_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

@@ -12,7 +12,7 @@ table"; Stage 1's `SCOPE_UNCERTAINTY_M`/`GATE_GROWTH_RATE_MPS` in
 `association_over_time.py` are the precedent for this kind of documented,
 revisitable constant).
 
-Three of the four half-lives are consumed. `POSITION_HALF_LIFE_S` (and
+Four of the five half-lives are now consumed. `POSITION_HALF_LIFE_S` (and
 `LOST_THRESHOLD_S` derived from it) drives `certainty_of` below.
 `IDENTITY_HALF_LIFE_S` drives `classification_confidence_at`
 (`plans/classification-refinement/plan.md` Stage 10's follow-up fix, once
@@ -22,18 +22,27 @@ first paragraph promised identity would eventually key off, keyed off
 `ClassificationBelief.established_sim` rather than `contact.last_seen_sim`
 -- identity confidence decays from when the classification claim was last
 confirmed, not from when the contact itself was last observed at all.
-`MOTION_HALF_LIFE_S` and
-`GENERAL_AREA_HALF_LIFE_S` remain unconsumed -- `Contact` does not yet track
-a separate motion estimate or general-area field to decay independently
-(that is BL-3/BL-4 territory: world enrichment adds `general_area`,
-attention adds a motion estimate). `OBJECT_ID_MEMORY_S` (`plans/
-contact-duplication-ambiguity-runaway/plan.md`) is not a fifth independent
+`MOTION_HALF_LIFE_S` **is now consumed** (`plans/movement-detection/
+plan.md` Stage 3) by `motion_confidence_at` below, the same shape
+`classification_confidence_at` already has -- it sat in this table unused
+since BL-2 with a docstring explicitly reserving it for exactly this.
+`GENERAL_AREA_HALF_LIFE_S` remains unconsumed -- `Contact` does not yet
+track a general-area field to decay independently (BL-3/world-enrichment
+territory: `general_area`). `OBJECT_ID_MEMORY_S` (`plans/
+contact-duplication-ambiguity-runaway/plan.md`) is not a sixth independent
 half-life but a reuse of `IDENTITY_HALF_LIFE_S` under a second name, drawn
 straight from this same table rather than an ad hoc timeout -- see its own
-docstring below. Both `MOTION_HALF_LIFE_S`/`GENERAL_AREA_HALF_LIFE_S`
-constants are declared now so the *one table* this module's docstring promises is complete from the start,
-and so BL-3/BL-4 extend this table rather than starting a second one
+docstring below. `GENERAL_AREA_HALF_LIFE_S` stays declared even unconsumed
+so the *one table* this module's docstring promises remains complete, and
+so a future BL-3 pass extends this table rather than starting a second one
 elsewhere (the plan's "Complicates BL-4" second-order-effect note).
+
+`MOTION_STOP_CONFIRM_S` (`plans/movement-detection/plan.md` Stage 3,
+`belief.motion.fold_motion`'s demotion gate) is declared here, not in
+`belief/motion.py` -- it is a decay-adjacent timing constant in the same
+family as `LOST_THRESHOLD_S`/`OBJECT_ID_MEMORY_S` above, not part of the
+fold *rule* itself, and this keeps every named-seconds constant this module
+promises to hold in one table.
 
 All functions here are pure functions of `(contact, now_sim)` -- no ticker,
 no mutation, no wall-clock. `ContactStore.tick` (`contacts.py`) is the only
@@ -70,8 +79,24 @@ POSITION_HALF_LIFE_S: Final[float] = 30.0
 #: Medium decay: which way it was moving. Slower than exact position (a
 #: heading estimate stays plausible longer than a point position does) but
 #: faster than "roughly where it is" -- per the concept doc's own ordering.
-#: Not yet consumed (no motion estimate exists on `Contact` yet; BL-4).
+#: Consumed by `motion_confidence_at` below (`plans/movement-detection/
+#: plan.md` Stage 3), decaying `Contact.motion.confidence` since
+#: `MotionBelief.established_sim` -- the identical shape
+#: `classification_confidence_at` already has for identity.
 MOTION_HALF_LIFE_S: Final[float] = 60.0
+
+#: How long a `"moving"` claim must see continuous sub-threshold
+#: (`apparent_motion=False`) evidence before `belief.motion.fold_motion`
+#: actually demotes it to `"stopped"` -- the asymmetric promote-fast/
+#: demote-slow rule `belief.motion`'s own module docstring states in full.
+#: Uncalibrated (same debt class as `optics.BINOCULAR_OPTIC`'s
+#: stabilisation penalty and `perception.motion.MOTION_COCKPIT_PENALTY`):
+#: named, isolated, and movable in one place. Chosen as a small multiple of
+#: a naked-eye poll interval -- long enough that one noisy sub-threshold
+#: reading near the gate's own boundary doesn't immediately flip a genuinely
+#: still-moving contact to "stopped," short enough that a crew member does
+#: not keep hearing "moving" long after a vehicle has visibly halted.
+MOTION_STOP_CONFIRM_S: Final[float] = 5.0
 
 #: Medium/slow decay: the general area, independent of the exact point.
 #: Slower than motion -- "somewhere near that village" stays true long after
@@ -227,6 +252,27 @@ def cardinality_confidence_at(contact: Contact, now_sim: float) -> float:
     return contact.cardinality.confidence * math.pow(
         0.5, elapsed_s / IDENTITY_HALF_LIFE_S
     )
+
+
+def motion_confidence_at(contact: Contact, now_sim: float) -> float:
+    """Numeric motion confidence, `(0, 1]`, exponentially decaying with a
+    half-life of `MOTION_HALF_LIFE_S` since `contact.motion.established_sim`
+    -- `classification_confidence_at`'s direct twin (`plans/
+    movement-detection/plan.md` Stage 3), reusing the same "decay only the
+    number" shape: `contact.motion.state` never decays, only `confidence`
+    does. **Caller's responsibility to check `contact.motion is not None`
+    first** -- unlike `classification`/`cardinality`, a contact's motion
+    belief can genuinely stay `None` for its whole life (see `belief.motion`'s
+    module docstring on why it is not seeded at founding), so this function
+    has no honest answer to give for one and does not attempt to fabricate
+    one. Pure, like every other function in this module -- no ticker, no
+    mutation, no wall-clock."""
+    assert contact.motion is not None, (
+        "motion_confidence_at requires contact.motion to be set -- callers "
+        "must check for None first (see this function's own docstring)"
+    )
+    elapsed_s = max(0.0, now_sim - contact.motion.established_sim)
+    return contact.motion.confidence * math.pow(0.5, elapsed_s / MOTION_HALF_LIFE_S)
 
 
 def object_id_continuity_valid(contact: Contact, now_sim: float) -> bool:

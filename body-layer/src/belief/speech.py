@@ -607,6 +607,16 @@ def _contact_report_text(facts: dict[str, object]) -> str:
     if isinstance(semantic, list) and semantic:
         best = max(semantic, key=lambda fact: fact["confidence"])
         text += f" {_round_enrichment_fragment(best['text'])}"
+    motion = facts.get("motion")
+    # `plans/movement-detection/plan.md` Stage 4 -- one trimmable clause,
+    # deliberately last and deliberately thin (this milestone's value is
+    # the belief and the event, not wording iteration). Only `"moving"` is
+    # ever spoken: a crew member volunteers motion when there IS motion to
+    # report, not a "stationary" clause on every single contact report --
+    # the semantic-fragment/count-clause precedent above (both omitted
+    # rather than stated when there's nothing notable to add).
+    if isinstance(motion, dict) and motion.get("state") == "moving":
+        text += ", moving"
     text += "."
     return text
 

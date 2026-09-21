@@ -109,6 +109,28 @@ class DetectionTrace:
     achieved_tier: str | None = None
     cluster_member_object_ids: tuple[int, ...] | None = None
     observation_id: str | None = None
+    #: The movement gate's own inputs/verdict (`perception.motion`, `plans/
+    #: movement-detection/plan.md`), annotated by `NakedEyePerceptionSource.
+    #: poll` via `annotate_motion` below, independently of
+    #: `annotate_admission` -- the motion gate runs (or doesn't, when
+    #: `velocity is None`) for every admitted candidate regardless of
+    #: whether it later makes it into an emitted cluster, so this is set
+    #: whenever a velocity sample was available to test, not only on
+    #: `ADMITTED` entries. `None` on every field when the candidate had no
+    #: velocity sample this poll (unknown, not "not moving" -- see
+    #: `motion.py`'s own module docstring) or the trace sink never got the
+    #: chance to see it (e.g. a candidate rejected before the movement gate
+    #: runs). `speed_mps`/`perp_speed_mps` are `|v|`/`|v_perp|`;
+    #: `angular_rate_rad_s` is the computed rate (`None` when the cheap
+    #: early-out alone decided the verdict, since the full vector projection
+    #: was never computed); `skew_s` is the velocity sample's time offset
+    #: from the world-objects poll it was joined against.
+    motion_speed_mps: float | None = None
+    motion_perp_speed_mps: float | None = None
+    motion_angular_rate_rad_s: float | None = None
+    motion_threshold_rad_s: float | None = None
+    motion_skew_s: float | None = None
+    apparent_motion: bool | None = None
 
 
 @dataclass
@@ -147,3 +169,32 @@ class DetectionTraceCollector:
             return
         entry.cluster_member_object_ids = cluster_member_object_ids
         entry.observation_id = observation_id
+
+    def annotate_motion(
+        self,
+        object_id: int,
+        *,
+        speed_mps: float | None,
+        perp_speed_mps: float | None,
+        angular_rate_rad_s: float | None,
+        threshold_rad_s: float,
+        skew_s: float | None,
+        apparent_motion: bool | None,
+    ) -> None:
+        """Fill in the movement gate's inputs/verdict on `object_id`'s most
+        recently recorded entry (`perception.motion`, `plans/
+        movement-detection/plan.md`) -- a no-op if that entry doesn't exist.
+        Unlike `annotate_admission`, not restricted to `ADMITTED` entries:
+        the movement gate only ever runs on already-admitted (`visible`)
+        candidates in `NakedEyePerceptionSource.poll`, so the outcome is
+        always `ADMITTED` in practice, but this method itself does not
+        assume that."""
+        entry = self._last_by_object_id.get(object_id)
+        if entry is None:
+            return
+        entry.motion_speed_mps = speed_mps
+        entry.motion_perp_speed_mps = perp_speed_mps
+        entry.motion_angular_rate_rad_s = angular_rate_rad_s
+        entry.motion_threshold_rad_s = threshold_rad_s
+        entry.motion_skew_s = skew_s
+        entry.apparent_motion = apparent_motion

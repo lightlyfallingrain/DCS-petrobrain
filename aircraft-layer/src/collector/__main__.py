@@ -27,10 +27,16 @@ for `POST /audio/play`, this pipeline's third inbound/write path -- unlike
 those two, it has no host/port (it plays audio directly on this box via
 `winsound`, no loopback UDP peer involved).
 
+A `UnitVelocityReceiver` (`plans/movement-detection/plan.md` Stage 1) is
+opened and run on its own background thread the same way, feeding a
+`UnitVelocityCache` that `GET /unit_velocity/latest` reads -- the second
+channel running the Hook-to-collector direction (after the F10 one above).
+
 Usage: python -m collector [--host HOST] [--port PORT] [--api-host HOST]
        [--api-port PORT] [--text-overlay-host HOST] [--text-overlay-port PORT]
        [--command-host HOST] [--command-port PORT]
        [--f10-host HOST] [--f10-port PORT]
+       [--unit-velocity-host HOST] [--unit-velocity-port PORT]
        [--dump-interval SECONDS] [--debug]
 """
 
@@ -50,6 +56,7 @@ from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
     TelemetryCache,
+    UnitVelocityCache,
     WorldObjectsCache,
 )
 from collector.command_sender import DEFAULT_HOST as COMMAND_DEFAULT_HOST
@@ -62,6 +69,9 @@ from collector.server import DEFAULT_HOST, DEFAULT_PORT, CollectorServer
 from collector.text_sender import DEFAULT_HOST as TEXT_OVERLAY_DEFAULT_HOST
 from collector.text_sender import DEFAULT_PORT as TEXT_OVERLAY_DEFAULT_PORT
 from collector.text_sender import TextOverlaySender
+from collector.unit_velocity_receiver import DEFAULT_HOST as UNIT_VELOCITY_DEFAULT_HOST
+from collector.unit_velocity_receiver import DEFAULT_PORT as UNIT_VELOCITY_DEFAULT_PORT
+from collector.unit_velocity_receiver import UnitVelocityReceiver
 
 
 def main() -> None:
@@ -112,6 +122,17 @@ def main() -> None:
         help="F10 radio-menu Hook script's UDP sender port",
     )
     parser.add_argument(
+        "--unit-velocity-host",
+        default=UNIT_VELOCITY_DEFAULT_HOST,
+        help="mission-telemetry Hook script's UDP sender host (loopback)",
+    )
+    parser.add_argument(
+        "--unit-velocity-port",
+        type=int,
+        default=UNIT_VELOCITY_DEFAULT_PORT,
+        help="mission-telemetry Hook script's UDP sender port",
+    )
+    parser.add_argument(
         "--dump-interval",
         type=float,
         default=1.0,
@@ -151,6 +172,15 @@ def main() -> None:
     f10_command_receiver_thread.start()
     audio_sender = AudioPlaybackSender()
     audio_sender.open()
+    unit_velocity_cache = UnitVelocityCache()
+    unit_velocity_receiver = UnitVelocityReceiver(
+        unit_velocity_cache, host=args.unit_velocity_host, port=args.unit_velocity_port
+    )
+    unit_velocity_receiver.open()
+    unit_velocity_receiver_thread = threading.Thread(
+        target=unit_velocity_receiver.serve_forever, daemon=True
+    )
+    unit_velocity_receiver_thread.start()
 
     collector = CollectorServer(
         cache,
@@ -175,6 +205,7 @@ def main() -> None:
         command_sender=command_sender,
         f10_command_queue=f10_command_queue,
         audio_sender=audio_sender,
+        unit_velocity_cache=unit_velocity_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)
@@ -194,6 +225,7 @@ def main() -> None:
         command_sender.close()
         f10_command_receiver.close()
         audio_sender.close()
+        unit_velocity_receiver.close()
 
 
 if __name__ == "__main__":

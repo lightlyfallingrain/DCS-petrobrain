@@ -72,6 +72,7 @@ from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
+    CONTACT_MOTION_CHANGED,
     EVENT_COOLDOWN_S,
     Event,
     EventKind,
@@ -79,7 +80,9 @@ from belief.events import (
     cardinality_event,
     classification_event,
     lifecycle_event_kind,
+    motion_event_kind,
 )
+from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
 from perception.geometry import GeoPosition
 from perception.source import Observation
@@ -190,6 +193,21 @@ class Contact:
     own direct mark, is exactly the kind of transition this comparison
     catches.
 
+    `motion` is `plans/movement-detection/plan.md` Stage 3's addition:
+    the contact's folded motion belief (`belief.motion.MotionBelief`, via
+    `fold_motion`) -- unlike `classification`/`cardinality`, this is
+    `None`-able for the contact's whole life, not just before founding: only
+    the naked-eye channel supplies motion evidence at all, so a contact seen
+    solely through the scope/hybrid channel never gets a motion percept and
+    stays honestly `None` (see `belief.motion`'s module docstring).
+    `motion_pending_stop_since_sim` is `fold_motion`'s own demotion-countdown
+    state, the asymmetric-fold twin of `classification_lockout_until_sim`/
+    `cardinality_lockout_until_sim` above.
+
+    `last_emitted_motion` is `last_emitted_cardinality`'s twin, for `belief.
+    events.motion_event_kind`'s comparison -- written only by `ContactStore.
+    tick`, never by `record`.
+
     `last_event_emitted_sim` is BL-4's per-contact-per-kind emission
     cooldown state (`belief.events.EVENT_COOLDOWN_S`): the `t_sim` at which
     an event of each `EventKind` was last actually appended to the log for
@@ -234,6 +252,9 @@ class Contact:
     #: `last_emitted_classification`, for `belief.events.cardinality_event`'s
     #: comparison -- written only by `ContactStore.tick`, never by `record`.
     last_emitted_cardinality: tuple[int, float] | None = None
+    motion: MotionBelief | None = None
+    motion_pending_stop_since_sim: float | None = None
+    last_emitted_motion: MotionState | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
 
     def record(self, percept: Percept) -> None:
@@ -275,6 +296,14 @@ class Contact:
                 self.cardinality_lockout_until_sim = (
                     percept.t_sim + CARDINALITY_CONTRADICTION_LOCKOUT_S
                 )
+        motion_outcome = fold_motion(
+            self.motion,
+            percept.apparent_motion,
+            percept.t_sim,
+            self.motion_pending_stop_since_sim,
+        )
+        self.motion = motion_outcome.motion
+        self.motion_pending_stop_since_sim = motion_outcome.pending_stop_since_sim
         self.contributing_observation_ids.append(percept.observation_id)
         self.last_seen_sim = percept.t_sim
         self._extend_or_open_span(percept)
@@ -311,6 +340,14 @@ class Contact:
                 if percept.count_bucket is not None
                 else new_cardinality_belief(OP_1UNIT, percept.t_sim)
             ),
+            # `held=None` -- `fold_motion` adopts the founding percept's own
+            # motion evidence outright (its own "no prior claim to demote
+            # away from" rule), or stays `None` when the founding percept
+            # carries no motion evidence at all (`belief.motion`'s module
+            # docstring).
+            motion=fold_motion(
+                None, percept.apparent_motion, percept.t_sim, None
+            ).motion,
             first_seen_sim=percept.t_sim,
             last_seen_sim=percept.t_sim,
         )
@@ -637,15 +674,16 @@ class ContactStore:
         are deliberately independent).
 
         **Ordering, per contact: lifecycle event first, then classification,
-        then cardinality, then attention** (`plans/classification-refinement/
-        plan.md` Stage 3, extended by `plans/bl4-attention-events/plan.md`,
-        then `plans/group-contact-model/plan.md` Stage 4b) -- a
-        `CONTACT_DETECTED` must precede that same contact's first
-        classification refinement or attention change, never follow it.
-        Cardinality sits between classification and attention since both
-        cardinality and classification are identity-shaped beliefs about
-        what/how-many, and attention's own event should still see the
-        contact's fully up-to-date facts first.
+        then cardinality, then motion, then attention** (`plans/
+        classification-refinement/plan.md` Stage 3, extended by `plans/
+        bl4-attention-events/plan.md`, then `plans/group-contact-model/
+        plan.md` Stage 4b, then `plans/movement-detection/plan.md` Stage 3)
+        -- a `CONTACT_DETECTED` must precede that same contact's first
+        classification refinement, cardinality/motion change, or attention
+        change, never follow it. Cardinality and motion both sit ahead of
+        attention since all three are identity/state-shaped beliefs about
+        what/how-many/whether-moving, and attention's own event should still
+        see the contact's fully up-to-date facts first.
 
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
@@ -716,6 +754,27 @@ class ContactStore:
                 )
                 contact.last_event_emitted_sim[CONTACT_CARDINALITY_CHANGED] = now_sim
             contact.last_emitted_cardinality = current_cardinality
+
+            current_motion: MotionState | None = (
+                contact.motion.state if contact.motion is not None else None
+            )
+            motion_kind = motion_event_kind(contact.last_emitted_motion, current_motion)
+            if motion_kind is not None and self._cooldown_elapsed(
+                contact, CONTACT_MOTION_CHANGED, now_sim
+            ):
+                self._events.append(
+                    Event(
+                        id=self._new_event_id(),
+                        contact_id=contact.id,
+                        kind=CONTACT_MOTION_CHANGED,
+                        t_sim=now_sim,
+                        certainty=current_certainty,
+                        previous_motion=contact.last_emitted_motion,
+                        motion=current_motion,
+                    )
+                )
+                contact.last_event_emitted_sim[CONTACT_MOTION_CHANGED] = now_sim
+            contact.last_emitted_motion = current_motion
 
             current_attention, _area_id = effective_attention(
                 contact.attention, contact.last_position, self.areas

@@ -34,6 +34,17 @@ polls for the same object is unconfirmed** (an open question in the same
 research doc, resolvable only by a live probe) -- treat it as a
 within-one-poll identifier only until verified live.
 
+`unit_name` (`plans/movement-detection/plan.md` Decision 1) is
+`LoGetWorldObjects`'s own `UnitName` field, passed through unconverted.
+Added as the **join key** between this feed and the unit-velocity feed
+(`unit_velocity.py`): the two environments (`LoGetWorldObjects` and
+mission-scripting) share no other identifier -- this object's own `pairs()`
+key is an export-side index whose cross-poll stability is still unconfirmed
+(see `object_id`'s own docstring below), while mission scripting keys units
+by `Unit:getName()`, which returns the same string as `UnitName`. `None`
+when the object carries no `UnitName` (scenery/statics may not) -- never
+coerced to `""`, same tri-state discipline as `is_ownship`.
+
 `is_ownship` identifies the player's own aircraft among `LoGetWorldObjects`'s
 unfiltered/global entries -- that table includes ownship itself (confirmed,
 see finding 10's forum evidence above), and prior to this field the only way
@@ -91,6 +102,11 @@ class WorldObjectSample:
     altitude_m: float
     heading_true_rad: float
     is_ownship: bool | None
+    #: Defaults `None` so every existing `WorldObjectSample(...)` call site --
+    #: test fixtures included -- keeps compiling; only `Export.lua` deployed
+    #: at/after `EXPORT_SCRIPT_VERSION`'s movement-detection bump actually
+    #: supplies a real value (module docstring).
+    unit_name: str | None = None
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> WorldObjectSample:
@@ -136,6 +152,17 @@ class WorldObjectSample:
                 f"field 'is_ownship' must be a boolean or null, got {is_ownship_raw!r}"
             )
 
+        unit_name_raw = data.get("unit_name")
+        unit_name: str | None
+        if unit_name_raw is None:
+            unit_name = None
+        elif isinstance(unit_name_raw, str):
+            unit_name = unit_name_raw
+        else:
+            raise WorldObjectParseError(
+                f"field 'unit_name' must be a string or null, got {unit_name_raw!r}"
+            )
+
         return WorldObjectSample(
             object_id=int(object_id_raw),
             object_type=object_type_raw,
@@ -145,6 +172,7 @@ class WorldObjectSample:
             altitude_m=_require_number(data, "alt_m"),
             heading_true_rad=_require_number(data, "heading_true_rad"),
             is_ownship=is_ownship,
+            unit_name=unit_name,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -157,6 +185,7 @@ class WorldObjectSample:
             "altitude_m": self.altitude_m,
             "heading_true_rad": self.heading_true_rad,
             "is_ownship": self.is_ownship,
+            "unit_name": self.unit_name,
         }
 
 

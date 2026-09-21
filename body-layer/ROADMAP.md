@@ -689,7 +689,18 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
   spoken id. Typed `watch <id>` readback unchanged.
 
-- [>] **Movement detection — design settled 2026-09-20 (user), not built.** The diagram
+- [~] **Movement detection — design settled 2026-09-20 (user), implemented 2026-09-22
+  (`plans/movement-detection/plan.md`), pending live acceptance.** The velocity transport
+  (`petrobrain-mission-telemetry-hook.lua` + `GET /unit_velocity/latest`), the apparent-angular-rate
+  gate (`perception/motion.py`), the belief fold and event (`belief/motion.py`,
+  `CONTACT_MOTION_CHANGED`), and the reporting surface (`get_situation`'s `facts["motion"]`, one
+  trimmable clause in contact-report speech) are all built and unit/fixture-tested — 887 passing
+  before this work, 929 after, 0 regressions. Stage 0 part 3's Mac-answerable benchmark measured
+  parse->join->gate at N=300 units at ~1 ms, confirming the plan's expectation that this cost is
+  irrelevant next to `check_visibility`'s own. **Not yet flown**: Stage 0 parts 1-2's own
+  self-measurement (the Hook's `os.clock()`/`dcs.log` unit_count/bridge_call_ms pair, and the
+  `timer.getTime()`/`LoGetModelTime()` clock-identity assumption Decision 3's skew bound depends on)
+  only answer themselves on a live sortie. The diagram
   (`docs/concept/STATE_TRANSITIONS.md`) lists `moving / stopped` as a reporting trigger, and
   `docs/concept/threat-levels.md` uses motion as a danger criterion. Nothing in the built event set
   can produce either. The user's design, recorded here so it is not re-derived:
