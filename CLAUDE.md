@@ -103,6 +103,36 @@ knowledge graph honest".
 
 Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list (`world-model/CLAUDE.md`, `aircraft-layer/CLAUDE.md`, or `body-layer/CLAUDE.md`; each has its own equally-canonical list, ruff format/check + mypy --strict + pytest in each case). A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
 
+## Talking to the user
+
+The user is the **product owner**, not the orchestrator. Write for someone who sets direction and
+flies the aircraft, not for someone tracking the build.
+
+**Default to a short answer.** Lead with the thing they have to act on. Most turns need a few lines.
+
+**Surface, in roughly this order:**
+- **Decisions needed** — a real fork, with a recommendation.
+- **Findings that change direction** — a measurement that contradicts the model, a defect with
+  consequences, something that invalidates an earlier assumption.
+- **What they must do** — fly it, run it on Windows, check a branch. Name the branch.
+- **Status, in one line** — done / in review / blocked on X.
+
+**Keep internal** unless it changes their decision: how something was verified, which agent did
+what, commit hashes, test counts beyond pass/fail, intermediate reasoning, procedure followed,
+self-corrections about process. These matter to the work and are recorded in commits, plans and
+research notes — which is where they belong. Repeating them in chat is not transparency, it is
+noise that buries the one line that mattered.
+
+**Detail is earned, not default.** Give it when the user asks, when a finding genuinely rests on
+it, or when they cannot judge a recommendation without it. A number that changes their mind is
+signal; a number that shows the work is not.
+
+**Do not narrate process.** "I'll dispatch a reviewer, then DoD" tells them nothing they can use.
+Say what came back and what it means.
+
+**Still say the uncomfortable thing.** Brevity is not the same as smoothing. A real risk, a wrong
+earlier claim, or a disagreement with a request gets said plainly — in a sentence, not a section.
+
 ## Workflow
 
 - One feature at a time. Commit in small logical steps.
