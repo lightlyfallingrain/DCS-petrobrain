@@ -8,6 +8,20 @@ long-running process on the Windows box, polled live over LAN. See
 ## Deploy Export.lua (Windows box, once per change)
 
 Copy `aircraft-layer/dcs-export/Export.lua` to
+
+**The deployed copy announces its version, and the collector checks it.** `Export.lua` carries
+`EXPORT_SCRIPT_VERSION` and sends it on every connect; the collector compares it against
+`EXPECTED_EXPORT_VERSION` and logs either a match at INFO or a **loud WARNING** on mismatch. Watch
+the collector's first lines after DCS connects — that is where a stale deployment shows itself.
+
+This exists because a copy-deployed script can lag the repository silently and indefinitely. On
+2026-09-21 a sortie ran an `Export.lua` predating the `is_ownship` flag (shipped 2026-09-09):
+ownship was evaluated as a detection candidate 4113 times in one flight and polluted the
+never-detected list, and a Windows probe plus an hour of tracing went into a bug that did not exist
+in the code. **When the wire format changes, bump both constants in the same commit.**
+
+**Do not restore from a `.backup` you made before swapping in a probe** — that backup is a copy of
+whatever was deployed, which may itself be stale. Re-copy from the repository.
 `Saved Games\DCS\Scripts\Export.lua`. Canonical source lives in this repo;
 never edit the deployed copy in place — same convention as
 `world-model/tools/wsl/` -> `win-mac-sync/run-wsl/`. A synced copy is kept at
