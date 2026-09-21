@@ -9,3 +9,4 @@ __pycache__/
 # disk deliberately (nothing the user recorded gets deleted) but they are
 # still audio and still belong outside the repo.
 data/corpus/
+*.egg-info/

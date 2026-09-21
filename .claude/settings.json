@@ -5,7 +5,8 @@
       "Bash(cat .env*)",
       "Bash(curl*)",
       "Bash(wget*)",
-      "Bash(git reset --hard*)"
+      "Bash(git reset --hard*)",
+      "Bash(git worktree remove --force*)"
     ]
   },
   "hooks": {
