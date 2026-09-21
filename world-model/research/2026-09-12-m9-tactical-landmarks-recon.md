@@ -32,6 +32,14 @@ Two narrow DCS-internals questions blocking the tactical-landmarks milestone pla
   `extent`, `polygon`, `boundary`, or similar across all ~1,186 entries. —
   **evidence: reproduced-locally** — **source:** ad hoc Python key-scan
   against the local file this session.
+
+  > **CORRECTION 2026-09-21 — "~1,186 entries" is the count this project already retracted
+  > once.** `towns.lua` has exactly **1,182 entry lines** (1,151 unique names — 31 are
+  > duplicates); 1,186 was that line count *minus one*, and there were never 4 unparseable
+  > entries (`2026-09-03-m5-recon.md` addendum, findings 30 and 31, which say so in those words).
+  > **The finding itself is unaffected** — no extent field exists, whatever the denominator. The
+  > figure was reintroduced nine days after being corrected, which is the part worth noticing:
+  > a retracted number in an addendum does not stop circulating just because the addendum exists.
 - **No other file under `Mods/terrains/Syria/` (or any shared/`_Common`-style
   terrain location) is plausibly a settlement-extent source, by filename.**
   Grepped the full theatre file listing
@@ -51,7 +59,24 @@ Two narrow DCS-internals questions blocking the tactical-landmarks milestone pla
   — `2026-09-03-m2-rastercharts-recon.md` — where it was confirmed to be a
   general-purpose ED engine manifest/index type, not registration or extent
   data, and every `Map/<Terrain>.sup5` across all installed theatres shares
-  that same header signature). `.gn4` is undocumented anywhere community-wide
+  that same header signature).
+  > **CORRECTION 2026-09-21 — the M2 note says neither of those things.** Both halves of this
+  > parenthesis upgrade an explicitly-hedged inference into a "confirmed" fact:
+  > - M2 (session 2) records *"absence of registration data specifically inside `.sup5` **remains
+  >   unconfirmed, not ruled out**"* — only the first 64 bytes of the file were ever read, with
+  >   615,152 bytes left unread — and describes the manifest/index reading as *"inference from
+  >   naming/sibling-pattern only, **not content inspection**."*
+  > - **No other theatre's `.sup5` header was ever parsed**, so "every `Map/<Terrain>.sup5` across
+  >   all installed theatres shares that same header signature" has no evidence behind it at all.
+  >
+  > This does not change M9's conclusion — `.sup5` is still not a settlement-extent source on the
+  > available evidence, and the bullet's own evidence tag correctly says `inferred`. What went
+  > wrong is between the tag and the prose: **the citation supplied the confidence the evidence
+  > line withheld.** A hedge survives one hop and dies on the second, which is exactly what a
+  > knowledge-graph query does to a document — it hands you the sentence, not the qualifier three
+  > paragraphs away in the file it cites.
+
+  `.gn4` is undocumented anywhere community-wide
   and was not decoded this session (out of scope: its directory/naming
   strongly implies map-display graphics, not semantic town-boundary data,
   and M2 already established this file family doesn't carry extent

@@ -1,3 +1,37 @@
+> **CORRECTION 2026-09-21 — the ladder this document derives from is contaminated, and two of its
+> conclusions no longer hold.**
+>
+> 1. **The screenshots were captured with DCS's "detection aid dots" ENABLED** (user, 2026-09-21).
+>    DCS draws a small dark dot at a target to make it findable at long range. Every grade in the
+>    ladder below therefore records what was visible *with that aid*, not unaided visibility, and is
+>    **optimistic by an unmeasured amount that grows with range**. The constants derived here
+>    (`LOWRES` 0.003 / `MEDRES` 0.014 / `HIRES` 0.028 / cap 10000) were fitted to aided data. **Do
+>    not derive new constants from this ladder without re-shooting with the aid off** — a dots-off
+>    re-shoot is the one remaining precondition for threshold recalibration
+>    (`2026-09-21-calibration-target-decided.md`). The fixture carries the same warning
+>    (`body-layer/tests/fixtures/vision_calibration.json`, `_comment`); the tests over it still pass
+>    and are kept as a regression guard against the model as fitted, but they are **no longer
+>    evidence about human visibility**.
+>
+>    Note what the contamination does *not* explain: the 2026-09-21 sortie found the model sees too
+>    *little* at the presence tier. The aid biases this data optimistic, which would push the model
+>    the other way — so the presence shortfall is a separate error, not a consequence of the dots.
+>    See `2026-09-21-first-cones-sortie-results.md`.
+>
+> 2. **"`BINOCULAR_RANGE_MULTIPLIER = 4.0` survived untouched" is no longer true.** The constant is
+>    **retired** (cones slice 2A). A single magnification applied uniformly to all three tiers is
+>    the premise that measurement killed: presence scales sub-linearly with magnification while
+>    class and type scale supra-linearly
+>    (`2026-09-21-aspect-magnification-and-distinctiveness.md` Finding 2). `perception/optics.py`
+>    now carries per-tier multipliers instead (`BINOCULAR_OPTIC` 2.42 / 3.50 / 3.00), and
+>    `visibility.py` no longer declares the constant at all.
+>
+> **Why the contamination was plausible to miss:** the capture protocol was rigorous about the
+> thing that had burned Pass 1 — compression — and lossless PNG was treated as settling the
+> "is the instrument honest" question. An in-sim visibility aid is a *different* instrument defect
+> in the same place, and nothing in the images announces it. Everything else below stands: the
+> method, the cross-optic apparent-angular-size agreement, and the Pass 1 correction are unaffected.
+
 # Vision range calibration — Pass 2 (lossless screenshot ladder)
 
 **Date:** 2026-09-17

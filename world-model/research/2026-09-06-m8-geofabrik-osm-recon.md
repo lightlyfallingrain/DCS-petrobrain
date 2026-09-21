@@ -4,6 +4,17 @@
 **DCS version:** not applicable — this investigation concerns OpenStreetMap/Geofabrik, not DCS internals
 **Theatre:** Syria (envelope from `2026-09-05-m7-syria-theatre-extent.md`: lat 31.2–39.0 N, lon 32.3–40.2 E)
 
+> **CORRECTION 2026-09-21 — the northern edge of that envelope is wrong.** It was copied from a
+> transcription typo in `2026-09-05-m7-syria-theatre-extent.md`'s beacon row: the beacon latitude
+> maximum is **37.999**, not 38.999, so the real working envelope is **lat 31.2–38.0 N**, lon
+> 32.3–40.2 E. Every "(31.2–39.0 N, 32.3–40.2 E)" in the coverage reasoning below should be read
+> with a 38.0 N top edge. See that note's own correction block for the verification.
+>
+> **This makes the coverage conclusions below safer, not riskier** — the envelope is a full degree
+> *shorter* than assumed, so any extract set judged sufficient for 39.0 N is still sufficient for
+> 38.0 N. No re-download or re-clip follows from this; it is recorded so the figure is not quoted
+> onward as the theatre's real extent.
+
 ### Question
 
 M8 re-introduces OSM as an augmentation layer via manually-downloaded Geofabrik per-country

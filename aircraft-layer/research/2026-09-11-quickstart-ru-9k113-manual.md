@@ -147,3 +147,25 @@ QuickStart RU.pdf`: `46-53`, `66-75`, `105-116`, `122-131`.
   against the DCS elevation gauge range (`-0.75…+1.0`) our probe measured —
   worth a follow-up if elevation limits in degrees are ever needed precisely
   (flagged as still-unmeasured in the SUMMARY note).
+
+  > **CORRECTION 2026-09-21 — the "±40° horizontal" reading above is wrong, and this note is
+  > where it entered the project.** Both figures on Рис. 4.20 (p. 70) annotate the **ПУ ПН
+  > control console** — the operator's *handle*, the input device — not the optical head. The
+  > sight head's own field of regard is **±60° lateral, +20°/−15° vertical**, sourced from the
+  > **English-language** edition of the Mi-24P manual, §3 "RADUGA-SH COMPONENTS", §3.4 "Missile
+  > Guidance Controls" (user, 2026-09-20). Full correction, including why the two cannot be the
+  > same quantity: `2026-09-20-9k113-sight-optics-from-manual.md`.
+  >
+  > **Why the misreading was plausible, and worth keeping:** the vertical pair (+20°/−15°) is
+  > *correct* for the head as well — one axis matched the real figure exactly, which is precisely
+  > the shape of evidence that makes a wrong reading feel confirmed. Had both been wrong the error
+  > would have announced itself. The underlying reason they cannot be the same quantity is
+  > established independently by this very note's own second finding: **the manual states the
+  > operator commands an angular *rate*, not a position** (§5.3.8 step 14, quoted above), so
+  > console deflection and head angle are different kinds of thing and any numeric coincidence
+  > between them is just that. The general rule: **a figure printed beside a photograph of a
+  > control describes that control.**
+  >
+  > Note also that ±60° was already the figure this file's sibling SUMMARY used for the azimuth
+  > calibration (`azimuth_deg = arg_874 × 136.36`, gauge ±0.44 ↔ ±60°), so nothing downstream was
+  > built on the ±40° reading — only this bullet carried it.

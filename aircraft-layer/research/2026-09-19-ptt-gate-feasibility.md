@@ -130,8 +130,9 @@ Windows box.
   transmits on whatever radio the SPU-8 selector has chosen — mean the Mi-24P already has a
   real, in-fiction, physical control whose entire purpose is "talk to my own crew," independent of
   which mission-frequency radio is selected. This doesn't collide with the earlier, already-decided
-  constraint that the player must stay on the mission frequency (`srs-adapter/research/2026-09-17-tts-audio-transport-recon.md`'s
-  "frequency injection is NOT an acceptable fallback" note): the SPU-8 selector's radio choice is
+  constraint that the player must stay on the mission frequency (`audio-adapter/research/2026-09-17-tts-audio-transport-recon.md`'s
+  "frequency injection is NOT an acceptable fallback" note — that subproject was named
+  `srs-adapter` when this note was written and the path was corrected 2026-09-21): the SPU-8 selector's radio choice is
   untouched by a half-press, since half-press routes to intercom regardless of `_data.selected`.
   Reusing this existing trigger — reading `GetDevice(0):get_argument_value(738)` for "player is
   half-pressing the real intercom trigger" — would need **no new joystick binding at all**, and it

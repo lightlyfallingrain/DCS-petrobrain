@@ -90,6 +90,13 @@ open desert with nothing occluding them. Treated as a calibration signal rather 
 computed): the scenario units sat roughly 1.5–4 km out, and two of the three sight detections were
 of units the map places beyond PB-1.5's current `NAKED_EYE_RANGE_CAP_M = 2500`.
 
+> **Note 2026-09-21:** `NAKED_EYE_RANGE_CAP_M` is **10000.0** today, not 2500 — the follow-up this
+> section asks for was carried out (2500 → 5000 → 10000, the last by the 2026-09-17 screenshot
+> ladder). The pilot's design position recorded here — *"if the player can see a unit, Petrovich
+> should be able to as well"* — is what drove it, and it is now the project's stated calibration
+> target (`body-layer/research/2026-09-21-calibration-target-decided.md`). Quote the *finding*
+> from this section, not the constant.
+
 The pilot's design position: **if the player can see a unit, Petrovich should be able to as well.**
 Flat desert is the easy case and would flatter any detection model — among trees or in broken
 terrain the comparison would differ — but it does suggest PB-1.5's cap is, if anything, too tight

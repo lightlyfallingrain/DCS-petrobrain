@@ -4,10 +4,21 @@
 **Source files:** `Mods/aircraft/Mi-24P/Cockpit/Scripts/{command_defs.lua,devices.lua,device_init.lua,clickabledata.lua}`,
 `Mods/aircraft/Mi-24P/Input/*/`, `Scripts/Export.lua`, `API/Sim_ControlAPI.md`.
 **Status:** every ID below is enumerated from primary source (reproduced-locally) and is exact.
-The **call mechanism is not yet live-probed** — whether `GetDevice` / `performClickableAction` /
-`get_argument_value` exist inside Export.lua's state is the one unverified link (§1, §7). Probe
-written and ready to run: `aircraft-layer/dcs-export/Export.probe-commands.lua`; background and
-run protocol in `2026-09-11-command-injection-surface.md`.
+
+> **CORRECTION 2026-09-21 — the status line that used to sit here was stale from the day after
+> this file was generated.** It read: *"The **call mechanism is not yet live-probed** — whether
+> `GetDevice` / `performClickableAction` / `get_argument_value` exist inside Export.lua's state is
+> the one unverified link (§1, §7). Probe written and ready to run."* **The probe was run, the
+> same day.** All four names (`GetDevice`, `SetCommand`, `performClickableAction`,
+> `get_argument_value`) are confirmed present and callable from the `Export.lua` state — see
+> `logs/2026-09-11/probe-cmd.log`, `2026-09-11-SUMMARY-petrovich-control.md` §1, and the
+> production `aircraft-layer/dcs-export/Export.lua`, which calls
+> `GetDevice(30):performClickableAction(...)` in the live BL-6 path. §1's own closing paragraph
+> ("What remains unverified is narrower: whether the `Export.lua` Lua state has `GetDevice`
+> bound") is superseded by the same evidence. §4.1.2 was added with the live results and is
+> correct; only the header and §1's tail were left behind.
+>
+> **See also the correction inside §4.2**, which still asserts the sight axes are rate-controlled.
 
 Regenerate after any DCS update — command IDs are positional and **will shift** if ED inserts an
 entry into a table (see "Fragility" below).
@@ -278,6 +289,20 @@ bearing needs aircraft heading folded in — a body-layer concern.
 | 3028 | `Command_Aiming` | |
 | 3002 | `Command_NABL` | observation mode (*наблюдение*) |
 | 3001 | `Command_POWER_PN` | sight power |
+
+> **CORRECTION 2026-09-21 — "the axes are velocity, not position" is true of the *player* channel
+> only, and the closed-loop conclusion it leads to is wrong.** Live runs 3-5 (2026-09-11) measured
+> the **AI** channel (3060/3061) as an exactly linear **position target**: ratio `0.440000` at five
+> commanded points, settling inside 0.25 s and holding flat. **`look_at(bearing)` is a single
+> write — no rate command, no integration, no loop.** §4.1.2 above carries the calibrated form and
+> is the section to trust. The player channel (3025/3026) really does accumulate, which is what
+> `axis_use_velocity = true` in `Devices_specs/9K113.lua` describes, and generalising it to the AI
+> channel is the exact mistake that cost two probe flights
+> (`2026-09-11-command-injection-surface.md`, "Live probe run 5 — RESOLVED").
+>
+> The two "gates to be aware of, neither resolved from files alone" below are likewise resolved:
+> the `_AI_AXIS` pair is no longer "also unverified" — it is the confirmed working effector, and
+> it is the channel this project uses.
 
 **The axes are velocity, not position.** `Devices_specs/9K113.lua` sets `axis_use_velocity = true`,
 `h_axis_velocity = rad(20)/s`, `v_axis_velocity = rad(10)/s`, `Slew_dead_zone = 0.003`,
