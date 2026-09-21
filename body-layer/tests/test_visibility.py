@@ -204,6 +204,103 @@ def test_armored_vehicle_just_outside_lowres_tier_range_is_not_visible() -> None
     assert result is None
 
 
+def test_group_salient_default_is_behaviour_identical_to_before_the_parameter_existed() -> (
+    None
+):
+    """Stage 1 regression pin (`plans/group-detectability/plan.md`): no
+    caller passes `group_salient=True` until Stage 2's `group_salience.py`
+    wiring lands, so `check_visibility`'s trace/tier output must stay
+    byte-identical to before this parameter existed. Same candidate as
+    `test_armored_vehicle_just_outside_lowres_tier_range_is_not_visible`
+    (just beyond the *lowres/salience* threshold, well short of the looser
+    *resolution* one), both with the default and with `group_salient=False`
+    passed explicitly -- both must still reject it."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=2334.0, z=0.0)
+
+    assert check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE) is None
+    assert (
+        check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE, group_salient=False)
+        is None
+    )
+
+
+def test_group_salient_admits_a_candidate_between_the_salience_and_resolution_thresholds() -> (
+    None
+):
+    """`group_salient=True` relaxes the presence threshold from
+    `LOWRES_ANGULAR_RADIUS_RAD` (2333.33 m for a 7 m T-72B, see the
+    `lowres`-tier tests above) to the looser `RESOLUTION_ANGULAR_RADIUS_RAD`
+    (`7 / 0.0013 = 5384.6 m`) -- a candidate in that gap is rejected as a
+    lone unit but admitted once the caller has marked it group-salient,
+    and the reverse never happens (relaxing never *tightens* the gate)."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=5384.0, z=0.0)
+
+    lone_result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
+    group_result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, group_salient=True
+    )
+
+    assert lone_result is None
+    assert group_result is not None
+    assert group_result.tier == "lowres"
+    assert group_result.confidence == NAKED_EYE_PRESENCE_CONFIDENCE
+
+
+def test_group_salient_candidate_beyond_the_resolution_threshold_is_still_rejected() -> (
+    None
+):
+    """Group salience relaxes the presence threshold, it does not remove
+    it -- a candidate beyond even `RESOLUTION_ANGULAR_RADIUS_RAD`'s own
+    (5384.6 m) threshold is rejected regardless of `group_salient`."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=5386.0, z=0.0)
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, group_salient=True
+    )
+
+    assert result is None
+
+
+def test_group_salient_trace_records_group_resolution_as_the_threshold_bound() -> None:
+    """`threshold_bound` (`detection_trace.py`) gains `"group_resolution"`
+    (`plans/group-detectability/plan.md` Stage 4) exactly when a
+    group-salient candidate was admitted by the relaxed threshold, not the
+    ordinary `"size_curve"`/`"range_cap"` reasons -- so a BL-9 trace can
+    show *why* a distant candidate was admitted."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=5384.0, z=0.0)
+    trace = DetectionTraceCollector()
+
+    result = check_visibility(
+        ownship, candidate, _FAKE_CONN, _THEATRE, group_salient=True, trace=trace
+    )
+
+    assert result is not None
+    assert len(trace.records) == 1
+    entry = trace.records[0]
+    assert entry.outcome is GateOutcome.ADMITTED
+    assert entry.threshold_bound == "group_resolution"
+
+
+def test_ordinary_admission_trace_still_records_size_curve_not_group_resolution() -> (
+    None
+):
+    """The new `"group_resolution"` value never fires for an ordinary,
+    non-group-salient admission -- the existing `"size_curve"` reason is
+    unchanged."""
+    ownship = _ownship(heading_true_deg=0.0)
+    candidate = _candidate("T-72B", x=2333.0, z=0.0)
+    trace = DetectionTraceCollector()
+
+    result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE, trace=trace)
+
+    assert result is not None
+    assert trace.records[0].threshold_bound == "size_curve"
+
+
 def test_ural_truck_gate_is_bound_by_the_size_curve_not_the_range_cap() -> None:
     """History, since this test's own name and premise have now flipped
     twice in the same session (`plans/detection-cones-slice1/plan.md`):
