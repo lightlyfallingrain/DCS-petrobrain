@@ -148,6 +148,7 @@ from perception.association import WorldObjectCandidate, filter_ownship
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
 from perception.detection_trace import DetectionTraceCollector
 from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.optics import UNAIDED_OPTIC
 from perception.reporting_names import reporting_name_for
 from perception.source import (
     OBSERVATION_ID_PREFIX_NAKED_EYE,
@@ -327,6 +328,14 @@ class NakedEyePerceptionSource:
                 for candidate, result in to_emit
             ],
             observer,
+            # UNAIDED_OPTIC.presence_range_mult -- the only optic
+            # `check_visibility` is called with today (no optic-selection
+            # mechanism exists until slice 2B, `plans/detection-cones-
+            # slice2/plan.md`). Threading the active optic's own presence
+            # multiplier is what keeps `clustering._separable`'s floor (A)
+            # slack for whichever optic actually admitted these
+            # candidates -- see that module's docstring.
+            UNAIDED_OPTIC.presence_range_mult,
         )
         observations = self._build_observations(
             now_sim, ownship_state, clusters, confidence_by_object_id

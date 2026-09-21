@@ -46,7 +46,23 @@ twelve real objects separate by *class* into several contacts, each with a
 small, exact count -- the honest resolution boundary closing as range does.
 Composition (Stage 5, not built here) is what would eventually let a
 resolved-but-uncountable cluster distinguish "some armor, some infantry"
-within its one contact."""
+within its one contact.
+
+**`cluster_candidates` now takes the active optic's own `presence_range_
+mult` (slice 2A, `plans/detection-cones-slice2/plan.md`, the clustering
+floor fix) -- this module passes `BINOCULAR_OPTIC.presence_range_mult`
+(2.42), not `UNAIDED_OPTIC`'s 1.0.** This fixture's own 9 km detection
+range is only plausible under an optic with binoculars' reach in the
+first place (`check_visibility`'s real gate would never admit a 7 m
+object at 9 km under `UNAIDED_OPTIC` -- its presence threshold is 2333 m,
+per `test_visibility.py`), matching the pre-slice-2A hardcoded floor
+constant (`BINOCULAR_RANGE_MULTIPLIER=4.0`) this fixture was originally
+written against. Passing `UNAIDED_OPTIC.presence_range_mult` here would
+make floor (A) bind at naked eye's own coarser resolution and merge the
+perpendicular row that the headline case says stays twelve dots -- a real
+consequence of the floor fix (see `clustering.py`'s own docstring), not
+a bug, but the wrong scenario for a fixture built around binocular-range
+detection."""
 
 from __future__ import annotations
 
@@ -57,6 +73,7 @@ from belief.contacts import ContactStore
 from perception import object_model
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
 from perception.geometry import GeoPosition
+from perception.optics import BINOCULAR_OPTIC
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
@@ -169,7 +186,9 @@ def test_twelve_units_perpendicular_to_los_at_9km_resolve_individually() -> None
         for index, _unit in enumerate(_UNIT_LABELS_AND_CLASSES)
     )
 
-    clusters = cluster_candidates(candidates, observer)
+    clusters = cluster_candidates(
+        candidates, observer, BINOCULAR_OPTIC.presence_range_mult
+    )
 
     assert len(clusters) == 12
     assert all(len(cluster.members) == 1 for cluster in clusters)
@@ -237,7 +256,9 @@ def test_twelve_units_along_los_at_9km_merge_at_200m_agl_but_split_at_1000m_agl(
         for index, (x, z, alt) in enumerate(row_candidates)
     )
 
-    clusters_low = cluster_candidates(candidates_low, observer_low)
+    clusters_low = cluster_candidates(
+        candidates_low, observer_low, BINOCULAR_OPTIC.presence_range_mult
+    )
 
     assert len(clusters_low) == 1
     cluster_low = clusters_low[0]
@@ -270,7 +291,9 @@ def test_twelve_units_along_los_at_9km_merge_at_200m_agl_but_split_at_1000m_agl(
         for index, (x, z, alt) in enumerate(row_candidates)
     )
 
-    clusters_high = cluster_candidates(candidates_high, observer_high)
+    clusters_high = cluster_candidates(
+        candidates_high, observer_high, BINOCULAR_OPTIC.presence_range_mult
+    )
 
     assert len(clusters_high) == 1
     cluster_high = clusters_high[0]
@@ -354,7 +377,9 @@ def test_twelve_unit_complex_at_close_range_splits_by_class_into_several_small_c
     observer = GeoPosition(x=0.0, z=0.0, alt_m=_TARGET_ALT_M + 200.0)
     candidates = _close_range_candidates(observer)
 
-    clusters = cluster_candidates(candidates, observer)
+    clusters = cluster_candidates(
+        candidates, observer, BINOCULAR_OPTIC.presence_range_mult
+    )
 
     # Six real class groups: SAM (2), AAA (2), ARMOR (3), TRUCK (1), MLRS
     # (1), INFANTRY (3) -- position-only clustering separates them cleanly

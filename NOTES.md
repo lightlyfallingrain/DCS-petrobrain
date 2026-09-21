@@ -288,6 +288,30 @@ two functions that must agree (2026-09-19).
   through the real clustering/pipeline functions until the required merge/split outcomes reproduced,
   rather than trusting a flat distance rescale (detection-cones-slice1, 2026-09-20).
 
+- **A slackness proof "verified benign" against today's constants can have an unstated premise that
+  later constants violate — record the premise, not just the verdict.** Slice 1 flagged
+  `clustering.py`'s `_separable` floor (A), which hardcodes a range-multiplier constant, as benign
+  twice. The proof was sound but incomplete: it holds only while the active optic's
+  `presence_range_mult ≤ 4.0`, true of every multiplier in the table at the time. Slice 2A's
+  per-tier multipliers introduced 5.81 (9K113 narrow), which breaks it — two genuinely separable
+  contacts would silently merge. "Verified benign" in a prior review reads as a settled fact to a
+  later reader; a proof is only as durable as its premise, and an unstated premise is invisible
+  until something violates it. When a review verifies an invariant algebraically, write down the
+  inequality it depends on, not just the conclusion — that turns the next constant change into a
+  one-line check instead of a rediscovery (detection-cones-slice1 review, slice2A fix, 2026-09-21).
+
+- **When several measured effects each look like they need their own tuning parameter, check
+  whether one is a consequence of another before giving each a knob.** Slice 2's naked-eye
+  multipliers were derived from the BTR-60 alone specifically because infantry's presence/class/type
+  figures, run through the same arithmetic, produced *different* per-optic multipliers — which
+  looked like a second, independent per-object-class calibration was needed. It wasn't: infantry's
+  apparently-distinct multipliers are the distinctiveness clamp (`class = min(presence, ...)`) seen
+  edge-on, not a third phenomenon. One per-class distinctiveness default plus the existing clamp
+  reproduces all four measured infantry rows exactly, with no second multiplier table. The general
+  form: before adding a parameter to explain a divergent measurement, check whether an *existing*
+  mechanism, composed with the one already being built, already explains it (detection-cones-
+  slice2, decisions doc + slice 2A implementation, 2026-09-21).
+
 - **A trig "collapses back to the same constant" claim, checked only at 0°/90°, is exactly the
   proof-by-convenient-example that hides the bug at every other angle.** The aspect-aware-profiles
   plan's first draft gave every unmigrated profile a cubic fallback (`length_m = width_m = height_m

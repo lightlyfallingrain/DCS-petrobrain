@@ -17,6 +17,7 @@ from perception.object_model import (
     DEFAULT_SIZE_M,
     ObjectTypeProfile,
     apparent_extent_m,
+    distinctiveness_of,
     profile_for,
 )
 
@@ -460,3 +461,53 @@ def test_bare_tank_keyword_is_not_reintroduced() -> None:
         "German_tank_wagon",
     ):
         assert profile_for(object_type).op_class != "OP_ARMORED", object_type
+
+
+# --- Distinctiveness (slice 2A, `plans/detection-cones-slice2/plan.md`
+# decision 3) --------------------------------------------------------------
+
+
+def test_ordinary_class_defaults_to_1() -> None:
+    """A vehicle profile with no per-type exception gets the default
+    ("ordinary") distinctiveness, 1.0 -- the user's own framing: "a vehicle
+    shape is vehicle shape.\""""
+    profile = profile_for("T-72B")
+    assert profile.op_class == "OP_ARMORED"
+    assert distinctiveness_of(profile) == pytest.approx(1.0)
+
+
+def test_infantry_class_default_is_5() -> None:
+    """`OP_INFANTRY`'s per-class default, 5.0 -- the user's own framing:
+    "Human shape is very distinct.\" Derived, not measured directly (module
+    docstring): naked-eye class (128 m) vs. presence (600 m) needs ~4.7x to
+    saturate the clamp; 5.0 is the round number just clear of that knee."""
+    profile = profile_for("Infantry")
+    assert profile.op_class == "OP_INFANTRY"
+    assert distinctiveness_of(profile) == pytest.approx(5.0)
+
+
+def test_s300_radar_rows_carry_a_per_type_exception_not_the_class_default() -> None:
+    """The two S-300 radar rows carry `distinctiveness=2.6` directly on the
+    profile (a per-type exception), not through `OP_LRSAM`'s class default
+    (which stays 1.0, "ordinary") -- `OP_LRSAM` also covers non-radar
+    launchers, which are not distinctive the way a radar dish is (user:
+    "Radar dishes as well.\"), so this must not be a class-wide entry."""
+    tr_profile = profile_for("s-300ps 40b6m tr")
+    sr_profile = profile_for("s-300ps 64h6e sr")
+    assert tr_profile.op_class == "OP_LRSAM"
+    assert sr_profile.op_class == "OP_LRSAM"
+    assert distinctiveness_of(tr_profile) == pytest.approx(2.6)
+    assert distinctiveness_of(sr_profile) == pytest.approx(2.6)
+
+    # A non-radar OP_LRSAM profile (synthetic -- this module has no other
+    # real OP_LRSAM keyword) still gets the ordinary class default, proving
+    # the exception is per-type, not per-class.
+    launcher_profile = ObjectTypeProfile(size_m=9.0, op_class="OP_LRSAM")
+    assert distinctiveness_of(launcher_profile) == pytest.approx(1.0)
+
+
+def test_per_type_exception_overrides_the_class_default() -> None:
+    """A synthetic profile with both an `op_class` that has a default and
+    its own `distinctiveness` field: the per-type value wins."""
+    profile = ObjectTypeProfile(size_m=1.8, op_class="OP_INFANTRY", distinctiveness=2.0)
+    assert distinctiveness_of(profile) == pytest.approx(2.0)
