@@ -6,9 +6,15 @@ per-tier, distinctiveness-aware act" — implementing the three settled model de
 sub-slices, each of which leaves the system flyable.
 
 **The three decisions are settled input, not open questions.** This plan is about how and in what
-order, and about the four structural problems they create that the decisions themselves do not
-answer: where gaze state lives, what a moving cone breaks downstream, how a scan loop stays
-replay-deterministic, and which existing mechanisms already govern the same concepts.
+order, and about the structural problems they create that the decisions themselves do not answer:
+where gaze state lives, why the attention gate *is* the optimisation, what must be allowed to bypass
+it, what a moving cone breaks downstream, how a scan loop stays replay-deterministic, and which
+existing mechanisms already govern the same concepts.
+
+**Revised 2026-09-21 (user), after 2A was already in flight.** Naked eyesight is **two channels**,
+not one: a narrow **focus** cone that sees well and itself scans within a sector, and a wide
+**peripheral** channel with poor acuity but excellent change detection. 2A is unaffected and is not
+changed by this revision; the two-channel model sharpens 2B, 2C and 2D.
 
 ### No investigator pass needed, and why
 
@@ -43,9 +49,9 @@ So the ordering is forced by measurability, not preference.
 | | Slice | Default behaviour changes? | Gate to the next slice |
 |---|---|---|---|
 | **2A** | Per-tier multipliers, distinctiveness, the clamp, clustering floor fix | **Yes** — class-tier ranges move for infantry and radars | A sortie with BL-9 tracing: infantry class ≈ presence; S-300 class within ~1.5× of 4500 m; vehicle class/presence unchanged within noise |
-| **2B** | Gaze as a filter; F10 scan commands steer perception | **No** — default gaze is the forward hemisphere, i.e. today | In flight: "scan left" demonstrably changes which contacts are detected; with no command issued, the BL-9 trace is byte-identical to 2A's |
-| **2C** | Default gaze becomes the scan loop `ahead → left → ahead → right` | **Yes** — this is the big one | A sortie judged by the user on *feel*: does he find things at a plausible rate, and does the callout language stay stable as contacts cycle in and out of gaze |
-| **2D** | Dwell as an act: binoculars onto a specific contact | **Yes** | Conditional — only built if 2C's sortie shows a real need (see effort/value below) |
+| **2B** | Gaze as a filter; `Optic.peripheral`; the stimulus seam; F10 scan commands steer perception | **No** — default gaze is the forward hemisphere, i.e. today | In flight: "scan left" demonstrably changes which contacts are detected; with no command issued, the BL-9 trace is byte-identical to 2A's |
+| **2C** | Default gaze becomes the two-level scan loop: sector `ahead → left → ahead → right`, focus cone stepping o'clock hours within it | **Yes** — this is the big one | A sortie judged by the user on *feel*: does he find things at a plausible rate, and does the callout language stay stable as contacts cycle in and out of gaze |
+| **2D** | Dwell as an act: fix on it, check for more nearby, then glass up or resume | **Yes** | Conditional — only built if 2C's sortie shows a real need (see effort/value below) |
 
 ---
 
@@ -77,27 +83,41 @@ So the ordering is forced by measurability, not preference.
 
 **2B**
 - `body-layer/src/perception/gaze.py` (**new**) — `Gaze(center_azimuth_deg, half_width_deg, label)`,
-  `FULL_GAZE` (0°, 90° — the forward hemisphere, i.e. no narrowing), and **the `RelativeSector`
-  vocabulary moved down from `belief/attention.py`**: the `Literal`, `RELATIVE_SECTORS`, and
-  `_RELATIVE_SECTOR_WEDGE_DEG`.
+  `FULL_GAZE` (0°, 90° — the forward hemisphere, i.e. no narrowing), `within_gaze(gaze, azimuth_deg)`,
+  `gaze_for(object_id, gaze, stimulus_ids, optic)`, and **the `RelativeSector` vocabulary moved down
+  from `belief/attention.py`**: the `Literal`, `RELATIVE_SECTORS`, and `_RELATIVE_SECTOR_WEDGE_DEG`.
+  Also the o'clock-hour table, since the two-level gaze (sector, then focus cone within it) resolves
+  to one hour.
 - `body-layer/src/belief/attention.py` — re-imports `RelativeSector` / the wedge table from
   `perception.gaze` instead of defining them. `belief → perception` is the allowed direction (it
   already imports `perception.geometry`); the reverse is forbidden, which is exactly why the
   vocabulary has to move down rather than the gate move up. **This is the one refactor the plan
   requires, and it removes a real duplication** — otherwise ahead/left/right/full wedge angles would
   exist in two modules that must agree and have no mechanism forcing them to.
-- `body-layer/src/perception/visibility.py` — `check_visibility` gains `gaze: Gaze | None = None`, a
-  cheap angular gate placed *after* the cockpit mask and *before* the optic FOV (the mask is what
-  the airframe permits, gaze is where he is looking within that, the optic is what the instrument
-  shows once pointed — the intersection, exactly as `todo/todo.md`'s "Scan commands should drive
-  naked-eye perception" entry already framed it). `None` = no restriction = today.
+- `body-layer/src/perception/geometry.py` — gains the two-line `angular_delta_deg` helper
+  (`abs((a - b + 180) % 360 - 180)`), currently private in `belief/attention.py` as
+  `_angular_delta_deg`; both modules import it from there. This is the *only* thing the gaze test
+  and `area_contains` genuinely share — see "Gaze cannot reuse `area_contains`" below.
+- `body-layer/src/perception/visibility.py` — `check_visibility` gains `gaze: Gaze | None = None`,
+  **evaluated first in the gate chain, ahead of the cockpit mask** (see "Attention is the
+  optimisation" below for why the ordering is load-bearing rather than incidental). `None` = no
+  restriction = today. The three directional gates then read: gaze (where he is looking) → cockpit
+  mask (what the airframe permits at all) → optic FOV (what the instrument shows once pointed). The
+  effective envelope is their intersection, exactly as `todo/todo.md`'s "Scan commands should drive
+  naked-eye perception" entry already framed it; the gates are **not nested** (the gaze wedge is a
+  pure azimuth test with no elevation term, so it admits targets the mask's depression limits
+  reject), so all three are genuinely needed and the order affects only cost and trace attribution.
 - `body-layer/src/perception/detection_trace.py` — new `GateOutcome.GAZE`, preserving BL-9's
   one-entry-per-call invariant (the same defect slice 1's merge note records for `OPTIC_FOV`).
 - `body-layer/src/perception/optics.py` — `within_optic_fov` takes the boresight as a parameter
   (the gaze center) rather than reading `Optic.boresight_azimuth_deg`; that field is deleted. An
-  optic is pointed by the head, not bolted to the airframe.
-- `body-layer/src/perception/naked_eye_source.py` — new field `gaze: Gaze | None = None`, passed
-  through to every `check_visibility` call.
+  optic is pointed by the head, not bolted to the airframe. **New field `peripheral: bool`** —
+  `UNAIDED_OPTIC` `True`, `BINOCULAR_OPTIC` `False` (hard part 2a). Not in 2A, which is already in
+  flight; this rides with 2B, where the rule that consumes it also lands.
+- `body-layer/src/perception/naked_eye_source.py` — new fields `gaze: Gaze | None = None` and
+  `peripheral_stimulus_ids: frozenset[int] = frozenset()` (the peripheral channel's output, hard
+  parts 2a and 4), resolved per candidate through `gaze.gaze_for(...)` before each
+  `check_visibility` call.
 - `body-layer/src/logger.py` — the runner is the only place belief and perception meet, and it
   already is (`_build_sources`, `store.ingest`). Before each poll it resolves the active commanded
   sector from the `TaskStore`/`ContactStore` (a pending `scan_area` task whose area carries a
@@ -108,7 +128,11 @@ So the ordering is forced by measurability, not preference.
 **2C**
 - `body-layer/src/perception/gaze.py` — `ScanPlan` (frozen: the commanded sector or `None`, plus the
   sim time the command was issued) and `gaze_at(t_sim, plan) -> Gaze`. **A pure function of sim
-  time, not a state machine** (see "Determinism" below).
+  time, not a state machine** (see "Determinism" below), and **two-level**: the plan selects the
+  sector, the same function resolves which o'clock hour within it the focus cone is resting on.
+  Constants `SCAN_CYCLE_PERIOD_S = 16.0` and `FOCUS_DWELL_S = 2.0` (hard part 8). The finer level is
+  a longer leg table, not new machinery — which is precisely why it is cheap to fold in now rather
+  than retrofit.
 - `body-layer/src/perception/naked_eye_source.py` — holds a `ScanPlan` instead of a `Gaze`, computes
   `gaze_at(now_sim, plan)` per poll; **and its acquisition sets become time-based**
   (`frozenset[int]` → `dict[int, float]` of object_id → last-seen sim time, evicted after a
@@ -129,7 +153,7 @@ measurement), `hybrid_source.py`, `association.py`, `belief/contacts.py`.
 
 ---
 
-### The four hard parts, confronted
+### The hard parts, confronted
 
 #### 1. Where gaze state lives — and the answer is "nowhere"
 
@@ -158,11 +182,168 @@ not expressible, and any design that tried to make optic selection a property of
 would be geometrically incoherent. Dwell must be a narrow gaze at a *specific bearing*, which is
 precisely the user's "looking at something with intent."
 
+The user's focus/peripheral model (hard part 2a) turns this into a clean three-level nesting rather
+than a two-term mismatch: **sector 60° → focus cone 30° → binocular 8.5°.** Each level is a
+deliberate narrowing bought at a cost, and the binocular's cost is now more than field of view.
+
 A corollary worth carrying: **2D is the slice that finally gives `BINOCULAR_OPTIC` a caller.**
 Without it, the binocular table entry and its measured 2.42/3.50/3.00 multipliers stay unreachable
 forever — the exact failure mode slice 1's scope cut was written to avoid.
 
-#### 3. What a moving cone breaks: `naked_eye_source.py`, specifically
+#### 2a. Two channels, not one — and it is the principled answer to the bypass seam
+
+User, 2026-09-21: focus is *"a narrow cone that sees really well,"* and within a sector it is itself
+a smaller cone moving in a scan pattern; peripheral is *"very wide FOV, fairly poor focus, but
+excellent change detection"* — movement, light changes, muzzle flash, tracers, launches, explosions
+— which *"grabs attention immediately and snaps focus there,"* unless the change was expected, in
+which case *"mind overrides instinct."*
+
+This replaces the bypass seam's design (hard part 4) with something better than an exemption list.
+An enumerated list of things that bypass attention ("missiles, flares, tracers…") answers *what*
+and never *why*, and every future addition is an arbitration. A second channel with its own physics
+— wide field, change-only, no acuity — answers *why*, and the list falls out of it. **Peripheral
+vision is what the bypass seam was groping for.**
+
+It also gives binoculars a real cost. Not merely 8.5° against a 60° sector, but **the loss of
+change detection entirely**: glass up and you stop noticing the launch flash behind your shoulder.
+That makes "raise binoculars or keep scanning" a genuine trade rather than a free acuity upgrade,
+which is what 2D's decision point was missing.
+
+**Does peripheral destroy the optimisation? No — and the reason is the important part.** A wide
+change-detection channel sounds like it re-introduces the full-envelope sweep that hard part 3 just
+removed. It does not, because **peripheral is event-driven, not scan-driven**. The focus channel
+runs the full gate chain over candidates because it is *looking for* things; the peripheral channel
+responds to things that *change*, and the number of change events per poll is bounded by the event
+rate, not by the ~74 candidates in view. Today that rate is zero (no change channel exists). So the
+cost model is: full chain on the focus cone's small share, plus a cheap azimuth + LOS test on
+whatever changed. The two-channel model is *cheaper* than one wide channel, not more expensive —
+and that is a consequence of the physics being right, which is the same point hard part 3 makes.
+
+**What to build now, and what not to.** The structural split determines the shape of the attention
+gate, so getting it wrong now is expensive later; but peripheral fires on change events and there is
+no behaviour-change channel in this codebase at all (`body-layer/ROADMAP.md` records movement
+detection as designed-not-built, gated on the unprobed mission bridge). So: build the structure in
+2B/2C with **no triggers wired**, and make it operative today through one field —
+
+**`Optic.peripheral: bool`** (unaided `True`, binocular `False`). This is not inert table data, the
+failure slice 1's scope cut was written to avoid, because it carries a live rule:
+
+> **Salience bypasses the gaze gate only when the active optic has peripheral vision.**
+
+That single rule makes the whole two-channel model testable with an empty stimulus set — supply a
+salient object id and assert it is admitted under `UNAIDED_OPTIC` and rejected under
+`BINOCULAR_OPTIC`. The binocular's real cost becomes an executable fact rather than a prose claim,
+today, with no change channel in existence.
+
+**Deferred deliberately: expectation suppression** (*"unless it is an expected change, in which case
+mind overrides instinct"*). It requires belief-side knowledge of what is expected, which would run
+the import the forbidden way and needs its own design pass. Recorded, not designed.
+
+#### 3. Attention is the optimisation — they are the same change, seen from two sides
+
+User direction, 2026-09-21: *"Attention direction also allows for optimisation: units that cannot be
+seen, i.e. are out of attention area, do not need any calculations, other than being outside
+attention area."*
+
+**This is not a performance pass to be added after the model works — it is how the attention gate
+works.** If an out-of-attention candidate is still fully evaluated, then either its result is
+discarded (waste) or it is detected anyway (the model is not doing its job). Skipping the
+computation and being unable to see it are the same statement. The speed is a consequence of the
+model becoming correct, which is why it is specified here rather than deferred to a later
+optimisation slice, and why **the attention wedge is the first gate in the chain, ahead of the
+cockpit mask**.
+
+The ordering is justified on its own terms — one bearing comparison against a wedge is the cheapest
+test available and by far the most selective — and it is measurable. From the real 2026-09-21 sortie
+trace (`~/cones-sortie.jsonl`: 350,913 candidate evaluations over 4,719 polls, ~74 candidates per
+poll):
+
+| outcome today | count | share |
+|---|---|---|
+| rejected by cockpit mask | 84,948 | 24.2% |
+| rejected by range/size | 248,478 | 70.8% |
+| admitted | 17,487 | 5.0% |
+
+**265,965 evaluations (75.8%) currently reach the range gate**, each paying a profile lookup, aspect
+arithmetic and a threshold comparison, with terrain-LOS sampling behind the survivors. A 60° wedge
+inside the ~260° cockpit envelope keeps roughly 23% of them — **about 61,000 instead of 266,000**.
+
+**The focus cone sharpens this further.** With the two-channel model (hard part 2a) the gate is the
+**30° focus cone**, not the 60° sector, so retention roughly halves again to ~12% — on the order of
+**31,000 instead of 266,000**. Treat the 61,000 as measured-and-scaled and the 31,000 as an
+estimate scaling linearly in wedge width from the same baseline; step 16 re-measures rather than
+assuming either. This is the only per-poll hot path in the body layer, and the one place in this
+plan where a cost claim rests on measurement rather than estimate.
+
+Two consequences to build in rather than discover:
+
+- **The saving arrives with 2C, not 2B.** 2B's default is `FULL_GAZE` (±90°), which by construction
+  rejects nothing the cockpit mask would not. 2B is therefore behaviour-preserving *and*
+  cost-neutral; the behaviour change and the saving land together in 2C, which is the same point
+  restated.
+- **Gaze-first costs the trace its cockpit-mask rejection rate.** A candidate behind the rear cutoff
+  that is also outside the wedge will now record `GAZE`, not `COCKPIT_MASK`, so the 24.2% figure
+  above stops being observable from a live trace. Accept this rather than reordering back: the mask
+  is a static, already-measured envelope that can be characterised offline, while the gaze rejection
+  count is the number that will actually be tuned. Say so in `detection_trace.py`'s docstring so a
+  future reader does not "fix" the ordering.
+
+#### 4. The bypass seam: what captures attention, and what it must never grant
+
+A blanket "skip everything outside the focus cone" would make Petrovich unable to notice things a
+real crewman certainly would. `docs/concept/STATE_TRANSITIONS.md` is explicit that a missile or
+gunfire aimed at ownship is an **urgent** report, and lists lights and flashes — strobes, tracers,
+explosions, flares — as attention-grabbing; the 2026-09-20 movement design adds that high speed
+grabs attention rather than merely being detectable.
+
+**Hard part 2a supplies the principle: this is the peripheral channel's output, not an exemption
+list.** The bypass set is therefore small, event-driven, and defined by the *stimulus* rather than
+by the object — never "missiles always bypass," which would be a standing omniscience exemption
+keyed on object type, and never a list that has to be arbitrated every time something is added.
+
+**The seam, built in 2B and 2C, is one parameter and one rule:** `NakedEyePerceptionSource` takes a
+`peripheral_stimulus_ids: frozenset[int]` (default empty, a true no-op) — the output of the
+attention-capture channel, which does not exist yet. The per-candidate gaze passed to
+`check_visibility` is `None` for a stimulus candidate **when the active optic has peripheral
+vision**, and the current focus `Gaze` otherwise. One pure function:
+
+```
+gaze_for(object_id, gaze, stimulus_ids, optic) -> Gaze | None
+```
+
+The `optic.peripheral` term is what makes this operative today rather than dormant (hard part 2a):
+with binoculars raised, a stimulus is *not* bypassed, because there is no peripheral channel to
+catch it.
+
+**The invariant that keeps the seam honest: a bypass skips the gaze gate only — never the cockpit
+mask, never range/size, never terrain LOS.** Salience redirects attention; it does not grant vision.
+A flash behind the ±130° rear cutoff, or behind a ridge, is still not seen. Without this rule the
+bypass becomes a back door through the no-omniscience invariant, which is exactly the shape of
+leak this milestone exists to close.
+
+**What is unprotected until the capture channel exists, stated plainly:** from 2C onward, an
+incoming missile or a muzzle flash outside the current 30° focus cone is simply not noticed. This does
+not regress anything that works today — nothing in the codebase detects incoming weapons at all;
+`UrgentCall` exists as a mechanism with `!inject-urgent` as its only trigger — but it adds a second,
+independent reason it will not work, and the capture channel must land alongside whatever finally
+builds the weapon detector, not after it.
+
+#### 5. Gaze cannot reuse `area_contains` — and that is not a duplication
+
+Worth settling explicitly, because it looks like the same predicate and is not. `belief.attention.
+area_contains` tests an **absolute** bearing from *the area's own centre* to a world position, plus
+a radius. The gaze test is a **body-relative azimuth** — the same quantity `cockpit_mask.is_visible`
+already consumes, derived from ownship's heading/pitch/bank — compared against a wedge centred on
+where his head is pointed. Different frame, different origin, no radius. Sharing one function would
+mean passing an ownship pose into what is deliberately a pure absolute-geometry predicate, which
+`plans/f10-command-vocabulary/plan.md` D2 already rejected once for the same reason.
+
+What *is* genuinely shared is the two-line shortest-angle helper (`_angular_delta_deg`). That moves
+down to `perception/geometry.py` as `angular_delta_deg` and both modules import it — the allowed
+direction, and the only piece small and frame-independent enough to be common. `perception` gets its
+own wedge test in `gaze.py`; that is one `if`, not a parallel implementation of an abstraction.
+
+#### 6. What a moving cone breaks: `naked_eye_source.py`, specifically
 
 Both acquisition modes are **poll-indexed, and a moving cone makes poll-indexing wrong**:
 
@@ -192,7 +373,7 @@ individually." At 60° sector width this is rare (a group tight enough to cluste
 astride a sector boundary); at 2D's 8.5° binocular field it is routine. Flagged as a 2C acceptance
 item and a 2D design constraint, not fixed pre-emptively.
 
-#### 4. The clustering floor is no longer benign — verified, not assumed
+#### 7. The clustering floor is no longer benign — verified, not assumed
 
 `_separable`'s floor (A) hardcodes `BINOCULAR_RANGE_MULTIPLIER`. Slice 1 flagged it benign twice.
 Under per-tier multipliers the proof has to be redone, and it does not survive intact.
@@ -214,34 +395,71 @@ is one parameter: pass the active optic's `presence_range_mult` in place of the 
 makes the floor slack **by construction for every optic**, present and future. Three lines, done in
 2A while the multipliers are being introduced, rather than left as a trap for the 9K113 slice.
 
-#### 5. The scan period is not a free parameter — it is bounded from both sides
+#### 8. The scan period, worked: `OBSERVED_WINDOW_S` must be derived, and the bounds are tight
 
-`logger.py`'s poll interval is **1.0 s**. Two independent constraints squeeze the cycle period:
+**The dwell number is settled by the user (2026-09-21): 2 s per o'clock sector for a quick scan.**
+An o'clock hour is 30°; the diagram's scan sectors are 60°, i.e. two hours each. So:
 
-- **Lower bound, from aliasing.** A sector dwelt on for less than ~2 poll intervals can be sampled
-  zero times on some cycles — entire sectors silently skipped. With four legs, that is a floor of
-  roughly **8 s per full cycle**.
-- **Upper bound, from `belief/decay.py`.** `OBSERVED_WINDOW_S = 5.0` is what makes
-  `certainty_of` return `"observed"`. If a full cycle exceeds 5 s, **every contact drops out of
-  "observed" certainty between visits**, and the crew layer starts hedging its language about
-  contacts he is in fact tracking perfectly well. `POSITION_HALF_LIFE_S = 30.0` and
-  `LOST_THRESHOLD_S = 120.0` are comfortable at any plausible cycle; `OBSERVED_WINDOW_S` is not.
+```
+ahead 11-1 (2h) -> 4 s ;  left 9-11 (2h) -> 4 s ;  ahead -> 4 s ;  right 1-3 (2h) -> 4 s
+SCAN_CYCLE_PERIOD_S = 16 ;  forward arc every 8 s ;  each flank every 16 s
+FOCUS_DWELL_S = 2   (the focus cone rests on one o'clock hour for 2 s)
+```
 
-**These bounds conflict: ≥8 s versus ≤5 s.** The resolution is that `OBSERVED_WINDOW_S`'s 5.0 was
-chosen when Petrovich looked everywhere at once, where "seen in the last 5 s" and "currently seen"
-were the same statement. Once he scans, the physically correct meaning of "observed" is *"seen
-within the current scan cycle"*, so the constant should be **derived from the cycle period rather
-than left independent** — `belief/decay.py` may import `perception.gaze` (the allowed direction).
+`logger.py` polls at **1.0 s**, so a 2 s focus dwell is 2 polls — the aliasing floor is comfortably
+cleared, and it is cleared at the *finest* level of the two-level gaze, which is the level that
+matters. The earlier 8 s recommendation in this plan is superseded.
 
-Recommended: **2 s per leg → 8 s cycle**, `OBSERVED_WINDOW_S = SCAN_CYCLE_PERIOD_S`. The `ahead` leg
-appears twice per cycle, so the forward arc is sampled every 4 s and each flank every 8 s — the
-diagram's forward weighting, preserved. A test should assert `SCAN_CYCLE_PERIOD_S < POSITION_HALF_LIFE_S`
-so a later tuning pass cannot silently push contacts into decay.
+**Now the relationship that has to be worked rather than noted.** `belief/decay.py`'s
+`certainty_of` returns `"observed"` while `now_sim - contact.last_seen_sim <= OBSERVED_WINDOW_S`,
+currently **5.0**. The worst case is a contact at one specific o'clock in a flank sector: the focus
+cone rests on it for 2 s and does not return for a full cycle. So
+
+```
+max_unobserved_gap_s = SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S = 16 - 2 = 14 s
+```
+
+against a 5.0 s window — **a flank contact is out of "observed" for 14 of every 16 seconds.** He is
+tracking it perfectly well and the crew layer hedges its language about it on nearly every tick.
+The constant's 5.0 was chosen when he looked everywhere at once, where "seen in the last 5 s" and
+"currently seen" were the same statement; once he scans, the physically correct meaning of
+"observed" is *"seen within the current scan cycle."*
+
+There is also an **upper** bound, and it is not the one stated earlier. `certainty_of`'s ladder is
+`elapsed <= OBSERVED_WINDOW_S` → observed, then `elapsed <= POSITION_HALF_LIFE_S` (30.0) → the next
+band down. If `OBSERVED_WINDOW_S` reaches 30.0 that middle band **vanishes entirely** — a silent
+collapse of a certainty level, not a gradual degradation. So:
+
+```
+SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S  <  OBSERVED_WINDOW_S  <  POSITION_HALF_LIFE_S
+                              14  <  OBSERVED_WINDOW_S  <  30
+```
+
+**Recommended: `OBSERVED_WINDOW_S = SCAN_CYCLE_PERIOD_S` = 16.0.** It reads as exactly what it
+means — observed iff seen within the last complete scan cycle — clears the lower bound with 2 s of
+margin for a poll landing awkwardly, and leaves a real 16-30 s band below it. `belief/decay.py`
+imports `perception.gaze` for the period (the allowed direction).
+
+Two assertions, both testing a real failure and neither a tautology:
+
+- `SCAN_CYCLE_PERIOD_S - FOCUS_DWELL_S < OBSERVED_WINDOW_S` — a later tuning pass cannot silently
+  push contacts he is holding out of "observed".
+- `OBSERVED_WINDOW_S < POSITION_HALF_LIFE_S` — the middle certainty band cannot be collapsed.
+
+**One consequence to carry into 2C's sortie rather than discover in it.** A *missed* visit doubles
+the gap to `2 x CYCLE - FOCUS_DWELL = 30 s`, which lands exactly on `POSITION_HALF_LIFE_S`. A
+contact dropped for one sweep — terrain LOS flicker, or the `NAKED_EYE_MAX_NEW_PER_POLL` cap — falls
+two certainty bands at once rather than one. That is arguably correct (he genuinely lost it for half
+a minute) but it will read as abrupt, and it is the first thing to look at if the 2C sortie shows
+contacts flickering in confidence.
+
+**And the acquisition retention window follows from the same number**: hard part 6's eviction
+window must be at least one full cycle, so `SCAN_CYCLE_PERIOD_S` is the value, not an invented one.
 
 This is the item most likely to have been discovered mid-implementation rather than during design,
 and it is why the decay constants were read before this plan was written rather than after.
 
-#### 6. Determinism and replay
+#### 9. Determinism and replay
 
 The pure-function design makes free scanning exactly reproducible: `replay.py` drives
 `source.poll(frame.t_sim, frame)` from recorded frames, and `gaze_at(t_sim, plan)` returns the same
@@ -301,34 +519,59 @@ they are state, but they are a pure function of the frame sequence.
 
 7. `gaze.py` with `Gaze`, `FULL_GAZE`, and the `RelativeSector` vocabulary moved down from
    `belief/attention.py`; `belief/attention.py` re-imports it. Verify `belief` tests are untouched.
-8. `check_visibility` gains the gaze gate + `GateOutcome.GAZE`; `within_optic_fov` takes its
-   boresight as a parameter; `Optic.boresight_azimuth_deg` deleted.
-9. `NakedEyePerceptionSource.gaze` field; `logger.py` resolves the commanded sector each poll and
-   assigns it. Default stays `FULL_GAZE`.
+8. `check_visibility` gains the gaze gate **as the first gate in the chain** +
+   `GateOutcome.GAZE`; `within_optic_fov` takes its boresight as a parameter;
+   `Optic.boresight_azimuth_deg` deleted. Document the ordering and its trace-attribution cost in
+   `detection_trace.py` (hard part 3).
+9. `Optic.peripheral`; `NakedEyePerceptionSource.gaze` + `peripheral_stimulus_ids` fields and
+   `gaze_for`; `logger.py` resolves the commanded sector each poll and assigns it. Default stays
+   `FULL_GAZE` and an empty stimulus set, so both are no-ops.
 10. Regression test: with no command issued, the BL-9 trace over a fixture stream is identical to
     2A's. New tests: a commanded `left` gaze rejects a contact at 12 o'clock and admits one at
-    10 o'clock; the gate fires *after* the mask (a contact behind the rear cutoff is still attributed
-    to `COCKPIT_MASK`, not `GAZE`, so the trace keeps naming the real reason).
+    10 o'clock; a candidate in `peripheral_stimulus_ids` clears the gaze gate at any azimuth **and
+    is still rejected by the cockpit mask behind the rear cutoff** — the invariant that keeps the
+    bypass from becoming an omniscience back door (hard part 4); and the same candidate is **not**
+    bypassed under `BINOCULAR_OPTIC`, because `peripheral` is `False` — the one test that makes the
+    binocular's real cost executable rather than prose (hard part 2a).
 11. Update `todo/todo.md`: close "Scan commands should drive naked-eye perception."
 
 **2C — the scan loop**
 
-12. `ScanPlan` + `gaze_at`; `SCAN_CYCLE_PERIOD_S` and the leg table (`ahead`, `left`, `ahead`,
-    `right`, 2 s each).
-13. Time-based acquisition dicts in `naked_eye_source.py` (hard part 3).
-14. `OBSERVED_WINDOW_S` derived from `SCAN_CYCLE_PERIOD_S` in `belief/decay.py`; the
-    `SCAN_CYCLE_PERIOD_S < POSITION_HALF_LIFE_S` assertion test.
+12. `ScanPlan` + two-level `gaze_at`; `SCAN_CYCLE_PERIOD_S = 16.0`, `FOCUS_DWELL_S = 2.0`, the
+    sector leg table (`ahead`, `left`, `ahead`, `right`, 4 s each) and the o'clock-hour step within
+    a leg (2 s each). If the first implementation runs whole sectors, the constants and the function
+    shape must still be the two-level ones — the finer level is a table, and retrofitting the shape
+    later is what this step exists to avoid.
+13. Time-based acquisition dicts in `naked_eye_source.py` (hard part 6), eviction window
+    `SCAN_CYCLE_PERIOD_S`.
+14. `OBSERVED_WINDOW_S = SCAN_CYCLE_PERIOD_S` (16.0) in `belief/decay.py`, plus **both** assertion
+    tests from hard part 8 — the lower bound against the worst-case flank gap, and the upper bound
+    against collapsing the middle certainty band.
 15. Determinism test: the same recorded stream replayed twice yields identical observations; and a
     contact sitting at a fixed bearing is detected on the cycles when its sector is gazed and not
     on the others, with the period matching `SCAN_CYCLE_PERIOD_S`.
-16. Fly it. This slice is judged on feel, not on a number.
+16. Measure the saving the same way the baseline was measured — gate-outcome counts over a full
+    sortie trace against the 350,913-evaluation baseline in hard part 3. It is the one number in
+    this milestone that can be checked rather than judged.
+17. Fly it. Everything else about this slice is judged on feel, not on a number.
 
 **2D — dwell as an act (conditional, see below)**
 
-17. Belief selects a dwell target (highest-attention contact not yet resolved to `type`); the runner
-    passes down a narrow `Gaze` at its bearing plus `BINOCULAR_OPTIC`; sustaining it for a period
-    informed by ED's `average_det_time_max_dist_*` ground figures yields the class/type upgrade the
-    binocular multipliers provide. The scan loop resumes when the dwell ends.
+18. **The user's own loop, which is a better definition than this plan previously carried**: focus
+    detects something → dwell on it to see what it is *and whether there are more things nearby* →
+    then, by available categorisation and expected threat, either raise binoculars or resume
+    scanning; if it turns out dangerous, watch it.
+
+    Three parts, each landing where it belongs. *Fix on it*: belief selects the target (highest
+    attention, lowest classification level), the runner passes down a narrow `Gaze` at its bearing.
+    *Check for more nearby*: the dwell widens to the contact's neighbourhood before deciding —
+    `cluster_candidates` already computes exactly this over what is visible, so it is a reuse, not
+    a new mechanism. *Glass up or resume*: a belief-side decision from categorisation and threat,
+    executed as `BINOCULAR_OPTIC` + its 8.5° field **and `peripheral=False`** — the trade is real in
+    both directions. Hold duration is informed by ED's `average_det_time_max_dist_*` ground figures.
+
+    Note what this does not need: no new module, no new state, no new belief→perception import. The
+    two-channel work in 2B/2C is what makes it a small slice.
 
 ---
 
@@ -356,6 +599,15 @@ they are state, but they are a pure function of the frame sequence.
   can still report something ED told him about while looking the other way. That is a real remaining
   omniscience seam, and it is ED's detection rather than ours. Out of scope here; worth a backlog
   entry after 2C shows how visible it is in practice.
+- **The attention-capture channel itself** — what actually computes a peripheral stimulus (flashes,
+  tracers, explosions, a weapon tracking ownship, high angular speed). It needs the diagram's
+  behaviour-change channel, which does not exist. **The seam it plugs into is built here** (hard
+  parts 2a and 4); the channel is not.
+- **Expectation suppression** — the user's *"unless it is an expected change, in which case mind
+  overrides instinct."* It needs belief-side knowledge of what is expected, which would run the
+  import the forbidden way, and it deserves its own design pass rather than a corner of this one.
+  Recorded, not designed. Until it exists, every peripheral stimulus captures attention equally,
+  including ones he had every reason to anticipate.
 - **Behaviour-change reporting, engagement envelopes, "danger"/"safe from" callouts, IFF** — all from
   the diagram, none of them cones work.
 
@@ -367,10 +619,32 @@ they are state, but they are a pure function of the frame sequence.
   awareness down to a 60° cone visiting each flank every 8 s is a large subjective change, and no
   amount of unit testing predicts whether it reads as "realistic" or "blind." It is deliberately the
   third slice so that 2A and 2B are already banked if 2C needs several tuning passes.
-- **The scan cycle conflicts with `OBSERVED_WINDOW_S` (hard part 5).** Resolved by derivation above,
+- **The scan cycle conflicts with `OBSERVED_WINDOW_S` (hard part 8).** Resolved by derivation above,
   but it changes crew-facing language, so the 2C sortie must listen for hedging on contacts he is
   actually holding.
-- **Group splitting at gaze edges (hard part 3)** — rare at 60°, routine at 2D's 8.5°.
+- **Group splitting at gaze edges (hard part 6)** — occasional at the 30° focus cone, routine at
+  2D's 8.5° binocular field. The two-level gaze makes this more likely than the earlier 60° design
+  did, and 2D's "check for more nearby" step is partly a mitigation as well as a behaviour.
+- **From 2C onward, nothing outside the current sector can capture his attention** — no flash, no
+  tracer, no missile. The seam exists and is empty. This regresses no working behaviour (nothing
+  detects weapons today; `UrgentCall`'s only trigger is `!inject-urgent`) but it means the gap now
+  has two independent causes, and the capture channel must ship with the weapon detector rather
+  than after it.
+- **The attention wedge has no elevation term.** It is a pure azimuth test, which is what makes it
+  the cheapest and most selective first gate — but it means a steep dive or climb does not narrow
+  what he is looking at, and the cockpit mask (which does have depression limits) is what catches
+  that. Correct for a head that turns rather than tilts; worth revisiting only if the 2C sortie
+  shows it reading wrong in hard manoeuvring.
+- **A missed sweep drops a contact two certainty bands at once** (hard part 8: `2 × CYCLE −
+  FOCUS_DWELL` = 30 s, exactly `POSITION_HALF_LIFE_S`). Defensible but it will read as abrupt; first
+  thing to check if 2C shows confidence flickering.
+- **`NAKED_EYE_MAX_NEW_PER_POLL = 3` is tighter than it looks under a 2 s focus dwell.** Two polls
+  per o'clock hour means at most six new objects taken in per visit to that bearing, and the rest
+  wait a full 16 s cycle. A dense sector will under-report. Do not raise it reflexively — it is the
+  pre-existing attention-bandwidth model (hard part 6) and the scan loop is the new one; decide
+  which is real before touching either.
+- **The measured saving assumes candidate counts stay near ~74 per poll.** A denser mission moves
+  the absolute numbers but not the ~23% retention ratio, which is a property of the wedge geometry.
 - **`NAKED_EYE_MAX_NEW_PER_POLL` may double-count with the scan loop** — both limit intake rate.
   Do not add a third such limiter without deciding which of these two is the real one.
 - **The 2026-09-17 screenshot ladder is compromised** (detection-aid dots enabled), so
@@ -398,12 +672,13 @@ partially-accumulated time, a defined interaction with the cone sweeping off mid
 either a random draw (destroying replay determinism) or a deterministic surrogate that is no longer
 ED's model.
 
-**Why the value is smaller than it looks:** the scan loop already produces "detection takes time" —
-a contact entering the envelope waits on average half a cycle to be looked at — and
-`NAKED_EYE_MAX_NEW_PER_POLL` already throttles intake. A third delay mechanism would be physically
-double-counting the same lag, and separating the three would need its own calibration sortie.
-ED's figures are also quoted for a different skill model under its own stated ideal conditions, so
-they are not directly transplantable.
+**Why the value is smaller than it looks, and the two-level gaze makes this stronger:** the scan
+loop already produces "detection takes time," and now produces a lot of it — a contact at a flank
+o'clock waits up to 14 s for the focus cone to reach it (hard part 8), not the few seconds the
+earlier 8 s design implied. `NAKED_EYE_MAX_NEW_PER_POLL` throttles intake on top of that. A third
+delay mechanism would be physically double-counting the same lag, and separating the three would
+need its own calibration sortie. ED's figures are also quoted for a different skill model under its
+own stated ideal conditions, so they are not directly transplantable.
 
 **The alternative, which is what 2D above builds:** read "dwell" as the user defined it — *"looking
 at something with intent"* — an act, not a timer. That version earns its keep for a reason the timer
@@ -413,6 +688,14 @@ where they are not (whether a passive glance finds a tank).
 
 **And 2D should be gated on 2C's sortie**, not built speculatively: if the scan loop already makes
 detection feel gradual, the cheapest correct outcome is that 2D is never needed in this milestone.
+The two-level gaze raises the odds of that outcome considerably, which is worth saying now rather
+than after 2D is half-built.
+
+One thing does argue the other way and should be weighed at the 2C gate rather than pre-judged:
+with `Optic.peripheral` landing in 2B, **2D is the only slice that ever exercises `peripheral=False`
+in the live path.** Until something raises binoculars, the binocular's real cost is proven by a test
+and never by a sortie. That is not sufficient reason to build 2D — a tested rule with no live caller
+is still better than an untested one — but it is the honest counterweight.
 
 ---
 
@@ -426,26 +709,40 @@ bearing once gaze takes one), and the deferred range-uncertainty work, whose set
 certainty should *narrow* when he uses the sight — is only expressible once "which optic is he using
 right now" is a real runtime value rather than a default argument.
 
-It complicates exactly one thing: every future perception channel must now decide whether gaze
-applies to it, and the hybrid/HelperAI channel's answer is already "no." That asymmetry is honest
-but it is a seam that will need re-examining rather than a settled boundary.
+It also changes the economics of every later perception term. Landcover LOS, light level, fog,
+movement — each was costed against a gate chain that evaluates ~266,000 candidates per sortie
+against the range test. After 2C that is ~61,000, so terms previously judged too expensive to run
+per candidate deserve re-costing rather than being carried forward as settled. This is the clearest
+case of the optimisation and the model being the same change: making him less omniscient is what
+makes the expensive realism terms affordable.
+
+The two-channel split narrows a future milestone usefully too. The attention-capture channel, the
+behaviour-change channel and movement detection were three separately-scoped items that all
+turn out to feed **one** thing — `peripheral_stimulus_ids` — so whichever is built first defines
+the interface for the other two, and none of them needs to negotiate with the attention gate again.
+
+It complicates exactly two things: every future perception channel must now decide whether gaze
+applies to it, and the hybrid/HelperAI channel's answer is already "no"; and every future
+attention-grabbing stimulus must decide whether it is a peripheral stimulus, which the two-channel
+physics constrains but does not fully decide. Both are honest seams that will need re-examining
+rather than settled boundaries.
 
 ---
 
 ### Decisions Requiring User Input
 
-**One question, and it is the one that needs lived experience rather than analysis.**
+**None outstanding.** The one question this plan carried — how long he should look at each sector —
+was answered by the user on 2026-09-21: **2 s per o'clock sector**, which works out to a 16 s cycle
+(hard part 8). That is recorded as a decision, not a recommendation, and the two constants derived
+from it (`OBSERVED_WINDOW_S`, the acquisition retention window) follow arithmetically rather than
+by taste.
 
-- **How long should he look at each sector?** The plan recommends **2 s per leg — an 8 s cycle, the
-  forward arc revisited every 4 s and each flank every 8 s.** 2 s is the floor imposed by the 1 Hz
-  poll rate (below it, sectors get aliased away entirely); there is no ceiling short of contacts
-  going stale, and the knock-on is that `OBSERVED_WINDOW_S` is re-derived from whatever this number
-  becomes, which changes how confidently Petrovich phrases contacts he is cycling past.
+Two things are **flagged rather than asked**, because they are consequences the user should see
+land rather than decisions needing an answer now:
 
-  This is not a number that can be derived — it is how a real crewman's head moves, which is
-  the user's knowledge and not the code's. If 8 s feels sluggish in the cockpit, 6 s (1.5 s per leg)
-  is the practical floor at the current poll rate; if it feels frantic, 12 s is fine mechanically and
-  simply means slower reaction to flank contacts.
-
-  Answerable after flying 2A if preferred — 2C is two slices away, and a guess now can be corrected
-  by the 2C sortie without rework.
+- **`OBSERVED_WINDOW_S` moves 5.0 → 16.0**, which changes how confidently Petrovich phrases
+  contacts he is cycling past. It is derived, but it is audible, and the 2C sortie is where it
+  gets judged.
+- **From 2C onward nothing outside the focus cone can capture his attention** until the
+  attention-capture channel exists (hard part 4). The seam is built and empty. Worth knowing before
+  flying 2C rather than after.

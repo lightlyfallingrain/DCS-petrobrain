@@ -227,13 +227,21 @@ def test_hires_range_candidate_with_no_reporting_name_falls_back_to_class() -> N
 def test_lowres_range_candidate_reaches_presence_level() -> None:
     # `plans/classification-refinement/plan.md` Stage 7: the gate moved to
     # `lowres`, making the presence tier reachable for the first time.
-    # Infantry at the naked-eye default (UNAIDED_OPTIC, M=1.0, `plans/
-    # detection-cones-slice1/plan.md` final scope change): medres threshold
-    # 128.57 m, lowres threshold 600 m. At 400 m the target clears the gate
-    # but only achieves `lowres` -- "something is there," ED's only
-    # catch-all class, not a fabricated class guess.
+    #
+    # **Switched from Infantry to a Ural truck, slice 2A (`plans/
+    # detection-cones-slice2/plan.md` decision 3).** Infantry now carries
+    # `distinctiveness=5.0`, which clamps its class threshold to its own
+    # presence threshold at every optic -- infantry can no longer produce
+    # a genuine presence-only observation, by design (this is exactly the
+    # fix: "Infantry classifies at exactly its detection range"). A Ural
+    # truck (`OP_TRUCK`, distinctiveness 1.0, "ordinary") is the object
+    # this test actually needs. Ural at the naked-eye default
+    # (UNAIDED_OPTIC): class threshold 6 / 0.014 * 1.0 * 1.0 = 428.57 m,
+    # presence threshold 6 / 0.003 * 1.0 = 2000 m. At 1000 m the target
+    # clears the gate but only achieves `lowres` -- "something is there,"
+    # ED's only catch-all class, not a fabricated class guess.
     world_objects = {
-        "objects": [_world_object(1, "Infantry", lat_deg=400.0, lon_deg=0.0)]
+        "objects": [_world_object(1, "Ural-4320", lat_deg=1000.0, lon_deg=0.0)]
     }
     source, _client = _source(world_objects)
 

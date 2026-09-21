@@ -145,14 +145,15 @@ def test_admission_records_achieved_tier() -> None:
     assert result is not None
     entry = trace.records[0]
     assert entry.outcome == GateOutcome.ADMITTED
-    # "lowres", not "hires", since the naked eye became check_visibility's
-    # default optic (cones slice 1, 2026-09-20). Infantry at 250 m is a
-    # speck to the unaided eye; through binoculars -- the old default --
-    # the same candidate resolved to "hires". The naked-eye ladder for
-    # Infantry is hires out to ~70 m, medres to ~140 m, lowres beyond.
-    # Updated rather than pinned to the old value because the old value
-    # described an observer permanently holding binoculars to his eyes.
-    assert entry.achieved_tier == "lowres"
+    # **"medres", not "lowres" (slice 2A, `plans/detection-cones-slice2/
+    # plan.md` decision 3).** Infantry now carries `distinctiveness=5.0`
+    # (`object_model._OP_CLASS_DISTINCTIVENESS`), which clamps its class
+    # threshold to its own presence threshold (600 m for UNAIDED_OPTIC) --
+    # far past the old, un-clamped naked-eye class threshold (128.57 m)
+    # this test originally pinned. At 250 m Infantry now clears class
+    # (600 m) but not type (64.29 m, unaffected by distinctiveness -- see
+    # `_achieved_tier`'s own docstring for why), so it resolves `medres`.
+    assert entry.achieved_tier == "medres"
     assert entry.true_bearing_deg == pytest.approx(result.bearing_deg)
     assert entry.true_range_m == pytest.approx(result.range_m)
     # Not yet annotated with cluster/observation detail -- that is

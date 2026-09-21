@@ -42,21 +42,47 @@ Two candidates `a`, `b` seen from an `observer` are **separable** when:
     theta_sep      = angular_separation_rad(observer, a, b)      [true 3D angle]
     theta_size(i)  = angular_size_rad(i.size_m, i.range_m)
     theta_sep >= 0.5 * (theta_size(a) + theta_size(b))                        ... (S)
-    theta_sep * BINOCULAR_RANGE_MULTIPLIER >= LOWRES_ANGULAR_RADIUS_RAD       ... (A)
+    theta_sep * M >= LOWRES_ANGULAR_RADIUS_RAD                               ... (A)
+
+where `M` is the *active optic's* `presence_range_mult` (`cluster_
+candidates`' own parameter, module docstring's "The clustering floor is no
+longer benign" section below), not a hardcoded constant.
 
 **(S) is the two-apples criterion, derived not tuned**: two discs of angular
 diameter `d_a`, `d_b` visually overlap exactly when their centre separation
 is under `(d_a + d_b) / 2`. No new constant and no magnification term --
-`M` (`BINOCULAR_RANGE_MULTIPLIER`) cancels out of (S) entirely, since both
-sides are angles scaled by the same optic.
+`M` cancels out of (S) entirely, since both sides are angles scaled by the
+same optic.
 
-**(A) is a named floor, provably non-binding for anything the channel
-actually detected**: `visibility.py` admits a candidate exactly when
-`theta_size * M >= LOWRES_ANGULAR_RADIUS_RAD`. Combined with (S):
-`theta_sep * M >= 0.5*(theta_size_a + theta_size_b)*M >= LOWRES_ANGULAR_RADIUS_RAD`,
-so (A) can never be the binding constraint for a detected pair -- kept
-anyway, as a one-line self-consistency check (see `test_clustering.py`'s own
-test for it), not because it ever fires.
+**(A) is a named floor, slack for anything the channel actually detected
+*at the same optic's own presence multiplier*, and no longer for granted
+across every optic (slice 2A fix, see below)**: `visibility.py` admits a
+candidate exactly when `theta_size * M >= LOWRES_ANGULAR_RADIUS_RAD`.
+Combined with (S): `theta_sep * M >= 0.5*(theta_size_a + theta_size_b)*M
+>= LOWRES_ANGULAR_RADIUS_RAD`, so (A) can never be the binding constraint
+for a pair detected *under that same M* -- kept anyway, as a one-line
+self-consistency check (see `test_clustering.py`'s own test for it), not
+because it ever fires for the optic that did the detecting.
+
+### The clustering floor is no longer benign (slice 2A fix)
+
+Before slice 2A this module hardcoded `M = BINOCULAR_RANGE_MULTIPLIER`
+(4.0) in (A), regardless of which optic actually admitted the candidates
+being clustered. The self-consistency proof above only holds while
+`M <= 4.0` -- and slice 2A's own decisions doc records a 9K113 narrow-sight
+`presence_range_mult` of 5.81 (deliberately not wired in as a selectable
+optic this slice, `optics.py`'s own docstring, but its number is real and
+already measured). At `M = 5.81` the floor stops being slack: two
+genuinely separable contacts could be silently merged into one cluster,
+exactly the defect this module exists to avoid. The fix is the one
+parameter change the proof calls for -- `cluster_candidates`/`_separable`
+take the active optic's own `presence_range_mult` instead of importing the
+binocular constant, which makes (A) slack **by construction for every
+optic**, present and future, rather than true only for the ones examined
+so far. `naked_eye_source.py`, the only caller, passes `UNAIDED_OPTIC.
+presence_range_mult` today (no optic-selection mechanism exists until
+slice 2B) -- the parameterisation itself is what future-proofs this
+against the day a narrower sight is actually selectable.
 
 Two candidates merge into one cluster when either (S) or (A) fails.
 
@@ -115,7 +141,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from perception.geometry import GeoPosition
-from perception.visibility import BINOCULAR_RANGE_MULTIPLIER, LOWRES_ANGULAR_RADIUS_RAD
+from perception.visibility import LOWRES_ANGULAR_RADIUS_RAD
 
 #: `perception.naked_eye_source._CLASSIFICATION_LEVEL_CLASS`'s twin for the
 #: presence level (1) -- unreachable from that module's own bare-int mirror
@@ -162,11 +188,19 @@ def angular_size_rad(size_m: float, slant_range_m: float) -> float:
     return size_m / slant_range_m
 
 
-def _separable(observer: GeoPosition, a: ClusterCandidate, b: ClusterCandidate) -> bool:
+def _separable(
+    observer: GeoPosition,
+    a: ClusterCandidate,
+    b: ClusterCandidate,
+    presence_range_mult: float,
+) -> bool:
     """Whether `a` and `b` are angularly separable at `observer` -- both
-    (S) and (A) from the module docstring must hold. (A) is provably slack
-    for anything the channel actually detected (see module docstring); kept
-    as a named, explicit check rather than assumed."""
+    (S) and (A) from the module docstring must hold. `presence_range_mult`
+    is the active optic's own `optics.Optic.presence_range_mult` (slice
+    2A's floor fix, module docstring's "The clustering floor is no longer
+    benign" section) -- (A) is slack for anything the channel actually
+    detected under that same optic; kept as a named, explicit check rather
+    than assumed."""
     theta_sep = angular_separation_rad(
         observer,
         GeoPosition(x=a.x, z=a.z, alt_m=a.alt_m),
@@ -175,7 +209,7 @@ def _separable(observer: GeoPosition, a: ClusterCandidate, b: ClusterCandidate) 
     theta_size_a = angular_size_rad(a.size_m, a.range_m)
     theta_size_b = angular_size_rad(b.size_m, b.range_m)
     resolvable = theta_sep >= 0.5 * (theta_size_a + theta_size_b)
-    above_floor = theta_sep * BINOCULAR_RANGE_MULTIPLIER >= LOWRES_ANGULAR_RADIUS_RAD
+    above_floor = theta_sep * presence_range_mult >= LOWRES_ANGULAR_RADIUS_RAD
     return resolvable and above_floor
 
 
@@ -217,10 +251,16 @@ class Cluster:
 
 
 def cluster_candidates(
-    candidates: Sequence[ClusterCandidate], observer: GeoPosition
+    candidates: Sequence[ClusterCandidate],
+    observer: GeoPosition,
+    presence_range_mult: float,
 ) -> list[Cluster]:
     """Single-link angular clustering over `candidates` at `observer` (module
-    docstring's (S)/(A) predicate). Single-link (a chain of pairwise-close
+    docstring's (S)/(A) predicate). `presence_range_mult` is the active
+    optic's own `optics.Optic.presence_range_mult` -- threaded through to
+    (A)'s floor check in `_separable` (slice 2A's floor fix); the caller is
+    responsible for passing the multiplier of whichever optic actually
+    admitted `candidates`. Single-link (a chain of pairwise-close
     candidates all end up in one cluster even if the two ends are far apart)
     -- the known chaining risk the plan documents and defers to a later
     calibration pass, not fixed here. Cluster order is not defined;
@@ -241,7 +281,9 @@ def cluster_candidates(
 
     for i in range(n):
         for j in range(i + 1, n):
-            if not _separable(observer, candidates[i], candidates[j]):
+            if not _separable(
+                observer, candidates[i], candidates[j], presence_range_mult
+            ):
                 union(i, j)
 
     groups: dict[int, list[ClusterCandidate]] = {}
