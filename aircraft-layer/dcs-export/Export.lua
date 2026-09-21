@@ -119,7 +119,7 @@ local socket = require("socket.core")
 -- shipped 2026-09-09 and the whole chain was correct end to end; a Windows
 -- probe and an hour of tracing went into a bug that did not exist in the code,
 -- because nothing recorded which version of this file had produced the data.
-local EXPORT_SCRIPT_VERSION = "2026-09-22"
+local EXPORT_SCRIPT_VERSION = "2026-09-22b"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -322,6 +322,12 @@ end
 -- docstring in `aircraft-layer/src/schema/world_objects.py`). The object is
 -- still sent either way -- flagging, never omitting, ownship's own entry is
 -- the whole point of this field (backlog decision, `todo/todo.md`).
+--
+-- `unit_name` (`plans/movement-detection/plan.md` Decision 1) is `obj.
+-- UnitName`, passed through as-is, or JSON `null` when the object carries
+-- none (scenery/statics may not) -- the join key the unit-velocity feed
+-- needs, since mission scripting's `Unit:getName()` returns the identical
+-- string. See `WorldObjectSample.unit_name`'s own docstring.
 local function encode_world_objects_line(t, world_objects, player_plane_id)
     local parts = {}
     for object_id, obj in pairs(world_objects) do
@@ -341,6 +347,7 @@ local function encode_world_objects_line(t, world_objects, player_plane_id)
                 .. ",\"alt_m\":" .. encode_scalar(lla.Alt)
                 .. ",\"heading_true_rad\":" .. encode_scalar(obj.Heading)
                 .. ",\"is_ownship\":" .. encode_scalar(is_ownship)
+                .. ",\"unit_name\":" .. encode_scalar(obj.UnitName)
                 .. "}"
         end
     end
