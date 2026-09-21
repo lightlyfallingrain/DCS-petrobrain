@@ -138,7 +138,23 @@ class AttentionArea:
 
     id: str
     center: GeoPosition
-    radius_m: float
+    #: Range limit in meters, or `None` for unbounded (no range test at
+    #: all -- `area_contains` skips it entirely). `None` exists for
+    #: F10-originated sector scans (`crew_console.py`), which have no
+    #: geometry to draw a radius from in the first place: the button
+    #: carries a bearing wedge, not a range. The one prior attempt to fill
+    #: that gap, `F10_SCAN_RADIUS_M = 3000.0`, was invented rather than
+    #: derived, and measured against the naked-eye envelope it did nothing
+    #: for any ground unit (all well inside 3 km) while wrongly excluding
+    #: the one contact that beats it, the S-300 mast at 8000 m -- a cutoff
+    #: that binds only in the case where it is wrong is worse than none.
+    #: What should bound a sector scan is what Petrovich can actually see,
+    #: not a second, arbitrary limit stacked on top of that. The typed
+    #: `scan-area`/`watch-area` console commands still supply a real,
+    #: player-chosen radius (`console.py`) -- this is only about the
+    #: invented one. See `todo/todo.md`, "Scan geometry: drop the invented
+    #: radius" for the full reasoning.
+    radius_m: float | None
     level: Attention
     source: str
     sector: Sector | None = None
@@ -217,12 +233,23 @@ def project_relative_area(
 
 def area_contains(area: AttentionArea, position: GeoPosition) -> bool:
     """Whether `position` falls inside `area` -- within `radius_m` of
-    `area.center`, and (if `area` has an angular wedge, see
+    `area.center` (skipped entirely when `radius_m` is `None`, i.e. an
+    unbounded area), and (if `area` has an angular wedge, see
     `area_wedge_deg`) within that wedge as measured from `area.center`,
     never from ownship. For an ownship-anchored area, `center`/`wedge_deg`
     are that area's last projection, so this stays pure absolute geometry
-    for both kinds of area."""
-    if range_m(area.center, position) > area.radius_m:
+    for both kinds of area.
+
+    An unbounded area is a wedge to the horizon, not "everything
+    everywhere": every caller that constructs a `radius_m=None` area also
+    supplies a real angular filter (`crew_console.py`'s F10 scans always
+    set `sector` or `relative_sector`), so this function does not itself
+    forbid a `radius_m=None` area with no wedge -- `area_wedge_deg` would
+    return `None` and every position would match. That combination is not
+    reachable from any caller in this codebase today; if one is ever
+    added, it must supply a wedge too, or it really does mean "all of
+    creation," which nothing here should ever ask for."""
+    if area.radius_m is not None and range_m(area.center, position) > area.radius_m:
         return False
     wedge = area_wedge_deg(area)
     if wedge is None:

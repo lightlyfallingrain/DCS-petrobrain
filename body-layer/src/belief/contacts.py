@@ -403,7 +403,7 @@ class ContactStore:
     def add_area(
         self,
         center: GeoPosition,
-        radius_m: float,
+        radius_m: float | None,
         level: Attention,
         source: str,
         sector: Sector | None = None,

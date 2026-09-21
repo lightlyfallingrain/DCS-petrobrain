@@ -432,8 +432,9 @@ def _handle_areas(store: ContactStore) -> list[str]:
 
 def _format_area_line(area: AttentionArea) -> str:
     sector_part = f" sector={area.sector}" if area.sector is not None else ""
+    radius_part = "unbounded" if area.radius_m is None else f"{area.radius_m:.0f}"
     return (
-        f"{area.id}: level={area.level} radius_m={area.radius_m:.0f}"
+        f"{area.id}: level={area.level} radius_m={radius_part}"
         f"{sector_part} source={area.source}"
     )
 
