@@ -12,6 +12,38 @@ run protocol in `2026-09-11-command-injection-surface.md`.
 Regenerate after any DCS update — command IDs are positional and **will shift** if ED inserts an
 entry into a table (see "Fragility" below).
 
+> ### Known gap — 13 elements are missing, and they are not a random 13
+>
+> **Found 2026-09-20.** This dump enumerates `clickabledata.lua` entries written in the
+> `default_2_position_tumb(…)` / `default_axis(…)` / `multiposition_switch(…)` helper-call form.
+> **13 of that file's 749 elements are raw table literals instead, and none of them are below.**
+> The generator never saw them. The set is biased towards exactly what this project wants, because
+> a control needs the raw form precisely when it has more than one action — the two push-to-talk
+> triggers and the two collectives are all in it. This is why `738` (the PTT arg that
+> `2026-09-19-ptt-gate-feasibility.md` went looking for) appears nowhere in this file: a generator
+> blind spot, not a stale or wrong argument number.
+>
+> | Element | Arg(s) | Device | Seat | Hint |
+> |---|---|---|---|---|
+> | `COLLECTIVE-CORR-PTR` | 0, 0 | `ENGINE_INTERFACE` | pilot | Collective (LMB) / Throttle (RMB) |
+> | `OP-COLL-THROTTLE-PTR` | 0, 0 | `ENGINE_INTERFACE` | op | Collective (LMB) / Throttle (RMB) |
+> | `CLOCK-LEFT-PTR` | 57, 57, 58 | `CLOCK_P` | pilot | Mech clock left lever |
+> | `CLOCK-RIGHT-PTR` | 59, 60 | `CLOCK_P` | pilot | Mech clock right lever |
+> | `CLOCK-LEFT-OP-PTR` | 687, 687, 688 | `CLOCK_O` | op | Mech clock left lever |
+> | `CLOCK-RIGHT-OP-PTR` | 693, 694 | `CLOCK_O` | op | Mech clock right lever |
+> | `ILS-ADJUST-HANDLE-PTR` | 1005, 1006, 1005, 1006 | `ASP_17V` | pilot | Sight reflector control |
+> | `BRAKE-LEVEL-OP-PTR` | 15, 846, 846 | `PKV` | op | PKI control |
+> | `RADAR-ALTIMETER-KNOB-PTR` | 31, 30 | `RADAR_ALTIMETER` | pilot | Radar altimeter adjust and test |
+> | **`STICK-PTT-PTR`** | **738, 738** | `SPU_8` | pilot | **Trigger, RADIO(LMB)=1.0 / ICS(RMB)=0.5** |
+> | **`OP-STICK-PTT-PTR`** | **856, 856** | `SPU_8` | op | **Trigger, RADIO(LMB)=1.0 / ICS(RMB)=0.5** |
+> | `TIMIR-LEFT-OP-PTR_2-9_5` | 1015, 1016 | `TIMER` | op | Left timer control |
+> | `TIMIR-LEFT-OP-PTR_8-38` | 1019, 1020 | `TIMER` | op | Right timer control |
+>
+> "Seat" is `crew_member_access` (0 = pilot, 1 = operator). Both PTTs declare
+> `arg_value = {1.0, 0.5}` with `arg_lim = {{0.0, 1.0}, {0.0, 0.5}}`. A regeneration should parse
+> the raw form too rather than relying on this hand-made table staying current. Source:
+> `2026-09-20-dcs-install-detection-deep-read.md` finding 11.
+
 ---
 
 ## 1. The two command channels

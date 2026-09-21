@@ -89,9 +89,33 @@ body-side view and the slice numbering both files share.
     should not produce a clip at all, so neither the adapter nor the body layer has to reason about
     it.
 
-  **Blocked on nothing but a decision to resume** — it needs device argument numbers for the switch
-  and the knob, the same way push-to-talk needed arg 738, which is an investigator pass plus a probe
-  on the Windows box.
+  ~~**Blocked on nothing but a decision to resume** — it needs device argument numbers for the
+  switch and the knob, the same way push-to-talk needed arg 738, which is an investigator pass plus
+  a probe on the Windows box.~~ **The investigator pass is done (2026-09-20, read from
+  `clickabledata.lua` on the Windows box). The slice stays deferred; only its prerequisite is
+  gone.**
+
+  | Arg | Control | Seat |
+  |---|---|---|
+  | 456 | Radio/ICS switch | pilot |
+  | 457 | SPU-8 main volume knob (axis 0-1, step 0.05) | pilot |
+  | 453 | SPU-8 radio volume knob | pilot |
+  | 455 | Radio source selector, 6 pos at 1/5 | pilot |
+  | 452 / 454 | Network 1/2 switch, circular call button | pilot |
+  | 376 / 377 | SPU-8 NET-2 / NET-1 ON-OFF | pilot |
+  | 738 | stick trigger: **1.0 = RADIO (LMB), 0.5 = ICS (RMB)**, 0.0 released | pilot |
+  | 656-661 | operator mirror of 452-457 | operator |
+  | **664** | **SPU-8 intercom power ON/OFF** | operator |
+  | 856 | operator stick trigger, same 1.0/0.5 encoding | operator |
+
+  **One thing to know before designing "intercom off means he cannot hear you": 664 is the only
+  actual intercom *power* switch, and it is on the operator's panel** (`crew_member_access = 1`) —
+  the player flying as pilot cannot reach it. The pilot's equivalent gating is 456 (Radio/ICS
+  select) plus the 376/377 network switches, which is a different thing. Source and the full
+  extraction: `aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md` finding 11.
+
+  Still genuinely needing a live probe: the *values* these args report in flight (the table gives
+  their declared ranges, not what `get_argument_value` returns mid-sortie).
 
   The original SRS groundwork is preserved in `research/2026-09-17-tts-audio-transport-recon.md`
   (read its two addenda, which correct the main body) — it established that stock SRS declares an

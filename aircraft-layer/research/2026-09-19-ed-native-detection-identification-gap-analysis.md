@@ -6,6 +6,18 @@
 contradicts that version; not re-verified live.
 **Theatre:** n/a (scripting-API / native-model question, not terrain-specific)
 
+> **PARTLY SUPERSEDED 2026-09-20 — read
+> [`2026-09-20-dcs-install-detection-deep-read.md`](2026-09-20-dcs-install-detection-deep-read.md)
+> alongside this.** `Scripts/AI/Detection.lua`, named below as the single highest-value unread
+> artifact, has now been read on the Windows box. It **refutes this document's Finding 1
+> conclusion that ED models neither movement nor dwell**: ED has a `motion_factor` (a detection-
+> distance bonus up to 1.5x, keyed to angular speed over angular size) and an aspect- and
+> class-dependent detection-*time* model, plus a scan-time term for optic sensors. The reasoning
+> here was sound on the evidence available — the Mi-24P tree genuinely contains neither term — but
+> the conclusion generalised from the module to the engine, and the engine file says otherwise.
+> The rest of this document (the identification ladder, what is readable at runtime, the
+> no-omniscience assessment) stands.
+
 ### Question
 
 User, verbatim: *"ED native model should be researched in detail for detection and identification
@@ -392,12 +404,13 @@ probes, in priority order:
 
 ### Unresolved
 
-- **`Scripts/AI/Detection.lua` unread** — the single highest-value next artifact; see Reproducible
-  Test #1.
-- **Whether `min_contrast_f`/`min_fog_transparency`/`extra_eyesight_ratio` are consumed anywhere in
-  the DCS install at all** (vs. read by fully native/compiled code with no Lua consumer whatsoever)
-  remains unknown even after this session — the `HelperAI.lua`-tree exhaustive sweep is a clean
-  negative for that specific tree, not for the whole install.
+- ~~**`Scripts/AI/Detection.lua` unread**~~ — **RESOLVED 2026-09-20**, read on the Windows box:
+  `2026-09-20-dcs-install-detection-deep-read.md` finding 1.
+- ~~**Whether `min_contrast_f`/`min_fog_transparency`/`extra_eyesight_ratio` are consumed anywhere
+  in the DCS install at all**~~ — **RESOLVED 2026-09-20.** The whole-install Lua sweep is now a
+  clean negative (three hits, all definitions), and `CockpitMi24.dll`'s import table shows the
+  consumer is the engine's own `wDetector`, which `Detection.lua` configures. See finding 5 of
+  `2026-09-20-dcs-install-detection-deep-read.md`.
 - **Whether `net.dostring_in("mission", ...)` can reach `world.weather` from a Hook script's own
   execution context** — architecturally plausible (the F10 precedent proves the general
   `net.dostring_in` + poll mechanism works from a Hook script), but the `"mission"` target string
@@ -407,14 +420,15 @@ probes, in priority order:
   (the Hoggit `Category:Environment` index page 404'd; a `Category:Functions` fallback listing was
   returned by search but not opened). A direct fetch of that category page, or of
   `DCS_func_getAbsTime`, would close this with one more tool call each.
-- **Whether ED's engine treats forest/vegetation as LOS-opaque for AI detection purposes** —
-  SpeedTree's presence confirms rendering-layer forest geometry exists; nothing found this session
-  confirms or denies whether the *gameplay* detection/LOS model samples that geometry at all
-  (vs. sampling only the bare terrain mesh, as our own `line_of_sight_clear` does).
+- ~~**Whether ED's engine treats forest/vegetation as LOS-opaque for AI detection purposes**~~ —
+  **RESOLVED 2026-09-20: yes, on every terrain this project uses.** `trees_LOS_test_T4 = true` and
+  all five installed theatres are Terrain-4. Finding 8 of the 2026-09-20 deep read.
 - **Aspect and camouflage/concealment** — not specifically searched for beyond the general
   `HelperAI.lua` constant sweep; a targeted grep of `Scripts/AI/Detection.lua` (once fetched) and a
   targeted Hoggit/forum search for these two terms specifically would be the next step if Architect
   judges them worth resolving before any aspect-aware design work.
 - **Per-unit-type characteristic size — whether ED's own value is Lua-readable anywhere in core
   DCS** (not a third-party asset-pack `db_units_*.lua`, which was found but not opened and belongs
-  to community mods, not stock content) is unconfirmed.
+  to community mods, not stock content). **Answered negatively 2026-09-20** for stock units: they
+  live in the encrypted `Scripts/Database.edce`, and `Detection.lua` only carries per-*class*
+  distances. The live `Unit.getDesc().box` route remains untested.
