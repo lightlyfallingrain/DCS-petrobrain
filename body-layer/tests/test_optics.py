@@ -20,11 +20,26 @@ from perception.optics import (
     Optic,
     within_optic_fov,
 )
-from perception.visibility import BINOCULAR_RANGE_MULTIPLIER
+
+
+def _optic(
+    fov_half_angle_deg: float | None, boresight_azimuth_deg: float = 0.0
+) -> Optic:
+    """A synthetic test `Optic` -- the per-tier multipliers are irrelevant
+    to `within_optic_fov` (a pure geometry test), so they're pinned at 1.0
+    here rather than repeated at every call site."""
+    return Optic(
+        name="test",
+        presence_range_mult=1.0,
+        class_range_mult=1.0,
+        type_range_mult=1.0,
+        fov_half_angle_deg=fov_half_angle_deg,
+        boresight_azimuth_deg=boresight_azimuth_deg,
+    )
 
 
 def test_none_fov_half_angle_always_passes() -> None:
-    unrestricted = Optic(name="test", magnification=1.0, fov_half_angle_deg=None)
+    unrestricted = _optic(fov_half_angle_deg=None)
 
     assert within_optic_fov(unrestricted, azimuth_deg=0.0, elevation_deg=0.0)
     # Far off-boresight in every axis -- still no restriction.
@@ -32,7 +47,7 @@ def test_none_fov_half_angle_always_passes() -> None:
 
 
 def test_boundary_case_exactly_at_the_half_angle_passes() -> None:
-    optic = Optic(name="test", magnification=1.0, fov_half_angle_deg=10.0)
+    optic = _optic(fov_half_angle_deg=10.0)
 
     # Pure azimuth offset of exactly the half-angle, zero elevation --
     # angular separation is exactly 10 deg.
@@ -40,7 +55,7 @@ def test_boundary_case_exactly_at_the_half_angle_passes() -> None:
 
 
 def test_just_outside_the_half_angle_fails() -> None:
-    optic = Optic(name="test", magnification=1.0, fov_half_angle_deg=10.0)
+    optic = _optic(fov_half_angle_deg=10.0)
 
     assert not within_optic_fov(optic, azimuth_deg=10.001, elevation_deg=0.0)
 
@@ -49,12 +64,7 @@ def test_off_boresight_azimuth_case() -> None:
     """A non-zero `boresight_azimuth_deg` shifts the cone's centre --
     confirms `within_optic_fov` measures separation from the optic's own
     boresight, not from world azimuth 0."""
-    optic = Optic(
-        name="test",
-        magnification=1.0,
-        fov_half_angle_deg=5.0,
-        boresight_azimuth_deg=45.0,
-    )
+    optic = _optic(fov_half_angle_deg=5.0, boresight_azimuth_deg=45.0)
 
     assert within_optic_fov(optic, azimuth_deg=45.0, elevation_deg=0.0)
     assert within_optic_fov(optic, azimuth_deg=48.0, elevation_deg=0.0)
@@ -65,31 +75,30 @@ def test_elevation_offset_alone_can_fail_the_gate() -> None:
     """A separation test, not an independent azimuth-box-and-elevation-box
     check -- pure elevation offset at zero azimuth must fail once it
     exceeds the half-angle, exactly as a pure azimuth offset does."""
-    optic = Optic(name="test", magnification=1.0, fov_half_angle_deg=10.0)
+    optic = _optic(fov_half_angle_deg=10.0)
 
     assert within_optic_fov(optic, azimuth_deg=0.0, elevation_deg=9.0)
     assert not within_optic_fov(optic, azimuth_deg=0.0, elevation_deg=11.0)
 
 
 def test_unaided_optic_has_no_fov_restriction() -> None:
-    assert UNAIDED_OPTIC.magnification == pytest.approx(1.0)
+    assert UNAIDED_OPTIC.presence_range_mult == pytest.approx(1.0)
+    assert UNAIDED_OPTIC.class_range_mult == pytest.approx(1.0)
+    assert UNAIDED_OPTIC.type_range_mult == pytest.approx(1.0)
     assert UNAIDED_OPTIC.fov_half_angle_deg is None
 
 
-def test_binocular_optic_magnification_matches_the_range_multiplier() -> None:
-    """`BINOCULAR_OPTIC.magnification` must track `visibility.
-    BINOCULAR_RANGE_MULTIPLIER` exactly, so the two can never silently
-    drift apart -- an import, not a hand-copied literal (plan Decision 1).
-
-    As of 2026-09-20's final scope change this is 4.0 again -- but
-    independently derived (a Б-6 6x30's real 6x magnification times a
-    ~0.67 handheld/stabilisation penalty, `BINOCULAR_OPTIC`'s own
-    docstring has the arithmetic), not the inherited `extra_eyesight_ratio`
-    value this project started from, and not the 8.0 this same session
-    briefly used either -- see `visibility.py`'s `BINOCULAR_RANGE_
-    MULTIPLIER` docstring for the full round trip."""
-    assert BINOCULAR_OPTIC.magnification == pytest.approx(BINOCULAR_RANGE_MULTIPLIER)
-    assert BINOCULAR_OPTIC.magnification == pytest.approx(4.0)
+def test_binocular_optic_has_the_btr_60_derived_per_tier_multipliers() -> None:
+    """`BINOCULAR_OPTIC`'s per-tier multipliers (slice 2A, `plans/
+    detection-cones-slice2/plan.md` decision 1) -- replacing the old flat
+    `magnification=4.0` (`BINOCULAR_RANGE_MULTIPLIER`, retired) with three
+    independently-measured, BTR-60-derived figures. Presence buys less than
+    the old flat figure implied (2.42), class almost as much (3.50), type a
+    little less again (3.00) -- `optics.py`'s own docstring has the
+    reasoning (glass buys recognition more than it buys detection)."""
+    assert BINOCULAR_OPTIC.presence_range_mult == pytest.approx(2.42)
+    assert BINOCULAR_OPTIC.class_range_mult == pytest.approx(3.50)
+    assert BINOCULAR_OPTIC.type_range_mult == pytest.approx(3.00)
 
 
 def test_binocular_optic_has_a_real_field_of_view() -> None:

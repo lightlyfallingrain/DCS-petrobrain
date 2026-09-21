@@ -53,14 +53,19 @@ _THEATRE = "Syria"
 #: A generous, unrestricted stand-in optic for tests whose purpose is the
 #: cockpit-mask/geometry gates, not range or field-of-view magnitude --
 #: `plans/detection-cones-slice1/plan.md`'s final scope change moved the
-#: default optic to `UNAIDED_OPTIC` (magnification 1.0, a much tighter
-#: range gate than the binocular default these tests were originally
-#: written against), so a mask-focused test that happens to place its
-#: candidate beyond the new default's range threshold would silently
-#: start testing the range gate instead of the mask -- passing this optic
-#: explicitly keeps those tests isolated to the gate they name.
+#: default optic to `UNAIDED_OPTIC` (a much tighter range gate than the
+#: binocular default these tests were originally written against), so a
+#: mask-focused test that happens to place its candidate beyond the new
+#: default's range threshold would silently start testing the range gate
+#: instead of the mask -- passing this optic explicitly keeps those tests
+#: isolated to the gate they name. `100.0` on every tier (slice 2A widened
+#: this from one `magnification` to three per-tier multipliers).
 _MASK_ONLY_OPTIC = Optic(
-    name="test_mask_only", magnification=100.0, fov_half_angle_deg=None
+    name="test_mask_only",
+    presence_range_mult=100.0,
+    class_range_mult=100.0,
+    type_range_mult=100.0,
+    fov_half_angle_deg=None,
 )
 
 
@@ -156,15 +161,28 @@ def test_infantry_just_outside_hires_tier_range_achieves_medres_tier() -> None:
     assert result.confidence == NAKED_EYE_VISIBILITY_CONFIDENCE
 
 
-def test_infantry_just_inside_lowres_tier_range_is_visible() -> None:
+def test_armored_vehicle_just_inside_lowres_tier_range_is_visible() -> None:
     # `plans/classification-refinement/plan.md` Stage 7: the gate moved
-    # from `medres` to `lowres`. Infantry: size 1.8 m, lowres threshold at
-    # the default optic (UNAIDED_OPTIC, M=1.0) = 1.8 / 0.003 * 1.0 = 600 m
-    # -- well below NAKED_EYE_RANGE_CAP_M, so the size curve (not the cap)
-    # still does the discriminating here for an object this small. A
-    # candidate this far out achieves only the `lowres` (presence) tier.
+    # from `medres` to `lowres`.
+    #
+    # **Switched from Infantry to an armored vehicle, slice 2A (`plans/
+    # detection-cones-slice2/plan.md` decision 3).** Infantry now carries
+    # `distinctiveness=5.0` (`object_model._OP_CLASS_DISTINCTIVENESS`),
+    # which saturates the class clamp at its own presence range at every
+    # optic -- infantry can no longer produce a genuine presence-only
+    # (`lowres`) observation, by design (this is exactly the fix: "Infantry
+    # classifies at exactly its detection range"). A T-72B (`OP_ARMORED`,
+    # distinctiveness 1.0, "ordinary") is the object this gate-boundary
+    # test actually needs. T-72B: size 7.0 m, UNAIDED_OPTIC (1.0/1.0/1.0):
+    # presence = 7 / 0.003 * 1.0 = 2333.33 m; class = min(2333.33,
+    # 7 / 0.014 * 1.0 * 1.0 = 500 m) = 500 m -- well below presence, so the
+    # clamp never binds for an ordinary object, and there is a real
+    # lowres-only band between 500 m and 2333.33 m (distinct from
+    # `test_ural_truck_gate_is_bound_by_the_size_curve_not_the_range_cap`'s
+    # own 428.57-2000 m band for a 6 m truck, so the two tests aren't
+    # duplicating one boundary).
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=599.0, z=0.0)
+    candidate = _candidate("T-72B", x=2333.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
@@ -173,11 +191,11 @@ def test_infantry_just_inside_lowres_tier_range_is_visible() -> None:
     assert result.confidence == NAKED_EYE_PRESENCE_CONFIDENCE
 
 
-def test_infantry_just_outside_lowres_tier_range_is_not_visible() -> None:
-    # Just beyond the default optic's (UNAIDED_OPTIC, M=1.0) lowres
-    # threshold of 600 m.
+def test_armored_vehicle_just_outside_lowres_tier_range_is_not_visible() -> None:
+    # Just beyond the default optic's (UNAIDED_OPTIC) lowres threshold of
+    # 2333.33 m for a T-72B (see the test above for the derivation).
     ownship = _ownship(heading_true_deg=0.0)
-    candidate = _candidate("Infantry", x=601.0, z=0.0)
+    candidate = _candidate("T-72B", x=2334.0, z=0.0)
 
     result = check_visibility(ownship, candidate, _FAKE_CONN, _THEATRE)
 
@@ -219,6 +237,33 @@ def test_ural_truck_gate_is_bound_by_the_size_curve_not_the_range_cap() -> None:
     assert check_visibility(ownship, beyond, _FAKE_CONN, _THEATRE) is None
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Slice 2A (`plans/detection-cones-slice2/plan.md` decision 1) "
+        "moved BINOCULAR_OPTIC's presence multiplier from the old flat "
+        "BINOCULAR_RANGE_MULTIPLIER=4.0 to a BTR-60-derived, per-tier "
+        "presence_range_mult=2.42 -- lower than the old flat figure, "
+        "because presence scales sub-linearly with magnification "
+        "(decisions doc decision 1) while LOWRES_ANGULAR_RADIUS_RAD was "
+        "itself derived from the *old* flat 4.0 against this exact "
+        "8890 m/7 m ground-truth point (visibility.py's own angular-radius "
+        "constants comment). At 2.42, a 7 m object's binocular presence "
+        "threshold is 7 / 0.003 * 2.42 = 5646.67 m -- below 8890 m, so "
+        "this candidate is no longer admitted. This is a real, known "
+        "regression against the photographed ground truth (the fixture "
+        "is CONTAMINATED besides -- see test_vision_calibration.py's own "
+        "module docstring), not a bug in this change: it is the accepted "
+        "'known unmodelled residual' the decisions doc names (a single "
+        "per-optic multiplier will be somewhat wrong for one class of "
+        "object either way). Kept as xfail rather than deleted or "
+        "silently re-derived, so this regression stays visible instead of "
+        "disappearing from the suite -- see "
+        "test_binocular_presence_threshold_for_a_7m_object below for the "
+        "new, correctly-derived threshold this module now actually "
+        "enforces."
+    ),
+    strict=True,
+)
 def test_armored_vehicle_is_visible_at_the_farthest_photographed_range() -> None:
     # The calibration ladder's outer datapoint: a row of 6-7 m ground
     # vehicles was plainly visible through binoculars at 8.89 km. The
@@ -242,6 +287,29 @@ def test_armored_vehicle_is_visible_at_the_farthest_photographed_range() -> None
 
     assert result is not None
     assert result.tier == "lowres"
+
+
+def test_binocular_presence_threshold_for_a_7m_object() -> None:
+    """The new, correctly-derived binocular presence threshold for a 7 m
+    object (slice 2A): `7 / LOWRES_ANGULAR_RADIUS_RAD *
+    BINOCULAR_OPTIC.presence_range_mult = 7 / 0.003 * 2.42 = 5646.67 m` --
+    admitted just inside it, rejected just outside. See the xfail test
+    above for why this is lower than the 8890 m ground truth the old flat
+    multiplier reached."""
+    ownship = _ownship(heading_true_deg=0.0)
+    inside = _candidate("T-72B", x=5646.0, z=0.0)
+    beyond = _candidate("T-72B", x=5648.0, z=0.0)
+
+    inside_result = check_visibility(
+        ownship, inside, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
+    )
+    beyond_result = check_visibility(
+        ownship, beyond, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
+    )
+
+    assert inside_result is not None
+    assert inside_result.tier == "lowres"
+    assert beyond_result is None
 
 
 def test_range_cap_binds_for_every_object_the_size_curve_would_let_run_away() -> None:
@@ -478,28 +546,29 @@ def test_default_optic_is_naked_eye() -> None:
        explicit `optic=UNAIDED_OPTIC` call must produce byte-identical
        results to the no-argument call, for every case below.
     2. **Default detection range shrinks sharply now that the default
-       optic is naked-eye (M=1.0), not binoculars** -- demonstrated with
-       an Infantry candidate at 300 m. Under `BINOCULAR_OPTIC` at M=4.0
-       (this slice's *original* default, before either of this session's
-       changes) this range resolved to `medres` (medres threshold
-       514.29 m, hires 257.14 m -- 300 m falls between them). Under the
-       *current* default, `UNAIDED_OPTIC` (M=1.0), the same geometry
-       drops a full tier to `lowres` -- naked-eye's medres threshold at
-       this magnification is only 128.57 m, well inside 300 m, while its
-       lowres threshold (600 m) still admits it. A candidate picked to be
-       genuinely beyond the naked eye's reach (a 601 m case is in
-       `test_infantry_just_outside_lowres_tier_range_is_not_visible`,
-       above) shows the sharper case -- full loss of detectability, not
-       just a tier downgrade. A `hires`-tier case (50 m, still resolves
-       under the naked eye) and the hard `NAKED_EYE_RANGE_CAP_M`
-       out-of-range case (10001 m, unaffected by any optic) are pinned
-       alongside the tier-downgrade case so this test covers the same
-       three-case shape the superseded binocular-default guards did.
+       optic is naked-eye, not binoculars.**
+
+    **`downgraded_tier_candidate` switched from Infantry to a T-72B, slice
+    2A (`plans/detection-cones-slice2/plan.md` decision 3).** Infantry now
+    carries `distinctiveness=5.0`, which saturates its class threshold to
+    its own presence range at every optic -- a 300 m Infantry candidate
+    now resolves `medres`, not the tier-downgrade-to-`lowres` story this
+    test originally told (see `test_armored_vehicle_just_inside_lowres_
+    tier_range_is_visible` for where that story now correctly lives, on a
+    non-distinctive object). A T-72B (`OP_ARMORED`, distinctiveness 1.0)
+    at 2000 m demonstrates the same shape: presence threshold 2333.33 m,
+    class threshold 500 m -- 2000 m clears presence but not class, so this
+    resolves `lowres` under the default optic, "something is there,"
+    ED's only catch-all. A `hires`-tier case (50 m Infantry, still
+    resolves under the naked eye) and the hard `NAKED_EYE_RANGE_CAP_M`
+    out-of-range case (10001 m, unaffected by any optic) are pinned
+    alongside it so this test covers the same three-case shape the
+    superseded binocular-default guards did.
     """
     ownship = _ownship(heading_true_deg=0.0)
 
     hires_candidate = _candidate("Infantry", x=50.0, z=0.0)
-    downgraded_tier_candidate = _candidate("Infantry", x=300.0, z=0.0)
+    downgraded_tier_candidate = _candidate("T-72B", x=2000.0, z=0.0)
     out_of_range_candidate = _candidate("Infantry", x=10_001.0, z=0.0)
 
     hires_result = check_visibility(ownship, hires_candidate, _FAKE_CONN, _THEATRE)
@@ -544,7 +613,13 @@ def test_default_optic_is_naked_eye() -> None:
 
 
 def test_synthetic_narrow_fov_optic_rejects_candidate_outside_its_cone() -> None:
-    narrow_optic = Optic(name="test_narrow", magnification=4.0, fov_half_angle_deg=5.0)
+    narrow_optic = Optic(
+        name="test_narrow",
+        presence_range_mult=4.0,
+        class_range_mult=4.0,
+        type_range_mult=4.0,
+        fov_half_angle_deg=5.0,
+    )
     ownship = _ownship(heading_true_deg=0.0)
     # 30 deg off boresight, well outside a 5 deg half-angle FOV, but well
     # within the cockpit mask (near-zero depression near the nose).
@@ -565,7 +640,13 @@ def test_synthetic_narrow_fov_optic_rejects_candidate_outside_its_cone() -> None
 
 
 def test_synthetic_narrow_fov_optic_admits_candidate_inside_its_cone() -> None:
-    narrow_optic = Optic(name="test_narrow", magnification=4.0, fov_half_angle_deg=5.0)
+    narrow_optic = Optic(
+        name="test_narrow",
+        presence_range_mult=4.0,
+        class_range_mult=4.0,
+        type_range_mult=4.0,
+        fov_half_angle_deg=5.0,
+    )
     ownship = _ownship(heading_true_deg=0.0)
     # Dead ahead, well inside any plausible FOV.
     on_axis_candidate = _candidate("Infantry", x=250.0, z=0.0)
@@ -578,26 +659,34 @@ def test_synthetic_narrow_fov_optic_admits_candidate_inside_its_cone() -> None:
 
 def test_higher_magnification_optic_extends_the_range_threshold() -> None:
     """`size_m / threshold_rad * M` -- the range threshold scales linearly
-    with magnification. `UNAIDED_OPTIC` (M=1.0, now the default -- see
-    `test_default_optic_is_naked_eye` above) is used here as the reference
-    point against `BINOCULAR_OPTIC` (M=4.0 as of 2026-09-20's final
-    scope change -- see `visibility.BINOCULAR_RANGE_MULTIPLIER`'s own
-    "round trip" docstring): a candidate beyond the unaided gate's outer
-    (`lowres`) threshold but within the binocular gate's own `lowres`
-    threshold is admitted under one and rejected under the other at the
-    exact same range. Dead ahead (azimuth 0), so `BINOCULAR_OPTIC`'s field
-    of view (4.25 deg half-angle) does not affect this candidate."""
+    with the optic's own `presence_range_mult`. `UNAIDED_OPTIC` (1.0, now
+    the default -- see `test_default_optic_is_naked_eye` above) is used
+    here as the reference point against `BINOCULAR_OPTIC`'s
+    `presence_range_mult` (2.42, slice 2A -- `optics.py`'s own docstring):
+    a candidate beyond the unaided gate's outer (`lowres`) presence
+    threshold but within the binocular gate's own presence threshold is
+    admitted under one and rejected under the other at the exact same
+    range. Dead ahead (azimuth 0), so `BINOCULAR_OPTIC`'s field of view
+    (4.25 deg half-angle) does not affect this candidate.
+
+    **Tier moved from `lowres` to `medres`, slice 2A decision 3.**
+    Infantry now carries `distinctiveness=5.0`, so under binoculars its
+    class threshold (`min(presence, 1.8 / 0.014 * 3.50 * 5.0 = 2250 m)`)
+    clamps to the *same* 1452 m as presence rather than the much shorter
+    unclamped figure -- a 610 m candidate that only clears presence still
+    also clears class, so it resolves `medres`, not `lowres`. This is the
+    clamp behaving as decision 3 intends, not a defect in this test."""
     ownship = _ownship(heading_true_deg=0.0)
     # Infantry: size 1.8 m, gating tier is `lowres` (0.003 rad).
-    # Unaided (M=1.0) lowres threshold: 1.8 / 0.003 * 1 = 600 m.
-    # Binocular (M=4.0) lowres threshold: 1.8 / 0.003 * 4 = 2400 m.
+    # Unaided presence threshold: 1.8 / 0.003 * 1.0 = 600 m.
+    # Binocular presence threshold: 1.8 / 0.003 * 2.42 = 1452 m.
     candidate = _candidate("Infantry", x=610.0, z=0.0)
 
     binocular_result = check_visibility(
         ownship, candidate, _FAKE_CONN, _THEATRE, optic=BINOCULAR_OPTIC
     )
     assert binocular_result is not None
-    assert binocular_result.tier == "lowres"
+    assert binocular_result.tier == "medres"
 
     unaided_result = check_visibility(
         ownship, candidate, _FAKE_CONN, _THEATRE, optic=UNAIDED_OPTIC
@@ -764,3 +853,106 @@ def test_tall_mast_shaped_profile_achieves_a_better_tier_than_the_old_scalar_for
 
     assert result is not None
     assert result.tier == "medres"
+
+
+# --- Slice 2A: per-tier multipliers, distinctiveness, the clamp
+# (`plans/detection-cones-slice2/plan.md`) --------------------------------
+
+
+#: Every named profile in `object_model`'s two keyword tables, plus its
+#: fallback -- the population `test_tier_thresholds_never_invert` and
+#: `test_infantry_class_clamps_to_presence_at_every_optic` below range
+#: over. Reached via the module's private tables rather than a curated
+#: subset, so this test catches a future profile whose `distinctiveness`/
+#: dimensions happen to invert the ladder, not just the profiles already
+#: known to be interesting.
+_ALL_PROFILES: tuple[ObjectTypeProfile, ...] = (
+    object_model._DEFAULT_PROFILE,
+    *(profile for _keyword, profile in object_model._KEYWORD_PROFILES),
+    *(profile for _keyword, profile in object_model._REPORTING_NAME_KEYWORD_PROFILES),
+)
+
+#: The two optics slice 2A actually ships (`optics.py`) -- 9K113 wide/
+#: narrow are deliberately not added as selectable `Optic`s this slice
+#: (`optics.py`'s own docstring), so they aren't in this population.
+_ALL_OPTICS: tuple[Optic, ...] = (UNAIDED_OPTIC, BINOCULAR_OPTIC)
+
+
+def test_tier_thresholds_never_invert() -> None:
+    """`type <= class <= presence` for every named profile, at every optic
+    (slice 2A step 4, `plans/detection-cones-slice2/plan.md`): the clamp
+    that makes a distinctive object's class saturate to its own presence
+    range could, if wired wrong, let the `type` threshold exceed `class`
+    for a sufficiently distinctive/high-`type_range_mult` combination --
+    `_achieved_tier`'s own chained `min()`s are what rule this out by
+    construction, not a value the thresholds happen to land on. Checked
+    directly against the computed range thresholds (recomputed here with
+    the same formula `_achieved_tier` uses internally, rather than
+    inferred indirectly from tier names), across every profile x optic
+    combination rather than a curated few, since an inversion is exactly
+    the kind of defect one hand-picked example could miss."""
+    for profile in _ALL_PROFILES:
+        distinctiveness = object_model.distinctiveness_of(profile)
+        for optic in _ALL_OPTICS:
+            presence_threshold_m = min(
+                visibility.NAKED_EYE_RANGE_CAP_M,
+                (profile.size_m / visibility.LOWRES_ANGULAR_RADIUS_RAD)
+                * optic.presence_range_mult,
+            )
+            class_threshold_m = min(
+                presence_threshold_m,
+                (profile.size_m / visibility.MEDRES_ANGULAR_RADIUS_RAD)
+                * optic.class_range_mult
+                * distinctiveness,
+            )
+            type_threshold_m = min(
+                class_threshold_m,
+                (profile.size_m / visibility.HIRES_ANGULAR_RADIUS_RAD)
+                * optic.type_range_mult,
+            )
+            assert type_threshold_m <= class_threshold_m <= presence_threshold_m, (
+                f"{profile.op_class} @ {optic.name}: type={type_threshold_m} "
+                f"class={class_threshold_m} presence={presence_threshold_m}"
+            )
+
+
+def test_infantry_class_clamps_to_presence_at_every_optic() -> None:
+    """The model's main evidence for decision 3 (`body-layer/research/
+    2026-09-21-slice2-model-decisions.md`): infantry's `distinctiveness=5.0`
+    is high enough that its raw class figure always exceeds its own
+    presence range, so the clamp always binds and `class == presence`
+    exactly -- reproducing the measured pattern ("Infantry classifies at
+    exactly its detection range," ratio 1.00 at every instrument) as a
+    structural consequence of one per-class constant, with no per-unit
+    special-casing. Checked at both optics slice 2A actually ships
+    (`UNAIDED_OPTIC`, `BINOCULAR_OPTIC`) via `_achieved_tier` directly --
+    the achieved tier at a range just inside presence must be `medres`
+    (class), never `lowres`, since class has saturated all the way out to
+    presence."""
+    profile = object_model.profile_for("Infantry")
+    assert profile.op_class == "OP_INFANTRY"
+    distinctiveness = object_model.distinctiveness_of(profile)
+    assert distinctiveness == pytest.approx(5.0)
+
+    for optic in _ALL_OPTICS:
+        presence_threshold_m = (
+            profile.size_m / visibility.LOWRES_ANGULAR_RADIUS_RAD
+        ) * optic.presence_range_mult
+        # A range 1 m inside presence -- if the clamp is working, this
+        # still resolves medres (class), not lowres, because class has
+        # saturated to presence.
+        just_inside_presence_m = presence_threshold_m - 1.0
+
+        tier, _confidence = visibility._achieved_tier(
+            just_inside_presence_m,
+            profile.size_m,
+            profile.size_m,
+            optic,
+            distinctiveness,
+        )
+
+        assert tier == "medres", (
+            f"infantry @ {optic.name}: expected class to saturate to "
+            f"presence ({presence_threshold_m} m), but a range just inside "
+            f"it resolved {tier!r}, not 'medres'"
+        )

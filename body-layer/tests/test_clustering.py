@@ -23,9 +23,19 @@ from perception.clustering import (
     count_bucket_for,
 )
 from perception.geometry import GeoPosition
-from perception.visibility import BINOCULAR_RANGE_MULTIPLIER, LOWRES_ANGULAR_RADIUS_RAD
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
+from perception.visibility import LOWRES_ANGULAR_RADIUS_RAD
 
 _OBSERVER = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+
+#: The multiplier every test below clusters under, unless a test is
+#: specifically about the floor fix -- `UNAIDED_OPTIC.presence_range_mult`
+#: (1.0) is the only value `naked_eye_source.py` actually passes today (no
+#: optic-selection mechanism exists until slice 2B), and the merge/split/
+#: counting geometry these tests exercise doesn't depend on which optic is
+#: active (`presence_range_mult` only matters to the floor (A), which these
+#: tests aren't targeting).
+_PRESENCE_RANGE_MULT = UNAIDED_OPTIC.presence_range_mult
 
 
 def _candidate(
@@ -52,7 +62,7 @@ def _candidate(
 
 
 def _cluster(candidates: list[ClusterCandidate]) -> list:  # type: ignore[type-arg]
-    return cluster_candidates(candidates, _OBSERVER)
+    return cluster_candidates(candidates, _OBSERVER, _PRESENCE_RANGE_MULT)
 
 
 def test_count_bucket_for_boundaries() -> None:
@@ -199,15 +209,17 @@ def test_floor_a_two_member_cluster_always_reports_one_unit() -> None:
 def test_floor_self_consistency_of_the_detection_floor_at_the_detection_limit() -> None:
     """(A)'s own self-consistency property (module docstring): for a
     candidate sitting exactly at its own detection-range limit (`range_m =
-    size_m / LOWRES_ANGULAR_RADIUS_RAD * BINOCULAR_RANGE_MULTIPLIER`, the
-    boundary `visibility.check_visibility`'s gate admits), (A) is satisfied
-    whenever (S) is -- the floor is provably slack for anything the channel
-    actually detected. Checked directly here against a pair placed exactly
-    at (S)'s own merge boundary, at the detection limit: (A) must still
-    hold."""
+    size_m / LOWRES_ANGULAR_RADIUS_RAD * presence_range_mult`, the boundary
+    `visibility.check_visibility`'s gate admits), (A) is satisfied whenever
+    (S) is -- the floor is slack for anything the channel actually detected
+    under that same optic. Checked directly here against a pair placed
+    exactly at (S)'s own merge boundary, at the detection limit, using
+    `BINOCULAR_OPTIC.presence_range_mult` (2.42) -- the largest multiplier
+    any optic selectable today actually carries: (A) must still hold."""
+    presence_range_mult = BINOCULAR_OPTIC.presence_range_mult
     size_m = 7.0
     range_at_detection_limit_m = (
-        size_m / LOWRES_ANGULAR_RADIUS_RAD * BINOCULAR_RANGE_MULTIPLIER
+        size_m / LOWRES_ANGULAR_RADIUS_RAD * presence_range_mult
     )
     unit_rad = size_m / range_at_detection_limit_m
     # Separated by exactly the (S) merge threshold's own angle, converted
@@ -218,7 +230,85 @@ def test_floor_self_consistency_of_the_detection_floor_at_the_detection_limit() 
 
     theta_sep = angular_separation_rad(_OBSERVER, a, b)
 
-    assert theta_sep * BINOCULAR_RANGE_MULTIPLIER >= LOWRES_ANGULAR_RADIUS_RAD
+    # `tan()` (used to build `separation_m`) and `atan2()` (used inside
+    # `angular_separation_rad`) don't round-trip to bit-identical values, so
+    # a tiny epsilon absorbs floating-point drift at this exact boundary --
+    # the same accommodation `optics.within_optic_fov`'s own boundary case
+    # makes, for the same reason.
+    assert theta_sep * presence_range_mult >= LOWRES_ANGULAR_RADIUS_RAD - 1e-9
+
+
+def test_floor_would_have_broken_under_the_old_hardcoded_constant() -> None:
+    """The slice 2A defect this module's docstring documents ("The
+    clustering floor is no longer benign"), proven directly rather than
+    asserted.
+
+    Two candidates admitted at the 9K113 narrow sight's real
+    `presence_range_mult` (5.81, `body-layer/research/
+    2026-09-21-slice2-model-decisions.md` -- deliberately not wired in as
+    a selectable `Optic` this slice, but its number is real and is exactly
+    the value the module docstring's proof names as breaking it), placed
+    exactly at (S)'s own merge boundary at that sight's own detection
+    limit -- the self-consistency proof (previous test) shows (A) holds
+    when checked with the *same* multiplier that admitted them. The old
+    code did not do that: it hardcoded `BINOCULAR_RANGE_MULTIPLIER = 4.0`
+    into (A) regardless of which optic actually admitted the candidates.
+    Reproducing that mismatch here -- checking (A) with the stale
+    hardcoded 4.0 against a pair admitted under 5.81 -- shows the floor
+    fails (`theta_sep * 4.0 < LOWRES`), which would have made `_separable`
+    report them as NOT separable (merged) purely because of the
+    mismatched constant, even though (S) -- the real merge criterion --
+    holds. The fix is `cluster_candidates`/`_separable` taking the active
+    optic's own multiplier (5.81 here) instead of a constant, which keeps
+    (A) consistent with whatever multiplier actually did the detecting."""
+    active_presence_range_mult = 5.81  # 9K113 narrow, decisions doc table
+    old_hardcoded_binocular_mult = 4.0  # BINOCULAR_RANGE_MULTIPLIER, retired
+    size_m = 7.0
+    range_at_detection_limit_m = (
+        size_m / LOWRES_ANGULAR_RADIUS_RAD * active_presence_range_mult
+    )
+    unit_rad = size_m / range_at_detection_limit_m
+    separation_m = math.tan(unit_rad) * range_at_detection_limit_m
+    a = GeoPosition(x=range_at_detection_limit_m, z=0.0, alt_m=500.0)
+    b = GeoPosition(x=range_at_detection_limit_m, z=separation_m, alt_m=500.0)
+
+    theta_sep = angular_separation_rad(_OBSERVER, a, b)
+
+    # Checked with the multiplier that actually admitted this pair: (A)
+    # holds, matching the self-consistency proof (same floating-point
+    # epsilon as that test, same reason).
+    assert theta_sep * active_presence_range_mult >= LOWRES_ANGULAR_RADIUS_RAD - 1e-9
+    # Checked with the OLD hardcoded constant instead: (A) fails, because
+    # 4.0 < 5.81 -- this is the defect the parameterisation fixes.
+    assert theta_sep * old_hardcoded_binocular_mult < LOWRES_ANGULAR_RADIUS_RAD
+
+    # `cluster_candidates`, correctly parameterised with the active
+    # optic's own multiplier, still resolves these two as separate
+    # clusters -- the fix in effect.
+    a_candidate = ClusterCandidate(
+        object_id=1,
+        x=range_at_detection_limit_m,
+        z=0.0,
+        alt_m=500.0,
+        range_m=range_at_detection_limit_m,
+        size_m=size_m,
+        classification_raw="OP_ARMORED",
+        classification_level=2,
+    )
+    b_candidate = ClusterCandidate(
+        object_id=2,
+        x=range_at_detection_limit_m,
+        z=separation_m,
+        alt_m=500.0,
+        range_m=range_at_detection_limit_m,
+        size_m=size_m,
+        classification_raw="OP_ARMORED",
+        classification_level=2,
+    )
+    clusters = cluster_candidates(
+        [a_candidate, b_candidate], _OBSERVER, active_presence_range_mult
+    )
+    assert len(clusters) == 2
 
 
 def test_homogeneous_cluster_keeps_its_shared_classification() -> None:

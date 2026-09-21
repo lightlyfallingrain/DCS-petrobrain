@@ -12,67 +12,49 @@ as a multiplier on top of this rather than as a replacement for it. A
 future conditions term belongs alongside the gates here; the three
 angular thresholds themselves should survive it unchanged.
 
-**Binocular premise -- SUPERSEDED, 2026-09-20, final scope change of this
-slice.** Per the plan's Decision #6 (resolved 2026-09-09, user-affirmed),
-this filter originally modeled a crew observer using handheld BINOCULARS
-*unconditionally*, for every candidate the cockpit mask admitted, with no
-field-of-view cost at all -- even though the module, channel, milestone,
-branch, and research file all kept the "naked_eye" name throughout
-(not renamed, per that decision). **That premise is now recognised as the
-single biggest source of over-detection in this channel** (user,
-2026-09-20): Petrovich was permanently glassed-up, seeing binocular
-magnification across the whole mask envelope as if he had raised
-binoculars to look at every single candidate specifically. Real
-observation is naked-eye by default. `check_visibility`'s `optic`
-parameter now defaults to `optics.UNAIDED_OPTIC` (magnification 1.0), not
-`optics.BINOCULAR_OPTIC` -- see that function's own docstring for the
+**Binocular premise -- SUPERSEDED, 2026-09-20.** Per the plan's Decision #6
+(resolved 2026-09-09, user-affirmed), this filter originally modeled a
+crew observer using handheld BINOCULARS *unconditionally*, for every
+candidate the cockpit mask admitted, with no field-of-view cost at all --
+even though the module, channel, milestone, branch, and research file all
+kept the "naked_eye" name throughout (not renamed, per that decision).
+**That premise is now recognised as the single biggest source of
+over-detection in this channel** (user, 2026-09-20): Petrovich was
+permanently glassed-up, seeing binocular magnification across the whole
+mask envelope as if he had raised binoculars to look at every single
+candidate specifically. Real observation is naked-eye by default.
+`check_visibility`'s `optic` parameter defaults to `optics.UNAIDED_OPTIC`,
+not `optics.BINOCULAR_OPTIC` -- see that function's own docstring for the
 mechanism, and `optics.py`'s module docstring for the full "Naked eye is
-now the default" rationale. This paragraph is kept, marked superseded,
-because the history matters: it explains why every constant below was
-originally tuned against the binocular column, and the angular-radius
-constants' own comments still describe that tuning.
+now the default" rationale.
 
-**`BINOCULAR_RANGE_MULTIPLIER`'s round trip, stated honestly so a future
-reader does not read a random walk back to a familiar number.** The value
-below has been, across this one design slice: **4.0** (inherited,
-unexamined, from `HelperAI.lua`'s `extra_eyesight_ratio` -- that
-constant's real role in ED's native detection formula is unverified, see
-the plan's Risks section on `min_contrast_f`/`min_fog_transparency`/
-`extra_eyesight_ratio`) -> **8.0** (a same-session excursion: a realistic
-8x30 instrument, magnification stated honestly with no hidden derating)
--> **4.0 again (final, current value below).** The final 4.0 is
-numerically identical to the first but is a different fact: it is
-independently derived from a real Б-6 6x30 (6x magnification) times a
-~0.67 penalty for handheld use on a vibrating airframe (`optics.py`'s
-`BINOCULAR_OPTIC` docstring has the arithmetic), not the restored
-inherited `extra_eyesight_ratio` value. That derivation also happens to
-match what the 2026-09-17 screenshot ladder's binocular column
-independently shows -- the first time the physical argument and the
-photographic evidence have produced the same number without either being
-tuned to match the other. **Because both the multiplier and the three
-angular-radius constants below are back to the values the 2026-09-17
-calibration was run against, that calibration is current again, not
-stale** -- `tests/test_vision_calibration.py` asserts this directly
-rather than assuming it.
+**Per-tier multipliers, not one flat figure (slice 2A, `plans/
+detection-cones-slice2/plan.md`, `body-layer/research/
+2026-09-21-slice2-model-decisions.md` decision 1).** `BINOCULAR_RANGE_
+MULTIPLIER` -- the single 4.0 this module used to apply uniformly to all
+three recognition-tier thresholds -- is retired. Each `optics.Optic` now
+carries three independently-measured multipliers
+(`presence_range_mult`/`class_range_mult`/`type_range_mult`), all derived
+from the BTR-60 (see `optics.py`'s own docstring for the table and the
+"why the BTR-60 alone" reasoning); `UNAIDED_OPTIC` is 1.0 on every tier.
+The angular-radius constants below (`LOWRES`/`MEDRES`/`HIRES_ANGULAR_
+RADIUS_RAD`) are themselves unchanged by this -- they are the target's own
+apparent-size threshold per tier, independent of which optic is looking
+through them; only the multiplier that scales each threshold into a range
+changed, and it now varies by tier rather than being one number.
 
-Do not re-derive the angular-radius constants below from an unaided-eye
-assumption and "correct" them to be stricter for that reason alone: the
-screenshot ladder measured *both* the unaided view and the zoomed/
-binocular view of the same targets at the same nine ranges, and they
-differ by roughly two recognition tiers at the ladder's own binocular
-magnification. Reading the ladder as apparent angular size (true angular
-size x magnification) makes the unaided and binocular columns land on the
-*same* tier thresholds, with the optic supplying only the magnification --
-that is why retuning the three angular constants below was never needed
-across any of this slice's changes, only the magnification the formula
-multiplies by.
+**`optics.py`** (`plans/detection-cones-slice1/plan.md`, extended by slice
+2A) names both optics this module distinguishes: `UNAIDED_OPTIC` (the
+default) and `BINOCULAR_OPTIC` (not the default; carries a real field of
+view, not `None`, and its own three per-tier multipliers). The 9K113 sight
+is deliberately deferred out of this slice (user, 2026-09-20) -- see
+`optics.py`'s own docstring.
 
-**`optics.py`** (`plans/detection-cones-slice1/plan.md`) names both optics
-this module distinguishes: `UNAIDED_OPTIC` (the default as of 2026-09-20)
-and `BINOCULAR_OPTIC` (no longer the default; now carries a real field of
-view, not `None` -- see that module's own docstring for why that is safe
-now and was not before). The 9K113 sight is deliberately deferred out of
-this slice (user, 2026-09-20) -- see `optics.py`'s own docstring.
+Deleting `BINOCULAR_RANGE_MULTIPLIER` also dissolves the real circular
+import this module and `optics.py` used to have -- `optics.py` no longer
+needs anything from this module, so `Optic`/`UNAIDED_OPTIC`/
+`within_optic_fov` are now an ordinary top-level import here, not the
+`TYPE_CHECKING`/function-local workaround this docstring used to explain.
 
 Composes four independent plausibility gates over one
 `association.WorldObjectCandidate` (reused, not duplicated) against one
@@ -114,7 +96,7 @@ detection here to be ambiguous *about*):
    size curve, expressed as a threshold angular radius per recognition tier
    rather than a flat range. This module works it backwards into a range
    threshold: `range_threshold = size / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
-   * BINOCULAR_RANGE_MULTIPLIER`, capped at `NAKED_EYE_RANGE_CAP_M` as a
+   * optic.presence_range_mult`, capped at `NAKED_EYE_RANGE_CAP_M` as a
    sanity bound regardless of what the formula computes for a given
    object's looked-up size -- this project's own derivation from ED's
    published constants, not a verified reproduction of ED's actual formula
@@ -160,7 +142,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 from perception import object_model
 from perception.association import WorldObjectCandidate
@@ -177,29 +159,19 @@ from perception.geometry import (
     line_of_sight_clear,
     range_m,
 )
+from perception.optics import UNAIDED_OPTIC, Optic, within_optic_fov
 from perception.source import OwnshipState
 
-if TYPE_CHECKING:
-    # `Optic` is only used for annotations here -- the actual value (used
-    # both as a type at runtime inside `check_visibility` and to resolve
-    # its `optic` parameter's default) is imported lazily inside that
-    # function. See its docstring for why: `optics.py` imports
-    # `BINOCULAR_RANGE_MULTIPLIER` from this module at its own module
-    # scope (`plans/detection-cones-slice1/plan.md` Decision 1 -- this
-    # module keeps owning the constant), and a plain top-level import of
-    # `optics.py` back into this module would make the two modules
-    # genuinely circular: whichever of the two happens to be imported
-    # first would fail, because it would trigger a full load of the
-    # other, which itself needs the first one fully loaded.
-    from perception.optics import Optic
-
-#: **Current again, as of 2026-09-20** -- these three thresholds were
-#: derived using `BINOCULAR_RANGE_MULTIPLIER = 4.0` (see that constant's
-#: own docstring for the full round trip: 4.0 -> 8.0 -> 4.0). The
-#: constant went to 8.0 for part of this design slice, which made this
-#: block briefly stale, and is back to 4.0 now -- the worked-example
-#: numbers below (`* 4`) are correct again, not historical.
-#: `tests/test_vision_calibration.py` checks this directly.
+#: **Historical derivation, `BINOCULAR_RANGE_MULTIPLIER` itself is retired
+#: (slice 2A)** -- these three thresholds were originally derived using
+#: `BINOCULAR_RANGE_MULTIPLIER = 4.0` (see the module docstring's "Per-tier
+#: multipliers" note for why that single constant was replaced by
+#: `optics.Optic`'s three per-tier multipliers). The worked examples below
+#: still use `* 4` because that is the arithmetic that actually produced
+#: these three angular-radius values on 2026-09-17 -- they are unchanged by
+#: slice 2A and do not need re-deriving; only the multiplier applied to
+#: them at query time changed, and it is now per-tier rather than one
+#: constant. `tests/test_vision_calibration.py` checks the values directly.
 #:
 #: Apparent-angular-radius thresholds (radians) per recognition tier,
 #: **calibrated 2026-09-17 against real in-game screenshots** -- see
@@ -253,36 +225,6 @@ IFF_ANGULAR_RADIUS_RAD: Final[float] = 0.025
 #: `MEDRES_ANGULAR_RADIUS_RAD` / `"medres"` here.
 NAKED_EYE_GATING_ANGULAR_RADIUS_RAD: Final[float] = LOWRES_ANGULAR_RADIUS_RAD
 NAKED_EYE_GATING_TIER_NAME: Final[str] = "lowres"
-
-#: See the module docstring's "round trip" note for the full chronology.
-#: This is `BINOCULAR_OPTIC.magnification` (`optics.py`) -- the multiplier
-#: `check_visibility` applies whenever that (now non-default) optic is
-#: passed explicitly, and the one `_achieved_tier` and the angular-radius
-#: thresholds above were calibrated against on 2026-09-17.
-#:
-#: **Round trip, final value 2026-09-20:** 4.0 (inherited, unexamined,
-#: from `HelperAI.lua`'s `extra_eyesight_ratio`) -> 8.0 (a same-session
-#: excursion: a realistic 8x30, magnification stated honestly, no
-#: derating) -> **4.0 again.** The final value is numerically identical to
-#: the first but is not the restored inherited number -- it is
-#: independently derived, a Б-6 6x30's real 6x magnification times a
-#: ~0.67 penalty for handheld use on a vibrating airframe
-#: (`optics.py`'s `BINOCULAR_OPTIC` docstring has the arithmetic), and it
-#: also happens to match what the 2026-09-17 screenshot ladder's
-#: binocular column independently shows. Two independent lines of
-#: evidence landing on the same number is a real confirmation of this
-#: value, not evidence the excursion through 8.0 was wasted -- that
-#: excursion is what replaced an unexamined borrowed constant with a
-#: derived one that happens to agree with it.
-#:
-#: **No longer the default multiplier applied to every candidate.** As of
-#: this same change, `check_visibility`'s default `optic` is
-#: `UNAIDED_OPTIC` (magnification 1.0), not `BINOCULAR_OPTIC` -- see the
-#: module docstring's superseded "Binocular premise" section and that
-#: function's own docstring. This constant now only applies when
-#: `BINOCULAR_OPTIC` is passed explicitly (no concrete `PerceptionSource`
-#: does so yet, plan Decision 4).
-BINOCULAR_RANGE_MULTIPLIER: Final[float] = 4.0
 
 #: Outer range bound, applied regardless of what the angular-radius formula
 #: computes for a given object's looked-up size, so a very large object
@@ -396,15 +338,38 @@ def _achieved_tier(
     range_m: float,
     presence_size_m: float,
     recognition_extent_m: float,
-    magnification: float = BINOCULAR_RANGE_MULTIPLIER,
+    optic: Optic = UNAIDED_OPTIC,
+    distinctiveness: float = 1.0,
 ) -> tuple[str, float]:
     """The tightest recognition tier `range_m` still satisfies, and that
     tier's confidence (Stage 6's worked table: presence low / class medium
-    / type high). Each tier's threshold is independently capped at
-    `NAKED_EYE_RANGE_CAP_M`, the same sanity bound `check_visibility`'s
-    gate applies (module docstring gate #2) -- a very large object's
-    `hires`/`medres` thresholds can both collapse onto the cap, which is
-    expected, not a bug.
+    / type high).
+
+    **Slice 2A (`plans/detection-cones-slice2/plan.md`) replaces the old
+    single `magnification` with `optic`'s three per-tier multipliers, and
+    adds `distinctiveness` -- the clamp (decisions doc decision 3) that is
+    this model's main evidence for infantry and radar dishes:**
+
+        presence = presence_size_m / LOWRES_ANGULAR_RADIUS_RAD * optic.presence_range_mult
+        class    = min(presence, recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD
+                                  * optic.class_range_mult * distinctiveness)
+        type     = min(class, recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD
+                               * optic.type_range_mult)
+
+    Each threshold is chained through `min()` against the tier above it
+    (and, for `presence`, against `NAKED_EYE_RANGE_CAP_M`) rather than
+    capped independently -- this is what makes tier monotonicity
+    (`type <= class <= presence`) a structural guarantee rather than
+    something that has to be separately checked and clamped: a distinctive
+    object's raw class/type figure can run past its own presence range
+    (an infantryman classifies as easily as he is detected), and chaining
+    the `min()`s is what stops that from inverting the ladder.
+    `distinctiveness` deliberately does **not** appear in the `type`
+    threshold -- measured 0.2 km infantry type range against 0.6 km
+    presence is a third, not equal, so a specific-type identification
+    still needs resolved detail that a distinctive silhouette alone does
+    not buy (see the decisions doc's "one row does not fit" note for the
+    one measurement this still doesn't explain).
 
     **Two different size measures, deliberately, per `body-layer/research/
     2026-09-21-aspect-magnification-and-distinctiveness.md` Finding 1 --
@@ -416,22 +381,18 @@ def _achieved_tier(
     turn; recognition is a shape event and needs the shape. So:
 
     - `presence_size_m` (aspect-invariant, `profile.size_m`) drives the
-      `lowres` threshold below -- and must be the exact same value
+      `presence` threshold above -- and must be the exact same value
       `check_visibility`'s own range-admission gate uses, so a candidate
       can never be admitted by the gate and then fail to achieve even
-      `lowres` here, or the reverse. This is why the `lowres` threshold is
-      computed explicitly below rather than left as an implicit "anything
-      that reaches this point" fallback: an explicit, self-contained
-      computation is the only way this function can't silently drift out
-      of sync with the gate's own arithmetic if either is edited later.
+      `lowres` here, or the reverse. This is why the `presence` threshold
+      is computed explicitly below rather than left as an implicit
+      "anything that reaches this point" fallback: an explicit,
+      self-contained computation is the only way this function can't
+      silently drift out of sync with the gate's own arithmetic if either
+      is edited later.
     - `recognition_extent_m` (aspect-aware, `object_model.apparent_extent_m`)
-      drives `medres`/`hires` -- where the measured aspect effect actually
+      drives `class`/`type` -- where the measured aspect effect actually
       belongs.
-
-    `magnification` generalises the old hardcoded `BINOCULAR_RANGE_
-    MULTIPLIER` reference (`plans/detection-cones-slice1/plan.md`) --
-    defaults to it, so every existing call site (which passes no
-    `magnification` argument) is unaffected.
 
     The final fallback return (range beyond even the `lowres` threshold) is
     unreachable from `check_visibility` -- its own gate already drops
@@ -439,31 +400,33 @@ def _achieved_tier(
     but is kept as an explicit, best-effort `lowres` result rather than a
     crash, since `test_vision_calibration.py` calls this function directly
     against screenshot ground truth without going through that gate."""
-    hires_threshold_m = min(
+    presence_threshold_m = min(
         NAKED_EYE_RANGE_CAP_M,
-        (recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD) * magnification,
+        (presence_size_m / LOWRES_ANGULAR_RADIUS_RAD) * optic.presence_range_mult,
     )
-    medres_threshold_m = min(
-        NAKED_EYE_RANGE_CAP_M,
-        (recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD) * magnification,
+    class_threshold_m = min(
+        presence_threshold_m,
+        (recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD)
+        * optic.class_range_mult
+        * distinctiveness,
     )
-    lowres_threshold_m = min(
-        NAKED_EYE_RANGE_CAP_M,
-        (presence_size_m / LOWRES_ANGULAR_RADIUS_RAD) * magnification,
+    type_threshold_m = min(
+        class_threshold_m,
+        (recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD) * optic.type_range_mult,
     )
-    if range_m <= hires_threshold_m:
+    if range_m <= type_threshold_m:
         return "hires", NAKED_EYE_TYPE_CONFIDENCE
-    if range_m <= medres_threshold_m:
+    if range_m <= class_threshold_m:
         return "medres", NAKED_EYE_VISIBILITY_CONFIDENCE
-    if range_m <= lowres_threshold_m:
+    if range_m <= presence_threshold_m:
         return "lowres", NAKED_EYE_PRESENCE_CONFIDENCE
-    # Beyond even the lowres threshold -- unreachable from check_visibility
-    # itself (its own gate already dropped this candidate at the identical
-    # presence_size_m-derived threshold before calling this function), but
-    # test_vision_calibration.py calls this function directly against
-    # screenshot ground truth without going through that gate. Explicit
-    # best-effort fallback rather than a crash, matching this function's
-    # pre-existing contract of always returning a tier.
+    # Beyond even the presence threshold -- unreachable from
+    # check_visibility itself (its own gate already dropped this candidate
+    # at the identical presence_size_m-derived threshold before calling
+    # this function), but test_vision_calibration.py calls this function
+    # directly against screenshot ground truth without going through that
+    # gate. Explicit best-effort fallback rather than a crash, matching
+    # this function's pre-existing contract of always returning a tier.
     return "lowres", NAKED_EYE_PRESENCE_CONFIDENCE
 
 
@@ -484,19 +447,22 @@ def check_visibility(
     mirroring `association.associate()`'s own cheap-before-expensive
     ordering.
 
-    `optic` defaults to `optics.UNAIDED_OPTIC` (magnification 1.0), as of
-    2026-09-20 -- this was `BINOCULAR_OPTIC` for most of that slice's
-    development but is now naked-eye by default (module docstring's
-    superseded "Binocular premise" section has the full reasoning: modelling
-    Petrovich as permanently glassed-up, with binocular magnification and
-    no field-of-view cost across the whole cockpit-mask envelope, was the
-    single biggest source of over-detection in this channel). Accepted as
-    `None` and resolved inside this function rather than as a literal
-    `Optic = UNAIDED_OPTIC` default expression, to avoid a real circular
-    import between this module and `optics.py` (see the `TYPE_CHECKING`
-    import above) -- behaviourally identical: calling `check_visibility(...)`
-    with no `optic` argument is the same as passing `UNAIDED_OPTIC`
-    explicitly, which is what the regression test below actually pins.
+    `optic` defaults to `optics.UNAIDED_OPTIC`, as of 2026-09-20 -- this
+    was `BINOCULAR_OPTIC` for most of that slice's development but is now
+    naked-eye by default (module docstring's superseded "Binocular premise"
+    section has the full reasoning: modelling Petrovich as permanently
+    glassed-up, with binocular magnification and no field-of-view cost
+    across the whole cockpit-mask envelope, was the single biggest source
+    of over-detection in this channel). Accepted as `None` and resolved
+    inside this function rather than as a literal `Optic = UNAIDED_OPTIC`
+    default expression -- kept this way for continuity with that history
+    even though the circular import that originally forced it is gone as
+    of slice 2A (module docstring): `optics.py` no longer imports anything
+    from this module, so `Optic`/`UNAIDED_OPTIC`/`within_optic_fov` are now
+    an ordinary top-level import here. Behaviourally identical either way:
+    calling `check_visibility(...)` with no `optic` argument is the same as
+    passing `UNAIDED_OPTIC` explicitly, which is what the regression test
+    below actually pins.
 
     The FOV gate is a new cone on top of the cockpit mask, not a
     replacement for it -- an optic can only narrow what the mask already
@@ -523,13 +489,14 @@ def check_visibility(
     once the default optic became the naked eye that would have made every
     trace row report a threshold 4x larger than the one actually applied --
     the trace silently misreporting the exact quantity it exists to measure.
-    It now uses `optic.magnification`, so the traced threshold is by
-    construction the one the gate used. Second, the FOV gate returned
-    without recording, which would have broken BL-9's one-entry-per-call
-    invariant the moment slice 2 wires a non-default optic; `GateOutcome`
-    gained `OPTIC_FOV` and the gate now records like every other."""
-    from perception.optics import UNAIDED_OPTIC, within_optic_fov
-
+    It now uses `optic.presence_range_mult` (slice 2A renamed the constant
+    it originally used, `optic.magnification`, into three per-tier
+    multipliers -- the gate/trace use the presence one, same as the
+    admission gate below), so the traced threshold is by construction the
+    one the gate used. Second, the FOV gate returned without recording,
+    which would have broken BL-9's one-entry-per-call invariant the moment
+    slice 2 wires a non-default optic; `GateOutcome` gained `OPTIC_FOV` and
+    the gate now records like every other."""
     if optic is None:
         optic = UNAIDED_OPTIC
 
@@ -550,7 +517,7 @@ def check_visibility(
     # reasoning; the two size measures must not be unified.
     size_curve_threshold_m = (
         profile.size_m / NAKED_EYE_GATING_ANGULAR_RADIUS_RAD
-    ) * optic.magnification
+    ) * optic.presence_range_mult
     range_threshold_m = min(NAKED_EYE_RANGE_CAP_M, size_curve_threshold_m)
     threshold_bound = (
         "range_cap" if NAKED_EYE_RANGE_CAP_M <= size_curve_threshold_m else "size_curve"
@@ -602,7 +569,11 @@ def check_visibility(
         return None
 
     achieved_tier, achieved_confidence = _achieved_tier(
-        candidate_range_m, profile.size_m, recognition_extent_m, optic.magnification
+        candidate_range_m,
+        profile.size_m,
+        recognition_extent_m,
+        optic,
+        object_model.distinctiveness_of(profile),
     )
     _record(GateOutcome.ADMITTED, achieved_tier=achieved_tier)
     return VisibilityResult(
