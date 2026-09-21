@@ -1,6 +1,31 @@
 """Named optics and per-optic field-of-view test --
 `plans/detection-cones-slice1/plan.md`, slice 1 of the "detection cones"
-milestone `body-layer/ROADMAP.md` names.
+milestone `body-layer/ROADMAP.md` names, extended to per-tier multipliers
+by slice 2A (`plans/detection-cones-slice2/plan.md`, `body-layer/research/
+2026-09-21-slice2-model-decisions.md` decision 1).
+
+**Per-tier, not one magnification (slice 2A).** `Optic` no longer carries a
+single `magnification` -- ED's own `recognition_distance_ratio_threshold`
+(0.25 naked-eye vs. 0.5 optics) and the 2026-09-21 sortie both show
+presence scaling sub-linearly with magnification while class/type scale
+supra-linearly, so a single number applied uniformly to all three
+recognition tiers was never right. `presence_range_mult`/
+`class_range_mult`/`type_range_mult` are the three independently-measured
+multipliers instead, all derived from the BTR-60 alone (the decisions
+doc's "why they come from the BTR-60 alone" section) -- `UNAIDED_OPTIC` is
+1.0/1.0/1.0 by construction (the baseline observer, distinctiveness and
+per-tier multipliers all inert), `BINOCULAR_OPTIC` is 2.42/3.50/3.00.
+
+**The 9K113 sight's multipliers (wide 3.55/7.00/6.50, narrow
+5.81/13.75/15.00) are deliberately NOT added here as named `Optic`
+instances.** The sight itself stays out of scope this slice (see the
+scope-cut paragraph below, unchanged) -- adding it as a selectable table
+entry would let a concrete `PerceptionSource` select it, which is exactly
+what `plans/detection-cones-slice2/plan.md`'s "Explicitly out of scope"
+section defers to its own backlog item. Its values live in the decisions
+doc and in `perception.clustering`'s own docstring (the floor-fix
+derivation needs the narrow sight's 5.81 to state why the floor had to
+become optic-parametric), not as an importable constant here.
 
 **Scope cut (user, 2026-09-20): the 9K113 sight is deferred entirely.**
 This module names only `UNAIDED_OPTIC` and `BINOCULAR_OPTIC`. The 9K113's
@@ -31,24 +56,20 @@ binoculars are a deliberate, narrower, raised-to-the-eyes act, which is
 exactly what `BINOCULAR_OPTIC.fov_half_angle_deg` now being a real number
 (not `None`) encodes -- see that optic's own docstring below.
 
-**The `BINOCULAR_RANGE_MULTIPLIER` round trip, stated honestly so a future
-reader does not conclude it was pointless (`visibility.py`'s own docstring
-carries the full chronology; this is the short version):** 4.0 (inherited,
-unexamined, from `HelperAI.lua`'s `extra_eyesight_ratio`) -> 8.0 (a
-same-session excursion: a realistic 8x30 instrument, magnification stated
-honestly with no derating) -> **4.0 again (final, this change)**. The
-final 4.0 is numerically identical to the first but is **not** the
-restored inherited number -- it is independently derived from a Б-6 6x30
-(a real, honestly-stated 6x magnification) times a stabilisation penalty
-for handheld use on a vibrating airframe (see `BINOCULAR_OPTIC` below).
-That it lands on the same value as the number this project spent two
-passes trying to get away from is a coincidence worth keeping, not
-evidence the excursion was wasted: the old 4.0 was an unexamined borrowed
-constant; the new 4.0 is a derived one that happens to match it, and --
-for the first time -- also matches what the 2026-09-17 screenshot ladder
-independently shows. Two different lines of evidence (a physical
-derivation and photographic ground truth) landing on the same number is a
-real confirmation, not a round trip back to where this started.
+**`BINOCULAR_RANGE_MULTIPLIER` is retired, not carried forward (slice
+2A).** It lived in `visibility.py` and was imported here as
+`BINOCULAR_OPTIC.magnification`; the single-number-per-optic premise it
+encoded is exactly what per-tier multipliers replace. Its own round-trip
+history (4.0 -> 8.0 -> 4.0, `visibility.py`'s docstring had the full
+chronology) is no longer relevant to the current model -- the binocular
+optic's numbers now come from the BTR-60 measurement (2.42/3.50/3.00),
+not from that constant. Deleting it also dissolves the real circular
+import this module and `visibility.py` used to have (each needed a name
+from the other): `optics.py` no longer imports anything from
+`visibility.py`, so `visibility.py` can import `Optic`/`UNAIDED_OPTIC`/
+`within_optic_fov` as an ordinary top-level import instead of the
+`TYPE_CHECKING`/function-local workaround its own docstring used to
+explain.
 
 Pure, no I/O, no DCS/world-model dependency -- mirrors `cockpit_mask.py`'s
 own posture.
@@ -60,33 +81,43 @@ import math
 from dataclasses import dataclass
 from typing import Final
 
-from perception.visibility import BINOCULAR_RANGE_MULTIPLIER
-
 
 @dataclass(frozen=True, slots=True)
 class Optic:
-    """One named optic: what it magnifies by, and what it shows once
-    pointed (field of view). `magnification` is the figure `visibility.
-    py`'s range-threshold formula and `_achieved_tier` actually use --
-    stated honestly as the instrument's own optical magnification, no
-    hidden derating factor (see module docstring). `fov_half_angle_deg`
-    is `None` for an optic with no FOV restriction (the naked eye -- the
-    cockpit occlusion mask is its only envelope); `BINOCULAR_OPTIC` below
-    is the first optic in this table to carry a real value."""
+    """One named optic: how much farther it lets each recognition tier be
+    achieved, and what it shows once pointed (field of view).
+
+    `presence_range_mult`/`class_range_mult`/`type_range_mult` replace the
+    old single `magnification` (slice 2A) -- the multiplier `visibility.
+    py`'s range-threshold formula and `_achieved_tier` apply to the
+    `lowres`/`medres`/`hires` threshold respectively, stated honestly per
+    tier rather than as one number assumed to apply uniformly. All three
+    are BTR-60-derived (module docstring); `UNAIDED_OPTIC` is 1.0 on all
+    three by construction.
+
+    `fov_half_angle_deg` is `None` for an optic with no FOV restriction
+    (the naked eye -- the cockpit occlusion mask is its only envelope);
+    `BINOCULAR_OPTIC` below is the first optic in this table to carry a
+    real value."""
 
     name: str
-    magnification: float
+    presence_range_mult: float
+    class_range_mult: float
+    type_range_mult: float
     fov_half_angle_deg: float | None
     boresight_azimuth_deg: float = 0.0
 
 
-#: Magnification 1.0, no FOV restriction -- the cockpit mask is the naked
+#: 1.0 on every tier, no FOV restriction -- the cockpit mask is the naked
 #: eye's only envelope. **The default `check_visibility` optic as of
 #: 2026-09-20** (was `BINOCULAR_OPTIC` -- see module docstring's "Naked eye
-#: is now the default" note for why).
+#: is now the default" note for why). The baseline observer every other
+#: optic's multipliers are measured against.
 UNAIDED_OPTIC: Final[Optic] = Optic(
     name="unaided",
-    magnification=1.0,
+    presence_range_mult=1.0,
+    class_range_mult=1.0,
+    type_range_mult=1.0,
     fov_half_angle_deg=None,
 )
 
@@ -94,21 +125,16 @@ UNAIDED_OPTIC: Final[Optic] = Optic(
 #: act, as of 2026-09-20** (see module docstring). A Б-6 6x30 -- Soviet
 #: standard compact issue, true field of view ~8.5 deg.
 #:
-#: `magnification=4.0` is `BINOCULAR_RANGE_MULTIPLIER` (`visibility.py`'s
-#: own constant, imported rather than redefined here -- see that module's
-#: Decision 1 on why the constant's home stays `visibility.py`), derived
-#: as **6x raw glass times a ~0.67 unstabilised-platform penalty**:
-#: handheld 6x on a vibrating helicopter does not deliver 6x of usable
-#: acuity (`6.0 * 0.67 ~= 4.0`). Unlike the earlier, reversed
-#: `handheld_effectiveness` split (`visibility.py`'s own docstring has that
-#: history), this is not a separate dataclass field manufactured to cancel
-#: a number back to a target -- it is the derivation behind this one
-#: `magnification` value, stated in prose because there is no second field
-#: for it to live in. **This is also, independently, what the
-#: 2026-09-17 screenshot ladder's binocular column shows** -- the first
-#: time the physical argument (glass x stabilisation penalty) and the
-#: photographic evidence have produced the same number without either
-#: being tuned to match the other.
+#: `presence_range_mult=2.42`/`class_range_mult=3.50`/`type_range_mult=
+#: 3.00` (slice 2A, `body-layer/research/2026-09-21-slice2-model-
+#: decisions.md` decision 1) -- BTR-60-derived, per-tier, replacing the
+#: old flat `magnification=4.0` (`BINOCULAR_RANGE_MULTIPLIER`, retired,
+#: see module docstring). Presence buys proportionally less than the old
+#: flat figure implied (2.42 vs. 4.0) while class buys almost as much
+#: (3.50) and type a little less again (3.00) -- ED's own
+#: `recognition_distance_ratio_threshold` (0.25 naked vs. 0.5 optics) and
+#: the sortie both point the same direction: glass buys recognition more
+#: than it buys detection.
 #:
 #: `fov_half_angle_deg=4.25` (half the ~8.5 deg true field) -- **set to a
 #: real value, not `None`, for the first time.** Safe precisely because
@@ -116,12 +142,15 @@ UNAIDED_OPTIC: Final[Optic] = Optic(
 #: calls `check_visibility` with this optic yet (plan Decision 4), so the
 #: gate cannot misfire in the live path today, and `within_optic_fov`
 #: finally has a real number to enforce once mode selection wires this
-#: optic in (slice 2). Binoculars magnifying with no field-of-view cost at
-#: all was the free-lunch half of the over-detection problem this change
-#: fixes -- magnification without a narrower cone was exactly backwards.
+#: optic in (slice 2B). Binoculars magnifying with no field-of-view cost at
+#: all was the free-lunch half of the over-detection problem the 2026-09-20
+#: change fixed -- magnification without a narrower cone was exactly
+#: backwards.
 BINOCULAR_OPTIC: Final[Optic] = Optic(
     name="binocular",
-    magnification=BINOCULAR_RANGE_MULTIPLIER,
+    presence_range_mult=2.42,
+    class_range_mult=3.50,
+    type_range_mult=3.00,
     fov_half_angle_deg=4.25,
 )
 

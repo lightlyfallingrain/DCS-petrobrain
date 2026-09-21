@@ -96,6 +96,16 @@ class ObjectTypeProfile:
     for the full arithmetic). `None` on any one of the three means this
     row's real shape is not known, not that it is a cube or a point --
     `apparent_extent_m` falls back to plain `size_m` in that case.
+
+    `distinctiveness`: optional per-type exception to `_OP_CLASS_
+    DISTINCTIVENESS`'s per-class default (slice 2A, `plans/
+    detection-cones-slice2/plan.md`, decision 3) -- `None` on every row
+    except the two S-300 radar rows below, meaning "use this profile's
+    `op_class` default." See `distinctiveness_of` for the resolution order
+    and the decisions doc for why this is a default-plus-exception design
+    rather than a per-type value on all ~150 rows: fabricating a
+    distinctiveness for every row is exactly the failure mode that
+    produced the S-300's 5.0 m generic size in the first place.
     """
 
     size_m: float
@@ -103,6 +113,7 @@ class ObjectTypeProfile:
     length_m: float | None = None
     width_m: float | None = None
     height_m: float | None = None
+    distinctiveness: float | None = None
 
 
 def apparent_extent_m(profile: ObjectTypeProfile, aspect_deg: float | None) -> float:
@@ -151,6 +162,40 @@ DEFAULT_OP_CLASS: Final[str] = "OP_GROUPSOMETHING"
 _DEFAULT_PROFILE: Final[ObjectTypeProfile] = ObjectTypeProfile(
     size_m=DEFAULT_SIZE_M, op_class=DEFAULT_OP_CLASS
 )
+
+#: Distinctiveness (slice 2A, `plans/detection-cones-slice2/plan.md`
+#: decision 3) -- how much of an object's detection range its class can
+#: also be claimed at, before the `visibility.py` clamp caps it at
+#: presence range regardless. `1.0` ("ordinary") is the default for every
+#: `op_class` not named below -- the user's own three groupings ("a
+#: vehicle shape is vehicle shape. Human shape is very distinct. Radar
+#: dishes as well.") only name two exceptions; everything else, including
+#: every armor/truck/SAM-launcher bucket, stays ordinary.
+#:
+#: `OP_INFANTRY -> 5.0`: derived, not measured directly, from the naked-eye
+#: ratio (class 128 m vs. presence 600 m needs ~4.7x to reach presence) --
+#: **the exact value doesn't matter above ~4.7**, since the clamp saturates
+#: at presence regardless of how far past it the raw class figure lands;
+#: 5.0 is the round number just clear of that knee. Radar distinctiveness
+#: is NOT here -- `OP_LRSAM` also covers launchers, which are not
+#: distinctive the way a radar dish is, so the S-300 radar rows below carry
+#: their own per-type `distinctiveness=2.6` instead of a class-wide entry.
+_OP_CLASS_DISTINCTIVENESS: Final[dict[str, float]] = {
+    "OP_INFANTRY": 5.0,
+}
+_DEFAULT_DISTINCTIVENESS: Final[float] = 1.0
+
+
+def distinctiveness_of(profile: ObjectTypeProfile) -> float:
+    """`profile`'s effective distinctiveness for `visibility.py`'s class
+    clamp: the profile's own per-type exception (`profile.distinctiveness`)
+    if it carries one, else `_OP_CLASS_DISTINCTIVENESS`'s per-`op_class`
+    default, else `_DEFAULT_DISTINCTIVENESS` (1.0, "ordinary") for any
+    class not named there."""
+    if profile.distinctiveness is not None:
+        return profile.distinctiveness
+    return _OP_CLASS_DISTINCTIVENESS.get(profile.op_class, _DEFAULT_DISTINCTIVENESS)
+
 
 #: Ordered `(keyword, profile)` pairs -- the first case-insensitive substring
 #: match against `object_type` wins, so a more specific keyword (e.g.
@@ -216,6 +261,13 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
             # SOURCED -- 24 m erected mast (ausairpower.net, corroborated
             # independently). This is the load-bearing figure for this row.
             height_m=24.0,
+            # Per-type distinctiveness exception (slice 2A, decision 3):
+            # 4500 / 1714 = 2.6, from the S-300's observed 4.5 km class
+            # range against the post-aspect-fix modelled 1714 m at naked
+            # eye. A radar dish's shape reads distinctly at range the same
+            # way infantry's does -- but `OP_LRSAM` also covers non-radar
+            # launchers, so this is a per-type value, not a class default.
+            distinctiveness=2.6,
         ),
     ),  # SA-10 Flap Lid radar, tall mast
     (
@@ -234,6 +286,9 @@ _KEYWORD_PROFILES: Final[tuple[tuple[str, ObjectTypeProfile], ...]] = (
             # works: agreement here is partly built in. Replace with a real
             # figure before citing this row in any calibration argument.
             height_m=10.0,
+            # See the Flap Lid row above for the derivation -- same
+            # per-type exception, same evidence.
+            distinctiveness=2.6,
         ),
     ),  # SA-10 Big Bird radar, low trailer
     # No bare "tank" keyword. It was measured against all 595 real DCS type
