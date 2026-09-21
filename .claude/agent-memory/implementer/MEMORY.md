@@ -5,90 +5,91 @@ Individual memory files live alongside this index, named `feedback_<topic>.md` (
 confirmations about how to approach work) or `project_<topic>.md` (non-obvious project facts).
 Write directly to this directory — it already exists, no need to create it or check first.
 
-- [No dep tooling in world-model](project_worldmodel_no_dep_tooling.md) — create `world-model/.venv` ad hoc; use pytest pythonpath ini.
-- [Verify full suite](verify_full_suite_not_just_new_files.md) — ruff can flag pre-existing drift in untouched files; fix separately.
-- [Append implementation.md](feedback_implementation_log_append.md) — multi-stage plans share one file; read/append, never replace.
-- [mypy CWD-only config](project_worldmodel_mypy_path_cwd.md) — cross-subproject mypy_path needs `cd` first, not just `--config-file`.
-- [M2 raster open Qs](project_m2_raster_open_questions.md) — RasterCharts `level` semantics unresolved; test_coordinates I001 recurred 3x.
-- [Overpass needs User-Agent](project_overpass_user_agent.md) — no default UA gets HTTP 406 with no payload.
-- [Attribution into images](feedback_render_attribution_into_image.md) — `draw.text` onto PNGs, not stdout; check new tool files individually.
-- [dangerouslyDisableSandbox](project_no_outbound_network_access.md) — DOES restore outbound network; test before assuming blocked.
-- [Respect instructed caps](feedback_respect_instructed_caps_over_recomputed_margins.md) — take the plan's stated max, log discrepancy, don't exceed.
-- [pyproj Transformer perf](project_pyproj_transformer_perf.md) — rebuilt per call, invisible until OSM-ingest scale; fix w/ functools.cache.
-- [M5 Stage 1 layout](project_m5_stage1_layout.md) — geometry/dcs_data/store/build/query landed; nearest_road/elevation null until Stage 2-3.
-- [M5 Stage 2 roadnet](project_m5_roadnet_stage2.md) — gate PASSED (131 routes); header route-count doesn't match walked total.
-- [M5 Stage 3 handoff](project_m5_stage3_handoff.md) — complete, real store at 100% grid coverage; one Latakia SRTM tile outstanding.
-- [Verify mission-probe claims](feedback_verify_mission_probe_pattern_claims.md) — re-read the actual prior script; prose isn't proof.
-- [M5 Stage 4 findings](project_m5_stage4_findings.md) — real corrupted road feature (id=3711); DCS-vs-OSM displacement ~5-50m not ~1km.
-- [Verify rebuild row counts](feedback_verify_rebuild_row_counts.md) — optional flags with no default silently drop data; verify counts directly.
-- [macOS mmap RSS](reference_macos_mmap_rss_metric.md) — use "peak memory footprint" not "max resident set size" on Darwin.
-- [Agent memory path](feedback_agent_memory_path.md) — always top-level `.claude/agent-memory/implementer/`, never subproject-nested.
-- [M6 terrain semantics](project_m6_terrain_semantics.md) — tuned defaults (threshold=20/min_cell=6); checkerboard noise is a res ceiling.
-- [Decouple fixtures from defaults](feedback_decouple_fixtures_from_tuned_defaults.md) — pass explicit test thresholds, never a tunable default.
-- [M7 Stage 0 region generalization](project_m7_stage0_region_generalization.md) — renaming a shared field touches every reader; DCS x=lat/z=lon.
-- [M7 Stage 1 vector layers](project_m7_stage1_vector_layers.md) — osm_cache_path hidden required-param blocker; parse_* reject inexact counts.
-- [M7 Stage 2 SRTM provenance](project_m7_stage2_srtm_provenance.md) — schema v2->v3, required field bump; "most recent grid wins" now matters.
-- [M8 probe store](project_m8_probe_store.md) — nearest-cell sparse-grid sampling, chunk classifier reuse free, ~23ms/chunk, base untouched.
-- [aircraft-layer 1-2](project_aircraft_layer_stage1_2.md) — new subproject, schema bool-as-int gotcha, LoGetSelfData shape unverified.
-- [PB-1 2-3: body-layer BL-0](project_pb1_stage2_3_body_layer.md) — LoGetWorldObjects returns lat/lon not x/z; geometry bypasses describe_position for LOS.
-- [PB-1 4-9: HybridSource](project_pb1_stage4_9_hybrid_source.md) — HelperAI parser built from prose only; range_m includes altitude.
-- [PB-1.5 naked-eye](project_pb1_5_naked_eye.md) — first LOS caller; derived_world_position un-quantised; range snaps up to bucket ceiling.
-- [Binocular reinterpretation](feedback_binocular_not_unaided_eye.md) — a reused ED constant can get new project meaning by explicit user decision.
-- [Verify keyword vocab](feedback_verify_keyword_vocab_against_real_strings.md) — plausible keywords were 0% reachable vs real DCS strings.
-- [Reporting-name lookup](project_reporting_name_lookup_pattern.md) — ED reporting-name 2nd keyword pass: ~24%->64.5% coverage, zero regression.
-- [Bucket coverage by scope](feedback_bucket_coverage_metrics_by_scope.md) — blended coverage floor hides in-scope gaps; assert per-bucket.
-- [Coverage floor needs nulls](feedback_coverage_floor_needs_real_nulls.md) — curated-pass fixtures pin 100%; prefer full enumeration.
-- [Word-boundary coverage bug](project_pb1_5_coverage_floor_word_boundary_bug.md) — "a-6" matched inside "SA-6"; need word-boundary-safe matching.
-- [PB-2 Stage 0 scope repair](project_pb2_stage0_scope_channel_repair.md) — real 0-score before/after table; debounce-preservation gotcha on generalize.
-- [PB-2 Stage 1 belief core](project_pb2_stage1_belief_core.md) — TYPE_CHECKING breaks belief circular import; reuse naked-eye bucket constants.
-- [PB-2 Stage 2 decay/events](project_pb2_stage2_decay_events.md) — no "§3.4" section exists; only 3/5 half-lives consumed; no first-tick-lost event.
-- [PB-2 Stage 4 tools/console](project_pb2_stage4_tools_console.md) — extra tool fns beyond named four; grep-based test trap; mypy narrowing gotcha.
-- [PB-2 Stage 5 fusion](project_pb2_stage5_cross_channel_fusion.md) — gate radius uses new percept's own uncertainty; certainty_of is pure recency.
-- [BL-2.5 overlay Hook](project_bl2_5_overlay_hook.md) — DCS ships real JSON.lua in Hook state; lupa syntax-checks Lua without DCS/root.
-- [BL-2.5 restyle followup](project_bl2_5_restyle_followup.md) — gameMessages.dlg grounds native-look Qs; prefer live calcSize() over guessed constant.
-- [BL-3 world enrichment](project_bl3_world_enrichment.md) — Contact has no bearing/range; float**float mypy Any quirk; fixtures schema-stale.
+- [No dep tooling in world-model](project_worldmodel_no_dep_tooling.md) — no venv/lockfile existed before M1; create `world-model/.venv` ad hoc, use pytest `pythonpath` ini for src/tests imports.
+- [Verify full suite, not just new files](verify_full_suite_not_just_new_files.md) — ruff check can flag pre-existing drift in untouched files; fix in its own small commit.
+- [Append, don't overwrite implementation.md](feedback_implementation_log_append.md) — multi-stage plans share one implementation.md; read/append, never replace.
+- [mypy config discovery is CWD-only](project_worldmodel_mypy_path_cwd.md) — mypy never finds a subproject's pyproject.toml from repo root; any cross-subproject mypy_path (body-layer -> world-model/src) needs cd first, not just world-model tools/tests.
+- [M2 raster open questions](project_m2_raster_open_questions.md) — RasterCharts `level` semantics unresolved (clipmap analogy doesn't transfer); test_coordinates.py I001 recurred 3x, needs root-cause not re-fix.
+- [Overpass needs User-Agent](project_overpass_user_agent.md) — urllib default has none; overpass-api.de returns HTTP 406 with no payload until one is set.
+- [Draw attribution into rendered images](feedback_render_attribution_into_image.md) — OSM attribution must be `draw.text`'d onto overlay PNGs, not just printed to stdout; `world-model/tools/` isn't in the mandated check commands but new tool files should still be checked individually.
+- [Network access via dangerouslyDisableSandbox](project_no_outbound_network_access.md) — corrected: `dangerouslyDisableSandbox: true` DOES restore outbound network (Overpass fetch worked); test before assuming blocked.
+- [Respect instructed caps over recomputed margins](feedback_respect_instructed_caps_over_recomputed_margins.md) — if your math shows more headroom than a plan's stated cap, take the cap's max and log the discrepancy, don't exceed it.
+- [pyproj Transformer per-call cost](project_pyproj_transformer_perf.md) — coordinates.py rebuilt a Transformer every call; invisible until M5's OSM-ingest scale (13.6k elements), fixed with functools.cache.
+- [M5 Stage 1 layout](project_m5_stage1_layout.md) — geometry/dcs_data/store/build/query packages landed; nearest_road(DCS)/elevation/surface_type null until Stage 2-3 wire in.
+- [M5 Stage 2 roadnet results](project_m5_roadnet_stage2.md) — gate PASSED (131 routes in Latakia bbox), header route-count field doesn't match walked total, resync pre-filter-only is unsafe.
+- [M5 Stage 3 handoff](project_m5_stage3_handoff.md) — complete: all 3 rungs ran live, real store rebuilt at 100% grid coverage; only a Latakia SRTM tile is outstanding.
+- [Verify mission-probe pattern claims](feedback_verify_mission_probe_pattern_claims.md) — re-read the actual prior script before claiming a new one "mirrors its proven pattern"; a plan's prose isn't proof the code does it.
+- [M5 Stage 4 findings](project_m5_stage4_findings.md) — real corrupted DCS road feature (id=3711) in live store; DCS-vs-OSM road displacement is ~5-50m not M1's ~1-1.3km point-error figure.
+- [Verify rebuild row counts](feedback_verify_rebuild_row_counts.md) — build_world_model.py optional flags with no default silently drop data on rebuild; verify row counts/query output directly.
+- [macOS mmap RSS metric](reference_macos_mmap_rss_metric.md) — for mmap-based readers on Darwin, use "peak memory footprint" not "maximum resident set size" to judge real memory use.
+- [Agent memory path](feedback_agent_memory_path.md) — always write to top-level `.claude/agent-memory/implementer/`, never a `world-model/`-nested copy; mistake recurred twice before this.
+- [M6 terrain semantics](project_m6_terrain_semantics.md) — tuned defaults (threshold=20/min_cell=6), real ridge=12/valley=12, checkerboard-noise finding is a resolution ceiling not a bug.
+- [Decouple test fixtures from tuned defaults](feedback_decouple_fixtures_from_tuned_defaults.md) — pass an explicit test threshold, never rely on a module default a later stage will re-tune.
+- [M7 Stage 0 region generalization](project_m7_stage0_region_generalization.md) — renaming a widely-read dataclass field touches every direct reader, not just plan-named call sites; full-theatre roadnet census numbers; DCS x=lat/z=lon convention.
+- [M7 Stage 1 vector layers](project_m7_stage1_vector_layers.md) — osm_cache_path was a hidden required-param blocker for syria-full; raw files already staged locally; parse_towns/beacons_lua reject non-exact counts so monkeypatch for pipeline tests.
+- [M7 Stage 2 SRTM provenance](project_m7_stage2_srtm_provenance.md) — grid.provenance schema bump v2->v3, required field on ElevationGrid/SurfaceGrid, "most recent grid wins" ordering now matters, plan's file list vs its own locked decisions can conflict.
+- [M8 probe store](project_m8_probe_store.md) — nearest-cell-only sparse-grid sampling, chunk classifier reuse needed zero new logic, ~23ms/chunk perf, base store fully untouched.
+- [aircraft-layer stage 1-2](project_aircraft_layer_stage1_2.md) — new independent subproject, schema bool-as-int gotcha, LoGetSelfData shape unverified (defensive pcall in Export.lua), stage 3/4 deferred.
+- [PB-1 stage 2-3: body-layer BL-0](project_pb1_stage2_3_body_layer.md) — PerceptionSource scaffolding, LoGetWorldObjects returns lat/lon not x/z, geometry.py deliberately bypasses describe_position for LOS sampling.
+- [PB-1 stage 4-9: HybridPerceptionSource](project_pb1_stage4_9_hybrid_source.md) — HelperAI recursive parser built from prose only (no example dump), association.py tie-margin/debounce judgment calls, range_m includes altitude.
+- [PB-1.5 naked-eye channel](project_pb1_5_naked_eye.md) — first real caller of geometry.line_of_sight_clear; derived_world_position stays un-quantised, bearing quantises relative-then-back-to-true, range snaps up to bucket ceiling.
+- [Binocular, not unaided-eye, reinterpretation](feedback_binocular_not_unaided_eye.md) — a reused ED constant can be given a new project-owned meaning by explicit user decision; name/document that meaning, don't let it look like a source transcription.
+- [Verify keyword vocab against real strings](feedback_verify_keyword_vocab_against_real_strings.md) — object_model.py's OP_SHIP/SA-* keywords were plausible English/NATO words, 0% reachable against real DCS object_type strings; fabricated-string tests masked it.
+- [Reporting-name lookup pattern](project_reporting_name_lookup_pattern.md) — irregular DCS object_type -> ED's own regular reporting-name vocabulary as a 2nd keyword pass; ~24%->64.5% ground coverage, raw table tried first for zero regression.
+- [Bucket coverage metrics by scope](feedback_bucket_coverage_metrics_by_scope.md) — a blended coverage floor across mixed-relevance fixture entries hides the in-scope gap; tag entries with a bucket and assert per-bucket, not one number.
+- [Coverage floor needs real nulls](feedback_coverage_floor_needs_real_nulls.md) — a fixture where every entry is pre-selected to pass pins the coverage metric at 100%; prefer full enumeration over curated sampling.
+- [PB-1.5 coverage-floor word-boundary bug](project_pb1_5_coverage_floor_word_boundary_bug.md) — bare "a-6"/"a-10" substring keywords matched inside "SA-6"/"SA-10"; use word-boundary-safe matching for DCS type/reporting-name keyword scripts.
+- [PB-2 Stage 0 scope-channel repair](project_pb2_stage0_scope_channel_repair.md) — real 0-score before/after table for reporting-name fix; debounce-preservation gotcha when generalizing single-item guard to multi-item (no test caught it).
+- [PB-2 Stage 1 belief core](project_pb2_stage1_belief_core.md) — TYPE_CHECKING breaks belief-module circular import; reuse naked-eye's private bucket constants, don't duplicate; ambiguous-merge fixtures need real margin vs. gate radius.
+- [PB-2 Stage 2 decay/events](project_pb2_stage2_decay_events.md) — PETROBRAIN_RUNTIME.md has no "§3.4 certainty table" (no numbered sections at all); only 3/5 half-life constants consumed by design; first-tick-already-lost emits no event.
+- [PB-2 Stage 4 tools/console](project_pb2_stage4_tools_console.md) — extra tool fns beyond the named four, grep-based derived_world_position test trap, mypy repeated-expression narrowing gotcha.
+- [PB-2 Stage 5 cross-channel fusion](project_pb2_stage5_cross_channel_fusion.md) — gate radius uses the new percept's own range-derived uncertainty; certainty_of is pure recency, not quality-weighted.
+- [BL-2.5 overlay Hook script](project_bl2_5_overlay_hook.md) — DCS ships a real JSON.lua in Hook state (don't hand-roll a decoder); module() unneeded if no bare globals; lupa syntax-checks Lua without DCS/root.
+- [BL-2.5 restyle follow-up](project_bl2_5_restyle_followup.md) — gameMessages.dlg grounds "look native" questions; prefer live calcSize()-driven sizing over a bigger guessed constant; reuse existing id-render convention.
+- [BL-3 world enrichment](project_bl3_world_enrichment.md) — Contact has no bearing/range, only flat position; float**float mypy Any quirk; latakia-20km.sqlite fixture is schema-stale, syria-full.sqlite lacks settlement/water/ridge/valley.- [BL-2.6 Stages 1-4 classification lattice](project_bl2_6_stages1_4_classification_lattice.md) — refine/contradict derivable from before/after level+value alone; required-field breakage was narrower than expected, grep construction sites first.
+- [BL-2.6 Stages 6-7 naked-eye calibration](project_bl2_6_stages6_7_naked_eye_calibration.md) — mechanism-then-gate split leaves a provably-dead branch after Stage 6; gate move flips which constraint binds for trucks, invalidating a test's premise not just its numbers; hires-tier needs a reporting-name-miss fallback test.
+- [BL-2.6 Stage 10 confidence-decay fix](project_bl26_stage10_confidence_decay_fix.md) — implemented missing classification_confidence_at; keys off established_sim not last_seen_sim; branch predated BL-3's position_confidence merge, verify merge-base before trusting "already merged" claims.
+- [Overlay clock/range summary](project_overlay_clock_range_summary.md) — threaded relative_now into _contact_summary w/o 2nd compute; console.py needed zero code change; float 3050/1000 rounds down not up.
+- [BL-4 attention/events milestone](project_bl4_attention_events.md) — 3-commit split via git stash push --keep-index; effective_attention takes primitives not Contact (circular import); last_emitted_attention stores effective not direct value.
+- [BL-5 tool API stages](project_bl5_tool_api_stages.md) — find_place_by_name + find_place/get_situation/describe_our_position/poll_events + TOOL_SET registry + console wiring, 4 commits.
+- [Verify git log after commit](feedback_verify_git_log_after_commit.md) — a concurrent session in the same checkout can sweep staged files into its own commit or reset the branch; re-check log/status after committing too.
+- [BL-5a text-mode crew interaction](project_bl5a_text_mode_crew.md) — bypass_gate couldn't touch events.py so got its own UrgentCall type; no candidate score (find_contact has no ranking); ATTENTION_CHANGED deliberately silent.
+- [Object-permanence continuity fix](project_object_permanence_continuity_fix.md) — 2 overlapping-gate objects merge cleanly on founding, don't ambiguously spawn; reused an existing test's geometry instead; verify-by-disabling-the-fix pattern.
+- [Mock-flight fixture harness](project_mock_flight_fixture.md) — real HTTP+world-model chain test found no regression; fold_classification "lower level holds" blocks mid-flight reclassification events when Hybrid founds first.
+- [BL-6 commands inspect/adapt](project_bl6_commands_inspect_adapt.md) — PendingIntent/TaskStore, scan_area missing now_sim in plan text, CommandSender raises unlike TextOverlaySender, Export.lua command listener polls every frame ahead of export throttle.
+- [Overlay speech callouts](project_overlay_speech_callouts.md) — CrewConsole._print second sink, widened private _handle_inject_urgent return type to carry bypass_gate, "!!" prefix at push site not on OutgoingSpeech.text.
+- [osm-classified-cache](project_osm_classified_cache.md) — 3rd two-store instance (osm_cache/); dropped source_id from cache schema; finalize_cache/open_osm_cache_for_populate take explicit conn param not in plan prose.
+- [F10 crew commands Stages 1-3](project_f10_crew_commands.md) — first Hook->collector inbound UDP direction, first bounded-FIFO cache, no aircraft-layer venv, verify-before-assume wiring gaps, plan's manual-check prose was wrong.
+- [Contact report wording](project_contact_report_wording.md) — spelled units/TTS acronym table/"very close"/"on-next to" wording; roadmap's own "LR"/"MI-8" examples didn't match real vocabulary.
+- [Inbound speech Stage 2 matcher](project_inbound_speech_stage2_matcher.md) — plan's seam table under-specifies token=None (added verb_anchored/ambiguous bools); derived verb set is a deliberate superset; short-word fuzzy false-anchor found; voice-only tokens act as no-ops.
+- [Inbound speech Stage 3 recognition service](project_inbound_speech_stage3_recognition_service.md) — POST /transcribe + GET /transcripts/poll, stop_talking dispatch, --crew-text telemetry-gate blocks poll dispatch without real telemetry (verified via direct component drive instead).
+- [BL-9 detection trace](project_bl9_detection_trace.md) — mutable-record annotation pattern, ground-truth/belief join via Contact.contributing_observation_ids scan, verified via replay.py not live DCS.
+- [Aspect-aware profiles](project_aspect_aware_profiles.md) — apparent_extent_m formula, None-not-cube dimension semantics, S-300 sourcing; POST-DOD CORRECTED: aspect affects recognition only, never detection (gate/lowres use size_m, medres/hires use apparent_extent_m).
+- [Unbounded sector scan](project_unbounded_sector_scan.md) — AttentionArea.radius_m -> float | None, F10_SCAN_RADIUS_M deleted; only 2 direct .radius_m reads existed outside tests, tasks.py untouched.
+- [Cones slice 2A multipliers](project_cones_slice2a_multipliers.md) — per-tier optic multipliers move vehicle calibration rows too (not just distinctiveness); infantry's distinctiveness=5.0 eliminates its lowres band structurally; clustering floor fix exposed a fixture's hidden binocular-range assumption.
+- [Overlay speech callouts addendum](project_overlay_speech_callouts_addendum.md) — shared _contact_report_text helper fixes broken lifecycle callout text; facts["semantic"] is list[dict] not list[SemanticFact].
+- [Overlay speech callouts addendum 2](project_overlay_speech_callouts_addendum2.md) — round() ties-to-even on rounding boundaries, CONTACT_LOST no-template needs no route_event change, classification-changed relative_now needs EnrichmentContext.
+- [BL-7 mission phase](project_bl7_mission_phase.md) — get_situation's only caller is console.py; MissionPhaseTracker needs no cross-thread sync (built once, shared by reference); verified real asdict() JSON shape before writing parser/fixture.
+- [MI-1/MI-1.5 scaffold](project_mi1_mi15_scaffold.md) — pydcs dcs.lua vendors cleanly via `pip download git+...`, no raw-passthrough field on filtered output = structural leak guarantee, mypy cwd gotcha recurred.
+- [M10 road junctions](project_m10_road_junctions.md) — real cluster/junction counts (3980/3634), singleton-cluster filtering needed, coincident-duplicate-road false positive found (not tolerance-fixable).
+- [pyosmium package name](feedback_pyosmium_package_name.md) — PyPI/import name is `osmium`, not `pyosmium`; `pip install pyosmium` 404s, check PyPI JSON API before escalating a dependency as unavailable.
+- [MI-2 world enrichment](project_mi2_world_enrichment.md) — shared-sqlite server can't use ThreadingHTTPServer, cross-venv integration test correctly dropped per plan, mypy CWD bug caught live.
+- [MI-3 schema/Tagged[T]](project_mi3_schema_tagged.md) — Unit.skill fan-out was 1 site not many, fixture route extension broke 2 existing MI-2 tests, mypy --strict skips tests/ here.
+- [MI-4 Ollama synth](project_mi4_ollama_synth.md) — Ollama auto-pulls an absent model on /api/chat (no clean "not found" error); Bash curl to loopback denied but in-process urllib succeeded; Threat.area_ref always None.
+- [MI-5 player questions](project_mi5_player_questions.md) — ownship choice-question path is dead (basis has no candidate names, always falls back to free_text); main.py copies live-ollama test's pipeline sequence, never smoke-tested live.
+- [MI-6 runtime compilation](project_mi6_runtime_compilation.md) — plan prose vs. declared field type mismatch (prefer the type), PlaceMatch.name key confirmed against world-model source, CLAUDE.md Structure gap found and filled.
+- [Group-contact-model Stage 4b speech/events](project_group_contact_model_stage4b_speech_events.md) — console.py structural test caught a should-be-private helper; OP_GROUPSOMETHING fixture conflict design pre-authorized.
+- [F10 command vocabulary Stage 6-7](project_f10_command_vocabulary_stage6_7.md) — dispatch mirrors console.py's existing _handle_scan_area D5 pattern; found a genuinely-stale doc outside the plan's named list.
+- [F10 command vocabulary review fix](project_f10_command_vocabulary_review_fix.md) — captured PendingIntent.area went stale after dataclasses.replace on reprojection; resolve live by id via new ContactStore.get_area, not by coupling tasks.py<->contacts.py.
+- [Group-contact-model Stage 3b-i ellipse](project_group_contact_model_stage3bi_ellipse.md) — cross-range-only single-link counting is provably always-1, fixed via centroid-relative grid-binning; xfail'd a real gate regression rather than tuning magnitude. SUPERSEDED by rev.2 below.
+- [Group-contact-model Stage 3b-i rev.2 angular](project_group_contact_model_stage3bi_rev2_angular.md) — ellipse replaced by a true angular predicate; gate/clustering formula-sharing was the real gate-regression defect; same-bearing/same-altitude test fixtures are now degenerate; design's own §8 test list was incomplete.
+- [Group-contact-model Stages 1-2](project_group_contact_model_stage1_2.md) — real single-link chaining at plan's own test distances, majority-overlap continuity needs a global 2-pass not per-cluster, gate radius vs cluster radius can legitimately disagree.
+- [Group-contact-model Stages 3a-4a](project_group_contact_model_stage3a_4a.md) — same-source/same-poll exclusion via ingest pre-scan, doc-file hunk-splitting for separate commits, cardinality "unknown" = literal (0,inf) root interval.
+- [Cockpit visibility mask](project_cockpit_visibility_mask.md) — body-relative depression mask replacing flat FOV cone; pitch/bank sign unverified; write D3-split integration tests with boundary-clear values so they survive the calibration commit unmodified.
+- [TTS voice output stages 1-4](project_tts_voice_output_stage1_4.md) — winsound needs static sys.platform check not try/except for mypy --strict; python -m __main__ doesn't work; say -v <bad voice> silently falls back; every subproject needs its own .gitignore.
+- [Entrypoint exemption scope](feedback_entrypoint_exemption_scope.md) — "no automated test, live-process entrypoint" covers the CLI wiring, not every class merely co-located with it in the same file.
+- [Cones 2C scan loop](project_cones_2c_scan_loop.md) — ScanPlan per-sector legs (plan defect flagged), default gaze now restrictive breaks ~40 fixtures, TaskStore success-check trap for persistent commanded scans in long fixtures.
+- [Cones 2C sortie fixes](project_cones_2c_sortie_fixes.md) — gaze overlay read + scan/watch mode fix touched 3 call sites not 1; wrong worktree base caught by grepping for a symbol the task named; a backlog root-cause claim turned out wrong for one finding.
+- [Callout scheduling Slice A/B](project_callout_scheduling_stages.md) — build full design first then split for revertible commits; bunched-at-t0 fixture undercounts spoken lines vs. staggered; plan's "three infantry" example contradicts its own reused mechanism.
 - [BL-2.6 1-4 classification](project_bl2_6_stages1_4_classification_lattice.md) — refine/contradict derivable from level+value alone.
-- [BL-2.6 6-7 naked-eye calib](project_bl2_6_stages6_7_naked_eye_calibration.md) — mechanism-then-gate split leaves a dead branch after Stage 6.
-- [BL-2.6 Stage 10 decay fix](project_bl26_stage10_confidence_decay_fix.md) — keys off established_sim not last_seen_sim; verify merge-base first.
-- [Overlay clock/range](project_overlay_clock_range_summary.md) — threaded relative_now w/o 2nd compute; float 3050/1000 rounds down.
-- [BL-4 attention/events](project_bl4_attention_events.md) — 3-commit via git stash --keep-index; effective_attention takes primitives.
-- [BL-5 tool API stages](project_bl5_tool_api_stages.md) — find_place_by_name + get_situation/describe_our_position/poll_events, 4 commits.
-- [Verify git log after commit](feedback_verify_git_log_after_commit.md) — concurrent sessions can sweep staged files; re-check log/status.
-- [BL-5a text-mode crew](project_bl5a_text_mode_crew.md) — bypass_gate got its own UrgentCall type; find_contact has no ranking score.
-- [Object-permanence fix](project_object_permanence_continuity_fix.md) — overlapping-gate objects merge cleanly; verify-by-disabling pattern.
-- [Mock-flight fixture](project_mock_flight_fixture.md) — real HTTP+WM chain found no regression; "lower level holds" blocks mid-flight reclass.
-- [BL-6 commands](project_bl6_commands_inspect_adapt.md) — PendingIntent/TaskStore; scan_area missing now_sim in plan text.
-- [Overlay speech callouts](project_overlay_speech_callouts.md) — CrewConsole._print 2nd sink; "!!" prefix at push site not on text.
-- [osm-classified-cache](project_osm_classified_cache.md) — 3rd two-store instance; dropped source_id; conn param not in plan prose.
-- [F10 crew commands 1-3](project_f10_crew_commands.md) — first Hook->collector inbound UDP; first bounded-FIFO cache; plan's manual checks wrong.
-- [Contact report wording](project_contact_report_wording.md) — spelled units/TTS table; roadmap's own LR/MI-8 examples didn't match vocab.
-- [Inbound speech Stage 2](project_inbound_speech_stage2_matcher.md) — seam table under-specifies token=None; short-word fuzzy false-anchor found.
-- [Inbound speech Stage 3](project_inbound_speech_stage3_recognition_service.md) — telemetry-gate blocks poll dispatch; verified via direct drive.
-- [BL-9 detection trace](project_bl9_detection_trace.md) — mutable-record annotation; ground-truth/belief join via contributing_observation_ids.
-- [Aspect-aware profiles](project_aspect_aware_profiles.md) — POST-DOD CORRECTED: aspect affects recognition only, never detection.
-- [Unbounded sector scan](project_unbounded_sector_scan.md) — AttentionArea.radius_m -> float|None; only 2 direct reads outside tests.
-- [Cones 2A multipliers](project_cones_slice2a_multipliers.md) — per-tier optics move calibration rows; floor fix exposed hidden fixture assumption.
-- [Overlay callouts addendum](project_overlay_speech_callouts_addendum.md) — shared _contact_report_text fixes lifecycle text; semantic is list[dict].
-- [Overlay callouts addendum 2](project_overlay_speech_callouts_addendum2.md) — round() ties-to-even; CONTACT_LOST needs no route_event change.
-- [BL-7 mission phase](project_bl7_mission_phase.md) — get_situation's only caller is console.py; no cross-thread sync needed.
-- [MI-1/1.5 scaffold](project_mi1_mi15_scaffold.md) — pydcs dcs.lua vendors via pip download git+; no raw-passthrough = structural leak guarantee.
-- [M10 road junctions](project_m10_road_junctions.md) — real counts (3980/3634); coincident-duplicate-road false positive (not tolerance-fixable).
-- [pyosmium package name](feedback_pyosmium_package_name.md) — PyPI/import name is `osmium` not `pyosmium`; check PyPI JSON API first.
-- [MI-2 world enrichment](project_mi2_world_enrichment.md) — shared-sqlite server can't use ThreadingHTTPServer; mypy CWD bug caught live.
-- [MI-3 schema/Tagged[T]](project_mi3_schema_tagged.md) — Unit.skill fan-out was 1 site; mypy --strict skips tests/ here.
-- [MI-4 Ollama synth](project_mi4_ollama_synth.md) — auto-pulls absent model on /api/chat; Bash curl to loopback denied, in-process urllib OK.
-- [MI-5 player questions](project_mi5_player_questions.md) — ownship choice-question path is dead code, always falls back to free_text.
-- [MI-6 runtime compilation](project_mi6_runtime_compilation.md) — plan prose vs declared type mismatch (prefer the type); found stale CLAUDE.md gap.
-- [Group-contact 4b speech](project_group_contact_model_stage4b_speech_events.md) — structural test caught should-be-private helper.
-- [F10 vocab Stage 6-7](project_f10_command_vocabulary_stage6_7.md) — dispatch mirrors _handle_scan_area D5 pattern; found stale doc outside list.
-- [F10 vocab review fix](project_f10_command_vocabulary_review_fix.md) — captured PendingIntent.area went stale after reprojection; resolve live by id.
-- [Group-contact 3b-i ellipse](project_group_contact_model_stage3bi_ellipse.md) — cross-range-only counting provably always-1. SUPERSEDED by rev.2.
-- [Group-contact 3b-i rev.2](project_group_contact_model_stage3bi_rev2_angular.md) — gate/clustering formula-sharing was the real regression defect.
-- [Group-contact 1-2](project_group_contact_model_stage1_2.md) — real single-link chaining; gate radius vs cluster radius can legitimately disagree.
-- [Group-contact 3a-4a](project_group_contact_model_stage3a_4a.md) — same-source/same-poll exclusion via ingest pre-scan; cardinality UNKNOWN=(0,inf).
-- [Cockpit visibility mask](project_cockpit_visibility_mask.md) — body-relative depression mask; write D3-split tests with boundary-clear values.
-- [TTS voice output 1-4](project_tts_voice_output_stage1_4.md) — winsound needs static sys.platform check; every subproject needs its own .gitignore.
-- [Entrypoint exemption scope](feedback_entrypoint_exemption_scope.md) — covers CLI wiring only, not every class co-located in the same file.
-- [Cones 2C scan loop](project_cones_2c_scan_loop.md) — ScanPlan per-sector legs plan defect; default gaze now restrictive breaks ~40 fixtures.
-- [Cones 2C sortie fixes](project_cones_2c_sortie_fixes.md) — gaze/scan fix touched 3 call sites not 1; grep for a named symbol caught wrong worktree.
 - [Group detectability](project_group_detectability.md) — RESOLUTION_ANGULAR_RADIUS_RAD split; plan's 0.0013 rounds wrong direction vs LOWRES precedent.

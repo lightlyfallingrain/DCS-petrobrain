@@ -64,13 +64,16 @@ documented gap, not an oversight: a future milestone that wants to narrate
 "entering a watched area raised attention on C22" adds a template here,
 it does not need to touch this module's structure).
 
-**No contact clustering.** `render_contact_report` reports one contact at a
-time. §3.6's multi-contact `contact_group` worked example (composition
-counts) needs data this codebase does not track yet
-(`docs/concept/PETROBRAIN_RUNTIME.md` line 336: no clustering exists) --
-out of scope per the plan's explicit scope cut, not an oversight; the
-report format below has no unit-count/"group of" element for the same
-reason.
+**No contact clustering in `render_contact_report` itself.** It reports one
+contact at a time, and always will -- §3.6's multi-contact `contact_group`
+worked example is answered a different way: `belief.callouts.
+render_group_report` (`plans/callout-scheduling/plan.md`) builds a group
+line from several contacts' `facts`, at *speech time*, without this module
+gaining any notion of a persisted group. See that function's own docstring
+and `belief.callouts`' module docstring for the full "report space, not
+world space" argument -- grouping is a view over several `describe_contact`
+results, not a new belief-state entity, and not a reuse of `perception.
+clustering`'s optical-resolvability question.
 
 **Contact report format (2026-09-10 user decision, superseding the original
 "speak `describe_contact`'s `summary` verbatim" design; extended 2026-09-11
@@ -189,6 +192,7 @@ its regex simply does not match)."""
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Final, Literal
@@ -621,6 +625,87 @@ def render_contact_report(
     if result is None:
         return None
     text = _contact_report_text(result["facts"])
+    return OutgoingSpeech(text=text, template="contact_report")
+
+
+def render_group_report(facts_list: list[dict[str, object]]) -> OutgoingSpeech:
+    """A speech-time-only group report (`plans/callout-scheduling/plan.md`,
+    "Aggregation" section) -- `belief.callouts.group_candidates` has already
+    decided `facts_list` all share the same `_unit_type_display`/
+    `_format_range_km` words, so this function does no grouping decision of
+    its own; it only composes one line from several `describe_contact`
+    results, reusing exactly the vocabulary a single-contact report already
+    uses rather than adding a second phrasing path:
+
+    - the group interval is `lo = sum(member.lo)`, `hi = sum(member.hi)` --
+      the same lower-bound idea as `belief.tools._estimated_units_lower_
+      bound`, applied per group instead of over the whole store. A member
+      with no `facts["cardinality"]` at all (the exactly-one default every
+      contact is seeded with) contributes `(1, 1)`.
+    - fed into the existing `_cardinality_phrase`/`_plural_unit_type_
+      display`, so the register stays hedged ("several infantry", "a
+      couple of trucks"). An exact count is spoken only when *every*
+      member's own interval is exact (`lo == hi`) **and** every member is
+      individually attended (`watch`/`priority`) -- tightened from
+      `_cardinality_phrase`'s own single-contact `attended` rule, so a
+      group never manufactures precision by averaging a mix of watched and
+      unwatched members.
+    - clock/range are taken from the group's **nearest** member (by
+      `relative_now.range_m`) -- a crew reports the near edge of a cluster,
+      not its centroid. Every member of a group is guaranteed to carry
+      `relative_now` (`group_candidates` only ever buckets members that
+      have one).
+    - the semantic-enrichment fragment is dropped entirely for a group --
+      one enrichment fact true of one member (e.g. "near a road") is not
+      necessarily true of the whole group, unlike `_contact_report_text`'s
+      single-contact case."""
+    classification = facts_list[0]["classification"]
+    assert isinstance(classification, dict)
+    value = classification.get("value")
+    level = classification.get("level")
+
+    lo_total = 0
+    hi_total = 0.0
+    all_exact = True
+    all_attended = True
+    for facts in facts_list:
+        cardinality = facts.get("cardinality")
+        if isinstance(cardinality, dict):
+            lo = cardinality["lo"]
+            hi = cardinality["hi"]
+        else:
+            lo = hi = 1
+        lo_total += lo
+        hi_total += hi
+        if lo != hi:
+            all_exact = False
+        if facts.get("attention") not in ("watch", "priority"):
+            all_attended = False
+
+    phrase = _cardinality_phrase(
+        lo_total, hi_total, attended=all_attended and all_exact
+    )
+    if phrase is None:
+        text = _unit_type_display(value, level)
+    else:
+        text = f"{phrase} {_plural_unit_type_display(value, level)}"
+
+    nearest_relative_now: dict[str, object] | None = None
+    nearest_range_m = math.inf
+    for facts in facts_list:
+        relative_now = facts.get("relative_now")
+        if not isinstance(relative_now, dict):
+            continue
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        if range_m < nearest_range_m:
+            nearest_range_m = range_m
+            nearest_relative_now = relative_now
+    if nearest_relative_now is not None:
+        clock = nearest_relative_now["clock_position"]
+        text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
+
+    text += "."
     return OutgoingSpeech(text=text, template="contact_report")
 
 
