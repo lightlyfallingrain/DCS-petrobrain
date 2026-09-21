@@ -68,7 +68,7 @@ class DetectionTrace:
     `NakedEyePerceptionSource.poll` has clustered and emitted it (the
     latter two) -- an `ADMITTED` outcome does not by itself guarantee
     `cluster_member_object_ids`/`observation_id` are set, since
-    `NAKED_EYE_MAX_NEW_PER_POLL` can still throttle a gate-admitted
+    `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` can still throttle a gate-admitted
     candidate out of this poll's emission (see `naked_eye_source.py`'s own
     module docstring, point 5) -- that candidate's trace stays `ADMITTED`
     with no cluster/observation detail, which is itself useful debrief
