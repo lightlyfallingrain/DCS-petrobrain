@@ -32,6 +32,7 @@ here -- see `tools.py`'s own module docstring on why `set_attention`/
     scan-area <bearing> <range_m> <radius_m> <reason> [sector] -> tools.scan_area
     task-status <id>                            -> tools.get_task_status
     cancel-task <id>                            -> tools.cancel_task
+    watch-task <id>                             -> tools.watch_contact_task
 
 `events`/`ack <id>` map to `tools.list_events`/`tools.acknowledge_event`
 directly, which is exactly `tools.poll_events`'s own semantics (BL-5,
@@ -72,7 +73,18 @@ raises through to the caller. `task-status`'s handler may additionally
 fetch `Console.aircraft_client.get_petrovich_wheel_latest()` as a
 display-only diagnostic line (Petrovich's live AI-Wheel state); this is
 never stored on the `PendingIntent` returned by `tools.get_task_status`
-and never changes that function's own return contract."""
+and never changes that function's own return contract.
+
+`watch-task <id>` (`plans/watch-as-standing-mode/plan.md`) maps to
+`tools.watch_contact_task` -- unlike the plain `watch <id>` alias above
+(which only calls `tools.set_attention`), this registers a `"watch_contact"`
+`belief.tasks.PendingIntent` alongside the mark, the same composing shape
+`scan-area` already uses, so a developer can exercise/inspect the
+cancellable-watch machinery `belief.crew_console`'s F10 "Watch" items use
+without going through the crew-text surface. Unlike the crew-text
+readback, this developer command speaks the task id directly (`cancel-task`/
+`task-status <id>` need it), since `console.py` has no "no ids in speech"
+rule -- that rule is `belief.speech`'s, for the player-facing surface only."""
 
 from __future__ import annotations
 
@@ -108,6 +120,7 @@ from belief.tools import (
     set_attention,
     unwatch_area,
     watch_area,
+    watch_contact_task,
 )
 from perception.geometry import GeoPosition, project_from_bearing_range
 
@@ -136,6 +149,7 @@ Petrovich belief console -- commands:
   scan-area <bearing_deg> <range_m> <radius_m> <reason> [sector]  ask Petrovich to search an area
   task-status <id>                 a scan task's current status
   cancel-task <id>                 cancel a still-pending scan task
+  watch-task <id>                  watch a contact via a cancellable task
 """
 
 _CONTACT_FILTERS: tuple[ContactFilter, ...] = ("all", "visible", "watched")
@@ -272,6 +286,8 @@ def _dispatch(
         return _handle_task_status(tasks, rest, aircraft_client)
     if command == "cancel-task":
         return _handle_cancel_task(store, tasks, rest)
+    if command == "watch-task":
+        return _handle_watch_task(store, tasks, rest, now_sim)
     return [f"unknown command: {command}"]
 
 
@@ -349,6 +365,21 @@ def _handle_unwatch(store: ContactStore, rest: str) -> list[str]:
         return ["usage: unwatch <id>"]
     found = set_attention(store, rest, "normal")
     return [f"no longer watching {rest}" if found else f"no such contact: {rest}"]
+
+
+def _handle_watch_task(
+    store: ContactStore, tasks: TaskStore, rest: str, now_sim: float
+) -> list[str]:
+    """`watch-task <id>` -- see this module's own docstring for how this
+    differs from the plain `watch <id>` alias above: this registers a
+    cancellable `"watch_contact"` task alongside the mark, via
+    `tools.watch_contact_task`, rather than only setting the mark."""
+    if not rest:
+        return ["usage: watch-task <id>"]
+    task = watch_contact_task(store, tasks, rest, now_sim)
+    if task is None:
+        return [f"no such contact: {rest}"]
+    return [f"watch task {task.id} created (contact {rest})"]
 
 
 def _handle_attention(store: ContactStore, rest: str) -> list[str]:
@@ -544,6 +575,7 @@ def _handle_scan_area(
     observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
     center = project_from_bearing_range(observer, bearing_deg, range_m)
     task = scan_area(store, tasks, center, radius_m, reason, now_sim, sector=sector)
+    assert task.area is not None  # every scan_area task carries an area
     lines = [f"scan task {task.id} created (area {task.area.id})"]
     if aircraft_client is not None:
         try:
@@ -578,8 +610,18 @@ def _handle_task_status(
 
 
 def _format_task_line(task: PendingIntent) -> str:
+    """`task-status <id>`'s one-line rendering -- `area=<id>` for a
+    `scan_area` task, `contact_id=<id>` for a `watch_contact` task
+    (`plans/watch-as-standing-mode/plan.md`), since exactly one of those
+    two fields is ever populated for a given task (`PendingIntent`'s own
+    docstring)."""
+    subject = (
+        f"area={task.area.id}"
+        if task.area is not None
+        else f"contact_id={task.contact_id}"
+    )
     line = (
-        f"{task.id}: status={task.status} area={task.area.id} "
+        f"{task.id}: status={task.status} {subject} "
         f"reason={task.reason!r} deadline_sim={task.deadline_sim}"
     )
     if task.result_contact_ids:

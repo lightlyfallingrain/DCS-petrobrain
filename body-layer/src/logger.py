@@ -470,6 +470,13 @@ def _active_gaze(tasks: TaskStore) -> ScanPlan:
     than one is active -- a later scan command is what a player issuing
     "scan left" then "scan right" would expect to take effect.
 
+    **Unaffected by `watch_contact` tasks** (`plans/watch-as-standing-mode/
+    plan.md`) -- the `kind == "scan_area"` check above already excludes
+    them, and a `watch_contact` task's `area` is `None` regardless (`belief.
+    tasks.PendingIntent`'s own docstring), so gaze and watch can be
+    commanded independently and coexist without this function needing to
+    know a second kind exists.
+
     **Cones 2C sortie fix: honours any status except `"cancelled"`, not
     only `"pending"`.** `belief.tasks.TaskStore.tick` flips a `scan_area`
     task to `"succeeded"` the instant any contact is seen inside its area
@@ -489,6 +496,7 @@ def _active_gaze(tasks: TaskStore) -> ScanPlan:
         if (
             task.kind == "scan_area"
             and task.status != "cancelled"
+            and task.area is not None
             and task.area.relative_sector is not None
         ):
             return ScanPlan(

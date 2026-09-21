@@ -1,15 +1,26 @@
 """`PendingIntent`/`TaskStore` -- BL-6 (`plans/bl6-commands-inspect-adapt/
-plan.md`), the belief-side half of `scan_area`'s command lifecycle.
+plan.md`), the belief-side half of `scan_area`'s command lifecycle, joined
+by `watch_contact` (`plans/watch-as-standing-mode/plan.md`) as this store's
+second `TaskKind`.
 
-Unchanged in shape from the plan's original (pre-live-investigation)
-premise, per the plan's "What stayed the same" section: a `PendingIntent`
-is created when a scan is requested, and `tick` decides whether it has
-`succeeded` (a `belief.contacts.Contact` inside the task's area was
-observed after the task was created), `failed` (nothing confirmed by
-`deadline_sim`), or is still `pending`. This module has **no DCS I/O** --
-the live trigger that (per the plan's newer half) actually makes Petrovich
-search lives one layer up, in `console.py`'s `scan-area` handler, the same
-place BL-2.5 wired the overlay push rather than inside `tools.py`.
+For a `scan_area` task, a `PendingIntent` is created when a scan is
+requested, and `tick` decides whether it has `succeeded` (a `belief.
+contacts.Contact` inside the task's area was observed after the task was
+created), `failed` (nothing confirmed by `deadline_sim`), or is still
+`pending`. This module has **no DCS I/O** -- the live trigger that (per the
+plan's newer half) actually makes Petrovich search lives one layer up, in
+`console.py`'s `scan-area` handler, the same place BL-2.5 wired the overlay
+push rather than inside `tools.py`.
+
+**A `watch_contact` task has no success/timeout lifecycle at all** --
+watching a contact does not "succeed" (there is nothing to confirm beyond
+the mark itself) or "time out" (there is no deadline a watch is meant to
+resolve by). It is created purely so `cancel_task` has something to find
+and end, and so a caller can ask what is currently being watched; `area`
+is `None` for this kind (see `PendingIntent.area`'s own docstring), and
+`tick` leaves any task with no `area` untouched forever -- it only ever
+leaves `"pending"` via an explicit cancel. `contact_id` carries the watched
+contact instead.
 
 **Epistemic caveat, carried at every read site (`tools.get_task_status`'s
 own docstring repeats this for the brain-facing surface):** a `failed`
@@ -89,10 +100,11 @@ from typing import Literal
 from belief.attention import AttentionArea, area_contains
 from belief.contacts import ContactStore
 
-#: Only one kind exists this milestone -- `scan_area`'s trigger-and-check
-#: lifecycle. A `Literal` (not a bare `str`) so a future second kind is a
-#: type-checked, additive change, not a silent string-typo risk.
-TaskKind = Literal["scan_area"]
+#: `scan_area`'s trigger-and-check lifecycle, joined by `watch_contact`'s
+#: mark-and-hold lifecycle (`plans/watch-as-standing-mode/plan.md`). A
+#: `Literal` (not a bare `str`) so a future third kind is a type-checked,
+#: additive change, not a silent string-typo risk.
+TaskKind = Literal["scan_area", "watch_contact"]
 
 #: **`"cancelled"` is the only true terminal state (cones 2C sortie fix,
 #: `docs/concept/STATE_TRANSITIONS.md`'s "Modes" section).** `tick` still
@@ -116,10 +128,16 @@ _TASK_ID_PREFIX = "TASK"
 
 @dataclass
 class PendingIntent:
-    """One outstanding (or resolved) `scan_area` request. `area` is the
-    `belief.attention.AttentionArea` `tools.scan_area` registered alongside
-    this task -- the same object, not a copy, so `cancel_task`'s "remove the
-    area too" (the plan's Decision 3) can read `task.area.id` directly.
+    """One outstanding (or resolved) task -- a `scan_area` request or a
+    `watch_contact` mark. `area` is the `belief.attention.AttentionArea`
+    `tools.scan_area` registered alongside a *scan* task -- the same
+    object, not a copy, so `cancel_task`'s "remove the area too" (the
+    plan's Decision 3) can read `task.area.id` directly. **`None` for a
+    `watch_contact` task** (`plans/watch-as-standing-mode/plan.md`): a
+    watch has no spatial area of its own, only the `contact_id` it marks --
+    every reader that dereferences `task.area` must first check `kind` (or
+    `area is not None`), the same way `contact_id` readers must check
+    `kind == "watch_contact"`.
 
     **`task.area.id` is the only field of this reference safe to read
     directly once the task exists.** For an ownship-anchored area,
@@ -132,12 +150,17 @@ class PendingIntent:
 
     id: str
     kind: TaskKind
-    area: AttentionArea
     created_sim: float
     deadline_sim: float
     reason: str
     status: TaskStatus = "pending"
     result_contact_ids: list[str] = field(default_factory=list)
+    #: `scan_area` only -- see this class's own docstring. `None` for
+    #: `watch_contact`.
+    area: AttentionArea | None = None
+    #: `watch_contact` only -- the contact this task marks watched. `None`
+    #: for `scan_area`.
+    contact_id: str | None = None
 
 
 class TaskStore:
@@ -157,19 +180,36 @@ class TaskStore:
     def create(
         self,
         kind: TaskKind,
-        area: AttentionArea,
+        area: AttentionArea | None,
         created_sim: float,
         deadline_sim: float,
         reason: str,
+        contact_id: str | None = None,
     ) -> PendingIntent:
         """Mint a new `PendingIntent`, minting its `id` the same way
         `ContactStore._new_contact_id`/`_new_event_id`/`_new_area_id` mint
         theirs. Returns the stored task, including its minted `id`, so a
-        caller (`tools.scan_area`) can report it back."""
+        caller (`tools.scan_area`/`tools.watch_contact_task`) can report it
+        back.
+
+        `area` stays a required, positional second argument (unlike
+        `contact_id`) even though it is now typed `AttentionArea | None`
+        (`plans/watch-as-standing-mode/plan.md`) -- every existing
+        `scan_area`-kind call site across this codebase, tests included,
+        passes it positionally right after `kind`, and giving it a default
+        here would either break that calling convention or force `area`
+        behind `contact_id` in the parameter list for no benefit; a
+        `watch_contact` caller (`tools.watch_contact_task`) just passes
+        `area=None` explicitly instead. `area`/`contact_id` are each
+        meaningful for exactly one `kind` (see `PendingIntent`'s own
+        docstring) -- this constructor does not enforce that pairing, the
+        same way it does not enforce `deadline_sim`'s meaning; callers are
+        `tools.py`'s two composing functions, not general call sites."""
         task = PendingIntent(
             id=self._new_task_id(),
             kind=kind,
             area=area,
+            contact_id=contact_id,
             created_sim=created_sim,
             deadline_sim=deadline_sim,
             reason=reason,
@@ -214,9 +254,16 @@ class TaskStore:
         """Resolve every still-`pending` task as of `now_sim`, driven purely
         by `now_sim` (never wall clock, preserving BL-0's replay
         determinism) -- see the module docstring for the success/timeout
-        rule and the idempotence guarantee."""
+        rule and the idempotence guarantee.
+
+        A task with no `area` (`watch_contact`, per `PendingIntent`'s own
+        docstring) has nothing for this loop to check containment
+        against, and no lifecycle to resolve -- it is skipped every tick
+        and stays `"pending"` until an explicit `cancel`."""
         for task in self._tasks.values():
             if task.status != "pending":
+                continue
+            if task.area is None:
                 continue
             # Resolve the live area by id rather than trusting `task.area`
             # directly -- see `PendingIntent.area`'s docstring and this

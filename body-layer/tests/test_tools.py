@@ -46,6 +46,7 @@ from belief.tools import (
     set_attention,
     unwatch_area,
     watch_area,
+    watch_contact_task,
 )
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
@@ -975,6 +976,45 @@ def test_cancel_task_cancels_and_removes_the_area() -> None:
     assert cancel_task(store, tasks, task.id) is True
     assert get_task_status(tasks, task.id).status == "cancelled"  # type: ignore[union-attr]
     assert list_areas(store) == []
+
+
+# --- plans/watch-as-standing-mode/plan.md: watch_contact_task -------------
+
+
+def test_watch_contact_task_marks_watched_and_registers_a_task() -> None:
+    store = _store_with_one_contact()
+    tasks = TaskStore()
+    contact = store.contacts[0]
+
+    task = watch_contact_task(store, tasks, contact.id, now_sim=0.0)
+
+    assert task is not None
+    assert task.kind == "watch_contact"
+    assert task.contact_id == contact.id
+    assert task.area is None
+    assert task.status == "pending"
+    assert contact.attention == "watch"
+
+
+def test_watch_contact_task_returns_none_for_unknown_contact() -> None:
+    store = ContactStore()
+    tasks = TaskStore()
+
+    assert watch_contact_task(store, tasks, "CONTACT_999", now_sim=0.0) is None
+    assert list(tasks.tasks) == []
+
+
+def test_cancel_task_on_a_watch_contact_task_returns_attention_to_normal() -> None:
+    store = _store_with_one_contact()
+    tasks = TaskStore()
+    contact = store.contacts[0]
+    task = watch_contact_task(store, tasks, contact.id, now_sim=0.0)
+    assert task is not None
+
+    assert cancel_task(store, tasks, task.id) is True
+
+    assert get_task_status(tasks, task.id).status == "cancelled"  # type: ignore[union-attr]
+    assert contact.attention == "normal"
 
 
 def test_cancel_task_returns_false_for_unknown_id() -> None:
