@@ -6,8 +6,39 @@ naked-eye and binocular halves of the contaminated 2026-09-17 ladder. The 9K113 
 ladder remain valid and are not re-shot (user: the dots do not affect the sight views).
 
 Pattern per rung: **map image showing the F10 ruler range, then naked eye, then zoomed view.**
-Ownship ~750 m throughout. **Approach was at ~60° AOB** — which matters, since aspect drives
-recognition.
+**Approach was at ~60° AOB** — which matters, since aspect drives recognition.
+
+**Altitude: ~750 m MSL but 100–130 m AGL** (user correction, 2026-09-21; the cockpit shows
+`ALT 138 R`, the radar altimeter, confirming it). Terrain is therefore ~620–650 m MSL. The
+distinction is not cosmetic — three consequences follow, and two of them are reassuring.
+
+| range | depression angle | height foreshortened to |
+|---|---|---|
+| 0.248 km | 24.9° | 91% |
+| 0.509 km | 12.7° | 98% |
+| 1.00 km | 6.6° | 99% |
+| 1.91–9.28 km | 3.4°–0.7° | ~100% |
+
+**1. The ladder is not constant-geometry**, running from a 24.9° look-down at the nearest rung to
+0.7° at the farthest.
+
+**2. But the foreshortening that implies is negligible here** — 9% at the closest rung and ≤2%
+beyond 0.5 km. `object_model.apparent_extent_m` deliberately ignores the observer's look-down angle
+when foreshortening `height_m`, flagged in `plans/aspect-aware-profiles/plan.md` as *"correct at the
+shallow depression angles typical of level cruise, wrong in the limit of looking straight down."*
+**This set stays inside that assumption**, so the simplification is safe for fitting against it. A
+steep-dive set would not be, and should not be fitted with the same model.
+
+**3. At ~115 m above the targets, ED's own altitude-dependent visibility formula gives 10.4 km** —
+`visibility_km = 10 · e^(0.3588 · (detector_km + target_km))`, from
+`aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md` finding 7. That is
+essentially the existing flat `NAKED_EYE_RANGE_CAP_M = 10000`, so **the cap is correct for this
+flight profile** and the altitude-dependent improvement the deep read proposed only matters at
+higher altitude (600 m → 12.4 km, 2 km → 20.5 km).
+
+**Consequence for grading the top rung:** 9.28 km sits close to that 10.4 km atmospheric limit, so a
+"nothing visible" there may be **haze rather than acuity** — a different failure from the one the
+thresholds model. Grade it, but do not let it drive the constants.
 
 ## The ranges
 
