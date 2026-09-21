@@ -21,7 +21,7 @@ have created, and it is the reason this is a rendered view instead.
 ## Keeping it current
 
 Regenerate when a merge changes milestone status — the same moment the merge discipline already
-requires a roadmap update (`.claude/skills/merge.md` step 6). Updating this page is *optional* in a
+requires a roadmap update (`.claude/skills/merge/SKILL.md` step 6). Updating this page is *optional* in a
 way the roadmap update is not: a stale page is a cosmetic problem, a stale roadmap is a correctness
 one. Do not let this file's existence add friction to merging.
 

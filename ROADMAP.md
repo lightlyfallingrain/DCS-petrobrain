@@ -55,7 +55,7 @@ this file only tracks the cross-subproject picture. `todo/todo.md` no longer dup
 narrative; it holds only items that don't yet belong to one subproject's roadmap (cross-cutting
 backlog, session-scoped notes) and User priority tasks.
 
-The `/merge` skill (`.claude/skills/merge.md`) and the DoD agent (`.claude/agents/dod.md`) both
+The `/merge` skill (`.claude/skills/merge/SKILL.md`) and the DoD agent (`.claude/agents/dod.md`) both
 require the relevant `ROADMAP.md` (and, for a cross-subproject change, this file) to be updated
 *in the same push* as any merge — a roadmap update is part of finishing a merge, not a follow-up
 task. If a roadmap file and `todo/todo.md`/another roadmap ever disagree, treat that as a bug in

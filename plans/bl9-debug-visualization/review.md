@@ -74,7 +74,7 @@ All matches the reported numbers exactly.
 - **Four non-BL-9 commits are bundled into this feature branch's history**: `6bc7644` (research:
   9K113 sight optics), `860a55a` (research: calibration screenshot manifest), `7e63761` (docs:
   `docs/PROCESS.md` binary-sources rule), and `44a96a0` (chore: `/test-card` skill —
-  `.claude/agents/dod.md`, `.claude/skills/test-card.md`). None of these touch BL-9's Affected
+  `.claude/agents/dod.md`, `.claude/skills/test-card/SKILL.md`). None of these touch BL-9's Affected
   Modules; the last one is a skill/config edit, exactly the category `AGENTS.md`'s "Side quests"
   rule names explicitly as needing a disposable `git worktree` on `main`, not the active feature
   branch. `main` is currently at `d22abfe` (the BL-9/detection-cones planning commit), so these four

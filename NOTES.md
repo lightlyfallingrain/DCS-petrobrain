@@ -220,7 +220,7 @@ Two tells that a model is in the wrong space, both present here and both visible
 
 The correction came from the user's lived experience, not from analysis: *"two apples 20 cm apart at
 50 cm are obviously two side by side, and may be one when one sits behind the other"*. Worth
-pairing with `.claude/skills/explore.md` — asking for the non-DCS analogue is what surfaced it.
+pairing with `.claude/skills/explore/SKILL.md` — asking for the non-DCS analogue is what surfaced it.
 
 ## A design written against a stale test list produces phantom expectations
 

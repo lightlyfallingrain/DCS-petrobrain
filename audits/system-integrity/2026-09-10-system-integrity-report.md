@@ -4,7 +4,7 @@ Diagnostic only. No files were edited as part of this audit.
 
 Context: an extremely active session — BL-2.6, BL-3, BL-4, BL-5, BL-5a all merged today, plus a
 significant object-permanence bug fix. AGENTS.md/CLAUDE.md gained a new "side quest" worktree rule
-today; `.claude/skills/merge.md` was rewritten today.
+today; `.claude/skills/merge/SKILL.md` was rewritten today.
 
 ## Tier 1 — Definite integrity problems
 

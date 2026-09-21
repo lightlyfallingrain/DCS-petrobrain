@@ -2,7 +2,7 @@
 # Daily refresh of the derived status page (docs/status/petrobrain-status.html).
 #
 # Run by a launchd agent at 05:00 local time; see the plist template in
-# `.claude/skills/status-page.md`. launchd uses local wall-clock time, so this
+# `.claude/skills/status-page/SKILL.md`. launchd uses local wall-clock time, so this
 # stays at 05:00 across DST changes without intervention, and a job missed
 # because the Mac was asleep fires when it wakes.
 #
@@ -53,7 +53,7 @@ fi
 
 say "$COMMITS commit(s) in the last 24h -- regenerating"
 
-PROMPT='Regenerate the project status page, following .claude/skills/status-page.md exactly.
+PROMPT='Regenerate the project status page, following .claude/skills/status-page/SKILL.md exactly.
 
 Read the roadmap files FIRST, before opening the page: root ROADMAP.md, every
 subproject ROADMAP.md (world-model, aircraft-layer, body-layer,

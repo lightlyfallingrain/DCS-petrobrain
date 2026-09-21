@@ -6,7 +6,7 @@ Full architecture/design (scope boundaries, tool-set design, data model, open qu
 *is*; this file tracks what's actually *done*. PB-x in the descriptions below cross-references
 `docs/concept/PETROBRAIN_RUNTIME.md`'s runtime milestone numbering — BL-x is the body-owned slice
 of it. Update this file (not `../todo/todo.md`) whenever a body-layer branch merges — see
-`../.claude/skills/merge.md`.
+`../.claude/skills/merge/SKILL.md`.
 
 **Live acceptance debt.** A milestone can pass DoD on fixture/console testing alone when its plan
 scopes live-DCS acceptance out deliberately (a real decision, not debt — e.g. BL-3, the overlay

@@ -26,7 +26,7 @@ Diagnostic only. No config/docs/memory edited as part of this audit.
 ### 3. Commit-time quality gate and `/dod-check`, `/check`, `/compile`, `/test` skills only cover world-model — aircraft-layer and body-layer have zero automated enforcement
 
 - `.claude/settings.json` PreToolUse `git commit` hook runs exactly `ruff format --check world-model/src world-model/tests && ruff check ... && mypy world-model/src && pytest world-model/tests -q` — scoped only to world-model.
-- `.claude/skills/check.md`, `compile.md`, `test.md`, and `dod-check.md` all hardcode `world-model/src`/`world-model/tests` (`dod-check.md` sets `SRC="world-model/src"` for every gate: format/lint/mypy/pytest, debug-output scan, TODO scan, error-suppression scan, file-size scan).
+- `.claude/skills/check/SKILL.md`, `compile.md`, `test.md`, and `dod-check.md` all hardcode `world-model/src`/`world-model/tests` (`dod-check.md` sets `SRC="world-model/src"` for every gate: format/lint/mypy/pytest, debug-output scan, TODO scan, error-suppression scan, file-size scan).
 - But aircraft-layer/CLAUDE.md and body-layer/CLAUDE.md each define their own real Commands block (own ruff/mypy/pytest scoped to their own src/tests), with real test suites (aircraft-layer: 52 tests; body-layer: 47 tests per `plans/pb1-perception-logger/dod-check.md`).
 - `docs/AGENT_ROLES.md` §7 tells DoD to run `/dod-check <feature>` as its mechanical check — for aircraft-layer or body-layer features this would silently report false PASSes on code it never inspected.
 - Confirmed no incident yet only because the PB-1 DoD check bypassed the broken script and ran the correct scoped commands by hand (`plans/pb1-perception-logger/dod-check.md`).

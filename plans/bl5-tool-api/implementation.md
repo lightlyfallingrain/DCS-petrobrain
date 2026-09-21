@@ -55,7 +55,7 @@ commands answer correctly end to end, not just against mocked fixtures.
 
 ### Notable Discoveries
 - **A concurrent process was working in this same checkout.** Mid-implementation, a `git commit`
-  from another session (unrelated `/merge` skill rewrite, `.claude/skills/merge.md`) briefly swept
+  from another session (unrelated `/merge` skill rewrite, `.claude/skills/merge/SKILL.md`) briefly swept
   up this session's already-`git add`-staged `console.py`/`test_console.py` changes into its own
   commit. That session then reset itself back one commit and recommitted with only its own file,
   which put `console.py`/`test_console.py` back into this session's working tree as unstaged
