@@ -66,6 +66,42 @@ That derivation was already withdrawn once as circular (see
 value may still be a reasonable *effective* multiplier for "a magnified view" — it is simply not
 attributable to a named instrument.
 
+## Resolution: anchor the zoom to the 9K113 wide (user decision, 2026-09-21)
+
+> *"The binocular FOV has been approximately same, though not exact. The 9K113 wide is close enough
+> and very stable, we can use that to calibrate the binoculars and then apply a factor."*
+
+This inverts the dependency and fixes the provenance problem without new data. Rather than
+calibrating an uncontrolled view directly, **measure it against a stable instrument with a published
+specification** and express it as a ratio.
+
+Worked from the BTR-60 table's **AOB 90° rows**, so aspect matches between the two columns:
+
+| tier | zoom ÷ 9K113 wide | 9K113 wide multiplier | derived zoom multiplier | currently shipped |
+|---|---|---|---|---|
+| presence | 0.682 | 3.55 | **2.42** | 2.42 |
+| class | 0.500 | 7.00 | **3.50** | 3.50 |
+| type | 0.462 | 6.50 | **3.00** | 3.00 |
+
+**The numbers do not move** — same data, different route. **The provenance does**, and that was the
+defect. `BINOCULAR_OPTIC`'s multipliers now express as *"0.68 / 0.50 / 0.46 of the 9K113 wide's
+measured effect"*, anchored to a documented ×3.3 stabilised sight whose own calibration column is
+uncontaminated. They no longer rest on a zoom setting nobody can reproduce.
+
+**The per-tier ratios differ, and that is signal rather than noise.** 0.68 at presence against 0.46
+at type says a lower-magnification view loses proportionally *more* at the recognition tiers than at
+detection — which is the sub-linear-presence / supra-linear-class finding arriving from a third
+independent direction.
+
+**The procedure this gives for future sets:** capture the zoom column *alongside* the 9K113 wide at
+the same ranges and aspect, take the ratio, multiply by the sight's own multipliers. The anchor stays
+stable even when the zoom drifts between sessions, so the drift stops mattering.
+
+**One consequence worth noting:** this makes the 9K113's calibration data load-bearing *before* the
+9K113 slice exists (it is deferred in `todo/todo.md`). That is fine — the data is already captured
+and uncontaminated — but the deferred slice now has a second reason to be built, and its columns
+must not be discarded as belonging only to a future milestone.
+
 ## Recommendation for the next set
 
 **Fix the zoom to a repeatable setting** before capturing another magnified column, or the same
@@ -80,9 +116,9 @@ problem recurs. Options, cheapest first:
    optic multipliers from the 9K113's *specified* magnifications (×3.3 / ×10) instead, which are
    real instrument figures rather than a user-set view.
 
-Option 3 is worth weighing seriously: the 9K113 columns of the old ladder are uncontaminated and its
-magnifications are documented, so it is the only magnified instrument in this project with both
-valid data and a known specification.
+**Superseded by the resolution above**, which takes option 3's insight — the 9K113 is the only
+magnified instrument here with both valid data and a documented specification — and uses it as an
+*anchor* rather than a replacement, keeping the zoom column usable instead of discarding it.
 
 ## Grades
 
