@@ -509,7 +509,7 @@ def set_attention(
 def watch_area(
     store: ContactStore,
     center: GeoPosition,
-    radius_m: float,
+    radius_m: float | None,
     level: Attention = "watch",
     sector: Sector | None = None,
     source: str = "console",
@@ -862,7 +862,7 @@ def scan_area(
     store: ContactStore,
     tasks: TaskStore,
     center: GeoPosition,
-    radius_m: float,
+    radius_m: float | None,
     reason: str,
     now_sim: float,
     deadline_s: float = DEFAULT_SCAN_DEADLINE_S,
