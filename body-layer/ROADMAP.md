@@ -416,6 +416,23 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   BL-4's `AttentionArea` registry): keep BL-8's eventual mission-end export/persistence boundary in
   mind, not as a design constraint yet, just don't shape something in a way that obviously fights it.
 
+- [x] **Aspect-aware object profiles — DONE, merged 2026-09-21** (`3f624d9`, branch
+  `feature/aspect-aware-profiles`). `ObjectTypeProfile` gains optional length/width/height;
+  `apparent_extent_m` gives `max(L·|sinθ|+W·|cosθ|, height)`. **Aspect drives recognition
+  (`MEDRES`/`HIRES`) only — detection keeps the aspect-invariant `size_m`**, because a BTR-60 seen
+  through four instruments showed presence identical at every aspect while class and type moved
+  1.33×–2.31× (`body-layer/research/2026-09-21-aspect-magnification-and-distinctiveness.md`).
+
+  Fixes the tall-mast bug: the S-300 40B6M's presence range went from 1665 m to 8000 m against an
+  observed 6700 m, on an independently sourced 24 m mast height. Only the two S-300 rows carry real
+  dimensions; the other ~148 are untouched and unaffected.
+
+  **Threshold recalibration remains deferred, now for a third reason.** Class is short for radars
+  while too generous for vehicles, which no single threshold pair resolves. The missing term is
+  silhouette distinctiveness, measured this session: infantry classifies at *exactly* its detection
+  range at all four instruments, while a BTR-60 needs 7.75× closer. That is a model-shape change,
+  not a constant.
+
 - [x] **BL-9 — Debug visualization. DONE, merged 2026-09-20** (`1553eb9`, branch
   `feature/bl9-detection-trace`). `--detection-trace` flag, `DetectionTraceWriter` (a read-only join
   between `LoGetWorldObjects` ground truth and belief state), and a post-flight reducer.
