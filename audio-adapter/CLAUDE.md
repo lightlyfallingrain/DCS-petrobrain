@@ -61,9 +61,16 @@ and `GET /transcripts/poll` always drains empty, a true no-op. A Stage 3 follow-
 `stop_talking` token needs to interrupt playback and say nothing — no readback, an exception to
 this project's usual readback/confirm rule; see `src/server.py`'s entry below. See "Structure" below for
 `stt_engine.py`/`vocabulary.py`/`command_matcher.py`/`transcript_queue.py`/`tools/stt_bench.py`,
-and that tool's own module docstring for how to record a corpus and run the bench. Capture/PTT
-(Stages 4-5) are not built yet — Stage 3's own acceptance path is `POST /transcribe`ing a Stage 1
-corpus WAV directly, no Windows/DCS in the loop.
+and that tool's own module docstring for how to record a corpus and run the bench.
+
+**Stage 4 (capture/PTT) landed 2026-09-22**: `python -m audio_adapter.capture` records while a
+talk control is held and POSTs the clip to `POST /transcribe`. Two PTT sources behind one
+`PTTSource` protocol — `KeyTogglePTT` (space starts, space stops; a terminal gets no key-release
+event, the same wall `tools/record_corpus.py` hit) so the whole chain runs on the Mac, and
+`JoystickPTT` over `winmm.joyGetPosEx` for the Windows box. Stage 5 adds a third, the real Mi-24P
+intercom trigger, and changes nothing else. Capture deliberately knows nothing about recognition:
+it posts a WAV and the result comes back through body-layer's `GET /transcripts/poll`, so it can
+run on a machine with no model on it.
 
 ## Tech stack
 
@@ -139,6 +146,19 @@ curl -X POST http://127.0.0.1:7795/transcribe -d @/tmp/transcribe.json
 curl http://127.0.0.1:7795/transcripts/poll
 ```
 
+**Capture** (`python -m audio_adapter.capture`) runs wherever the microphone is, and needs an
+adapter with `--whisper-model` running somewhere to post to. On the Mac, space is the talk control,
+so the whole chain is exercisable with no Windows box and no joystick:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m audio_adapter.capture            # SPACE starts, SPACE stops
+PYTHONPATH=src .venv/bin/python -m audio_adapter.capture \
+  --adapter-url http://<mac-ip>:7795 --ptt joystick --joystick-button 7 --input-device Headset
+```
+
+Run `PYTHONPATH=src python tools/probe_joystick.py` on the Windows box first to get the device id
+and button number — and remember it numbers buttons from 0 while DCS's binding UI numbers from 1.
+
 `POST /transcribe`'s response is just `{"ok": true}` — the recognised text and match metadata land
 in the queue `GET /transcripts/poll` drains (`{"transcript", "confidence", "token", "match_ratio",
 "verb_anchored", "ambiguous", "t_wall"}` per entry, `[]` when nothing is pending), the same seven
@@ -193,6 +213,15 @@ consume.
   its own test file specifically so this doesn't recur: an entrypoint's "no automated test"
   exemption covers the CLI wiring genuinely tied to a live process, not every class that happens to
   be defined next to it.
+- `tests/test_capture_loop.py`, `tests/test_audio_capture.py`, `tests/test_ptt_source.py`,
+  `tests/test_transcribe_client.py` (Slice 3 Stage 4) — the loop against fake PTT/recorder/sink
+  (both rejections, both failure paths, shutdown, and a PTT failure propagating); the gate and the
+  peak/duration measurement against synthesized WAVs; the winmm button decode against a fake
+  `winmm` — **the bit arithmetic is the piece tested hardest precisely because a one-off in it
+  still produces plausible-looking probe output and only shows up as "the button I bound does
+  nothing", on Windows, in flight**; and the transcribe client against a real loopback server, the
+  same posture `test_aircraft_client.py` uses. `SoxRecorder` against a real microphone is not
+  automated — there is no device in CI and nothing to assert about what it heard.
 - `tests/test_local_playback.py` (Stage 3 follow-up) — `_InFlightTracker` directly (no threads, no
   subprocess: `start`/`interrupt`/`finish` called by hand to reproduce the exact interleaving that
   broke the first version of this fix — a second `interrupt()` against a second in-flight process
@@ -258,6 +287,32 @@ consume.
   500 the in-flight `/speak` call). `LocalPlaybackSink.__init__` takes an injectable `spawn`
   callable (default: real `Popen`) specifically so tests can drive this logic with a fake
   `_PlaybackProcess`, no real `afplay` involved.
+- `src/ptt_source.py` (Slice 3 Stage 4) — `PTTSource` protocol (`is_down() -> bool`) plus the
+  `winmm.dll` binding (`JOYCAPSW`/`JOYINFOEX`, `enumerate_devices`, `read_button_mask`) and two
+  implementations: `JoystickPTT` and `KeyTogglePTT`. `tools/probe_joystick.py` imports this same
+  binding rather than carrying its own copy — a probe that vouches for a mechanism must be using
+  it. **Button numbers here are 0-based, as `joyGetPosEx` reports them; DCS's binding UI numbers
+  from 1**, so the probe's button 7 is DCS's "JOY_BTN8". `load_winmm()` raises off Windows rather
+  than degrading, and `JoystickPTT` polls once at construction so a bad device id fails at startup
+  instead of when the player first presses to talk.
+- `src/audio_capture.py` (Slice 3 Stage 4) — `SoxRecorder` (start/stop, one clip per press),
+  `ClipGate` (duration and peak only — the real judgement is downstream in `command_matcher` and
+  body-layer's bands), and `wav_peak_and_duration`. **sox rather than the planned ffmpeg**: every
+  Windows-specific detail here (the `waveaudio` driver, the device substring, the 1024-byte buffer
+  that stops a terminate from discarding 0.256 s, the `--ignore-length` header repair) was already
+  learned by `tools/record_corpus.py` against the user's own headset. `FRONT_LATENCY_S` records the
+  measured ~0.14 s device-open cost at the front of every clip and why it is not corrected yet.
+- `src/capture_loop.py` (Slice 3 Stage 4) — `CaptureLoop`: PTT edges in, posted clips out, with
+  every collaborator injected so the sequencing is testable without a microphone, a joystick or a
+  network. Capture and send failures come back as `CaptureEvent`s rather than exceptions — one bad
+  clip must cost one command, not the capture process, since the player is flying. A `PTTSource`
+  that raises is the exception: a dead talk control must not look like silence.
+- `src/transcribe_client.py` (Slice 3 Stage 4) — `TranscribeClient`, the capture process's one
+  outbound call. Deliberately the mirror of `aircraft_client.py` (the audio direction that already
+  existed) rather than a second transport idiom. Its 30 s timeout is not a copy slip: whisper runs
+  synchronously inside `POST /transcribe`, so the response waits for a real transcription.
+- `src/audio_adapter/capture.py` (Slice 3 Stage 4) — the `python -m audio_adapter.capture`
+  entrypoint. CLI wiring only, same untested-by-design posture as `__main__.py`.
 - `src/stt_engine.py` (Slice 3 Stage 1) — `STTEngine` protocol + `WhisperCliEngine` +
   the mirror image of `tts_engine.py`. See "Tech stack" above for the
   unverified-CLI-contract caveat.
