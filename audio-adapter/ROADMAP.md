@@ -194,8 +194,39 @@ body-side view and the slice numbering both files share.
       floor. The fix points the constant at the quantity it was measured on, and gives the brain
       layer its **second route in**: speech heard clearly that matches no command is free speech,
       not a failure.
-  - [ ] Stage 4 — Windows capture.
-  - [ ] Stage 5 — real PTT through DCS.
+  - [~] **Stage 4 — capture.** Built 2026-09-22 (`feature/inbound-speech-stage4`), verified as
+    far as a Mac allows; **one spoken clip through the live path is the outstanding acceptance**,
+    and it needs the user's own voice rather than a Windows box.
+
+    `ptt_source.py` (`PTTSource` protocol, `JoystickPTT` over winmm, `KeyTogglePTT` for the Mac),
+    `audio_capture.py` (`SoxRecorder`, `ClipGate`), `capture_loop.py` (`CaptureLoop`),
+    `transcribe_client.py`, and `python -m audio_adapter.capture`.
+
+    **Two deviations from the plan, both narrowing it:**
+    - **sox, not `ffmpeg -f dshow`.** Part of Stage 4's stated job was discovering the dshow device
+      name for the user's headset — but `tools/record_corpus.py` already recorded 252 corpus clips
+      through that exact headset with sox, so the driver name, input-argument order, buffer size
+      and truncation repair are all already settled against the hardware that matters. A second
+      audio binary would have re-learned them and added a dependency.
+    - **A real PTT, not the planned manual `--capture-window-s` trigger.** The stub existed to
+      avoid a DCS dependency; a joystick button avoids it just as completely while being the
+      actual gesture, so the trigger never has to be replaced — only the source behind the
+      protocol, which is what Stage 5 does.
+
+    **The finding worth carrying forward: the first ~0.14 s after a press is not captured.** sox
+    returns from `Popen` in ~2 ms but the audio device is not open yet, and the loss is a fixed
+    open cost, not a proportional one — four runs at holds from 0.6 s to 2.0 s lost 0.134-0.144 s
+    every time. `record_corpus.py` solved the same thing with a 0.35 s preroll before prompting,
+    which a PTT gate cannot do because the press *is* the prompt. Left uncorrected on purpose: the
+    natural press-then-speak gesture leaves more than that, and the fix (a permanently hot mic with
+    the pressed interval trimmed out of a rolling recording) costs continuous capture and file
+    rotation to buy something no evidence yet says is needed. If Stage 6 shows first words clipped,
+    that is the fix, and the measurement is recorded so it is not re-derived.
+
+  - [ ] Stage 5 — real PTT through DCS. Now a `DcsPTT` behind the same protocol, plus the
+    `Export.lua`/collector half; arg 738's declared values are already first-party
+    (`aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md`), and `Export.probe-ptt.lua`
+    remains unrun.
   - [ ] Stage 6 — live sortie acceptance.
 
   **Settled before design (user, 2026-09-19):**
