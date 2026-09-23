@@ -44,6 +44,7 @@ from audio_capture import (
     DEFAULT_MAX_CLIP_S,
     DEFAULT_MIN_CLIP_S,
     DEFAULT_MIN_PEAK,
+    DEFAULT_SOX_BINARY,
     DEFAULT_TAIL_S,
     ClipGate,
     SoxRecorder,
@@ -97,6 +98,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="sox input device (index or name substring) -- the system default is rarely the headset",
     )
+    parser.add_argument(
+        "--sox-binary",
+        default=DEFAULT_SOX_BINARY,
+        help=(
+            "sox executable, by name on PATH or as a full path. Needed when "
+            "PATH cannot be trusted -- notably a Windows Python launched "
+            "from WSL, which inherits WSL's PATH: "
+            '--sox-binary "C:\\Program Files (x86)\\sox-14-4-2\\sox.exe"'
+        ),
+    )
     parser.add_argument("--tail-s", type=float, default=DEFAULT_TAIL_S)
     parser.add_argument("--max-clip-s", type=float, default=DEFAULT_MAX_CLIP_S)
     parser.add_argument("--min-clip-s", type=float, default=DEFAULT_MIN_CLIP_S)
@@ -108,18 +119,26 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
-    if not sox_available():
+    if not sox_available(args.sox_binary):
         print(
-            "`sox` not found. macOS: brew install sox. "
+            f"`{args.sox_binary}` not found. macOS: brew install sox. "
             "Windows: the installer from sox.sourceforge.net.",
             file=sys.stderr,
         )
+        if args.sox_binary == DEFAULT_SOX_BINARY:
+            print(
+                "Running a Windows Python from WSL? The PATH it inherits is "
+                "WSL's, which Windows cannot use. Pass the full Windows path "
+                "with --sox-binary.",
+                file=sys.stderr,
+            )
         return 1
 
     recorder = SoxRecorder(
         driver=args.input_driver,
         device=args.input_device,
         max_clip_s=args.max_clip_s,
+        sox_binary=args.sox_binary,
     )
     gate = ClipGate(min_duration_s=args.min_clip_s, min_peak=args.min_peak)
     client = TranscribeClient(args.adapter_url)
