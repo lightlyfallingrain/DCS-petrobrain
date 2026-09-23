@@ -15,6 +15,14 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **Binocular optic (Stages 1-3b) and voice command completeness (Stages 1-5), added
+  2026-09-23.** Both merged on `feature/binocular-optic` and passed DoD on fixtures/console only —
+  neither has flown. They are deliberately batched onto one sortie because they are one cockpit
+  loop (look, report, be told where to look): `docs/acceptance/2026-09-23-eyes-and-voice-sortie.md`.
+  Clears when that sortie is flown and the card's "Bring back" items are answered — the nine
+  unbenched `scan <clock>` tokens' recognition accuracy in particular has no measurement of any
+  kind yet, benched or live.
+
 - [ ] **Two things waiting on the user's own machines, added 2026-09-19.** Neither blocks work.
   - **The daily status-page launchd job** (`.claude/scripts/com.petrobrain.status-page.plist`) is
     written but **not installed** — installing writes outside the repo. Test with
