@@ -307,6 +307,31 @@ class ScanPlan:
     #: has to learn that binoculars exist.
     fixed_look: Gaze | None = None
 
+    #: **`__post_init__` deliberately does not forbid `fixed_look`
+    #: co-existing with `commanded_sector`/`commanded_legs`**
+    #: (`plans/voice-command-completeness/review.md`'s Optional
+    #: Refinements, decided rather than left open). No production path
+    #: constructs that combination today: `fixed_look_at` above always
+    #: passes `commanded_sector=None` and leaves `commanded_legs` at its
+    #: `None` default, and `logger._apply_active_gaze` only ever
+    #: *replaces* `resolved_plan` wholesale with a fresh
+    #: `fixed_look_at(...)`, never merges one onto an existing commanded
+    #: plan -- `tests/test_gaze.py::test_fixed_look_wins_over_commanded_
+    #: legs` constructs the combination directly only to prove `gaze_at`'s
+    #: tie-break (`fixed_look` always wins), not as a production shape.
+    #: **Left loose on purpose, not fixed**: `fixed_look` exists so
+    #: binoculars can override a commanded scan, and "override" plausibly
+    #: means a future glass phase remembers *what* was commanded
+    #: underneath the stare (so free-scan doesn't silently replace a
+    #: player's own "scan north" once the binoculars come down) by setting
+    #: both fields on one `ScanPlan` at once -- `gaze_at`'s existing
+    #: tie-break already resolves that combination correctly. Rejecting it
+    #: here would need reversing the moment such a caller shows up, for no
+    #: safety this class currently lacks (`gaze_at` is a pure function of
+    #: `(t_sim, plan)` in every path verified). Revisit only if a future
+    #: caller starts constructing `ScanPlan` from more than these two call
+    #: sites and the combination turns out to be a genuine construction
+    #: bug rather than a deliberate stack.
     def __post_init__(self) -> None:
         if self.commanded_sector is not None and self.commanded_legs is not None:
             raise ValueError(

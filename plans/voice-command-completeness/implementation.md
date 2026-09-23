@@ -303,3 +303,76 @@ dropped.
   gap**: a player scanning `1 o'clock` or a compass direction gets no glassing sweep the way
   `ahead`/`left`/`right`/`full` already do. Left open deliberately (see "Design choice" above) —
   worth a follow-on stage if the user wants it.
+
+### 2026-09-23 — Closing the review's Optional Refinements
+
+`plans/voice-command-completeness/review.md`'s milestone was **APPROVED with no required
+fixes**; this pass closes its four Optional Refinements. No behaviour change except item 3's
+decision (documented, no code semantics changed there either — a comment only).
+
+1. **End-to-end test for `_handle_report`'s multi-contact grouping/truncation**
+   (`test_report_all_groups_and_truncates_multiple_contacts`, `test_crew_console.py`). Four
+   distinct classification types (`BMP-2`/`T-72`/`BTR-70`/`ZSU-23-4`), each due east at a
+   different range (1/2/3/4 km) so each forms its own singleton `group_facts` bucket — four
+   groups, capped at `REPORT_MAX_GROUPS` (3), ordered nearest-first, with a trailing "And more."
+   Reproduces the reviewer's own throwaway-script scenario as a pinned regression test; passed
+   first try against the real dispatch path, confirming the review's by-hand verification.
+2. **Wrap-case test for the absolute→relative conversion**
+   (`test_active_gaze_compass_conversion_handles_the_360_0_wrap`, `test_logger.py`). A commanded
+   "scan north" resolved at heading 350°/0°/10° all yield the identical `(11, 12, 1)` legs —
+   confirms no discontinuity at the 360°/0° wrap, mirroring the reviewer's own hand-verification
+   of `legs_within_wedge` but through `_active_gaze` and pinned as a regression.
+3. **`ScanPlan.__post_init__`'s missing `fixed_look`/`commanded_sector`/`commanded_legs`
+   exclusivity — decided NOT to tighten.** Added a comment on the field/`__post_init__` boundary
+   in `gaze.py` explaining the decision rather than a `ValueError`: `fixed_look` exists so
+   binoculars can override a commanded scan, and a future glass phase remembering what was
+   commanded underneath the stare (so the pre-binocular scan resumes rather than falling back to
+   free scan once binoculars come down) is a plausible legitimate use of both fields set at once
+   — `gaze_at`'s existing tie-break already resolves that combination correctly with no code
+   change needed. Tightening now would have to be reversed the moment such a caller appears, for
+   no safety this class currently lacks. No production path constructs the combination today
+   (`fixed_look_at` always passes `commanded_sector=None`/leaves `commanded_legs` at its `None`
+   default; `logger._apply_active_gaze` only ever replaces `resolved_plan` wholesale, never
+   merges) — purely a documentation change, no test added, no behaviour touched.
+4. **Boundary test at the cockpit mask's `rear_cutoff_deg` (130°)**
+   (`test_report_bearing_s_just_inside_rear_cutoff_says_clear` /
+   `..._just_past_rear_cutoff_cannot_see_it`, `test_crew_console.py`). Heading chosen so `S`'s
+   sector center (180°) sits at exactly 129°/131° relative — pins the `>=` comparison in
+   `_handle_report`'s `rear_hemisphere` check directly, at the one boundary the two pre-existing
+   tests (dead-ahead, dead-astern) were nowhere near. Added `_enrichment_context_with_heading`,
+   a small twin of the existing `_enrichment_context` fixture with a caller-controlled ownship
+   heading — needed since no existing helper let a test place a sector center at an exact
+   relative bearing.
+
+#### Files Changed
+- `body-layer/src/perception/gaze.py` — comment-only addition documenting refinement 3's decision
+  on `ScanPlan.__post_init__`. No code/behaviour change.
+- `body-layer/tests/test_crew_console.py` — three new tests (refinements 1 and 4) plus the
+  `_enrichment_context_with_heading` fixture helper.
+- `body-layer/tests/test_logger.py` — one new test (refinement 2).
+
+#### Checks
+
+**body-layer/**
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (strict, `PYTHONPATH=src:../world-model/src`): pass, no issues in 45 source files
+- `pytest tests -q`: **1080 passed, 4 xfailed** (baseline 1076 passed / 4 xfailed — 4 new tests,
+  no regressions)
+
+**audio-adapter/** (untouched this pass, re-verified per task instructions)
+- `ruff check src tests`: pass
+- `mypy src`: pass, no issues in 15 source files
+- `pytest tests -q`: **179 passed, 1 skipped** (matches baseline, unchanged)
+
+#### Notable Discoveries
+- All three tests requiring precise numeric predictions (the four-group report text, the 350/0/10
+  wrap, and the 129°/131° boundary) passed on the first run against the real code — the review's
+  own by-hand verification of these same three risk areas held up under an automated regression
+  test, not just under one-time manual execution.
+- The plan's test-impact expectations (per this role's own process step 1b) were treated as a
+  hypothesis rather than trusted: `plans/voice-command-completeness/review.md` itself was read in
+  full, and each of the two touched test files was checked for related existing coverage
+  (`grep`'d for `_active_gaze`/`rear_cutoff`/`report_all` test names) before writing new tests, to
+  avoid duplicating or contradicting an existing test. No mismatch found — the review's four
+  items were the complete, correctly-scoped list for this pass.
