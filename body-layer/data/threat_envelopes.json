@@ -1,0 +1,262 @@
+{
+  "source": "https://wiki.hoggitworld.com/view/Threat_Database",
+  "source_file": "Threat Database - DCS World Wiki - Hoggitworld.com.html",
+  "retrieved": "2026-09-24",
+  "provenance": "community wiki, transcribed snapshot -- not DCS ground truth",
+  "units": "metres; converted at extraction from NMI (range) and feet (altitude)",
+  "null_means": "the source cell was TBC or absent; a null MUST degrade to no warning, never to a default",
+  "entries": [
+    {
+      "threat": "ZU-23-3 Sergey",
+      "nato": null,
+      "category": "aaa",
+      "range_min_m": 0,
+      "range_max_m": 2408,
+      "alt_min_m": 0,
+      "alt_max_m": 1981
+    },
+    {
+      "threat": "ZSU-23-4 Shilka",
+      "nato": null,
+      "category": "aaa",
+      "range_min_m": 0,
+      "range_max_m": 2408,
+      "alt_min_m": 0,
+      "alt_max_m": 1981
+    },
+    {
+      "threat": "ZSU-57-2 Sparka",
+      "nato": null,
+      "category": "aaa",
+      "range_min_m": 0,
+      "range_max_m": 3704,
+      "alt_min_m": 0,
+      "alt_max_m": 4267
+    },
+    {
+      "threat": "ZPU-1/2/4",
+      "nato": null,
+      "category": "aaa",
+      "range_min_m": 0,
+      "range_max_m": 1296,
+      "alt_min_m": 0,
+      "alt_max_m": 1372
+    },
+    {
+      "threat": "Flakpanzer Gepard",
+      "nato": null,
+      "category": "aaa",
+      "range_min_m": 0,
+      "range_max_m": 3704,
+      "alt_min_m": 0,
+      "alt_max_m": 2896
+    },
+    {
+      "threat": "M163 Vulcan",
+      "nato": null,
+      "category": "aaa",
+      "range_min_m": 0,
+      "range_max_m": 2593,
+      "alt_min_m": 0,
+      "alt_max_m": 1372
+    },
+    {
+      "threat": "3K39 Igla",
+      "nato": "SA-18 Grouse",
+      "category": "manpads",
+      "range_min_m": 463,
+      "range_max_m": 4630,
+      "alt_min_m": 0,
+      "alt_max_m": 3658
+    },
+    {
+      "threat": "9K338 Igla-S",
+      "nato": "SA-24 Grinch",
+      "category": "manpads",
+      "range_min_m": 463,
+      "range_max_m": 4630,
+      "alt_min_m": 0,
+      "alt_max_m": 3658
+    },
+    {
+      "threat": "FIM-92 Stinger",
+      "nato": null,
+      "category": "manpads",
+      "range_min_m": 185,
+      "range_max_m": 3704,
+      "alt_min_m": 0,
+      "alt_max_m": 1981
+    },
+    {
+      "threat": "S-75 Devina",
+      "nato": "SA-2 Guideline",
+      "category": "sam",
+      "range_min_m": null,
+      "range_max_m": 51856,
+      "alt_min_m": null,
+      "alt_max_m": 24994
+    },
+    {
+      "threat": "S-125 Neva/Pechora",
+      "nato": "SA-3 Goa",
+      "category": "sam",
+      "range_min_m": 5926,
+      "range_max_m": 25002,
+      "alt_min_m": 213,
+      "alt_max_m": 19995
+    },
+    {
+      "threat": "S-200",
+      "nato": "SA-5 Gammon",
+      "category": "sam",
+      "range_min_m": null,
+      "range_max_m": null,
+      "alt_min_m": null,
+      "alt_max_m": null
+    },
+    {
+      "threat": "2K12 Kub",
+      "nato": "SA-6 Gainful",
+      "category": "sam",
+      "range_min_m": 926,
+      "range_max_m": 35558,
+      "alt_min_m": 30,
+      "alt_max_m": 10058
+    },
+    {
+      "threat": "9K33 Osa",
+      "nato": "SA-8 Gecko",
+      "category": "sam",
+      "range_min_m": 1482,
+      "range_max_m": 13890,
+      "alt_min_m": 15,
+      "alt_max_m": 6401
+    },
+    {
+      "threat": "9K31 Strela-1",
+      "nato": "SA-9 Gaskin",
+      "category": "sam",
+      "range_min_m": 741,
+      "range_max_m": 4630,
+      "alt_min_m": 30,
+      "alt_max_m": 3658
+    },
+    {
+      "threat": "S-300PS",
+      "nato": "SA-10 Grumble",
+      "category": "sam",
+      "range_min_m": 5556,
+      "range_max_m": 74080,
+      "alt_min_m": 15,
+      "alt_max_m": 45720
+    },
+    {
+      "threat": "9K37 Buk",
+      "nato": "SA-11 Gadfly",
+      "category": "sam",
+      "range_min_m": null,
+      "range_max_m": 35558,
+      "alt_min_m": 18,
+      "alt_max_m": 24994
+    },
+    {
+      "threat": "9K35 Strela-10",
+      "nato": "SA-13 Gopher",
+      "category": "sam",
+      "range_min_m": 741,
+      "range_max_m": 5186,
+      "alt_min_m": 23,
+      "alt_max_m": 4572
+    },
+    {
+      "threat": "9K331 Tor",
+      "nato": "SA-15 Gauntlet",
+      "category": "sam",
+      "range_min_m": 1482,
+      "range_max_m": 12038,
+      "alt_min_m": 18,
+      "alt_max_m": 7925
+    },
+    {
+      "threat": "2K22M Tunguska",
+      "nato": "SA-19 Grison",
+      "category": "sam",
+      "range_min_m": 0,
+      "range_max_m": 7408,
+      "alt_min_m": 0,
+      "alt_max_m": 4877
+    },
+    {
+      "threat": "Avenger ADS",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": 185,
+      "range_max_m": 6852,
+      "alt_min_m": 0,
+      "alt_max_m": 3353
+    },
+    {
+      "threat": "M6 Linebacker",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": 185,
+      "range_max_m": 3704,
+      "alt_min_m": 0,
+      "alt_max_m": 3353
+    },
+    {
+      "threat": "Rapier",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": null,
+      "range_max_m": 8519,
+      "alt_min_m": null,
+      "alt_max_m": 2987
+    },
+    {
+      "threat": "MIM-115 Roland",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": 926,
+      "range_max_m": 6297,
+      "alt_min_m": 9,
+      "alt_max_m": 5944
+    },
+    {
+      "threat": "MIM-72G Chapparal",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": 185,
+      "range_max_m": 5556,
+      "alt_min_m": 46,
+      "alt_max_m": 2896
+    },
+    {
+      "threat": "MIM-23 Hawk",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": 1852,
+      "range_max_m": 47411,
+      "alt_min_m": 137,
+      "alt_max_m": 13716
+    },
+    {
+      "threat": "MIM-104 Patriot",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": 2963,
+      "range_max_m": 159272,
+      "alt_min_m": 61,
+      "alt_max_m": 24384
+    },
+    {
+      "threat": "NASAMs",
+      "nato": null,
+      "category": "sam",
+      "range_min_m": null,
+      "range_max_m": 14816,
+      "alt_min_m": null,
+      "alt_max_m": null
+    }
+  ]
+}
