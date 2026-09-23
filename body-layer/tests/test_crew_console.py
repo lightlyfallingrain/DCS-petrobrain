@@ -761,7 +761,7 @@ def test_scan_never_calls_the_aircraft_layer_even_if_it_would_fail() -> None:
 
     lines = console.handle_f10_command("scan_full", now_sim=0.0)
 
-    assert lines == ["Scanning the full forward arc."]
+    assert lines == ["Scanning full arc."]
     assert client.triggered_modes == []
     assert len(tasks.tasks) == 1
     assert tasks.tasks[0].status == "pending"
@@ -789,7 +789,7 @@ def test_scan_then_cancel_task_actually_cancels_it() -> None:
 
     # Names what was stopped, never the task id (live-test finding
     # 2026-09-16: the player heard "cancelled task TASK_4").
-    assert lines == ["Copy, stopping the scan ahead."]
+    assert lines == ["Copy, stop scan ahead."]
     assert task_id not in lines[0]
     assert tasks.get(task_id) is not None
     resolved = tasks.get(task_id)
@@ -818,7 +818,7 @@ def test_cancel_task_reaches_an_already_succeeded_scan() -> None:
 
     lines = console.handle_f10_command("cancel_task", now_sim=1.0)
 
-    assert lines == ["Copy, stopping the scan ahead."]
+    assert lines == ["Copy, stop scan ahead."]
     resolved = tasks.get(task.id)
     assert resolved is not None and resolved.status == "cancelled"
 
@@ -868,7 +868,7 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
 
     # This task was built directly with no sector on its area, so the
     # phrase falls back to the bare kind rather than naming a sector.
-    assert lines == ["Copy, stopping the scan."]
+    assert lines == ["Copy, stop scan."]
     assert task2.id not in lines[0]
     resolved_task2 = tasks.get(task2.id)
     resolved_task1 = tasks.get(task1.id)
@@ -1027,7 +1027,7 @@ def test_cancel_task_names_a_bearing_scan_by_its_compass_word() -> None:
     console.handle_f10_command("scan_bearing_se", now_sim=0.0)
     lines = console.handle_f10_command("cancel_task", now_sim=1.0)
 
-    assert lines == ["Copy, stopping the scan southeast."]
+    assert lines == ["Copy, stop scan southeast."]
 
 
 # --- plans/watch-as-standing-mode/plan.md: watch as a cancellable mode -----
@@ -1085,7 +1085,7 @@ def test_watch_then_cancel_task_stops_the_watch(
 
     lines = console.handle_f10_command("cancel_task", now_sim=1.0)
 
-    assert lines == ["Copy, stopping the watch."]
+    assert lines == ["Copy, stop watch."]
     assert contact.attention == "normal"
     assert tasks.tasks[0].status == "cancelled"
 
@@ -1119,9 +1119,10 @@ def test_scan_and_watch_coexist_and_cancel_task_stops_both(
 ) -> None:
     """The finding's full scripted sequence: "scan ahead" then "watch
     closest" must leave *both* standing modes active at once (a single
-    "current task" field could not express this), and a single "Cancel
-    Task" -- the only F10 item and the only vocabulary available -- ends
-    both, naming each in the readback rather than silently dropping one."""
+    "current task" field could not express this), and `cancel_task` -- now
+    the explicit all-modes form rather than the only vocabulary available --
+    ends both, naming each in the readback rather than silently dropping
+    one. The narrow forms are covered below."""
     store = ContactStore()
     store.ingest(
         [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
@@ -1141,7 +1142,7 @@ def test_scan_and_watch_coexist_and_cancel_task_stops_both(
 
     lines = console.handle_f10_command("cancel_task", now_sim=1.0)
 
-    assert lines == ["Copy, stopping the scan ahead and the watch."]
+    assert lines == ["Copy, stop scan ahead and watch."]
     assert contact.attention == "normal"
     assert all(task.status == "cancelled" for task in tasks.tasks)
 
@@ -1171,7 +1172,7 @@ def test_cancel_task_only_cancels_the_newest_task_per_kind(
 
     lines = console.handle_f10_command("cancel_task", now_sim=2.0)
 
-    assert lines == ["Copy, stopping the scan to the left and the watch."]
+    assert lines == ["Copy, stop scan left and watch."]
     assert first_scan.status == "pending"
     assert second_scan.status == "cancelled"
 
@@ -1484,7 +1485,7 @@ def test_handle_transcript_cancel_task_needs_the_higher_floor(
         now_sim=1.0,
     )
 
-    assert lines == ["Cancel the task, confirm?"]
+    assert lines == ["Cancel everything, confirm?"]
     # Not actually cancelled yet.
     assert tasks.tasks[0].status == "pending"
 
@@ -1515,3 +1516,88 @@ def test_voice_repl_harness_reports_usage_on_bad_input() -> None:
     console = CrewConsole(store=ContactStore())
     lines = console.handle_line("!voice not enough args", now_sim=0.0)
     assert lines[0].startswith("usage: !voice")
+
+
+def test_cancel_scan_leaves_the_watch_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """User direction 2026-09-23, reversing this console's own earlier
+    decision: *"One cancel does not automatically cancel other ongoing
+    tasks."* Stopping the scan while continuing to watch a contact is an
+    ordinary thing to want, and the cancel-everything reading made it
+    impossible to express."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    console.handle_f10_command("watch_nearest", now_sim=0.0)
+
+    lines = console.handle_f10_command("cancel_scan", now_sim=1.0)
+
+    assert lines == ["Copy, stop scan ahead."]
+    assert contact.attention == "watch"
+    scans = [task for task in tasks.tasks if task.kind == "scan_area"]
+    watches = [task for task in tasks.tasks if task.kind == "watch_contact"]
+    assert all(task.status == "cancelled" for task in scans)
+    assert all(task.status != "cancelled" for task in watches)
+
+
+def test_cancel_watch_leaves_the_scan_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The mirror of the above, and the one the sortie transcript actually
+    wanted: the pilot watched a contact while scanning, and stopping the
+    watch should not blind the scan."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    console.handle_f10_command("watch_nearest", now_sim=0.0)
+
+    lines = console.handle_f10_command("cancel_watch", now_sim=1.0)
+
+    assert lines == ["Copy, stop watch."]
+    assert contact.attention == "normal"
+    scans = [task for task in tasks.tasks if task.kind == "scan_area"]
+    assert all(task.status != "cancelled" for task in scans)
+
+
+def test_cancel_scan_with_nothing_scanning_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A narrow cancel that matches nothing must not claim to have stopped
+    something -- and must not fall through to cancelling the watch, which
+    is the exact failure the narrow forms exist to prevent."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    console.handle_f10_command("watch_nearest", now_sim=0.0)
+
+    lines = console.handle_f10_command("cancel_scan", now_sim=1.0)
+
+    assert lines == ["nothing to stop"]
+    assert contact.attention == "watch"

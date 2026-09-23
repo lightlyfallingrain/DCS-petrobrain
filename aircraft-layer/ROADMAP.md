@@ -31,7 +31,7 @@ details and `WORKFLOW.md` for the cross-machine deploy/run workflow. Full design
   Needs `autoexec.cfg` `net.allow_dostring_in = { "scripting" }`. Wall-clock provenance only.
   See `body-layer/ROADMAP.md` "F10 radio-menu command input" and `plans/f10-crew-commands/`.
 
-- [~] **Unit-velocity channel — implemented 2026-09-22, pending live acceptance**
+- [x] **Unit-velocity channel — implemented 2026-09-22, ACCEPTED live 2026-09-23** on the five-fix sortie (`docs/acceptance/2026-09-22-five-fixes-sortie.md`): movement callouts were produced in flight, which exercises the whole transport end to end. Originally:
   (`plans/movement-detection/plan.md` Stage 1). Second Hook→collector direction, alongside the F10
   channel above: `petrobrain-mission-telemetry-hook.lua` polls `Object.getVelocity()` for every unit
   and static object at 1 Hz via `net.dostring_in("scripting", ...)` (the same bridge the F10 hook

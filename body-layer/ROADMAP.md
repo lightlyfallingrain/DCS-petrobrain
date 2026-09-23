@@ -416,6 +416,33 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   BL-4's `AttentionArea` registry): keep BL-8's eventual mission-end export/persistence boundary in
   mind, not as a design constraint yet, just don't shape something in a way that obviously fights it.
 
+- [x] **Cones slice 2C — the o'clock scan loop. DONE, merged 2026-09-22** (`4f89fc8`). The
+  default gaze stops being "everywhere" and becomes a scan: 12, then 11/10/9, then 12 again, then
+  1/2/3 — 30° cones, two seconds each, a 16-second cycle that covers the forward arc twice. The
+  numbers are the user's (*"scan per o'clock cone"*, 2 s per sector), not fitted.
+
+  **`gaze_at(t_sim, plan)` is a pure function of sim time**, so replay determinism falls out of
+  purity rather than being managed — nothing holds a scan phase that could drift from the clock.
+  Two consequences followed rather than being designed: `decay.OBSERVED_WINDOW_S` moved 5.0 → 16.0,
+  derived from the cycle and bounded on both sides, and acquisition state became time-based,
+  because poll-indexed sets break the moment the cone moves.
+
+  **Two fixes rode in from the sortie that followed, and both came from the pilot flying it.**
+
+  - **The overlay now names the cone he is looking at.** Two of the test card's four blocks were
+    unevaluable without it — *"very difficult to judge when I don't visually see where Petrovich is
+    looking"*. A perception model that steers attention is invisible from the cockpit unless it
+    says where it is pointed.
+  - **Scan and Watch became standing modes rather than one-shot tasks.** `tasks.py` marked a task
+    succeeded on first contact and `_active_gaze` honoured only pending tasks, so a commanded scan
+    silently reverted to free scan the moment it found anything — which is why *"scan left"* still
+    produced 12 o'clock reports. The same assumption sat in three places, so fixing only
+    `_active_gaze` would have left cancel hollow.
+
+  **Left open at merge and closed afterwards:** `watch_nearest` created no `PendingIntent` at all,
+  so `Cancel Task` had nothing to find regardless of the above. Fixed in `32346a0` (watch as a
+  standing mode), where cancel now ends every governing kind and names each.
+
 - [x] **Cones slice 2B — gaze as a filter. DONE, merged 2026-09-21.** `perception/gaze.py`;
   `check_visibility` evaluates a gaze first in the gate chain; `Optic.peripheral` and the bypass
   rule; **F10 scan commands finally steer naked-eye perception** rather than only registering an
@@ -633,6 +660,102 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
   See `plans/group-detectability/plan.md`.
 
+- [x] **Five-fix sortie — FLOWN AND ACCEPTED 2026-09-23** (user: *"with these fixes, Five-Fix Sortie is done and accepted"*), four passes.
+  (`docs/acceptance/2026-09-22-five-fixes-sortie.md`.)
+
+  | | result |
+  |---|---|
+  | Callouts current | **pass** — *"pretty good"* |
+  | Repetition gone | **partial** — *"not completely, but better than before"* |
+  | Groups found sooner than singles | **undecided** — needs more testing |
+  | Watch and scan together | **pass** |
+  | Movement | **pass** on a preliminary test |
+
+  Three of the five close outright; the aggregation and group items stay open below with what the
+  transcript actually showed.
+
+- [x] **Internal identifiers were being read aloud — fixed 2026-09-23** (`fix/spoken-vocabulary`).
+  The sortie produced *"unit at 12 o'clock, 2 kilometres is OP_LRSAM"* and *"...is
+  OP_GROUPSOMETHING"*: this codebase's own `op_class` bucket names, spoken to the pilot.
+
+  **The cause is worth more than the fix.** `_OP_CLASS_DISPLAY` carried a comment stating that
+  every `op_class` the object model assigns had an entry, and that was true when written.
+  `OP_LRSAM` arrived later with the aspect-profile work and was never added, and the unmapped
+  fallback returned the value *verbatim* — so a vocabulary gap became an intelligibility failure
+  rather than a specificity one. The comment was the only thing enforcing the invariant, and a
+  comment cannot fail. `test_speech.py` now derives the class set from `object_model` itself, so
+  the next class added there fails a test instead of reaching the audio channel.
+
+  A second stale claim fell with it: `OP_GROUPSOMETHING` was documented as unreachable at `class`
+  level. The transcript disproved it.
+
+  **Wording decided with the user, from the same transcript:**
+  - The three SAM tiers are spoken apart — *short range SAM* / *medium range SAM* / *long range
+    SAM* — rather than all collapsing to "SAM". The difference between a short-range and a
+    long-range SAM is the difference between a threat you can fly around and one you cannot, so
+    flattening them discards the most decision-relevant part of the call.
+  - `AAA` is spoken *"triple A"*. Not a mis-reading fix like the `Mi-XX` entries: the letters are
+    pronounced correctly and are still the wrong thing to say.
+  - `OP_GROUPSOMETHING` is *"group"*.
+
+  **One over-reach caught by the existing tests, worth recording.** The first fix replaced *every*
+  unmapped class value with a generic word, which would have reduced *"BMP-2"* to *"contact"* — a
+  `class`-level value is not always an `OP_*` bucket; it can be a raw DCS type name or scope/hybrid
+  free text, and those are already sayable. The rule is narrower than it first looked: suppress the
+  `OP_` prefix specifically, pass everything else through.
+
+  Also fixed from the same transcript: *"1 kilometres"* → *"1 kilometre"*. Only exactly 1 takes the
+  singular, which is why it is an equality check and not a less-than-or-equal one.
+
+- [x] **Radio brevity, and cancel became three commands — 2026-09-23** (`fix/spoken-vocabulary`,
+  user direction from the five-fix transcript).
+
+  **Articles dropped.** *"a couple of contacts"* → *"couple contacts"*, *"Scanning to the left"* →
+  *"Scanning left"*, *"Copy, stopping the scan to the left and the watch"* → *"Copy, stop scan left
+  and watch"*. The user's reason is the right one and worth keeping: an article carries no
+  information in a report and still spends a slice of a channel one person can occupy at a time.
+
+  **An identification line now opens with the contact's class.** *"unit at 11 o'clock, very close
+  is BTR-70"* → *"armor 11 o'clock, very close is BTR-70"*: it says what the pilot is being asked
+  to look at before it says what it turned out to be. Two guards fell out of trying it — a type
+  whose profile lands on the object model's default class (`BM-30`, `SA-10 Flap Lid radar`) keeps
+  *"unit"* rather than opening with *"group"*, which reads as a formation; and a lead that would
+  repeat the payload (*"truck … is truck"*) falls back to *"unit"*, because that is a stutter
+  rather than a report.
+
+  **Cancel is three commands now, reversing this console's own decision from two days earlier.**
+  The old reasoning was sound given what existed: there was no vocabulary to say "cancel the watch"
+  as opposed to the scan, so cancelling everything and naming each thing stopped beat guessing. The
+  user's answer after flying it was to supply the missing vocabulary instead — *"stop watching
+  \<unit\>"* and *"stop scan"* are separate actions, and **one cancel must not end the other
+  mode**. Scanning while watching a contact is ordinary, and the old reading made it inexpressible.
+  `cancel_scan` and `cancel_watch` are narrow; `cancel_task` stays as the explicit all-modes form
+  and still names both. The F10 menu grew a `Stop` submenu with all three.
+
+  **Voice is not yet updated for this**, deliberately: `audio-adapter`'s vocabulary is a
+  hand-synced third copy, and its 99.2% gate was measured on a recorded corpus that has no phrases
+  for the two new tokens. Adding them unbenched would put unmeasured tokens into the one part of
+  the chain whose accuracy was established by measurement. It needs corpus phrases first.
+
+- [ ] **Repetition is better but not gone — reopened 2026-09-23 from the sortie.** Aggregation
+  works on same-type, same-range, adjacent-clock contacts, and the transcript shows it firing. What
+  it does not catch is the run it left behind:
+
+  ```
+  ground, 12 o'clock, 2.5 kilometres.
+  ground, 12 o'clock, 4.5 kilometres.
+  ground, 12 o'clock, 3 kilometres.
+  ground, 12 o'clock, 4 kilometres.
+  ground, 12 o'clock, 4 kilometres.
+  ```
+
+  Five presence-level calls in one sector within one scan, differing only in range, two of them
+  identical. They are not aggregated because the range differs, and the range is precisely the part
+  that carries no information at presence level — *"ground, 12 o'clock"* five times is one fact.
+  Two candidate rules, not yet chosen: widen aggregation to a range *band* at presence level only,
+  or suppress re-reporting a contact already called within some window. The second is probably the
+  real one, since the identical repeat suggests the same contact was called twice.
+
 ## Backlog (body-layer)
 
 - [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
@@ -689,8 +812,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
   spoken id. Typed `watch <id>` readback unchanged.
 
-- [~] **Movement detection — design settled 2026-09-20 (user), implemented 2026-09-22
-  (`plans/movement-detection/plan.md`), pending live acceptance.** The velocity transport
+- [x] **Movement detection — ACCEPTED 2026-09-23** on the five-fix sortie (user: *"pass on
+  preliminary test, will test and adjust more in future"*). Design settled 2026-09-20 (user),
+  implemented 2026-09-22 (`plans/movement-detection/plan.md`).
+
+  **Accepted on a preliminary reading, not a thorough one** — the user said so explicitly, and the
+  distinction is worth keeping rather than rounding up to "done": what was confirmed is that moving
+  units are called as moving and static ones are not, which is the behaviour the milestone exists
+  to produce. The constants (`MOTION_STOP_CONFIRM_S`, `MOTION_COCKPIT_PENALTY`) remain uncalibrated
+  and will move once there are more flights behind them. The velocity transport
   (`petrobrain-mission-telemetry-hook.lua` + `GET /unit_velocity/latest`), the apparent-angular-rate
   gate (`perception/motion.py`), the belief fold and event (`belief/motion.py`,
   `CONTACT_MOTION_CHANGED`), and the reporting surface (`get_situation`'s `facts["motion"]`, one
