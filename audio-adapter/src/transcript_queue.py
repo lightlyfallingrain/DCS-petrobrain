@@ -32,16 +32,22 @@ _MAX_QUEUE_LEN = 64
 
 @dataclass(frozen=True)
 class TranscriptEvent:
-    """One recognised-and-matched transcript, exactly the seven fields
+    """One recognised-and-matched transcript, exactly the eight fields
     `plans/inbound-speech/plan.md` Decision 6's `GET /transcripts/poll` row
-    names -- text and match metadata only, **never** audio bytes, a WAV
-    path, or which engine ran (the plan's "body-layer never sees audio"
-    invariant). `token`/`match_ratio`/`verb_anchored`/`ambiguous` are
+    names, extended by `plans/voice-command-completeness/plan.md` Stage 3 --
+    text and match metadata only, **never** audio bytes, a WAV path, or
+    which engine ran (the plan's "body-layer never sees audio" invariant).
+    `token`/`match_ratio`/`verb_anchored`/`ambiguous`/`bearing_degrees` are
     `command_matcher.MatchResult`'s own fields, carried through unchanged
-    -- see that dataclass's docstring for why all four are required rather
-    than `token`/`match_ratio` alone: `token=None` cannot by itself
-    distinguish "not a command attempt" from "verb-anchored but
-    unresolved" from "ambiguous", three behaviourally distinct outcomes.
+    -- see that dataclass's docstring for why `token`/`match_ratio`/
+    `verb_anchored`/`ambiguous` are all required rather than `token`/
+    `match_ratio` alone: `token=None` cannot by itself distinguish "not a
+    command attempt" from "verb-anchored but unresolved" from "ambiguous",
+    three behaviourally distinct outcomes. `bearing_degrees` was
+    previously computed by `command_matcher.match_transcript` and then
+    dropped at this exact wire -- `TranscriptEvent` carried only seven
+    fields, so a perfectly recognised "scan bearing three two zero" arrived
+    at body-layer as a bare token with no number; this field is the fix.
     `t_wall` is `time.time()` at the moment `POST /transcribe` recognised
     the clip, not when body-layer eventually polls it."""
 
@@ -52,6 +58,7 @@ class TranscriptEvent:
     verb_anchored: bool
     ambiguous: bool
     t_wall: float
+    bearing_degrees: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +69,7 @@ class TranscriptEvent:
             "verb_anchored": self.verb_anchored,
             "ambiguous": self.ambiguous,
             "t_wall": self.t_wall,
+            "bearing_degrees": self.bearing_degrees,
         }
 
 

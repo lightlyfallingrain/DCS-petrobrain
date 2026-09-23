@@ -122,6 +122,24 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
 #: Spoken digit by digit, always three digits ("bearing three two zero",
 #: "bearing zero zero five"), which is standard readback form and removes
 #: the ambiguity between 50, 350 and 005 by construction.
+#:
+#: **This 5-degree slot is a recognition checksum, not a precision
+#: guarantee, and the two are independent** (`plans/
+#: voice-command-completeness/plan.md` Decision 3). Roughly four in five
+#: mishearings land on a value that is not a multiple of five, which is
+#: what makes them *detectable* -- `parse_bearing` returns them as `heard`
+#: without `degrees` so the caller can ask the player to say again rather
+#: than act on a number nobody said. What body-layer's
+#: `belief.crew_console._nearest_sector` then does with a value that *does*
+#: pass this checksum is a separate, later decision: it quantises the
+#: parsed bearing onto the nearest of the eight `Sector` compass buckets
+#: (45-degree wide) before acting, because the user judged "o'clock
+#: direction is enough, no need for x degrees granularity now"
+#: (2026-09-23). Do not read that act-time quantisation back into this
+#: constant, or "restore" 5-degree precision here later under the belief
+#: that it was ever wanted at the acted-on value -- the checksum runs at
+#: recognition time, the quantisation at act time, and neither one implies
+#: anything about the other's resolution.
 BEARING_RESOLUTION_DEG = 5
 
 #: Every legal bearing: 0, 5, 10 ... 355.

@@ -901,7 +901,7 @@ def _poll_f10_commands(
     aircraft_client: AircraftLayerClient, crew_console: CrewConsole, now_sim: float
 ) -> None:
     """Drains pending F10 radio-menu selections (`plans/f10-crew-commands/
-    plan.md`) and dispatches each through `CrewConsole.handle_f10_command`
+    plan.md`) and dispatches each through `CrewConsole.handle_command`
     -- the same post-`tick()` hook point `drain_events` already uses.
     Wrapped in its own `try`/`except AircraftLayerError` (log-and-continue),
     the same per-call isolation shape the BL-2.5 overlay-push loop already
@@ -914,7 +914,7 @@ def _poll_f10_commands(
     for command in commands:
         token = command.get("command")
         if isinstance(token, str):
-            crew_console.handle_f10_command(token, now_sim)
+            crew_console.handle_command(token, now_sim)
 
 
 def _poll_transcripts(
@@ -928,14 +928,17 @@ def _poll_transcripts(
     failed poll never stops the loop.
 
     Each item is validated field-by-field against `transcript_queue.
-    TranscriptEvent.to_dict`'s seven-field shape before dispatch -- a
+    TranscriptEvent.to_dict`'s eight-field shape before dispatch -- a
     malformed/partial item (a schema mismatch, not an expected runtime
     state) is skipped rather than raising, the same defensive posture
     `_poll_f10_commands`'s `isinstance` check already takes on its own,
     simpler payload. `t_wall` (wall-clock time the adapter recognised the
     clip) is intentionally not threaded into `handle_transcript` --
     `now_sim` is this poll's own DCS sim time, the same clock every other
-    dispatch path in this loop already uses."""
+    dispatch path in this loop already uses. `bearing_degrees` (`plans/
+    voice-command-completeness/plan.md` Stage 3) is threaded straight
+    through, `None` allowed (populated only for the two numeric-bearing
+    tokens)."""
     try:
         transcripts = audio_client.get_transcripts()
     except AudioAdapterError:
@@ -948,6 +951,7 @@ def _poll_transcripts(
         match_ratio = item.get("match_ratio")
         verb_anchored = item.get("verb_anchored")
         ambiguous = item.get("ambiguous")
+        bearing_degrees = item.get("bearing_degrees")
         if not isinstance(transcript, str):
             continue
         if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
@@ -960,6 +964,10 @@ def _poll_transcripts(
             continue
         if not isinstance(ambiguous, bool):
             continue
+        if bearing_degrees is not None and not (
+            isinstance(bearing_degrees, int) and not isinstance(bearing_degrees, bool)
+        ):
+            continue
         crew_console.handle_transcript(
             transcript,
             float(confidence),
@@ -968,6 +976,7 @@ def _poll_transcripts(
             verb_anchored,
             ambiguous,
             now_sim,
+            bearing_degrees=bearing_degrees,
         )
 
 
@@ -1167,7 +1176,7 @@ def main() -> None:
         help=(
             "poll and dispatch player-selected DCS F10 radio-menu commands "
             "(watch nearest / scan forward / cancel task) through "
-            "CrewConsole.handle_f10_command -- plans/f10-crew-commands/"
+            "CrewConsole.handle_command -- plans/f10-crew-commands/"
             "plan.md. Only meaningful with --crew-text; defaults off, a "
             "true no-op when absent. Reuses the same --aircraft-layer-url "
             "instance, no separate URL needed."
