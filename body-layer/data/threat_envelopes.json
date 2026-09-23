@@ -4,7 +4,13 @@
   "retrieved": "2026-09-24",
   "provenance": "community wiki, transcribed snapshot -- not DCS ground truth",
   "units": "metres; converted at extraction from NMI (range) and feet (altitude)",
-  "null_means": "the source cell was TBC or absent; a null MUST degrade to no warning, never to a default",
+  "null_means": {
+    "range_max_m": "no warning at all -- an unknown reach cannot be warned about",
+    "range_min_m": "treat as 0 -- an unknown minimum must not create a safe pocket",
+    "alt_min_m": "treat as 0 -- an unknown floor must not make flying low look safe",
+    "alt_max_m": "treat as unbounded -- an unknown ceiling must not make altitude look safe",
+    "why_they_differ": "A null in range_max means the threat is unusable and is dropped. A null in any of the other three would, under that same rule, hand the pilot protection the data never claimed. S-75/SA-2 forces the split: no min range and no floor, but a real 51.9 km reach that an entry-wide drop rule would have thrown away."
+  },
   "entries": [
     {
       "threat": "ZU-23-3 Sergey",

@@ -15,3 +15,7 @@ mission-interpreter/research/samples/
 # built from. Both are derived; the corpus is a copy of tracked documents.
 graphify-corpus/
 graphify-out/
+
+# Saved-page asset directories (browser "Web Page, complete") -- the HTML
+# itself is committed as provenance; its styling/scripts are not.
+*_files/
