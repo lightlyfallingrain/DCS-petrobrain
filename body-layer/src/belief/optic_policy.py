@@ -40,6 +40,7 @@ from enum import Enum
 from itertools import pairwise
 from typing import Final
 
+from belief.association_over_time import CLOCK_BUCKET_DEG
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
@@ -134,7 +135,7 @@ class LookTarget:
     #: target most of the time, and a mock-flight test caught exactly that
     #: as four vanished observations. He knows it is "around two o'clock";
     #: he sweeps around two o'clock.
-    bearing_uncertainty_deg: float = 15.0
+    bearing_uncertainty_deg: float = CLOCK_BUCKET_DEG / 2.0
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,16 @@ class OpticState:
     #: uncertainty around one believed contact. Empty while scanning.
     search_pattern_steps: tuple[tuple[float, float], ...] = ()
     search_step_index: int = 0
+    #: The look's own sweep centre and half-width, fixed for the whole
+    #: `GLASSING` phase -- unlike `look_azimuth_deg`, which moves to the
+    #: current step every poll. `look_is_finished` and the attempted-range
+    #: marking test against *this* envelope, not the current step, because
+    #: a contact deliberately outside today's step may still be inside the
+    #: sweep the look as a whole covers (`plans/binocular-optic/
+    #: stage3b.md` D4). `None` outside `GLASSING` (and while `SEARCHING`,
+    #: which has its own end condition and never reads these).
+    look_envelope_azimuth_deg: float | None = None
+    look_envelope_half_width_deg: float | None = None
     #: Range at the last attempt, per contact -- `RETRY_RANGE_FRACTION`'s
     #: input. Contacts are never removed: the map is bounded by how many
     #: distinct contacts one sortie produces, and forgetting an attempt
@@ -177,6 +188,24 @@ class OpticDecision:
     #: alone" -- the scan phase does not override the gaze at all.
     look_azimuth_deg: float | None = None
     look_elevation_deg: float | None = None
+
+
+def _step_centres_deg(half_width_deg: float, fov_full_width_deg: float) -> list[float]:
+    """Evenly-spread step centres covering `[-half_width_deg,
+    +half_width_deg]`, so the first and last steps cover the edges.
+
+    Shared by `search_pattern` (sweeping a sector of *unknown* ground) and
+    `look_sweep` (sweeping the *known* angular uncertainty around one
+    believed direction) -- both need the same "how many steps of this
+    width does it take to cover this span, evenly centred" arithmetic, and
+    only the number of steps and what each represents differ
+    (`plans/binocular-optic/stage3b.md` D2).
+    """
+    steps_across = max(1, math.ceil((2.0 * half_width_deg) / fov_full_width_deg))
+    if steps_across == 1:
+        return [0.0]
+    stride = (2.0 * half_width_deg) / steps_across
+    return [-half_width_deg + stride * (index + 0.5) for index in range(steps_across)]
 
 
 def search_pattern(
@@ -212,15 +241,7 @@ def search_pattern(
     middle, rather than taking a minute to cover.
     """
     half_width = min(sector_half_width_deg, MAX_SEARCH_SECTOR_HALF_WIDTH_DEG)
-    steps_across = max(1, math.ceil((2.0 * half_width) / fov_full_width_deg))
-    # Step centres, evenly spread so the first and last cover the edges.
-    if steps_across == 1:
-        azimuths = [0.0]
-    else:
-        stride = (2.0 * half_width) / steps_across
-        azimuths = [
-            -half_width + stride * (index + 0.5) for index in range(steps_across)
-        ]
+    azimuths = _step_centres_deg(half_width, fov_full_width_deg)
 
     near_depression = math.degrees(math.atan2(altitude_agl_m, max(near_m, 1.0)))
     far_depression = math.degrees(math.atan2(altitude_agl_m, max(far_m, 1.0)))
@@ -237,6 +258,50 @@ def search_pattern(
         sweep = azimuths if band_index % 2 == 0 else list(reversed(azimuths))
         pattern.extend((azimuth, elevation) for azimuth in sweep)
     return pattern
+
+
+def look_sweep(
+    *,
+    centre_azimuth_deg: float,
+    centre_elevation_deg: float,
+    bearing_uncertainty_deg: float,
+    fov_full_width_deg: float,
+) -> list[tuple[float, float]]:
+    """The steps one binocular identification look works through, sweeping
+    the believed bearing's own angular uncertainty instead of staring at
+    its centre (`plans/binocular-optic/stage3b.md`).
+
+    **A sibling of `search_pattern`, not a reuse of it.** `search_pattern`
+    covers unknown ground between two ranges and derives elevation from a
+    range->depression mapping; a look covers the *known* angular error
+    around one believed direction, at the elevation the belief already
+    supplies. Forcing this through `search_pattern` would mean passing
+    `near_m = far_m` to recover an angle already in hand, and inheriting a
+    search-policy cap (`MAX_SEARCH_SECTOR_HALF_WIDTH_DEG`) and a
+    ground-only sky clamp that both answer the wrong question here.
+
+    **Elevation is held constant at `centre_elevation_deg`.** The down-range
+    bucket that widens a naked-eye report also perturbs elevation, but at
+    helicopter geometry that is well under a degree against a binocular's
+    ~4-degree half-angle -- a second swept axis would buy nothing and only
+    cost steps that azimuth needs more.
+
+    **Ordered centre-outward**: the believed bearing is the most likely
+    one, so looking there first maximises the chance of ending the sweep on
+    step 0 (`look_is_finished`), and guarantees the single most likely
+    direction is sampled even if the poll rate under-samples the rest of
+    the sweep.
+
+    **`N == 1` reproduces today's stare exactly** -- when the uncertainty
+    fits inside one field of view, the sweep is a single step at the
+    believed direction for the whole look. The stare is this function's
+    degenerate case, not a branch elsewhere.
+    """
+    half_width = max(bearing_uncertainty_deg, 0.0)
+    azimuths = sorted(
+        _step_centres_deg(half_width, fov_full_width_deg), key=lambda a: (abs(a), a)
+    )
+    return [(centre_azimuth_deg + offset, centre_elevation_deg) for offset in azimuths]
 
 
 def is_steady(
@@ -420,11 +485,21 @@ def look_is_finished(
     > units in FOV at distance where more detailed identification can be
     > expected
 
-    Both halves are one predicate -- **no contact inside the field of view
-    is still within the improvement window** -- since a contact that has
-    been identified has left the window by definition, and one that never
-    could be was never in it. `MAX_LOOK_S` then only fires when recognition
-    is not happening at all.
+    Both halves are one predicate -- **no contact inside the look's sweep
+    envelope is still within the improvement window** -- since a contact
+    that has been identified has left the window by definition, and one
+    that never could be was never in it. `MAX_LOOK_S` then only fires when
+    recognition is not happening at all.
+
+    **The test is against the sweep's envelope, not the field of view**
+    (`plans/binocular-optic/stage3b.md` D4). As written against the field
+    of view, this would end every sweep on its first poll: step 0 may
+    deliberately point away from a target that is still inside the
+    believed bearing's own uncertainty, and that is the entire premise of
+    sweeping. Today's stare is the `N = 1` case where the envelope *is*
+    the field of view, so this widening is a strict generalisation, not a
+    new rule -- the predicate keeps its old meaning exactly where it
+    currently applies.
     """
     started_sim = state.phase_started_sim
     if started_sim is None or now_sim - started_sim >= MAX_LOOK_S:
@@ -436,14 +511,28 @@ def look_is_finished(
 
 
 def _target_in_current_look(state: OpticState, target: LookTarget) -> bool:
-    if state.look_azimuth_deg is None or state.look_elevation_deg is None:
+    """Whether `target` is inside the current look's sweep envelope --
+    within `state.look_envelope_half_width_deg` of
+    `state.look_envelope_azimuth_deg`, at the current look elevation
+    (constant across a sweep, see `look_sweep`'s docstring). Falls back to
+    the binocular field of view when no envelope is recorded (a search
+    phase, or a state built without one), which reproduces the pre-sweep
+    behaviour exactly."""
+    if state.look_elevation_deg is None:
         return False
-    half_angle = BINOCULAR_OPTIC.fov_half_angle_deg
-    if half_angle is None:  # pragma: no cover
+    centre_azimuth = state.look_envelope_azimuth_deg
+    if centre_azimuth is None:
+        centre_azimuth = state.look_azimuth_deg
+    if centre_azimuth is None:
+        return False
+    half_angle = state.look_envelope_half_width_deg
+    if half_angle is None:
+        half_angle = BINOCULAR_OPTIC.fov_half_angle_deg
+    if half_angle is None:  # pragma: no cover -- binoculars always have one
         return True
     centre = LookTarget(
         contact_id="",
-        azimuth_deg=state.look_azimuth_deg,
+        azimuth_deg=centre_azimuth,
         elevation_deg=state.look_elevation_deg,
         range_m=0.0,
         object_type="",
@@ -465,6 +554,8 @@ def _back_to_scanning(
             look_elevation_deg=None,
             search_pattern_steps=(),
             search_step_index=0,
+            look_envelope_azimuth_deg=None,
+            look_envelope_half_width_deg=None,
         ),
         OpticDecision(optic=UNAIDED_OPTIC),
     )
@@ -538,13 +629,40 @@ def decide(
                     phase_started_sim=now_sim,
                     look_azimuth_deg=None,
                     look_elevation_deg=None,
+                    search_pattern_steps=(),
+                    search_step_index=0,
+                    look_envelope_azimuth_deg=None,
+                    look_envelope_half_width_deg=None,
                 ),
                 OpticDecision(optic=UNAIDED_OPTIC),
             )
-        return state, OpticDecision(
-            optic=BINOCULAR_OPTIC,
-            look_azimuth_deg=state.look_azimuth_deg,
-            look_elevation_deg=state.look_elevation_deg,
+        # Step-indexed exactly as `SEARCHING` above: `step_s` is derived
+        # from the sweep's own step count rather than a new constant
+        # (`plans/binocular-optic/stage3b.md` D3), so a sweep running out
+        # of steps and `MAX_LOOK_S` expiring are the same event -- `N = 1`
+        # (today's stare) gives `step_s == MAX_LOOK_S`, unchanged.
+        step_count = len(state.search_pattern_steps)
+        if step_count > 0:
+            step_s = MAX_LOOK_S / step_count
+            elapsed = now_sim - state.phase_started_sim
+            index = min(int(elapsed // step_s), step_count - 1)
+            azimuth, elevation = state.search_pattern_steps[index]
+        else:  # pragma: no cover -- a look always has at least one step
+            index = state.search_step_index
+            azimuth = state.look_azimuth_deg or 0.0
+            elevation = state.look_elevation_deg or 0.0
+        return (
+            replace(
+                state,
+                look_azimuth_deg=azimuth,
+                look_elevation_deg=elevation,
+                search_step_index=index,
+            ),
+            OpticDecision(
+                optic=BINOCULAR_OPTIC,
+                look_azimuth_deg=azimuth,
+                look_elevation_deg=elevation,
+            ),
         )
 
     # Scanning. A look can only start at a completed scan cycle -- this is
@@ -580,28 +698,47 @@ def decide(
             OpticDecision(optic=UNAIDED_OPTIC),
         )
 
+    # The look sweeps the believed bearing's own angular uncertainty
+    # rather than staring at its centre (`plans/binocular-optic/
+    # stage3b.md`). The attempted-range marking widens to match: the
+    # sweep will visit the whole envelope, so every target in it gets the
+    # look's benefit and must bear the retry rule, or a contact the sweep
+    # only reaches on a later step would never be marked and would
+    # re-trigger a look immediately.
+    fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    sweep = look_sweep(
+        centre_azimuth_deg=chosen.azimuth_deg,
+        centre_elevation_deg=chosen.elevation_deg,
+        bearing_uncertainty_deg=chosen.bearing_uncertainty_deg,
+        fov_full_width_deg=fov_full_width_deg,
+    )
+    envelope_half_width = max(chosen.bearing_uncertainty_deg, 0.0)
+
     attempted = dict(state.attempted_at_range_m)
     for target in worth_looking:
-        if _angular_separation_deg(chosen, target) <= (
-            BINOCULAR_OPTIC.fov_half_angle_deg or 0.0
-        ):
+        if _angular_separation_deg(chosen, target) <= envelope_half_width:
             # Every contact this look covers counts as attempted, not just
             # the one it was centred on -- they all get the benefit, so
             # they all bear the retry rule.
             attempted[target.contact_id] = target.range_m
 
+    first_azimuth, first_elevation = sweep[0]
     return (
         OpticState(
             phase=OpticPhase.GLASSING,
             phase_started_sim=now_sim,
-            look_azimuth_deg=chosen.azimuth_deg,
-            look_elevation_deg=chosen.elevation_deg,
+            look_azimuth_deg=first_azimuth,
+            look_elevation_deg=first_elevation,
+            search_pattern_steps=tuple(sweep),
+            search_step_index=0,
+            look_envelope_azimuth_deg=chosen.azimuth_deg,
+            look_envelope_half_width_deg=envelope_half_width,
             attempted_at_range_m=attempted,
         ),
         OpticDecision(
             optic=BINOCULAR_OPTIC,
-            look_azimuth_deg=chosen.azimuth_deg,
-            look_elevation_deg=chosen.elevation_deg,
+            look_azimuth_deg=first_azimuth,
+            look_elevation_deg=first_elevation,
         ),
     )
 
