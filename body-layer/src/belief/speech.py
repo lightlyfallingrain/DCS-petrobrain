@@ -344,34 +344,57 @@ def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
 
 #: `class`-level `OP_*` buckets -> a human word, for the contact report's
 #: unit-type field. See module docstring's "Contact report format" note.
-#: Every `OP_*` value `perception.object_model` actually assigns (checked
-#: against its table) has an entry; an unmapped value falls back to itself
-#: verbatim (`_unit_type_display`) rather than raising.
+#:
+#: **Exhaustiveness is enforced by a test, not by this comment.** An earlier
+#: version of this note claimed every value `perception.object_model` assigns
+#: had an entry, and it was true when written. `OP_LRSAM` was added to the
+#: object model later and never added here, so a live sortie produced
+#: *"unit at 12 o'clock, 2 kilometres is OP_LRSAM"* -- an internal identifier
+#: read aloud to the pilot. `test_speech.py` now derives the set of assigned
+#: classes from `object_model` itself and asserts both tables cover it, so
+#: the next class added to the object model fails a test instead of reaching
+#: the audio channel.
+#:
+#: The three SAM tiers are spoken apart rather than collapsed to "SAM"
+#: (user, 2026-09-23, from that sortie): the difference between a short-range
+#: and a long-range SAM is the difference between a threat you can fly around
+#: and one you cannot, so flattening them discards the most decision-relevant
+#: thing in the call.
 _OP_CLASS_DISPLAY: Final[dict[str, str]] = {
     "OP_ARMORED": "armor",
     "OP_TRUCK": "truck",
     "OP_INFANTRY": "infantry",
-    "OP_SRSAM": "SAM",
-    "OP_MRSAM": "SAM",
+    "OP_SRSAM": "short range SAM",
+    "OP_MRSAM": "medium range SAM",
+    "OP_LRSAM": "long range SAM",
     "OP_SPAAG": "AAA",
     "OP_ZU23": "AAA",
     "OP_SHIP": "ship",
+    # The object model's default class -- "some group of something", which
+    # is what an unrecognised DCS type falls back to. It was documented here
+    # as unreachable at `class` level; the same sortie disproved that
+    # (*"unit at 9 o'clock, very close is OP_GROUPSOMETHING"*), so it gets a
+    # sayable word rather than an assertion.
+    "OP_GROUPSOMETHING": "group",
 }
 
 #: `_OP_CLASS_DISPLAY`'s plural sibling, for `_plural_unit_type_display`. See
-#: module docstring's "Stage 4b -- the count clause" note. No
-#: `"OP_GROUPSOMETHING"` entry, for the identical reason `_OP_CLASS_DISPLAY`
-#: has none (Sec 4 of the Stage 4b design): a class-level classification can
-#: never hold that value.
+#: module docstring's "Stage 4b -- the count clause" note. It used to carry a
+#: comment explaining why `"OP_GROUPSOMETHING"` needed no entry -- a
+#: class-level classification supposedly could never hold that value. A live
+#: sortie said otherwise, so it has one, and the exhaustiveness test covers
+#: this table too.
 _OP_CLASS_DISPLAY_PLURAL: Final[dict[str, str]] = {
     "OP_ARMORED": "armor",  # already a mass noun -- singular form doubles as plural
     "OP_TRUCK": "trucks",
     "OP_INFANTRY": "infantry",  # mass noun
-    "OP_SRSAM": "SAMs",
-    "OP_MRSAM": "SAMs",
+    "OP_SRSAM": "short range SAMs",
+    "OP_MRSAM": "medium range SAMs",
+    "OP_LRSAM": "long range SAMs",
     "OP_SPAAG": "AAA",  # mass/acronym -- unchanged
     "OP_ZU23": "AAA",
     "OP_SHIP": "ships",
+    "OP_GROUPSOMETHING": "contacts",  # "groups" reads as formations, not contacts
 }
 
 #: Matches a `belief.enrichment.SemanticFact.text` fragment's trailing
@@ -396,6 +419,11 @@ _ENRICHMENT_DISTANCE_RE: Final = re.compile(r"\((\d+)m\)$")
 #: as one blended token, not as characters), so all four get the same fix
 #: rather than leaving three of them inconsistently unfixed.
 _TTS_TOKEN_RESPELL: Final[dict[str, str]] = {
+    # "AAA" reads as three letters; the crew word is "triple A" (user,
+    # 2026-09-23). Unlike the Mi-XX entries this is not a mis-reading fix but
+    # a vocabulary one -- the letters are pronounced correctly and are still
+    # the wrong thing to say.
+    "aaa": "triple A",
     "mi-8": "M I 8",
     "mi-24": "M I 24",
     "mi-26": "M I 26",
@@ -413,6 +441,31 @@ def _respell_for_tts(text: str) -> str:
     )
 
 
+def _unmapped_class_display(value: str, generic: str) -> str:
+    """What to say for a `class` value neither display table maps.
+
+    **Internal identifiers are suppressed; everything else passes through.**
+    A `class`-level value is not always an `OP_*` bucket -- it can be a raw
+    DCS type name or free text from the scope/hybrid channel, and those are
+    already sayable, so replacing them would throw away real information.
+    Only the `OP_` prefix marks a value as this codebase's own vocabulary,
+    which the pilot has no reason to have heard of.
+
+    That distinction was learned the expensive way in both directions. The
+    original behaviour returned every unmapped value verbatim, which is why
+    a sortie heard *"...is OP_LRSAM"*. The first fix replaced every unmapped
+    value with a generic word, which the existing tests immediately caught:
+    it would have reduced *"BMP-2"* to *"contact"*.
+
+    Falling back to a generic word costs one level of specificity, which is
+    what an unrecognised classification means anyway. A vocabulary gap should
+    cost specificity, never intelligibility.
+    """
+    if value.startswith("OP_"):
+        return generic
+    return value
+
+
 def _unit_type_display(value: object, level: object) -> str:
     """The contact report's unit-type field, from `facts["classification"]`'s
     `value`/`level`. See module docstring's "Contact report format" note.
@@ -421,7 +474,12 @@ def _unit_type_display(value: object, level: object) -> str:
     if level == "type" and isinstance(value, str) and value:
         return _respell_for_tts(value)
     if level == "class" and isinstance(value, str) and value:
-        return _OP_CLASS_DISPLAY.get(value, value)
+        # Respelled as well as mapped: the respell table used to be
+        # type-level only, on the reasoning that class words needed no
+        # fixing. "AAA" is a class word and does need it.
+        return _respell_for_tts(
+            _OP_CLASS_DISPLAY.get(value, _unmapped_class_display(value, "contact"))
+        )
     if level == "presence":
         return "ground"
     return "contact"
@@ -441,7 +499,11 @@ def _plural_unit_type_display(value: object, level: object) -> str:
     if level == "type" and isinstance(value, str) and value:
         return _respell_for_tts(value)
     if level == "class" and isinstance(value, str) and value:
-        return _OP_CLASS_DISPLAY_PLURAL.get(value, value)
+        return _respell_for_tts(
+            _OP_CLASS_DISPLAY_PLURAL.get(
+                value, _unmapped_class_display(value, "contacts")
+            )
+        )
     return "contacts"
 
 
@@ -532,7 +594,11 @@ def _format_range_km(range_m: float) -> str:
         range_str = str(int(range_km))
     else:
         range_str = f"{range_km:g}"
-    return f"{range_str} kilometres"
+    # "1 kilometres" was heard live (2026-09-23). Only exactly 1 takes the
+    # singular: 0.5 and 1.5 are both plural in English, which is why this is
+    # an equality check rather than a "less than or equal to one" test.
+    unit = "kilometre" if range_km == 1 else "kilometres"
+    return f"{range_str} {unit}"
 
 
 def _round_enrichment_fragment(text: str) -> str:
