@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 #: every poll, 4113 times in one flight, and a Windows probe plus an hour of
 #: tracing went into a bug that did not exist in the code. A mismatch warning
 #: costs one log line and makes that failure loud instead of invisible.
-EXPECTED_EXPORT_VERSION = "2026-09-23a"
+EXPECTED_EXPORT_VERSION = "2026-09-23b"
 #: Bumped again 2026-09-22 (`b` suffix, `plans/movement-detection/plan.md`
 #: Stage 1) for the `unit_name` field added to `WorldObjectSample` -- the
 #: join key the unit-velocity feed needs (see `schema/world_objects.py`'s
