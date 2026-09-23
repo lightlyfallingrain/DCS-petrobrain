@@ -817,7 +817,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   crewman using binoculars, are the constants anywhere near right) is the next piece of work, and
   nothing above should be read as validated against a live cockpit.
 
-- [x] **Voice command completeness — Stages 1 through 4. DONE**
+- [x] **Voice command completeness — Stages 1 through 5. DONE**
   (`feature/voice-command-completeness`; plan: `plans/voice-command-completeness/plan.md`). 20 of
   41 recognised voice tokens (`report_all`, the nine `report_clock_*`, the eight
   `report_bearing_<compass>`, `report_bearing_deg`, `scan_bearing_deg`) reached `CrewConsole.
@@ -858,12 +858,26 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   command readback has been unbudgeted since readbacks existed, so a routine callout could queue
   immediately behind one rather than waiting for it to finish.
 
-  **Deliberately not done here** (see the plan's Decision 5, both deferred to their own stage,
-  after this one, per user direction): ownship-relative o'clock scan tokens (`scan_clock_1..12`),
-  and making a compass `scan north`/`scan_bearing_deg` actually steer naked-eye gaze — today it
-  only registers an `AttentionArea` and speaks a readback while Petrovich keeps free-scanning, a
-  pre-existing gap this milestone did not touch and that must be said in the sortie card, not
-  discovered in the air. **Unflown as of merge.**
+  **Stage 5 -- ownship-relative o'clock scans, and compass scans that finally steer the naked eye**
+  (both land together, per Decision 5, since they are two partial fixes to the same seam).
+  `scan_clock_1..12` (nine forward hours, mirroring the report family's own clock tokens) give the
+  ownship-relative frame the fine granularity it lacked: `left` alone spans three o'clock hours (a
+  90-degree wedge), and there was no way to say "just there" relative to the nose (user, 2026-09-23:
+  *"'scan 1 o'clock' directs scan at a narrow sector that is own ship relative. That is needed."*).
+  `perception.gaze.ScanPlan` gained a `commanded_legs: tuple[int, ...] | None` field carrying legs
+  directly -- the architect's own generalisation, rather than widening `RelativeSector` with twelve
+  more literals -- so a single o'clock hour is a one-leg plan exactly as `ahead` already is.
+  `logger._active_gaze` now also resolves a compass-only `AttentionArea.sector` task (previously
+  silently skipped, the measured pre-existing defect: `scan north` registered an area and spoke a
+  readback while Petrovich kept free-scanning), converting it to relative legs every poll via the
+  new `perception.gaze.legs_within_wedge`, using that poll's own ownship heading -- so `scan north`
+  finally moves his eyes, and stays correct as the aircraft turns. `belief.attention.AttentionArea`
+  gained a third, sibling directional field, `relative_clock_hour: int | None`, pairwise mutually
+  exclusive with `sector`/`relative_sector`; `project_relative_area` projects it the same way. The
+  binocular search sweep (`logger._search_sweep`) stays gated on `commanded_sector` alone --
+  deliberately not extended to the new commanded-legs cases, out of this stage's scope. Nine new,
+  **unbenched** tokens (no recordings in this corpus), the same cost class as `cancel_scan`/
+  `cancel_watch` before 2026-09-23 -- next corpus recording's job. **Unflown as of merge.**
 
 ## Backlog (body-layer)
 
