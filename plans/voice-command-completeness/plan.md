@@ -284,10 +284,33 @@ and rewriting history to match current naming is how a decision log stops being 
 
 ---
 
-### Decision 5 — `scan <clock>`: recommended, but **not this milestone**
+### Decision 5 — `scan <clock>`: **wanted, and it is Stage 5** (user, 2026-09-23)
 
-The user is right that o'clock granularity closes the report/scan asymmetry naturally. Deferring it
-anyway, for three reasons:
+**Resolved by the user, against the recommendation below.** Their reasoning names a gap in the
+direction vocabulary that this plan had not articulated:
+
+> We have absolute directions: north, south, etc and compass numeric direction like 315 degrees.
+> Own ship relative is currently left/right/ahead. We need finer directions, that is where the
+> o'clock commands come to play. "scan 1 o'clock" directs scan at a narrow sector that is own ship
+> relative. That is needed. Add this as it's own stage and do it after wiring the currently
+> existing commands.
+
+So the vocabulary has **two frames, and only one of them has fine granularity**:
+
+| frame | coarse | fine |
+|---|---|---|
+| absolute | `north`, `north-west`, … | numeric compass (`315 degrees`) |
+| ownship-relative | `left`, `right`, `ahead`, `full` | **missing — this is what o'clock supplies** |
+
+`left` spans three o'clock hours (11, 10, 9) — a 90° wedge. There is no way to say "just there"
+relative to the nose, which is the most natural thing to say when you can see where you are
+pointing. That is the gap, and it is a real one rather than a symmetry argument.
+
+**Sequenced after Stages 1–4**, as directed: wire what already exists first. The deferral reasoning
+below survives as *sequencing* rationale rather than as a refusal, and points 1 and 3 remain the
+real costs of the stage.
+
+Deferred within this milestone for three reasons:
 
 1. **It is new vocabulary, and therefore unbenched** — nine tokens with no recordings, the same cost
    that kept `cancel_scan`/`cancel_watch` off voice until 2026-09-23. Cheapest when the corpus is
@@ -304,8 +327,19 @@ anyway, for three reasons:
 
 That same generalisation is what would also fix the measured gap that compass scans never reach
 gaze — `_active_gaze` could convert an absolute `area.sector` into relative o'clock legs per tick
-using current heading. Do both together as one follow-on milestone; separately they are two partial
-fixes to the same seam. Backlog both in `todo/todo.md`.
+using current heading. **Both land together in Stage 5**; separately they are two partial fixes to
+the same seam.
+
+**Stage 5 — ownship-relative o'clock scans, and compass scans that actually steer the gaze.**
+`ScanPlan` carries legs directly instead of a `RelativeSector`; an o'clock command is a one-leg
+plan, exactly as `ahead` already is. Nine new tokens (`scan_clock_1..12`, matching the nine the
+report family already has), **unbenched** — they should go into the next corpus recording, and
+until then their recognition accuracy is a claim nobody has measured. `_active_gaze` gains the
+absolute→relative conversion per tick so `scan north` finally moves his eyes.
+
+The user's standing rule applies to this stage with particular force: *"if we have the machinery
+for a command to work, it must work from voice commands."* After Stage 5 the answer to "does scan
+work" stops depending on which of three vocabularies the pilot happened to use.
 
 ---
 
@@ -386,15 +420,21 @@ drive gaze inherits a 45° quantisation it cannot undo without revisiting this d
 
 ---
 
-### Decisions Requiring User Input
+### Decisions Requiring User Input — **both answered 2026-09-23**
 
-1. **Wording of the rear-hemisphere answer.** `Can't see north.` is the proposal. It is a new class
-   of reply — an honest refusal — and the register matters more than the words.
-2. **Whether the compass-scan gaze gap blocks this milestone.** The user's rule was *"if we have the
-   machinery for a command to work, it must work."* `scan north` arguably *works* (area, task,
-   readback) and always has; what it does not do is move his eyes. Recommendation: ship this
-   milestone, take the gaze fix as the immediately-following one together with `scan <clock>`. If
-   the user reads "works" as "moves his eyes", that follow-on is really Stage 5 of this plan and the
-   milestone should be scoped accordingly.
+1. **Wording of the rear-hemisphere answer** — **ANSWERED: agreed.** `Can't see north.` It is a new
+   class of reply, an honest refusal, and it is the one place where "clear" would be omniscience's
+   mirror image: claiming a look that the cockpit mask makes physically impossible.
+2. **Whether the compass-scan gaze gap blocks this milestone** — **ANSWERED: it does not block, but
+   it is in scope as Stage 5.** The user reads "works" as including "moves his eyes", and asked for
+   the o'clock family in the same breath (Decision 5 above). Both land together, after Stages 1–4
+   wire what already exists.
+
+   **Report scope was bounded in the same answer:** *"only report what is known or what memory tells
+   (requires memory layer)"*. So a report answers from the live belief store and nothing else — no
+   inference, no extrapolation from where something was heading. Anything richer waits for BL-8's
+   memory layer and is explicitly **not** this milestone's to invent. That also settles what a
+   report says about a contact that has decayed to `lost`: it is no longer known, so it is not
+   reported.
 3. **`REPORT_MAX_GROUPS = 3`.** Worth one sortie's judgment: is a three-group answer useful or too
    long to sit through.
