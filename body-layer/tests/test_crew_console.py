@@ -782,6 +782,28 @@ def test_scan_bearing_n_registers_a_task_with_the_absolute_sector(
     assert task.area.relative_sector is None
 
 
+def test_scan_clock_1_registers_a_task_with_the_relative_clock_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 5's ownship-relative o'clock scan family (`plans/
+    voice-command-completeness/plan.md` Decision 5) -- the fine-grained
+    sibling of `scan_ahead`/`scan_bearing_n`, registering `AttentionArea.
+    relative_clock_hour` instead of `relative_sector`/`sector`."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("scan_clock_1", now_sim=0.0)
+
+    assert lines == ["Scanning one o'clock."]
+    task = tasks.tasks[0]
+    assert task.area.relative_clock_hour == 1
+    assert task.area.relative_sector is None
+    assert task.area.sector is None
+
+
 def test_scan_never_calls_the_aircraft_layer_even_if_it_would_fail() -> None:
     """Replaces a D5-era test that asserted a *failed* trigger still left
     the task registered. There is no trigger on this path any more, so that
@@ -1071,6 +1093,27 @@ def test_cancel_task_names_a_bearing_scan_by_its_compass_word() -> None:
     lines = console.handle_command("cancel_task", now_sim=1.0)
 
     assert lines == ["Copy, stop scan southeast."]
+
+
+def test_cancel_task_names_a_clock_hour_scan_by_its_number_word() -> None:
+    """The o'clock half of the cancel readback (Stage 5) -- `_describe_
+    task_for_speech` reads a third field for these (`area.
+    relative_clock_hour`), so neither the relative- nor the compass-scan
+    test alone covers it."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
+    )
+
+    console.handle_command("scan_clock_1", now_sim=0.0)
+    lines = console.handle_command("cancel_task", now_sim=1.0)
+
+    assert lines == ["Copy, stop scan one o'clock."]
 
 
 # --- plans/watch-as-standing-mode/plan.md: watch as a cancellable mode -----
@@ -1951,6 +1994,7 @@ def test_describe_token_for_confirm_names_the_quantised_sector_not_the_number() 
     assert _describe_token_for_confirm("report_clock_3") == "report three o'clock"
     assert _describe_token_for_confirm("report_bearing_n") == "report north"
     assert _describe_token_for_confirm("report_all") == "report"
+    assert _describe_token_for_confirm("scan_clock_1") == "scan one o'clock"
 
 
 def test_a_confirm_band_bearing_survives_the_affirm_round_trip(

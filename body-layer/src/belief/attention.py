@@ -74,7 +74,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Final, Literal
 
-from perception.gaze import _RELATIVE_SECTOR_WEDGE_DEG
+from perception.gaze import (
+    _RELATIVE_SECTOR_WEDGE_DEG,
+    FOCUS_CONE_HALF_WIDTH_DEG,
+    _gaze_for_clock_hour,
+)
 from perception.gaze import RelativeSector as RelativeSector  # noqa: PLC0414
 from perception.geometry import GeoPosition, angular_delta_deg, bearing_deg, range_m
 
@@ -167,6 +171,19 @@ class AttentionArea:
     #: but it is an approximation, not an exact track.
     relative_sector: RelativeSector | None = None
 
+    #: Set iff this is an ownship-anchored area narrowed to a single
+    #: o'clock hour (Stage 5, `plans/voice-command-completeness/plan.md`
+    #: Decision 5) -- `relative_sector`'s finer-grained sibling for
+    #: `scan_clock_1`..`scan_clock_12` rather than widening
+    #: `perception.gaze.RelativeSector` itself (that module's own
+    #: reasoning: a single hour is not one of the four named sectors, and
+    #: twelve more literals would ripple through the wedge/label tables
+    #: for no shared behaviour). Mutually exclusive with `relative_sector`
+    #: and `sector` -- exactly one directional field, or none, may be set.
+    #: `center`/`wedge_deg` hold its last projection, same staleness
+    #: caveat as `relative_sector`.
+    relative_clock_hour: int | None = None
+
 
 def area_wedge_deg(area: AttentionArea) -> tuple[float, float] | None:
     """`area`'s effective angular wedge as `(center, half_width)` in
@@ -194,20 +211,27 @@ def project_relative_area(
 ) -> AttentionArea:
     """Re-anchor an ownship-relative `area` onto ownship's current pose,
     returning a new frozen `AttentionArea` whose `center` is
-    `ownship_position` and whose `wedge_deg` is `area.relative_sector`
-    rotated by `heading_true_deg` into absolute bearings.
+    `ownship_position` and whose `wedge_deg` is `area.relative_sector` (or,
+    Stage 5, `area.relative_clock_hour`) rotated by `heading_true_deg` into
+    absolute bearings.
 
-    Returns `area` unchanged when `relative_sector` is `None` -- a fixed
-    patch of ground is never re-anchored (module docstring). Callers may
-    apply this to every area indiscriminately.
+    Returns `area` unchanged when neither `relative_sector` nor
+    `relative_clock_hour` is set -- a fixed patch of ground is never
+    re-anchored (module docstring). Callers may apply this to every area
+    indiscriminately.
 
     This is the single function that makes a relative area track ownship;
     see D2 in `plans/f10-command-vocabulary/plan.md` for why the tracking
     lives here and on `logger.py`'s tick rather than inside
     `area_contains`."""
-    if area.relative_sector is None:
+    if area.relative_sector is not None:
+        relative_center, half_width = _RELATIVE_SECTOR_WEDGE_DEG[area.relative_sector]
+    elif area.relative_clock_hour is not None:
+        clock_gaze = _gaze_for_clock_hour(area.relative_clock_hour)
+        relative_center = clock_gaze.center_azimuth_deg
+        half_width = FOCUS_CONE_HALF_WIDTH_DEG
+    else:
         return area
-    relative_center, half_width = _RELATIVE_SECTOR_WEDGE_DEG[area.relative_sector]
     absolute_center = (heading_true_deg + relative_center) % 360.0
     return replace(
         area,

@@ -294,7 +294,12 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   `_active_gaze` converting an absolute `area.sector` into relative o'clock legs per tick using
   current heading, the same generalisation the o'clock-scan item needs anyway).
 
-- [ ] **Ownship-relative o'clock scan tokens — deferred to Stage 5 of `plans/
+  **Closed by Stage 5** (`plans/voice-command-completeness/plan.md`, `logger._active_gaze`):
+  a `sector`-only task now also resolves, converted to `ScanPlan.commanded_legs` every poll via
+  the new `perception.gaze.legs_within_wedge`, using that poll's own ownship heading — `scan north`
+  now steers `NakedEyePerceptionSource`, not just an `AttentionArea`. **Unflown as of merge.**
+
+- [x] **Ownship-relative o'clock scan tokens — deferred to Stage 5 of `plans/
   voice-command-completeness/plan.md`, user direction 2026-09-23.** The command vocabulary has two
   frames and only one has fine granularity: absolute (`north`/`315 degrees`, coarse and fine both)
   vs. ownship-relative (`left`/`right`/`ahead`/`full`, coarse only — `left` spans a 90° wedge, three
@@ -309,6 +314,10 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   and rippling through `_RELATIVE_SECTOR_WEDGE_DEG`/`belief.attention`'s re-export/the label
   tables — the same generalisation that would also fix the compass-scan-gaze gap immediately above,
   which is why the two items are sequenced to land in the same stage.
+
+  **Closed by Stage 5**: `scan_clock_1..12` dispatch through `CrewConsole._handle_scan`'s new
+  `relative_clock_hour` parameter, registering a one-leg `ScanPlan.commanded_legs`; the nine
+  tokens are unbenched, as flagged above — next corpus recording's job. **Unflown as of merge.**
 
 
 - [ ] **Stage 5 road junctions: pathological single-chunk stalls — CONFIRMED DATA-DEPENDENT.** Raised

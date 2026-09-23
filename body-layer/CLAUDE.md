@@ -670,6 +670,17 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   `NakedEyePerceptionSource` consumes it), and call `detection_trace_writer.DetectionTraceWriter.
   write_poll` immediately after each `runner.run_once()` — after `ingest`/`tick` have already run
   against that poll's `Observation`s, so writing the trace can never influence what was ingested.
+
+  **`_active_gaze` (Stage 5, `plans/voice-command-completeness/plan.md` Decision 5) now takes a
+  `heading_true_deg` parameter** and resolves every directional field `AttentionArea` can carry, not
+  only `relative_sector`: a `relative_clock_hour` (the new o'clock scan tokens) resolves to a
+  one-leg `ScanPlan.commanded_legs`; a compass-only `sector` (previously silently skipped, falling
+  through to `FREE_SCAN_PLAN`) converts to relative legs via the new `perception.gaze.
+  legs_within_wedge`, computed fresh every poll from that poll's own ownship heading — this is the
+  fix for the measured pre-existing defect that `scan north` registered an `AttentionArea` and spoke
+  a readback while Petrovich kept free-scanning. `run_once` passes `ownship.heading_true_deg`; test
+  call sites default it to `0.0`. `_search_sweep`/`_format_gaze_line` stay gated on `commanded_
+  sector` alone for the binocular band, extended only for the debug overlay's own label.
 - `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`COCKPIT_MASK`/`RANGE_OR_SIZE`/
   `TERRAIN_LOS`/`ADMITTED`), the mutable `DetectionTrace` record (one per candidate per poll,
   ground truth by construction, same footing as `Observation`/`WorldObjectCandidate` — no
@@ -949,6 +960,31 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   fixing a separate latent defect this milestone's reports made audible: every command readback had
   been unbudgeted since readbacks existed, so a routine callout could queue immediately behind one
   instead of waiting for it to finish speaking.
+
+  **Stage 5 adds `scan_clock_1..12`, the ownship-relative o'clock scan family** (`plans/
+  voice-command-completeness/plan.md` Decision 5, user 2026-09-23) — `_CLOCK_SCAN_TOKENS` dispatches
+  into `_handle_scan`'s new `relative_clock_hour: int | None` parameter, exactly like the existing
+  `sector`/`relative_sector` parameters, registering a `belief.tasks.PendingIntent` whose
+  `AttentionArea.relative_clock_hour` is set instead. `_describe_task_for_speech`/`_describe_token_
+  for_confirm` gained matching branches so cancel/confirm wording names the hour the same way the
+  other two families already do. **Stage 5 also fixes the measured pre-existing defect that a
+  compass scan never steered gaze at all** — see `perception/gaze.py`'s and `logger.py`'s own
+  Structure entries below for the mechanism (`ScanPlan.commanded_legs`, `logger._active_gaze`'s
+  absolute→relative conversion). The nine new tokens are **unbenched**, same cost class as
+  `cancel_scan`/`cancel_watch` before 2026-09-23.
+- `src/perception/gaze.py` — `ScanPlan` (module docstring: pure per-`t_sim` `gaze_at`), unchanged
+  in its core shape since 2C except for one Stage 5 addition (`plans/voice-command-completeness/
+  plan.md` Decision 5): a `commanded_legs: tuple[int, ...] | None` field carrying o'clock legs
+  directly, mutually exclusive with the existing `commanded_sector: RelativeSector | None` —
+  **the architect's own generalisation, deliberately not a wider `RelativeSector` literal**: a
+  single o'clock hour (`scan_clock_1`) is a one-leg `commanded_legs` tuple, exactly as `ahead`
+  already degenerates to one leg under `commanded_sector`, and an absolute compass scan converts to
+  its current-heading-relative legs the same way (see `logger.py`'s entry). `legs_within_wedge(
+  center_azimuth_deg, half_width_deg)` is the new public helper this conversion needs: every o'clock
+  hour whose own gaze center falls within a wedge, ordered by signed offset (a left-to-right sweep)
+  — `_SECTOR_LEGS`'s per-sector tables generalised to an arbitrary wedge. `gaze_at` picks
+  `commanded_sector` over `commanded_legs` over free scan, in that order (mutual exclusivity means
+  at most one of the first two is ever set).
 - `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
   Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
   Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into
