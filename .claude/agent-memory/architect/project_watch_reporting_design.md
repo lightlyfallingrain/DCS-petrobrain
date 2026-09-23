@@ -1,0 +1,68 @@
+---
+name: watch-reporting-design
+description: Watch-reporting plan (2026-09-24) — the speech allowlist that made three of four triggers already-built or already-silent, the belief-keyed engagement envelope, and why terrain LOS replaced the altitude column.
+metadata:
+  type: project
+---
+
+`plans/watch-reporting/plan.md`, planned 2026-09-24 against `feature/binocular-optic` merged into a
+worktree. Four load-bearing findings worth keeping, because each one inverted what the brief assumed.
+
+**1. `callouts._TEMPLATED_KINDS` is the speech allowlist, and it is the first thing to read before
+planning any "Petrovich should say X" milestone.** It holds only
+`{CONTACT_DETECTED, CONTACT_REACQUIRED, CONTACT_CLASSIFICATION_CHANGED}`. Consequences that were not
+visible from the event list alone: reacquisition **already speaks for every contact** (a requested
+trigger that was already done), and `CONTACT_MOTION_CHANGED` **fires and has never been spoken**
+(`movement-detection` built the event and stopped). Attention today changes *ordering*
+(`callout_priority`'s `-attention_rank`), never *eligibility* — so "watched contacts report
+themselves" is the project's first watched-only speech.
+
+**Why:** the brief said three of four triggers "have machinery", which was true of the *events* and
+false of the *speech*. Reading the event list and the attention field would have produced a plan that
+duplicated reacquisition and missed that motion was silent.
+
+**How to apply:** for any reporting milestone, check the allowlist and the priority key before
+believing an event reaches the pilot.
+
+**2. Gate placement is a real choice, and this plan used both.** Motion is gated at the *speech*
+layer (event stays universal, `callouts.tick` filters on effective attention) following
+`CONTACT_CARDINALITY_CHANGED`'s "real event, never spoken" precedent. The two new kinds are gated at
+*emission*, because their per-contact bookkeeping is only meaningful for a watched contact and
+emitting theatre-wide would flood `store.events`. Seeding conventions came out opposite and both
+matter: range-crossing seeds silently (or `follow` blurts the range the readback just gave), engagement
+seeds as "outside" (so recognising a SAM you are already inside fires).
+
+**3. The envelope lookup's *signature* is the no-omniscience guard.** `belief/threat.py`'s
+`envelope_for(classification: ClassificationBelief)` structurally cannot be handed ground truth,
+because it does not accept the type that carries it. Presence/unknown → `None`: a dot has no envelope.
+The class-level rollup is **derived at import** by joining threat rows through
+`perception.object_model`'s existing keyword table, so class membership has exactly one definition and
+cannot drift. Fell out of that: our `OP_SRSAM` bucket spans SA-3 (~18 km) to SA-13 (~5 km), a 4×
+spread — the class-level warning is early and wrong in magnitude by construction.
+
+**Why:** `body-layer/ROADMAP.md`'s deferred threat-band item warns that computing this from ground
+truth would be "an omniscience backdoor wearing a prioritisation label — and an invisible one".
+
+**4. Terrain LOS replaced the altitude column, and the reasoning generalises.** The Hoggit table's
+altitude figures are all *ceilings*; a Mi-24P at 50–150 m AGL is never near one, so the gate could
+only ever return the same answer. Dropped the column entirely rather than storing it — a number that
+can never bind is worse than absent, because a later reader assumes it is load-bearing. What actually
+defends a low helicopter is terrain masking, and `perception.geometry.line_of_sight_clear` (wrapping
+world-model's `query.line_of_sight`) was already in-process and already gating every sighting. The
+threat test became `min <= range <= max and los_clear(...)` with no altitude term, which is
+**symmetric with perception** — he cannot see through terrain, neither can the SAM, one primitive
+answers both.
+
+**Wiring detail that avoids an import cycle:** `enrichment.py` imports `contacts.py`, so
+`ContactStore.tick` can never take an `EnrichmentContext`. Pass a bare `GeoPosition` for ownship and
+**inject `los_clear` as a callable** closed over `conn`/`theatre` in `logger.run_once`. Keeps
+`contacts.py` free of world-model imports, keeps the new blocks in the five-block loop with their
+free `EVENT_COOLDOWN_S`, and lets fixtures test hysteresis with a lambda instead of a terrain
+database. **Reusable pattern** for anything else that wants a world-model fact inside `contacts.py`.
+
+**How to apply:** when a plan proposes gating on tabulated data, check the value's range against the
+aircraft's actual operating envelope before ingesting it. And check whether an already-built
+primitive models the real mechanism better than the table does.
+
+See also [[project_bl4_attention_events]], [[project_callout_scheduling_design]],
+[[project_movement_detection_design]], [[project_voice_command_completeness]].
