@@ -64,6 +64,7 @@ def _telemetry_dict() -> dict[str, Any]:
         "pitch_rad": 0.0,
         "bank_rad": 0.0,
         "altitude_msl_m": 350.0,
+        "altitude_agl_m": 350.0,
     }
 
 
@@ -583,6 +584,7 @@ def _console_telemetry_dict() -> dict[str, Any]:
         "pitch_rad": 0.0,
         "bank_rad": 0.0,
         "altitude_msl_m": 500.0,
+        "altitude_agl_m": 500.0,
     }
 
 

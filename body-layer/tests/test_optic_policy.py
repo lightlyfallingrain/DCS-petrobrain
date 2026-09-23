@@ -533,3 +533,195 @@ class TestLookTargetGeometry:
         )
 
         assert target.azimuth_deg == -90.0
+
+
+class TestSearchPattern:
+    """`plans/binocular-optic/plan.md` D6/Stage 3. Range is the vertical
+    axis, so "close to far" and "as high as there is ground ahead" are one
+    instruction, and "do not scan at sky" is a property of the geometry
+    rather than a clamp."""
+
+    def _pattern(self, *, altitude_agl_m: float) -> list[tuple[float, float]]:
+        from belief.optic_policy import search_pattern
+
+        return search_pattern(
+            sector_half_width_deg=15.0,
+            near_m=2_333.0,
+            far_m=5_647.0,
+            altitude_agl_m=altitude_agl_m,
+            fov_full_width_deg=8.5,
+        )
+
+    def test_nothing_is_ever_aimed_at_the_sky(self) -> None:
+        for altitude in (60.0, 120.0, 500.0, 1_000.0):
+            assert all(
+                elevation <= 0.0
+                for _, elevation in self._pattern(altitude_agl_m=altitude)
+            ), altitude
+
+    def test_the_sweep_collapses_to_one_band_at_helicopter_altitude(self) -> None:
+        """The finding that stops this being a pointlessly slow vertical
+        crawl at low level: the whole 2.3-5.6 km band spans under two
+        degrees of depression at 120 m AGL, far inside a binocular's own
+        field, so the S-shape has nothing to step through."""
+        elevations = {elevation for _, elevation in self._pattern(altitude_agl_m=120.0)}
+        assert len(elevations) == 1
+
+    def test_it_becomes_a_real_raster_when_high(self) -> None:
+        elevations = {
+            elevation for _, elevation in self._pattern(altitude_agl_m=1_000.0)
+        }
+        assert len(elevations) > 1
+
+    def test_successive_bands_sweep_in_opposite_directions(self) -> None:
+        """The S in the S-shape -- sweeping back the way you came costs no
+        extra movement, where restarting at the same edge every band
+        does."""
+        pattern = self._pattern(altitude_agl_m=1_000.0)
+        first_band_elevation = pattern[0][1]
+        first_band = [az for az, el in pattern if el == first_band_elevation]
+        second_band = [az for az, el in pattern if el != first_band_elevation]
+        assert first_band == sorted(first_band)
+        assert second_band == sorted(second_band, reverse=True)
+
+    def test_the_sector_is_capped_at_thirty_degrees(self) -> None:
+        """User: "cap binocular scan at 30 deg azimuth, there's no wide
+        area binocular scan". A wider commanded scan is swept across its
+        middle rather than taking a minute to cover."""
+        from belief.optic_policy import MAX_SEARCH_SECTOR_HALF_WIDTH_DEG, search_pattern
+
+        wide = search_pattern(
+            sector_half_width_deg=90.0,
+            near_m=2_333.0,
+            far_m=5_647.0,
+            altitude_agl_m=120.0,
+            fov_full_width_deg=8.5,
+        )
+        assert all(
+            abs(azimuth) <= MAX_SEARCH_SECTOR_HALF_WIDTH_DEG for azimuth, _ in wide
+        )
+
+    def test_the_sweep_covers_the_sector(self) -> None:
+        pattern = self._pattern(altitude_agl_m=120.0)
+        azimuths = [azimuth for azimuth, _ in pattern]
+        assert min(azimuths) < -7.0
+        assert max(azimuths) > 7.0
+
+
+class TestSearchPhase:
+    def test_a_commanded_sector_is_swept_when_nothing_needs_resolving(self) -> None:
+        from belief.optic_policy import OpticPhase
+
+        sweep = [(-10.0, -2.0), (0.0, -2.0), (10.0, -2.0)]
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=sweep,
+        )
+        assert state.phase is OpticPhase.SEARCHING
+        assert decision.optic is BINOCULAR_OPTIC
+        assert (decision.look_azimuth_deg, decision.look_elevation_deg) == sweep[0]
+
+    def test_resolving_a_contact_beats_searching_for_another(self) -> None:
+        """The user's own sequencing: detected targets get the dwell
+        behaviour. A contact already found and resolvable is worth more
+        than looking for one that may not exist."""
+        from belief.optic_policy import OpticPhase
+
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[_target()],
+            steady=True,
+            search=[(-10.0, -2.0), (0.0, -2.0)],
+        )
+        assert state.phase is OpticPhase.GLASSING
+
+    def test_the_sweep_advances_with_time(self) -> None:
+        from belief.optic_policy import SEARCH_STEP_S
+
+        sweep = [(-10.0, -2.0), (0.0, -2.0), (10.0, -2.0)]
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=sweep,
+        )
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + SEARCH_STEP_S * 1.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=sweep,
+        )
+        assert (decision.look_azimuth_deg, decision.look_elevation_deg) == sweep[1]
+
+    def test_the_sweep_ends_after_its_last_step(self) -> None:
+        """One complete area scan, not a loop -- the user asked for a
+        single pass, and a repeating sweep would never hand the naked eye
+        back."""
+        from belief.optic_policy import SEARCH_STEP_S, OpticPhase
+
+        sweep = [(-10.0, -2.0), (0.0, -2.0)]
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=sweep,
+        )
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + SEARCH_STEP_S * len(sweep),
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=sweep,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+
+    def test_manoeuvring_ends_a_sweep_too(self) -> None:
+        from belief.optic_policy import OpticPhase
+
+        sweep = [(-10.0, -2.0), (0.0, -2.0)]
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+            search=sweep,
+        )
+        state, _decision = decide(
+            state,
+            now_sim=_CYCLE_S + 0.1,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=False,
+            search=sweep,
+        )
+        assert state.phase is OpticPhase.SCANNING
+
+    def test_no_search_is_offered_for_a_free_scan(self) -> None:
+        """Free scan has no sector to sweep, so the empty pattern simply
+        restarts the scan -- no branch needed at the call site."""
+        from belief.optic_policy import OpticPhase
+
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC

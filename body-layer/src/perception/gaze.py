@@ -143,6 +143,15 @@ _RELATIVE_SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = {
     "full": (0.0, 90.0),
 }
 
+#: Public alias for the table above, so a caller outside this module can
+#: ask how wide a commanded sector is without reaching for a private name.
+#: The binocular search needs exactly that
+#: (`belief.optic_policy.search_pattern`'s `sector_half_width_deg`), and it
+#: is the same table `belief.attention.AttentionArea` already reads.
+SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = (
+    _RELATIVE_SECTOR_WEDGE_DEG
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Gaze:

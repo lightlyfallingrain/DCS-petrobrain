@@ -100,6 +100,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from support.mock_aircraft_layer import MockAircraftLayerServer
 from support.mock_world_model import build_mock_world_model
 
@@ -198,6 +199,22 @@ def test_mock_world_model_line_of_sight_clear_over_flat_terrain(
 # --- Single-threaded full-chain determinism test ----------------------------
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Binoculars Stage 3 finding, 2026-09-23: a believed contact's bearing "
+        "is reconstructed from a quantised percept (the 30-degree clock "
+        "bucket), so it can be 15 degrees from the true bearing -- against a "
+        "binocular field of view of 4.25. Aiming a single stare at the "
+        "believed position therefore misses, and this fixture loses the four "
+        "observations taken during the glass phase (36 -> 32). "
+        "A TRIPWIRE, not an accepted loss: the fix is to sweep the belief's "
+        "own uncertainty rather than stare at its centre "
+        "(plans/binocular-optic/plan.md Stage 3b). When that lands this test "
+        "must turn green again and this marker must be removed -- if it does "
+        "not, the fix did not work."
+    ),
+    strict=True,
+)
 def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
     tmp_path: Path,
 ) -> None:

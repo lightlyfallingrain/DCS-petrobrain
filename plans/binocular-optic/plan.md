@@ -243,6 +243,31 @@ rule. Three things the building of it changed or revealed:
 **Stage 3 — binocular search within a commanded sector.** D6's raster, sky clamp and far-band
 restriction, alternating with the naked-eye scan.
 
+**Stage 3b — a look is a sweep, not a stare. NOT BUILT; this is the next piece of work.**
+
+Found while building Stage 3, by a test rather than by reasoning: **a believed contact's bearing is
+reconstructed from a quantised percept — the reporting vocabulary's 30° clock bucket — so it can
+sit up to 15° from the true bearing. The binocular field of view is ±4.25°.** Aiming a single stare
+at the believed position therefore misses the target most of the time.
+
+`test_mock_flight_chain` caught it as four vanished observations (36 → 32) and is now `xfail`
+`strict=True` with that reason: a tripwire, not an accepted loss. When this stage lands the test
+must turn green and the marker must be removed; if it does not, the fix did not work.
+
+**The fix is already implied by the design rather than new**: he knows it is *"around two
+o'clock"*, so he sweeps around two o'clock. A look becomes a small sweep across the belief's own
+angular uncertainty, using the same stepping machinery `search_pattern` already provides, and
+degenerating to a single step when the uncertainty is smaller than the field of view. `LookTarget`
+already carries `bearing_uncertainty_deg` for it (defaulted, unused).
+
+Two things to settle while building it:
+
+- **Where the uncertainty comes from.** Half a clock bucket (15°) is the honest default, but a
+  contact tracked over several polls may deserve better, and `Contact.last_position_uncertainty_m`
+  already exists as a metres figure that converts to an angle at a known range.
+- **How the 6 s cap divides.** Four steps at 1.5 s each fits the cap exactly, but whether that is
+  enough dwell per step for a recognition is a sortie question.
+
 **Stage 4 — sortie.** Whether it *feels* like a crewman using binoculars, and whether the budget
 and lockout are anywhere near right. Expect the constants to move once, as they did after every
 other perception milestone.

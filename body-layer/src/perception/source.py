@@ -116,6 +116,20 @@ class OwnshipState:
     pitch_deg: float = 0.0
     bank_deg: float = 0.0
 
+    #: Height above the ground below, metres (`plans/binocular-optic/
+    #: plan.md` Stage 3). Already on the wire (`TelemetrySample.
+    #: altitude_agl_m`) and simply never carried across before, because
+    #: nothing needed it: `alt_m` is MSL, which is the right frame for
+    #: comparing ownship against a contact's own altitude.
+    #:
+    #: **The binocular search needs the other one.** How far below the
+    #: horizon a patch of ground at range R sits is `atan(agl / R)`, and
+    #: over high terrain MSL is not even close -- a sweep aimed with MSL
+    #: over a 1500 m plateau would point at the sky. Defaults to `0.0` so
+    #: every existing constructor (test fixtures included) is unchanged;
+    #: only `from_telemetry_dict` supplies a real value.
+    alt_agl_m: float = 0.0
+
     @staticmethod
     def from_telemetry_dict(data: dict[str, Any]) -> OwnshipState:
         """Convert one aircraft-layer `GET /telemetry/latest` JSON object
@@ -137,6 +151,7 @@ class OwnshipState:
             heading_true_deg=math.degrees(float(data["heading_true_rad"])) % 360.0,
             pitch_deg=math.degrees(float(data["pitch_rad"])),
             bank_deg=math.degrees(float(data["bank_rad"])),
+            alt_agl_m=float(data["altitude_agl_m"]),
         )
 
 
