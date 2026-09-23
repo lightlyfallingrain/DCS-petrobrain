@@ -119,7 +119,7 @@ local socket = require("socket.core")
 -- shipped 2026-09-09 and the whole chain was correct end to end; a Windows
 -- probe and an hour of tracing went into a bug that did not exist in the code,
 -- because nothing recorded which version of this file had produced the data.
-local EXPORT_SCRIPT_VERSION = "2026-09-23a"
+local EXPORT_SCRIPT_VERSION = "2026-09-23b"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -269,34 +269,6 @@ local PTT_EPSILON = 0.01
 
 local last_ptt_sent = nil
 
---: Reads the pilot's trigger and sends a line only when it has moved.
---: Deliberately not part of the telemetry line: that line is throttled to
---: 5 Hz and this must not be, and a trigger that changes twice a minute
---: has no business riding a stream that ships ten fields twenty times a
---: second.
-local function push_ptt_state(t)
-    if client == nil then
-        return -- nothing to send to yet; the next change will be sent
-    end
-    local ptt = safe_call(function()
-        return GetDevice(0):get_argument_value(ARG_PILOT_PTT)
-    end)
-    if ptt == nil then
-        return -- no mainpanel device (briefing screen, wrong airframe)
-    end
-    if last_ptt_sent ~= nil and math.abs(ptt - last_ptt_sent) < PTT_EPSILON then
-        return
-    end
-    last_ptt_sent = ptt
-    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
-        .. ',"ptt":' .. string.format("%.3f", ptt) .. '}\n')
-    if not ok then
-        debug_log("ptt send failed: " .. tostring(err))
-        client:close()
-        client = nil
-    end
-end
-
 
 local function encode_json_line(fields, order)
     local parts = {}
@@ -438,6 +410,53 @@ local function safe_call(fn)
         return nil, nil, nil
     end
     return a, b, c
+end
+
+--: Reads the pilot's trigger and sends a line only when it has moved.
+--: Deliberately not part of the telemetry line: that line is throttled to
+--: 5 Hz and this must not be, and a trigger that changes twice a minute
+--: has no business riding a stream that ships ten fields twenty times a
+--: second.
+--:
+--: **This must stay below `safe_call`.** It lived above it in the first
+--: version, and in Lua a `local` referenced before its declaration is not
+--: an upvalue at all -- it compiles as a *global* lookup, which is nil at
+--: call time. Every frame then tried to call nil, the trigger never
+--: published a single line, and the capture process saw a talk control
+--: that was simply never pressed. The syntax is perfectly valid, so
+--: `luac -p` passes it: this is the failure mode that check cannot see.
+local ptt_logged_first = false
+
+local function push_ptt_state(t)
+    if client == nil then
+        return -- nothing to send to yet; the next change will be sent
+    end
+    local ptt = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_PILOT_PTT)
+    end)
+    if ptt == nil then
+        return -- no mainpanel device (briefing screen, wrong airframe)
+    end
+    if last_ptt_sent ~= nil and math.abs(ptt - last_ptt_sent) < PTT_EPSILON then
+        return
+    end
+    last_ptt_sent = ptt
+    if not ptt_logged_first then
+        -- One line, the first time the trigger moves at all. Cheap, and it
+        -- is the difference between "the trigger is not wired" and "the
+        -- trigger is wired and the value never changed" -- two failures
+        -- that look identical from the capture process.
+        ptt_logged_first = true
+        debug_log("ptt first movement: arg " .. tostring(ARG_PILOT_PTT)
+            .. " = " .. tostring(ptt))
+    end
+    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
+        .. ',"ptt":' .. string.format("%.3f", ptt) .. '}\n')
+    if not ok then
+        debug_log("ptt send failed: " .. tostring(err))
+        client:close()
+        client = nil
+    end
 end
 
 -- BL-6's inbound command listener (plans/bl6-commands-inspect-adapt/
