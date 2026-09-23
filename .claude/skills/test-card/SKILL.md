@@ -74,6 +74,13 @@ arrived that way rather than in answer to a question.
 
 - **Every command run**, or labelled `UNVERIFIED` where it genuinely cannot be (needs Windows,
   needs DCS, needs a sortie). Both are fine; a confident guess is not.
+- **Every command carries the directory it runs in**, whenever a card spans more than one
+  subproject. The voice card put the collector and the capture process in one Windows block, both
+  prefixed `set PYTHONPATH=src` and neither with a `cd` — so the second was run from the first
+  one's directory and died on `ModuleNotFoundError`, mid-test. Each subproject has its own `src`,
+  and `PYTHONPATH=src` means nothing without knowing where you are standing. A block of commands
+  that silently assumes the previous block's working directory is a card that only works for
+  whoever wrote it.
 - **Conflicts between tests surfaced.** The Stage 6 card nearly told the user to run the PTT probe
   as a rider on the same flight — but `Export.probe-ptt.lua` replaces the production `Export.lua`
   and kills the collector, so it needs its own session. That kind of conflict is invisible unless
