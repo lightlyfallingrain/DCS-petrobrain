@@ -30,10 +30,14 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import json
 import platform
 import select
 import sys
-from collections.abc import Iterator
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Callable, Iterator
 from ctypes import wintypes
 from typing import Protocol, Self
 
@@ -346,3 +350,110 @@ def _read_key_nonblocking() -> str | None:
         return None
     char = sys.stdin.read(1)
     return char.lower() if char else None
+
+
+#: How long the trigger must sit at its intercom stop before it counts as
+#: held. **This is not a tuning knob, it is a measurement.** A full press
+#: transits the intercom stop on its way to the radio stop -- 19 ms and
+#: 32 ms in the two presses the live probe captured (2026-09-23,
+#: `aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md`, third
+#: addendum) -- because a two-stage mechanical trigger must pass through
+#: its first stop to reach its second. Without a debounce, every radio call
+#: to ATC would open a capture for ~20 ms. 100 ms is three times the worst
+#: observed transit and still an order of magnitude below any deliberate
+#: press-and-speak gesture.
+INTERCOM_DEBOUNCE_S = 0.1
+
+#: Poll rate for `GET /ptt/state`. Fast enough that a press is noticed well
+#: inside the audio device's own ~140 ms open time (so the poll is never the
+#: thing that clips a first syllable), slow enough not to hammer a
+#: `ThreadingHTTPServer` sharing a box with DCS.
+DEFAULT_DCS_POLL_HZ = 30.0
+
+
+class DcsPTT:
+    """`PTTSource` over the aircraft's own intercom trigger (Stage 5).
+
+    Reads `GET /ptt/state` on a running collector, which publishes arg 738
+    as `Export.lua` reports it. The collector is on the same machine as the
+    capture process, so this is an HTTP hop over loopback -- deliberately,
+    because it keeps the subproject boundary the project already uses rather
+    than importing across it. (If capture ever moves *into* the collector,
+    which `audio-adapter/ROADMAP.md` argues it should at this stage, this
+    class is what disappears.)
+
+    **Two behaviours beyond "is it pressed", both from measurement:**
+
+    - **The intercom stop is debounced** (`INTERCOM_DEBOUNCE_S`), because a
+      full press transits it.
+    - **A full press latches a discard.** Debouncing stops a capture
+      *starting* on a fast radio press; it cannot help a slow one that
+      dwells past the window. So if the trigger ever reaches the radio stop
+      while a capture is running, `discard_requested()` returns True and the
+      clip is dropped -- the player moved to the radio, and what they said
+      was not addressed to the crew.
+
+    A failed read raises `PTTError` rather than reporting "not pressed":
+    a dead collector and a released trigger must not look the same.
+    """
+
+    def __init__(
+        self,
+        collector_url: str,
+        timeout_s: float = 1.0,
+        debounce_s: float = INTERCOM_DEBOUNCE_S,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._url = f"{collector_url.rstrip('/')}/ptt/state"
+        self._timeout_s = timeout_s
+        self._debounce_s = debounce_s
+        self._monotonic = monotonic
+        self._intercom_since: float | None = None
+        self._radio_latched = False
+
+    def _read(self) -> dict[str, object] | None:
+        try:
+            with urllib.request.urlopen(self._url, timeout=self._timeout_s) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+            raise PTTError(f"could not read {self._url}: {exc}") from exc
+        if payload is None:
+            # The trigger has not moved since the collector started. That is
+            # the ordinary state at startup, not a failure -- Export.lua
+            # sends a line only on change -- and it means "not pressed".
+            return None
+        if not isinstance(payload, dict):
+            raise PTTError(
+                f"{self._url} returned {type(payload).__name__}, not an object"
+            )
+        return payload
+
+    def is_down(self) -> bool:
+        payload = self._read()
+        if payload is None:
+            self._intercom_since = None
+            return False
+
+        if bool(payload.get("radio")):
+            # Latched, not returned: the discard is consumed at release, by
+            # which time the trigger has usually passed back through 0.
+            self._radio_latched = True
+            self._intercom_since = None
+            return False
+
+        if not bool(payload.get("intercom")):
+            self._intercom_since = None
+            return False
+
+        now = self._monotonic()
+        if self._intercom_since is None:
+            self._intercom_since = now
+        return (now - self._intercom_since) >= self._debounce_s
+
+    def discard_requested(self) -> bool:
+        """True once if the trigger reached the radio stop since the last
+        call. Consumed by reading it -- the capture loop asks exactly once,
+        at release."""
+        latched = self._radio_latched
+        self._radio_latched = False
+        return latched

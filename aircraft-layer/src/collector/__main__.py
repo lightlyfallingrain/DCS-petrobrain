@@ -55,6 +55,7 @@ from collector.cache import (
     F10CommandQueue,
     PetrovichIndicationCache,
     PetrovichWheelCache,
+    PttCache,
     TelemetryCache,
     UnitVelocityCache,
     WorldObjectsCache,
@@ -182,11 +183,16 @@ def main() -> None:
     )
     unit_velocity_receiver_thread.start()
 
+    # One cache, handed to both halves: the collector fills it from
+    # Export.lua's ptt lines and the API serves it to the capture process.
+    ptt_cache = PttCache()
+
     collector = CollectorServer(
         cache,
         world_objects_cache,
         petrovich_indication_cache,
         petrovich_wheel_cache,
+        ptt_cache=ptt_cache,
         host=args.host,
         port=args.port,
     )
@@ -206,6 +212,7 @@ def main() -> None:
         f10_command_queue=f10_command_queue,
         audio_sender=audio_sender,
         unit_velocity_cache=unit_velocity_cache,
+        ptt_cache=ptt_cache,
     )
     api.open()
     api_thread = threading.Thread(target=api.serve_forever, daemon=True)

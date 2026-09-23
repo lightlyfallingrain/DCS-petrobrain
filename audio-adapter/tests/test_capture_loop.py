@@ -225,3 +225,63 @@ def test_ptt_failure_propagates() -> None:
     )
     with pytest.raises(RuntimeError, match="unplugged"):
         loop.tick()
+
+
+class _Discarding:
+    """A `discard_if` hook the test drives directly."""
+
+    def __init__(self, value: bool = False) -> None:
+        self.value = value
+        self.calls = 0
+
+    def __call__(self) -> bool:
+        self.calls += 1
+        return self.value
+
+
+def test_a_radio_press_discards_the_clip() -> None:
+    """Stage 5: reaching the radio stop mid-utterance means the player was
+    talking to ATC, not the crew. The clip is dropped rather than posted --
+    and dropped for a stated reason, so it is distinguishable from a clip
+    the gate rejected."""
+    sink = FakeSink()
+    loop, ptt, _, _, _ = build(sink=sink)
+    discard = _Discarding(value=True)
+    loop._discard_if = discard
+
+    ptt.down = True
+    loop.tick()
+    ptt.down = False
+    events = loop.tick()
+
+    assert [event.kind for event in events] == ["dropped"]
+    assert "radio" in events[0].detail
+    assert sink.sent == []
+
+
+def test_the_discard_hook_is_asked_once_per_release() -> None:
+    """It consumes a latch on the `DcsPTT` side, so asking twice would
+    throw one away."""
+    loop, ptt, _, _, _ = build()
+    discard = _Discarding(value=False)
+    loop._discard_if = discard
+
+    ptt.down = True
+    loop.tick()
+    loop.tick()  # still held: nothing to ask about yet
+    assert discard.calls == 0
+
+    ptt.down = False
+    loop.tick()
+    assert discard.calls == 1
+
+
+def test_no_hook_means_no_discard() -> None:
+    """The joystick and keyboard sources have nothing to say about radio
+    presses, so they pass no hook and nothing changes for them."""
+    loop, ptt, _, sink, _ = build()
+    ptt.down = True
+    loop.tick()
+    ptt.down = False
+    assert [event.kind for event in loop.tick()] == ["sent"]
+    assert sink.sent == [b"RIFFfake"]
