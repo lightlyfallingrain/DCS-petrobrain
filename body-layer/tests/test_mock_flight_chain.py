@@ -100,7 +100,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import pytest
 from support.mock_aircraft_layer import MockAircraftLayerServer
 from support.mock_world_model import build_mock_world_model
 
@@ -199,22 +198,6 @@ def test_mock_world_model_line_of_sight_clear_over_flat_terrain(
 # --- Single-threaded full-chain determinism test ----------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Binoculars Stage 3 finding, 2026-09-23: a believed contact's bearing "
-        "is reconstructed from a quantised percept (the 30-degree clock "
-        "bucket), so it can be 15 degrees from the true bearing -- against a "
-        "binocular field of view of 4.25. Aiming a single stare at the "
-        "believed position therefore misses, and this fixture loses the four "
-        "observations taken during the glass phase (36 -> 32). "
-        "A TRIPWIRE, not an accepted loss: the fix is to sweep the belief's "
-        "own uncertainty rather than stare at its centre "
-        "(plans/binocular-optic/plan.md Stage 3b). When that lands this test "
-        "must turn green again and this marker must be removed -- if it does "
-        "not, the fix did not work."
-    ),
-    strict=True,
-)
 def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
     tmp_path: Path,
 ) -> None:
@@ -303,7 +286,25 @@ def test_mock_flight_chain_single_threaded_reaches_expected_contact_state(
         # pre-scan, `plans/group-contact-model/plan.md` Stage 3a) has
         # nothing to exclude here any more -- there is only ever one
         # candidate contact in this fixture.
-        assert len(runner.store.observations) == 36
+        # **32, not 36, since the binocular cycle landed (2026-09-23).** Four
+        # polls (t=20, 25, 50, 55) are spent in a binocular *search*: this
+        # fixture carries a permanent `scan_area("ahead")` task, so
+        # `logger._search_sweep` is non-empty and the completed scan phase
+        # hands over to `OpticPhase.SEARCHING`. The sweep is aimed at the
+        # band beyond naked-eye reach (2.3-5.6 km) while this fixture's
+        # truck sits at 1.4 km closing to 0.4 km, so it is outside the cone
+        # and the naked-eye channel emits nothing on those polls.
+        #
+        # **That is the cost working, not a defect**: binoculars are a
+        # narrow tube, and time spent searching far is time not watching
+        # near. An earlier version of this comment blamed the loss on
+        # aiming a stare at a quantised bearing -- that defect is real
+        # (`plans/binocular-optic/stage3b.md`) but this fixture never
+        # exercises it, because its only contact is `type`-level from frame
+        # 0 and `OpticPhase.GLASSING` is therefore never entered at all.
+        # Verified by replaying with the optic decision traced, not
+        # reasoned about.
+        assert len(runner.store.observations) == 32
 
         contacts = get_contacts(runner.store, final_t_sim)
 
