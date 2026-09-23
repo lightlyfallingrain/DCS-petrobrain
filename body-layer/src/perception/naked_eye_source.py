@@ -227,7 +227,7 @@ from perception.motion import (
     MOTION_VELOCITY_MAX_SKEW_S,
     evaluate_motion_gate,
 )
-from perception.optics import UNAIDED_OPTIC
+from perception.optics import UNAIDED_OPTIC, Optic
 from perception.reporting_names import reporting_name_for
 from perception.source import (
     OBSERVATION_ID_PREFIX_NAKED_EYE,
@@ -366,6 +366,19 @@ class NakedEyePerceptionSource:
     #: `poll()` resolves the effective `Gaze` for this poll via
     #: `perception.gaze.gaze_at(now_sim, self.scan_plan)`.
     scan_plan: ScanPlan = field(default_factory=lambda: FREE_SCAN_PLAN)
+
+    #: The instrument this poll looks through (`plans/binocular-optic/
+    #: plan.md` Stage 1). Assigned per poll by `logger._apply_active_gaze`
+    #: alongside `scan_plan`, from the same resolution, for the same
+    #: reason: the *decision* to raise binoculars reads beliefs, which
+    #: `perception` may not import, so belief resolves and perception
+    #: receives a frozen value -- exactly the seam `gaze.py` established.
+    #:
+    #: **Stage 1 always resolves to `UNAIDED_OPTIC`**, so nothing
+    #: observable changes until Stage 2 supplies a policy. That is the
+    #: regression gate 2B used and it is worth repeating here: the
+    #: plumbing is proven before any behaviour rides on it.
+    optic: Optic = UNAIDED_OPTIC
     #: The peripheral channel's output (hard parts 2a/4 of the plan) --
     #: always empty until the attention-capture channel exists (out of
     #: scope this slice); resolved per candidate through `perception.gaze.
@@ -477,6 +490,7 @@ class NakedEyePerceptionSource:
                 candidate,
                 self.world_model_conn,
                 self.theatre,
+                optic=self.optic,
                 gaze=candidate_gaze,
                 trace=self.trace_sink,
                 group_salient=candidate.object_id in salient_ids,

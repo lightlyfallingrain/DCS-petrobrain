@@ -132,6 +132,20 @@ class DetectionTrace:
     motion_skew_s: float | None = None
     apparent_motion: bool | None = None
 
+    #: The instrument this candidate was evaluated through (`plans/
+    #: binocular-optic/plan.md` Stage 1) -- `optics.Optic.name`.
+    #:
+    #: Recorded per row rather than per poll even though the optic is a
+    #: property of the *look*, because a debrief's question is always about
+    #: one contact ("why was that never identified?"), and an answer that
+    #: requires joining against a separate per-poll table is an answer
+    #: nobody computes. The `range_threshold_m` beside it is already the
+    #: optic-scaled figure, so without this field that number is
+    #: unexplainable: the same contact at the same range yields two
+    #: different thresholds depending on an instrument the row does not
+    #: name.
+    optic: str = "unaided"
+
 
 @dataclass
 class DetectionTraceCollector:

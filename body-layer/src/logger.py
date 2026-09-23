@@ -203,6 +203,7 @@ from perception.gaze import FREE_SCAN_PLAN, Gaze, ScanPlan, gaze_at
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
+from perception.optics import UNAIDED_OPTIC, Optic
 from perception.source import Observation, OwnshipState, PerceptionSource
 
 logger = logging.getLogger(__name__)
@@ -506,16 +507,42 @@ def _active_gaze(tasks: TaskStore) -> ScanPlan:
     return FREE_SCAN_PLAN
 
 
+def _active_optic() -> Optic:
+    """The instrument Petrovich is looking through this poll
+    (`plans/binocular-optic/plan.md` Stage 1).
+
+    **Always the naked eye, for now.** Stage 1 exists to put the optic on
+    the same per-poll resolution path the gaze already takes -- belief
+    resolves, perception receives a frozen value -- without changing any
+    behaviour, which is the regression gate 2B used for the same reason:
+    the plumbing is proven before anything rides on it.
+
+    Stage 2 replaces the body of this function with `belief.optic_policy`'s
+    decision, and nothing else in the poll loop has to move. It takes no
+    arguments yet deliberately: giving it the parameters it will eventually
+    need would be inventing an interface ahead of the policy that defines
+    it.
+    """
+    return UNAIDED_OPTIC
+
+
 def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> None:
-    """Assigns `_active_gaze(tasks)` onto whichever `sources` entry is a
-    `NakedEyePerceptionSource` -- a true no-op for every other source, and
-    for a `sources` list (e.g. in tests) that holds no naked-eye source at
-    all. The same write-thread/single-assignment pattern `last_t_sim`
-    already uses safely (`run_once`'s only caller)."""
+    """Assigns `_active_gaze(tasks)` and `_active_optic()` onto whichever
+    `sources` entry is a `NakedEyePerceptionSource` -- a true no-op for
+    every other source, and for a `sources` list (e.g. in tests) that holds
+    no naked-eye source at all. The same write-thread/single-assignment
+    pattern `last_t_sim` already uses safely (`run_once`'s only caller).
+
+    Both are resolved here rather than in two places because they are one
+    decision: *where he is looking and through what* is a single act, and
+    splitting the resolution would allow a gaze and an optic from different
+    polls to be applied together."""
     scan_plan = _active_gaze(tasks)
+    optic = _active_optic()
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
             source.scan_plan = scan_plan
+            source.optic = optic
 
 
 def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
