@@ -83,18 +83,61 @@ than a tuned threshold.
 is never re-glassed, and a contact too far for even the binocular type tier waits until it closes —
 which is also D5's retry rule, for free.
 
-### D2. A budget, and a mandatory naked-eye scan between looks
+### D2. It is a phase cycle, not an interrupt
 
-Binoculars cost near-blindness: a 4.25° half-angle against the naked eye's 15° focus cone, so while
-glassed everything outside a narrow tube is unseen. That is the point, and the accounting has to be
-real or it is not a cost at all:
+**This is the decision the user's clarification forced, and it simplifies everything downstream:**
 
-- **`BINOCULAR_DWELL_S`** — one look is bounded. It must be long enough for a recognition to be
-  plausible and short enough that the scan is not abandoned.
-- **Then at least one full free-scan cycle before the next raise** (`SCAN_CYCLE_PERIOD_S`, 16 s).
-  This is the *lockout*, and it is deliberately expensive: it means binoculars are used a few times
-  a minute, not continuously. See Open Question 1 — the user's phrase was "at least one naked eye
-  scan", which could also mean one cone dwell.
+> when scan detects target, do not immediately raise binoculars. First complete the current sector
+> naked eye scan to get as many naked eye detections as possible, then raise binoculars to take a
+> closer look.
+
+So perception alternates **phases** rather than being interrupted:
+
+- **Scan phase** — the naked-eye plan runs to *completion*: the full 16 s o'clock cycle when
+  free-scanning, or one complete pass of a commanded sector. Detections accumulate; nothing is
+  glassed yet.
+- **Glass phase** — entered only at a phase boundary, and only if there is work for it: contacts
+  queued by D1's window, or a commanded sector to search (D6). It ends on its own stop conditions
+  and hands back to the scan phase.
+
+**The lockout stops being a rule and becomes structural.** *"at least one naked eye scan before the
+next binocular usage"* is true by construction, because a glass phase can only be entered from the
+end of a scan phase. There is no timer to enforce and no way to express the illegal state.
+
+**And its length follows the scan mode, which is what the user asked for** (*"depends on scan mode.
+Full scan takes time, sector or o'clock scan is faster, allowing more frequent binocular use"*). A
+free scan cycles in 16 s, so binoculars come round every 16 s plus the look. A commanded o'clock
+sector cycles far faster, so they come round more often. **Nothing computes this** — it is the
+period of whatever plan is active, and it falls out for free.
+
+### D2a. One look serves everything inside the field of view
+
+> Special case, if binocular FOV sees multiple units at once, they all get the benefit of binocular
+> looking at them.
+
+This needs no special case at all, which is worth stating so nobody builds one: `check_visibility`
+is evaluated per candidate against the current optic, so **every contact inside the 8.5° cone
+during a glass phase is already evaluated at the binocular tier.** The "special case" is the
+natural consequence of the optic being a property of the look rather than of a target. It gets a
+test rather than a mechanism, because the risk is a future refactor quietly making the optic
+per-target.
+
+It does change how a look is *chosen*: pointing at the direction that puts the most unresolved
+contacts inside one cone is strictly better than pointing at the nearest one. Stage 2 picks the
+direction, not the contact.
+
+### D2b. A look ends when there is nothing left to learn from it
+
+Max **6 s** (user), but it ends early on the condition the user stated, which is sharper than a
+timer:
+
+> - unit(s) looked at gained more detailed identification
+>   - no other units in FOV at distance where more detailed identification can be expected
+
+Both halves are one predicate: **stop when no contact inside the field of view is still within
+D1's improvement window** — each has either improved to type, or sits outside the band where the
+binocular could have helped. The 6 s cap then only fires when recognition simply is not happening,
+which is exactly the case where continuing to stare is wasted.
 
 ### D3. The smoothness gate is about manoeuvring, not vibration
 
@@ -128,23 +171,44 @@ spends the budget on a question already answered.
 
 ### D6. Binocular *search* is a different act from binocular *identification*
 
-For a commanded narrow scan, the binoculars sweep rather than fixate, and three rules from the user
-apply only here:
+The user's worked example is the specification:
 
-- **A raster pattern at the instrument's own width.** 8.5° of full width against a 30° o'clock cone
-  is roughly four steps across.
-- **No sky.** Elevation is clamped at or below the horizon unless the player explicitly asked
-  otherwise. He is looking for ground units.
-- **Only beyond the naked eye's own reach.** The near band is already covered by the scan that is
-  alternating with this one; pointing the binoculars there spends the budget re-covering it. The
-  exception is D1's identification, which is allowed at any range in the window.
+> command "scan 12 o'clock" -> naked eye scan 12 o'clock sector -> binocular scan of 12 o'clock
+> sector from distance where naked eye cannot see to as high as there is ground ahead. Depending on
+> binocular FOV vs sector width, do S shaped scan from close to far. This should be fast, not
+> dwelling on any spot, but rather trying to *detect* targets. Detected targets then get the dwell
+> behaviour.
 
-### D7. He must say so, and the overlay must show it
+Four properties, each with a consequence:
 
-The 2C sortie's sharpest lesson was *"very difficult to judge when I don't visually see where
-Petrovich is looking"* — and binoculars make that worse, because while glassed **his silence is
-meaningful**: he is not failing to see things, he is looking somewhere very specific. The overlay
-already shows the gaze cone; it gains the optic. See Open Question 2 on whether he speaks it too.
+- **It sweeps, it does not fixate.** Short steps, no dwell. The act is detection, and what it finds
+  is handed to D2b's dwell behaviour on a later glass phase — so search and identification compose
+  rather than competing for the same budget.
+- **An S-shaped raster, close to far.** Azimuth sweeps alternating direction, stepping outward in
+  range. **Range maps to elevation**: further out is nearer the horizon, so "from close to far" and
+  "as high as there is ground ahead" are the same axis. The far limit is where the ground stops
+  being visible, not an arbitrary distance.
+- **Starting where the naked eye stops.** The near band is already covered by the scan phase that
+  alternates with this one, so sweeping it again spends the budget re-covering known ground.
+- **No sky**, unless the player asked for it. Elevation clamps at the horizon.
+
+**Cost, stated because it is the thing most likely to feel wrong:** a 30° sector against 8.5° of
+binocular width is ~4 azimuth steps; three range bands makes ~12 steps. At a short step time that
+is several seconds — reasonable. **A commanded `full` (180°) sector is ~21 steps per band and is
+not reasonable**; Stage 3 has to either decline a binocular search that wide or cover it coarsely,
+and that is a real decision rather than an oversight to discover in the air.
+
+### D7. The overlay shows it; he does not announce it
+
+**No spoken announcement** (user, asked directly). The 2C sortie's lesson — *"very difficult to
+judge when I don't visually see where Petrovich is looking"* — is answered by the overlay, which
+already shows the gaze cone and gains the optic. Adding a line of speech for every raise would buy
+the same information at the cost of chatter on a channel one person occupies at a time.
+
+This does leave a real property unannounced: **while glassed, his silence means something
+different** — he is not failing to see, he is looking somewhere very narrow. The overlay carries
+that, and whether it needs saying out loud is a judgement for the sortie rather than a decision to
+guess at now.
 
 ---
 
@@ -170,21 +234,14 @@ other perception milestone.
 
 ---
 
-## Open questions for the user
+## Questions resolved before building (user, 2026-09-23)
 
-1. **How long is the lockout?** *"at least one naked eye scan"* reads most naturally as one full
-   16 s cycle — which makes binoculars a few-times-a-minute act. It could equally mean one 2 s cone
-   dwell, which would make them nearly continuous. The first is a real cost; the second is barely
-   one.
-
-2. **Does he announce it?** *"Taking a closer look, two o'clock."* on raise. It costs chatter and it
-   buys the pilot an explanation for why he went quiet — which matters more than usual here,
-   because glassed silence is not the same as nothing-to-report.
-
-3. **How long is one look?** Long enough to be plausible, short enough not to abandon the scan.
-   This is a feel judgement, not a derivable number.
-
----
+1. **Lockout length** — *"depends on scan mode"*. Resolved structurally by D2: the lockout is one
+   complete pass of whatever plan is active, so a free scan gives 16 s between looks and a
+   commanded sector gives much less. No constant.
+2. **Announcement** — no (D7).
+3. **Look duration** — 6 s cap, with D2b's earlier stop condition doing most of the work.
+4. **Search duration** — one complete area scan of the commanded sector (D6).
 
 ## Risks
 
