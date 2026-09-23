@@ -608,6 +608,224 @@ class TestSearchPattern:
         assert max(azimuths) > 7.0
 
 
+class TestLookSweep:
+    """`plans/binocular-optic/stage3b.md` D2: the sweep a binocular
+    identification look works through, distinct from `search_pattern`
+    (unknown ground, range-derived elevation) even though both share the
+    same step-centre arithmetic."""
+
+    def test_narrow_uncertainty_stays_a_single_step(self) -> None:
+        """`N == 1` reproduces today's stare exactly -- the short-range
+        common case needs no special handling, it falls out of the
+        formula."""
+        from belief.optic_policy import look_sweep
+
+        sweep = look_sweep(
+            centre_azimuth_deg=10.0,
+            centre_elevation_deg=-5.0,
+            bearing_uncertainty_deg=3.0,
+            fov_full_width_deg=8.5,
+        )
+        assert sweep == [(10.0, -5.0)]
+
+    def test_the_default_uncertainty_needs_four_steps(self) -> None:
+        """The worked example from the plan: U = 15 deg against an 8.5 deg
+        field gives N = 4, not 1 -- the default clock-bucket uncertainty
+        does not degenerate to a stare."""
+        from belief.optic_policy import look_sweep
+
+        sweep = look_sweep(
+            centre_azimuth_deg=0.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=8.5,
+        )
+        assert len(sweep) == 4
+
+    def test_elevation_never_moves(self) -> None:
+        """The down-range bucket also perturbs elevation, but at
+        helicopter geometry it is well under a degree against a binocular
+        half-angle -- a second swept axis would only cost steps."""
+        from belief.optic_policy import look_sweep
+
+        sweep = look_sweep(
+            centre_azimuth_deg=0.0,
+            centre_elevation_deg=-12.5,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=8.5,
+        )
+        assert {elevation for _, elevation in sweep} == {-12.5}
+
+    def test_steps_are_ordered_centre_outward(self) -> None:
+        """The believed bearing is the most likely direction, so it is
+        looked at first -- and stays first even if the poll rate
+        under-samples the rest of the sweep."""
+        from belief.optic_policy import look_sweep
+
+        sweep = look_sweep(
+            centre_azimuth_deg=20.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=8.5,
+        )
+        offsets = [azimuth - 20.0 for azimuth, _ in sweep]
+        assert offsets == sorted(offsets, key=lambda offset: (abs(offset), offset))
+
+    def test_offsets_stay_within_the_uncertainty(self) -> None:
+        from belief.optic_policy import look_sweep
+
+        sweep = look_sweep(
+            centre_azimuth_deg=0.0,
+            centre_elevation_deg=0.0,
+            bearing_uncertainty_deg=15.0,
+            fov_full_width_deg=8.5,
+        )
+        assert all(abs(azimuth) <= 15.0 for azimuth, _ in sweep)
+        # And the sweep genuinely covers the span, not just its centre.
+        assert max(abs(azimuth) for azimuth, _ in sweep) > 8.5 / 2.0
+
+
+class TestSweepStepsWithTime:
+    """`decide`'s `GLASSING` branch is step-indexed the way `SEARCHING`
+    already is (`plans/binocular-optic/stage3b.md` D3): `step_s =
+    MAX_LOOK_S / N`, no new constant."""
+
+    def test_the_look_advances_through_its_own_sweep(self) -> None:
+        target = _target(azimuth_deg=0.0, range_m=500.0, current_level="class")
+        state, first = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        step_count = len(state.search_pattern_steps)
+        assert step_count == 4  # the default 15 deg / 8.5 deg case
+        step_s = MAX_LOOK_S / step_count
+
+        state, second = decide(
+            state,
+            now_sim=_CYCLE_S + step_s * 1.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert second.look_azimuth_deg != first.look_azimuth_deg
+        assert (second.look_azimuth_deg, second.look_elevation_deg) == (
+            state.search_pattern_steps[1]
+        )
+
+    def test_running_out_of_steps_ends_the_look_at_max_look_s(self) -> None:
+        """The cap and the sweep's own exhaustion become one event: with
+        `step_s * N == MAX_LOOK_S`, there is no truncation mid-sweep."""
+        target = _target(azimuth_deg=0.0, range_m=500.0, current_level="class")
+        state, _ = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.SCANNING
+        assert decision.optic is UNAIDED_OPTIC
+
+
+class TestSweepEnvelope:
+    """`look_is_finished` widens from the field of view to the sweep's
+    envelope (`plans/binocular-optic/stage3b.md` D4) -- without this, a
+    sweep would end on its own first step, every time."""
+
+    def test_the_first_step_does_not_end_the_look_early(self) -> None:
+        """A target deliberately outside step 0's field of view, but
+        inside the sweep envelope, must keep the look running -- the
+        premise the whole fix rests on."""
+        # Believed azimuth 12 deg off the target's own reported azimuth
+        # (0.0), comfortably outside the 4.25 deg binocular half-angle but
+        # inside the 15 deg envelope.
+        target = _target(azimuth_deg=12.0, range_m=500.0, current_level="class")
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+        assert decision.look_azimuth_deg is not None
+
+        # One poll later, still mid-sweep: the look must still be running,
+        # not ended by "nothing in the (first step's) field of view".
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + 0.5,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+
+
+class TestSweepFindsAnOffsetContact:
+    """The real Stage 3b tripwire (`plans/binocular-optic/stage3b.md` step
+    5): a believed bearing offset from the truth by most of a half-bucket,
+    outside the binocular field of view. This is the test that must go red
+    if the sweep is reverted to a stare -- the mock-flight fixture cannot
+    play that role, since its only contact never enters `GLASSING` at all
+    (see `test_mock_flight_chain.py`'s own comment)."""
+
+    def test_the_sweep_reaches_the_true_bearing_a_stare_would_miss(self) -> None:
+        true_azimuth_deg = 0.0
+        believed_azimuth_deg = 12.0  # most of a 15 deg half-bucket
+        fov_half_angle_deg = BINOCULAR_OPTIC.fov_half_angle_deg
+        assert fov_half_angle_deg is not None
+
+        # The premise: a single stare at the believed bearing misses.
+        assert abs(believed_azimuth_deg - true_azimuth_deg) > fov_half_angle_deg
+
+        target = _target(
+            azimuth_deg=believed_azimuth_deg,
+            range_m=500.0,  # inside the T-72 class -> type window
+            current_level="class",
+        )
+        state, decision = decide(
+            OpticState(phase_started_sim=0.0),
+            now_sim=_CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[target],
+            steady=True,
+        )
+        assert state.phase is OpticPhase.GLASSING
+
+        directions = [decision.look_azimuth_deg]
+        now = _CYCLE_S
+        while state.phase is OpticPhase.GLASSING:
+            now += 0.5
+            state, decision = decide(
+                state,
+                now_sim=now,
+                scan_cycle_period_s=_CYCLE_S,
+                targets=[target],
+                steady=True,
+            )
+            if state.phase is OpticPhase.GLASSING:
+                directions.append(decision.look_azimuth_deg)
+
+        assert any(
+            direction is not None
+            and abs(direction - true_azimuth_deg) <= fov_half_angle_deg
+            for direction in directions
+        ), directions
+
+
 class TestSearchPhase:
     def test_a_commanded_sector_is_swept_when_nothing_needs_resolving(self) -> None:
         from belief.optic_policy import OpticPhase
