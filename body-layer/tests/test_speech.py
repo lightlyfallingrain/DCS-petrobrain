@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import pytest
 
 from belief import enrichment as enrichment_module
+from belief import speech as speech_module
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
@@ -424,7 +425,7 @@ def test_format_range_km_boundary_cases() -> None:
     # round() (banker's rounding, ties to even) resolves them to 1 and 2
     # respectively -- pinned here so a future change to the rounding
     # implementation is a deliberate, visible diff.
-    assert _format_range_km(1250.0) == "1 kilometres"
+    assert _format_range_km(1250.0) == "1 kilometre"
     assert _format_range_km(1750.0) == "2 kilometres"
 
 
@@ -769,3 +770,82 @@ def test_route_event_cardinality_changed_has_no_template_and_is_not_acknowledged
 
     assert speech is None
     assert changed in store.unacknowledged_events
+
+
+class TestSpokenVocabularyIsSayable:
+    """No internal identifier may ever reach the audio channel.
+
+    From the 2026-09-22 sortie, which produced *"unit at 12 o'clock, 2
+    kilometres is OP_LRSAM"* and *"...is OP_GROUPSOMETHING"*. Both display
+    tables were exhaustive when written and stopped being so when the object
+    model gained a class; the comment claiming exhaustiveness was the only
+    thing enforcing it, and a comment cannot fail. These tests derive the
+    class set from `object_model` itself, so the next class added there
+    fails here rather than being read aloud to the pilot.
+    """
+
+    def _assigned_classes(self) -> set[str]:
+        from perception import object_model
+
+        return (
+            {profile.op_class for _, profile in object_model._KEYWORD_PROFILES}
+            | {
+                profile.op_class
+                for _, profile in object_model._REPORTING_NAME_KEYWORD_PROFILES
+            }
+            | {object_model.DEFAULT_OP_CLASS}
+        )
+
+    def test_every_assigned_class_has_a_singular_word(self) -> None:
+        missing = self._assigned_classes() - set(speech_module._OP_CLASS_DISPLAY)
+        assert not missing, f"op_class values with no spoken word: {sorted(missing)}"
+
+    def test_every_assigned_class_has_a_plural_word(self) -> None:
+        missing = self._assigned_classes() - set(speech_module._OP_CLASS_DISPLAY_PLURAL)
+        assert not missing, f"op_class values with no plural word: {sorted(missing)}"
+
+    def test_no_display_word_leaks_an_internal_identifier(self) -> None:
+        for table in (
+            speech_module._OP_CLASS_DISPLAY,
+            speech_module._OP_CLASS_DISPLAY_PLURAL,
+        ):
+            for key, word in table.items():
+                assert "OP_" not in word, f"{key} maps to an internal name: {word!r}"
+
+    def test_an_unmapped_internal_class_degrades_rather_than_leaking(self) -> None:
+        """The safety net for a class value arriving from outside the object
+        model, which the exhaustiveness tests cannot cover."""
+        assert (
+            speech_module._unit_type_display("OP_SOMETHING_NEW", "class") == "contact"
+        )
+        assert (
+            speech_module._plural_unit_type_display("OP_SOMETHING_NEW", "class")
+            == "contacts"
+        )
+
+    def test_a_non_internal_class_value_still_passes_through(self) -> None:
+        """Only the `OP_` prefix marks a value as internal. A class-level
+        value can be a raw DCS type name or scope/hybrid free text, and
+        suppressing those would discard real information -- the first
+        attempt at this fix did exactly that, reducing "BMP-2" to
+        "contact"."""
+        assert speech_module._unit_type_display("BMP-2", "class") == "BMP-2"
+        assert speech_module._unit_type_display("SAM", "class") == "SAM"
+
+    def test_the_sam_tiers_are_spoken_apart(self) -> None:
+        """Flattening them to "SAM" discards the most decision-relevant part
+        of the call: whether it can be flown around."""
+        words = {
+            speech_module._unit_type_display(value, "class")
+            for value in ("OP_SRSAM", "OP_MRSAM", "OP_LRSAM")
+        }
+        assert words == {"short range SAM", "medium range SAM", "long range SAM"}
+
+    def test_aaa_is_spoken_as_triple_a(self) -> None:
+        assert speech_module._unit_type_display("OP_SPAAG", "class") == "triple A"
+        assert speech_module._unit_type_display("OP_ZU23", "class") == "triple A"
+
+    def test_one_kilometre_is_singular(self) -> None:
+        assert speech_module._format_range_km(1000.0) == "1 kilometre"
+        assert speech_module._format_range_km(1500.0) == "1.5 kilometres"
+        assert speech_module._format_range_km(500.0) == "0.5 kilometres"
