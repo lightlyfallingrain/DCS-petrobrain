@@ -1,6 +1,6 @@
 ---
 name: watch-reporting-design
-description: Watch-reporting plan (2026-09-24) — the speech allowlist that made three of four triggers already-built or already-silent, the belief-keyed engagement envelope, and why terrain LOS replaced the altitude column.
+description: Watch-reporting plan (2026-09-24) — the speech allowlist that made three of four triggers already-built or already-silent, the belief-keyed engagement envelope, and the range/altitude/terrain AND that a summarised fetch nearly broke.
 metadata:
   type: project
 ---
@@ -43,15 +43,31 @@ spread — the class-level warning is early and wrong in magnitude by constructi
 **Why:** `body-layer/ROADMAP.md`'s deferred threat-band item warns that computing this from ground
 truth would be "an omniscience backdoor wearing a prioritisation label — and an invisible one".
 
-**4. Terrain LOS replaced the altitude column, and the reasoning generalises.** The Hoggit table's
-altitude figures are all *ceilings*; a Mi-24P at 50–150 m AGL is never near one, so the gate could
-only ever return the same answer. Dropped the column entirely rather than storing it — a number that
-can never bind is worse than absent, because a later reader assumes it is load-bearing. What actually
-defends a low helicopter is terrain masking, and `perception.geometry.line_of_sight_clear` (wrapping
-world-model's `query.line_of_sight`) was already in-process and already gating every sighting. The
-threat test became `min <= range <= max and los_clear(...)` with no altitude term, which is
-**symmetric with perception** — he cannot see through terrain, neither can the SAM, one primitive
-answers both.
+**4. Three independent ways to be safe, ANDed — and a two-round misread that nearly deleted one of
+them.** The threat test is `range_min <= r <= range_max` AND `alt_min <= h <= alt_max` AND
+`los_clear(threat, ownship)`. Range, altitude and terrain answer different questions and none
+substitutes for another.
+
+**The misread, because the failure mode is the reusable part:** a summarising web fetch flattened the
+Hoggit table's altitude cell `0 - 6500` into "6500 maximum". On that premise I reasoned — correctly,
+from a false input — that ceilings never bind for a Mi-24P and the column should be dropped entirely.
+The user had the literal table open and corrected it: **it is a band**, and both ends matter. A
+Shilka's `0 - 6500 ft` means *no floor* (flying low buys nothing against it) while a system with a
+genuine floor is defeated by flying under it. That per-type distinction is the tactical payload, and
+it falls out of `alt_min <= h <= alt_max` with no `if floor == 0` branch. Even the ceiling binds:
+6,500 ft is ~2,000 m, squarely inside this aircraft's range, unlike the 150,000 ft an S-300 suggested.
+
+**Rule:** never let a summarised fetch stand in for literal table cells when the cells are the
+design input. A range rendered as a single number is the specific tell. Ask the user to paste.
+
+The LOS half of that reasoning survived and is worth keeping: `perception.geometry.line_of_sight_clear`
+(wrapping world-model's `query.line_of_sight`) was already in-process and already gating every
+sighting, so the terrain term is **symmetric with perception** — he cannot see through terrain,
+neither can the SAM, one primitive answers both. It also subsumes the stale-contact cry-wolf case.
+
+Ingest `radar_range_m` (separate from and *longer* than weapon range — being tracked is not being
+shootable; the future "he's looking at us" warning lives here) and `acquire_time_s`, and say loudly
+that nothing consumes them, or a reviewer deletes one and misuses the other.
 
 **Wiring detail that avoids an import cycle:** `enrichment.py` imports `contacts.py`, so
 `ContactStore.tick` can never take an `EnrichmentContext`. Pass a bare `GeoPosition` for ownship and
@@ -60,9 +76,11 @@ answers both.
 free `EVENT_COOLDOWN_S`, and lets fixtures test hysteresis with a lambda instead of a terrain
 database. **Reusable pattern** for anything else that wants a world-model fact inside `contacts.py`.
 
-**How to apply:** when a plan proposes gating on tabulated data, check the value's range against the
-aircraft's actual operating envelope before ingesting it. And check whether an already-built
-primitive models the real mechanism better than the table does.
+**How to apply:** when a plan turns on tabulated external data, get the literal cells in front of you
+before reasoning about what the numbers mean — the "this value can never bind, drop it" argument is
+seductive and was wrong here precisely because the input was pre-digested. Separately, and still
+sound: check whether an already-built primitive (LOS here) models the real mechanism better than a
+table does — just add it, do not let it displace the table.
 
 See also [[project_bl4_attention_events]], [[project_callout_scheduling_design]],
 [[project_movement_detection_design]], [[project_voice_command_completeness]].

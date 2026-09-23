@@ -69,9 +69,10 @@ worktree, not inferred.
   and `los_clear: Callable[[GeoPosition, GeoPosition], bool] | None = None` (4f); two new blocks in
   the five-block loop; new `Contact` fields (`last_announced_range_km`, `last_emitted_engagement`,
   and the watched-seed bookkeeping below).
-- `body-layer/src/belief/threat.py` — **new module.** The ingested min/max range table, the
-  per-`op_class` worst-case rollup, and the believed-classification lookup. The only new module in
-  the plan. **No altitude field** (4f).
+- `body-layer/src/belief/threat.py` — **new module.** The ingested table (range band, altitude band,
+  radar range, acquire time), the per-`op_class` worst-case rollup, and the believed-classification
+  lookup. The only new module in the plan. Two of its four fields have no consumer yet, deliberately
+  (4f).
 - `body-layer/src/belief/callouts.py` — `_WATCHED_ONLY_KINDS`; the watched test in `tick`'s filter;
   a per-contact `_last_spoken_sim` gap for the watched-only family.
 - `body-layer/src/belief/speech.py` — `_contact_report_text` gains two optional affixes
@@ -281,9 +282,10 @@ plan extends it rather than re-litigating it.
 
 ### Decision 4 — engagement envelopes: ingest the Hoggit table, key the lookup on belief
 
-**Source:** `https://wiki.hoggitworld.com/view/Threat_Database`. Per-type min/max engagement range in
-nautical miles, by threat category. (The page also carries an altitude column; it is a ceiling, it
-can never bind for this aircraft, and 4f drops it.)
+**Source:** `https://wiki.hoggitworld.com/view/Threat_Database`. Per-type engagement range band (NMI),
+altitude band (feet), radar range (NMI) and acquire time (seconds), by threat category. **Every range
+column is a min/max band written as one cell** (`0 - 6500`) — see 4f, which is where two successive
+misreadings of that fact were caught.
 
 #### 4a — provenance
 
@@ -299,11 +301,14 @@ project's provenance memory: **provisional until confirmed**, never silently pro
   produces a danger call. Inventing a number here would be worse than silence: it would be an
   authoritative-sounding warning derived from nothing, and it would be invisible, because the output
   would merely look like slightly odd prioritisation.
-- **Conversion happens once, at transcription.** The table is committed in **metres** with the NMI
-  figure in a trailing comment per row. This project works in metres throughout; a runtime
-  conversion is a unit bug waiting for the one caller that forgets it.
+- **Conversion happens once, at transcription.** The table is committed in **metres** (ranges *and*
+  altitudes) and **seconds**, with the source's NMI/feet figures in a trailing comment per row. This
+  project works in metres throughout; a runtime conversion is a unit bug waiting for the one caller
+  that forgets it — and with two different source units on one row, that caller will exist.
 
-#### 4b — how it is ingested: hand-transcribed, committed as data
+#### 4b — why hand-transcription, rather than a scraper or the DCS install
+
+*(How the rows physically reach the repo, which is a gate on Stage 4, is 4g.)*
 
 **Recommended: hand-transcribe.** There is no JSON/Lua/CSV export — only HTML tables. The set that
 matters is small (the air-defence categories, ~40 rows; ground armour and trucks have no relevant
@@ -409,52 +414,81 @@ sitting near the boundary flaps between "danger" and "safe from" every few secon
 `EVENT_COOLDOWN_S` budget doing it. Implement it as hysteresis and say so, so nobody later
 "simplifies" it to a single threshold.
 
-#### 4f — the altitude column is dropped entirely; terrain LOS replaces it
+#### 4f — four fields, four different questions, and only two of them are consumed now
 
-**Do not ingest the altitude column.** The source's altitude figures are all *maxima* — `Altitude
-(Feet)` in the AAA, MANPADS, SAM and Ground Threat tables, `Max Altitude` in Airspace Surveillance.
-There is no floor, no minimum engagement altitude and no low-level limit anywhere on the page.
-
-A ceiling binds fast jets. This aircraft flies at roughly 50–150 m AGL, so every ceiling in the table
-(S-300 150,000 ft, SA-6 33,000 ft, SA-8 21,000 ft, SA-13 15,000 ft) is so far above ownship that the
-comparison can only ever return the same answer. **Storing a number that can never bind is worse than
-not having it**, because a later reader will assume it is load-bearing and design around it. The
-column does not enter `EngagementEnvelope` and does not get transcribed; `threat.py`'s docstring
-records that it was considered and dropped, and why, so nobody adds it back as an oversight.
-
-**What replaces it is already built: terrain line of sight.** For a helicopter at 100 ft, being under
-a ridge is the low-altitude defence — not being under some tabulated floor. So the threat test is:
+The source table's real columns, per the user's own reading of the page (a summarising fetch
+flattened the band into a maximum twice; the literal cells say otherwise):
 
 ```
-threatened = range_min_m <= range <= range_max_m
-             and line_of_sight_clear(conn, theatre, threat_position, ownship_position)
+Threat | NATO Designation | RWR Symbology | HARM Code | Range (NMI) min/max |
+Altitude (Feet) min/max | Acquire Time (Seconds) | Guidance Type | Ammunition
 ```
 
-with **no altitude term at all**, and `range_max_m` scaled by `1.5` on the leaving side (4e).
+Worked example, ZSU-23-4 Shilka: engagement range **0–2 NM**, **radar range 12 NM**, acquire time
+**8 s**, altitude **0–6,500 ft**.
 
-Two properties of this that must not be refactored away by someone who does not know why they are
-there:
+`EngagementEnvelope` therefore carries four distinct facts. They are easy to collapse into one
+"threat range" and the collapse would be wrong in a different way each time, so the module docstring
+must name what each one answers:
+
+| field | answers | consumed by this milestone |
+|---|---|---|
+| `range_min_m` / `range_max_m` | *Can it shoot me from here?* | **yes** — the user's "nearing their engagement range of us" |
+| `alt_min_m` / `alt_max_m` | *Can it shoot me at this height?* | **yes** — see the floor rule below |
+| `radar_range_m` | *Can it see me?* — separate from and **longer** than weapon range | **no** |
+| `acquire_time_s` | *Does it get a shot off before I'm past?* | **no** |
+
+**The min end of the range band is real, not a rounding artefact.** Too close to engage is a genuine
+state and a helicopter closing on a SAM actually reaches it. The envelope is an annulus, not a disc.
+
+**The altitude floor is the tactical fact, and it only binds when non-zero.** I was wrong in the
+previous revision of this section, twice over: the column is a band, and even the ceiling binds —
+the Shilka's 6,500 ft is ~2,000 m, squarely inside a Mi-24P's operating range, not the unreachable
+150,000 ft an S-300 ceiling suggested. More importantly the floor is where the tactics live:
+
+- Shilka, `0–6,500 ft`: **no floor**, so flying low buys nothing against it. You are inside its
+  altitude band on the deck.
+- A system with a genuine minimum engagement altitude is **defeated by flying under it**.
+
+That distinction is the whole point, and it falls straight out of the data with no special-casing:
+the test is `alt_min_m <= h <= alt_max_m`, and `alt_min_m == 0` makes the lower bound vacuous on its
+own. Do not write an `if floor == 0` branch — the arithmetic already does it.
+
+`h` is ownship's height **above the threat's own position**, not MSL and not AGL:
+`ownship_position.alt_m - contact.last_position.alt_m`. Both are already in hand inside `tick`. A SAM
+on a 1,500 m plateau and one in a valley have the same band relative to themselves, and comparing
+either against an MSL figure would be wrong by the terrain.
+
+**Terrain LOS composes with both bands; it does not replace either.** The previous revision presented
+LOS as a substitute for altitude, which was the wrong framing — they answer different questions. All
+three are ANDed:
+
+```
+threatened = range_min_m <= range <= range_max_m          # can it shoot this far
+             and alt_min_m <= height_above_threat <= alt_max_m   # can it shoot this high/low
+             and los_clear(threat_position, ownship_position)    # is there a ridge in the way
+```
+
+with `range_max_m` scaled by `1.5` on the leaving side (4e). A helicopter hiding behind a ridge is
+defeated by none of range or altitude — only by terrain — which is exactly why the third term is
+needed and why it is not interchangeable with the second.
+
+Two properties of the LOS term worth protecting from a later "simplification":
 
 - **It is symmetric with perception.** He cannot see through terrain; neither can the SAM.
   `perception/visibility.py` already gates every sighting on `geometry.line_of_sight_clear`, and the
   same primitive answers both directions. The model needs no separate notion of "can it see me".
-- **It makes flying low behind a ridge actually work**, and it will be *visibly* right or *visibly*
-  wrong in flight. An altitude table would have been neither — it would have silently agreed with
-  itself forever.
+- **It subsumes the stale-contact cry-wolf case.** A contact decayed to `estimated` because you slid
+  behind a ridge now fails LOS on its remembered position and goes "safe from", rather than warning
+  off a position he cannot confirm.
 
-This also subsumes the cry-wolf case I would otherwise have had to handle separately: a contact that
-has decayed to `estimated` because you slid behind a ridge now fails the LOS test on its remembered
-position, and goes "safe from" rather than warning off a position he cannot confirm.
+**Cost.** `line_of_sight_clear` is a sampled elevation-grid walk against world-model's SQLite store —
+the same call the naked-eye channel already makes per candidate per poll. Bounded here by *watched
+contacts that resolved an envelope*, not by contact count: `envelope_for` returns `None` for
+unknown/presence-level contacts and for classes with no row, and that check is free and runs first.
+Order the three terms range → altitude → LOS so the cheap arithmetic rejects before the grid walk.
 
-**Cost, stated honestly.** `line_of_sight_clear` is a sampled elevation-grid walk against
-world-model's SQLite store — the same call the naked-eye channel already makes *per candidate, per
-poll*. The marginal cost here is small but not zero, and it is bounded by **watched contacts that
-resolved an envelope**, not by every contact: `envelope_for` returns `None` for
-unknown/presence-level contacts and for classes with no threat row, and that check is free and runs
-first. In practice that is a handful of contacts per poll against a primitive already running for
-dozens.
-
-**Wiring, and the import-cycle it avoids.** `contacts.py` cannot import `belief.enrichment` (cycle),
+**Wiring, and the import cycle it avoids.** `contacts.py` cannot import `belief.enrichment` (cycle),
 and `line_of_sight_clear` needs `conn` and `theatre`. Rather than widening `tick` with two
 world-model arguments, inject the check:
 
@@ -465,13 +499,49 @@ def tick(self, now_sim: float, ownship_position: GeoPosition | None = None,
 
 `logger.run_once` supplies a closure over its existing `world_model_conn`/`theatre`. `contacts.py`
 stays free of both world-model and enrichment imports, the engagement block keeps its place in the
-five-block loop (and its `EVENT_COOLDOWN_S`), and a fixture tests the hysteresis with a two-line
-lambda instead of a terrain database. `los_clear=None` means the term is skipped — correct
-degradation for the no-world-model path the console already handles elsewhere.
+five-block loop (and its free `EVENT_COOLDOWN_S`), and a fixture tests the hysteresis with a two-line
+lambda instead of a terrain database. `los_clear=None` skips the term — correct degradation for the
+no-world-model path the console already handles elsewhere.
 
-**`Range Min` is ingested and used.** It earns its place where the altitude column does not: a
-helicopter routinely ends up inside a SAM's minimum range, and that is a condition this aircraft
-actually reaches. The envelope is the annulus `[range_min_m, range_max_m]`.
+**`radar_range_m` and `acquire_time_s` are ingested and nothing reads them.** Say so explicitly in
+the module docstring, because an unused field invites either deletion or invention:
+
+- **Radar range is the natural home of a future "he's looking at us" warning**, and it is a
+  *different* claim from "he can shoot us" — being tracked at 12 NM by a Shilka whose gun reaches
+  2 NM is information, not a threat. The roadmap already records that "tracking us" is *observable*
+  (a slewed dish is a visible fact) rather than an omniscience problem, so the perception half is
+  legitimate; the knowledge half is this column. Transcribing it now costs one more cell per row and
+  saves re-transcribing the whole table later.
+- **Acquire time is what would eventually decide whether a fast crossing pass actually gets engaged**
+  — the difference between overflying a Shilka and loitering in front of one. Nothing models
+  time-in-envelope today.
+
+Neither is speculative scope: they are cells in a row already being typed. **They must not acquire a
+consumer in this milestone.**
+
+#### 4g — getting the data into the repo, which is a real gate
+
+The wiki page is HTML-only with no JSON/Lua/CSV export, and **the fetching tool available to the
+planning session declines to reproduce the tables in full**, so the ingest cannot be automated from
+here. This is a genuine blocker on Stage 4, not a formality — name it rather than discovering it
+mid-implementation.
+
+Two honest routes, and the first is better:
+
+1. **The user pastes the tables.** They already have the page open — the Shilka row above came from
+   them. Air-defence categories only (AAA, MANPADS, SAM, and the radar rows); ground armour and
+   trucks have no envelope worth modelling against a helicopter beyond gun range. That is roughly 40
+   rows, one paste, and it puts the literal cells in front of whoever transcribes them — which is
+   exactly what would have prevented the two errors in this section's own history.
+2. **An investigator pass with different tooling**, if the paste is inconvenient. Slower, and it
+   reintroduces the summarisation risk that caused the problem.
+
+**Do not begin Stage 4 before the data is in hand.** Transcribing from memory or from a summary is
+how a wrong max range becomes a confident wrong danger call.
+
+Whichever route: the result is a **transcribed snapshot of a community wiki**, carrying
+`source="hoggit-threat-database"`, `confidence="provisional"` and the retrieval date per 4a, with a
+missing or `TBC` cell degrading to **no warning** — never to an invented default.
 
 ---
 
@@ -528,10 +598,12 @@ Flyable alone; body-layer only.
   `!voice` harness and the typed console **before** any redeploy, which is how to test the selector
   logic without burning a sortie on recognition.
 
-**Stage 4 — engagement envelopes.** `belief/threat.py` (transcription + rollup + `envelope_for`);
-`CONTACT_ENGAGEMENT_CHANGED`; the seventh block in `tick` with the min/max annulus, the 1.5×
-hysteresis, the injected `los_clear` term and the seed-as-outside convention; the two wordings.
-Largest and least certain — last, so the sortie after Stage 3 informs it.
+**Stage 4 — engagement envelopes. Gated on the table being in hand (4g) — do not start without it.**
+`belief/threat.py` (transcription + rollup + `envelope_for`); `CONTACT_ENGAGEMENT_CHANGED`; the
+seventh block in `tick` with the range annulus ANDed with the altitude band and the injected
+`los_clear` term, the 1.5× hysteresis on the leaving side, and the seed-as-outside convention; the
+two wordings. `radar_range_m`/`acquire_time_s` are transcribed and left unconsumed. Largest and least
+certain — last, so the sortie after Stage 3 informs it.
 
 **Stage 5 — prose and roadmap.** `STATE_TRANSITIONS.md`'s "Watching" block, both `ROADMAP.md`s,
 `todo/todo.md` for the deferrals named below.
@@ -562,6 +634,17 @@ for Stage 3.
 - **Hoggit data is a dated community snapshot** and some cells read `TBC`. A wrong max range produces
   a confidently wrong danger call. Missing values degrade to silence by design; wrong ones do not
   announce themselves.
+- **Stage 4 is blocked until the table is physically in the repo** (4g), and the page cannot be
+  fetched in full by the tooling available to planning. This is the only hard external dependency in
+  the milestone; Stages 1–3 are unaffected.
+- **The altitude column was misread twice before this plan settled** — a summarising fetch flattened
+  `0 - 6500` into "6500 max", which inverted the conclusion (from "the floor is the tactical fact"
+  to "drop the column"). Transcribe from the literal cells, never from a summary, and treat any
+  single-number altitude as suspect.
+- **Two ingested fields have no consumer** (`radar_range_m`, `acquire_time_s`). They will read as
+  dead code to a reviewer. The module docstring must say what each is for and that neither is wired,
+  or one will be deleted as unused and the other pressed into service as a threat range — being
+  *tracked* is not being *shootable*.
 - **The LOS term makes the danger state flap over broken ground.** Terrain masking is binary and
   changes fast at 150 kt through valleys, so danger/safe could alternate at the poll rate. The 1.5×
   hysteresis only damps the *range* boundary, not the LOS one. `EVENT_COOLDOWN_S` (15 s) and
