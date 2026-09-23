@@ -65,6 +65,8 @@ LEGACY_F10_TOKENS: tuple[str, ...] = (
     "watch_nearest",
     "watch_nearest_air_defence",
     "cancel_task",
+    "cancel_scan",
+    "cancel_watch",
 )
 
 #: Clock positions worth recognising: 8 through 4 the short way round,
@@ -221,6 +223,21 @@ PHRASES: dict[str, tuple[str, ...]] = {
         "watch nearest air defense",
     ),
     "cancel_task": ("cancel task", "cancel"),
+    # Narrow cancels (user, 2026-09-23: *"cancel task <task> should work
+    # cancel <task>"*). They were F10-only when the tokens were added,
+    # because this corpus has no recordings of them and the 99.2% gate was
+    # measured on recordings -- but a menu-only way to say something the
+    # pilot is already saying out loud is the wrong side of that trade.
+    #
+    # **`"cancel"` alone stays with `cancel_task`.** A bare "cancel" cannot
+    # name which mode it means, and guessing is what the narrow tokens were
+    # introduced to stop; the all-modes reading is the honest one for an
+    # unqualified cancel, and its readback names everything it stopped.
+    #
+    # `"stop scan"`/`"stop watch"` do not collide with the `stop` token:
+    # that one counts only when it is the entire transmission.
+    "cancel_scan": ("cancel scan", "stop scan", "stop scanning"),
+    "cancel_watch": ("cancel watch", "stop watch", "stop watching"),
     # Voice-only. `report` carries three phrasings because it is the
     # command most likely to be said casually and differently each time.
     "report_all": ("report", "report contacts", "what do you see"),
