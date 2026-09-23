@@ -339,13 +339,19 @@ class CrewConsole:
     #: always reports "no pending task", rather than raising.
     tasks: TaskStore | None = None
     #: How many player commands this console has dispatched, F10 or spoken
-    #: (`plans/binocular-optic/plan.md` D4). A counter rather than a flag
-    #: or a callback: the poll loop compares it across one iteration to
-    #: learn "did the player ask for anything just now", which stays true
-    #: for a command surface added later without this class knowing what
-    #: the answer is used for. It is deliberately not reset -- a monotonic
-    #: count is what makes the comparison safe across any number of
-    #: commands in one poll.
+    #: -- typed free text and voice's `"fallthrough"` disposition alike
+    #: (`plans/binocular-optic/plan.md` D4: "not a special case per
+    #: command"). Incremented from the two surface-level entry points that
+    #: are each reached regardless of *how* the player phrased the request
+    #: -- `handle_f10_command`'s own top (token dispatch) and
+    #: `_handle_utterance`'s top (every free-text utterance, typed or
+    #: fallen-through from voice) -- never per-intent inside either one. A
+    #: counter rather than a flag or a callback: the poll loop compares it
+    #: across one iteration to learn "did the player ask for anything just
+    #: now", which stays true for a command surface added later without
+    #: this class knowing what the answer is used for. It is deliberately
+    #: not reset -- a monotonic count is what makes the comparison safe
+    #: across any number of commands in one poll.
     commands_handled: int = 0
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
@@ -968,6 +974,15 @@ class CrewConsole:
         return f"{_UTTERANCE_ID_PREFIX}_{self._next_utterance_number}"
 
     def _handle_utterance(self, transcript: str, now_sim: float) -> list[str]:
+        # `plans/binocular-optic/plan.md` D4: the player asking for anything
+        # is itself evidence Petrovich's current optic activity matters less
+        # than what was just asked -- unconditional across surfaces, not a
+        # per-command special case. This is the one point both `handle_line`
+        # (typed free text) and voice's `"fallthrough"` disposition (which
+        # itself calls `handle_line` -- see `_act_on_voice_decision`) pass
+        # through, so counting here covers both without double-counting
+        # `handle_f10_command`'s own call for the token-dispatch surface.
+        self._note_player_command()
         parse = parse_utterance(self.store, transcript, now_sim)
         utterance = PlayerUtterance(
             id=self._new_utterance_id(),

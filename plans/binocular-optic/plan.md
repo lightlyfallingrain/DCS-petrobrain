@@ -243,7 +243,7 @@ rule. Three things the building of it changed or revealed:
 **Stage 3 — binocular search within a commanded sector.** D6's raster, sky clamp and far-band
 restriction, alternating with the naked-eye scan.
 
-**Stage 3b — a look is a sweep, not a stare. NOT BUILT; this is the next piece of work.**
+**Stage 3b — a look is a sweep, not a stare. DONE 2026-09-23, merged `e91b9ee`.**
 
 Found while building Stage 3, by a test rather than by reasoning: **a believed contact's bearing is
 reconstructed from a quantised percept — the reporting vocabulary's 30° clock bucket — so it can
@@ -259,22 +259,29 @@ otherwise: its only contact is `type`-level from frame 0, so `improvement_window
 0.4 km. The lost observations are the cost of searching far while a near contact goes unwatched,
 which is the model working. The test now asserts 32 with that explanation and the `xfail` is gone.
 
-The aiming defect is still real; it simply has no coverage yet. Stage 3b must bring its own
-unit-level tripwire — see `plans/binocular-optic/stage3b.md`, which carries the full design.
+The aiming defect was real; Stage 3b's own unit-level tripwire —
+`TestSweepFindsAnOffsetContact` (`plans/binocular-optic/stage3b.md` carries the full design) —
+proves it, empirically: reviewer-verified by forcing the sweep's half-width to 0 (reverting it to a
+stare) and re-running, which goes red.
 
-**The fix is already implied by the design rather than new**: he knows it is *"around two
-o'clock"*, so he sweeps around two o'clock. A look becomes a small sweep across the belief's own
-angular uncertainty, using the same stepping machinery `search_pattern` already provides, and
-degenerating to a single step when the uncertainty is smaller than the field of view. `LookTarget`
-already carries `bearing_uncertainty_deg` for it (defaulted, unused).
+**The fix was already implied by the design rather than new**: he knows it is *"around two
+o'clock"*, so he sweeps around two o'clock. A look is now a small sweep across the belief's own
+angular uncertainty (`look_sweep`), using the same stepping machinery `search_pattern` already
+provided, degenerating to a single step (`N=1`) when the uncertainty is smaller than the field of
+view — reproducing the pre-sweep behaviour exactly in that case, confirmed rather than assumed.
+`LookTarget`'s pre-existing `bearing_uncertainty_deg` field is what drives it. `OpticState` gained
+`look_envelope_azimuth_deg`/`look_envelope_half_width_deg` (the sweep's fixed centre/width, tested
+against by `look_is_finished`/`_target_in_current_look` in preference to the field of view, falling
+back to the FOV only when no envelope is recorded — a search phase, or a hand-built state in a
+test). `choose_look` deliberately stays on the field of view (it picks where contacts cluster, not
+where the sweep envelope sits).
 
-Two things to settle while building it:
+The two things flagged to settle while building it were resolved as follows:
 
-- **Where the uncertainty comes from.** Half a clock bucket (15°) is the honest default, but a
-  contact tracked over several polls may deserve better, and `Contact.last_position_uncertainty_m`
-  already exists as a metres figure that converts to an angle at a known range.
-- **How the 6 s cap divides.** Four steps at 1.5 s each fits the cap exactly, but whether that is
-  enough dwell per step for a recognition is a sortie question.
+- **Where the uncertainty comes from.** Shipped as the honest default, half a clock bucket (15°) —
+  `Contact.last_position_uncertainty_m`'s metres-to-angle refinement was not built this stage.
+- **How the 6 s cap divides.** Four steps at 1.5 s each, exactly as scoped. Whether that dwell is
+  enough for a real recognition is unverified and carries into Stage 4's sortie.
 
 **Stage 4 — sortie.** Whether it *feels* like a crewman using binoculars, and whether the budget
 and lockout are anywhere near right. Expect the constants to move once, as they did after every
