@@ -250,9 +250,17 @@ reconstructed from a quantised percept — the reporting vocabulary's 30° clock
 sit up to 15° from the true bearing. The binocular field of view is ±4.25°.** Aiming a single stare
 at the believed position therefore misses the target most of the time.
 
-`test_mock_flight_chain` caught it as four vanished observations (36 → 32) and is now `xfail`
-`strict=True` with that reason: a tripwire, not an accepted loss. When this stage lands the test
-must turn green and the marker must be removed; if it does not, the fix did not work.
+**Corrected 2026-09-23, and the correction matters.** This entry originally blamed
+`test_mock_flight_chain`'s four vanished observations (36 → 32) on that aiming defect, and marked
+the test `xfail` as a tripwire. Replaying the fixture with the optic decision traced showed
+otherwise: its only contact is `type`-level from frame 0, so `improvement_window_m` returns
+`(0, 0)`, **`OpticPhase.GLASSING` is never entered**, and the binoculars go up only for Stage 3's
+*search* — aimed at the 2.3–5.6 km band while that fixture's truck sits at 1.4 km closing to
+0.4 km. The lost observations are the cost of searching far while a near contact goes unwatched,
+which is the model working. The test now asserts 32 with that explanation and the `xfail` is gone.
+
+The aiming defect is still real; it simply has no coverage yet. Stage 3b must bring its own
+unit-level tripwire — see `plans/binocular-optic/stage3b.md`, which carries the full design.
 
 **The fix is already implied by the design rather than new**: he knows it is *"around two
 o'clock"*, so he sweeps around two o'clock. A look becomes a small sweep across the belief's own
