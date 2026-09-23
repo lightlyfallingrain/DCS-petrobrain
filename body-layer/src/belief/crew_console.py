@@ -34,7 +34,7 @@ was decided true. See `belief.callouts`' own module docstring for the full
 design (speech-time scheduling, sim-time occupancy, report-space
 aggregation).
 
-**`handle_f10_command`.** `plans/f10-crew-commands/plan.md`'s second,
+**`handle_command`.** `plans/f10-crew-commands/plan.md`'s second,
 non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
 loop drains player-selected DCS F10 radio-menu tokens
 (`aircraft_client.get_f10_commands`) and dispatches each one here, through
@@ -72,12 +72,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TextIO
+from typing import Final, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
-from belief.attention import RelativeSector, Sector
+from belief.attention import _SECTOR_CENTER_DEG, SECTORS, RelativeSector, Sector
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
-from belief.callouts import CalloutScheduler
+from belief.callouts import CalloutScheduler, group_facts, report_priority
 from belief.classification import parent_class_of
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
@@ -88,10 +88,15 @@ from belief.escalation import (
 )
 from belief.speech import (
     UrgentCall,
+    _contact_report_text,
     render_cancel_readback,
+    render_clear,
     render_confirm_request,
     render_contact_report,
+    render_group_report,
+    render_no_view,
     render_readback,
+    render_report,
     render_say_again,
     render_scan_readback,
     render_watch_nearest_readback,
@@ -114,7 +119,8 @@ from belief.voice_commands import (
     classify_response,
     classify_yes_no,
 )
-from perception.geometry import GeoPosition
+from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
+from perception.geometry import GeoPosition, angular_delta_deg
 
 #: Spoken when "Cancel Task" finds nothing to cancel -- no task store wired
 #: up, or no still-`pending` task. Deliberately not routed through
@@ -230,7 +236,78 @@ _SECTOR_SCAN_LABELS: dict[Sector, str] = {
 #: Every F10 scan command's fixed `belief.tools.scan_area` reason (Stage 6)
 #: -- an F10 button supplies no free-text justification the way a typed
 #: `scan-area` command's trailing `reason` argument does.
-_F10_SCAN_REASON = "F10 scan command"
+_SCAN_COMMAND_REASON = "F10 scan command"
+
+#: `report_clock_<p>` -> the ownship-relative hour, for `handle_command`'s
+#: dispatch and `_describe_token_for_confirm`'s fallback description
+#: (`plans/voice-command-completeness/plan.md` Stage 2). The nine forward
+#: hours `audio-adapter/src/vocabulary.py`'s `FORWARD_CLOCK_POSITIONS`
+#: recognises -- deliberately not all twelve, for the same reason that
+#: table gives: Petrovich cannot see behind the aircraft, so a report about
+#: an hour he has no honest answer for is not worth wiring (the clock
+#: family is safe by construction, see `_handle_report`'s own docstring).
+_CLOCK_REPORT_TOKENS: dict[str, int] = {
+    f"report_clock_{p}": p for p in (8, 9, 10, 11, 12, 1, 2, 3, 4)
+}
+
+#: Spoken number words for `_CLOCK_REPORT_TOKENS`' hours -- lowercase,
+#: mirroring `_SECTOR_SCAN_LABELS`' register; `render_clear`/
+#: `_describe_token_for_confirm` capitalize where the word is
+#: sentence-initial, this table only supplies the bare word.
+_CLOCK_REPORT_LABELS: dict[int, str] = {
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+    11: "eleven",
+    12: "twelve",
+}
+
+#: `report_bearing_<compass>` -> `belief.attention.Sector` -- the
+#: compass-absolute half of the report vocabulary, `_BEARING_SCAN_TOKENS`'
+#: direct sibling for the `report` verb rather than `scan`.
+_BEARING_REPORT_TOKENS: dict[str, Sector] = {
+    "report_bearing_n": "N",
+    "report_bearing_ne": "NE",
+    "report_bearing_e": "E",
+    "report_bearing_se": "SE",
+    "report_bearing_s": "S",
+    "report_bearing_sw": "SW",
+    "report_bearing_w": "W",
+    "report_bearing_nw": "NW",
+}
+
+#: At most this many groups are spoken in one report, joined into one
+#: utterance (`plans/voice-command-completeness/plan.md` Decision 1b) --
+#: an uncalibrated placeholder pending a live sortie's judgment on whether
+#: three groups is useful or too long to sit through (that plan's
+#: "Decisions Requiring User Input" item 3), isolated here so retuning it
+#: never touches `_handle_report`'s own logic.
+REPORT_MAX_GROUPS: Final[int] = 3
+
+
+def _nearest_sector(degrees: int) -> Sector:
+    """Quantises an absolute bearing onto the nearest of the eight
+    compass `Sector`s (`plans/voice-command-completeness/plan.md` Decision
+    3) -- `scan_bearing_deg(320)` reduces to `scan_bearing_nw`,
+    `report_bearing_deg(5)` reduces to `report_bearing_n`. Per the user's
+    2026-09-23 direction ("o'clock direction is enough, no need for x
+    degrees granularity now"), the numeric bearing tokens act on exactly
+    the same eight buckets `scan_bearing_*`/`report_bearing_*` already do
+    -- no new geometry, no `AttentionArea.wedge_deg` use. `degrees` is
+    assumed already a legal, 5-degree-multiple bearing (`audio_adapter.
+    vocabulary.parse_bearing`'s own checksum already rejected anything
+    else upstream of this call)."""
+    return min(
+        SECTORS,
+        key=lambda sector: angular_delta_deg(
+            float(degrees), _SECTOR_CENTER_DEG[sector]
+        ),
+    )
+
 
 #: Plain human phrase per non-scan legacy token, for `_describe_token_for_
 #: confirm`'s fallback table -- `render_confirm_request`'s `description`
@@ -243,25 +320,77 @@ _TOKEN_DESCRIPTIONS: dict[str, str] = {
     "cancel_task": "cancel everything",
     "cancel_scan": "stop scan",
     "cancel_watch": "stop watch",
+    "report_all": "report",
 }
 
 
-def _describe_token_for_confirm(token: str) -> str:
+def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) -> str:
     """A plain human phrase for `token`, for `belief.speech.
     render_confirm_request`'s `description` argument (Stage 2,
-    `plans/inbound-speech/plan.md`). Reuses `handle_f10_command`'s own
-    token->label tables for the 15-token legacy vocabulary it can already
-    dispatch (`_describe_task_for_speech`'s sibling, same "one table, two
-    readers" idea); anything outside that set (a voice-only token this
-    milestone does not yet act on -- see `handle_f10_command`'s own
-    defensive `else` branch) falls back to the token name with
-    underscores turned to spaces, which is honest rather than polished:
-    there is no dispatch behind it yet for the confirm to be about."""
+    `plans/inbound-speech/plan.md`, extended by `plans/
+    voice-command-completeness/plan.md` Stage 2/3). Reuses `handle_command`'s
+    own token->label tables (`_describe_task_for_speech`'s sibling, same
+    "one table, two readers" idea) for every token this module now
+    dispatches; anything outside that set falls back to the token name
+    with underscores turned to spaces, which is honest rather than
+    polished: there is no dispatch behind it yet for the confirm to be
+    about.
+
+    **`report_bearing_deg`/`scan_bearing_deg` say the quantised sector, not
+    the number** (Decision 3 item 5: `"scan northwest, confirm?"`, never
+    `"scan bearing 317, confirm?"`) -- the confirm prompt's job is to
+    expose a misunderstanding, and repeating the raw number while the
+    dispatch itself acts on a coarser bucket would hide the only
+    discrepancy worth hearing, the same reasoning `render_scan_readback`'s
+    own call site already follows. `bearing_degrees` is only consulted for
+    those two tokens; every other token ignores it."""
     if token in _RELATIVE_SCAN_TOKENS:
         return f"scan {_RELATIVE_SCAN_LABELS[_RELATIVE_SCAN_TOKENS[token]]}"
     if token in _BEARING_SCAN_TOKENS:
         return f"scan {_SECTOR_SCAN_LABELS[_BEARING_SCAN_TOKENS[token]]}"
+    if token in _BEARING_REPORT_TOKENS:
+        return f"report {_SECTOR_SCAN_LABELS[_BEARING_REPORT_TOKENS[token]]}"
+    if token in _CLOCK_REPORT_TOKENS:
+        clock = _CLOCK_REPORT_TOKENS[token]
+        return f"report {_CLOCK_REPORT_LABELS[clock]} o'clock"
+    if (
+        token in ("scan_bearing_deg", "report_bearing_deg")
+        and bearing_degrees is not None
+    ):
+        sector = _nearest_sector(bearing_degrees)
+        verb = "scan" if token == "scan_bearing_deg" else "report"
+        return f"{verb} {_SECTOR_SCAN_LABELS[sector]}"
     return _TOKEN_DESCRIPTIONS.get(token, token.replace("_", " "))
+
+
+#: The canonical "what has real dispatch behaviour in `handle_command`" set
+#: (`plans/voice-command-completeness/plan.md` Stage 1) -- every token this
+#: method actually branches on, `stop_talking` included (a documented,
+#: deliberate no-readback no-op, not a gap). Excludes `wake_petrovich`/
+#: `cancel_nevermind`/`say_again` (handled above `handle_command` entirely,
+#: per the module docstring -- this method never even sees those three
+#: tokens) and `scan_bearing_deg`/`report_bearing_deg` are included even
+#: though a missing `bearing_degrees` argument degrades them to a "say
+#: again" line rather than raising, matching every other graceful-
+#: degradation branch in this class. `test_crew_console.py` asserts every
+#: member of this set returns a non-empty result from `handle_command`.
+DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
+    set(_RELATIVE_SCAN_TOKENS)
+    | set(_BEARING_SCAN_TOKENS)
+    | set(_CLOCK_REPORT_TOKENS)
+    | set(_BEARING_REPORT_TOKENS)
+    | {
+        "scan_bearing_deg",
+        "report_bearing_deg",
+        "report_all",
+        "watch_nearest",
+        "watch_nearest_air_defence",
+        "cancel_task",
+        "cancel_scan",
+        "cancel_watch",
+        "stop_talking",
+    }
+)
 
 
 def _active_tasks_by_kind(tasks: list[PendingIntent]) -> list[PendingIntent]:
@@ -343,7 +472,7 @@ class CrewConsole:
     #: (`plans/binocular-optic/plan.md` D4: "not a special case per
     #: command"). Incremented from the two surface-level entry points that
     #: are each reached regardless of *how* the player phrased the request
-    #: -- `handle_f10_command`'s own top (token dispatch) and
+    #: -- `handle_command`'s own top (token dispatch) and
     #: `_handle_utterance`'s top (every free-text utterance, typed or
     #: fallen-through from voice) -- never per-intent inside either one. A
     #: counter rather than a flag or a callback: the poll loop compares it
@@ -437,20 +566,31 @@ class CrewConsole:
         `commands_handled`."""
         self.commands_handled += 1
 
-    def handle_f10_command(self, token: str, now_sim: float) -> list[str]:
-        """Dispatches one player-selected F10 radio-menu token (`plans/
-        f10-command-vocabulary/plan.md`) -- `logger.py`'s `--crew-text
-        --f10-commands` poll loop calls this once per token drained from
-        `aircraft_client.get_f10_commands`, the same post-`drain_events`
-        hook point as every other spoken-output path. The 14-token
-        vocabulary (`aircraft-layer`'s `F10CommandReceiver.ALLOWED_COMMANDS`)
-        is dispatched via two lookup tables (`_RELATIVE_SCAN_TOKENS`,
-        `_BEARING_SCAN_TOKENS`) rather than a 14-branch if/elif, matching
-        `belief.utterance`'s own ordered-table idiom for a fixed, closed
-        vocabulary. An unrecognized token returns `[]` without printing
-        anything -- aircraft-layer's `F10CommandReceiver` already filters to
-        its own `ALLOWED_COMMANDS`, so this branch is defensive, not a real
-        path in practice."""
+    def handle_command(
+        self, token: str, now_sim: float, bearing_degrees: int | None = None
+    ) -> list[str]:
+        """Dispatches one player-issued command token -- originally F10
+        radio-menu selections only (`plans/f10-crew-commands/plan.md`),
+        this is now the single dispatcher for every input surface that
+        resolves to a token: `logger.py`'s `--crew-text --f10-commands`
+        poll loop (`aircraft_client.get_f10_commands`), a voice `"act"`
+        disposition (`_act_on_voice_decision`), and a committed confirm-band
+        answer (`handle_transcript`). Renamed from `handle_f10_command`
+        (`plans/voice-command-completeness/plan.md` Stage 1, Decision 4) --
+        the F10 radio menu is the transport being retired, not the concept
+        this method dispatches, which voice already shared with it.
+
+        **`DISPATCHED_COMMAND_TOKENS`** (module-level, below) is the
+        canonical "what has real behaviour here" set -- `test_crew_console.
+        py` asserts every member either returns a non-empty result or is a
+        documented no-op (`stop_talking`). `wake_petrovich`/
+        `cancel_nevermind`/`say_again` are never passed to this method at
+        all (handled above it, per the module docstring); an unrecognized
+        token (including a genuinely unknown one) is now **logged**, not
+        silently swallowed -- the failure mode this milestone exists to fix
+        was silence: a recognised token reaching this method and doing
+        nothing was indistinguishable, from the cockpit, from not having
+        been heard at all."""
         self._note_player_command()
         if token in _RELATIVE_SCAN_TOKENS:
             relative_sector = _RELATIVE_SCAN_TOKENS[token]
@@ -464,6 +604,14 @@ class CrewConsole:
             lines = self._handle_scan(
                 now_sim, sector=sector, sector_label=_SECTOR_SCAN_LABELS[sector]
             )
+        elif token == "scan_bearing_deg":
+            if bearing_degrees is None:
+                lines = ["say again -- no bearing heard"]
+            else:
+                sector = _nearest_sector(bearing_degrees)
+                lines = self._handle_scan(
+                    now_sim, sector=sector, sector_label=_SECTOR_SCAN_LABELS[sector]
+                )
         elif token == "watch_nearest":
             lines = self._handle_watch_nearest(now_sim)
         elif token == "watch_nearest_air_defence":
@@ -480,7 +628,21 @@ class CrewConsole:
             # readback" shape (see `_handle_stop_talking`'s own docstring).
             self._handle_stop_talking()
             return []
+        elif token == "report_all":
+            lines = self._handle_report(now_sim)
+        elif token in _CLOCK_REPORT_TOKENS:
+            lines = self._handle_report(now_sim, clock=_CLOCK_REPORT_TOKENS[token])
+        elif token in _BEARING_REPORT_TOKENS:
+            lines = self._handle_report(now_sim, sector=_BEARING_REPORT_TOKENS[token])
+        elif token == "report_bearing_deg":
+            if bearing_degrees is None:
+                lines = ["say again -- no bearing heard"]
+            else:
+                lines = self._handle_report(
+                    now_sim, sector=_nearest_sector(bearing_degrees)
+                )
         else:
+            logger.warning("no dispatch behaviour for command token %r", token)
             return []
         self._print(lines, now_sim)
         return lines
@@ -610,7 +772,7 @@ class CrewConsole:
     ) -> list[str]:
         """Registers a real `belief.tasks.PendingIntent` via `belief.tools.
         scan_area`, with `center`/`radius_m`/`reason` all fixed (ownship's
-        own position, `None` (unbounded), `_F10_SCAN_REASON`) rather than
+        own position, `None` (unbounded), `_SCAN_COMMAND_REASON`) rather than
         player-supplied, since an F10 button carries no bearing/range/
         free-text the way a typed `scan-area` command does. `radius_m=None`
         is a deliberate choice, not a missing value: an F10 sector scan
@@ -618,7 +780,7 @@ class CrewConsole:
         "Scan geometry: drop the invented radius" -- the area's own
         `radius_m` field documents the reasoning in full. Exactly one of
         `sector`/`relative_sector` is set by the caller
-        (`handle_f10_command`'s two lookup tables), never both --
+        (`handle_command`'s two lookup tables), never both --
         `scan_area`/`ContactStore.add_area` would raise `ValueError` if
         they were.
 
@@ -668,12 +830,101 @@ class CrewConsole:
             self.tasks,
             center,
             None,
-            _F10_SCAN_REASON,
+            _SCAN_COMMAND_REASON,
             now_sim,
             sector=sector,
             relative_sector=relative_sector,
         )
         return [render_scan_readback(sector_label).text]
+
+    def _handle_report(
+        self,
+        now_sim: float,
+        *,
+        clock: int | None = None,
+        sector: Sector | None = None,
+    ) -> list[str]:
+        """`report_all`/`report_clock_<p>`/`report_bearing_<compass>`/
+        `report_bearing_deg` (the last reduced to `sector` by
+        `handle_command` before this is ever called) -- `plans/
+        voice-command-completeness/plan.md` Decision 1: **a read of current
+        belief and nothing else.** No `AttentionArea`, no `PendingIntent`,
+        no gaze change, no `aircraft_client` call -- "report is always
+        about current belief. Scan tells to go look" (user, 2026-09-23).
+        At most one of `clock`/`sector` is set by the caller; neither set
+        means `report_all`.
+
+        **Source of facts, in order** (Decision 1's numbered steps):
+        `belief.tools.get_contacts`, then drop `certainty == "lost"`
+        (contacts are never pruned, so without this a report grows
+        monotonically over a sortie -- `"estimated"` stays, since a
+        remembered contact is still belief), then drop anything with no
+        `relative_now` (no `self.enrichment` -> the whole family answers
+        the same graceful-degradation line `_handle_scan` already uses),
+        then the family filter, then group+render.
+
+        **The rear-hemisphere carve-out (Decision 2) applies only to
+        `sector`.** The clock family is safe by construction (`_CLOCK_
+        REPORT_TOKENS` only names the eight-to-four forward hemisphere,
+        same as `audio_adapter.vocabulary.FORWARD_CLOCK_POSITIONS` and for
+        the identical reason) -- `report_all` never claims a direction at
+        all. A `sector` request asks about an absolute compass direction
+        that may sit behind the aircraft; answering "clear" there would
+        claim a look the cockpit mask makes physically impossible, so an
+        empty result for a rear-hemisphere `sector` speaks `render_no_view`
+        instead of `render_clear`. A contact that *is* believed to sit
+        there is still reported normally -- belief survives the aircraft
+        turning away; only the *absence* claim is withheld."""
+        if self.enrichment is None:
+            return ["no world-model connection configured"]
+
+        direction_label: str | None = None
+        rear_hemisphere = False
+        if clock is not None:
+            direction_label = f"{_CLOCK_REPORT_LABELS[clock]} o'clock"
+        elif sector is not None:
+            direction_label = _SECTOR_SCAN_LABELS[sector]
+            heading = self.enrichment.ownship.heading_true_deg
+            relative_deg = angular_delta_deg(_SECTOR_CENTER_DEG[sector], heading)
+            rear_cutoff_deg = COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg
+            rear_hemisphere = relative_deg >= rear_cutoff_deg
+
+        center_deg = _SECTOR_CENTER_DEG[sector] if sector is not None else None
+        facts_list: list[dict[str, object]] = []
+        for result in get_contacts(self.store, now_sim, enrichment=self.enrichment):
+            facts = result["facts"]
+            if facts.get("certainty") == "lost":
+                continue
+            relative_now = facts.get("relative_now")
+            if not isinstance(relative_now, dict):
+                continue
+            if clock is not None and relative_now["clock_position"] != clock:
+                continue
+            if center_deg is not None:
+                bearing_deg = relative_now["bearing_deg"]
+                assert isinstance(bearing_deg, float)
+                if angular_delta_deg(bearing_deg, center_deg) > 45.0:
+                    continue
+            facts_list.append(facts)
+
+        if not facts_list:
+            if rear_hemisphere:
+                assert direction_label is not None
+                return [render_no_view(direction_label).text]
+            return [render_clear(direction_label).text]
+
+        groups = sorted(
+            group_facts(facts_list),
+            key=lambda group: min(report_priority(facts) for facts in group),
+        )
+        texts = [
+            _contact_report_text(group[0])
+            if len(group) == 1
+            else render_group_report(group).text
+            for group in groups[:REPORT_MAX_GROUPS]
+        ]
+        truncated = len(groups) > REPORT_MAX_GROUPS
+        return [render_report(texts, truncated).text]
 
     def _describe_task_for_speech(self, task: PendingIntent) -> str | None:
         """A plain human phrase for `task`, for `speech.render_cancel_
@@ -801,7 +1052,7 @@ class CrewConsole:
         routed through `_print`: there is no line to print, push to the
         overlay, or speak.
 
-        `handle_f10_command`'s Stage 3 revision to this method (the
+        `handle_command`'s Stage 3 revision to this method (the
         original had this return a short `"Copy."` acknowledgement, pushed
         urgent through `_print` -- see plan Stage 3's own entry for that
         history) replaced *that* with a real interrupt-only call:
@@ -836,14 +1087,18 @@ class CrewConsole:
         verb_anchored: bool,
         ambiguous: bool,
         now_sim: float,
+        bearing_degrees: int | None = None,
     ) -> list[str]:
         """`plans/inbound-speech/plan.md` Stage 2's voice-command entry
-        point -- a sibling of `handle_line`/`handle_f10_command`, per the
+        point -- a sibling of `handle_line`/`handle_command`, per the
         module docstring's prediction of a third input surface. Called
         with the fields `audio_adapter.command_matcher.MatchResult` already
         resolved (Stage 3 wires the real HTTP poll; this stage is driven
         by tests and the `!voice` REPL harness, see `_handle_voice_test_
-        command`).
+        command`). `bearing_degrees` (`plans/voice-command-completeness/
+        plan.md` Stage 3) is `MatchResult.bearing_degrees` carried through
+        unchanged -- populated only when `token` is `"scan_bearing_deg"`/
+        `"report_bearing_deg"`.
 
         **A pending confirm-band question, if any, is checked first** --
         `classify_yes_no` decides whether this transcript commits, discards,
@@ -854,14 +1109,21 @@ class CrewConsole:
         stale question, not the player's new utterance). Affirm/negative
         are valid only inside this branch, i.e. only while a confirmation
         is pending -- outside it the same words are ordinary text and reach
-        `belief.voice_commands.classify_response` like anything else."""
+        `belief.voice_commands.classify_response` like anything else.
+        Committing (`affirm`) passes `pending.bearing_degrees` through to
+        `handle_command`, not this call's own `bearing_degrees` -- the
+        number belongs to whichever transcript originally proposed the
+        pending command, not to the (typically bearing-less) "affirm" reply
+        that commits it."""
         if self._pending_confirmation is not None:
             pending = self._pending_confirmation
             if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:
                 answer = classify_yes_no(transcript)
                 self._pending_confirmation = None
                 if answer == "affirm":
-                    return self.handle_f10_command(pending.token, now_sim)
+                    return self.handle_command(
+                        pending.token, now_sim, bearing_degrees=pending.bearing_degrees
+                    )
                 if answer == "negative":
                     return []
                 # else: falls through and this transcript is evaluated on
@@ -883,7 +1145,9 @@ class CrewConsole:
             disposition=decision.disposition,
             acted_token=decision.token,
         )
-        return self._act_on_voice_decision(decision, transcript, now_sim)
+        return self._act_on_voice_decision(
+            decision, transcript, now_sim, bearing_degrees
+        )
 
     def _log_transcript(self, **row: object) -> None:
         """Write one row to `transcript_log`, if configured.
@@ -898,7 +1162,11 @@ class CrewConsole:
             return
 
     def _act_on_voice_decision(
-        self, decision: BandDecision, transcript: str, now_sim: float
+        self,
+        decision: BandDecision,
+        transcript: str,
+        now_sim: float,
+        bearing_degrees: int | None = None,
     ) -> list[str]:
         if decision.disposition == "fallthrough":
             # `handle_line` re-strips/re-checks the `!`-prefixed harness
@@ -908,12 +1176,17 @@ class CrewConsole:
             return self.handle_line(transcript, now_sim)
         if decision.disposition == "act":
             assert decision.token is not None
-            return self.handle_f10_command(decision.token, now_sim)
+            return self.handle_command(
+                decision.token, now_sim, bearing_degrees=bearing_degrees
+            )
         if decision.disposition == "confirm":
             assert decision.token is not None
-            description = _describe_token_for_confirm(decision.token)
+            description = _describe_token_for_confirm(decision.token, bearing_degrees)
             self._pending_confirmation = PendingConfirmation(
-                token=decision.token, description=description, pending_since_sim=now_sim
+                token=decision.token,
+                description=description,
+                pending_since_sim=now_sim,
+                bearing_degrees=bearing_degrees,
             )
             lines = [render_confirm_request(description).text]
         else:  # "say_again"
@@ -935,7 +1208,17 @@ class CrewConsole:
 
         `!voice <token|-> <match_ratio> <confidence> <verb_anchored:0|1>
         <ambiguous:0|1> <transcript...>` -- `-` for `token` means "no
-        match" (`None`)."""
+        match" (`None`). `<transcript...>` accepts an **optional trailing
+        degrees argument** (`plans/voice-command-completeness/plan.md`
+        Stage 3, decision 3 item 6): if the transcript's last word is a
+        bare integer, it is peeled off as `bearing_degrees` and the
+        remaining words are the transcript, mirroring `MatchResult.
+        bearing_degrees`'s real shape (a number attached to, but distinct
+        from, the transcript text) without adding a new fixed positional
+        argument that would break every existing `!voice` invocation.
+        `!voice scan_bearing_deg 1.0 1.0 1 0 scan bearing three two zero
+        320` sets `bearing_degrees=320`; a transcript with no trailing
+        integer (every pre-existing test/harness use) is unaffected."""
         usage = [
             (
                 "usage: !voice <token|-> <match_ratio> <confidence> "
@@ -959,6 +1242,11 @@ class CrewConsole:
             self._print(usage, now_sim)
             return usage
         token = None if token_arg == "-" else token_arg
+        bearing_degrees: int | None = None
+        split_transcript = transcript.rsplit(maxsplit=1)
+        if len(split_transcript) == 2 and split_transcript[1].lstrip("-").isdigit():
+            transcript, degrees_word = split_transcript
+            bearing_degrees = int(degrees_word)
         return self.handle_transcript(
             transcript,
             confidence,
@@ -967,6 +1255,7 @@ class CrewConsole:
             verb_arg == "1",
             ambiguous_arg == "1",
             now_sim,
+            bearing_degrees=bearing_degrees,
         )
 
     def _new_utterance_id(self) -> str:
@@ -981,7 +1270,7 @@ class CrewConsole:
         # (typed free text) and voice's `"fallthrough"` disposition (which
         # itself calls `handle_line` -- see `_act_on_voice_decision`) pass
         # through, so counting here covers both without double-counting
-        # `handle_f10_command`'s own call for the token-dispatch surface.
+        # `handle_command`'s own call for the token-dispatch surface.
         self._note_player_command()
         parse = parse_utterance(self.store, transcript, now_sim)
         utterance = PlayerUtterance(
@@ -1104,3 +1393,14 @@ class CrewConsole:
                     )
             if bypass_gate:
                 self.scheduler.note_urgent(now_sim, line)
+            else:
+                # `plans/voice-command-completeness/plan.md` Decision 2 --
+                # every reply (a readback or a report) claims the channel
+                # for its own spoken duration, fixing a real latent defect:
+                # every command readback has been unbudgeted since readbacks
+                # existed, so a routine callout could queue immediately
+                # behind one. `note_reply` extends (`max`), never preempts,
+                # so a scheduler-drained callout line (already accounted
+                # for by `CalloutScheduler.tick` itself) calling this again
+                # is a harmless no-op, not a double-charge.
+                self.scheduler.note_reply(now_sim, line)

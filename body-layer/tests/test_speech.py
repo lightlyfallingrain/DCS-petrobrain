@@ -34,9 +34,12 @@ from belief.speech import (
     _respell_for_tts,
     _round_enrichment_fragment,
     _unit_type_display,
+    render_clear,
     render_confirm_request,
     render_contact_report,
+    render_no_view,
     render_readback,
+    render_report,
     render_say_again,
     render_watch_nearest_readback,
     route_event,
@@ -161,6 +164,39 @@ def test_render_confirm_request_capitalizes_and_appends_confirm() -> None:
 
 def test_render_confirm_request_empty_description() -> None:
     assert render_confirm_request("").text == ", confirm?"
+
+
+def test_render_clear_with_no_direction_is_bare_clear() -> None:
+    speech = render_clear(None)
+    assert speech.text == "Clear."
+    assert speech.template == "contact_report"
+
+
+def test_render_clear_capitalizes_a_directional_label() -> None:
+    assert render_clear("three o'clock").text == "Three o'clock, clear."
+    assert render_clear("north").text == "North, clear."
+
+
+def test_render_no_view_is_lowercase_mid_sentence() -> None:
+    """Unlike `render_clear`'s sentence-initial capitalized label,
+    `render_no_view`'s label is spoken mid-sentence -- `"Can't see
+    north."`, never `"Can't see North."`"""
+    speech = render_no_view("north")
+    assert speech.text == "Can't see north."
+    assert speech.template == "contact_report"
+
+
+def test_render_report_joins_group_texts_into_one_utterance() -> None:
+    speech = render_report(
+        ["BMP-2, 3 o'clock, 1 kilometre.", "T-72, 9 o'clock."], False
+    )
+    assert speech.text == "BMP-2, 3 o'clock, 1 kilometre. T-72, 9 o'clock."
+    assert speech.template == "contact_report"
+
+
+def test_render_report_appends_and_more_when_truncated() -> None:
+    speech = render_report(["BMP-2, 3 o'clock, 1 kilometre."], True)
+    assert speech.text == "BMP-2, 3 o'clock, 1 kilometre. And more."
 
 
 def test_render_contact_report_returns_none_for_unknown_contact() -> None:

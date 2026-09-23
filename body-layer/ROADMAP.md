@@ -817,6 +817,54 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   crewman using binoculars, are the constants anywhere near right) is the next piece of work, and
   nothing above should be read as validated against a live cockpit.
 
+- [x] **Voice command completeness — Stages 1 through 4. DONE**
+  (`feature/voice-command-completeness`; plan: `plans/voice-command-completeness/plan.md`). 20 of
+  41 recognised voice tokens (`report_all`, the nine `report_clock_*`, the eight
+  `report_bearing_<compass>`, `report_bearing_deg`, `scan_bearing_deg`) reached `CrewConsole.
+  handle_command` (renamed from `handle_f10_command`, Stage 1 — the F10 radio menu is the transport
+  being retired, not the concept the rest of this codebase still needs) and fell through its
+  defensive `else` doing nothing — recognition succeeded, the dispatcher said "act", and the act was
+  a silent no-op, indistinguishable from not having been heard at all.
+
+  **Stage 2 — the report families.** `report` is a read of current belief and nothing else, never a
+  look (*"report is always about current belief. Scan tells to go look"* — user, 2026-09-23): no
+  `AttentionArea`, no task, no gaze change. Drops `certainty == "lost"` contacts (never pruned, so a
+  report would otherwise grow across a sortie) and anything with no `relative_now`, filters by the
+  requested family, groups via a new `belief.callouts.group_facts` (the bucket+chain rule extracted
+  out of `group_candidates` so the report and callout paths share one aggregation rule), and speaks
+  **one utterance**, capped at `REPORT_MAX_GROUPS` (3, uncalibrated) with a trailing `"And more."`
+  when truncated — never one line per group, the same discipline `plans/callout-scheduling/`
+  established. An empty result says `"Clear."`/`"<direction>, clear."` — **except** a compass/
+  numeric-bearing direction past the cockpit mask's rear cutoff relative to current heading, which
+  says `"Can't see <direction>."` instead: `"clear"` there would claim a look that is physically
+  impossible, the no-omniscience invariant's mirror image. A contact actually believed to sit there
+  is still reported normally; only the absence claim is withheld.
+
+  **Stage 3 — the numeric bearing slot.** `scan_bearing_deg`/`report_bearing_deg` quantise onto the
+  nearest of the eight compass sectors (`_nearest_sector`, 45° buckets — *"o'clock direction is
+  enough, no need for x degrees granularity now"*, user 2026-09-23) and then behave exactly like
+  their compass-word sibling tokens, readback and confirm prompt included (naming the sector, never
+  the raw number). Required an `audio-adapter` wire fix: `MatchResult.bearing_degrees` was computed
+  by `command_matcher.match_transcript` and then dropped at the wire — `TranscriptEvent` carried
+  seven fields, not eight. Now eight; `PendingConfirmation.bearing_degrees` carries the parsed value
+  across a confirm round trip so an "affirm" commit does not lose the heading.
+
+  **Stage 4 — prose** (`body-layer/CLAUDE.md`, `docs/concept/STATE_TRANSITIONS.md`, this entry).
+
+  **`DISPATCHED_COMMAND_TOKENS`** (module-level, `crew_console.py`) is now the canonical
+  "what has real behaviour" set, asserted against by test; an unrecognised token logs a warning
+  instead of vanishing silently. `CrewConsole._print`'s non-urgent path now also calls
+  `CalloutScheduler.note_reply`, closing a separate latent defect the reports made audible: every
+  command readback has been unbudgeted since readbacks existed, so a routine callout could queue
+  immediately behind one rather than waiting for it to finish.
+
+  **Deliberately not done here** (see the plan's Decision 5, both deferred to their own stage,
+  after this one, per user direction): ownship-relative o'clock scan tokens (`scan_clock_1..12`),
+  and making a compass `scan north`/`scan_bearing_deg` actually steer naked-eye gaze — today it
+  only registers an `AttentionArea` and speaks a readback while Petrovich keeps free-scanning, a
+  pre-existing gap this milestone did not touch and that must be said in the sortie card, not
+  discovered in the air. **Unflown as of merge.**
+
 ## Backlog (body-layer)
 
 - [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
