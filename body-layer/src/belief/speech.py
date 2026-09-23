@@ -271,6 +271,14 @@ def render_scan_readback(sector_label: str) -> OutgoingSpeech:
     return OutgoingSpeech(text=f"Scanning {sector_label}.", template="readback")
 
 
+#: Radio brevity: English articles carry no information in a report and cost
+#: speaking time (user, 2026-09-23, from the five-fix sortie transcript).
+#: `"scanning to the left"` becomes `"scanning left"`, `"a couple of
+#: contacts"` becomes `"couple contacts"`. This is a register, not a style
+#: preference -- it is how crews actually talk on an intercom, and every
+#: word costs a slice of a channel one person can occupy at a time.
+
+
 def render_cancel_readback(what_was_cancelled: str | None) -> OutgoingSpeech:
     """The F10 "Cancel Task" readback. `what_was_cancelled` is a plain human
     phrase for the cancelled task (`"the scan to the left"`, `"the scan
@@ -287,9 +295,7 @@ def render_cancel_readback(what_was_cancelled: str | None) -> OutgoingSpeech:
     mapping, this function only formats it."""
     if what_was_cancelled is None:
         return OutgoingSpeech(text="Copy, stopping.", template="readback")
-    return OutgoingSpeech(
-        text=f"Copy, stopping {what_was_cancelled}.", template="readback"
-    )
+    return OutgoingSpeech(text=f"Copy, stop {what_was_cancelled}.", template="readback")
 
 
 def render_say_again() -> OutgoingSpeech:
@@ -441,6 +447,43 @@ def _respell_for_tts(text: str) -> str:
     )
 
 
+def _identification_lead(value: object, unit_type: str) -> str:
+    """The noun an identification line opens with: the contact's class when
+    that is known, else `"unit"` (user, 2026-09-23).
+
+    *"armor 11 o'clock, very close is BTR-80"* tells the pilot what he is
+    being asked to look at before it tells him what it turned out to be;
+    *"unit at 11 o'clock..."* made him wait for the payload. The article
+    goes with it, for the same brevity reason as everything else here.
+
+    The class is derived from the identified type rather than read from the
+    contact, because at the moment a classification *changes* the new value
+    is the type and the previous class word is not carried in the event. A
+    type whose profile falls to the object model's default class yields
+    nothing sayable -- `BM-30` and `SA-10 Flap Lid radar` both do -- so
+    those keep `"unit"` rather than opening with `"group"`, which would read
+    as a formation rather than as a description. Nor does the lead repeat
+    the payload: *"truck ... is truck"* is a stutter, not a report.
+    """
+    if not isinstance(value, str) or not value:
+        return "unit"
+    from perception import object_model
+
+    op_class = object_model.profile_for(value).op_class
+    if op_class == object_model.DEFAULT_OP_CLASS:
+        return "unit"
+    word = _OP_CLASS_DISPLAY.get(op_class)
+    if not word:
+        return "unit"
+    spoken = _respell_for_tts(word)
+    # "truck 11 o'clock ... is truck" says the same word twice and sounds
+    # like a stutter rather than a report. When the lead would repeat the
+    # payload, the generic noun carries the sentence instead.
+    if spoken.lower() == unit_type.lower():
+        return "unit"
+    return spoken
+
+
 def _unmapped_class_display(value: str, generic: str) -> str:
     """What to say for a `class` value neither display table maps.
 
@@ -562,9 +605,9 @@ def _cardinality_phrase(lo: int, hi: float, attended: bool = False) -> str | Non
     if lo >= 16:
         return "many"
     if lo == 4 and hi <= 5:
-        return "a handful of"
+        return "handful"
     if lo >= 2 and hi <= 3:
-        return "a couple of"
+        return "couple"
     return "several"
 
 
@@ -817,10 +860,11 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
             clock = relative_now["clock_position"]
             range_m = relative_now["range_m"]
             assert isinstance(range_m, float)
+            lead = _identification_lead(classification.get("value"), unit_type)
             return (
-                f"unit at {clock} o'clock, {_format_range_km(range_m)} is {unit_type}."
+                f"{lead} {clock} o'clock, {_format_range_km(range_m)} is {unit_type}."
             )
-        return f"unit is {unit_type}."
+        return f"{_identification_lead(classification.get('value'), unit_type)} is {unit_type}."
     if event.kind == CONTACT_CARDINALITY_CHANGED:
         return None
     return None

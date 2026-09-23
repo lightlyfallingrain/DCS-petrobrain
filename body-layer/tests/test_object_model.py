@@ -145,7 +145,7 @@ def test_s300_64h6e_sr_has_real_dimensions_and_op_lrsam() -> None:
 # set: 190 classified (~60.1%, see test_coverage_floor_against_real_type_
 # sample below). The floor is set well below that measured rate -- a
 # *regression guard*, not a target -- so it has room to move (a future
-# keyword edit shifting a handful of matches, or DCS adding/renaming a few
+# keyword edit shifting handful matches, or DCS adding/renaming a few
 # types on a future TSV refresh) without failing on noise, while still
 # catching a real regression (e.g. the reporting-name table being silently
 # reverted, broken, or its data file emptied -- which would drop coverage
