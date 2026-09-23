@@ -44,7 +44,31 @@ the exercise, which is their time in the seat.
 
 **Per block: do / expect / record.** Three labelled parts, always in that order. "Expect" carries
 the number or behaviour that would mean it worked — a card without expectations makes the user
-judge against memory. "Record" is a checkbox list of the specific observations wanted back.
+judge against memory. "Record" is the list of specific observations wanted back.
+
+**The card cannot collect anything, so do not build it as if it can.** It is a prompt list read in
+the cockpit; the answers come back in conversation afterwards. This was learned twice in one day
+(2026-09-23). First the user pointed out that a checkbox is not an answer to an open question —
+*"yes/no is not an answer to an open ended question, would need a textbox"* — so text fields were
+added. They persist to `localStorage`, which lives in the pilot's browser and is unreadable from
+here, and the next message was the correction that matters: *"input fields on cards are useless
+unless you can read them. I can write my notes directly here too."*
+
+So the card's job is to **ask the right questions in the right order**, not to receive answers:
+
+- **Phrase every open item as a question with a speakable answer.** *"How long from release to
+  readback?"* — not *"Latency acceptable?"*. The pilot reads it, observes it, and says the number
+  later. The phrasing is the whole contribution: a badly-phrased item produces a vague answer no
+  matter what widget sits next to it.
+- **The checkbox is a place-keeper, not a record.** Its only job is surviving a five-minute
+  interruption so the pilot knows which items they have already covered. It is fine for that and
+  should not be asked to do more.
+- **The bring-back list is the actual mechanism.** It is what gets read out afterwards, so it
+  carries the real questions — keep it short enough to answer from memory in one sitting.
+
+Never add a text input, a form, a copy-to-clipboard block or a download. Anything the page appears
+to save is lost, and a control that looks like it captured an observation is worse than no control
+at all: it takes a real answer and quietly discards it.
 
 **One block marked as the prize.** There is almost always a single measurement worth more than the
 rest, and saying so changes what gets done when attention runs short. On the Stage 6 card it was
@@ -58,6 +82,13 @@ arrived that way rather than in answer to a question.
 
 - **Every command run**, or labelled `UNVERIFIED` where it genuinely cannot be (needs Windows,
   needs DCS, needs a sortie). Both are fine; a confident guess is not.
+- **Every command carries the directory it runs in**, whenever a card spans more than one
+  subproject. The voice card put the collector and the capture process in one Windows block, both
+  prefixed `set PYTHONPATH=src` and neither with a `cd` — so the second was run from the first
+  one's directory and died on `ModuleNotFoundError`, mid-test. Each subproject has its own `src`,
+  and `PYTHONPATH=src` means nothing without knowing where you are standing. A block of commands
+  that silently assumes the previous block's working directory is a card that only works for
+  whoever wrote it.
 - **Conflicts between tests surfaced.** The Stage 6 card nearly told the user to run the PTT probe
   as a rider on the same flight — but `Export.probe-ptt.lua` replaces the production `Export.lua`
   and kills the collector, so it needs its own session. That kind of conflict is invisible unless
@@ -72,8 +103,9 @@ the existing cards — Barlow Condensed display, Source Sans body, JetBrains Mon
 the palette should suit *reading in a cockpit*: dark ground, amber instrument accent, a distinct
 colour for the "record this" rail.
 
-Include the persistence script; it is a dozen lines and it is the difference between a card the
-user ticks through and a card they lose their place in:
+Include the persistence script for the checkboxes; it is a dozen lines and it is the difference
+between a card the user ticks through and a card they lose their place in. **Checkboxes only** —
+see above for why the page must not appear to save anything else:
 
 ```js
 const KEY='<test-name>';

@@ -37,6 +37,7 @@ from schema import (
     F10CommandEvent,
     PetrovichIndicationSample,
     PetrovichWheelSample,
+    PttSample,
     TelemetrySample,
     UnitVelocitySnapshot,
     WorldObjectsSnapshot,
@@ -118,6 +119,32 @@ class PetrovichWheelCache:
 
     def latest(self) -> PetrovichWheelSample | None:
         """Return the most recently pushed sample, or `None` if empty."""
+        return self._latest
+
+
+class PttCache:
+    """Holds the latest reading of the pilot's push-to-talk trigger
+    (`plans/inbound-speech/plan.md` Stage 5).
+
+    Latest-of-one, like every cache above, and the fit is closer here than
+    anywhere else: the trigger is a *state*, not an event stream, and
+    `Export.lua` sends a line only when it changes. A queue would hold a
+    history nobody wants -- the one question a consumer ever asks is "is it
+    down right now".
+    """
+
+    def __init__(self) -> None:
+        self._latest: PttSample | None = None
+
+    def push(self, sample: PttSample) -> None:
+        """Record a newly-received sample as the current trigger state."""
+        self._latest = sample
+
+    def latest(self) -> PttSample | None:
+        """Return the most recently pushed sample, or `None` if the trigger
+        has not moved since the collector started -- the normal state at
+        startup rather than an error: a trigger nobody has touched produces
+        no lines at all."""
         return self._latest
 
 

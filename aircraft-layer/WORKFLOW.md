@@ -136,8 +136,49 @@ python -m collector
 ```
 
 (PowerShell: `$env:PYTHONPATH="src"`; macOS/Linux: `PYTHONPATH=src python -m collector`.)
-`src` isn't installed as a package — `PYTHONPATH` is required, not optional; `python -m collector`
-alone fails with `No module named collector`.
+`src` isn't installed as a package — so the module has to be findable somehow; `python -m collector`
+from the subproject root fails with `No module named collector`.
+
+**Or skip the environment variable entirely by standing in `src`:**
+
+```
+cd aircraft-layer/src
+python -m collector
+```
+
+`python -m` puts the working directory on `sys.path`, so this is equivalent and has one fewer thing
+to get wrong. It matters most across subprojects: `PYTHONPATH=src` is relative to wherever you are
+standing, so a second command run from the first one's directory silently resolves the wrong `src`
+(or none) — which is exactly how the voice sortie's capture process died with
+`ModuleNotFoundError`, mid-test.
+
+### From WSL bash, rather than cmd
+
+**Run the Windows Python through interop; do not run these as Linux processes.**
+
+```bash
+cd /mnt/c/<path>/DCS-petrobrain/aircraft-layer/src && python.exe -m collector
+```
+
+`python.exe`, not `python` — WSL's own Python is Linux and would be the wrong interpreter. Nothing
+about the networking changes, because the process is still a Windows process: it binds Windows
+loopback, reaches the Windows audio device, and is covered by the same firewall rule below.
+
+**Why not run the collector natively inside WSL**, which is the obvious thing to try and does not
+work:
+
+- **`winsound` does not exist on Linux.** Spoken-audio playback is a Windows-stdlib call, so a
+  native-WSL collector loses Petrovich's voice entirely.
+- **Four channels are UDP, and WSL2's `localhostForwarding` is TCP-only.** F10 commands and unit
+  velocity arrive from the Hook scripts over UDP; the text overlay and the Petrovich search command
+  leave over UDP. Export.lua's TCP feed would forward fine and *everything else would silently stop
+  arriving* — a failure that presents as "movement detection broke", not as a networking
+  misconfiguration. Windows 11 23H2+'s `networkingMode=mirrored` does fix UDP in both directions,
+  but it does not bring `winsound` back, so it is not worth the configuration.
+
+**One real gotcha:** keep the Windows-side checkout on the Windows filesystem (`/mnt/c/...`). A
+checkout on WSL's own ext4 is reachable from Windows only through a `\\wsl$\` UNC path, and
+Windows tooling is unreliable about UNC working directories.
 
 This starts two servers in one process, sharing one in-memory cache:
 

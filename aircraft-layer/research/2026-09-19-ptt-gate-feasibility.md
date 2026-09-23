@@ -218,3 +218,125 @@ deliberate press (including the short one) produced at least one logged sample.
 - ~~**Full-press (radio-transmit) numeric value of arg 738**~~ — **RESOLVED 2026-09-20: 1.0**,
   stated directly by `arg_value = {1.0, 0.5}` in `clickabledata.lua:1009-1025`. The guess of "~1.0"
   was right.
+
+---
+
+### Addendum 2026-09-23 — the stdlib-only fallback is confirmed working, first-party
+
+The last bullet of "Possible Approaches" listed raw Windows joystick polling through `winmm.dll`'s
+`joyGetPosEx` as a fallback "if, for some reason, no cockpit-argument PTT path holds up", and noted
+it as a real but untested option. It has now been **run on the user's own Windows box**
+(`audio-adapter/tools/probe_joystick.py`, which shares its binding with the production
+`audio-adapter/src/ptt_source.py` rather than carrying its own copy):
+
+- **Four devices answer, ids 0-3.** The specific doubt was that `joyGetPosEx` predates DirectInput
+  and addresses devices by a small numeric id, so a multi-device pit (stick, throttle, pedals)
+  might appear only partially. It does not — all four are enumerated and pollable.
+- **A held press is read as a held state.** Device 2, button 0, **613 ms held**, down and up edges
+  both captured. This was the second half of the doubt: an API that reported only edges would have
+  been unusable as a talk gate.
+- **Evidence: reproduced-locally** (the user ran it; output pasted into the session).
+
+This does not change the recommendation for Stage 5 — arg 738's right press remains the in-fiction
+control, needs no new binding, and its declared values are already first-party. What it changes is
+that **Stage 4 no longer depends on Stage 5**: capture has a real, held, physical talk control on
+Windows today, with DCS closed, so the whole speech chain can be exercised before any sim
+dependency exists. That was the reason for preferring a joystick button over the plan's manual
+`--capture-window-s` stub, and it now rests on a measurement rather than an expectation.
+
+**Not probed, still:** `Export.probe-ptt.lua` remains unrun, so what `get_argument_value(738)`
+actually *returns* mid-sortie is still a different claim from what `clickabledata.lua` declares.
+
+---
+
+### Addendum 2026-09-23 (second) — arg 738 read live, in flight, and it behaves
+
+`Export.probe-ptt.lua` has now been run (user, Windows box). **This closes the last open item in
+this note.** Three presses of the user's own bound PTT, logged as transitions:
+
+```
+#2 t_model=2.881 ptt(738)=0.5
+#3 t_model=3.709 ptt(738)=0
+#4 t_model=4.246 ptt(738)=0.5
+#5 t_model=4.455 ptt(738)=0
+#6 t_model=8.008 ptt(738)=0.5
+#7 t_model=8.817 ptt(738)=0
+```
+
+- **738 is live on this install and returns exactly the declared value.** 0.5 pressed, 0.0
+  released, matching `clickabledata.lua`'s `arg_value = {1.0, 0.5}` for `STICK-PTT-PTR`. The
+  argument number is confirmed by *runtime behaviour*, not only by declaration.
+  — **evidence: reproduced-locally.**
+- **The player's existing HOTAS binding drives the cockpit argument.** This was the sharper of the
+  two risks and it was never stated in the original note: a DCS binding can be a *game action* that
+  never animates the cockpit control, in which case the argument would be right and still never
+  move for a real press. It moves. No mouse-click control test was needed.
+  — **evidence: reproduced-locally.**
+- **It is a held state, not an edge pulse.** Each press logs one transition to 0.5 and the next
+  transition ~0.8 s later, so the value *stayed* 0.5 across every intervening frame. The original
+  note inferred this from SRS's `>= 0.1` branching; it is now observed.
+- **A 209 ms press was captured.** The short-press step answered its own question: the momentary
+  control is not missed at this poll rate, with two full orders of magnitude of margin against the
+  frame time. The "could a brief press be missed" risk is closed.
+
+**Not observed: the full-press value.** Every press in this run read 0.5, so 1.0 (radio) is still
+declaration-only. That is not a gap for the PTT gate — see the design consequence below — but it
+means any code that wants to *distinguish* radio from intercom is still working from the declared
+value.
+
+**Design consequence, and it is a real decision rather than a threshold choice.** SRS gates on
+`>= 0.1`, which treats both stops as "transmitting". Petrovich should not: **the full press is the
+player talking on the radio to someone else, and Petrovich has no business hearing it.** The right
+gate is the intercom stop specifically — `abs(v - 0.5) < 0.1` — which is also what the real
+aircraft does, since the half press routes to intercom regardless of what the SPU-8 selector has
+chosen. Gating on `>= 0.1` would make every radio call to ATC an utterance aimed at the crew.
+
+**One oddity worth recording, not chased.** Wall-clock and model time disagree across the run
+(24 s of wall clock between samples #5 and #6 against 3.5 s of model time), so the mission was
+paused or the session was not running at 1:1. It has no bearing on the readings — each press is
+internally consistent in model time — but anyone timing something from this log should not use the
+wall clock.
+
+---
+
+### Addendum 2026-09-23 (third) — the full press transits the intercom stop, and that breaks the obvious gate
+
+A second run captured the full press, which the first did not. It changes the gate design, so it is
+recorded separately rather than folded into the addendum above.
+
+```
+#4 t_model=11.423 ptt(738)=0.5     #7 t_model=15.321 ptt(738)=0.5
+#5 t_model=11.455 ptt(738)=1       #8 t_model=15.340 ptt(738)=1
+#6 t_model=12.680 ptt(738)=0       #9 t_model=15.532 ptt(738)=0
+```
+
+- **The full-press value is 1.0**, as declared. That part of `clickabledata.lua` is now observed
+  rather than inferred. — **evidence: reproduced-locally.**
+- **A full press passes *through* 0.5 for 19–32 ms before reaching 1.0.** It is a two-stage
+  mechanical trigger, so of course it does — the physical stop is on the way to the full pull. Two
+  samples, 32 ms and 19 ms, which at DCS's frame rate is one to two frames.
+- **The release does not transit.** Both releases went 1.0 → 0.0 with no 0.5 sample in between.
+  Not something to rely on: at a lower frame rate a release could land a 0.5 sample, and the
+  mitigation below covers it anyway.
+
+**This falsifies the gate specified in the previous addendum.** `abs(v - 0.5) < 0.1` alone fires on
+every full press, so every radio call to ATC would open a capture for ~20 ms. The `ClipGate`'s
+0.35 s minimum would discard the resulting clip, so nothing would reach recognition — which is
+exactly what makes it a nasty defect rather than an obvious one: it would show up as a dropped-clip
+line per radio transmission and an audio device opened and closed for nothing, not as a wrong
+command.
+
+**Two mitigations, both cheap, and they cover different cases:**
+
+1. **Debounce the intercom stop.** Require 0.5 to persist for ~100 ms before treating it as held.
+   The measured transit is at most 32 ms, so 100 ms is three times the observed worst case and
+   still an order of magnitude below any deliberate press-and-speak gesture. This is what stops a
+   capture ever starting on a radio press.
+2. **Treat a rise to 1.0 as an abort, not just a non-trigger.** If the value reaches 1.0 while a
+   capture is running, discard the clip: the player has moved to the radio, and whatever was said
+   was not addressed to the crew. This covers the case debouncing cannot — a slow full press that
+   dwells at the half stop past the debounce window.
+
+Neither costs anything at runtime; both are a few lines in the `DcsPTT` implementation. The reason
+to write them down before building is that the failure they prevent is silent, and it would present
+as an audio problem rather than as a trigger problem.
