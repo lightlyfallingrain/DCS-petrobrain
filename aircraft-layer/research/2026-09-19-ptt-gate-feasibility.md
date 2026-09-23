@@ -296,3 +296,47 @@ chosen. Gating on `>= 0.1` would make every radio call to ATC an utterance aimed
 paused or the session was not running at 1:1. It has no bearing on the readings — each press is
 internally consistent in model time — but anyone timing something from this log should not use the
 wall clock.
+
+---
+
+### Addendum 2026-09-23 (third) — the full press transits the intercom stop, and that breaks the obvious gate
+
+A second run captured the full press, which the first did not. It changes the gate design, so it is
+recorded separately rather than folded into the addendum above.
+
+```
+#4 t_model=11.423 ptt(738)=0.5     #7 t_model=15.321 ptt(738)=0.5
+#5 t_model=11.455 ptt(738)=1       #8 t_model=15.340 ptt(738)=1
+#6 t_model=12.680 ptt(738)=0       #9 t_model=15.532 ptt(738)=0
+```
+
+- **The full-press value is 1.0**, as declared. That part of `clickabledata.lua` is now observed
+  rather than inferred. — **evidence: reproduced-locally.**
+- **A full press passes *through* 0.5 for 19–32 ms before reaching 1.0.** It is a two-stage
+  mechanical trigger, so of course it does — the physical stop is on the way to the full pull. Two
+  samples, 32 ms and 19 ms, which at DCS's frame rate is one to two frames.
+- **The release does not transit.** Both releases went 1.0 → 0.0 with no 0.5 sample in between.
+  Not something to rely on: at a lower frame rate a release could land a 0.5 sample, and the
+  mitigation below covers it anyway.
+
+**This falsifies the gate specified in the previous addendum.** `abs(v - 0.5) < 0.1` alone fires on
+every full press, so every radio call to ATC would open a capture for ~20 ms. The `ClipGate`'s
+0.35 s minimum would discard the resulting clip, so nothing would reach recognition — which is
+exactly what makes it a nasty defect rather than an obvious one: it would show up as a dropped-clip
+line per radio transmission and an audio device opened and closed for nothing, not as a wrong
+command.
+
+**Two mitigations, both cheap, and they cover different cases:**
+
+1. **Debounce the intercom stop.** Require 0.5 to persist for ~100 ms before treating it as held.
+   The measured transit is at most 32 ms, so 100 ms is three times the observed worst case and
+   still an order of magnitude below any deliberate press-and-speak gesture. This is what stops a
+   capture ever starting on a radio press.
+2. **Treat a rise to 1.0 as an abort, not just a non-trigger.** If the value reaches 1.0 while a
+   capture is running, discard the clip: the player has moved to the radio, and whatever was said
+   was not addressed to the crew. This covers the case debouncing cannot — a slow full press that
+   dwells at the half stop past the debounce window.
+
+Neither costs anything at runtime; both are a few lines in the `DcsPTT` implementation. The reason
+to write them down before building is that the failure they prevent is silent, and it would present
+as an audio problem rather than as a trigger problem.
