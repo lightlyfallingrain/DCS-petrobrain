@@ -347,6 +347,18 @@ class CrewConsole:
     #: count is what makes the comparison safe across any number of
     #: commands in one poll.
     commands_handled: int = 0
+    #: Optional sink for every recognised transcript and what was done
+    #: about it (`--speech-log`). Same optional-collaborator shape as
+    #: `overlay_client`/`speech_client`: `None` is a true no-op.
+    #:
+    #: **It exists because an unmatched utterance was previously
+    #: unobservable.** A transcript that matched no command fell through to
+    #: escalation, and the default brain client does nothing at all -- so
+    #: the most interesting case for debugging recognition, "what did he
+    #: hear that he could not act on", left no trace anywhere. Matched ones
+    #: are logged too: false fires are only findable by seeing what he
+    #: *did* act on.
+    transcript_log: Callable[[dict[str, object]], None] | None = None
     #: In-cockpit text overlay mirror (`plans/overlay-speech-callouts/
     #: plan.md`), mirroring `logger.ConsolePerceptionRunner.overlay_client`'s
     #: None-means-no-op pattern exactly. **Deliberately a separate field
@@ -854,7 +866,30 @@ class CrewConsole:
         decision = classify_response(
             token, match_ratio, confidence, verb_anchored, ambiguous
         )
+        self._log_transcript(
+            transcript=transcript,
+            confidence=confidence,
+            token=token,
+            match_ratio=match_ratio,
+            verb_anchored=verb_anchored,
+            ambiguous=ambiguous,
+            now_sim=now_sim,
+            disposition=decision.disposition,
+            acted_token=decision.token,
+        )
         return self._act_on_voice_decision(decision, transcript, now_sim)
+
+    def _log_transcript(self, **row: object) -> None:
+        """Write one row to `transcript_log`, if configured.
+
+        Wrapped like every other optional sink: a logging failure must not
+        cost the player the command they just spoke."""
+        if self.transcript_log is None:
+            return
+        try:
+            self.transcript_log(row)
+        except Exception:  # noqa: BLE001 -- a debug sink, never load-bearing
+            return
 
     def _act_on_voice_decision(
         self, decision: BandDecision, transcript: str, now_sim: float

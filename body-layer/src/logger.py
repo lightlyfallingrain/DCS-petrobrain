@@ -221,6 +221,7 @@ from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import UNAIDED_OPTIC, Optic
 from perception.source import Observation, OwnshipState, PerceptionSource
+from speech_log import SpeechLogWriter
 
 logger = logging.getLogger(__name__)
 
@@ -1174,6 +1175,20 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--speech-log",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per recognised transcript to this path -- "
+            "what was heard, the seven recognition fields, and what was done "
+            "about it (act/confirm/say_again/fallthrough). The answer to "
+            "'why did nothing happen when I said that': an utterance matching "
+            "no command otherwise reaches only the brain-layer stand-in, "
+            "which does nothing. Only meaningful with --crew-text "
+            "--speech-input; defaults off, a true no-op when absent."
+        ),
+    )
+    parser.add_argument(
         "--detection-trace",
         type=Path,
         default=None,
@@ -1196,6 +1211,11 @@ def main() -> None:
         parser.error("--speech-audio requires --audio-adapter-url")
     if args.speech_input and args.audio_adapter_url is None:
         parser.error("--speech-input requires --audio-adapter-url")
+    if args.speech_log is not None and not (args.crew_text and args.speech_input):
+        parser.error(
+            "--speech-log requires --crew-text --speech-input (there are no "
+            "transcripts to log without them)"
+        )
     if args.detection_trace is not None and not (args.console or args.crew_text):
         parser.error("--detection-trace requires --console or --crew-text")
 
@@ -1242,6 +1262,11 @@ def main() -> None:
             tasks=crew_runner.tasks,
             overlay_client=aircraft_client if args.overlay else None,
             speech_client=audio_adapter_client if args.speech_audio else None,
+            transcript_log=(
+                SpeechLogWriter(args.speech_log).write
+                if args.speech_log is not None
+                else None
+            ),
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(

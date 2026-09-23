@@ -141,6 +141,17 @@ true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-
 `--whisper-model` for `GET /transcripts/poll` to ever have anything to drain — see
 `audio-adapter/CLAUDE.md`.
 
+Add `--speech-log PATH` alongside `--crew-text --speech-input` to write one JSON line per
+recognised transcript: what was heard, the seven recognition fields, and what was done about it
+(`act`/`confirm`/`say_again`/`fallthrough`, plus the acted token). **It exists because an utterance
+matching no command was previously unobservable** — it fell through to escalation, and the default
+brain client does nothing, so the single most useful case for debugging recognition left no trace
+anywhere. Matched utterances are logged too: a false fire is only findable by seeing what he
+actually acted on. `parser.error`s without both flags; defaults off, a true no-op when absent, same
+additive posture as `--detection-trace`. Unbuffered, unlike the detection trace — speech is a
+handful of rows per sortie, and the row most worth having is the one immediately before something
+went wrong, which a buffer would still be holding when the process was killed to investigate.
+
 Add `--detection-trace PATH` alongside `--console` or `--crew-text` (BL-9, `plans/
 bl9-debug-visualization/plan.md`) to write a per-poll, per-object naked-eye visibility-gate trace
 (JSONL) to `PATH` — the answer to "why did Petrovich not see that" after a flight: which of

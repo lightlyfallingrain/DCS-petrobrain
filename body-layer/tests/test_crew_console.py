@@ -1601,3 +1601,69 @@ def test_cancel_scan_with_nothing_scanning_says_so(
 
     assert lines == ["nothing to stop"]
     assert contact.attention == "watch"
+
+
+def test_every_transcript_is_logged_with_what_was_done_about_it() -> None:
+    """`--speech-log`. The gap this closes: an utterance matching no
+    command reached only the brain-layer stand-in, which does nothing, so
+    the most useful case for debugging recognition left no trace at all."""
+    rows: list[dict[str, object]] = []
+    console = CrewConsole(store=ContactStore(), transcript_log=rows.append)
+
+    console.handle_transcript(
+        transcript="scan left",
+        confidence=0.9,
+        token="scan_left",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["transcript"] == "scan left"
+    assert rows[0]["disposition"] == "act"
+    assert rows[0]["acted_token"] == "scan_left"
+
+
+def test_an_unmatched_transcript_is_logged_too() -> None:
+    """The case the log exists for -- well-heard speech that matched
+    nothing is exactly what a recognition debrief needs to see."""
+    rows: list[dict[str, object]] = []
+    console = CrewConsole(store=ContactStore(), transcript_log=rows.append)
+
+    console.handle_transcript(
+        transcript="lovely weather today",
+        confidence=0.88,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["transcript"] == "lovely weather today"
+    assert rows[0]["disposition"] == "fallthrough"
+    assert rows[0]["acted_token"] is None
+
+
+def test_a_failing_log_sink_never_costs_the_player_a_command() -> None:
+    """A debug artifact must never be load-bearing."""
+
+    def explode(_row: dict[str, object]) -> None:
+        raise OSError("disk full")
+
+    console = CrewConsole(store=ContactStore(), transcript_log=explode)
+
+    lines = console.handle_transcript(
+        transcript="scan left",
+        confidence=0.9,
+        token="scan_left",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    assert lines  # the command still ran and still spoke
