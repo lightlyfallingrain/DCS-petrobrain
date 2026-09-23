@@ -187,13 +187,17 @@ SCOPE_UNCERTAINTY_M: Final[float] = 300.0
 #: real sessions show whether contacts are gated too tightly or too loosely.
 GATE_GROWTH_RATE_MPS: Final[float] = 20.0
 
-#: Half of naked-eye's 30 deg clock bucket -- the bearing could be anywhere
-#: within +/- this many degrees of the reported clock position. Moved back
+#: The width of naked-eye's own clock-position reporting bucket. Moved back
 #: here from `perception.clustering` by Stage 3b-i rev.2 (see module
 #: docstring) -- this is a reporting-quantisation figure, not a clustering
-#: one.
-_CLOCK_BUCKET_DEG: Final[float] = 30.0
-_HALF_CLOCK_BUCKET_RAD: Final[float] = math.radians(_CLOCK_BUCKET_DEG / 2.0)
+#: one. **Public as of Stage 3b of `plans/binocular-optic/plan.md`**: a
+#: binocular look's own sweep width is half this figure, for the same
+#: reason the spatial gate's bearing-uncertainty term is -- both are
+#: honest derivations from the one fact "the clock bucket is 30 deg wide",
+#: not two independently-tuned numbers that happen to agree
+#: (`plans/binocular-optic/stage3b.md` D1).
+CLOCK_BUCKET_DEG: Final[float] = 30.0
+_HALF_CLOCK_BUCKET_RAD: Final[float] = math.radians(CLOCK_BUCKET_DEG / 2.0)
 
 #: The 24 ED range-bucket upper bounds -- moved back here from `perception.
 #: clustering` by Stage 3b-i rev.2 (originally copied from `perception.
