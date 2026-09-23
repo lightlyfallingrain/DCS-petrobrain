@@ -732,10 +732,26 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `cancel_scan` and `cancel_watch` are narrow; `cancel_task` stays as the explicit all-modes form
   and still names both. The F10 menu grew a `Stop` submenu with all three.
 
-  **Voice is not yet updated for this**, deliberately: `audio-adapter`'s vocabulary is a
-  hand-synced third copy, and its 99.2% gate was measured on a recorded corpus that has no phrases
-  for the two new tokens. Adding them unbenched would put unmeasured tokens into the one part of
-  the chain whose accuracy was established by measurement. It needs corpus phrases first.
+  **Voice caught up the same day** (user, 2026-09-23: *"voice command 'cancel task <task>' should
+  work 'cancel <task>'"*). `cancel_scan`/`cancel_watch` are spoken as *"cancel scan"* / *"stop
+  scan"* / *"stop scanning"* and their watch equivalents.
+
+  The hesitation had been that these phrasings are **unbenched** — `audio-adapter`'s 99.2% figure
+  was measured on a recorded corpus containing no examples of them — and that is still true. The
+  user's answer is the right one: a menu-only way to say something the pilot is already saying out
+  loud is the wrong side of that trade. The tests prove the phrasings are unambiguous against the
+  rest of the vocabulary, which is a different claim from proving whisper hears them; the next
+  corpus recording should include them.
+
+  Two decisions inside it:
+  - **A bare *"cancel"* stays the all-modes form.** It cannot name which mode it means, and
+    guessing is exactly what the narrow tokens were introduced to stop.
+  - **`stop scan` does not collide with `stop`** (which silences him), because that rule counts
+    only when the single word is the entire transmission — settled in Stage 2 for an unrelated
+    reason, and it carries this case for free.
+  - **`ACT_FLOOR_CANCEL` now keys on a `CANCEL_TOKENS` set** rather than one name. A mis-heard
+    *"stop watch"* destroys standing state exactly as a mis-heard *"cancel task"* does, and the
+    narrow tokens would otherwise have inherited the ordinary floor silently.
 
 - [ ] **Repetition is better but not gone — reopened 2026-09-23 from the sortie.** Aggregation
   works on same-type, same-range, adjacent-clock contacts, and the transcript shows it firing. What
