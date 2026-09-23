@@ -1066,3 +1066,46 @@ def test_poll_transcripts_skips_malformed_items() -> None:
     # Must not raise, and the well-formed second item must still dispatch.
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
     assert client.poll_count == 1
+
+
+def test_a_player_command_lowers_the_binoculars() -> None:
+    """`plans/binocular-optic/plan.md` D4, wired through a counter rather
+    than a callback: the poll loop asks "did the player ask for anything
+    just now" by comparing `CrewConsole.commands_handled` across one
+    iteration, which stays true for a command surface added later without
+    the console knowing what the answer is used for."""
+    from belief.crew_console import CrewConsole
+    from belief.optic_policy import OpticPhase, OpticState, lower_binoculars
+
+    console = CrewConsole(store=ContactStore())
+    before = console.commands_handled
+    console.handle_f10_command("scan_ahead", now_sim=1.0)
+    assert console.commands_handled == before + 1
+
+    glassing = OpticState(
+        phase=OpticPhase.GLASSING,
+        phase_started_sim=0.0,
+        look_azimuth_deg=30.0,
+        look_elevation_deg=-5.0,
+    )
+    lowered = lower_binoculars(glassing, now_sim=1.0)
+
+    assert lowered.phase is OpticPhase.SCANNING
+    assert lowered.look_azimuth_deg is None
+
+
+def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
+    """The no-omniscience property of the binocular trigger: a
+    presence-level contact has no believed type, so the window is sized
+    from the object model's default profile. A Petrovich who sized it by
+    what the thing really is would be deciding with knowledge he does not
+    have."""
+    from belief.optic_policy import improvement_window_m
+
+    unknown_lower, unknown_upper = improvement_window_m(
+        "OP_GROUPSOMETHING", current_level="presence"
+    )
+    assert unknown_upper > unknown_lower > 0.0
+
+    known_lower, known_upper = improvement_window_m("T-72", current_level="presence")
+    assert (unknown_lower, unknown_upper) != (known_lower, known_upper)

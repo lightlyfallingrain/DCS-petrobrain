@@ -183,6 +183,7 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TextIO
@@ -196,10 +197,25 @@ from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
+from belief.optic_policy import (
+    LookTarget,
+    OpticDecision,
+    OpticState,
+    is_steady,
+    look_target_for,
+    lower_binoculars,
+)
+from belief.optic_policy import decide as decide_optic
 from belief.tasks import TaskStore
 from detection_trace_writer import DetectionTraceWriter
 from perception.detection_trace import DetectionTraceCollector
-from perception.gaze import FREE_SCAN_PLAN, Gaze, ScanPlan, gaze_at
+from perception.gaze import (
+    FREE_SCAN_PLAN,
+    SCAN_CYCLE_PERIOD_S,
+    Gaze,
+    ScanPlan,
+    gaze_at,
+)
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
@@ -349,6 +365,27 @@ class ConsolePerceptionRunner:
     #: into `self.sources` to find the naked-eye one back out.
     scan_plan: ScanPlan = field(default_factory=lambda: FREE_SCAN_PLAN)
 
+    #: The binocular cycle's own state (`plans/binocular-optic/plan.md`
+    #: Stage 2), carried across polls because the cycle spans them -- a
+    #: glass phase begins at the end of one scan and ends several polls
+    #: later. Replaced wholesale each poll rather than mutated, so the
+    #: decision stays a pure function and a replay reproduces it exactly.
+    optic_state: OpticState = field(default_factory=OpticState)
+
+    #: Recent `(t_sim, pitch, bank, heading)` samples, oldest first -- the
+    #: steadiness gate's only input. Bounded because it is a *rate*
+    #: estimate: a longer history would let a manoeuvre a minute ago still
+    #: forbid a look, which is the opposite of what the gate is for.
+    attitude_history: deque[tuple[float, float, float, float]] = field(
+        default_factory=lambda: deque(maxlen=ATTITUDE_HISTORY_LEN)
+    )
+
+    #: What this poll resolved to look through, kept visible for the same
+    #: reason `scan_plan` is: a poll loop showing the pilot where Petrovich
+    #: is looking should be able to say *through what* without recomputing
+    #: the decision.
+    optic: Optic = UNAIDED_OPTIC
+
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
@@ -408,11 +445,26 @@ class ConsolePerceptionRunner:
         # the naked-eye source a frozen Gaze before it polls (`_active_
         # gaze`'s own docstring) -- a no-op for every other source, and
         # when no scan command is pending.
-        _apply_active_gaze(self.sources, self.tasks)
-        # Same resolution, kept on the runner (`scan_plan`'s own docstring)
-        # so a poll loop can show the pilot where Petrovich is currently
-        # looking without recomputing it or reaching into `self.sources`.
+        self.attitude_history.append(
+            (
+                ownship.t_sim,
+                ownship.pitch_deg,
+                ownship.bank_deg,
+                ownship.heading_true_deg,
+            )
+        )
         self.scan_plan = _active_gaze(self.tasks)
+        self.optic_state, optic_decision = decide_optic(
+            self.optic_state,
+            now_sim=ownship.t_sim,
+            scan_cycle_period_s=SCAN_CYCLE_PERIOD_S,
+            targets=_look_targets(self.store, ownship),
+            steady=is_steady(list(self.attitude_history)),
+        )
+        self.optic = optic_decision.optic
+        _apply_active_gaze(
+            self.sources, self.tasks, scan_plan=self.scan_plan, decision=optic_decision
+        )
         observations = [
             observation
             for source in self.sources
@@ -507,41 +559,74 @@ def _active_gaze(tasks: TaskStore) -> ScanPlan:
     return FREE_SCAN_PLAN
 
 
-def _active_optic() -> Optic:
-    """The instrument Petrovich is looking through this poll
-    (`plans/binocular-optic/plan.md` Stage 1).
+def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget]:
+    """Every live contact, as the binocular policy needs to see it.
 
-    **Always the naked eye, for now.** Stage 1 exists to put the optic on
-    the same per-poll resolution path the gaze already takes -- belief
-    resolves, perception receives a frozen value -- without changing any
-    behaviour, which is the regression gate 2B used for the same reason:
-    the plumbing is proven before anything rides on it.
-
-    Stage 2 replaces the body of this function with `belief.optic_policy`'s
-    decision, and nothing else in the poll loop has to move. It takes no
-    arguments yet deliberately: giving it the parameters it will eventually
-    need would be inventing an interface ahead of the policy that defines
-    it.
+    **Uses the contact's *believed* type, not ground truth** -- which for a
+    presence-level contact is no type at all, and `object_model.profile_for`
+    degrades to its default profile there. That is the honest model rather
+    than a shortcoming: deciding whether a mark is worth a closer look is a
+    judgement made from the mark, and a Petrovich who sized the window by
+    what the thing really is would be deciding with knowledge he does not
+    have.
     """
-    return UNAIDED_OPTIC
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    return [
+        look_target_for(
+            contact.id,
+            observer=observer,
+            target_position=contact.last_position,
+            heading_true_deg=ownship.heading_true_deg,
+            object_type=contact.last_class_raw,
+            current_level=contact.classification.level.name.lower(),
+        )
+        for contact in store.contacts
+    ]
 
 
-def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> None:
-    """Assigns `_active_gaze(tasks)` and `_active_optic()` onto whichever
-    `sources` entry is a `NakedEyePerceptionSource` -- a true no-op for
-    every other source, and for a `sources` list (e.g. in tests) that holds
-    no naked-eye source at all. The same write-thread/single-assignment
+def _apply_active_gaze(
+    sources: list[PerceptionSource],
+    tasks: TaskStore,
+    *,
+    scan_plan: ScanPlan | None = None,
+    decision: OpticDecision | None = None,
+) -> None:
+    """Assigns the resolved scan plan and optic onto whichever `sources`
+    entry is a `NakedEyePerceptionSource` -- a true no-op for every other
+    source, and for a `sources` list (e.g. in tests) that holds no
+    naked-eye source at all. The same write-thread/single-assignment
     pattern `last_t_sim` already uses safely (`run_once`'s only caller).
 
-    Both are resolved here rather than in two places because they are one
-    decision: *where he is looking and through what* is a single act, and
-    splitting the resolution would allow a gaze and an optic from different
-    polls to be applied together."""
-    scan_plan = _active_gaze(tasks)
-    optic = _active_optic()
+    Both are applied here rather than in two places because they are one
+    act -- *where he is looking and through what* -- and splitting the
+    application would let a gaze and an optic from different polls be used
+    for the same evaluation.
+
+    `scan_plan`/`decision` default to `None` so the pre-binocular call
+    shape (`_apply_active_gaze(sources, tasks)`) still works and still
+    resolves the scan plan itself: several tests construct sources and call
+    this directly, and none of them care about the optic.
+
+    **A glass phase overrides the scan plan with a fixed look**
+    (`plans/binocular-optic/plan.md` Stage 2). The look is a `ScanPlan`
+    holding one direction rather than a special case in the source: the
+    source already resolves `gaze_at(now_sim, scan_plan)` every poll, so a
+    plan whose every leg is the same direction *is* a fixed stare, and no
+    branch is needed anywhere downstream."""
+    resolved_plan = scan_plan if scan_plan is not None else _active_gaze(tasks)
+    optic = decision.optic if decision is not None else UNAIDED_OPTIC
+    if (
+        decision is not None
+        and decision.look_azimuth_deg is not None
+        and decision.look_elevation_deg is not None
+    ):
+        resolved_plan = ScanPlan.fixed_look_at(
+            azimuth_deg=decision.look_azimuth_deg,
+            elevation_deg=decision.look_elevation_deg,
+        )
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
-            source.scan_plan = scan_plan
+            source.scan_plan = resolved_plan
             source.optic = optic
 
 
@@ -619,6 +704,12 @@ def _build_sources(
         ),
     ]
 
+
+#: How many attitude samples the steadiness gate looks back over. Three at
+#: the default one-second poll interval is a few seconds of history: long
+#: enough to catch a manoeuvre in progress, short enough that a bank a
+#: minute ago cannot still forbid a look.
+ATTITUDE_HISTORY_LEN = 3
 
 _DEFAULT_POLL_INTERVAL_S = 1.0
 
@@ -894,10 +985,21 @@ def _run_crew_text_poll_loop(
             if runner.last_t_sim is not None:
                 crew_console.enrichment = runner.enrichment
                 crew_console.drain_events(runner.last_t_sim)
+                commands_before = crew_console.commands_handled
                 if f10_commands_enabled:
                     _poll_f10_commands(aircraft_client, crew_console, runner.last_t_sim)
                 if speech_input_enabled and speech_client is not None:
                     _poll_transcripts(speech_client, crew_console, runner.last_t_sim)
+                if crew_console.commands_handled != commands_before:
+                    # Any command lowers the binoculars (`plans/
+                    # binocular-optic/plan.md` D4) -- not per command type:
+                    # the pilot asking for something is itself evidence
+                    # that what Petrovich is doing matters less than what
+                    # was just asked for. Counted rather than inspected so
+                    # this stays true for a command surface added later.
+                    runner.optic_state = lower_binoculars(
+                        runner.optic_state, runner.last_t_sim
+                    )
                 if crew_console.overlay_client is not None:
                     last_gaze_label = _push_gaze_line(
                         crew_console.overlay_client,
