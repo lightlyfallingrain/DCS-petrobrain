@@ -31,10 +31,13 @@ import pytest
 from belief import enrichment as enrichment_module
 from belief.callouts import (
     CALLOUT_MAX_AGE_S,
+    INTER_UTTERANCE_GAP_S,
     CalloutScheduler,
     callout_priority,
     estimate_speech_duration_s,
     group_candidates,
+    group_facts,
+    report_priority,
 )
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
@@ -230,6 +233,141 @@ def test_callout_priority_ranks_newer_event_above_older_at_same_range() -> None:
     assert callout_priority(facts, newer, 5.0) < callout_priority(facts, older, 5.0)
 
 
+# --- report_priority (plans/voice-command-completeness/plan.md) ------------
+
+
+def test_report_priority_ranks_priority_attention_above_watch_above_normal() -> None:
+    """`report_priority`'s own version of `callout_priority`'s first test
+    above -- same `(threat_band, -attention_rank, ...)` ordering, no event
+    involved."""
+    priority_facts: dict[str, object] = {"attention": "priority"}
+    watch_facts: dict[str, object] = {"attention": "watch"}
+    normal_facts: dict[str, object] = {"attention": "normal"}
+    ignore_facts: dict[str, object] = {"attention": "ignore"}
+
+    ranked = sorted(
+        [priority_facts, watch_facts, normal_facts, ignore_facts],
+        key=report_priority,
+    )
+    assert ranked == [priority_facts, watch_facts, normal_facts, ignore_facts]
+
+
+def test_report_priority_ranks_nearer_range_above_farther() -> None:
+    near: dict[str, object] = {
+        "attention": "normal",
+        "relative_now": {"range_m": 100.0},
+    }
+    far: dict[str, object] = {
+        "attention": "normal",
+        "relative_now": {"range_m": 9000.0},
+    }
+    assert report_priority(near) < report_priority(far)
+
+
+def test_report_priority_no_relative_now_sorts_last() -> None:
+    unenriched: dict[str, object] = {"attention": "normal"}
+    enriched: dict[str, object] = {
+        "attention": "normal",
+        "relative_now": {"range_m": 50000.0},
+    }
+    assert report_priority(enriched) < report_priority(unenriched)
+
+
+# --- group_facts (plans/voice-command-completeness/plan.md Stage 2) --------
+
+
+def test_group_facts_chains_same_bucket_members_by_clock() -> None:
+    """The bucket+chain merge rule, exercised directly on facts -- no
+    `Event`, no `ContactStore`, no `describe_contact` lookup. Two members
+    sharing a `(unit word, range word)` bucket and one clock hour apart
+    must chain into a single group, the same rule `group_candidates`
+    already exercises indirectly (`test_mixed_type_pair_does_not_merge`
+    and neighbours, above)."""
+    facts_a: dict[str, object] = {
+        "classification": {"value": "OP_TRUCK", "level": "class"},
+        "relative_now": {"clock_position": 2, "range_m": 1000.0},
+    }
+    facts_b: dict[str, object] = {
+        "classification": {"value": "OP_TRUCK", "level": "class"},
+        "relative_now": {"clock_position": 3, "range_m": 1000.0},
+    }
+    groups = group_facts([facts_a, facts_b])
+    assert groups == [[facts_a, facts_b]]
+
+
+def test_group_facts_does_not_chain_different_unit_words() -> None:
+    facts_truck: dict[str, object] = {
+        "classification": {"value": "OP_TRUCK", "level": "class"},
+        "relative_now": {"clock_position": 3, "range_m": 1000.0},
+    }
+    facts_infantry: dict[str, object] = {
+        "classification": {"value": "OP_INFANTRY", "level": "class"},
+        "relative_now": {"clock_position": 3, "range_m": 1000.0},
+    }
+    groups = group_facts([facts_truck, facts_infantry])
+    assert len(groups) == 2
+    assert all(len(group) == 1 for group in groups)
+
+
+def test_group_facts_with_no_relative_now_is_always_a_singleton() -> None:
+    """No `EnrichmentContext` supplied -- clock/range are undecidable, so
+    grouping degrades to "no grouping" rather than guessing, the same
+    accepted consequence `group_candidates`'s own docstring states."""
+    unenriched_a: dict[str, object] = {
+        "classification": {"value": "OP_TRUCK", "level": "class"}
+    }
+    unenriched_b: dict[str, object] = {
+        "classification": {"value": "OP_TRUCK", "level": "class"}
+    }
+    groups = group_facts([unenriched_a, unenriched_b])
+    assert groups == [[unenriched_a], [unenriched_b]]
+
+
+def test_group_candidates_is_a_thin_wrapper_over_group_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression guard for the Stage 2 extraction: `group_candidates`
+    must still chain two same-bucket, same-clock-neighbourhood events into
+    one group, exactly as it did before `group_facts` was pulled out of
+    it -- and the returned group must still be `Event`s, not facts."""
+    store = ContactStore()
+    x, z = _xz_for_clock(3, 1000.0)
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_A",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                ownship_x=x,
+                ownship_z=z,
+                dwp_x=0.0,
+                dwp_z=0.0,
+            ),
+            _observation(
+                obs_id="OBS_B",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                ownship_x=x,
+                ownship_z=z,
+                dwp_x=50000.0,
+                dwp_z=0.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    enrichment = _enrichment_context(monkeypatch)
+    events = [e for e in store.events if e.kind == "CONTACT_DETECTED"]
+
+    groups = group_candidates(events, store, now_sim=0.0, enrichment=enrichment)
+
+    assert len(groups) == 1
+    assert len(groups[0]) == 2
+    assert all(isinstance(item, Event) for item in groups[0])
+
+
 # --- Slice A: CalloutScheduler.tick ------------------------------------------
 
 
@@ -372,6 +510,35 @@ def test_urgent_call_resets_occupancy_even_mid_routine_line() -> None:
     # urgent line's own duration -- the scheduler is not still blocked.
     assert console.scheduler.busy_until_sim < 1000.0
     assert console.scheduler.busy_until_sim >= 5.0
+
+
+# --- note_reply (plans/voice-command-completeness/plan.md Decision 2) ------
+
+
+def test_note_reply_extends_occupancy_past_the_reply_duration() -> None:
+    scheduler = CalloutScheduler()
+    text = "Clear."
+    scheduler.note_reply(now_sim=10.0, text=text)
+    expected = 10.0 + estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S
+    assert scheduler.busy_until_sim == expected
+
+
+def test_note_reply_never_shortens_an_already_longer_occupancy() -> None:
+    """`max`, not assignment -- a reply issued while a callout is still
+    playing must not shorten that callout's own budget."""
+    scheduler = CalloutScheduler()
+    scheduler.busy_until_sim = 1000.0
+    scheduler.note_reply(now_sim=10.0, text="Clear.")
+    assert scheduler.busy_until_sim == 1000.0
+
+
+def test_note_reply_extends_a_shorter_existing_occupancy() -> None:
+    scheduler = CalloutScheduler()
+    scheduler.busy_until_sim = 10.5  # barely past now_sim
+    scheduler.note_reply(now_sim=10.0, text="Clear.")
+    expected = 10.0 + estimate_speech_duration_s("Clear.") + INTER_UTTERANCE_GAP_S
+    assert scheduler.busy_until_sim == expected
+    assert scheduler.busy_until_sim > 10.5
 
 
 # --- Slice B: aggregation ----------------------------------------------------

@@ -183,11 +183,13 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.attention import _SECTOR_CENTER_DEG, _SECTOR_HALF_WIDTH_DEG
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
@@ -196,14 +198,34 @@ from belief.crew_console import CrewConsole
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainClient, DebugPrintBrainClient, NullBrainClient
 from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
+from belief.optic_policy import (
+    LookTarget,
+    OpticDecision,
+    OpticState,
+    is_steady,
+    look_target_for,
+    lower_binoculars,
+    search_pattern,
+)
+from belief.optic_policy import decide as decide_optic
 from belief.tasks import TaskStore
 from detection_trace_writer import DetectionTraceWriter
 from perception.detection_trace import DetectionTraceCollector
-from perception.gaze import FREE_SCAN_PLAN, Gaze, ScanPlan, gaze_at
+from perception.gaze import (
+    FREE_SCAN_PLAN,
+    SCAN_CYCLE_PERIOD_S,
+    SECTOR_WEDGE_DEG,
+    Gaze,
+    ScanPlan,
+    gaze_at,
+    legs_within_wedge,
+)
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import Observation, OwnshipState, PerceptionSource
+from speech_log import SpeechLogWriter
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +370,27 @@ class ConsolePerceptionRunner:
     #: into `self.sources` to find the naked-eye one back out.
     scan_plan: ScanPlan = field(default_factory=lambda: FREE_SCAN_PLAN)
 
+    #: The binocular cycle's own state (`plans/binocular-optic/plan.md`
+    #: Stage 2), carried across polls because the cycle spans them -- a
+    #: glass phase begins at the end of one scan and ends several polls
+    #: later. Replaced wholesale each poll rather than mutated, so the
+    #: decision stays a pure function and a replay reproduces it exactly.
+    optic_state: OpticState = field(default_factory=OpticState)
+
+    #: Recent `(t_sim, pitch, bank, heading)` samples, oldest first -- the
+    #: steadiness gate's only input. Bounded because it is a *rate*
+    #: estimate: a longer history would let a manoeuvre a minute ago still
+    #: forbid a look, which is the opposite of what the gate is for.
+    attitude_history: deque[tuple[float, float, float, float]] = field(
+        default_factory=lambda: deque(maxlen=ATTITUDE_HISTORY_LEN)
+    )
+
+    #: What this poll resolved to look through, kept visible for the same
+    #: reason `scan_plan` is: a poll loop showing the pilot where Petrovich
+    #: is looking should be able to say *through what* without recomputing
+    #: the decision.
+    optic: Optic = UNAIDED_OPTIC
+
     def run_once(self) -> list[Observation]:
         """Poll ownship telemetry once, poll every source for observations
         as of that telemetry's `t_sim`, ingest+tick them into `store`, and
@@ -407,11 +450,27 @@ class ConsolePerceptionRunner:
         # the naked-eye source a frozen Gaze before it polls (`_active_
         # gaze`'s own docstring) -- a no-op for every other source, and
         # when no scan command is pending.
-        _apply_active_gaze(self.sources, self.tasks)
-        # Same resolution, kept on the runner (`scan_plan`'s own docstring)
-        # so a poll loop can show the pilot where Petrovich is currently
-        # looking without recomputing it or reaching into `self.sources`.
-        self.scan_plan = _active_gaze(self.tasks)
+        self.attitude_history.append(
+            (
+                ownship.t_sim,
+                ownship.pitch_deg,
+                ownship.bank_deg,
+                ownship.heading_true_deg,
+            )
+        )
+        self.scan_plan = _active_gaze(self.tasks, ownship.heading_true_deg)
+        self.optic_state, optic_decision = decide_optic(
+            self.optic_state,
+            now_sim=ownship.t_sim,
+            scan_cycle_period_s=SCAN_CYCLE_PERIOD_S,
+            targets=_look_targets(self.store, ownship),
+            steady=is_steady(list(self.attitude_history)),
+            search=_search_sweep(self.scan_plan, ownship),
+        )
+        self.optic = optic_decision.optic
+        _apply_active_gaze(
+            self.sources, self.tasks, scan_plan=self.scan_plan, decision=optic_decision
+        )
         observations = [
             observation
             for source in self.sources
@@ -446,29 +505,54 @@ class ConsolePerceptionRunner:
         return observations
 
 
-def _active_gaze(tasks: TaskStore) -> ScanPlan:
-    """The `ScanPlan` implied by whatever ownship-relative scan sector is
-    currently commanded (`plans/detection-cones-slice2/plan.md`'s 2B,
-    closing `todo/todo.md`'s "Scan commands should drive naked-eye
-    perception"; generalised from a static `Gaze` to a `ScanPlan` by 2C) --
-    or `FREE_SCAN_PLAN` (the o'clock scan loop, `perception.gaze`'s own
-    module docstring) when no such command is pending.
+def _active_gaze(tasks: TaskStore, heading_true_deg: float = 0.0) -> ScanPlan:
+    """The `ScanPlan` implied by whatever scan is currently commanded
+    (`plans/detection-cones-slice2/plan.md`'s 2B, closing `todo/todo.md`'s
+    "Scan commands should drive naked-eye perception"; generalised from a
+    static `Gaze` to a `ScanPlan` by 2C, and generalised again by Stage 5
+    of `plans/voice-command-completeness/plan.md` to cover every directional
+    field `AttentionArea` can carry, not only `relative_sector`) -- or
+    `FREE_SCAN_PLAN` (the o'clock scan loop, `perception.gaze`'s own module
+    docstring) when no such command is pending.
 
-    Reads `PendingIntent.area.relative_sector`/`created_sim` directly,
-    never the store's live re-projected `AttentionArea` (`ContactStore.
-    reproject_relative_areas`) -- a relative sector's *direction* is
-    body-relative and invariant under reprojection; only its absolute
-    world-bearing projection changes with ownship heading, which this
-    function has no use for. This also sidesteps `belief.tasks`'s own
-    documented staleness caveat around `task.area` (its module docstring)
-    entirely, since nothing here needs the live area at all.
-    `task.created_sim` becomes `ScanPlan.command_t_sim` -- the sim time the
-    scan was ordered, which is what a commanded scan's o'clock legs cycle
-    from (`perception.gaze.gaze_at`'s own docstring).
+    Reads `PendingIntent.area.relative_sector`/`relative_clock_hour`/
+    `sector`/`created_sim` directly, never the store's live re-projected
+    `AttentionArea` (`ContactStore.reproject_relative_areas`) -- a relative
+    sector's or o'clock hour's *direction* is body-relative and invariant
+    under reprojection; only its absolute world-bearing projection changes
+    with ownship heading, which this function resolves itself via
+    `heading_true_deg` rather than reading off a stale live projection.
+    This also sidesteps `belief.tasks`'s own documented staleness caveat
+    around `task.area` (its module docstring) entirely, since nothing here
+    needs the live area at all. `task.created_sim` becomes `ScanPlan.
+    command_t_sim` -- the sim time the scan was ordered, which is what a
+    commanded scan's o'clock legs cycle from (`perception.gaze.gaze_at`'s
+    own docstring).
+
+    **Stage 5's fix, in one sentence: a compass-absolute `AttentionArea.
+    sector` (`scan north`/`scan bearing 320`) now also resolves here**,
+    converted to `ScanPlan.commanded_legs` via `perception.gaze.
+    legs_within_wedge` using *this poll's* `heading_true_deg` -- before
+    this stage, a `sector`-only task (no `relative_sector`) was silently
+    skipped by this function's own filter and fell through to
+    `FREE_SCAN_PLAN`, which is the measured defect this plan's Decision 5
+    names: "scan north" registered an attention area and spoke a readback
+    while Petrovich kept free-scanning. Because `_active_gaze` runs every
+    poll (`run_once`), the conversion is naturally recomputed each tick as
+    heading changes -- `gaze_at` itself stays a pure function of `t_sim`
+    alone (`perception.gaze`'s own hard part 1), the legs it cycles are
+    just refreshed by the caller before each poll. A single o'clock hour
+    (`AttentionArea.relative_clock_hour`, Stage 5's new field for
+    `scan_clock_1`..`scan_clock_12`) resolves to a one-leg `commanded_legs`
+    tuple the same way `ahead` already degenerates to a static gaze
+    (`perception.gaze.ScanPlan`'s own docstring).
 
     The most recently created still-active `scan_area` task wins when more
     than one is active -- a later scan command is what a player issuing
-    "scan left" then "scan right" would expect to take effect.
+    "scan left" then "scan right" would expect to take effect. A task
+    carrying no directional field at all (`sector`, `relative_sector`, and
+    `relative_clock_hour` all `None`) is skipped, same as before Stage 5 --
+    it has nothing for this function to steer by.
 
     **Unaffected by `watch_contact` tasks** (`plans/watch-as-standing-mode/
     plan.md`) -- the `kind == "scan_area"` check above already excludes
@@ -493,29 +577,151 @@ def _active_gaze(tasks: TaskStore) -> ScanPlan:
     reach a resolved task) or a newer scan command (via this function's own
     "most recent" tie-break) ends it."""
     for task in reversed(tasks.tasks):
-        if (
-            task.kind == "scan_area"
-            and task.status != "cancelled"
-            and task.area is not None
-            and task.area.relative_sector is not None
-        ):
+        if task.kind != "scan_area" or task.status == "cancelled" or task.area is None:
+            continue
+        area = task.area
+        if area.relative_sector is not None:
             return ScanPlan(
-                commanded_sector=task.area.relative_sector,
+                commanded_sector=area.relative_sector,
+                command_t_sim=task.created_sim,
+            )
+        if area.relative_clock_hour is not None:
+            return ScanPlan(
+                commanded_sector=None,
+                commanded_legs=(area.relative_clock_hour,),
+                command_t_sim=task.created_sim,
+            )
+        if area.sector is not None:
+            absolute_center = _SECTOR_CENTER_DEG[area.sector]
+            relative_center = (
+                absolute_center - heading_true_deg + 180.0
+            ) % 360.0 - 180.0
+            legs = legs_within_wedge(relative_center, _SECTOR_HALF_WIDTH_DEG)
+            return ScanPlan(
+                commanded_sector=None,
+                commanded_legs=legs,
                 command_t_sim=task.created_sim,
             )
     return FREE_SCAN_PLAN
 
 
-def _apply_active_gaze(sources: list[PerceptionSource], tasks: TaskStore) -> None:
-    """Assigns `_active_gaze(tasks)` onto whichever `sources` entry is a
-    `NakedEyePerceptionSource` -- a true no-op for every other source, and
-    for a `sources` list (e.g. in tests) that holds no naked-eye source at
-    all. The same write-thread/single-assignment pattern `last_t_sim`
-    already uses safely (`run_once`'s only caller)."""
-    scan_plan = _active_gaze(tasks)
+def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget]:
+    """Every live contact, as the binocular policy needs to see it.
+
+    **Uses the contact's *believed* type, not ground truth** -- which for a
+    presence-level contact is no type at all, and `object_model.profile_for`
+    degrades to its default profile there. That is the honest model rather
+    than a shortcoming: deciding whether a mark is worth a closer look is a
+    judgement made from the mark, and a Petrovich who sized the window by
+    what the thing really is would be deciding with knowledge he does not
+    have.
+    """
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    return [
+        look_target_for(
+            contact.id,
+            observer=observer,
+            target_position=contact.last_position,
+            heading_true_deg=ownship.heading_true_deg,
+            object_type=contact.last_class_raw,
+            current_level=contact.classification.level.name.lower(),
+        )
+        for contact in store.contacts
+    ]
+
+
+#: The band a binocular search sweeps: from where the naked eye runs out
+#: to where the binoculars do, for a mid-sized vehicle. Sweeping nearer
+#: re-covers ground the scan phase alternating with this one has already
+#: covered; sweeping further covers ground the instrument cannot resolve
+#: anyway. Stated as a constant rather than computed per contact because a
+#: search has no contact yet -- that is what it is looking for.
+_SEARCH_BAND_M: tuple[float, float] = (2_333.0, 5_647.0)
+
+
+def _search_sweep(
+    scan_plan: ScanPlan, ownship: OwnshipState
+) -> list[tuple[float, float]]:
+    """The binocular sweep for the currently-commanded sector, or empty.
+
+    **Empty for a free scan, deliberately** (`plans/binocular-optic/
+    plan.md` D6): searching is something the player asks for by naming a
+    place to look. A free scan is Petrovich deciding where to look for
+    himself, and turning that into a binocular sweep would spend most of
+    every minute glassed for no one's reason.
+
+    The band swept starts where the naked eye runs out and ends where the
+    binoculars do -- sweeping nearer than that re-covers ground the scan
+    phase alternating with this one has already covered.
+
+    **Still gated on `commanded_sector` alone, not `commanded_legs`**
+    (Stage 5, `plans/voice-command-completeness/plan.md`): a bare o'clock
+    hour or a converted compass-sector scan gets no binocular search band.
+    `SECTOR_WEDGE_DEG` has no entry for either -- there is no named sector
+    to look up a half-width for -- and Stage 5's own scope is gaze, not
+    binocular search; extending this to the new commanded-legs cases is
+    left for a later stage if wanted.
+    """
+    if scan_plan.commanded_sector is None:
+        return []
+    _, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    near_m, far_m = _SEARCH_BAND_M
+    fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    if fov_full_width_deg <= 0.0:
+        return []
+    return search_pattern(
+        sector_half_width_deg=half_width_deg,
+        near_m=near_m,
+        far_m=far_m,
+        altitude_agl_m=max(ownship.alt_agl_m, 0.0),
+        fov_full_width_deg=fov_full_width_deg,
+    )
+
+
+def _apply_active_gaze(
+    sources: list[PerceptionSource],
+    tasks: TaskStore,
+    *,
+    scan_plan: ScanPlan | None = None,
+    decision: OpticDecision | None = None,
+) -> None:
+    """Assigns the resolved scan plan and optic onto whichever `sources`
+    entry is a `NakedEyePerceptionSource` -- a true no-op for every other
+    source, and for a `sources` list (e.g. in tests) that holds no
+    naked-eye source at all. The same write-thread/single-assignment
+    pattern `last_t_sim` already uses safely (`run_once`'s only caller).
+
+    Both are applied here rather than in two places because they are one
+    act -- *where he is looking and through what* -- and splitting the
+    application would let a gaze and an optic from different polls be used
+    for the same evaluation.
+
+    `scan_plan`/`decision` default to `None` so the pre-binocular call
+    shape (`_apply_active_gaze(sources, tasks)`) still works and still
+    resolves the scan plan itself: several tests construct sources and call
+    this directly, and none of them care about the optic.
+
+    **A glass phase overrides the scan plan with a fixed look**
+    (`plans/binocular-optic/plan.md` Stage 2). The look is a `ScanPlan`
+    holding one direction rather than a special case in the source: the
+    source already resolves `gaze_at(now_sim, scan_plan)` every poll, so a
+    plan whose every leg is the same direction *is* a fixed stare, and no
+    branch is needed anywhere downstream."""
+    resolved_plan = scan_plan if scan_plan is not None else _active_gaze(tasks)
+    optic = decision.optic if decision is not None else UNAIDED_OPTIC
+    if (
+        decision is not None
+        and decision.look_azimuth_deg is not None
+        and decision.look_elevation_deg is not None
+    ):
+        resolved_plan = ScanPlan.fixed_look_at(
+            azimuth_deg=decision.look_azimuth_deg,
+            elevation_deg=decision.look_elevation_deg,
+        )
     for source in sources:
         if isinstance(source, NakedEyePerceptionSource):
-            source.scan_plan = scan_plan
+            source.scan_plan = resolved_plan
+            source.optic = optic
 
 
 def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
@@ -525,12 +731,18 @@ def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
     the scan loop at all without this). `gaze.label` is always an o'clock
     hour under `gaze_at` (`"11_oclock"`, `perception.gaze.Gaze`'s own
     docstring: a label meant for exactly this kind of debug/trace display),
-    reformatted here rather than branched on."""
+    reformatted here rather than branched on. A `commanded_legs`-only plan
+    (Stage 5: a bare o'clock hour, or a compass-sector scan converted to
+    relative legs) has no single sector name to speak -- it says "commanded
+    scan" rather than naming a sector, since the sector-naming detail lives
+    on `AttentionArea`/`crew_console.py`'s own readback, not here."""
     where = gaze.label.replace("_oclock", " o'clock")
     if scan_plan.commanded_sector is not None:
         return (
             f"Petrovich: looking {where} (commanded {scan_plan.commanded_sector} scan)"
         )
+    if scan_plan.commanded_legs is not None:
+        return f"Petrovich: looking {where} (commanded scan)"
     return f"Petrovich: looking {where} (free scan)"
 
 
@@ -592,6 +804,12 @@ def _build_sources(
         ),
     ]
 
+
+#: How many attitude samples the steadiness gate looks back over. Three at
+#: the default one-second poll interval is a few seconds of history: long
+#: enough to catch a manoeuvre in progress, short enough that a bank a
+#: minute ago cannot still forbid a look.
+ATTITUDE_HISTORY_LEN = 3
 
 _DEFAULT_POLL_INTERVAL_S = 1.0
 
@@ -739,7 +957,7 @@ def _poll_f10_commands(
     aircraft_client: AircraftLayerClient, crew_console: CrewConsole, now_sim: float
 ) -> None:
     """Drains pending F10 radio-menu selections (`plans/f10-crew-commands/
-    plan.md`) and dispatches each through `CrewConsole.handle_f10_command`
+    plan.md`) and dispatches each through `CrewConsole.handle_command`
     -- the same post-`tick()` hook point `drain_events` already uses.
     Wrapped in its own `try`/`except AircraftLayerError` (log-and-continue),
     the same per-call isolation shape the BL-2.5 overlay-push loop already
@@ -752,7 +970,7 @@ def _poll_f10_commands(
     for command in commands:
         token = command.get("command")
         if isinstance(token, str):
-            crew_console.handle_f10_command(token, now_sim)
+            crew_console.handle_command(token, now_sim)
 
 
 def _poll_transcripts(
@@ -766,14 +984,17 @@ def _poll_transcripts(
     failed poll never stops the loop.
 
     Each item is validated field-by-field against `transcript_queue.
-    TranscriptEvent.to_dict`'s seven-field shape before dispatch -- a
+    TranscriptEvent.to_dict`'s eight-field shape before dispatch -- a
     malformed/partial item (a schema mismatch, not an expected runtime
     state) is skipped rather than raising, the same defensive posture
     `_poll_f10_commands`'s `isinstance` check already takes on its own,
     simpler payload. `t_wall` (wall-clock time the adapter recognised the
     clip) is intentionally not threaded into `handle_transcript` --
     `now_sim` is this poll's own DCS sim time, the same clock every other
-    dispatch path in this loop already uses."""
+    dispatch path in this loop already uses. `bearing_degrees` (`plans/
+    voice-command-completeness/plan.md` Stage 3) is threaded straight
+    through, `None` allowed (populated only for the two numeric-bearing
+    tokens)."""
     try:
         transcripts = audio_client.get_transcripts()
     except AudioAdapterError:
@@ -786,6 +1007,7 @@ def _poll_transcripts(
         match_ratio = item.get("match_ratio")
         verb_anchored = item.get("verb_anchored")
         ambiguous = item.get("ambiguous")
+        bearing_degrees = item.get("bearing_degrees")
         if not isinstance(transcript, str):
             continue
         if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
@@ -798,6 +1020,10 @@ def _poll_transcripts(
             continue
         if not isinstance(ambiguous, bool):
             continue
+        if bearing_degrees is not None and not (
+            isinstance(bearing_degrees, int) and not isinstance(bearing_degrees, bool)
+        ):
+            continue
         crew_console.handle_transcript(
             transcript,
             float(confidence),
@@ -806,6 +1032,7 @@ def _poll_transcripts(
             verb_anchored,
             ambiguous,
             now_sim,
+            bearing_degrees=bearing_degrees,
         )
 
 
@@ -867,10 +1094,21 @@ def _run_crew_text_poll_loop(
             if runner.last_t_sim is not None:
                 crew_console.enrichment = runner.enrichment
                 crew_console.drain_events(runner.last_t_sim)
+                commands_before = crew_console.commands_handled
                 if f10_commands_enabled:
                     _poll_f10_commands(aircraft_client, crew_console, runner.last_t_sim)
                 if speech_input_enabled and speech_client is not None:
                     _poll_transcripts(speech_client, crew_console, runner.last_t_sim)
+                if crew_console.commands_handled != commands_before:
+                    # Any command lowers the binoculars (`plans/
+                    # binocular-optic/plan.md` D4) -- not per command type:
+                    # the pilot asking for something is itself evidence
+                    # that what Petrovich is doing matters less than what
+                    # was just asked for. Counted rather than inspected so
+                    # this stays true for a command surface added later.
+                    runner.optic_state = lower_binoculars(
+                        runner.optic_state, runner.last_t_sim
+                    )
                 if crew_console.overlay_client is not None:
                     last_gaze_label = _push_gaze_line(
                         crew_console.overlay_client,
@@ -994,7 +1232,7 @@ def main() -> None:
         help=(
             "poll and dispatch player-selected DCS F10 radio-menu commands "
             "(watch nearest / scan forward / cancel task) through "
-            "CrewConsole.handle_f10_command -- plans/f10-crew-commands/"
+            "CrewConsole.handle_command -- plans/f10-crew-commands/"
             "plan.md. Only meaningful with --crew-text; defaults off, a "
             "true no-op when absent. Reuses the same --aircraft-layer-url "
             "instance, no separate URL needed."
@@ -1045,6 +1283,20 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--speech-log",
+        type=Path,
+        default=None,
+        help=(
+            "write one JSON line per recognised transcript to this path -- "
+            "what was heard, the seven recognition fields, and what was done "
+            "about it (act/confirm/say_again/fallthrough). The answer to "
+            "'why did nothing happen when I said that': an utterance matching "
+            "no command otherwise reaches only the brain-layer stand-in, "
+            "which does nothing. Only meaningful with --crew-text "
+            "--speech-input; defaults off, a true no-op when absent."
+        ),
+    )
+    parser.add_argument(
         "--detection-trace",
         type=Path,
         default=None,
@@ -1067,6 +1319,11 @@ def main() -> None:
         parser.error("--speech-audio requires --audio-adapter-url")
     if args.speech_input and args.audio_adapter_url is None:
         parser.error("--speech-input requires --audio-adapter-url")
+    if args.speech_log is not None and not (args.crew_text and args.speech_input):
+        parser.error(
+            "--speech-log requires --crew-text --speech-input (there are no "
+            "transcripts to log without them)"
+        )
     if args.detection_trace is not None and not (args.console or args.crew_text):
         parser.error("--detection-trace requires --console or --crew-text")
 
@@ -1113,6 +1370,11 @@ def main() -> None:
             tasks=crew_runner.tasks,
             overlay_client=aircraft_client if args.overlay else None,
             speech_client=audio_adapter_client if args.speech_audio else None,
+            transcript_log=(
+                SpeechLogWriter(args.speech_log).write
+                if args.speech_log is not None
+                else None
+            ),
         )
         stop_event = threading.Event()
         poll_thread = threading.Thread(

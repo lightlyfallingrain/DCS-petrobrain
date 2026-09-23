@@ -185,6 +185,7 @@ def within_optic_fov(
     boresight_azimuth_deg: float,
     azimuth_deg: float,
     elevation_deg: float,
+    boresight_elevation_deg: float = 0.0,
 ) -> bool:
     """True if `(azimuth_deg, elevation_deg)` -- a body-relative direction,
     same convention as `perception.geometry.BodyRelativeDirection` -- falls
@@ -201,13 +202,23 @@ def within_optic_fov(
     safe great-circle-style separation via the standard spherical law of
     cosines, not a flat azimuth/elevation box (an optic's circular eyepiece
     does not admit a target only because it clears an azimuth check and an
-    elevation check independently)."""
+    elevation check independently).
+
+    **`boresight_elevation_deg` exists because a level boresight makes a
+    narrow optic useless at close range** (`plans/binocular-optic/plan.md`
+    Stage 2). It defaulted to level when the gate was written, which was
+    harmless while nothing passed a real optic: a ground unit 1 km away
+    from 120 m AGL sits ~6.9 degrees below the horizon, outside
+    `BINOCULAR_OPTIC`'s own 4.25-degree half-angle -- so binoculars would
+    have been unable to look at precisely the contacts worth looking at.
+    You point binoculars *at* a thing, including downwards; the default
+    stays level so every existing caller is unchanged."""
     if optic.fov_half_angle_deg is None:
         return True
 
     az_delta_rad = math.radians(azimuth_deg - boresight_azimuth_deg)
     el_rad = math.radians(elevation_deg)
-    boresight_el_rad = 0.0
+    boresight_el_rad = math.radians(boresight_elevation_deg)
 
     cos_separation = math.sin(el_rad) * math.sin(boresight_el_rad) + math.cos(
         el_rad

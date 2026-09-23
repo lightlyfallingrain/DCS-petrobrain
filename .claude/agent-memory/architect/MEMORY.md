@@ -49,3 +49,5 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Tactical landmarks scoping](project_tactical_landmarks_scoping.md) - 2026-09-12 plan resolving whether world-model content is rich enough for Mission Interpreter — ridge/valley/flat, settlement boundaries, road junct...
 - [Resolution vs salience split](project_resolution_vs_salience_split.md) — presence threshold split in two; clustering floor (A) is coupled to the loosest admission threshold.
 - [Movement detection design](project_movement_detection_design.md) — velocity vector never leaves perception/; UnitName join key; MOTION_HALF_LIFE_S was already waiting in decay.py.
+- [Binocular Stage 3b](project_binocular_stage3b.md) — the mock-flight xfail names the wrong cause (search, not stare); never read last_position_uncertainty_m as a bearing error.
+- [Voice command completeness](project_voice_command_completeness.md) — absolute-vs-relative frame rule for direction vocabulary; rename what survives, not what's retired; _print owns speech occupancy.
