@@ -167,11 +167,15 @@ _RELATIVE_SCAN_TOKENS: dict[str, RelativeSector] = {
 #: Spoken phrasing for `_RELATIVE_SCAN_TOKENS`' sectors -- `render_scan_
 #: readback`'s `sector_label` argument. `"full"` reads as "the full forward
 #: arc" rather than the bare token, since "scanning full" alone reads oddly.
+#: Articles dropped 2026-09-23 (user, from the five-fix sortie): "scanning
+#: to the left" became "scanning left". Radio brevity is the register, not a
+#: style preference -- an intercom is a channel one person occupies at a
+#: time, and every article spends a slice of it carrying nothing.
 _RELATIVE_SCAN_LABELS: dict[RelativeSector, str] = {
     "ahead": "ahead",
-    "left": "to the left",
-    "right": "to the right",
-    "full": "the full forward arc",
+    "left": "left",
+    "right": "right",
+    "full": "full arc",
 }
 
 #: `scan_bearing_n`/... -> `belief.attention.Sector` -- the compass-absolute
@@ -236,7 +240,9 @@ _F10_SCAN_REASON = "F10 scan command"
 _TOKEN_DESCRIPTIONS: dict[str, str] = {
     "watch_nearest": "watch nearest",
     "watch_nearest_air_defence": "watch nearest air defence",
-    "cancel_task": "cancel the task",
+    "cancel_task": "cancel everything",
+    "cancel_scan": "stop scan",
+    "cancel_watch": "stop watch",
 }
 
 
@@ -431,6 +437,10 @@ class CrewConsole:
             lines = self._handle_watch_nearest(now_sim, air_defence_only=True)
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
+        elif token == "cancel_scan":
+            lines = self._handle_cancel_task(kinds=("scan_area",))
+        elif token == "cancel_watch":
+            lines = self._handle_cancel_task(kinds=("watch_contact",))
         elif token == "stop_talking":
             # No readback, no `_print` call at all -- `stop_talking` is a
             # stated exception to every other token's "dispatch, then
@@ -653,71 +663,78 @@ class CrewConsole:
         speech" rule and keeping the phrase as terse as the scan
         fallback's own bare `"the scan"`."""
         if task.kind == "watch_contact":
-            return "the watch"
+            return "watch"
         if task.kind != "scan_area":
             return None
         area = task.area
         assert area is not None  # every scan_area task carries an area
         if area.relative_sector is not None:
-            return f"the scan {_RELATIVE_SCAN_LABELS[area.relative_sector]}"
+            return f"scan {_RELATIVE_SCAN_LABELS[area.relative_sector]}"
         if area.sector is not None:
-            return f"the scan {_SECTOR_SCAN_LABELS[area.sector]}"
-        return "the scan"
+            return f"scan {_SECTOR_SCAN_LABELS[area.sector]}"
+        return "scan"
 
-    def _handle_cancel_task(self) -> list[str]:
+    def _handle_cancel_task(self, kinds: tuple[str, ...] | None = None) -> list[str]:
         """Cancels the single currently-*governing* task of each kind in
-        `self.tasks`, regardless of source (plan Decision 3). Every
-        `scan_*` token registers a real task via `_handle_scan` above (D5,
-        `plans/f10-command-vocabulary/plan.md`), and every `watch_nearest*`
-        token now does too (`plans/watch-as-standing-mode/plan.md`), so this
-        is no longer the always-"no pending task" dead path it was before
-        those fixes -- a scan and/or a watch followed by "Cancel Task"
-        genuinely cancels them.
+                `self.tasks`, regardless of source (plan Decision 3). Every
+                `scan_*` token registers a real task via `_handle_scan` above (D5,
+                `plans/f10-command-vocabulary/plan.md`), and every `watch_nearest*`
+                token now does too (`plans/watch-as-standing-mode/plan.md`), so this
+                is no longer the always-"no pending task" dead path it was before
+                those fixes -- a scan and/or a watch followed by "Cancel Task"
+                genuinely cancels them.
 
-        **One F10 item, no per-kind vocabulary -- so "Cancel Task" cancels
-        every currently-active kind at once, not just one.** There is no
-        voice/menu way to say "cancel the watch" specifically as opposed to
-        the scan, so rather than guess which one the player meant (or
-        arbitrarily pick "most recent" across kinds, which could silently
-        leave the other running), this ends every standing mode that is
-        still governing something. That is the predictable reading of a
-        single Cancel button: it stops *everything currently commanded*,
-        and the readback names each thing it stopped so the player can hear
-        it was not partial.
+        **`kinds` selects which standing modes to end; `None` means all of
+                them (2026-09-23, reversing this method's own earlier decision).**
+                The original reasoning was sound given what existed: there was no
+                vocabulary to say "cancel the watch" as opposed to the scan, so
+                guessing was worse than stopping everything and naming each thing
+                stopped. The user's answer once he had flown it was to supply the
+                missing vocabulary instead -- *"stop watching <unit>"* and *"stop
+                scan"* are separate actions, and **one cancel must not silently end
+                the other mode**. Stopping a scan while watching a contact is an
+                ordinary thing to want, and the cancel-everything reading made it
+                impossible to express.
 
-        **"Currently governing" means the single most-recently-created
-        still-active task *per kind*, not literally every non-cancelled
-        task ever created.** Superseding a scan with a newer one (or a
-        watch with a newer one) does not retroactively cancel the earlier
-        task -- `logger._active_gaze` already only honours the newest
-        `scan_area` task via its own "most recent wins" tie-break, and an
-        older, superseded task of either kind is inert but not `cancelled`.
-        Treating every merely-inert task as "active" would make one Cancel
-        Task press cancel a whole session's worth of stale scans, so this
-        groups active tasks by `kind` and keeps only each group's newest
-        (`_active_tasks_by_kind`) before acting -- exactly the selection
-        `logger._active_gaze` already uses for gaze, generalised to any
-        kind and to cancellation rather than gaze.
+                So the menu now carries `cancel_scan` and `cancel_watch`, and
+                `cancel_task` remains as the deliberate all-modes form -- kept, not
+                left over: *"cancel that"* is a real thing to say when several
+                things are running, and its readback names both, so it cannot be
+                mistaken for a narrow cancel.
 
-        **Cones 2C sortie fix, unchanged: "active" means `status !=
-        "cancelled"`, not `status == "pending"`.** A `scan_area` task is a
-        standing mode (`belief.tasks.TaskStatus`'s own docstring) that
-        `TaskStore.tick` can flip to `"succeeded"` within seconds of being
-        issued (the moment any contact is seen in its area) -- under a
-        `"pending"`-only filter, that task had already dropped out of this
-        list by the time a player heard it and said "Cancel Task," which
-        produced the sortie's "'nothing to stop'" finding. `TaskStore.
-        cancel` itself is fixed the same way, so cancelling a resolved task
-        here now genuinely ends its mode (`logger._active_gaze` stops
-        honouring it), not just a bookkeeping no-op. A `watch_contact` task
-        never leaves `"pending"` on its own (`TaskStore.tick` skips any task
-        with no `area`), so this same "active" definition covers it too
-        without a separate case.
+                **"Currently governing" means the single most-recently-created
+                still-active task *per kind*, not literally every non-cancelled
+                task ever created.** Superseding a scan with a newer one (or a
+                watch with a newer one) does not retroactively cancel the earlier
+                task -- `logger._active_gaze` already only honours the newest
+                `scan_area` task via its own "most recent wins" tie-break, and an
+                older, superseded task of either kind is inert but not `cancelled`.
+                Treating every merely-inert task as "active" would make one Cancel
+                Task press cancel a whole session's worth of stale scans, so this
+                groups active tasks by `kind` and keeps only each group's newest
+                (`_active_tasks_by_kind`) before acting -- exactly the selection
+                `logger._active_gaze` already uses for gaze, generalised to any
+                kind and to cancellation rather than gaze.
 
-        The readback names *what* was cancelled, never the task id
-        (live-test finding 2026-09-16: the player heard `"cancelled task
-        TASK_4"`). See `speech.render_cancel_readback` for why -- the same
-        no-ids-in-speech rule this codebase already applies to contacts."""
+                **Cones 2C sortie fix, unchanged: "active" means `status !=
+                "cancelled"`, not `status == "pending"`.** A `scan_area` task is a
+                standing mode (`belief.tasks.TaskStatus`'s own docstring) that
+                `TaskStore.tick` can flip to `"succeeded"` within seconds of being
+                issued (the moment any contact is seen in its area) -- under a
+                `"pending"`-only filter, that task had already dropped out of this
+                list by the time a player heard it and said "Cancel Task," which
+                produced the sortie's "'nothing to stop'" finding. `TaskStore.
+                cancel` itself is fixed the same way, so cancelling a resolved task
+                here now genuinely ends its mode (`logger._active_gaze` stops
+                honouring it), not just a bookkeeping no-op. A `watch_contact` task
+                never leaves `"pending"` on its own (`TaskStore.tick` skips any task
+                with no `area`), so this same "active" definition covers it too
+                without a separate case.
+
+                The readback names *what* was cancelled, never the task id
+                (live-test finding 2026-09-16: the player heard `"cancelled task
+                TASK_4"`). See `speech.render_cancel_readback` for why -- the same
+                no-ids-in-speech rule this codebase already applies to contacts."""
         # Both no-store and nothing-active say the same thing, and it is
         # deliberately *not* `render_cancel_readback` -- that template says
         # "Copy, stopping", which would claim to have stopped something
@@ -725,6 +742,8 @@ class CrewConsole:
         if self.tasks is None:
             return [_NOTHING_TO_STOP]
         active = _active_tasks_by_kind(self.tasks.tasks)
+        if kinds is not None:
+            active = [task for task in active if task.kind in kinds]
         if not active:
             return [_NOTHING_TO_STOP]
         descriptions: list[str] = []

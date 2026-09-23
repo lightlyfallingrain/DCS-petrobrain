@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import pytest
 
 from belief import enrichment as enrichment_module
+from belief import speech as speech_module
 from belief.contacts import ContactStore
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
@@ -382,7 +383,7 @@ def test_route_event_classification_changed_speaks_position_and_new_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`CONTACT_CLASSIFICATION_CHANGED` (2026-09-11 addendum) speaks
-    `"unit at {clock} o'clock, {range} km is {type}."` when enriched, built
+    `"unit {clock} o'clock, {range} km is {type}."` when enriched, built
     from the contact's current, already-folded classification via
     `_unit_type_display` -- not the raw `event.classification` enum
     string."""
@@ -395,7 +396,9 @@ def test_route_event_classification_changed_speaks_position_and_new_type(
     )
 
     assert speech is not None
-    assert speech.text.startswith("unit at ")
+    # The lead noun is the contact's class when the identified type yields
+    # one (2026-09-23): a T-72 opens the line as "armor", not "unit".
+    assert speech.text.startswith("armor ")
     assert "o'clock" in speech.text
     assert speech.text.endswith(" is T-72.")
 
@@ -411,7 +414,7 @@ def test_route_event_classification_changed_omits_range_when_not_enriched() -> N
     speech = route_event(store, changed, now_sim=1.0)
 
     assert speech is not None
-    assert speech.text == "unit is T-72."
+    assert speech.text == "armor is T-72."
 
 
 def test_format_range_km_rounds_to_nearest_half_km_no_trailing_zero() -> None:
@@ -424,7 +427,7 @@ def test_format_range_km_boundary_cases() -> None:
     # round() (banker's rounding, ties to even) resolves them to 1 and 2
     # respectively -- pinned here so a future change to the rounding
     # implementation is a deliberate, visible diff.
-    assert _format_range_km(1250.0) == "1 kilometres"
+    assert _format_range_km(1250.0) == "1 kilometre"
     assert _format_range_km(1750.0) == "2 kilometres"
 
 
@@ -496,9 +499,9 @@ def test_cardinality_phrase_singular_is_no_clause() -> None:
 def test_cardinality_phrase_two_or_three_is_a_couple() -> None:
     """User direction, 2026-09-19. Carries its own `"of"`, like
     `"a handful of"` and for the same reason."""
-    assert _cardinality_phrase(2, 2) == "a couple of"
-    assert _cardinality_phrase(3, 3) == "a couple of"
-    assert _cardinality_phrase(2, 3) == "a couple of"
+    assert _cardinality_phrase(2, 2) == "couple"
+    assert _cardinality_phrase(3, 3) == "couple"
+    assert _cardinality_phrase(2, 3) == "couple"
 
 
 def test_cardinality_phrase_default_is_several() -> None:
@@ -522,7 +525,7 @@ def test_attention_does_not_manufacture_precision() -> None:
     """An inexact interval keeps its hedge however closely it is watched --
     attention buys disclosure of precision already held, never invention of
     precision that is not."""
-    assert _cardinality_phrase(4, 5, attended=True) == "a handful of"
+    assert _cardinality_phrase(4, 5, attended=True) == "handful"
     assert _cardinality_phrase(8, 10, attended=True) == "several"
 
 
@@ -544,7 +547,7 @@ def test_cardinality_phrase_op_to5units_is_a_handful() -> None:
     noun, `"a handful trucks"` is not. Keeping the connector in the phrase
     lets `_contact_report_text` stay a plain phrase-plus-noun join instead
     of growing a second grammar rule beside the first."""
-    assert _cardinality_phrase(4, 5) == "a handful of"
+    assert _cardinality_phrase(4, 5) == "handful"
 
 
 def test_cardinality_phrase_lo_16_or_more_is_many() -> None:
@@ -656,7 +659,7 @@ def test_route_event_contact_detected_speaks_plural_cardinality_clause() -> None
     detected = next(e for e in store.events if e.kind == "CONTACT_DETECTED")
     speech = route_event(store, detected, now_sim=0.0)
     assert speech is not None
-    assert speech.text == "a handful of trucks."
+    assert speech.text == "handful trucks."
 
 
 def test_render_watch_nearest_readback_speaks_plural_cardinality_clause() -> None:
@@ -678,7 +681,7 @@ def test_render_watch_nearest_readback_speaks_plural_cardinality_clause() -> Non
     result = describe_contact(store, contact_id, now_sim=0.0)
     assert result is not None
     speech = render_watch_nearest_readback(result["facts"])
-    assert speech.text == "Watching a handful of trucks."
+    assert speech.text == "Watching handful trucks."
 
 
 def _store_with_a_classification_change_and_plural_cardinality() -> ContactStore:
@@ -725,7 +728,7 @@ def test_classification_changed_text_omits_count_clause_even_with_plural_cardina
     speech = route_event(store, changed, now_sim=1.0)
 
     assert speech is not None
-    assert speech.text == "unit is T-72."
+    assert speech.text == "armor is T-72."
 
 
 def test_route_event_cardinality_changed_has_no_template_and_is_not_acknowledged() -> (
@@ -769,3 +772,82 @@ def test_route_event_cardinality_changed_has_no_template_and_is_not_acknowledged
 
     assert speech is None
     assert changed in store.unacknowledged_events
+
+
+class TestSpokenVocabularyIsSayable:
+    """No internal identifier may ever reach the audio channel.
+
+    From the 2026-09-22 sortie, which produced *"unit 12 o'clock, 2
+    kilometres is OP_LRSAM"* and *"...is OP_GROUPSOMETHING"*. Both display
+    tables were exhaustive when written and stopped being so when the object
+    model gained a class; the comment claiming exhaustiveness was the only
+    thing enforcing it, and a comment cannot fail. These tests derive the
+    class set from `object_model` itself, so the next class added there
+    fails here rather than being read aloud to the pilot.
+    """
+
+    def _assigned_classes(self) -> set[str]:
+        from perception import object_model
+
+        return (
+            {profile.op_class for _, profile in object_model._KEYWORD_PROFILES}
+            | {
+                profile.op_class
+                for _, profile in object_model._REPORTING_NAME_KEYWORD_PROFILES
+            }
+            | {object_model.DEFAULT_OP_CLASS}
+        )
+
+    def test_every_assigned_class_has_a_singular_word(self) -> None:
+        missing = self._assigned_classes() - set(speech_module._OP_CLASS_DISPLAY)
+        assert not missing, f"op_class values with no spoken word: {sorted(missing)}"
+
+    def test_every_assigned_class_has_a_plural_word(self) -> None:
+        missing = self._assigned_classes() - set(speech_module._OP_CLASS_DISPLAY_PLURAL)
+        assert not missing, f"op_class values with no plural word: {sorted(missing)}"
+
+    def test_no_display_word_leaks_an_internal_identifier(self) -> None:
+        for table in (
+            speech_module._OP_CLASS_DISPLAY,
+            speech_module._OP_CLASS_DISPLAY_PLURAL,
+        ):
+            for key, word in table.items():
+                assert "OP_" not in word, f"{key} maps to an internal name: {word!r}"
+
+    def test_an_unmapped_internal_class_degrades_rather_than_leaking(self) -> None:
+        """The safety net for a class value arriving from outside the object
+        model, which the exhaustiveness tests cannot cover."""
+        assert (
+            speech_module._unit_type_display("OP_SOMETHING_NEW", "class") == "contact"
+        )
+        assert (
+            speech_module._plural_unit_type_display("OP_SOMETHING_NEW", "class")
+            == "contacts"
+        )
+
+    def test_a_non_internal_class_value_still_passes_through(self) -> None:
+        """Only the `OP_` prefix marks a value as internal. A class-level
+        value can be a raw DCS type name or scope/hybrid free text, and
+        suppressing those would discard real information -- the first
+        attempt at this fix did exactly that, reducing "BMP-2" to
+        "contact"."""
+        assert speech_module._unit_type_display("BMP-2", "class") == "BMP-2"
+        assert speech_module._unit_type_display("SAM", "class") == "SAM"
+
+    def test_the_sam_tiers_are_spoken_apart(self) -> None:
+        """Flattening them to "SAM" discards the most decision-relevant part
+        of the call: whether it can be flown around."""
+        words = {
+            speech_module._unit_type_display(value, "class")
+            for value in ("OP_SRSAM", "OP_MRSAM", "OP_LRSAM")
+        }
+        assert words == {"short range SAM", "medium range SAM", "long range SAM"}
+
+    def test_aaa_is_spoken_as_triple_a(self) -> None:
+        assert speech_module._unit_type_display("OP_SPAAG", "class") == "triple A"
+        assert speech_module._unit_type_display("OP_ZU23", "class") == "triple A"
+
+    def test_one_kilometre_is_singular(self) -> None:
+        assert speech_module._format_range_km(1000.0) == "1 kilometre"
+        assert speech_module._format_range_km(1500.0) == "1.5 kilometres"
+        assert speech_module._format_range_km(500.0) == "0.5 kilometres"

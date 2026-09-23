@@ -70,6 +70,13 @@ ALLOWED_COMMANDS: Final[tuple[str, ...]] = (
     "scan_bearing_nw",
     "watch_nearest",
     "watch_nearest_air_defence",
+    # Three cancel forms (2026-09-23). The narrow two exist because one
+    # cancel must not silently end the other standing mode; `cancel_task`
+    # stays as the explicit all-modes form. Hand-synced with the Hook
+    # script's menu and body-layer's own token table, the same documented
+    # hand-sync this list already had.
+    "cancel_scan",
+    "cancel_watch",
     "cancel_task",
 )
 
