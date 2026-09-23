@@ -16,11 +16,16 @@ import math
 import struct
 import wave
 
+import pytest
+
 from audio_capture import (
     SAMPLE_RATE,
+    CaptureError,
     Clip,
     ClipGate,
+    SoxRecorder,
     input_args,
+    sox_available,
     wav_peak_and_duration,
 )
 
@@ -107,3 +112,34 @@ def test_input_args_name_a_driver_before_the_device() -> None:
 
 def test_input_args_take_a_device_without_a_driver() -> None:
     assert input_args(None, "2") == ["2"]
+
+
+def test_sox_available_accepts_an_absolute_path() -> None:
+    """`shutil.which` resolves an absolute path as well as a bare name, so
+    one check covers both -- which is what lets `--sox-binary` take a full
+    Windows path without a second code path."""
+    import sys
+
+    assert sox_available(sys.executable) is True
+
+
+def test_sox_available_reports_a_missing_binary() -> None:
+    assert sox_available("definitely-not-a-real-binary-name") is False
+
+
+def test_the_recorder_reports_which_binary_it_could_not_find() -> None:
+    """The error names the binary rather than saying "sox": when the path
+    was passed explicitly and is wrong, the wrong path is the thing worth
+    seeing."""
+    recorder = SoxRecorder(sox_binary="/nonexistent/sox")
+    with pytest.raises(CaptureError, match="/nonexistent/sox"):
+        recorder.start()
+
+
+def test_the_recorder_hints_at_the_wsl_path_trap() -> None:
+    """A Windows Python launched from WSL inherits WSL's PATH, so sox is
+    installed, working, and invisible. Without the hint that reads as "sox
+    is broken"."""
+    recorder = SoxRecorder(sox_binary="/nonexistent/sox")
+    with pytest.raises(CaptureError, match="WSL"):
+        recorder.start()

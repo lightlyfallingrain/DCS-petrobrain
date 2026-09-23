@@ -81,8 +81,16 @@ set PYTHONPATH=src
 python -m audio_adapter.capture --adapter-url http://<mac-ip>:7795 --ptt dcs
 ```
 
-Capture is stdlib-only, so no venv is needed for it on Windows — but it does need `sox` on PATH,
-which the corpus recording already required.
+Capture is stdlib-only, so no venv is needed for it on Windows — but it does need `sox`.
+
+**From WSL, name the sox binary explicitly.** A Windows Python launched from WSL inherits *WSL's*
+`PATH`, which Windows cannot use, so sox is installed, working, and invisible:
+
+```bash
+cd /mnt/c/<path>/DCS-petrobrain/audio-adapter/src
+python.exe -m audio_adapter.capture --adapter-url http://<mac-ip>:7795 --ptt dcs \
+  --sox-binary 'C:\Program Files (x86)\sox-14-4-2\sox.exe'
+```
 
 Mac, two terminals:
 

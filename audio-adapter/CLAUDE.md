@@ -295,7 +295,9 @@ consume.
   from 1**, so the probe's button 7 is DCS's "JOY_BTN8". `load_winmm()` raises off Windows rather
   than degrading, and `JoystickPTT` polls once at construction so a bad device id fails at startup
   instead of when the player first presses to talk.
-- `src/audio_capture.py` (Slice 3 Stage 4) — `SoxRecorder` (start/stop, one clip per press),
+- `src/audio_capture.py` (Slice 3 Stage 4) — `SoxRecorder` (start/stop, one clip per press;
+  `sox_binary` is overridable via `--sox-binary`, because `PATH` cannot be trusted — a Windows
+  Python launched from WSL inherits WSL's `PATH` and cannot find an installed, working sox),
   `ClipGate` (duration and peak only — the real judgement is downstream in `command_matcher` and
   body-layer's bands), and `wav_peak_and_duration`. **sox rather than the planned ffmpeg**: every
   Windows-specific detail here (the `waveaudio` driver, the device substring, the 1024-byte buffer

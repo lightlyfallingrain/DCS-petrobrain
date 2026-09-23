@@ -99,8 +99,20 @@ class CaptureError(RuntimeError):
     rejected by the gate, which is normal and not an error."""
 
 
-def sox_available() -> bool:
-    return shutil.which("sox") is not None
+#: The binary's default name, resolved through `PATH`. Overridable because
+#: `PATH` is not always the thing you think it is: a Windows Python
+#: launched from WSL inherits WSL's own `PATH`, full of Linux paths Windows
+#: cannot use, so `shutil.which("sox")` fails even though sox is installed
+#: and working. Naming the binary explicitly sidesteps the whole question --
+#: and a project meant to be public cannot assume where anyone installed it
+#: anyway.
+DEFAULT_SOX_BINARY = "sox"
+
+
+def sox_available(sox_binary: str = DEFAULT_SOX_BINARY) -> bool:
+    """True if the binary can be found. `shutil.which` handles an absolute
+    path as well as a bare name, so this is one check for both cases."""
+    return shutil.which(sox_binary) is not None
 
 
 def input_args(driver: str | None, device: str | None) -> list[str]:
@@ -235,10 +247,12 @@ class SoxRecorder:
         driver: str | None = None,
         device: str | None = None,
         max_clip_s: float = DEFAULT_MAX_CLIP_S,
+        sox_binary: str = DEFAULT_SOX_BINARY,
     ) -> None:
         self._driver = driver
         self._device = device
         self._max_clip_s = max_clip_s
+        self._sox_binary = sox_binary
         self._process: subprocess.Popen[bytes] | None = None
         self._path: Path | None = None
         self._started_at = 0.0
@@ -246,10 +260,13 @@ class SoxRecorder:
     def start(self) -> None:
         if self._process is not None:
             raise CaptureError("recorder already running")
-        if not sox_available():
+        if not sox_available(self._sox_binary):
             raise CaptureError(
-                "`sox` not found. macOS: brew install sox. "
-                "Windows: the installer from sox.sourceforge.net."
+                f"`{self._sox_binary}` not found. macOS: brew install sox. "
+                "Windows: the installer from sox.sourceforge.net. "
+                "Running a Windows Python from WSL? Pass the full Windows "
+                "path with --sox-binary -- the inherited PATH is WSL's, not "
+                "Windows'."
             )
         # mkstemp rather than NamedTemporaryFile: sox writes this file
         # itself, so the handle is closed immediately and only the path
@@ -267,7 +284,7 @@ class SoxRecorder:
         # file whisper will reject.
         self._process = subprocess.Popen(
             [
-                "sox",
+                self._sox_binary,
                 "-q",
                 "--buffer",
                 str(SOX_BUFFER_BYTES),
@@ -307,7 +324,7 @@ class SoxRecorder:
                 raise CaptureError(
                     f"sox produced nothing: {stderr.decode('utf-8', 'replace').strip()[:200]}"
                 )
-            _repair_truncated_wav(path)
+            _repair_truncated_wav(path, self._sox_binary)
             wav = path.read_bytes()
         finally:
             if process.stderr is not None:
@@ -322,7 +339,7 @@ class SoxRecorder:
             self.stop()
 
 
-def _repair_truncated_wav(path: Path) -> bool:
+def _repair_truncated_wav(path: Path, sox_binary: str = DEFAULT_SOX_BINARY) -> bool:
     """Rewrite `path`'s header after sox was stopped mid-write.
 
     Returns False when sox cannot repair it, leaving the original in
@@ -331,7 +348,7 @@ def _repair_truncated_wav(path: Path) -> bool:
     """
     temp = path.with_suffix(".repair.wav")
     result = subprocess.run(
-        ["sox", "--ignore-length", str(path), str(temp)],
+        [sox_binary, "--ignore-length", str(path), str(temp)],
         capture_output=True,
         check=False,
     )
