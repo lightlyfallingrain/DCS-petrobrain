@@ -390,8 +390,9 @@ class DcsPTT:
       *starting* on a fast radio press; it cannot help a slow one that
       dwells past the window. So if the trigger ever reaches the radio stop
       while a capture is running, `discard_requested()` returns True and the
-      clip is dropped -- the player moved to the radio, and what they said
-      was not addressed to the crew.
+      clip is dropped. What that stop *does* varies by setup -- with VOIP it
+      transmits to someone else, without it it opens the DCS radio menu --
+      and the invariant holds for both: it is not speech aimed at the crew.
 
     A failed read raises `PTTError` rather than reporting "not pressed":
     a dead collector and a released trigger must not look the same.

@@ -186,9 +186,45 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+#: How long to wait before retrying after the talk control stops
+#: answering. Long enough that a collector restart (or DCS reloading a
+#: mission) does not produce a screenful, short enough that the trigger is
+#: usable again within a breath of the feed coming back.
+_PTT_RETRY_S = 1.0
+
+
 def _run(loop: CaptureLoop, interval: float) -> None:
+    """Poll until interrupted, surviving a talk control that stops
+    answering.
+
+    **A dead feed used to kill this process.** `CaptureLoop` raises on a
+    `PTTError` deliberately -- a dead trigger must not look like silence --
+    but propagating that all the way out meant a collector restart, a DCS
+    crash or a mission reload left the pilot with no capture at all and a
+    traceback they could not act on mid-flight. The right handling is here
+    rather than in the loop: report it, drop any in-flight clip, and keep
+    trying. The loop keeps its loud failure; the process keeps running.
+    """
+    complaining = False
     while True:
-        for event in loop.tick():
+        try:
+            events = loop.tick()
+        except PTTError as exc:
+            if not complaining:
+                print(f"  talk control unreachable: {exc}", file=sys.stderr)
+                print(
+                    "  retrying -- capture is paused until it answers", file=sys.stderr
+                )
+                complaining = True
+            # Whatever was being recorded cannot be finished by a release
+            # that will never arrive.
+            loop.shutdown()
+            time.sleep(_PTT_RETRY_S)
+            continue
+        if complaining:
+            print("  talk control back.", file=sys.stderr)
+            complaining = False
+        for event in events:
             if event.kind == "press":
                 print("  ● REC")
             elif event.kind == "sent":
