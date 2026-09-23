@@ -97,8 +97,18 @@ Mac, two terminals:
 ```sh
 cd audio-adapter
 PYTHONPATH=src .venv/bin/python -m audio_adapter \
-  --host 0.0.0.0 --whisper-model ~/whisper-models/ggml-small.en.bin
+  --host 0.0.0.0 \
+  --target aircraft-layer --aircraft-layer-url http://<windows-ip>:7791 \
+  --whisper-model ~/whisper-models/ggml-small.en.bin
 ```
+
+**`--target` defaults to `local`,** which plays Petrovich through the Mac's speakers — right for
+auditioning a voice at a desk, wrong for a cockpit. Without it you will hear him, just not where
+you are flying.
+
+The two URLs point in opposite directions and are easy to cross: `--host 0.0.0.0` is the adapter
+*listening* so Windows can reach it, and `--aircraft-layer-url` is the adapter *calling back* to
+the collector to play the WAV through `winsound` on the Windows box.
 
 **`--host 0.0.0.0` is not optional for this flight.** The adapter defaults to loopback because it
 was built as a Mac-local service; the capture process calling in from Windows is a new role. Without
@@ -118,8 +128,12 @@ PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
   --aircraft-layer-url http://<windows-ip>:7791 \
   --theatre Syria \
   --world-model-db <path-to-region.sqlite> \
-  --crew-text --overlay --f10-commands --speech-input
+  --crew-text --overlay --f10-commands --speech-input \
+  --speech-audio --audio-adapter-url http://127.0.0.1:7795
 ```
+
+`--audio-adapter-url` stays on loopback — the logger and the adapter are both on the Mac. It is
+`--speech-audio` that makes Petrovich audible at all; `--speech-input` is the other direction.
 
 **`--speech-input` is the one that makes this flight different.** Without it the logger never polls
 for transcripts and every command you speak lands in a queue nobody drains.
