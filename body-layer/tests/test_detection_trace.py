@@ -31,6 +31,7 @@ from perception.detection_trace import (
 )
 from perception.gaze import ScanPlan
 from perception.naked_eye_source import NakedEyePerceptionSource
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC
 from perception.source import OwnshipState
 from perception.visibility import check_visibility
 from replay import load_ownship_frames, replay
@@ -491,3 +492,38 @@ def test_write_poll_clears_the_collector(tmp_path: Any) -> None:
 
     assert trace.records == []
     writer.close()
+
+
+def test_trace_records_the_optic_the_candidate_was_judged_through() -> None:
+    """`plans/binocular-optic/plan.md` Stage 1. Without this the row's own
+    `range_threshold_m` is unexplainable: the same contact at the same
+    range yields a different threshold depending on an instrument the row
+    would not otherwise name."""
+    trace = DetectionTraceCollector()
+
+    check_visibility(
+        _ownship(),
+        _candidate("Infantry", x=1_000.0, z=0.0),
+        _FAKE_CONN,
+        _THEATRE,
+        optic=BINOCULAR_OPTIC,
+        trace=trace,
+    )
+
+    assert [entry.optic for entry in trace.records] == [BINOCULAR_OPTIC.name]
+
+
+def test_trace_defaults_to_the_unaided_optic() -> None:
+    """The overwhelmingly common row, and the one every existing debrief
+    tool reads -- it must not become `None` or an empty string."""
+    trace = DetectionTraceCollector()
+
+    check_visibility(
+        _ownship(),
+        _candidate("Infantry", x=1_000.0, z=0.0),
+        _FAKE_CONN,
+        _THEATRE,
+        trace=trace,
+    )
+
+    assert [entry.optic for entry in trace.records] == [UNAIDED_OPTIC.name]

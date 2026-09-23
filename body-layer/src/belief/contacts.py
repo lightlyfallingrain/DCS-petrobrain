@@ -445,25 +445,38 @@ class ContactStore:
         source: str,
         sector: Sector | None = None,
         relative_sector: RelativeSector | None = None,
+        relative_clock_hour: int | None = None,
     ) -> AttentionArea:
         """Register a new `AttentionArea`, minting its `id` the same way
         `_new_contact_id`/`_new_event_id` mint theirs. Returns the stored
         `AttentionArea` (with its minted `id`) so a caller (`tools.
         watch_area`) can report it back.
 
-        Passing `relative_sector` makes this an ownship-anchored area
-        (`belief.attention`'s module docstring, second kind): `center` is
-        then only its initial projection, replaced on every
-        `reproject_relative_areas` call. `sector` and `relative_sector` are
-        mutually exclusive -- they are two different frames for the same
-        angular filter, and silently letting one win would make the
-        resulting area's behaviour depend on `area_wedge_deg`'s precedence
-        rule rather than on what the caller asked for."""
-        if sector is not None and relative_sector is not None:
+        Passing `relative_sector` or `relative_clock_hour` (Stage 5,
+        `plans/voice-command-completeness/plan.md` Decision 5) makes this
+        an ownship-anchored area (`belief.attention`'s module docstring,
+        second kind): `center` is then only its initial projection,
+        replaced on every `reproject_relative_areas` call. `sector`,
+        `relative_sector`, and `relative_clock_hour` are pairwise mutually
+        exclusive -- they are three different frames for the same angular
+        filter, and silently letting one win would make the resulting
+        area's behaviour depend on `area_wedge_deg`'s precedence rule
+        rather than on what the caller asked for."""
+        directional = [
+            name
+            for name, value in (
+                ("sector", sector),
+                ("relative_sector", relative_sector),
+                ("relative_clock_hour", relative_clock_hour),
+            )
+            if value is not None
+        ]
+        if len(directional) > 1:
             raise ValueError(
-                "add_area takes sector (compass-absolute) or relative_sector "
-                "(ownship-relative), not both -- they are two frames for the "
-                f"same angular filter, got {sector!r} and {relative_sector!r}"
+                "add_area takes at most one of sector (compass-absolute), "
+                "relative_sector (ownship-relative), or relative_clock_hour "
+                "(ownship-relative, single o'clock hour) -- they are "
+                f"different frames for the same angular filter, got {directional!r}"
             )
         area = AttentionArea(
             id=self._new_area_id(),
@@ -473,6 +486,7 @@ class ContactStore:
             source=source,
             sector=sector,
             relative_sector=relative_sector,
+            relative_clock_hour=relative_clock_hour,
         )
         self._areas[area.id] = area
         return area

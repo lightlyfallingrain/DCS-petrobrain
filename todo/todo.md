@@ -283,6 +283,42 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   Deliberately deferred by user direction 2026-09-16 ("write entry in backlog for full pattern
   simulation, but for now simply remove 9K113 trigger").
 
+  **Compass/absolute scans still never reach `_active_gaze` — measured again 2026-09-23 while
+  scoping `plans/voice-command-completeness/plan.md`.** `_active_gaze` only ever converts a
+  `scan_area` task's `relative_sector` field into a `perception.gaze.Gaze` (cones slice 2B, above);
+  a compass scan sets `area.sector` instead, so `scan north`/the quantised `scan_bearing_deg`
+  fall through to `FREE_SCAN_PLAN` exactly as before that slice landed. A pilot who hears
+  `"Scanning northwest."` and gets free-scan behaviour reads it as broken. Named explicitly, not
+  silently reopened, by `voice-command-completeness`'s own Decision 5/Risks section, and deferred
+  to that plan's Stage 5 alongside the item below (both land together: the clean fix is
+  `_active_gaze` converting an absolute `area.sector` into relative o'clock legs per tick using
+  current heading, the same generalisation the o'clock-scan item needs anyway).
+
+  **Closed by Stage 5** (`plans/voice-command-completeness/plan.md`, `logger._active_gaze`):
+  a `sector`-only task now also resolves, converted to `ScanPlan.commanded_legs` every poll via
+  the new `perception.gaze.legs_within_wedge`, using that poll's own ownship heading — `scan north`
+  now steers `NakedEyePerceptionSource`, not just an `AttentionArea`. **Unflown as of merge.**
+
+- [x] **Ownship-relative o'clock scan tokens — deferred to Stage 5 of `plans/
+  voice-command-completeness/plan.md`, user direction 2026-09-23.** The command vocabulary has two
+  frames and only one has fine granularity: absolute (`north`/`315 degrees`, coarse and fine both)
+  vs. ownship-relative (`left`/`right`/`ahead`/`full`, coarse only — `left` spans a 90° wedge, three
+  o'clock hours). *"'scan 1 o'clock' directs scan at a narrow sector that is own ship relative.
+  That is needed"* (user). Nine new tokens (`scan_clock_1..12`, matching the report family's own
+  nine forward hours), **unbenched** — no recordings exist for them, same cost that kept
+  `cancel_scan`/`cancel_watch` off voice until 2026-09-23; cheapest when the corpus is next
+  re-recorded. The real cost is geometry, not vocabulary: a single o'clock hour is not expressible
+  as a `RelativeSector` today (`perception.gaze._SECTOR_LEGS` only has `ahead`/`left`/`right`/
+  `full`), so the clean generalisation is `ScanPlan` carrying legs directly (an o'clock command is a
+  one-leg plan, exactly like `ahead` already is) rather than widening the `RelativeSector` literal
+  and rippling through `_RELATIVE_SECTOR_WEDGE_DEG`/`belief.attention`'s re-export/the label
+  tables — the same generalisation that would also fix the compass-scan-gaze gap immediately above,
+  which is why the two items are sequenced to land in the same stage.
+
+  **Closed by Stage 5**: `scan_clock_1..12` dispatch through `CrewConsole._handle_scan`'s new
+  `relative_clock_hour` parameter, registering a one-leg `ScanPlan.commanded_legs`; the nine
+  tokens are unbenched, as flagged above — next corpus recording's job. **Unflown as of merge.**
+
 
 - [ ] **Stage 5 road junctions: pathological single-chunk stalls — CONFIRMED DATA-DEPENDENT.** Raised
   2026-09-16 from the `syria-full` build log validating `osm-landcover-optimization`. Stage 5 took

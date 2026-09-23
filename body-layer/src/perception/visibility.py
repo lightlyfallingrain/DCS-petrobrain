@@ -431,6 +431,53 @@ def _aspect_deg(
     return abs(delta)
 
 
+def tier_ranges(
+    *,
+    presence_size_m: float,
+    recognition_extent_m: float,
+    optic: Optic = UNAIDED_OPTIC,
+    distinctiveness: float = 1.0,
+    group_salient: bool = False,
+) -> tuple[float, float, float]:
+    """The three tier thresholds in metres -- `(presence, class, type)` --
+    for one object seen through one instrument.
+
+    Extracted from `_achieved_tier` unchanged (`plans/binocular-optic/
+    plan.md` Stage 2) because a second caller now needs the *thresholds*
+    rather than the achieved tier: deciding whether binoculars are worth
+    raising is the question "would this contact identify at this range
+    through that instrument, when it does not through this one", which is
+    a comparison of two type thresholds.
+
+    **Extracted rather than reimplemented, deliberately.** The chained
+    `min()`s are what make `type <= class <= presence` structural; a policy
+    that recomputed them from the same constants would be one refactor away
+    from disagreeing with what the eye actually does, and the disagreement
+    would present as Petrovich raising binoculars for contacts he then
+    cannot resolve -- a behaviour nobody would trace back to a duplicated
+    formula.
+    """
+    presence_threshold_m = min(
+        NAKED_EYE_RANGE_CAP_M,
+        (
+            presence_size_m
+            / _presence_angular_radius_rad(LOWRES_ANGULAR_RADIUS_RAD, group_salient)
+        )
+        * optic.presence_range_mult,
+    )
+    class_threshold_m = min(
+        presence_threshold_m,
+        (recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD)
+        * optic.class_range_mult
+        * distinctiveness,
+    )
+    type_threshold_m = min(
+        class_threshold_m,
+        (recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD) * optic.type_range_mult,
+    )
+    return presence_threshold_m, class_threshold_m, type_threshold_m
+
+
 def _achieved_tier(
     range_m: float,
     presence_size_m: float,
@@ -511,23 +558,12 @@ def _achieved_tier(
     but is kept as an explicit, best-effort `lowres` result rather than a
     crash, since `test_vision_calibration.py` calls this function directly
     against screenshot ground truth without going through that gate."""
-    presence_threshold_m = min(
-        NAKED_EYE_RANGE_CAP_M,
-        (
-            presence_size_m
-            / _presence_angular_radius_rad(LOWRES_ANGULAR_RADIUS_RAD, group_salient)
-        )
-        * optic.presence_range_mult,
-    )
-    class_threshold_m = min(
-        presence_threshold_m,
-        (recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD)
-        * optic.class_range_mult
-        * distinctiveness,
-    )
-    type_threshold_m = min(
-        class_threshold_m,
-        (recognition_extent_m / HIRES_ANGULAR_RADIUS_RAD) * optic.type_range_mult,
+    presence_threshold_m, class_threshold_m, type_threshold_m = tier_ranges(
+        presence_size_m=presence_size_m,
+        recognition_extent_m=recognition_extent_m,
+        optic=optic,
+        distinctiveness=distinctiveness,
+        group_salient=group_salient,
     )
     if range_m <= type_threshold_m:
         return "hires", NAKED_EYE_TYPE_CONFIDENCE
@@ -691,6 +727,7 @@ def check_visibility(
                 threshold_bound=threshold_bound,
                 outcome=outcome,
                 achieved_tier=achieved_tier,
+                optic=optic.name,
             )
         )
 
@@ -714,11 +751,13 @@ def check_visibility(
         return None
 
     boresight_azimuth_deg = gaze.center_azimuth_deg if gaze is not None else 0.0
+    boresight_elevation_deg = gaze.center_elevation_deg if gaze is not None else 0.0
     if not within_optic_fov(
         optic,
         boresight_azimuth_deg,
         body_direction.azimuth_deg,
         body_direction.elevation_deg,
+        boresight_elevation_deg=boresight_elevation_deg,
     ):
         _record(GateOutcome.OPTIC_FOV)
         return None

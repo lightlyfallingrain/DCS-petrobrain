@@ -25,6 +25,16 @@ this is a hybrid design (real detection gate + `LoGetWorldObjects`-derived geome
 **Current BL-x milestone status: see `ROADMAP.md`** (this directory), not this file — status
 changes faster than this doc gets touched.
 
+**The surface is *commands*, not "F10 commands."** `CrewConsole.handle_command`
+(`plans/voice-command-completeness/plan.md` Stage 1, renamed from `handle_f10_command`) is the
+single dispatcher for every player-issued command token, reached from three input surfaces: the
+DCS F10 radio menu, a spoken voice command, and a committed confirm-band answer. The F10 menu is
+one legacy transport into that dispatcher, not the concept it names — per user direction
+2026-09-19, voice is primary and the F10 menu "may go stale" once it is retired; the transport
+names (`F10CommandQueue`, `get_f10_commands`, `--f10-commands`) stay as-is deliberately (see that
+plan's Decision 4) since they describe the F10 radio-menu transport specifically, which is real
+and still running, and renaming code scheduled for deletion buys nothing.
+
 ## Tech stack
 
 - Python 3.11+, fully type-hinted, `mypy --strict` (`pyproject.toml`). Stdlib only for
@@ -114,7 +124,7 @@ Add `--f10-commands` alongside `--crew-text` (`plans/f10-crew-commands/plan.md`,
 by `plans/f10-command-vocabulary/plan.md`) to poll and dispatch player-selected DCS F10 radio-menu
 commands — the 15-token scan/watch/cancel vocabulary (`Scan` -> `Ahead`/`Left`/`Right`/`Full`/eight
 compass `Bearing` items, `Watch` -> `Nearest`/`Nearest Air Defence`, `Cancel Task`) — through `CrewConsole.
-handle_f10_command`, the same output funnel typed/spoken text already goes through. Only meaningful
+handle_command`, the same output funnel typed/spoken text already goes through. Only meaningful
 with `--crew-text`; defaults off, a true no-op when absent, same additive posture as `--overlay`.
 See `aircraft-layer/WORKFLOW.md`'s "Deploy the F10 commands Hook script"
 section for the DCS-side half of this channel (including its `autoexec.cfg` opt-in) — UNVERIFIED
@@ -140,6 +150,17 @@ meaningful with `--crew-text`; `--speech-input` requires `--audio-adapter-url`; 
 true no-op when absent, same additive posture as `--f10-commands`. Needs `audio-adapter` run with
 `--whisper-model` for `GET /transcripts/poll` to ever have anything to drain — see
 `audio-adapter/CLAUDE.md`.
+
+Add `--speech-log PATH` alongside `--crew-text --speech-input` to write one JSON line per
+recognised transcript: what was heard, the seven recognition fields, and what was done about it
+(`act`/`confirm`/`say_again`/`fallthrough`, plus the acted token). **It exists because an utterance
+matching no command was previously unobservable** — it fell through to escalation, and the default
+brain client does nothing, so the single most useful case for debugging recognition left no trace
+anywhere. Matched utterances are logged too: a false fire is only findable by seeing what he
+actually acted on. `parser.error`s without both flags; defaults off, a true no-op when absent, same
+additive posture as `--detection-trace`. Unbuffered, unlike the detection trace — speech is a
+handful of rows per sortie, and the row most worth having is the one immediately before something
+went wrong, which a buffer would still be holding when the process was killed to investigate.
 
 Add `--detection-trace PATH` alongside `--console` or `--crew-text` (BL-9, `plans/
 bl9-debug-visualization/plan.md`) to write a per-poll, per-object naked-eye visibility-gate trace
@@ -624,7 +645,7 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   `--f10-commands` (`plans/f10-crew-commands/plan.md`, only meaningful with `--crew-text`, same
   additive-no-op-when-absent posture as `--overlay`) adds a `_poll_f10_commands` call to
   `_run_crew_text_poll_loop` right after `drain_events`, draining `aircraft_client.
-  get_f10_commands()` and dispatching each token through `CrewConsole.handle_f10_command` — its own
+  get_f10_commands()` and dispatching each token through `CrewConsole.handle_command` — its own
   `try`/`except AircraftLayerError` (log-and-continue), the same per-call isolation shape the
   `--overlay` push loop above uses, so one failed poll never stops the loop. `main()`'s
   `--crew-text` branch also now wires `CrewConsole(tasks=crew_runner.tasks, ...)`, the same
@@ -649,6 +670,17 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   `NakedEyePerceptionSource` consumes it), and call `detection_trace_writer.DetectionTraceWriter.
   write_poll` immediately after each `runner.run_once()` — after `ingest`/`tick` have already run
   against that poll's `Observation`s, so writing the trace can never influence what was ingested.
+
+  **`_active_gaze` (Stage 5, `plans/voice-command-completeness/plan.md` Decision 5) now takes a
+  `heading_true_deg` parameter** and resolves every directional field `AttentionArea` can carry, not
+  only `relative_sector`: a `relative_clock_hour` (the new o'clock scan tokens) resolves to a
+  one-leg `ScanPlan.commanded_legs`; a compass-only `sector` (previously silently skipped, falling
+  through to `FREE_SCAN_PLAN`) converts to relative legs via the new `perception.gaze.
+  legs_within_wedge`, computed fresh every poll from that poll's own ownship heading — this is the
+  fix for the measured pre-existing defect that `scan north` registered an `AttentionArea` and spoke
+  a readback while Petrovich kept free-scanning. `run_once` passes `ownship.heading_true_deg`; test
+  call sites default it to `0.0`. `_search_sweep`/`_format_gaze_line` stay gated on `commanded_
+  sector` alone for the binocular band, extended only for the debug overlay's own label.
 - `src/perception/detection_trace.py` (BL-9) — `GateOutcome` (`COCKPIT_MASK`/`RANGE_OR_SIZE`/
   `TERRAIN_LOS`/`ADMITTED`), the mutable `DetectionTrace` record (one per candidate per poll,
   ground truth by construction, same footing as `Observation`/`WorldObjectCandidate` — no
@@ -816,11 +848,11 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   AudioAdapterError`, independent of `overlay_client`'s own try/except for the same line — one
   sink's failure never blocks the other's push. `logger.py`'s `--crew-text --speech-audio` branch
   wires this to a `belief.audio_client.AudioAdapterClient` built from `--audio-adapter-url`.
-  `tasks: TaskStore | None` + `handle_f10_command` (`plans/f10-crew-commands/plan.md`, vocabulary
+  `tasks: TaskStore | None` + `handle_command` (`plans/f10-crew-commands/plan.md`, vocabulary
   widened to 15 tokens and made non-hollow by `plans/f10-command-vocabulary/plan.md` Stage 6) are
   `CrewConsole`'s second, non-text input surface: `logger.py`'s `--crew-text --f10-commands` poll
   loop drains player-selected DCS F10 radio-menu tokens (`aircraft_client.get_f10_commands`,
-  `GET /f10_commands/poll`) and dispatches each through `handle_f10_command`, the same `_print`
+  `GET /f10_commands/poll`) and dispatches each through `handle_command`, the same `_print`
   funnel `handle_line`/`drain_events` already use, via two lookup tables (`_RELATIVE_SCAN_TOKENS`,
   `_BEARING_SCAN_TOKENS`) rather than a 14-branch if/elif. `watch_nearest` (a new
   `_nearest_contact_id` helper — nearest contact by `facts["relative_now"]["range_m"]`, requires
@@ -840,10 +872,10 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   `logger.py` wires it to the same `ConsolePerceptionRunner.tasks` instance its poll loop already
   ticks. `stop_talking` (Stage 3, `plans/inbound-speech/plan.md`; revised by that plan's Stage 3
   follow-up, user direction 2026-09-20 — "no readback or confirmation, just stop talking... more
-  of a debug tool than crew feature") is `handle_f10_command`'s one token with **no readback at
+  of a debug tool than crew feature") is `handle_command`'s one token with **no readback at
   all** and no `_print` call: `_handle_stop_talking` calls `speech_client.stop()`
   (`belief.audio_client.AudioAdapterClient.stop`, `POST /stop`) when a `speech_client` is
-  configured and otherwise no-ops, then `handle_f10_command` returns `[]` directly. `stop()`
+  configured and otherwise no-ops, then `handle_command` returns `[]` directly. `stop()`
   reaches `audio-adapter`'s `AudioSink.interrupt()` without synthesizing or delivering any audio —
   for `--target aircraft-layer` that forwards to `collector.audio_sender.AudioPlaybackSender.
   interrupt` (`POST /audio/stop`), which clears the routine queue and stops in-flight playback
@@ -883,20 +915,76 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   between two calls — owned and mutated by `crew_console.py`, not this module.
   `CrewConsole.handle_transcript(transcript, confidence, token, match_ratio, verb_anchored,
   ambiguous, now_sim)` (`crew_console.py`) is the new sibling entry point this module's docstring
-  predicted: pending-confirmation check first (affirm commits via `handle_f10_command`, negative
+  predicted: pending-confirmation check first (affirm commits via `handle_command`, negative
   discards silently, anything else discards the stale question and falls through to treat the new
   transcript as its own input), then `classify_response`'s disposition — `"fallthrough"` routes to
-  the unchanged `handle_line`; `"act"` reuses `handle_f10_command` directly (so only the 15-token
-  legacy vocabulary that function already dispatches has real behaviour this stage — a voice-only
-  token like `report_all`/`report_bearing_*`/`scan_bearing_deg` matches and reads back/confirms via
-  `_describe_token_for_confirm`'s generic fallback, but acting on it is a graceful no-op through
-  `handle_f10_command`'s existing defensive `else` branch, a documented gap, not silently missing);
-  `"confirm"`/`"say_again"` speak `belief.speech.render_confirm_request`/`render_say_again` through
-  the usual `_print` funnel. `!voice <token|-> <match_ratio> <confidence> <verb_anchored:0|1>
-  <ambiguous:0|1> <transcript...>` is a `!inject-urgent`-style typed test harness for this whole
-  pipeline (Stage 2 has no audio and no adapter HTTP wiring yet — Stage 3 adds `GET
+  the unchanged `handle_line`; `"act"` reuses `handle_command` directly. `"confirm"`/`"say_again"`
+  speak `belief.speech.render_confirm_request`/`render_say_again` through the usual `_print`
+  funnel. `!voice <token|-> <match_ratio> <confidence> <verb_anchored:0|1> <ambiguous:0|1>
+  <transcript...> [<bearing_degrees>]` is a `!inject-urgent`-style typed test harness for this
+  whole pipeline (Stage 2 has no audio and no adapter HTTP wiring yet — Stage 3 adds `GET
   /transcripts/poll`; body-layer cannot compute a real match itself, so this command takes the
-  already-matched fields as literal arguments, exactly Stage 3's future wire shape).
+  already-matched fields as literal arguments, exactly Stage 3's wire shape). The optional trailing
+  integer is `bearing_degrees` (`plans/voice-command-completeness/plan.md` Stage 3) — peeled off
+  the transcript's last word when present, so every pre-existing `!voice` invocation with no
+  trailing number is unaffected.
+
+  **The report family and the two numeric-bearing tokens are no longer a graceful no-op**
+  (`plans/voice-command-completeness/plan.md` Stages 1-3, closing the gap this paragraph used to
+  describe: 20 of the 41 recognised voice tokens reached `handle_command` and silently did
+  nothing). `report_all`/the nine `report_clock_*`/the eight `report_bearing_<compass>` tokens
+  dispatch to `CrewConsole._handle_report` — **a read of current belief only**: no `AttentionArea`,
+  no task, no gaze change, no `aircraft_client` call ("report is always about current belief. Scan
+  tells to go look" — user, 2026-09-23). It drops `certainty == "lost"` contacts (contacts are
+  never pruned, so a report would otherwise grow monotonically over a sortie) and any contact with
+  no `relative_now`, applies the family filter, groups via `belief.callouts.group_facts` (the
+  bucket+chain merge rule extracted from `group_candidates` so the report and callout paths share
+  one aggregation rule rather than two that could drift), and speaks **one utterance**
+  (`belief.speech.render_report`, capped at `REPORT_MAX_GROUPS` groups with a trailing `"And
+  more."` when truncated) — never one line per group, the same "nothing pre-rendered ahead of
+  being spoken" discipline `plans/callout-scheduling/` established. An empty result speaks
+  `belief.speech.render_clear` (`"Clear."`, or `"<direction>, clear."`) — **except** a compass/
+  numeric-bearing request whose direction sits past the cockpit mask's `rear_cutoff_deg` relative
+  to current heading, which speaks `render_no_view` (`"Can't see <direction>."`) instead: answering
+  "clear" there would claim a look that is physically impossible, the no-omniscience invariant's
+  mirror image. A contact actually believed to sit in the rear hemisphere is still reported
+  normally — only the *absence* claim is withheld. `scan_bearing_deg`/`report_bearing_deg` quantise
+  their parsed bearing onto the nearest of the eight compass `Sector`s (`_nearest_sector`, 45°
+  buckets) and then behave exactly like their compass-word sibling tokens, including the readback/
+  confirm-prompt naming the sector rather than the raw number — `PendingConfirmation.
+  bearing_degrees` carries the parsed value across a confirm round trip so an "affirm" commit does
+  not lose it. `DISPATCHED_COMMAND_TOKENS` (module-level in `crew_console.py`) is the canonical set
+  of tokens with real dispatch behaviour; `handle_command` now logs a warning (still returns `[]`)
+  for anything outside it, rather than swallowing an unrecognised token silently. `CrewConsole.
+  _print`'s non-`bypass_gate` path now also calls `belief.callouts.CalloutScheduler.note_reply` —
+  fixing a separate latent defect this milestone's reports made audible: every command readback had
+  been unbudgeted since readbacks existed, so a routine callout could queue immediately behind one
+  instead of waiting for it to finish speaking.
+
+  **Stage 5 adds `scan_clock_1..12`, the ownship-relative o'clock scan family** (`plans/
+  voice-command-completeness/plan.md` Decision 5, user 2026-09-23) — `_CLOCK_SCAN_TOKENS` dispatches
+  into `_handle_scan`'s new `relative_clock_hour: int | None` parameter, exactly like the existing
+  `sector`/`relative_sector` parameters, registering a `belief.tasks.PendingIntent` whose
+  `AttentionArea.relative_clock_hour` is set instead. `_describe_task_for_speech`/`_describe_token_
+  for_confirm` gained matching branches so cancel/confirm wording names the hour the same way the
+  other two families already do. **Stage 5 also fixes the measured pre-existing defect that a
+  compass scan never steered gaze at all** — see `perception/gaze.py`'s and `logger.py`'s own
+  Structure entries below for the mechanism (`ScanPlan.commanded_legs`, `logger._active_gaze`'s
+  absolute→relative conversion). The nine new tokens are **unbenched**, same cost class as
+  `cancel_scan`/`cancel_watch` before 2026-09-23.
+- `src/perception/gaze.py` — `ScanPlan` (module docstring: pure per-`t_sim` `gaze_at`), unchanged
+  in its core shape since 2C except for one Stage 5 addition (`plans/voice-command-completeness/
+  plan.md` Decision 5): a `commanded_legs: tuple[int, ...] | None` field carrying o'clock legs
+  directly, mutually exclusive with the existing `commanded_sector: RelativeSector | None` —
+  **the architect's own generalisation, deliberately not a wider `RelativeSector` literal**: a
+  single o'clock hour (`scan_clock_1`) is a one-leg `commanded_legs` tuple, exactly as `ahead`
+  already degenerates to one leg under `commanded_sector`, and an absolute compass scan converts to
+  its current-heading-relative legs the same way (see `logger.py`'s entry). `legs_within_wedge(
+  center_azimuth_deg, half_width_deg)` is the new public helper this conversion needs: every o'clock
+  hour whose own gaze center falls within a wedge, ordered by signed offset (a left-to-right sweep)
+  — `_SECTOR_LEGS`'s per-sector tables generalised to an arbitrary wedge. `gaze_at` picks
+  `commanded_sector` over `commanded_legs` over free scan, in that order (mutual exclusivity means
+  at most one of the first two is ever set).
 - `src/belief/mission_phase.py` (BL-7, `plans/bl7-mission-phase-relevance/plan.md`) — parses
   Mission Interpreter's MI-6 `--emit-compact` JSON output directly (a plain file read, not a
   Python import — mission-interpreter isn't the body-layer↔world-model in-process exception) into

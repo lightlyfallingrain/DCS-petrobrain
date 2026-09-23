@@ -20,7 +20,12 @@ from belief import enrichment as enrichment_module
 from belief.audio_client import AudioAdapterError
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
-from belief.crew_console import CrewConsole
+from belief.crew_console import (
+    DISPATCHED_COMMAND_TOKENS,
+    CrewConsole,
+    _describe_token_for_confirm,
+    _nearest_sector,
+)
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import EscalationPayload
@@ -194,6 +199,44 @@ def _observation_with_ownship_x(
         ),
         provenance="test_fixture",
         classification_level=classification_level,
+    )
+
+
+def _observation_at(
+    *,
+    obs_id: str,
+    t_sim: float,
+    ownship_x: float,
+    ownship_z: float,
+    classification_raw: str = "BMP-2",
+) -> Observation:
+    """Places a contact at a controlled world position for `plans/
+    voice-command-completeness/plan.md`'s report-family tests, via
+    `ownship_at_observation`'s x/z rather than `bearing_deg`/`range_m` --
+    `_enrichment_context`'s monkeypatched `project_terrain_aware` returns
+    its `observer` argument unchanged (identity, ignoring bearing/range
+    entirely), and `_terrain_aware_world_position` calls it with
+    `percept.ownship_at_observation` as that observer. So, under this
+    fixture, a contact's *reported* world position is exactly the
+    observing ownship's own position at the moment of its most recent
+    contributing observation -- `bearing_deg=0.0`/`range_m=1000.0` below
+    are therefore arbitrary placeholders, not the values that end up
+    driving `relative_now`."""
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(x=ownship_x, z=ownship_z),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+        classification_level=2,
     )
 
 
@@ -557,12 +600,12 @@ def test_failed_speech_push_degrades_without_raising_and_does_not_block_overlay(
     assert lines == [f"Watching {contact_id}."]
 
 
-# -- handle_f10_command (plans/f10-crew-commands/plan.md) -------------------
+# -- handle_command (plans/f10-crew-commands/plan.md) -------------------
 
 
-def test_handle_f10_command_unrecognized_token_returns_empty_list() -> None:
+def test_handle_command_unrecognized_token_returns_empty_list() -> None:
     console = CrewConsole(store=ContactStore())
-    assert console.handle_f10_command("shut_down_dcs", now_sim=0.0) == []
+    assert console.handle_command("shut_down_dcs", now_sim=0.0) == []
 
 
 # -- stop_talking (Stage 3, plans/inbound-speech/plan.md, revised by the ----
@@ -574,7 +617,7 @@ def test_handle_f10_command_unrecognized_token_returns_empty_list() -> None:
 
 def test_stop_talking_speaks_nothing() -> None:
     console = CrewConsole(store=ContactStore())
-    lines = console.handle_f10_command("stop_talking", now_sim=0.0)
+    lines = console.handle_command("stop_talking", now_sim=0.0)
     assert lines == []
 
 
@@ -585,7 +628,7 @@ def test_stop_talking_calls_speech_client_stop_not_push_speech() -> None:
     speech_client = FakeSpeechClient()
     console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
 
-    lines = console.handle_f10_command("stop_talking", now_sim=0.0)
+    lines = console.handle_command("stop_talking", now_sim=0.0)
 
     assert lines == []
     assert speech_client.pushed == []
@@ -598,7 +641,7 @@ def test_stop_talking_pushes_nothing_to_the_overlay() -> None:
     overlay_client = FakeOverlayClient()
     console = CrewConsole(store=ContactStore(), overlay_client=overlay_client)  # type: ignore[arg-type]
 
-    console.handle_f10_command("stop_talking", now_sim=0.0)
+    console.handle_command("stop_talking", now_sim=0.0)
 
     assert overlay_client.pushed == []
 
@@ -610,7 +653,7 @@ def test_stop_talking_interrupt_failure_does_not_raise() -> None:
     speech_client = FakeSpeechClient(fail_on=frozenset({"Copy."}))
     console = CrewConsole(store=ContactStore(), speech_client=speech_client)  # type: ignore[arg-type]
 
-    lines = console.handle_f10_command("stop_talking", now_sim=0.0)
+    lines = console.handle_command("stop_talking", now_sim=0.0)
 
     assert lines == []
 
@@ -624,7 +667,7 @@ def test_watch_nearest_without_enrichment_reports_no_contact_to_watch() -> None:
     store.tick(now_sim=0.0)
     console = CrewConsole(store=store)
 
-    assert console.handle_f10_command("watch_nearest", now_sim=0.0) == [
+    assert console.handle_command("watch_nearest", now_sim=0.0) == [
         "no contact to watch"
     ]
 
@@ -635,7 +678,7 @@ def test_watch_nearest_reports_no_contact_to_watch_when_store_is_empty(
     store = ContactStore()
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
-    assert console.handle_f10_command("watch_nearest", now_sim=0.0) == [
+    assert console.handle_command("watch_nearest", now_sim=0.0) == [
         "no contact to watch"
     ]
 
@@ -662,7 +705,7 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
     near_contact = next(c for c in store.contacts if c.classification.value == "T-72")
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
-    lines = console.handle_f10_command("watch_nearest", now_sim=0.0)
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
 
     # Contact-report wording (unit type, clock, range), no spoken id -- the
     # player named no contact, so the readback has to say which one it was.
@@ -675,7 +718,7 @@ def test_watch_nearest_selects_the_nearest_contact_by_range(
 
 def test_scan_ahead_without_enrichment_reports_not_configured() -> None:
     console = CrewConsole(store=ContactStore())
-    assert console.handle_f10_command("scan_ahead", now_sim=0.0) == [
+    assert console.handle_command("scan_ahead", now_sim=0.0) == [
         "no world-model connection configured"
     ]
 
@@ -686,7 +729,7 @@ def test_scan_ahead_without_tasks_reports_not_configured(
     console = CrewConsole(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
-    assert console.handle_f10_command("scan_ahead", now_sim=0.0) == [
+    assert console.handle_command("scan_ahead", now_sim=0.0) == [
         "no task store configured"
     ]
 
@@ -709,7 +752,7 @@ def test_scan_ahead_registers_a_task_and_fires_no_dcs_effector(
         aircraft_client=client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_ahead", now_sim=0.0)
+    lines = console.handle_command("scan_ahead", now_sim=0.0)
 
     assert lines == ["Scanning ahead."]
     # Regression guard: re-wiring any DCS effector to Scan is the bug this
@@ -731,12 +774,34 @@ def test_scan_bearing_n_registers_a_task_with_the_absolute_sector(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
 
-    lines = console.handle_f10_command("scan_bearing_n", now_sim=0.0)
+    lines = console.handle_command("scan_bearing_n", now_sim=0.0)
 
     assert lines == ["Scanning north."]
     task = tasks.tasks[0]
     assert task.area.sector == "N"
     assert task.area.relative_sector is None
+
+
+def test_scan_clock_1_registers_a_task_with_the_relative_clock_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stage 5's ownship-relative o'clock scan family (`plans/
+    voice-command-completeness/plan.md` Decision 5) -- the fine-grained
+    sibling of `scan_ahead`/`scan_bearing_n`, registering `AttentionArea.
+    relative_clock_hour` instead of `relative_sector`/`sector`."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("scan_clock_1", now_sim=0.0)
+
+    assert lines == ["Scanning one o'clock."]
+    task = tasks.tasks[0]
+    assert task.area.relative_clock_hour == 1
+    assert task.area.relative_sector is None
+    assert task.area.sector is None
 
 
 def test_scan_never_calls_the_aircraft_layer_even_if_it_would_fail() -> None:
@@ -759,7 +824,7 @@ def test_scan_never_calls_the_aircraft_layer_even_if_it_would_fail() -> None:
         aircraft_client=client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_full", now_sim=0.0)
+    lines = console.handle_command("scan_full", now_sim=0.0)
 
     assert lines == ["Scanning full arc."]
     assert client.triggered_modes == []
@@ -782,10 +847,10 @@ def test_scan_then_cancel_task_actually_cancels_it() -> None:
         ),
     )
 
-    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    console.handle_command("scan_ahead", now_sim=0.0)
     task_id = tasks.tasks[0].id
 
-    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+    lines = console.handle_command("cancel_task", now_sim=1.0)
 
     # Names what was stopped, never the task id (live-test finding
     # 2026-09-16: the player heard "cancelled task TASK_4").
@@ -812,11 +877,11 @@ def test_cancel_task_reaches_an_already_succeeded_scan() -> None:
         ),
     )
 
-    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    console.handle_command("scan_ahead", now_sim=0.0)
     task = tasks.tasks[0]
     task.status = "succeeded"
 
-    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+    lines = console.handle_command("cancel_task", now_sim=1.0)
 
     assert lines == ["Copy, stop scan ahead."]
     resolved = tasks.get(task.id)
@@ -825,7 +890,7 @@ def test_cancel_task_reaches_an_already_succeeded_scan() -> None:
 
 def test_cancel_task_without_tasks_configured_reports_nothing_to_stop() -> None:
     console = CrewConsole(store=ContactStore())
-    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["nothing to stop"]
+    assert console.handle_command("cancel_task", now_sim=0.0) == ["nothing to stop"]
 
 
 def test_cancel_task_reports_nothing_to_stop_when_none_pending() -> None:
@@ -833,7 +898,7 @@ def test_cancel_task_reports_nothing_to_stop_when_none_pending() -> None:
     tasks = TaskStore()
     console = CrewConsole(store=store, tasks=tasks)
 
-    assert console.handle_f10_command("cancel_task", now_sim=0.0) == ["nothing to stop"]
+    assert console.handle_command("cancel_task", now_sim=0.0) == ["nothing to stop"]
 
 
 def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
@@ -864,7 +929,7 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
         reason="second",
     )
 
-    lines = console.handle_f10_command("cancel_task", now_sim=2.0)
+    lines = console.handle_command("cancel_task", now_sim=2.0)
 
     # This task was built directly with no sector on its area, so the
     # phrase falls back to the bare kind rather than naming a sector.
@@ -876,7 +941,7 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
     assert resolved_task1 is not None and resolved_task1.status == "pending"
 
 
-def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel(
+def test_handle_command_pushes_to_overlay_via_the_print_funnel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _RecordingAircraftClient()
@@ -889,7 +954,7 @@ def test_handle_f10_command_pushes_to_overlay_via_the_print_funnel(
         overlay_client=overlay_client,  # type: ignore[arg-type]
     )
 
-    lines = console.handle_f10_command("scan_ahead", now_sim=0.0)
+    lines = console.handle_command("scan_ahead", now_sim=0.0)
 
     assert lines == ["Scanning ahead."]
     assert overlay_client.pushed == ["Scanning ahead."]
@@ -921,7 +986,7 @@ def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
     tank = next(c for c in store.contacts if c.classification.value == "T-72")
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
-    lines = console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0)
+    lines = console.handle_command("watch_nearest_air_defence", now_sim=0.0)
 
     assert "Osa" in lines[0]
     assert sam.attention == "watch"
@@ -947,7 +1012,7 @@ def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(
 
     # Distinct from the plain "no contact to watch" -- there *is* a contact,
     # it just isn't air defence, and the crew must hear which.
-    assert console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0) == [
+    assert console.handle_command("watch_nearest_air_defence", now_sim=0.0) == [
         "no air defence contact to watch"
     ]
 
@@ -1003,7 +1068,7 @@ def test_watch_nearest_air_defence_ignores_a_presence_level_contact(
 
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
-    assert console.handle_f10_command("watch_nearest_air_defence", now_sim=0.0) == [
+    assert console.handle_command("watch_nearest_air_defence", now_sim=0.0) == [
         "no air defence contact to watch"
     ]
     assert blob.attention == "normal"
@@ -1024,10 +1089,31 @@ def test_cancel_task_names_a_bearing_scan_by_its_compass_word() -> None:
         ),
     )
 
-    console.handle_f10_command("scan_bearing_se", now_sim=0.0)
-    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+    console.handle_command("scan_bearing_se", now_sim=0.0)
+    lines = console.handle_command("cancel_task", now_sim=1.0)
 
     assert lines == ["Copy, stop scan southeast."]
+
+
+def test_cancel_task_names_a_clock_hour_scan_by_its_number_word() -> None:
+    """The o'clock half of the cancel readback (Stage 5) -- `_describe_
+    task_for_speech` reads a third field for these (`area.
+    relative_clock_hour`), so neither the relative- nor the compass-scan
+    test alone covers it."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store,
+        tasks=tasks,
+        enrichment=EnrichmentContext(
+            conn=_FAKE_CONN, theatre="Syria", ownship=_ownship(x=0.0, z=0.0)
+        ),
+    )
+
+    console.handle_command("scan_clock_1", now_sim=0.0)
+    lines = console.handle_command("cancel_task", now_sim=1.0)
+
+    assert lines == ["Copy, stop scan one o'clock."]
 
 
 # --- plans/watch-as-standing-mode/plan.md: watch as a cancellable mode -----
@@ -1053,7 +1139,7 @@ def test_watch_nearest_registers_a_cancellable_task(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
 
-    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    console.handle_command("watch_nearest", now_sim=0.0)
 
     assert contact.attention == "watch"
     assert len(tasks.tasks) == 1
@@ -1080,10 +1166,10 @@ def test_watch_then_cancel_task_stops_the_watch(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
-    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    console.handle_command("watch_nearest", now_sim=0.0)
     assert contact.attention == "watch"
 
-    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+    lines = console.handle_command("cancel_task", now_sim=1.0)
 
     assert lines == ["Copy, stop watch."]
     assert contact.attention == "normal"
@@ -1108,7 +1194,7 @@ def test_watch_nearest_without_tasks_still_falls_back_to_a_bare_mark(
     contact = store.contacts[0]
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
-    lines = console.handle_f10_command("watch_nearest", now_sim=0.0)
+    lines = console.handle_command("watch_nearest", now_sim=0.0)
 
     assert contact.attention == "watch"
     assert lines != ["no such contact: " + contact.id]
@@ -1135,12 +1221,12 @@ def test_scan_and_watch_coexist_and_cancel_task_stops_both(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
 
-    console.handle_f10_command("scan_ahead", now_sim=0.0)
-    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    console.handle_command("scan_ahead", now_sim=0.0)
+    console.handle_command("watch_nearest", now_sim=0.0)
     assert len(tasks.tasks) == 2
     assert contact.attention == "watch"
 
-    lines = console.handle_f10_command("cancel_task", now_sim=1.0)
+    lines = console.handle_command("cancel_task", now_sim=1.0)
 
     assert lines == ["Copy, stop scan ahead and watch."]
     assert contact.attention == "normal"
@@ -1165,12 +1251,12 @@ def test_cancel_task_only_cancels_the_newest_task_per_kind(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
 
-    console.handle_f10_command("scan_ahead", now_sim=0.0)
-    console.handle_f10_command("scan_left", now_sim=1.0)
+    console.handle_command("scan_ahead", now_sim=0.0)
+    console.handle_command("scan_left", now_sim=1.0)
     first_scan, second_scan = tasks.tasks
-    console.handle_f10_command("watch_nearest", now_sim=1.0)
+    console.handle_command("watch_nearest", now_sim=1.0)
 
-    lines = console.handle_f10_command("cancel_task", now_sim=2.0)
+    lines = console.handle_command("cancel_task", now_sim=2.0)
 
     assert lines == ["Copy, stop scan left and watch."]
     assert first_scan.status == "pending"
@@ -1469,7 +1555,7 @@ def test_handle_transcript_cancel_task_needs_the_higher_floor(
         tasks=tasks,
         enrichment=_enrichment_context(monkeypatch),
     )
-    console.handle_f10_command("scan_ahead", now_sim=0.0)
+    console.handle_command("scan_ahead", now_sim=0.0)
     assert len(tasks.tasks) == 1
 
     confidence_mid = (
@@ -1537,10 +1623,10 @@ def test_cancel_scan_leaves_the_watch_running(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
-    console.handle_f10_command("scan_ahead", now_sim=0.0)
-    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    console.handle_command("scan_ahead", now_sim=0.0)
+    console.handle_command("watch_nearest", now_sim=0.0)
 
-    lines = console.handle_f10_command("cancel_scan", now_sim=1.0)
+    lines = console.handle_command("cancel_scan", now_sim=1.0)
 
     assert lines == ["Copy, stop scan ahead."]
     assert contact.attention == "watch"
@@ -1567,10 +1653,10 @@ def test_cancel_watch_leaves_the_scan_running(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
-    console.handle_f10_command("scan_ahead", now_sim=0.0)
-    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    console.handle_command("scan_ahead", now_sim=0.0)
+    console.handle_command("watch_nearest", now_sim=0.0)
 
-    lines = console.handle_f10_command("cancel_watch", now_sim=1.0)
+    lines = console.handle_command("cancel_watch", now_sim=1.0)
 
     assert lines == ["Copy, stop watch."]
     assert contact.attention == "normal"
@@ -1595,9 +1681,500 @@ def test_cancel_scan_with_nothing_scanning_says_so(
     console = CrewConsole(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
-    console.handle_f10_command("watch_nearest", now_sim=0.0)
+    console.handle_command("watch_nearest", now_sim=0.0)
 
-    lines = console.handle_f10_command("cancel_scan", now_sim=1.0)
+    lines = console.handle_command("cancel_scan", now_sim=1.0)
 
     assert lines == ["nothing to stop"]
     assert contact.attention == "watch"
+
+
+def test_every_transcript_is_logged_with_what_was_done_about_it() -> None:
+    """`--speech-log`. The gap this closes: an utterance matching no
+    command reached only the brain-layer stand-in, which does nothing, so
+    the most useful case for debugging recognition left no trace at all."""
+    rows: list[dict[str, object]] = []
+    console = CrewConsole(store=ContactStore(), transcript_log=rows.append)
+
+    console.handle_transcript(
+        transcript="scan left",
+        confidence=0.9,
+        token="scan_left",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["transcript"] == "scan left"
+    assert rows[0]["disposition"] == "act"
+    assert rows[0]["acted_token"] == "scan_left"
+
+
+def test_an_unmatched_transcript_is_logged_too() -> None:
+    """The case the log exists for -- well-heard speech that matched
+    nothing is exactly what a recognition debrief needs to see."""
+    rows: list[dict[str, object]] = []
+    console = CrewConsole(store=ContactStore(), transcript_log=rows.append)
+
+    console.handle_transcript(
+        transcript="lovely weather today",
+        confidence=0.88,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["transcript"] == "lovely weather today"
+    assert rows[0]["disposition"] == "fallthrough"
+    assert rows[0]["acted_token"] is None
+
+
+def test_a_failing_log_sink_never_costs_the_player_a_command() -> None:
+    """A debug artifact must never be load-bearing."""
+
+    def explode(_row: dict[str, object]) -> None:
+        raise OSError("disk full")
+
+    console = CrewConsole(store=ContactStore(), transcript_log=explode)
+
+    lines = console.handle_transcript(
+        transcript="scan left",
+        confidence=0.9,
+        token="scan_left",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    assert lines  # the command still ran and still spoke
+
+
+# -- plans/voice-command-completeness/plan.md ---------------------------
+
+
+def test_dispatched_command_tokens_all_return_something(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The regression guard for the whole milestone: every token this
+    project claims to have wired must either speak something or be
+    `stop_talking`'s documented, deliberate no-readback no-op -- never the
+    silent `[]` that sent 20 of 41 recognised voice tokens nowhere."""
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    for token in sorted(DISPATCHED_COMMAND_TOKENS):
+        lines = console.handle_command(token, now_sim=0.0)
+        if token == "stop_talking":
+            assert lines == [], token
+        else:
+            assert lines, token
+
+
+def test_unknown_token_returns_nothing_and_logs_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The failure mode this milestone exists to fix was *silence* -- an
+    unrecognised token reaching `handle_command` and doing nothing,
+    indistinguishable from not having been heard at all. Post-fix, the
+    empty result is unchanged (there is genuinely nothing to say for a
+    token nobody defined), but it must no longer be silent in the logs."""
+    console = CrewConsole(store=ContactStore())
+    with caplog.at_level("WARNING"):
+        lines = console.handle_command("not_a_real_token", now_sim=0.0)
+    assert lines == []
+    assert any("not_a_real_token" in record.message for record in caplog.records)
+
+
+def test_report_all_with_no_contacts_says_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_command("report_all", now_sim=0.0) == ["Clear."]
+
+
+def test_report_all_without_enrichment_reports_not_configured() -> None:
+    console = CrewConsole(store=ContactStore())
+    assert console.handle_command("report_all", now_sim=0.0) == [
+        "no world-model connection configured"
+    ]
+
+
+def test_report_all_speaks_a_known_contact(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test that would fail if `report_all`'s dispatch were removed --
+    and pins the spoken output, not just that something was said."""
+    store = ContactStore()
+    store.ingest(
+        [_observation_at(obs_id="OBS_1", t_sim=0.0, ownship_x=0.0, ownship_z=1000.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("report_all", now_sim=0.0)
+
+    assert lines == ["BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres)."]
+
+
+def test_report_all_drops_a_lost_contact(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decision 1 step 1: contacts are never pruned, so a report must drop
+    `certainty == "lost"` itself or it would grow monotonically over a
+    sortie -- a contact past `LOST_THRESHOLD_S` must not be reported."""
+    store = ContactStore()
+    store.ingest(
+        [_observation_at(obs_id="OBS_1", t_sim=0.0, ownship_x=0.0, ownship_z=1000.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("report_all", now_sim=LOST_THRESHOLD_S + 1.0)
+
+    assert lines == ["Clear."]
+
+
+def test_report_clock_3_with_no_contact_says_clock_position_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_command("report_clock_3", now_sim=0.0) == [
+        "Three o'clock, clear."
+    ]
+
+
+def test_report_clock_3_finds_the_matching_contact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_at(obs_id="OBS_E", t_sim=0.0, ownship_x=0.0, ownship_z=1000.0),
+            _observation_at(
+                obs_id="OBS_N",
+                t_sim=0.0,
+                ownship_x=1000.0,
+                ownship_z=0.0,
+                classification_raw="T-72",
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    # OBS_E is east of ownship (3 o'clock); OBS_N is dead ahead (12 o'clock)
+    # -- only the 3 o'clock contact must be named.
+    lines = console.handle_command("report_clock_3", now_sim=0.0)
+
+    assert lines == ["BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres)."]
+
+
+def test_report_bearing_n_with_no_contact_and_forward_heading_says_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ownship heads north (`_ownship`'s default heading); north is dead
+    ahead, well inside the cockpit mask's forward envelope -- `render_
+    clear`, not `render_no_view`."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_command("report_bearing_n", now_sim=0.0) == ["North, clear."]
+
+
+def test_report_bearing_s_with_forward_heading_cannot_see_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 2's carve-out: ownship heads north, so south is dead
+    astern -- past the cockpit mask's `rear_cutoff_deg` (130). Answering
+    "clear" would claim a look that is physically impossible; the honest
+    answer is a refusal, not an empty report."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_command("report_bearing_s", now_sim=0.0) == [
+        "Can't see south."
+    ]
+
+
+def test_report_bearing_s_still_reports_a_contact_believed_to_be_there(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Belief survives the aircraft turning away -- only the *absence*
+    claim (`render_no_view`) is withheld for the rear hemisphere; a
+    contact that is actually believed to sit there is still reported."""
+    store = ContactStore()
+    store.ingest(
+        [_observation_at(obs_id="OBS_S", t_sim=0.0, ownship_x=-1000.0, ownship_z=0.0)],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("report_bearing_s", now_sim=0.0)
+
+    assert lines == ["BMP-2, 6 o'clock, 1 kilometre near Jableh (~200 metres)."]
+
+
+def _enrichment_context_with_heading(
+    monkeypatch: pytest.MonkeyPatch, heading_true_deg: float
+) -> EnrichmentContext:
+    """`_enrichment_context`'s twin with a caller-controlled ownship
+    heading -- needed to place `_SECTOR_CENTER_DEG["S"]` (180 degrees) at
+    an exact relative bearing from the nose, for the `rear_cutoff_deg`
+    boundary test below. Same monkeypatches as `_enrichment_context`."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        ),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    return EnrichmentContext(
+        conn=_FAKE_CONN,
+        theatre="Syria",
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=heading_true_deg
+        ),
+    )
+
+
+def test_report_bearing_s_just_inside_rear_cutoff_says_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Optional refinement, `plans/voice-command-completeness/review.md`:
+    the two existing rear-hemisphere tests (dead-ahead-north, dead-astern-
+    south) are far from `COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg`
+    (130 degrees) -- this pins the `>=` comparison itself. Heading 51 puts
+    `S`'s sector center (180) at exactly 129 degrees relative -- just
+    inside the forward-visible envelope, so an empty result must still
+    answer "clear", not the rear-hemisphere refusal."""
+    console = CrewConsole(
+        store=ContactStore(),
+        enrichment=_enrichment_context_with_heading(monkeypatch, 51.0),
+    )
+    assert console.handle_command("report_bearing_s", now_sim=0.0) == ["South, clear."]
+
+
+def test_report_bearing_s_just_past_rear_cutoff_cannot_see_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`rear_cutoff_deg`'s other side: heading 49 puts `S`'s sector center
+    at exactly 131 degrees relative -- just past the cutoff, so an empty
+    result must refuse rather than claim a look that is physically
+    impossible."""
+    console = CrewConsole(
+        store=ContactStore(),
+        enrichment=_enrichment_context_with_heading(monkeypatch, 49.0),
+    )
+    assert console.handle_command("report_bearing_s", now_sim=0.0) == [
+        "Can't see south."
+    ]
+
+
+def test_report_bearing_deg_quantises_onto_the_nearest_sector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 3: a numeric bearing reduces to the nearest of the eight
+    compass sectors and behaves exactly like `report_bearing_<compass>` --
+    185 degrees is inside the `S` (180) bucket, so this must also refuse
+    with `"Can't see south."` under a forward-facing ownship, not answer
+    `"Clear."`"""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    lines = console.handle_command(
+        "report_bearing_deg", now_sim=0.0, bearing_degrees=185
+    )
+    assert lines == ["Can't see south."]
+
+
+def test_report_bearing_deg_without_a_bearing_says_say_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.handle_command("report_bearing_deg", now_sim=0.0) == [
+        "say again -- no bearing heard"
+    ]
+
+
+def test_report_all_groups_and_truncates_multiple_contacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Optional refinement, `plans/voice-command-completeness/review.md`:
+    `group_facts`'s bucketing and `render_report`'s `REPORT_MAX_GROUPS`
+    truncation are each unit-tested in isolation (`test_callouts.py`,
+    `test_speech.py`) but never driven together through the real
+    `_handle_report` dispatch path -- the reviewer verified this seam
+    correct by hand, once, with a throwaway script; this pins it. Four
+    distinct classification types, each due east at a different range,
+    never share a `(unit word, range word)` bucket, so each forms its own
+    singleton group -- four groups, capped at `REPORT_MAX_GROUPS` (3),
+    ordered nearest-first (`report_priority`'s equal-attention-rank
+    tiebreak), with a trailing "And more."."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_at(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=1000.0,
+                classification_raw="BMP-2",
+            ),
+            _observation_at(
+                obs_id="OBS_2",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=2000.0,
+                classification_raw="T-72",
+            ),
+            _observation_at(
+                obs_id="OBS_3",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=3000.0,
+                classification_raw="BTR-70",
+            ),
+            _observation_at(
+                obs_id="OBS_4",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=4000.0,
+                classification_raw="ZSU-23-4",
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("report_all", now_sim=0.0)
+
+    assert lines == [
+        (
+            "BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres). "
+            "T-72, 3 o'clock, 2 kilometres near Jableh (~200 metres). "
+            "BTR-70, 3 o'clock, 3 kilometres near Jableh (~200 metres). "
+            "And more."
+        )
+    ]
+
+
+def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mirrors `test_scan_bearing_n_registers_a_task_with_the_absolute_
+    sector` -- `scan_bearing_deg(317)` must reduce to exactly the same
+    behaviour as `scan_bearing_nw`, including the readback naming the
+    sector, never the raw number (Decision 3's "readback names the sector,
+    not the number")."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    lines = console.handle_command("scan_bearing_deg", now_sim=0.0, bearing_degrees=317)
+
+    assert lines == ["Scanning northwest."]
+    assert len(tasks.tasks) == 1
+    assert tasks.tasks[0].area.sector == "NW"
+
+
+def test_nearest_sector_quantises_to_the_nearest_compass_bucket() -> None:
+    assert _nearest_sector(0) == "N"
+    assert _nearest_sector(5) == "N"
+    assert _nearest_sector(320) == "NW"
+    assert _nearest_sector(185) == "S"
+    assert _nearest_sector(225) == "SW"
+
+
+def test_describe_token_for_confirm_names_the_quantised_sector_not_the_number() -> None:
+    """Decision 3 item 5 -- the confirm prompt's job is to expose a
+    misunderstanding, and repeating the raw number while the dispatch
+    itself acts on a coarser bucket would hide the only discrepancy worth
+    hearing."""
+    assert _describe_token_for_confirm("scan_bearing_deg", 317) == "scan northwest"
+    assert _describe_token_for_confirm("report_bearing_deg", 5) == "report north"
+    assert _describe_token_for_confirm("report_clock_3") == "report three o'clock"
+    assert _describe_token_for_confirm("report_bearing_n") == "report north"
+    assert _describe_token_for_confirm("report_all") == "report"
+    assert _describe_token_for_confirm("scan_clock_1") == "scan one o'clock"
+
+
+def test_a_confirm_band_bearing_survives_the_affirm_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without `PendingConfirmation.bearing_degrees`, a bearing command
+    that lands in the confirm band loses its number the moment the player
+    says "affirm" -- `handle_command` is called again on commit with no
+    other way to recover it. This is the test that would fail if that
+    field were removed."""
+    store = ContactStore()
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
+    )
+    confirm_confidence = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+
+    lines = console.handle_transcript(
+        transcript="scan bearing three one seven",
+        confidence=confirm_confidence,
+        token="scan_bearing_deg",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+        bearing_degrees=317,
+    )
+    assert lines == ["Scan northwest, confirm?"]
+
+    lines = console.handle_transcript(
+        transcript="affirm",
+        confidence=1.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+
+    assert lines == ["Scanning northwest."]
+    assert len(tasks.tasks) == 1
+    assert tasks.tasks[0].area.sector == "NW"
+
+
+def test_a_reply_extends_the_callout_scheduler_occupancy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 2's fix for the latent defect: every command readback has
+    been unbudgeted since readbacks existed, so a routine callout could
+    queue immediately behind one. `_print`'s non-urgent path must now
+    claim the channel via `CalloutScheduler.note_reply`."""
+    console = CrewConsole(
+        store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
+    )
+    assert console.scheduler.busy_until_sim == 0.0
+
+    console.handle_command("report_all", now_sim=10.0)
+
+    assert console.scheduler.busy_until_sim > 10.0

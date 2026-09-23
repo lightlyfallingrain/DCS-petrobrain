@@ -92,3 +92,5 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Boundary only tested via fixture](feedback_boundary_only_tested_via_fixture.md) — a merge/chain-cap boundary can be correct but only incidentally covered by one large fixture; call the private helper directly with hand-built boundary cases.
 - [Group detectability roadmap lag](project_group_detectability_roadmap_lag.md) — group-detectability APPROVED WITH MINOR FIXES; ROADMAP.md entry lagged a same-day constant-correction commit, cited stale 0.0013 figure.
 - [Movement detection review approved](project_movement_detection_review_approved.md) — APPROVED clean; grep-for-absence technique to verify omniscience-boundary/replay-determinism claims structurally.
+- [Binocular optic stage2 3b review](project_binocular_optic_stage2_3b_review.md) — APPROVED WITH MINOR FIXES; D4 "any command lowers binoculars" only wired for F10 path, not free-form utterances.
+- [Voice command completeness stages1 5 approved](project_voice_command_completeness_stages1_5_approved.md) — APPROVED clean; compass-wrap and multi-contact-report-truncation seams verified by direct execution, both untested but correct.

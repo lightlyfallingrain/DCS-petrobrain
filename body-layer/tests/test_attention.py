@@ -24,6 +24,7 @@ def _area(
     level: Attention = "watch",
     sector: Sector | None = None,
     relative_sector: RelativeSector | None = None,
+    relative_clock_hour: int | None = None,
     wedge_deg: tuple[float, float] | None = None,
     source: str = "console",
 ) -> AttentionArea:
@@ -35,6 +36,7 @@ def _area(
         source=source,
         sector=sector,
         relative_sector=relative_sector,
+        relative_clock_hour=relative_clock_hour,
         wedge_deg=wedge_deg,
     )
 
@@ -206,6 +208,30 @@ def test_project_relative_area_returns_fixed_areas_unchanged() -> None:
     projected = project_relative_area(area, ownship, heading_true_deg=45.0)
 
     assert projected is area
+
+
+# -- relative_clock_hour projection (Stage 5, plans/
+# voice-command-completeness/plan.md Decision 5) -----------------------------
+
+
+def test_project_relative_area_rotates_a_clock_hour_by_heading() -> None:
+    ownship = GeoPosition(x=100.0, z=200.0, alt_m=50.0)
+    area = _area(relative_clock_hour=1)  # 1 o'clock == +30 relative
+
+    projected = project_relative_area(area, ownship, heading_true_deg=90.0)
+
+    assert projected.center == ownship
+    assert projected.wedge_deg == (120.0, 15.0)  # 90 + 30, focus-cone half-width
+
+
+def test_project_relative_area_clock_hour_wraps_across_360() -> None:
+    ownship = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    area = _area(relative_clock_hour=10)  # 10 o'clock == -60 relative
+
+    projected = project_relative_area(area, ownship, heading_true_deg=30.0)
+
+    # -60 + 30 = -30 -> wraps to 330.
+    assert projected.wedge_deg == (330.0, 15.0)
 
 
 # -- area_wedge_deg precedence (plan D3) -------------------------------------

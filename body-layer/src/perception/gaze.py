@@ -143,6 +143,15 @@ _RELATIVE_SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = {
     "full": (0.0, 90.0),
 }
 
+#: Public alias for the table above, so a caller outside this module can
+#: ask how wide a commanded sector is without reaching for a private name.
+#: The binocular search needs exactly that
+#: (`belief.optic_policy.search_pattern`'s `sector_half_width_deg`), and it
+#: is the same table `belief.attention.AttentionArea` already reads.
+SECTOR_WEDGE_DEG: Final[dict[RelativeSector, tuple[float, float]]] = (
+    _RELATIVE_SECTOR_WEDGE_DEG
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Gaze:
@@ -157,6 +166,19 @@ class Gaze:
     center_azimuth_deg: float
     half_width_deg: float
     label: str
+
+    #: Where the look is pointed vertically, body-relative degrees,
+    #: positive up (`plans/binocular-optic/plan.md` Stage 2). Zero -- level
+    #: -- for every scanning gaze, which is why it defaults to it and why
+    #: nothing before this needed it: the o'clock scan sweeps horizontally
+    #: and `within_gaze` tests azimuth alone, unchanged.
+    #:
+    #: It matters only for a *narrow* optic, and there it is decisive: a
+    #: ground contact 1 km away from 120 m AGL is ~6.9 degrees below the
+    #: horizon, well outside a binocular's 4.25-degree half-angle. With a
+    #: level boresight the instrument could never be aimed at the contacts
+    #: it exists to resolve.
+    center_elevation_deg: float = 0.0
 
 
 #: The forward hemisphere, matching `RelativeSector.full`'s own wedge --
@@ -245,17 +267,103 @@ class ScanPlan:
     time, so a scan a player just ordered starts at that sector's first
     leg. `command_t_sim` must be `None` exactly when `commanded_sector` is
     `None` -- `__post_init__` enforces this pairing rather than leaving it
-    an unchecked convention."""
+    an unchecked convention.
+
+    **`commanded_legs` (Stage 5, `plans/voice-command-completeness/
+    plan.md` Decision 5) is the same cycling mechanism for a commanded
+    scan that is not one of the four named `RelativeSector`s** -- a single
+    o'clock hour (`scan_clock_1`..`scan_clock_12`) is a one-leg tuple, and
+    a compass-absolute scan (`scan north`/`scan bearing 320`) converts to
+    its current-heading-relative legs every poll (`logger._active_gaze`,
+    via `legs_within_wedge` below). The architect's own reasoning for this
+    field, rather than widening `RelativeSector` with twelve more
+    literals: a single o'clock hour is not one of the four named sectors,
+    and adding twelve more literals would ripple through
+    `_RELATIVE_SECTOR_WEDGE_DEG`/`belief.attention`'s re-export/the label
+    tables for no shared behaviour -- `ahead`/`left`/`right`/`full` keep
+    their own name, wedge table, and every existing caller/test unchanged.
+    Mutually exclusive with `commanded_sector`: at most one may be set,
+    and `command_t_sim` must be set iff either one is."""
 
     commanded_sector: RelativeSector | None
     command_t_sim: float | None
 
+    #: See the class docstring's Stage 5 paragraph. `None` for free scan
+    #: and for every commanded scan expressible as a named `RelativeSector`
+    #: (unchanged, `commanded_sector` still carries those). Never empty --
+    #: `__post_init__` rejects a zero-length tuple, since a plan claiming a
+    #: commanded scan with nothing to look at is a construction bug, not a
+    #: legal "commanded, but nowhere."
+    commanded_legs: tuple[int, ...] | None = None
+
+    #: A fixed direction to stare at, overriding the cycling legs entirely
+    #: (`plans/binocular-optic/plan.md` Stage 2). Set only while binoculars
+    #: are up.
+    #:
+    #: **Expressed as a plan rather than as a branch in the source**, which
+    #: is what keeps the stare from costing anything downstream: the source
+    #: already calls `gaze_at(now_sim, scan_plan)` every poll, so a plan
+    #: that answers with one direction *is* a fixed look, and nothing below
+    #: has to learn that binoculars exist.
+    fixed_look: Gaze | None = None
+
+    #: **`__post_init__` deliberately does not forbid `fixed_look`
+    #: co-existing with `commanded_sector`/`commanded_legs`**
+    #: (`plans/voice-command-completeness/review.md`'s Optional
+    #: Refinements, decided rather than left open). No production path
+    #: constructs that combination today: `fixed_look_at` above always
+    #: passes `commanded_sector=None` and leaves `commanded_legs` at its
+    #: `None` default, and `logger._apply_active_gaze` only ever
+    #: *replaces* `resolved_plan` wholesale with a fresh
+    #: `fixed_look_at(...)`, never merges one onto an existing commanded
+    #: plan -- `tests/test_gaze.py::test_fixed_look_wins_over_commanded_
+    #: legs` constructs the combination directly only to prove `gaze_at`'s
+    #: tie-break (`fixed_look` always wins), not as a production shape.
+    #: **Left loose on purpose, not fixed**: `fixed_look` exists so
+    #: binoculars can override a commanded scan, and "override" plausibly
+    #: means a future glass phase remembers *what* was commanded
+    #: underneath the stare (so free-scan doesn't silently replace a
+    #: player's own "scan north" once the binoculars come down) by setting
+    #: both fields on one `ScanPlan` at once -- `gaze_at`'s existing
+    #: tie-break already resolves that combination correctly. Rejecting it
+    #: here would need reversing the moment such a caller shows up, for no
+    #: safety this class currently lacks (`gaze_at` is a pure function of
+    #: `(t_sim, plan)` in every path verified). Revisit only if a future
+    #: caller starts constructing `ScanPlan` from more than these two call
+    #: sites and the combination turns out to be a genuine construction
+    #: bug rather than a deliberate stack.
     def __post_init__(self) -> None:
-        if (self.commanded_sector is None) != (self.command_t_sim is None):
+        if self.commanded_sector is not None and self.commanded_legs is not None:
+            raise ValueError(
+                "ScanPlan.commanded_sector and commanded_legs are mutually "
+                "exclusive -- set at most one"
+            )
+        commanded = self.commanded_sector is not None or self.commanded_legs is not None
+        if commanded != (self.command_t_sim is not None):
             raise ValueError(
                 "ScanPlan.command_t_sim must be set if and only if "
-                "commanded_sector is set"
+                "commanded_sector or commanded_legs is set"
             )
+        if self.commanded_legs is not None and len(self.commanded_legs) == 0:
+            raise ValueError("ScanPlan.commanded_legs must not be empty")
+
+    @staticmethod
+    def fixed_look_at(*, azimuth_deg: float, elevation_deg: float) -> ScanPlan:
+        """A plan that stares in one direction. The wedge keeps the naked
+        eye's own focus half-width: the gaze gate is about where the head
+        is turned, and the *optic* is what narrows what that buys -- which
+        is why a binocular look needs no narrower `Gaze` as well as a
+        narrower field of view."""
+        return ScanPlan(
+            commanded_sector=None,
+            command_t_sim=None,
+            fixed_look=Gaze(
+                center_azimuth_deg=azimuth_deg,
+                half_width_deg=FOCUS_CONE_HALF_WIDTH_DEG,
+                center_elevation_deg=elevation_deg,
+                label="fixed_look",
+            ),
+        )
 
 
 #: Free scan, module docstring's default -- `NakedEyePerceptionSource.
@@ -278,18 +386,58 @@ def _gaze_for_clock_hour(clock_hour: int) -> Gaze:
     )
 
 
+def legs_within_wedge(
+    center_azimuth_deg: float, half_width_deg: float
+) -> tuple[int, ...]:
+    """The o'clock hours whose own gaze center (`_gaze_for_clock_hour`)
+    falls within `half_width_deg` of `center_azimuth_deg` (body-relative),
+    ordered by signed offset from `center_azimuth_deg` ascending -- a
+    left-to-right sweep, generalising `_SECTOR_LEGS`'s per-sector tables
+    to an arbitrary wedge (Stage 5, `plans/voice-command-completeness/
+    plan.md` Decision 5). `logger._active_gaze` is the one caller: it
+    converts an absolute compass-sector scan (`AttentionArea.sector`) into
+    `ScanPlan.commanded_legs` every poll, using that poll's own ownship
+    heading -- the absolute->relative conversion the module docstring's
+    "Commanded scan" section describes, and the mechanism that finally
+    makes `scan north` steer the naked eye."""
+
+    def _signed_offset(hour: int) -> float:
+        raw = _gaze_for_clock_hour(hour).center_azimuth_deg - center_azimuth_deg
+        return (raw + 180.0) % 360.0 - 180.0
+
+    hours = [
+        hour
+        for hour in range(1, 13)
+        if angular_delta_deg(
+            _gaze_for_clock_hour(hour).center_azimuth_deg, center_azimuth_deg
+        )
+        <= half_width_deg
+    ]
+    return tuple(sorted(hours, key=_signed_offset))
+
+
 def gaze_at(t_sim: float, plan: ScanPlan) -> Gaze:
     """The effective `Gaze` at `t_sim` under `plan` -- a pure function of
     sim time (module docstring, hard part 1): a modulo and a table index,
     never a mutation. Free scan indexes `SCAN_PLAN` by `t_sim %
     SCAN_CYCLE_PERIOD_S`; a commanded scan indexes that sector's own
-    `_SECTOR_LEGS` entry by elapsed time since `plan.command_t_sim`."""
-    if plan.commanded_sector is None:
+    `_SECTOR_LEGS` entry (or, Stage 5, `plan.commanded_legs` directly) by
+    elapsed time since `plan.command_t_sim`. A plan carrying a
+    `fixed_look` returns it unchanged -- still a pure function of its
+    inputs, just one that ignores the clock."""
+    if plan.fixed_look is not None:
+        return plan.fixed_look
+    legs: tuple[int, ...]
+    if plan.commanded_sector is not None:
+        legs = _SECTOR_LEGS[plan.commanded_sector]
+    elif plan.commanded_legs is not None:
+        legs = plan.commanded_legs
+    else:
         legs = SCAN_PLAN
+    if plan.commanded_sector is None and plan.commanded_legs is None:
         elapsed_s = t_sim % SCAN_CYCLE_PERIOD_S
     else:
         assert plan.command_t_sim is not None  # ScanPlan.__post_init__
-        legs = _SECTOR_LEGS[plan.commanded_sector]
         cycle_s = len(legs) * FOCUS_DWELL_S
         elapsed_s = (t_sim - plan.command_t_sim) % cycle_s
     index = min(int(elapsed_s // FOCUS_DWELL_S), len(legs) - 1)

@@ -898,6 +898,7 @@ def scan_area(
     deadline_s: float = DEFAULT_SCAN_DEADLINE_S,
     sector: Sector | None = None,
     relative_sector: RelativeSector | None = None,
+    relative_clock_hour: int | None = None,
 ) -> PendingIntent:
     """Ask Petrovich to search, and register what "found something relevant"
     would mean for that ask -- BL-6 (`plans/bl6-commands-inspect-adapt/
@@ -926,6 +927,7 @@ def scan_area(
         source="scan_area",
         sector=sector,
         relative_sector=relative_sector,
+        relative_clock_hour=relative_clock_hour,
     )
     kind: TaskKind = "scan_area"
     return tasks.create(
