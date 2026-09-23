@@ -246,3 +246,53 @@ dependency exists. That was the reason for preferring a joystick button over the
 
 **Not probed, still:** `Export.probe-ptt.lua` remains unrun, so what `get_argument_value(738)`
 actually *returns* mid-sortie is still a different claim from what `clickabledata.lua` declares.
+
+---
+
+### Addendum 2026-09-23 (second) — arg 738 read live, in flight, and it behaves
+
+`Export.probe-ptt.lua` has now been run (user, Windows box). **This closes the last open item in
+this note.** Three presses of the user's own bound PTT, logged as transitions:
+
+```
+#2 t_model=2.881 ptt(738)=0.5
+#3 t_model=3.709 ptt(738)=0
+#4 t_model=4.246 ptt(738)=0.5
+#5 t_model=4.455 ptt(738)=0
+#6 t_model=8.008 ptt(738)=0.5
+#7 t_model=8.817 ptt(738)=0
+```
+
+- **738 is live on this install and returns exactly the declared value.** 0.5 pressed, 0.0
+  released, matching `clickabledata.lua`'s `arg_value = {1.0, 0.5}` for `STICK-PTT-PTR`. The
+  argument number is confirmed by *runtime behaviour*, not only by declaration.
+  — **evidence: reproduced-locally.**
+- **The player's existing HOTAS binding drives the cockpit argument.** This was the sharper of the
+  two risks and it was never stated in the original note: a DCS binding can be a *game action* that
+  never animates the cockpit control, in which case the argument would be right and still never
+  move for a real press. It moves. No mouse-click control test was needed.
+  — **evidence: reproduced-locally.**
+- **It is a held state, not an edge pulse.** Each press logs one transition to 0.5 and the next
+  transition ~0.8 s later, so the value *stayed* 0.5 across every intervening frame. The original
+  note inferred this from SRS's `>= 0.1` branching; it is now observed.
+- **A 209 ms press was captured.** The short-press step answered its own question: the momentary
+  control is not missed at this poll rate, with two full orders of magnitude of margin against the
+  frame time. The "could a brief press be missed" risk is closed.
+
+**Not observed: the full-press value.** Every press in this run read 0.5, so 1.0 (radio) is still
+declaration-only. That is not a gap for the PTT gate — see the design consequence below — but it
+means any code that wants to *distinguish* radio from intercom is still working from the declared
+value.
+
+**Design consequence, and it is a real decision rather than a threshold choice.** SRS gates on
+`>= 0.1`, which treats both stops as "transmitting". Petrovich should not: **the full press is the
+player talking on the radio to someone else, and Petrovich has no business hearing it.** The right
+gate is the intercom stop specifically — `abs(v - 0.5) < 0.1` — which is also what the real
+aircraft does, since the half press routes to intercom regardless of what the SPU-8 selector has
+chosen. Gating on `>= 0.1` would make every radio call to ATC an utterance aimed at the crew.
+
+**One oddity worth recording, not chased.** Wall-clock and model time disagree across the run
+(24 s of wall clock between samples #5 and #6 against 3.5 s of model time), so the mission was
+paused or the session was not running at 1:1. It has no bearing on the readings — each press is
+internally consistent in model time — but anyone timing something from this log should not use the
+wall clock.

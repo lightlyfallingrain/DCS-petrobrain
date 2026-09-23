@@ -234,10 +234,22 @@ body-side view and the slice numbering both files share.
     rotation to buy something no evidence yet says is needed. If Stage 6 shows first words clipped,
     that is the fix, and the measurement is recorded so it is not re-derived.
 
-  - [ ] Stage 5 — real PTT through DCS. Now a `DcsPTT` behind the same protocol, plus the
-    `Export.lua`/collector half; arg 738's declared values are already first-party
-    (`aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md`), and `Export.probe-ptt.lua`
-    remains unrun.
+  - [ ] **Stage 5 — real PTT through DCS. Mechanism confirmed live 2026-09-23; only the wiring is
+    left.** `Export.probe-ptt.lua` was run and arg 738 returned 0.5 held and 0.0 released on the
+    user's own bound trigger, a 209 ms press was captured, and the value held across frames rather
+    than pulsing. Crucially the *binding* was confirmed too — a DCS binding can be a game action
+    that never animates the cockpit control, which would have left the argument right and still
+    dead. Full addendum: `aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md`.
+
+    **Gate on the intercom stop specifically (`abs(v - 0.5) < 0.1`), not SRS's `>= 0.1`.** The full
+    press is the player talking on the radio to someone else, and Petrovich has no business hearing
+    it; the half press routes to intercom regardless of the SPU-8 selector, so this is also what the
+    real aircraft does. SRS's threshold is right for SRS and wrong here.
+
+    Remaining work is plumbing: `Export.lua` publishes the value, the collector caches it,
+    `GET /ptt/state` exposes it, and a `DcsPTT` implements the same `PTTSource` protocol the
+    joystick already does. **It bumps the Export wire format again**, so it is worth landing
+    *before* the next sortie rather than after, to avoid a second redeploy.
   - [ ] Stage 6 — live sortie acceptance.
 
   **Settled before design (user, 2026-09-19):**
