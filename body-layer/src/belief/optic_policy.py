@@ -83,12 +83,28 @@ RETRY_RANGE_FRACTION: Final[float] = 0.8
 #: (~60 steps) where a 30-degree one is about twelve.
 MAX_SEARCH_SECTOR_HALF_WIDTH_DEG: Final[float] = 15.0
 
+#: How long the look rests on each step of a search sweep. Short, because
+#: the act is *detection* -- the user's own framing: *"this should be fast,
+#: not dwelling on any spot, but rather trying to detect targets. Detected
+#: targets then get the dwell behaviour."* Dwelling is what the
+#: identification look is for, and it happens on a later cycle.
+SEARCH_STEP_S: Final[float] = 0.8
+
 
 class OpticPhase(str, Enum):
-    """Which half of the cycle is running."""
+    """Which part of the cycle is running.
+
+    `SEARCHING` is a glass phase too -- binoculars are up -- but a
+    different *act*: it sweeps to detect rather than resting to resolve,
+    so it has its own step timing and its own end condition. Keeping them
+    apart is what stops a search inheriting the identification look's
+    "stop when nothing can improve", which would end a sweep on its first
+    step every time.
+    """
 
     SCANNING = "scanning"
     GLASSING = "glassing"
+    SEARCHING = "searching"
 
 
 @dataclass(frozen=True)
@@ -108,6 +124,17 @@ class LookTarget:
     #: tier a look would gain, which is what makes the trigger "raise to
     #: classify" rather than "raise to identify".
     current_level: str
+    #: How far the *believed* bearing may be from the true one, degrees.
+    #:
+    #: **This is why a look is a sweep and not a stare.** A contact's
+    #: position is reconstructed from a quantised percept -- the reporting
+    #: vocabulary's 30-degree clock bucket -- so the belief can be up to
+    #: 15 degrees off in azimuth, against a binocular field of view of
+    #: 4.25. Aiming a single stare at the believed position would miss the
+    #: target most of the time, and a mock-flight test caught exactly that
+    #: as four vanished observations. He knows it is "around two o'clock";
+    #: he sweeps around two o'clock.
+    bearing_uncertainty_deg: float = 15.0
 
 
 @dataclass(frozen=True)
@@ -119,10 +146,21 @@ class OpticState:
     sequence."""
 
     phase: OpticPhase = OpticPhase.SCANNING
-    phase_started_sim: float = 0.0
+    #: When the current phase began. **`None` until the first poll**, not
+    #: `0.0`: a mission's sim clock does not start at zero, so a default of
+    #: zero means the very first poll sees a scan that "completed" long ago
+    #: and raises binoculars before ever having scanned. A test caught
+    #: exactly that. `decide` adopts the first `now_sim` it is given and
+    #: starts the cycle there.
+    phase_started_sim: float | None = None
     #: Where the current look points, body-relative. `None` while scanning.
     look_azimuth_deg: float | None = None
     look_elevation_deg: float | None = None
+    #: The sweep being worked through, and how far into it. Used by both
+    #: glass phases: a search sweeps a sector, and a look sweeps the
+    #: uncertainty around one believed contact. Empty while scanning.
+    search_pattern_steps: tuple[tuple[float, float], ...] = ()
+    search_step_index: int = 0
     #: Range at the last attempt, per contact -- `RETRY_RANGE_FRACTION`'s
     #: input. Contacts are never removed: the map is bounded by how many
     #: distinct contacts one sortie produces, and forgetting an attempt
@@ -139,6 +177,66 @@ class OpticDecision:
     #: alone" -- the scan phase does not override the gaze at all.
     look_azimuth_deg: float | None = None
     look_elevation_deg: float | None = None
+
+
+def search_pattern(
+    *,
+    sector_half_width_deg: float,
+    near_m: float,
+    far_m: float,
+    altitude_agl_m: float,
+    fov_full_width_deg: float,
+) -> list[tuple[float, float]]:
+    """The boustrophedon sweep for a binocular search of one sector:
+    `(azimuth, elevation)` steps in the order they should be looked at.
+
+    **Range is the vertical axis, so "close to far" and "as high as there
+    is ground ahead" are the same instruction** (user's own worded
+    example). A patch of ground at range `R` sits `atan(h / R)` below the
+    horizon, so sweeping outward *is* sweeping upward, and the far limit is
+    the horizon rather than a distance anyone has to choose. Elevation is
+    therefore never positive: "do not scan at sky" is a property of the
+    geometry here, not a clamp bolted on afterwards.
+
+    **The number of range bands is derived, and at helicopter altitude it
+    is one.** The whole 2.3-5.6 km band spans under 2 degrees of depression
+    at 120 m AGL -- far inside a binocular's own ~8.5-degree field -- so the
+    S-shape degenerates to a single left-right sweep, and only becomes a
+    real raster above roughly 700 m. Computing the bands rather than fixing
+    their count is what makes that fall out instead of producing a
+    pointlessly slow vertical crawl at low level.
+
+    `sector_half_width_deg` is capped at `MAX_SEARCH_SECTOR_HALF_WIDTH_DEG`
+    (user: *"cap binocular scan at 30 deg azimuth, there's no wide area
+    binocular scan"*) -- a wider commanded scan is swept only across its
+    middle, rather than taking a minute to cover.
+    """
+    half_width = min(sector_half_width_deg, MAX_SEARCH_SECTOR_HALF_WIDTH_DEG)
+    steps_across = max(1, math.ceil((2.0 * half_width) / fov_full_width_deg))
+    # Step centres, evenly spread so the first and last cover the edges.
+    if steps_across == 1:
+        azimuths = [0.0]
+    else:
+        stride = (2.0 * half_width) / steps_across
+        azimuths = [
+            -half_width + stride * (index + 0.5) for index in range(steps_across)
+        ]
+
+    near_depression = math.degrees(math.atan2(altitude_agl_m, max(near_m, 1.0)))
+    far_depression = math.degrees(math.atan2(altitude_agl_m, max(far_m, 1.0)))
+    spread = abs(near_depression - far_depression)
+    bands = max(1, math.ceil(spread / fov_full_width_deg))
+    if bands == 1:
+        elevations = [-(near_depression + far_depression) / 2.0]
+    else:
+        step = (near_depression - far_depression) / (bands - 1)
+        elevations = [-(near_depression - step * index) for index in range(bands)]
+
+    pattern: list[tuple[float, float]] = []
+    for band_index, elevation in enumerate(elevations):
+        sweep = azimuths if band_index % 2 == 0 else list(reversed(azimuths))
+        pattern.extend((azimuth, elevation) for azimuth in sweep)
+    return pattern
 
 
 def is_steady(
@@ -328,7 +426,8 @@ def look_is_finished(
     could be was never in it. `MAX_LOOK_S` then only fires when recognition
     is not happening at all.
     """
-    if now_sim - state.phase_started_sim >= MAX_LOOK_S:
+    started_sim = state.phase_started_sim
+    if started_sim is None or now_sim - started_sim >= MAX_LOOK_S:
         return True
     return not any(
         _target_in_current_look(state, target) and can_still_improve(target)
@@ -353,6 +452,24 @@ def _target_in_current_look(state: OpticState, target: LookTarget) -> bool:
     return _angular_separation_deg(centre, target) <= half_angle
 
 
+def _back_to_scanning(
+    state: OpticState, now_sim: float
+) -> tuple[OpticState, OpticDecision]:
+    """End whatever the binoculars were doing and hand back to the scan."""
+    return (
+        replace(
+            state,
+            phase=OpticPhase.SCANNING,
+            phase_started_sim=now_sim,
+            look_azimuth_deg=None,
+            look_elevation_deg=None,
+            search_pattern_steps=(),
+            search_step_index=0,
+        ),
+        OpticDecision(optic=UNAIDED_OPTIC),
+    )
+
+
 def lower_binoculars(state: OpticState, now_sim: float) -> OpticState:
     """Put them down now, whatever the cycle was doing.
 
@@ -363,13 +480,7 @@ def lower_binoculars(state: OpticState, now_sim: float) -> OpticState:
     """
     if state.phase is OpticPhase.SCANNING:
         return state
-    return replace(
-        state,
-        phase=OpticPhase.SCANNING,
-        phase_started_sim=now_sim,
-        look_azimuth_deg=None,
-        look_elevation_deg=None,
-    )
+    return _back_to_scanning(state, now_sim)[0]
 
 
 def decide(
@@ -379,13 +490,45 @@ def decide(
     scan_cycle_period_s: float,
     targets: Sequence[LookTarget],
     steady: bool,
+    search: Sequence[tuple[float, float]] = (),
 ) -> tuple[OpticState, OpticDecision]:
     """Advance the cycle one poll and say what to look through.
+
+    `search` is the sweep to run when there is nothing worth a closer look
+    -- empty when the active scan is free or its sector is too wide to
+    sweep (Stage 3). **Identification takes priority over search**: a
+    contact already detected and resolvable is worth more than looking for
+    another one, and the user's own sequencing says so (*"detected targets
+    then get the dwell behaviour"*).
 
     Pure: same inputs, same outputs, no clock read and no store access --
     which is what keeps a replay identical, the property `gaze_at` was
     built around and this has to preserve.
     """
+    if state.phase_started_sim is None:
+        # First poll: start the cycle from this mission's own clock rather
+        # than from zero, and scan before deciding anything.
+        return (
+            replace(state, phase_started_sim=now_sim),
+            OpticDecision(optic=UNAIDED_OPTIC),
+        )
+
+    if state.phase is OpticPhase.SEARCHING:
+        if not steady:
+            return _back_to_scanning(state, now_sim)
+        elapsed = now_sim - state.phase_started_sim
+        index = int(elapsed // SEARCH_STEP_S)
+        if index >= len(state.search_pattern_steps):
+            return _back_to_scanning(state, now_sim)
+        azimuth, elevation = state.search_pattern_steps[index]
+        return (
+            replace(state, search_step_index=index),
+            OpticDecision(
+                optic=BINOCULAR_OPTIC,
+                look_azimuth_deg=azimuth,
+                look_elevation_deg=elevation,
+            ),
+        )
     if state.phase is OpticPhase.GLASSING:
         if not steady or look_is_finished(state, now_sim, targets):
             return (
@@ -413,6 +556,23 @@ def decide(
     worth_looking = [target for target in targets if is_worth_a_look(target, state)]
     chosen = choose_look(worth_looking)
     if chosen is None:
+        if search:
+            # Nothing to resolve, but a narrow sector was commanded: sweep
+            # it for things the naked eye could not pick up.
+            azimuth, elevation = search[0]
+            return (
+                OpticState(
+                    phase=OpticPhase.SEARCHING,
+                    phase_started_sim=now_sim,
+                    search_pattern_steps=tuple(search),
+                    attempted_at_range_m=dict(state.attempted_at_range_m),
+                ),
+                OpticDecision(
+                    optic=BINOCULAR_OPTIC,
+                    look_azimuth_deg=azimuth,
+                    look_elevation_deg=elevation,
+                ),
+            )
         # Nothing to look at: the scan cycle restarts rather than the
         # aircraft waiting in a completed phase forever.
         return (

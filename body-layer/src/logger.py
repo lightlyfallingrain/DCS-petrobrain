@@ -204,6 +204,7 @@ from belief.optic_policy import (
     is_steady,
     look_target_for,
     lower_binoculars,
+    search_pattern,
 )
 from belief.optic_policy import decide as decide_optic
 from belief.tasks import TaskStore
@@ -212,6 +213,7 @@ from perception.detection_trace import DetectionTraceCollector
 from perception.gaze import (
     FREE_SCAN_PLAN,
     SCAN_CYCLE_PERIOD_S,
+    SECTOR_WEDGE_DEG,
     Gaze,
     ScanPlan,
     gaze_at,
@@ -219,7 +221,7 @@ from perception.gaze import (
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
-from perception.optics import UNAIDED_OPTIC, Optic
+from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.source import Observation, OwnshipState, PerceptionSource
 from speech_log import SpeechLogWriter
 
@@ -461,6 +463,7 @@ class ConsolePerceptionRunner:
             scan_cycle_period_s=SCAN_CYCLE_PERIOD_S,
             targets=_look_targets(self.store, ownship),
             steady=is_steady(list(self.attitude_history)),
+            search=_search_sweep(self.scan_plan, ownship),
         )
         self.optic = optic_decision.optic
         _apply_active_gaze(
@@ -583,6 +586,46 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
         )
         for contact in store.contacts
     ]
+
+
+#: The band a binocular search sweeps: from where the naked eye runs out
+#: to where the binoculars do, for a mid-sized vehicle. Sweeping nearer
+#: re-covers ground the scan phase alternating with this one has already
+#: covered; sweeping further covers ground the instrument cannot resolve
+#: anyway. Stated as a constant rather than computed per contact because a
+#: search has no contact yet -- that is what it is looking for.
+_SEARCH_BAND_M: tuple[float, float] = (2_333.0, 5_647.0)
+
+
+def _search_sweep(
+    scan_plan: ScanPlan, ownship: OwnshipState
+) -> list[tuple[float, float]]:
+    """The binocular sweep for the currently-commanded sector, or empty.
+
+    **Empty for a free scan, deliberately** (`plans/binocular-optic/
+    plan.md` D6): searching is something the player asks for by naming a
+    place to look. A free scan is Petrovich deciding where to look for
+    himself, and turning that into a binocular sweep would spend most of
+    every minute glassed for no one's reason.
+
+    The band swept starts where the naked eye runs out and ends where the
+    binoculars do -- sweeping nearer than that re-covers ground the scan
+    phase alternating with this one has already covered.
+    """
+    if scan_plan.commanded_sector is None:
+        return []
+    _, half_width_deg = SECTOR_WEDGE_DEG[scan_plan.commanded_sector]
+    near_m, far_m = _SEARCH_BAND_M
+    fov_full_width_deg = (BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0
+    if fov_full_width_deg <= 0.0:
+        return []
+    return search_pattern(
+        sector_half_width_deg=half_width_deg,
+        near_m=near_m,
+        far_m=far_m,
+        altitude_agl_m=max(ownship.alt_agl_m, 0.0),
+        fov_full_width_deg=fov_full_width_deg,
+    )
 
 
 def _apply_active_gaze(
