@@ -93,6 +93,16 @@ ACT_FLOOR: float = 0.60
 #: against the same quantity `ACT_FLOOR` is.
 ACT_FLOOR_CANCEL: float = 0.80
 
+#: Every token that *destroys* standing state, and therefore every token
+#: held to `ACT_FLOOR_CANCEL`. A set rather than a comparison against one
+#: name: the narrow cancels arrived later (2026-09-23) and would otherwise
+#: have inherited the ordinary floor silently -- a mis-heard "stop watch"
+#: is exactly as destructive as a mis-heard "cancel task", and the reason
+#: the higher floor exists does not care which mode is being ended.
+CANCEL_TOKENS: frozenset[str] = frozenset(
+    {"cancel_task", "cancel_scan", "cancel_watch"}
+)
+
 #: Below this, nothing fires and Petrovich asks the player to say it
 #: again (`belief.speech.render_say_again`) rather than guessing or
 #: sitting silent. **Not measured** -- Stage 1's bench has no data point
@@ -243,7 +253,7 @@ def classify_response(
     if token is None:
         return BandDecision(disposition="say_again")
 
-    floor = ACT_FLOOR_CANCEL if token == "cancel_task" else ACT_FLOOR
+    floor = ACT_FLOOR_CANCEL if token in CANCEL_TOKENS else ACT_FLOOR
     if confidence >= floor:
         return BandDecision(disposition="act", token=token)
     if confidence >= CONFIRM_FLOOR:
