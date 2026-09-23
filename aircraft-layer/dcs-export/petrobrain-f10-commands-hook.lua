@@ -166,7 +166,15 @@ missionCommands.addCommand("Northwest", bearing, pbF10Enqueue("scan_bearing_nw")
 local watch = missionCommands.addSubMenu("Watch", sub)
 missionCommands.addCommand("Nearest", watch, pbF10Enqueue("watch_nearest"))
 missionCommands.addCommand("Nearest Air Defence", watch, pbF10Enqueue("watch_nearest_air_defence"))
-missionCommands.addCommand("Cancel Task", sub, pbF10Enqueue("cancel_task"))
+-- Three cancel items, not one (user, 2026-09-23). "Stop Scan" and "Stop
+-- Watch" are separate actions: one cancel must not silently end the other
+-- standing mode, because scanning while watching a contact is an ordinary
+-- thing to be doing. "Cancel Everything" remains as the deliberate
+-- all-modes form and its readback names each thing it stopped.
+local stop = missionCommands.addSubMenu("Stop", sub)
+missionCommands.addCommand("Stop Scan", stop, pbF10Enqueue("cancel_scan"))
+missionCommands.addCommand("Stop Watch", stop, pbF10Enqueue("cancel_watch"))
+missionCommands.addCommand("Cancel Everything", stop, pbF10Enqueue("cancel_task"))
 return "registered"
 ]]
 
