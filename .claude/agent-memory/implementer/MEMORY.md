@@ -94,4 +94,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Callout scheduling Slice A/B](project_callout_scheduling_stages.md) — build full design first then split for revertible commits; bunched-at-t0 fixture undercounts spoken lines.
 - [Group detectability](project_group_detectability.md) — RESOLUTION_ANGULAR_RADIUS_RAD split; plan's 0.0013 rounds wrong direction vs LOWRES precedent.
 - [Watch as standing mode](project_watch_as_standing_mode.md) — 2nd TaskKind, area param must stay positional, console.py structural test needs a matching command, cancel-per-kind design.
+- [Binocular-optic review fix](project_binocular_optic_review_fix.md) — D4 counter belongs at `_handle_utterance` (single caller of handle_line), not handle_line itself, to avoid double-counting.
 - [Revert-test scratch copy](feedback_revert_test_scratch_copy.md) — never `git checkout --` a file with unstaged work to undo a live-patch sanity check; use a scratch copy instead.

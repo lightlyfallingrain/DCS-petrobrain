@@ -49,8 +49,9 @@ from logger import (
 from perception import association
 from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
 from perception.geometry import GeoPosition
+from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import NakedEyePerceptionSource
-from perception.source import Observation, OwnshipState
+from perception.source import DerivedWorldPosition, Observation, OwnshipState
 from store.writer import open_for_build
 
 
@@ -1071,29 +1072,70 @@ def test_poll_transcripts_skips_malformed_items() -> None:
 
 
 def test_a_player_command_lowers_the_binoculars() -> None:
-    """`plans/binocular-optic/plan.md` D4, wired through a counter rather
-    than a callback: the poll loop asks "did the player ask for anything
-    just now" by comparing `CrewConsole.commands_handled` across one
-    iteration, which stays true for a command surface added later without
-    the console knowing what the answer is used for."""
+    """`plans/binocular-optic/plan.md` D4 ("not a special case per
+    command... the pilot asking for something is itself evidence") wired
+    through a counter rather than a callback -- `_run_crew_text_poll_loop`
+    asks "did the player ask for anything just now" by comparing
+    `CrewConsole.commands_handled` across one poll iteration, then lowers
+    the binoculars if it changed. Reproduces that exact conditional (see
+    `logger._run_crew_text_poll_loop`) rather than checking the counter and
+    `lower_binoculars` as two unrelated facts, which is what let the real
+    D4 gap (only `handle_f10_command` incremented the counter -- a typed or
+    voice-fallthrough free-form request did not) go uncaught: a resolvable
+    F10 token always passed this test, whichever surface actually carried
+    D4's rule.
+
+    **Drives the free-form typed path** (`handle_line`, not
+    `handle_f10_command`) -- the surface the review found broken -- and
+    asserts the binoculars actually come down as a consequence, not merely
+    that the counter moved."""
     from belief.crew_console import CrewConsole
     from belief.optic_policy import OpticPhase, OpticState, lower_binoculars
 
-    console = CrewConsole(store=ContactStore())
-    before = console.commands_handled
-    console.handle_f10_command("scan_ahead", now_sim=1.0)
-    assert console.commands_handled == before + 1
+    store = ContactStore()
+    store.ingest(
+        [
+            Observation(
+                id="OBS_1",
+                contact_id=None,
+                t_sim=0.0,
+                t_wall=0.0,
+                source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                classification_raw="BMP-2",
+                bearing_deg=0.0,
+                range_m=1000.0,
+                ownship_at_observation=OwnshipState(
+                    t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+                ),
+                derived_world_position=DerivedWorldPosition(
+                    x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+                ),
+                provenance="test_fixture",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
 
-    glassing = OpticState(
+    console = CrewConsole(store=store)
+    optic_state = OpticState(
         phase=OpticPhase.GLASSING,
         phase_started_sim=0.0,
         look_azimuth_deg=30.0,
         look_elevation_deg=-5.0,
     )
-    lowered = lower_binoculars(glassing, now_sim=1.0)
 
-    assert lowered.phase is OpticPhase.SCANNING
-    assert lowered.look_azimuth_deg is None
+    commands_before = console.commands_handled
+    readback_lines = console.handle_line(f"watch {contact_id}", now_sim=1.0)
+    assert readback_lines == [f"Watching {contact_id}."]  # a real free-form request
+
+    if console.commands_handled != commands_before:
+        optic_state = lower_binoculars(optic_state, now_sim=1.0)
+
+    assert optic_state.phase is OpticPhase.SCANNING
+    assert optic_state.look_azimuth_deg is None
 
 
 def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
