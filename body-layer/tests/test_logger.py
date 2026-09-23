@@ -402,6 +402,17 @@ def test_format_gaze_line_names_the_commanded_sector() -> None:
     assert line == "Petrovich: looking 11 o'clock (commanded left scan)"
 
 
+def test_format_gaze_line_names_a_commanded_legs_scan_generically() -> None:
+    # A `commanded_legs`-only plan (Stage 5: a bare o'clock hour, or a
+    # converted compass scan) has no single sector name to speak.
+    plan = ScanPlan(commanded_sector=None, command_t_sim=0.0, commanded_legs=(1,))
+    gaze = gaze_at(0.0, plan)
+
+    line = _format_gaze_line(plan, gaze)
+
+    assert line == "Petrovich: looking 1 o'clock (commanded scan)"
+
+
 def test_push_gaze_line_pushes_once_and_is_a_no_op_on_no_change() -> None:
     overlay_client = FakeOverlayClient()
 
@@ -902,6 +913,114 @@ def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
     assert plan == ScanPlan(commanded_sector="right", command_t_sim=1.0)
 
 
+# -- Stage 5 (plans/voice-command-completeness/plan.md Decision 5):
+# compass-sector and relative_clock_hour tasks, and the absolute->relative
+# heading conversion. --------------------------------------------------------
+
+
+def _sector_area(area_id: str, sector: str) -> AttentionArea:
+    return AttentionArea(
+        id=area_id,
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=None,
+        level="watch",
+        source="scan_area",
+        sector=sector,  # type: ignore[arg-type]
+    )
+
+
+def _clock_area(area_id: str, clock_hour: int) -> AttentionArea:
+    return AttentionArea(
+        id=area_id,
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=None,
+        level="watch",
+        source="scan_area",
+        relative_clock_hour=clock_hour,
+    )
+
+
+def test_active_gaze_resolves_a_relative_clock_hour_task() -> None:
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _clock_area("AREA_1", 1),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan = _active_gaze(tasks)
+
+    assert plan == ScanPlan(
+        commanded_sector=None, command_t_sim=3.0, commanded_legs=(1,)
+    )
+
+
+def test_active_gaze_was_previously_silently_skipping_a_compass_only_task() -> None:
+    # The measured pre-existing defect this stage fixes: before Stage 5,
+    # `_active_gaze` only ever read `task.area.relative_sector`, so a
+    # compass-only task (`scan north`) fell through this filter entirely
+    # and the function returned `FREE_SCAN_PLAN` even though a scan was
+    # commanded and still active.
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan = _active_gaze(tasks, heading_true_deg=0.0)
+
+    assert plan != FREE_SCAN_PLAN
+    assert plan.commanded_legs is not None
+
+
+def test_active_gaze_converts_a_compass_sector_to_relative_legs_using_heading() -> None:
+    # Nose pointed north (heading 0): "scan north" should resolve to legs
+    # centered on dead ahead (12 o'clock) -- 11, 12, 1.
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan = _active_gaze(tasks, heading_true_deg=0.0)
+
+    assert plan == ScanPlan(
+        commanded_sector=None, command_t_sim=0.0, commanded_legs=(11, 12, 1)
+    )
+
+
+def test_active_gaze_compass_conversion_tracks_current_heading() -> None:
+    # Same commanded "scan north" task, but the nose is now pointed east
+    # (heading 90) -- north is 90 degrees to the left of the nose, so the
+    # resolved legs must shift accordingly (this is the "per tick, using
+    # current heading" half of Decision 5).
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan_heading_0 = _active_gaze(tasks, heading_true_deg=0.0)
+    plan_heading_90 = _active_gaze(tasks, heading_true_deg=90.0)
+
+    assert plan_heading_0 != plan_heading_90
+    assert plan_heading_0.commanded_legs == (11, 12, 1)
+    # Relative bearing of true north with the nose on 90: 0 - 90 = -90 ->
+    # dead left (9 o'clock), so the admitted legs center on 9.
+    assert plan_heading_90.commanded_legs == (8, 9, 10)
+
+
 def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
     tasks = TaskStore()
     tasks.create(
@@ -956,6 +1075,48 @@ def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
     runner.run_once()
 
     assert naked_eye.scan_plan == ScanPlan(commanded_sector="left", command_t_sim=0.0)
+
+
+def test_run_once_compass_scan_actually_changes_naked_eye_gaze() -> None:
+    # The test that would have failed before Stage 5: a compass scan
+    # ("scan north") used to register a real `AttentionArea`/`PendingIntent`
+    # and speak a readback while `NakedEyePerceptionSource.scan_plan` stayed
+    # `FREE_SCAN_PLAN` -- the pilot heard "Scanning north" and Petrovich kept
+    # free-scanning regardless. This asserts the gaze the naked-eye source is
+    # actually handed changes, not merely that a task was registered.
+    telemetry = _telemetry_dict()  # heading_true_rad=0.0 -- nose points north
+    store = ContactStore()
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=600.0,
+        reason="scan-area",
+    )
+    naked_eye = _naked_eye_source()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[naked_eye],
+        store=store,
+        tasks=tasks,
+    )
+
+    runner.run_once()
+
+    # The scan plan actually assigned to the source is a real commanded
+    # one, not free scan -- heading 0 puts north dead ahead, so the
+    # resolved legs are dead-ahead-and-either-side (11, 12, 1).
+    assert naked_eye.scan_plan == ScanPlan(
+        commanded_sector=None, command_t_sim=0.0, commanded_legs=(11, 12, 1)
+    )
+    # And the gaze it resolves to genuinely differs from what free scan
+    # would have produced at the same t_sim -- this is the property that
+    # actually matters: Petrovich's eyes moved differently because of the
+    # command, not merely that a differently-shaped object got assigned.
+    commanded_gaze = gaze_at(3.0, naked_eye.scan_plan)
+    free_scan_gaze = gaze_at(3.0, FREE_SCAN_PLAN)
+    assert commanded_gaze != free_scan_gaze
 
 
 # -- _poll_transcripts (plans/inbound-speech/plan.md Stage 3) ---------------

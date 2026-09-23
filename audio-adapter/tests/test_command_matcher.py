@@ -56,6 +56,10 @@ def test_exact_phrase_hits_every_token_family() -> None:
         "scan north": "scan_bearing_n",
         "report east": "report_bearing_e",
         "report three o'clock": "report_clock_3",
+        # Stage 5 (plans/voice-command-completeness/plan.md Decision 5) --
+        # the new ownship-relative o'clock scan family, matched the same
+        # way its report-family sibling already is above.
+        "scan one o'clock": "scan_clock_1",
         "stop": "stop_talking",
         "say again": "say_again",
     }
