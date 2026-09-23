@@ -194,9 +194,9 @@ body-side view and the slice numbering both files share.
       floor. The fix points the constant at the quantity it was measured on, and gives the brain
       layer its **second route in**: speech heard clearly that matches no command is free speech,
       not a failure.
-  - [~] **Stage 4 — capture.** Built 2026-09-22 (`feature/inbound-speech-stage4`), verified as
-    far as a Mac allows; **one spoken clip through the live path is the outstanding acceptance**,
-    and it needs the user's own voice rather than a Windows box.
+  - [x] **Stage 4 — capture. FLOWN AND ACCEPTED 2026-09-23.** Built 2026-09-22
+    (`feature/inbound-speech-stage4`). Voice through the live path works: the clip is captured,
+    recognised, dispatched and read back.
 
     `ptt_source.py` (`PTTSource` protocol, `JoystickPTT` over winmm, `KeyTogglePTT` for the Mac),
     `audio_capture.py` (`SoxRecorder`, `ClipGate`), `capture_loop.py` (`CaptureLoop`),
@@ -234,8 +234,20 @@ body-side view and the slice numbering both files share.
     rotation to buy something no evidence yet says is needed. If Stage 6 shows first words clipped,
     that is the fix, and the measurement is recorded so it is not re-derived.
 
-  - [~] **Stage 5 — real PTT through DCS. Built 2026-09-23** on `feature/inbound-speech-stage4`
-    (stacked on Stage 4 at user direction, to be tested as one). **Mechanism confirmed live first.** `Export.probe-ptt.lua` was run and arg 738 returned 0.5 held and 0.0 released on the
+  - [x] **Stage 5 — real PTT through DCS. FLOWN AND ACCEPTED 2026-09-23.** Built the same day on
+    `feature/inbound-speech-stage4` (stacked on Stage 4 at user direction, tested as one).
+
+    **The sortie's four verdicts:** the trigger works; a radio call stays out of it; the two-stage
+    trigger *"is natural"*; and the audio path is right. The one item not exercised is endurance —
+    false-fire and miss rates over a whole flight — which needs a real sortie rather than a systems
+    check.
+
+    **One bug was found and fixed between building and flying, and it is the interesting part.**
+    `push_ptt_state` was defined above `safe_call` in `Export.lua`, and Lua has no hoisting: a name
+    referenced before its `local` declaration compiles as a *global* lookup, nil at call time. Every
+    frame called nil, the trigger published nothing, and from the capture process's side that is
+    indistinguishable from a talk control nobody pressed. `luac5.1 -p` passes it — the syntax is
+    valid — so the syntax check cannot see this class at all. `Export.probe-ptt.lua` was run and arg 738 returned 0.5 held and 0.0 released on the
     user's own bound trigger, a 209 ms press was captured, and the value held across frames rather
     than pulsing. Crucially the *binding* was confirmed too — a DCS binding can be a game action
     that never animates the cockpit control, which would have left the argument right and still
@@ -271,10 +283,15 @@ body-side view and the slice numbering both files share.
     **`discard_if` is a hook on `CaptureLoop`, not a new `PTTSource` method.** Only `DcsPTT` has
     anything to say about radio presses; widening the protocol would have made the joystick and
     keyboard sources carry a method that always answers False.
-  - [>] **The ~0.14 s device-open gap — three candidate fixes, all gated on the sortie.** Do not
-    build any of them until the flight says the gap is actually felt; the whole point of measuring
-    it was to avoid paying for a fix nobody needs. Recorded here so the options are not re-derived,
-    with what each costs and what it does *not* solve.
+  - [x] **The ~0.14 s device-open gap — CLOSED 2026-09-23, not felt, nothing built.** The sortie
+    answered it: press-then-speak *"is the natural, normal way how aviation radios work"*, and
+    press-while-speaking *"works surprisingly well"* — the verb survives. So none of the three
+    candidate fixes gets built, and the measurement's whole purpose is served: it stopped a fix
+    being paid for before there was evidence it was needed.
+
+    The options are kept below rather than deleted, because the gap is real and a different
+    microphone or a slower machine could make it matter. **Do not build any of them without a
+    fresh observation that it is felt.**
 
     **A. Open the device speculatively, on any press.** Start recording the moment arg 738 leaves
     0.0, and discard the clip if the trigger never settles at the intercom stop. **This is the
@@ -312,6 +329,32 @@ body-side view and the slice numbering both files share.
     **The gate is block 3 of the voice sortie** (`docs/acceptance/2026-09-23-voice-command-sortie.md`):
     press-then-speak versus speaking into the press. If the gap is not felt, none of these gets
     built.
+
+  - [ ] **Press-to-readback is ~3 s, and that is the next real problem.** Measured on the
+    2026-09-23 sortie (user: *"time from release to feedback is about 3 s"*). A crew member answers
+    in well under a second, so this is what will keep him feeling like a machine no matter how good
+    the recognition is.
+
+    **One component is certain rather than estimated: the logger polls `GET /transcripts/poll` once
+    per `poll_interval_s`, default 1.0 s**, so a recognised command waits 0 to 1 s — half a second
+    on average — purely to be noticed. It is the cheapest half-second in the chain to remove, and
+    it costs nothing but loopback HTTP requests.
+
+    The rest of the budget is estimated and should be **measured before anything is optimised**:
+    the 0.4 s tail (deliberate), sox's stop and `--ignore-length` re-encode, the LAN hop, whisper
+    itself, and `say`'s synthesis (previously measured at 0.6-0.8 s). Every hop already carries a
+    wall-clock stamp, so instrumenting this is reading timestamps rather than adding machinery.
+
+    **Two candidate fixes that need no accuracy trade:**
+    - **Poll transcripts faster than the telemetry cadence.** They are different jobs on the same
+      timer today.
+    - **Cache synthesized readbacks.** The readback vocabulary is small and fixed (*"Scanning
+      left."*, *"Copy, stop scan."*), so the same handful of WAVs are re-synthesized every flight.
+
+    **Not a candidate: a smaller whisper model.** `small.en` was chosen on unsafe-error count, not
+    accuracy — `tiny.en` produced seven confident wrong commands and `base.en` two, against
+    `small.en`'s none. Trading that for latency would buy speed with the one failure the pilot
+    cannot catch.
 
   - [ ] Stage 6 — live sortie acceptance.
 

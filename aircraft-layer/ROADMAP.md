@@ -48,7 +48,7 @@ details and `WORKFLOW.md` for the cross-machine deploy/run workflow. Full design
 
 ## Backlog
 
-- [~] **Push-to-talk channel — implemented 2026-09-23, pending live acceptance**
+- [x] **Push-to-talk channel — implemented and ACCEPTED live 2026-09-23** (the voice sortie: the trigger works, and a radio call stays out of it).
   (`feature/inbound-speech-stage4`, `plans/inbound-speech/plan.md` Stage 5). `Export.lua` publishes
   the pilot stick trigger (arg 738) as its own line kind; `PttSample`/`PttCache`/`GET /ptt/state`
   carry it to the capture process. Wire version bumped to `2026-09-23a`.
