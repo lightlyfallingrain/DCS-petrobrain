@@ -57,15 +57,19 @@ class PttSample:
         **Not `raw >= 0.1`**, which is what DCS-SRS uses and which is right
         for SRS and wrong here: SRS wants to know whether the player is
         transmitting at all, while this wants to know whether they are
-        talking *to Petrovich*. A full press is the player on the radio to
-        someone else, and Petrovich has no business hearing it.
+        talking *to Petrovich*. A full press is not that under any setup --
+        with VOIP it transmits to someone else, without it it opens the DCS
+        radio menu -- so the half stop is the only one that means "to the
+        crew".
         """
         return abs(self.raw - INTERCOM_VALUE) < _STOP_TOLERANCE
 
     @property
     def radio(self) -> bool:
-        """The trigger is fully pressed -- the player is transmitting on
-        whichever radio the SPU-8 selector has chosen."""
+        """The trigger is fully pressed. Named for the control rather than
+        for one setup's use of it: with VOIP that transmits on whichever
+        radio the SPU-8 selector has chosen, and without VOIP it opens the
+        DCS radio menu. The name survives both."""
         return self.raw >= _RADIO_FLOOR
 
     @staticmethod

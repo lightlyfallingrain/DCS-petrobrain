@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from audio_capture import DEFAULT_TAIL_S, Clip, ClipGate
+from audio_capture import DEFAULT_MAX_CLIP_S, DEFAULT_TAIL_S, Clip, ClipGate
 from ptt_source import PTTSource
 
 
@@ -29,6 +29,8 @@ class Recorder(Protocol):
     def start(self) -> None: ...
 
     def stop(self) -> Clip: ...
+
+    def abort(self) -> None: ...
 
 
 class ClipSink(Protocol):
@@ -76,6 +78,8 @@ class CaptureLoop:
         tail_s: float = DEFAULT_TAIL_S,
         sleep: Callable[[float], None] = time.sleep,
         discard_if: Callable[[], bool] | None = None,
+        max_hold_s: float = DEFAULT_MAX_CLIP_S + 3.0,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._ptt = ptt
         self._recorder = recorder
@@ -83,15 +87,31 @@ class CaptureLoop:
         self._sink = sink
         self._tail_s = tail_s
         self._sleep = sleep
-        # Asked once, at release: "was this clip addressed to someone else
+        # Asked once, at release: "was this clip addressed to the crew
         # after all?" Only `DcsPTT` supplies it, and only for one case --
-        # the player moved the trigger to the radio stop mid-utterance, so
-        # what they said was for ATC, not the crew. It is a separate hook
+        # the player took the trigger to its full-press stop mid-utterance.
+        # **What that stop does depends on the setup, and the invariant
+        # holds for both**: with VOIP it transmits to someone else, and
+        # without it it opens the DCS radio menu. Either way it is not
+        # speech aimed at the crew, which is all this hook needs to be
+        # true. It is a separate hook
         # rather than part of `PTTSource` because the joystick and keyboard
         # sources have nothing to say about it, and widening the protocol
         # for one implementation would make both of them carry a method
         # that always answers False.
         self._discard_if = discard_if
+        # The guard for a release that never arrives (user, 2026-09-23).
+        # sox stops itself at `max_clip_s` via its own `trim`, so the audio
+        # device is never held open forever -- but this loop would still
+        # believe it was recording, and would then post whatever sox left
+        # behind as if the player had finished speaking. A wedged PTT feed,
+        # a DCS crash mid-press, or a trigger that sticks all produce
+        # exactly that. The ceiling sits above `max_clip_s` deliberately:
+        # the ordinary end of a long press is sox's own limit, and this
+        # only fires when the *release* is what went missing.
+        self._max_hold_s = max_hold_s
+        self._monotonic = monotonic
+        self._started_at: float | None = None
         self._recording = False
 
     @property
@@ -111,20 +131,37 @@ class CaptureLoop:
             except Exception as exc:  # noqa: BLE001 -- see class docstring
                 return [CaptureEvent("error", f"could not start recording: {exc}")]
             self._recording = True
+            self._started_at = self._monotonic()
             return [CaptureEvent("press", "recording")]
+
+        if down and self._recording and self._started_at is not None:
+            held = self._monotonic() - self._started_at
+            if held >= self._max_hold_s:
+                self._recording = False
+                self._started_at = None
+                self._recorder.abort()
+                return [
+                    CaptureEvent(
+                        "error",
+                        f"held {held:.0f}s with no release -- clip discarded, "
+                        "talk control may be stuck",
+                    )
+                ]
+            return []
 
         if not down and self._recording:
             # The tail runs before the stop, inside the loop's own tick,
             # so nothing else can start a new clip during it.
             self._sleep(self._tail_s)
             self._recording = False
+            self._started_at = None
             try:
                 clip = self._recorder.stop()
             except Exception as exc:  # noqa: BLE001 -- see class docstring
                 return [CaptureEvent("error", f"capture failed: {exc}")]
             if self._discard_if is not None and self._discard_if():
                 return [
-                    CaptureEvent("dropped", "radio press -- not addressed to the crew")
+                    CaptureEvent("dropped", "full press -- not addressed to the crew")
                 ]
             verdict = self._gate.assess(clip)
             if not verdict.accepted:
@@ -145,6 +182,7 @@ class CaptureLoop:
         if not self._recording:
             return
         self._recording = False
+        self._started_at = None
         try:
             self._recorder.stop()
         except Exception:  # noqa: BLE001 -- nothing useful to do while exiting

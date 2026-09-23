@@ -43,6 +43,9 @@ class FakeRecorder:
             raise self.stop_error
         return self.clip
 
+    def abort(self) -> None:
+        self.stops += 1
+
 
 class FakeSink:
     def __init__(self) -> None:
@@ -240,8 +243,9 @@ class _Discarding:
 
 
 def test_a_radio_press_discards_the_clip() -> None:
-    """Stage 5: reaching the radio stop mid-utterance means the player was
-    talking to ATC, not the crew. The clip is dropped rather than posted --
+    """Stage 5: reaching the full-press stop mid-utterance means the clip
+    was not addressed to the crew -- a VOIP transmission to someone else,
+    or the DCS radio menu where there is no VOIP. The clip is dropped rather than posted --
     and dropped for a stated reason, so it is distinguishable from a clip
     the gate rejected."""
     sink = FakeSink()
@@ -255,7 +259,7 @@ def test_a_radio_press_discards_the_clip() -> None:
     events = loop.tick()
 
     assert [event.kind for event in events] == ["dropped"]
-    assert "radio" in events[0].detail
+    assert "full press" in events[0].detail
     assert sink.sent == []
 
 
@@ -277,11 +281,107 @@ def test_the_discard_hook_is_asked_once_per_release() -> None:
 
 
 def test_no_hook_means_no_discard() -> None:
-    """The joystick and keyboard sources have nothing to say about radio
-    presses, so they pass no hook and nothing changes for them."""
+    """The joystick and keyboard sources have nothing to say about a
+    full press, so they pass no hook and nothing changes for them."""
     loop, ptt, _, sink, _ = build()
     ptt.down = True
     loop.tick()
     ptt.down = False
     assert [event.kind for event in loop.tick()] == ["sent"]
     assert sink.sent == [b"RIFFfake"]
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _build_with_clock(
+    max_hold_s: float,
+) -> tuple[CaptureLoop, FakePTT, FakeRecorder, FakeSink, _Clock]:
+    ptt = FakePTT()
+    recorder = FakeRecorder()
+    sink = FakeSink()
+    clock = _Clock()
+    loop = CaptureLoop(
+        ptt=ptt,
+        recorder=recorder,
+        gate=ClipGate(),
+        sink=sink,
+        tail_s=0.4,
+        sleep=lambda _s: None,
+        max_hold_s=max_hold_s,
+        monotonic=clock,
+    )
+    return loop, ptt, recorder, sink, clock
+
+
+def test_a_release_that_never_arrives_is_abandoned() -> None:
+    """User requirement, 2026-09-23: the device must not be left open when
+    the stop signal never fires -- a DCS crash mid-press, a wedged feed, a
+    trigger that sticks. sox stops itself at its own clip limit, so the
+    audio device is safe either way; what this prevents is the loop
+    believing it is still recording and then posting whatever sox left
+    behind as if the player had finished speaking."""
+    loop, ptt, recorder, sink, clock = _build_with_clock(max_hold_s=15.0)
+
+    ptt.down = True
+    assert [event.kind for event in loop.tick()] == ["press"]
+
+    clock.now = 14.0
+    assert loop.tick() == []  # still inside the ceiling
+    assert loop.recording
+
+    clock.now = 15.0
+    events = loop.tick()
+
+    assert [event.kind for event in events] == ["error"]
+    assert "no release" in events[0].detail
+    assert not loop.recording
+    assert recorder.stops == 1  # aborted, not left running
+    assert sink.sent == []
+
+
+def test_the_abandoned_clip_is_never_posted() -> None:
+    """It is discarded rather than sent: nobody said anything that ended."""
+    loop, ptt, _, sink, clock = _build_with_clock(max_hold_s=5.0)
+    ptt.down = True
+    loop.tick()
+    clock.now = 99.0
+    loop.tick()
+    assert sink.sent == []
+
+
+def test_the_loop_recovers_after_abandoning_one() -> None:
+    """A stuck trigger that later releases and is pressed again must work
+    normally -- the ceiling ends one clip, not the session."""
+    loop, ptt, _, sink, clock = _build_with_clock(max_hold_s=5.0)
+    ptt.down = True
+    loop.tick()
+    clock.now = 5.0
+    loop.tick()
+
+    ptt.down = False
+    assert loop.tick() == []  # nothing in flight to release
+
+    ptt.down = True
+    assert [event.kind for event in loop.tick()] == ["press"]
+    ptt.down = False
+    assert [event.kind for event in loop.tick()] == ["sent"]
+    assert sink.sent == [b"RIFFfake"]
+
+
+def test_an_ordinary_long_press_is_not_abandoned() -> None:
+    """The ceiling sits above the recorder's own clip limit on purpose: a
+    genuinely long utterance ends at sox's limit, and only a missing
+    *release* should trip this."""
+    loop, ptt, _, _sink, clock = _build_with_clock(max_hold_s=15.0)
+    ptt.down = True
+    loop.tick()
+    clock.now = 11.0
+    assert loop.tick() == []
+    ptt.down = False
+    assert [event.kind for event in loop.tick()] == ["sent"]
