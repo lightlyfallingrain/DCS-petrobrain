@@ -234,8 +234,8 @@ body-side view and the slice numbering both files share.
     rotation to buy something no evidence yet says is needed. If Stage 6 shows first words clipped,
     that is the fix, and the measurement is recorded so it is not re-derived.
 
-  - [ ] **Stage 5 — real PTT through DCS. Mechanism confirmed live 2026-09-23; only the wiring is
-    left.** `Export.probe-ptt.lua` was run and arg 738 returned 0.5 held and 0.0 released on the
+  - [~] **Stage 5 — real PTT through DCS. Built 2026-09-23** on `feature/inbound-speech-stage4`
+    (stacked on Stage 4 at user direction, to be tested as one). **Mechanism confirmed live first.** `Export.probe-ptt.lua` was run and arg 738 returned 0.5 held and 0.0 released on the
     user's own bound trigger, a 209 ms press was captured, and the value held across frames rather
     than pulsing. Crucially the *binding* was confirmed too — a DCS binding can be a game action
     that never animates the cockpit control, which would have left the argument right and still
@@ -254,10 +254,23 @@ body-side view and the slice numbering both files share.
     failure this prevents is silent — a discarded sub-threshold clip per radio transmission, which
     presents as an audio problem rather than a trigger one.
 
-    Remaining work is plumbing: `Export.lua` publishes the value, the collector caches it,
-    `GET /ptt/state` exposes it, and a `DcsPTT` implements the same `PTTSource` protocol the
-    joystick already does. **It bumps the Export wire format again**, so it is worth landing
-    *before* the next sortie rather than after, to avoid a second redeploy.
+    **What was built.** `Export.lua` reads arg 738 every frame and sends `{"t":…,"ptt":…}` **only
+    when it changes** — deliberately not on the 5 Hz telemetry line, because a press waiting behind
+    that throttle could lose up to 200 ms off the front of an utterance, on top of the ~140 ms the
+    audio device already costs to open, and the front of an utterance is where the verb is. A real
+    trigger produces two lines per press, not a stream. `PttSample`/`PttCache` carry it,
+    `GET /ptt/state` serves it, and `DcsPTT` implements the same `PTTSource` protocol the joystick
+    already does. Wire version `2026-09-22b` → **`2026-09-23a`**.
+
+    **The layer boundary is doing real work here.** `Export.lua` and the collector carry the raw
+    value and decide nothing; the two thresholds and both mitigations live in `DcsPTT`, where they
+    can be tuned and tested without copying a file into Saved Games. The endpoint still serves the
+    decided booleans alongside the raw value, so a consumer that wants them need not re-derive two
+    thresholds.
+
+    **`discard_if` is a hook on `CaptureLoop`, not a new `PTTSource` method.** Only `DcsPTT` has
+    anything to say about radio presses; widening the protocol would have made the joystick and
+    keyboard sources carry a method that always answers False.
   - [ ] Stage 6 — live sortie acceptance.
 
   **Settled before design (user, 2026-09-19):**

@@ -75,6 +75,7 @@ class CaptureLoop:
         sink: ClipSink,
         tail_s: float = DEFAULT_TAIL_S,
         sleep: Callable[[float], None] = time.sleep,
+        discard_if: Callable[[], bool] | None = None,
     ) -> None:
         self._ptt = ptt
         self._recorder = recorder
@@ -82,6 +83,15 @@ class CaptureLoop:
         self._sink = sink
         self._tail_s = tail_s
         self._sleep = sleep
+        # Asked once, at release: "was this clip addressed to someone else
+        # after all?" Only `DcsPTT` supplies it, and only for one case --
+        # the player moved the trigger to the radio stop mid-utterance, so
+        # what they said was for ATC, not the crew. It is a separate hook
+        # rather than part of `PTTSource` because the joystick and keyboard
+        # sources have nothing to say about it, and widening the protocol
+        # for one implementation would make both of them carry a method
+        # that always answers False.
+        self._discard_if = discard_if
         self._recording = False
 
     @property
@@ -112,6 +122,10 @@ class CaptureLoop:
                 clip = self._recorder.stop()
             except Exception as exc:  # noqa: BLE001 -- see class docstring
                 return [CaptureEvent("error", f"capture failed: {exc}")]
+            if self._discard_if is not None and self._discard_if():
+                return [
+                    CaptureEvent("dropped", "radio press -- not addressed to the crew")
+                ]
             verdict = self._gate.assess(clip)
             if not verdict.accepted:
                 return [CaptureEvent("dropped", verdict.reason or "rejected")]

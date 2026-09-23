@@ -119,7 +119,7 @@ local socket = require("socket.core")
 -- shipped 2026-09-09 and the whole chain was correct end to end; a Windows
 -- probe and an hour of tracing went into a bug that did not exist in the code,
 -- because nothing recorded which version of this file had produced the data.
-local EXPORT_SCRIPT_VERSION = "2026-09-22b"
+local EXPORT_SCRIPT_VERSION = "2026-09-23a"
 
 local HOST = "127.0.0.1"
 local PORT = 7790
@@ -251,6 +251,53 @@ end
 -- number/boolean/nil values. Export.lua has no JSON library available by
 -- default (see research doc finding 2) and the wire schema here is flat and
 -- small (~12 fields), so a general-purpose encoder isn't needed.
+--: Arg 738 is the pilot's stick trigger: 1.0 full press (radio), 0.5 right
+--: press (intercom), 0.0 released. First-party from the module's own
+--: clickabledata.lua and confirmed live 2026-09-23 -- see
+--: aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md and its three
+--: addenda, which also record that a full press TRANSITS 0.5 for 19-32 ms
+--: on its way to 1.0. That transit is why this script reports the raw
+--: value rather than a decided boolean: deciding "is the player talking to
+--: the crew" needs a debounce, and a debounce belongs where it can be
+--: tuned and tested without redeploying a file into Saved Games.
+local ARG_PILOT_PTT = 738
+
+--: Below this, two readings of arg 738 are the same reading. The arg is a
+--: graduated value, so an exact-equality check would send a line whenever
+--: it wobbled in the last decimal.
+local PTT_EPSILON = 0.01
+
+local last_ptt_sent = nil
+
+--: Reads the pilot's trigger and sends a line only when it has moved.
+--: Deliberately not part of the telemetry line: that line is throttled to
+--: 5 Hz and this must not be, and a trigger that changes twice a minute
+--: has no business riding a stream that ships ten fields twenty times a
+--: second.
+local function push_ptt_state(t)
+    if client == nil then
+        return -- nothing to send to yet; the next change will be sent
+    end
+    local ptt = safe_call(function()
+        return GetDevice(0):get_argument_value(ARG_PILOT_PTT)
+    end)
+    if ptt == nil then
+        return -- no mainpanel device (briefing screen, wrong airframe)
+    end
+    if last_ptt_sent ~= nil and math.abs(ptt - last_ptt_sent) < PTT_EPSILON then
+        return
+    end
+    last_ptt_sent = ptt
+    local ok, err = client:send('{"t":' .. string.format("%.3f", t)
+        .. ',"ptt":' .. string.format("%.3f", ptt) .. '}\n')
+    if not ok then
+        debug_log("ptt send failed: " .. tostring(err))
+        client:close()
+        client = nil
+    end
+end
+
+
 local function encode_json_line(fields, order)
     local parts = {}
     for i = 1, #order do
@@ -549,6 +596,14 @@ function LuaExportAfterNextFrame()
     -- throttle below -- a queued search command, or a long-press release
     -- deadline, must not wait behind the telemetry export cadence.
     poll_command_socket(t)
+    -- Slice 3 Stage 5: the same reasoning, more sharply. A push-to-talk
+    -- press that waited behind the 5 Hz throttle could lose up to 200 ms
+    -- off the front of an utterance, on top of the ~140 ms the audio device
+    -- already costs to open -- and the front of an utterance is where the
+    -- verb is ("SCAN east", "WATCH nearest"). So this reads every frame and
+    -- sends only on change: a real trigger produces two lines per press,
+    -- not a stream.
+    push_ptt_state(t)
     if pending_release_t ~= nil and t >= pending_release_t then
         safe_call(function()
             GetDevice(30):performClickableAction(WHEEL_CENTER_BUTTON, 0)

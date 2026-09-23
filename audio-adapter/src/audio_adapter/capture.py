@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from collections.abc import Callable
 
 from audio_capture import (
     DEFAULT_MAX_CLIP_S,
@@ -49,10 +50,12 @@ from audio_capture import (
     sox_available,
 )
 from capture_loop import CaptureLoop
-from ptt_source import JoystickPTT, KeyTogglePTT, PTTError, PTTSource
+from ptt_source import DcsPTT, JoystickPTT, KeyTogglePTT, PTTError, PTTSource
 from transcribe_client import TranscribeClient
 
 DEFAULT_ADAPTER_URL = "http://127.0.0.1:7795"
+#: The collector's own LAN API, on this same box when --ptt dcs is used.
+DEFAULT_COLLECTOR_URL = "http://127.0.0.1:7791"
 DEFAULT_POLL_HZ = 60.0
 
 
@@ -65,9 +68,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adapter-url", default=DEFAULT_ADAPTER_URL)
     parser.add_argument(
         "--ptt",
-        choices=("key", "joystick"),
+        choices=("key", "joystick", "dcs"),
         default="key",
-        help="talk control: a keypress (dev) or a joystick button (Windows)",
+        help=(
+            "talk control: a keypress (dev), a joystick button (Windows), "
+            "or the aircraft's own intercom trigger (needs a running collector)"
+        ),
+    )
+    parser.add_argument(
+        "--collector-url",
+        default=DEFAULT_COLLECTOR_URL,
+        help="collector to read GET /ptt/state from, for --ptt dcs",
     )
     parser.add_argument("--joystick-device", type=int, default=0)
     parser.add_argument(
@@ -114,8 +125,21 @@ def main(argv: list[str] | None = None) -> int:
     client = TranscribeClient(args.adapter_url)
 
     key_ptt: KeyTogglePTT | None = None
+    discard_if: Callable[[], bool] | None = None
     ptt: PTTSource
-    if args.ptt == "joystick":
+    if args.ptt == "dcs":
+        dcs_ptt = DcsPTT(args.collector_url)
+        ptt = dcs_ptt
+        # Only this source can say a clip was for the radio, so only this
+        # branch wires the hook.
+        discard_if = dcs_ptt.discard_requested
+        print(
+            f"PTT: the aircraft's intercom trigger, via {args.collector_url}/ptt/state.\n"
+            "  Right-press the stick trigger (the intercom stop) and hold.\n"
+            "  A full press is the radio -- it will not talk to Petrovich, and\n"
+            "  reaching it mid-utterance discards the clip."
+        )
+    elif args.ptt == "joystick":
         try:
             ptt = JoystickPTT(args.joystick_device, args.joystick_button)
         except PTTError as exc:
@@ -145,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         gate=gate,
         sink=client.transcribe,
         tail_s=args.tail_s,
+        discard_if=discard_if,
     )
     interval = 1.0 / args.poll_hz if args.poll_hz > 0 else 0.0
 
