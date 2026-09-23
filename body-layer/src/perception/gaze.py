@@ -158,6 +158,19 @@ class Gaze:
     half_width_deg: float
     label: str
 
+    #: Where the look is pointed vertically, body-relative degrees,
+    #: positive up (`plans/binocular-optic/plan.md` Stage 2). Zero -- level
+    #: -- for every scanning gaze, which is why it defaults to it and why
+    #: nothing before this needed it: the o'clock scan sweeps horizontally
+    #: and `within_gaze` tests azimuth alone, unchanged.
+    #:
+    #: It matters only for a *narrow* optic, and there it is decisive: a
+    #: ground contact 1 km away from 120 m AGL is ~6.9 degrees below the
+    #: horizon, well outside a binocular's 4.25-degree half-angle. With a
+    #: level boresight the instrument could never be aimed at the contacts
+    #: it exists to resolve.
+    center_elevation_deg: float = 0.0
+
 
 #: The forward hemisphere, matching `RelativeSector.full`'s own wedge --
 #: **not** the runtime default (module docstring). Exists as the explicit
