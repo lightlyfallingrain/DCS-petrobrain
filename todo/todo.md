@@ -131,14 +131,19 @@ Prioritize any open task here over any other task in this file or roadmap files.
 
 First flight of the o'clock scan loop. Six findings; two share a root cause.
 
-- [ ] **Show where Petrovich is looking. DO THIS FIRST — it gates the other judgements.** The pilot
+- [x] **Show where Petrovich is looking. DONE, merged 2026-09-22 (`4f89fc8`)** — the overlay now
+  names the cone he is looking at, which is what made the rest of this list judgeable.
+  **Originally:** it gated the other judgements. The pilot
   could not evaluate two of the card's four blocks: *"very difficult to judge when I don't visually
   see where Petrovich is looking"*. The scan loop, the dwell, and whether a 16 s flank revisit feels
   attentive are all unjudgeable without it. An overlay line naming the current gaze o'clock
   (`gaze_at(t_sim, plan)` is pure, so this is a read, not new state) would make the next sortie
   evaluable instead of impressionistic. Cheap, and everything else waits behind it.
 
-- [ ] **Scan and Watch must be standing modes, not one-shot tasks.** Root cause of two findings.
+- [x] **Scan and Watch must be standing modes, not one-shot tasks. DONE** — the mode semantics
+  merged with 2C (`4f89fc8`), and `watch_nearest`'s missing `PendingIntent` (flagged open at that
+  merge, so `Cancel Task` still had nothing to find) closed in `32346a0`. Cancel now ends every
+  governing kind and names each. Root cause of two findings.
   `belief/tasks.py`'s `tick` marks a task `succeeded` **the moment any contact is found in its
   area**, and `logger._active_gaze` only honours `status == "pending"` — so a commanded scan reverts
   to free scan on first contact, silently.
@@ -153,12 +158,15 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
     it as a fix; the semantics are the defect.
   - Note the shape: the code is correct for what it was designed as. The design was wrong.
 
-- [ ] **Callouts must not be backlogged.** Observed: *"I got callouts for unit at 12 o'clock when I
+- [x] **Callouts must not be backlogged. DONE, merged 2026-09-22 (`bba090c`)** — nothing is
+  rendered until the moment it is spoken, so a bearing cannot be stale by the time it is heard. Observed: *"I got callouts for unit at 12 o'clock when I
   had already flown past it several seconds ago."* A queue built ahead of time plays out stale.
   Pilot's own statement of the fix, and it is the right one: **"when a message ends, then determine
   what to say next."** Decide at speech time, from current belief — not at detection time.
 
-- [ ] **Aggregate repetitive callouts.** Seven lines observed where two would do:
+- [x] **Aggregate repetitive callouts. DONE, merged 2026-09-22 (`bba090c`)** — the seven observed
+  lines render as four in the fixture. Identification lines are never aggregated, which is what
+  stops a BTR-70 disappearing into "three infantry". Seven lines observed where two would do:
   ```
   infantry, 12 o'clock, 0.5 kilometres.
   infantry, 1 o'clock, 0.5 kilometres.
