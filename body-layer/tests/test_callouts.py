@@ -473,7 +473,7 @@ def test_group_never_speaks_an_exact_count_unless_every_member_is_attended_and_e
     }
 
     hedged = render_group_report([watched_and_exact, unwatched_and_exact])
-    assert hedged.text.startswith("a couple of trucks,")
+    assert hedged.text.startswith("couple trucks,")
 
     both_watched = render_group_report([watched_and_exact, watched_and_exact])
     assert both_watched.text.startswith("two trucks,")
@@ -560,7 +560,7 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     says to reuse (`speech._cardinality_phrase`, tightened here to require
     every member attended *and* exact before speaking a number) renders an
     unattended three-member group exactly like an unattended two-member
-    group: `"a couple of infantry, ..."` (`lo >= 2 and hi <= 3` covers
+    group: `"couple infantry, ..."` (`lo >= 2 and hi <= 3` covers
     both 2 and 3, and nothing in this scenario marks any contact
     watched/priority). This is a plan-example defect, not an
     implementation gap -- asserted here as the actually-produced text
@@ -727,10 +727,10 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
         poll(t)
 
     assert spoken == [
-        "a couple of infantry, 12 o'clock, 0.5 kilometres.",
-        "unit at 1 o'clock, very close is BTR-70.",
-        "unit at 12 o'clock, very close is truck.",
-        "a couple of infantry, 2 o'clock, very close.",
+        "couple infantry, 12 o'clock, 0.5 kilometres.",
+        "armor 1 o'clock, very close is BTR-70.",
+        "unit 12 o'clock, very close is truck.",
+        "couple infantry, 2 o'clock, very close.",
     ]
 
 
