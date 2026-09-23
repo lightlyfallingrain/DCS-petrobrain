@@ -241,10 +241,18 @@ body-side view and the slice numbering both files share.
     that never animates the cockpit control, which would have left the argument right and still
     dead. Full addendum: `aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md`.
 
-    **Gate on the intercom stop specifically (`abs(v - 0.5) < 0.1`), not SRS's `>= 0.1`.** The full
-    press is the player talking on the radio to someone else, and Petrovich has no business hearing
-    it; the half press routes to intercom regardless of the SPU-8 selector, so this is also what the
-    real aircraft does. SRS's threshold is right for SRS and wrong here.
+    **Gate on the intercom stop specifically, not SRS's `>= 0.1`.** The full press is the player
+    talking on the radio to someone else, and Petrovich has no business hearing it; the half press
+    routes to intercom regardless of the SPU-8 selector, so this is also what the real aircraft does.
+
+    **But `abs(v - 0.5) < 0.1` alone is not enough, and a second probe run proved it.** A full press
+    *transits* the half stop for 19–32 ms on its way to 1.0 — it is a two-stage mechanical trigger,
+    so it must. That bare gate would therefore open a capture on every radio call. Two mitigations,
+    covering different cases: **debounce the 0.5 state by ~100 ms** (three times the observed worst
+    transit, still far below any deliberate press-and-speak), and **treat a rise to 1.0 as an abort**
+    of any capture in flight, which catches a slow full press that dwells past the debounce. The
+    failure this prevents is silent — a discarded sub-threshold clip per radio transmission, which
+    presents as an audio problem rather than a trigger one.
 
     Remaining work is plumbing: `Export.lua` publishes the value, the collector caches it,
     `GET /ptt/state` exposes it, and a `DcsPTT` implements the same `PTTSource` protocol the
