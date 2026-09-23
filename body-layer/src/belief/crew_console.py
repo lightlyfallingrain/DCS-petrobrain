@@ -266,6 +266,19 @@ _CLOCK_REPORT_LABELS: dict[int, str] = {
     12: "twelve",
 }
 
+#: `scan_clock_<p>` -> the ownship-relative hour to scan (Stage 5,
+#: `plans/voice-command-completeness/plan.md` Decision 5) --
+#: `_CLOCK_REPORT_TOKENS`'s direct sibling for the `scan` verb rather than
+#: `report`, same nine forward hours for the same no-omniscience reason
+#: (Petrovich cannot see behind the aircraft, so scanning an hour he has
+#: no honest answer for is not worth wiring). This is the fine-grained
+#: ownship-relative vocabulary `_RELATIVE_SCAN_TOKENS` lacks: `left` spans
+#: three o'clock hours (11, 10, 9), and there was previously no way to say
+#: "just there" relative to the nose.
+_CLOCK_SCAN_TOKENS: dict[str, int] = {
+    f"scan_clock_{p}": p for p in (8, 9, 10, 11, 12, 1, 2, 3, 4)
+}
+
 #: `report_bearing_<compass>` -> `belief.attention.Sector` -- the
 #: compass-absolute half of the report vocabulary, `_BEARING_SCAN_TOKENS`'
 #: direct sibling for the `report` verb rather than `scan`.
@@ -353,6 +366,9 @@ def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) 
     if token in _CLOCK_REPORT_TOKENS:
         clock = _CLOCK_REPORT_TOKENS[token]
         return f"report {_CLOCK_REPORT_LABELS[clock]} o'clock"
+    if token in _CLOCK_SCAN_TOKENS:
+        clock = _CLOCK_SCAN_TOKENS[token]
+        return f"scan {_CLOCK_REPORT_LABELS[clock]} o'clock"
     if (
         token in ("scan_bearing_deg", "report_bearing_deg")
         and bearing_degrees is not None
@@ -378,6 +394,7 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
     set(_RELATIVE_SCAN_TOKENS)
     | set(_BEARING_SCAN_TOKENS)
     | set(_CLOCK_REPORT_TOKENS)
+    | set(_CLOCK_SCAN_TOKENS)
     | set(_BEARING_REPORT_TOKENS)
     | {
         "scan_bearing_deg",
@@ -612,6 +629,13 @@ class CrewConsole:
                 lines = self._handle_scan(
                     now_sim, sector=sector, sector_label=_SECTOR_SCAN_LABELS[sector]
                 )
+        elif token in _CLOCK_SCAN_TOKENS:
+            clock = _CLOCK_SCAN_TOKENS[token]
+            lines = self._handle_scan(
+                now_sim,
+                relative_clock_hour=clock,
+                sector_label=f"{_CLOCK_REPORT_LABELS[clock]} o'clock",
+            )
         elif token == "watch_nearest":
             lines = self._handle_watch_nearest(now_sim)
         elif token == "watch_nearest_air_defence":
@@ -769,6 +793,7 @@ class CrewConsole:
         sector_label: str,
         sector: Sector | None = None,
         relative_sector: RelativeSector | None = None,
+        relative_clock_hour: int | None = None,
     ) -> list[str]:
         """Registers a real `belief.tasks.PendingIntent` via `belief.tools.
         scan_area`, with `center`/`radius_m`/`reason` all fixed (ownship's
@@ -778,11 +803,12 @@ class CrewConsole:
         is a deliberate choice, not a missing value: an F10 sector scan
         should get everything visible within its wedge, per `todo/todo.md`'s
         "Scan geometry: drop the invented radius" -- the area's own
-        `radius_m` field documents the reasoning in full. Exactly one of
-        `sector`/`relative_sector` is set by the caller
-        (`handle_command`'s two lookup tables), never both --
-        `scan_area`/`ContactStore.add_area` would raise `ValueError` if
-        they were.
+        `radius_m` field documents the reasoning in full. At most one of
+        `sector`/`relative_sector`/`relative_clock_hour` (Stage 5's own
+        o'clock family, `plans/voice-command-completeness/plan.md`
+        Decision 5) is set by the caller (`handle_command`'s lookup
+        tables), never more than one -- `scan_area`/`ContactStore.add_area`
+        would raise `ValueError` if they were.
 
         **Fires no DCS effector, deliberately** (live-test finding
         2026-09-16). This handler used to call `aircraft_client.
@@ -834,6 +860,7 @@ class CrewConsole:
             now_sim,
             sector=sector,
             relative_sector=relative_sector,
+            relative_clock_hour=relative_clock_hour,
         )
         return [render_scan_readback(sector_label).text]
 
@@ -933,13 +960,14 @@ class CrewConsole:
         better than "whatever you last asked for".
 
         For a `scan_area` task, reads the frame fields (`relative_sector`/
-        `sector`) straight off the task's captured `area`. Unlike the
-        geometry fields, those two are never rewritten by `ContactStore.
-        reproject_relative_areas` -- it replaces `center`/`wedge_deg` only
-        -- so the captured reference is safe to read here, and going
-        through `store.get_area` would return the same frame anyway.
-        (`TaskStore.tick` *does* have to resolve the live area; see its own
-        docstring for why the two differ.)
+        `sector`/`relative_clock_hour`, Stage 5's own o'clock field) straight
+        off the task's captured `area`. Unlike the geometry fields, those
+        three are never rewritten by `ContactStore.reproject_relative_areas`
+        -- it replaces `center`/`wedge_deg` only -- so the captured
+        reference is safe to read here, and going through `store.get_area`
+        would return the same frame anyway. (`TaskStore.tick` *does* have to
+        resolve the live area; see its own docstring for why the two
+        differ.)
 
         For a `watch_contact` task (`plans/watch-as-standing-mode/
         plan.md`), always `"the watch"` -- never the watched contact's id
@@ -954,6 +982,8 @@ class CrewConsole:
         assert area is not None  # every scan_area task carries an area
         if area.relative_sector is not None:
             return f"scan {_RELATIVE_SCAN_LABELS[area.relative_sector]}"
+        if area.relative_clock_hour is not None:
+            return f"scan {_CLOCK_REPORT_LABELS[area.relative_clock_hour]} o'clock"
         if area.sector is not None:
             return f"scan {_SECTOR_SCAN_LABELS[area.sector]}"
         return "scan"

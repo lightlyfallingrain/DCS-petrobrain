@@ -100,6 +100,26 @@ _CLOCK_WORDS: dict[int, str] = {
 #: into a grammar, and it belongs to free speech once the brain layer exists.
 #: Commands with no F10 equivalent -- the first vocabulary this project
 #: added for voice on its own terms rather than by transcribing a menu.
+#: `scan_clock_<p>` -- the ownship-relative o'clock scan family (`plans/
+#: voice-command-completeness/plan.md` Stage 5, user direction 2026-09-23:
+#: *"'scan 1 o'clock' directs scan at a narrow sector that is own ship
+#: relative. That is needed."*). Own-ship-relative direction today is only
+#: `scan_ahead`/`scan_left`/`scan_right`/`scan_full` -- `left` alone spans
+#: three o'clock hours (11, 10, 9), a 90-degree wedge, and there was no way
+#: to say "just there" relative to the nose. Same nine forward hours as
+#: `report_clock_*`, for the identical no-omniscience reason (`FORWARD_
+#: CLOCK_POSITIONS`'s own comment).
+#:
+#: **Unbenched, like every token added here**: nine tokens with no
+#: recordings in this corpus, the same cost that kept `cancel_scan`/
+#: `cancel_watch` off voice until 2026-09-23 (see those tokens' own
+#: comment below) -- cheapest to add when the corpus is next re-recorded,
+#: not free today. Their recognition accuracy on this user's voice is
+#: unmeasured as of this stage.
+_SCAN_CLOCK_TOKENS: tuple[str, ...] = tuple(
+    f"scan_clock_{p}" for p in FORWARD_CLOCK_POSITIONS
+)
+
 VOICE_ONLY_TOKENS: tuple[str, ...] = (
     (
         "report_all",
@@ -110,6 +130,7 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
+    + _SCAN_CLOCK_TOKENS
 )
 
 #: Numeric bearings are a **slot, not an enumeration** (user direction,
@@ -335,6 +356,11 @@ for _position in FORWARD_CLOCK_POSITIONS:
     PHRASES[f"report_clock_{_position}"] = (
         f"report {_CLOCK_WORDS[_position]} o'clock",
     )
+    # `scan <clock>` -- Stage 5's ownship-relative o'clock scan family, one
+    # phrasing each like its `report_clock_*` sibling: the number word is
+    # the discriminating content, and a second carrier phrase would cost
+    # recording time without adding evidence about it.
+    PHRASES[f"scan_clock_{_position}"] = (f"scan {_CLOCK_WORDS[_position]} o'clock",)
 
 assert set(PHRASES) == set(TOKENS), "PHRASES and TOKENS have drifted apart"
 assert not set(LEGACY_F10_TOKENS) & set(VOICE_ONLY_TOKENS), "a token cannot be both"

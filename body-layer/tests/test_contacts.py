@@ -820,6 +820,64 @@ def test_add_area_rejects_sector_and_relative_sector_together() -> None:
         raise AssertionError("expected ValueError for sector + relative_sector")
 
 
+def test_add_area_rejects_relative_sector_and_relative_clock_hour_together() -> None:
+    # Stage 5 (`plans/voice-command-completeness/plan.md` Decision 5):
+    # `relative_clock_hour` joins `sector`/`relative_sector` as a third,
+    # pairwise mutually exclusive directional field.
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    try:
+        store.add_area(
+            center=center,
+            radius_m=500.0,
+            level="watch",
+            source="console",
+            relative_sector="ahead",
+            relative_clock_hour=1,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "expected ValueError for relative_sector + relative_clock_hour"
+        )
+
+
+def test_add_area_rejects_sector_and_relative_clock_hour_together() -> None:
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    try:
+        store.add_area(
+            center=center,
+            radius_m=500.0,
+            level="watch",
+            source="console",
+            sector="N",
+            relative_clock_hour=1,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for sector + relative_clock_hour")
+
+
+def test_add_area_accepts_relative_clock_hour_alone() -> None:
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    area = store.add_area(
+        center=center,
+        radius_m=None,
+        level="watch",
+        source="scan_area",
+        relative_clock_hour=1,
+    )
+
+    assert area.relative_clock_hour == 1
+    assert area.relative_sector is None
+    assert area.sector is None
+
+
 def test_reproject_relative_areas_updates_only_relative_areas() -> None:
     store = ContactStore()
     fixed = store.add_area(

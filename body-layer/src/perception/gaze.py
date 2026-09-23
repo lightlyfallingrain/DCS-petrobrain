@@ -267,10 +267,34 @@ class ScanPlan:
     time, so a scan a player just ordered starts at that sector's first
     leg. `command_t_sim` must be `None` exactly when `commanded_sector` is
     `None` -- `__post_init__` enforces this pairing rather than leaving it
-    an unchecked convention."""
+    an unchecked convention.
+
+    **`commanded_legs` (Stage 5, `plans/voice-command-completeness/
+    plan.md` Decision 5) is the same cycling mechanism for a commanded
+    scan that is not one of the four named `RelativeSector`s** -- a single
+    o'clock hour (`scan_clock_1`..`scan_clock_12`) is a one-leg tuple, and
+    a compass-absolute scan (`scan north`/`scan bearing 320`) converts to
+    its current-heading-relative legs every poll (`logger._active_gaze`,
+    via `legs_within_wedge` below). The architect's own reasoning for this
+    field, rather than widening `RelativeSector` with twelve more
+    literals: a single o'clock hour is not one of the four named sectors,
+    and adding twelve more literals would ripple through
+    `_RELATIVE_SECTOR_WEDGE_DEG`/`belief.attention`'s re-export/the label
+    tables for no shared behaviour -- `ahead`/`left`/`right`/`full` keep
+    their own name, wedge table, and every existing caller/test unchanged.
+    Mutually exclusive with `commanded_sector`: at most one may be set,
+    and `command_t_sim` must be set iff either one is."""
 
     commanded_sector: RelativeSector | None
     command_t_sim: float | None
+
+    #: See the class docstring's Stage 5 paragraph. `None` for free scan
+    #: and for every commanded scan expressible as a named `RelativeSector`
+    #: (unchanged, `commanded_sector` still carries those). Never empty --
+    #: `__post_init__` rejects a zero-length tuple, since a plan claiming a
+    #: commanded scan with nothing to look at is a construction bug, not a
+    #: legal "commanded, but nowhere."
+    commanded_legs: tuple[int, ...] | None = None
 
     #: A fixed direction to stare at, overriding the cycling legs entirely
     #: (`plans/binocular-optic/plan.md` Stage 2). Set only while binoculars
@@ -284,11 +308,19 @@ class ScanPlan:
     fixed_look: Gaze | None = None
 
     def __post_init__(self) -> None:
-        if (self.commanded_sector is None) != (self.command_t_sim is None):
+        if self.commanded_sector is not None and self.commanded_legs is not None:
+            raise ValueError(
+                "ScanPlan.commanded_sector and commanded_legs are mutually "
+                "exclusive -- set at most one"
+            )
+        commanded = self.commanded_sector is not None or self.commanded_legs is not None
+        if commanded != (self.command_t_sim is not None):
             raise ValueError(
                 "ScanPlan.command_t_sim must be set if and only if "
-                "commanded_sector is set"
+                "commanded_sector or commanded_legs is set"
             )
+        if self.commanded_legs is not None and len(self.commanded_legs) == 0:
+            raise ValueError("ScanPlan.commanded_legs must not be empty")
 
     @staticmethod
     def fixed_look_at(*, azimuth_deg: float, elevation_deg: float) -> ScanPlan:
@@ -329,22 +361,58 @@ def _gaze_for_clock_hour(clock_hour: int) -> Gaze:
     )
 
 
+def legs_within_wedge(
+    center_azimuth_deg: float, half_width_deg: float
+) -> tuple[int, ...]:
+    """The o'clock hours whose own gaze center (`_gaze_for_clock_hour`)
+    falls within `half_width_deg` of `center_azimuth_deg` (body-relative),
+    ordered by signed offset from `center_azimuth_deg` ascending -- a
+    left-to-right sweep, generalising `_SECTOR_LEGS`'s per-sector tables
+    to an arbitrary wedge (Stage 5, `plans/voice-command-completeness/
+    plan.md` Decision 5). `logger._active_gaze` is the one caller: it
+    converts an absolute compass-sector scan (`AttentionArea.sector`) into
+    `ScanPlan.commanded_legs` every poll, using that poll's own ownship
+    heading -- the absolute->relative conversion the module docstring's
+    "Commanded scan" section describes, and the mechanism that finally
+    makes `scan north` steer the naked eye."""
+
+    def _signed_offset(hour: int) -> float:
+        raw = _gaze_for_clock_hour(hour).center_azimuth_deg - center_azimuth_deg
+        return (raw + 180.0) % 360.0 - 180.0
+
+    hours = [
+        hour
+        for hour in range(1, 13)
+        if angular_delta_deg(
+            _gaze_for_clock_hour(hour).center_azimuth_deg, center_azimuth_deg
+        )
+        <= half_width_deg
+    ]
+    return tuple(sorted(hours, key=_signed_offset))
+
+
 def gaze_at(t_sim: float, plan: ScanPlan) -> Gaze:
     """The effective `Gaze` at `t_sim` under `plan` -- a pure function of
     sim time (module docstring, hard part 1): a modulo and a table index,
     never a mutation. Free scan indexes `SCAN_PLAN` by `t_sim %
     SCAN_CYCLE_PERIOD_S`; a commanded scan indexes that sector's own
-    `_SECTOR_LEGS` entry by elapsed time since `plan.command_t_sim`. A
-    plan carrying a `fixed_look` returns it unchanged -- still a pure
-    function of its inputs, just one that ignores the clock."""
+    `_SECTOR_LEGS` entry (or, Stage 5, `plan.commanded_legs` directly) by
+    elapsed time since `plan.command_t_sim`. A plan carrying a
+    `fixed_look` returns it unchanged -- still a pure function of its
+    inputs, just one that ignores the clock."""
     if plan.fixed_look is not None:
         return plan.fixed_look
-    if plan.commanded_sector is None:
+    legs: tuple[int, ...]
+    if plan.commanded_sector is not None:
+        legs = _SECTOR_LEGS[plan.commanded_sector]
+    elif plan.commanded_legs is not None:
+        legs = plan.commanded_legs
+    else:
         legs = SCAN_PLAN
+    if plan.commanded_sector is None and plan.commanded_legs is None:
         elapsed_s = t_sim % SCAN_CYCLE_PERIOD_S
     else:
         assert plan.command_t_sim is not None  # ScanPlan.__post_init__
-        legs = _SECTOR_LEGS[plan.commanded_sector]
         cycle_s = len(legs) * FOCUS_DWELL_S
         elapsed_s = (t_sim - plan.command_t_sim) % cycle_s
     index = min(int(elapsed_s // FOCUS_DWELL_S), len(legs) - 1)

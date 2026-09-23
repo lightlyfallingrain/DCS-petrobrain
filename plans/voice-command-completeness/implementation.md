@@ -131,3 +131,175 @@ touched for tests the plan didn't name (none found beyond the incorrect file ref
   `busy_until_sim` update. This is deliberately redundant rather than conditioned on the call site —
   `max()` makes the second call a no-op in that case — because the plan's own instruction is to call
   it from `_print`'s non-urgent path, not to special-case which callers of `_print` should skip it.
+
+---
+
+## Stage 5 (2026-09-23)
+
+Implemented Stage 5 of `plans/voice-command-completeness/plan.md`: the ownship-relative o'clock
+scan family (`scan_clock_1..12`) and the fix for compass scans never reaching gaze. Worked from
+`feature/binocular-optic` (which already carried Stages 1-4, merged), branching
+`feature/scan-clock-ownship-relative` off it.
+
+Before starting: confirmed the plan's named test files exist and grepped
+`commanded_sector`/`ScanPlan(` across `src`/`tests` for every existing call site that a `ScanPlan`
+field change would touch (`test_optic_policy.py`, `test_detection_trace.py`,
+`test_emission_pipeline.py`, `test_gaze.py`, `test_logger.py`) — all construct `ScanPlan` via
+keyword arguments only, so adding a new keyword-only `commanded_legs` field with a default was
+additive to every one of them; none needed rewriting.
+
+### Design choice: additive field, not a full `RelativeSector` retirement
+
+The plan's Decision 5 mandates "let `ScanPlan` carry legs directly" as the generalisation, but
+leaves open exactly how. Two readings were possible: (a) retire `commanded_sector` entirely in
+favour of always carrying legs, or (b) add a new, separate `commanded_legs` field alongside the
+existing one. Went with (b): `commanded_sector: RelativeSector | None` is untouched for
+`ahead`/`left`/`right`/`full` (same wedge table, same `_search_sweep`/label-table readers, zero
+test rewrites), and the new `commanded_legs: tuple[int, ...] | None` field carries a bare o'clock
+hour or a converted absolute-sector's legs. `gaze_at` picks `commanded_sector` over
+`commanded_legs` over free scan, in that priority order — the two are mutually exclusive by
+`__post_init__` construction, so this is not a real ambiguity, just a fixed tie-break. This reads
+(b) as the more literal implementation of "rather than widening `RelativeSector`... `_SECTOR_LEGS`
+generalises directly" — the existing four-sector machinery stays exactly as it was, and the new
+mechanism is bolted on beside it rather than folding it in and re-deriving `_SECTOR_LEGS`'s four
+entries as `commanded_legs` values too (which would have touched every existing `ScanPlan`
+construction site and, per the plan's own "sync owner" note on Stage 1 having kept tests green
+throughout, seemed like the wrong kind of churn for a stage explicitly scoped to new capability).
+
+### `legs_within_wedge`: a new general helper, not a lookup table
+
+The absolute→relative conversion (`logger._active_gaze` converting a compass `AttentionArea.sector`
+into legs using current heading) needed a way to ask "which o'clock hours fall inside this
+arbitrary wedge" — `_SECTOR_LEGS` only has four pre-baked answers for the four named sectors, none
+of which is guaranteed to align with an arbitrary heading-rotated compass sector. Wrote
+`perception.gaze.legs_within_wedge(center_azimuth_deg, half_width_deg)`: enumerates all 12 hours,
+filters to those within `half_width_deg` via the existing `angular_delta_deg`, and orders by signed
+offset from center ascending (a left-to-right sweep). This ordering is **not** guaranteed to match
+`_SECTOR_LEGS`'s own near-center-first sweep order for an equivalent wedge (verified directly:
+`legs_within_wedge(-60.0, 30.0) == (9, 10, 11)`, not `(11, 10, 9)` the way `_SECTOR_LEGS["left"]`
+reads) — the two tables serve different callers (a commanded named sector vs. a converted absolute
+one) and were never required to agree on sweep order, only on which hours qualify. Documented this
+explicitly in the test that would otherwise look like a bug (`test_legs_within_wedge_matches_the_
+left_sectors_own_legs_as_a_set`).
+
+### `AttentionArea.relative_clock_hour`: a third directional field, not a `RelativeSector` value
+
+`scan_clock_1` needs an ownship-relative, per-poll-reprojected `AttentionArea` the same way
+`relative_sector` already gets one — but a single o'clock hour isn't a `RelativeSector`. Added
+`relative_clock_hour: int | None = None` to `AttentionArea`, pairwise mutually exclusive with
+`sector`/`relative_sector` (extended `ContactStore.add_area`'s existing two-way exclusivity check
+into a three-way one, `belief.tools.scan_area` threads the new keyword through unchanged in shape).
+`project_relative_area` gained the clock-hour branch, reusing `perception.gaze._gaze_for_clock_hour`
+for the relative-center azimuth and `FOCUS_CONE_HALF_WIDTH_DEG` (15°) for the half-width — a single
+o'clock hour's own gaze cone width, not a wider sector wedge.
+
+### `logger._active_gaze` gained a `heading_true_deg` parameter, default `0.0`
+
+Required for the absolute→relative conversion. Rather than making every call site pass a real
+heading, defaulted it to `0.0` — every existing test that calls `_active_gaze`/`_apply_active_gaze`
+directly only ever constructs `relative_sector`-based tasks (heading-independent), so none needed
+updating. `run_once` passes `ownship.heading_true_deg` for real. New tests that exercise the
+compass-conversion path pass `heading_true_deg` explicitly.
+
+### `_search_sweep`/binocular search band: deliberately not extended
+
+`_search_sweep` (the binocular search-pattern sweep) still gates on `commanded_sector is None`
+alone — a bare o'clock hour or a converted compass scan gets no binocular search band, same as a
+compass scan got none before this stage (it never reached `_active_gaze` at all). Extending the
+search band to the new `commanded_legs` cases would need a half-width derivation with no obvious
+correct answer for a single 30°-wide o'clock leg (a zero-or-near-zero half-width degenerates
+`search_pattern` to a single look position, which may or may not be wanted) — left for a later
+stage since the plan's own scope for Stage 5 is gaze, not binocular search. Documented as a
+deliberate scope boundary in both `logger.py`'s docstring and the ROADMAP entry, not silently
+dropped.
+
+### Files Changed (Stage 5)
+
+**body-layer**
+- `src/perception/gaze.py` — `ScanPlan.commanded_legs: tuple[int, ...] | None`, generalised
+  `__post_init__`/`gaze_at`; new `legs_within_wedge` helper.
+- `src/belief/attention.py` — `AttentionArea.relative_clock_hour: int | None`; `project_relative_area`
+  handles it.
+- `src/belief/contacts.py` — `ContactStore.add_area` gains `relative_clock_hour`, three-way mutual
+  exclusivity.
+- `src/belief/tools.py` — `scan_area` threads `relative_clock_hour` through to `add_area`.
+- `src/belief/crew_console.py` — `_CLOCK_SCAN_TOKENS`, `_handle_scan`'s new `relative_clock_hour`
+  parameter, `handle_command`/`_describe_task_for_speech`/`_describe_token_for_confirm`/
+  `DISPATCHED_COMMAND_TOKENS` all extended.
+- `src/logger.py` — `_active_gaze` gains `heading_true_deg`, resolves `relative_clock_hour`/`sector`
+  in addition to `relative_sector`; `run_once`'s call site updated; `_format_gaze_line` gains a
+  `commanded_legs` branch; `_search_sweep` docstring notes the deliberate non-extension.
+- `body-layer/CLAUDE.md`, `body-layer/ROADMAP.md`, `todo/todo.md` — prose/status updates, closing
+  both deferred backlog items this stage resolves.
+- Tests: `tests/test_gaze.py`, `tests/test_attention.py`, `tests/test_contacts.py`,
+  `tests/test_logger.py`, `tests/test_crew_console.py`.
+
+**audio-adapter**
+- `src/vocabulary.py` — nine `scan_clock_1..12` tokens (`_SCAN_CLOCK_TOKENS`) added to
+  `VOICE_ONLY_TOKENS`, one phrasing each in `PHRASES`.
+- `tests/test_command_matcher.py` — `"scan one o'clock"` added to the exact-phrase-per-family case
+  table, proving the new tokens are reachable through the real match pipeline, not just present in
+  the vocabulary tables.
+
+### Tests Added
+
+**body-layer**
+- `tests/test_gaze.py` — `ScanPlan` mutual-exclusivity/empty-legs validation; `commanded_legs`
+  single-hour and multi-hour cycling (cross-checked against the equivalent `commanded_sector`
+  plan); `fixed_look` still wins over `commanded_legs`; `legs_within_wedge` at dead-ahead, at the
+  rear (`+-180` wraparound), matched against `left`'s own wedge as a set, and a full-circle sweep
+  asserting no compass-sector half-width (45°) ever yields zero legs.
+- `tests/test_attention.py` — `project_relative_area` rotating a `relative_clock_hour` area by
+  heading, including the `360`-wraparound case (mirrors the existing `relative_sector` tests).
+- `tests/test_contacts.py` — `add_area`'s three-way mutual exclusivity (`relative_sector` +
+  `relative_clock_hour`, `sector` + `relative_clock_hour`), and accepting `relative_clock_hour`
+  alone.
+- `tests/test_logger.py` — `_active_gaze` resolving a `relative_clock_hour` task; the measured
+  pre-existing defect reproduced directly (`_active_gaze` returning `FREE_SCAN_PLAN` for a
+  compass-only task, pre-Stage-5 behaviour, as a documented regression marker); the compass→legs
+  conversion at heading 0 and heading 90 (proving the conversion tracks current heading, not a
+  frozen one); `_format_gaze_line`'s `commanded_legs` branch; and the stage's own required
+  end-to-end test — `test_run_once_compass_scan_actually_changes_naked_eye_gaze` — asserting the
+  `ScanPlan` actually assigned to `NakedEyePerceptionSource` after a `scan north` task, and that
+  `gaze_at` on that plan produces a *different* `Gaze` than free scan would have at the same
+  `t_sim`, not merely a differently-typed `ScanPlan` object.
+- `tests/test_crew_console.py` — `scan_clock_1` task registration (`relative_clock_hour` set,
+  `relative_sector`/`sector` both `None`), its readback wording, its cancel-readback wording
+  (`_describe_task_for_speech`'s third branch), and its confirm-prompt wording
+  (`_describe_token_for_confirm`). `DISPATCHED_COMMAND_TOKENS`'s existing completeness test covers
+  all nine new tokens automatically (no per-token test needed there).
+
+**audio-adapter**
+- `tests/test_command_matcher.py` — `"scan one o'clock"` -> `scan_clock_1` added to
+  `test_exact_phrase_hits_every_token_family`.
+
+### Checks
+
+**body-layer/**
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (strict, `PYTHONPATH=src:../world-model/src`): pass, no issues in 45 source files
+- `pytest tests -q`: **1076 passed, 4 xfailed** (baseline 1051 passed / 4 xfailed — 25 new tests, no
+  regressions)
+
+**audio-adapter/**
+- `ruff check src tests`: pass
+- `mypy src`: pass, no issues in 15 source files
+- `pytest tests -q`: **179 passed, 1 skipped** (baseline 179 passed / 1 skipped — no new test
+  functions added, one new case folded into an existing parametrised-by-dict test, no regressions)
+
+### Notable Discoveries
+
+- **The nine new tokens are genuinely unbenched.** No recordings of `scan_clock_1..12` exist in
+  this project's corpus (`audio-adapter/research/2026-09-19-corpus-bench-results.md` predates
+  them entirely) — their recognition accuracy on the user's own voice is unmeasured, same cost
+  class the plan itself names for `cancel_scan`/`cancel_watch` before 2026-09-23. Flagged in
+  `vocabulary.py`'s own comment so a future reader does not assume bench coverage that was never
+  run.
+- **`legs_within_wedge`'s sweep order genuinely diverges from `_SECTOR_LEGS`'s for an equivalent
+  wedge** (see "Design choice" above) — worth knowing before reusing this helper anywhere that
+  cares about sweep order rather than just membership, since it is easy to assume the two agree.
+- **The binocular search band gap for the new commanded-legs cases is a real, if narrow, product
+  gap**: a player scanning `1 o'clock` or a compass direction gets no glassing sweep the way
+  `ahead`/`left`/`right`/`full` already do. Left open deliberately (see "Design choice" above) —
+  worth a follow-on stage if the user wants it.

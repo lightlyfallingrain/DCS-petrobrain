@@ -189,6 +189,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
+from belief.attention import _SECTOR_CENTER_DEG, _SECTOR_HALF_WIDTH_DEG
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
@@ -217,6 +218,7 @@ from perception.gaze import (
     Gaze,
     ScanPlan,
     gaze_at,
+    legs_within_wedge,
 )
 from perception.geometry import GeoPosition, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
@@ -456,7 +458,7 @@ class ConsolePerceptionRunner:
                 ownship.heading_true_deg,
             )
         )
-        self.scan_plan = _active_gaze(self.tasks)
+        self.scan_plan = _active_gaze(self.tasks, ownship.heading_true_deg)
         self.optic_state, optic_decision = decide_optic(
             self.optic_state,
             now_sim=ownship.t_sim,
@@ -503,29 +505,54 @@ class ConsolePerceptionRunner:
         return observations
 
 
-def _active_gaze(tasks: TaskStore) -> ScanPlan:
-    """The `ScanPlan` implied by whatever ownship-relative scan sector is
-    currently commanded (`plans/detection-cones-slice2/plan.md`'s 2B,
-    closing `todo/todo.md`'s "Scan commands should drive naked-eye
-    perception"; generalised from a static `Gaze` to a `ScanPlan` by 2C) --
-    or `FREE_SCAN_PLAN` (the o'clock scan loop, `perception.gaze`'s own
-    module docstring) when no such command is pending.
+def _active_gaze(tasks: TaskStore, heading_true_deg: float = 0.0) -> ScanPlan:
+    """The `ScanPlan` implied by whatever scan is currently commanded
+    (`plans/detection-cones-slice2/plan.md`'s 2B, closing `todo/todo.md`'s
+    "Scan commands should drive naked-eye perception"; generalised from a
+    static `Gaze` to a `ScanPlan` by 2C, and generalised again by Stage 5
+    of `plans/voice-command-completeness/plan.md` to cover every directional
+    field `AttentionArea` can carry, not only `relative_sector`) -- or
+    `FREE_SCAN_PLAN` (the o'clock scan loop, `perception.gaze`'s own module
+    docstring) when no such command is pending.
 
-    Reads `PendingIntent.area.relative_sector`/`created_sim` directly,
-    never the store's live re-projected `AttentionArea` (`ContactStore.
-    reproject_relative_areas`) -- a relative sector's *direction* is
-    body-relative and invariant under reprojection; only its absolute
-    world-bearing projection changes with ownship heading, which this
-    function has no use for. This also sidesteps `belief.tasks`'s own
-    documented staleness caveat around `task.area` (its module docstring)
-    entirely, since nothing here needs the live area at all.
-    `task.created_sim` becomes `ScanPlan.command_t_sim` -- the sim time the
-    scan was ordered, which is what a commanded scan's o'clock legs cycle
-    from (`perception.gaze.gaze_at`'s own docstring).
+    Reads `PendingIntent.area.relative_sector`/`relative_clock_hour`/
+    `sector`/`created_sim` directly, never the store's live re-projected
+    `AttentionArea` (`ContactStore.reproject_relative_areas`) -- a relative
+    sector's or o'clock hour's *direction* is body-relative and invariant
+    under reprojection; only its absolute world-bearing projection changes
+    with ownship heading, which this function resolves itself via
+    `heading_true_deg` rather than reading off a stale live projection.
+    This also sidesteps `belief.tasks`'s own documented staleness caveat
+    around `task.area` (its module docstring) entirely, since nothing here
+    needs the live area at all. `task.created_sim` becomes `ScanPlan.
+    command_t_sim` -- the sim time the scan was ordered, which is what a
+    commanded scan's o'clock legs cycle from (`perception.gaze.gaze_at`'s
+    own docstring).
+
+    **Stage 5's fix, in one sentence: a compass-absolute `AttentionArea.
+    sector` (`scan north`/`scan bearing 320`) now also resolves here**,
+    converted to `ScanPlan.commanded_legs` via `perception.gaze.
+    legs_within_wedge` using *this poll's* `heading_true_deg` -- before
+    this stage, a `sector`-only task (no `relative_sector`) was silently
+    skipped by this function's own filter and fell through to
+    `FREE_SCAN_PLAN`, which is the measured defect this plan's Decision 5
+    names: "scan north" registered an attention area and spoke a readback
+    while Petrovich kept free-scanning. Because `_active_gaze` runs every
+    poll (`run_once`), the conversion is naturally recomputed each tick as
+    heading changes -- `gaze_at` itself stays a pure function of `t_sim`
+    alone (`perception.gaze`'s own hard part 1), the legs it cycles are
+    just refreshed by the caller before each poll. A single o'clock hour
+    (`AttentionArea.relative_clock_hour`, Stage 5's new field for
+    `scan_clock_1`..`scan_clock_12`) resolves to a one-leg `commanded_legs`
+    tuple the same way `ahead` already degenerates to a static gaze
+    (`perception.gaze.ScanPlan`'s own docstring).
 
     The most recently created still-active `scan_area` task wins when more
     than one is active -- a later scan command is what a player issuing
-    "scan left" then "scan right" would expect to take effect.
+    "scan left" then "scan right" would expect to take effect. A task
+    carrying no directional field at all (`sector`, `relative_sector`, and
+    `relative_clock_hour` all `None`) is skipped, same as before Stage 5 --
+    it has nothing for this function to steer by.
 
     **Unaffected by `watch_contact` tasks** (`plans/watch-as-standing-mode/
     plan.md`) -- the `kind == "scan_area"` check above already excludes
@@ -550,14 +577,29 @@ def _active_gaze(tasks: TaskStore) -> ScanPlan:
     reach a resolved task) or a newer scan command (via this function's own
     "most recent" tie-break) ends it."""
     for task in reversed(tasks.tasks):
-        if (
-            task.kind == "scan_area"
-            and task.status != "cancelled"
-            and task.area is not None
-            and task.area.relative_sector is not None
-        ):
+        if task.kind != "scan_area" or task.status == "cancelled" or task.area is None:
+            continue
+        area = task.area
+        if area.relative_sector is not None:
             return ScanPlan(
-                commanded_sector=task.area.relative_sector,
+                commanded_sector=area.relative_sector,
+                command_t_sim=task.created_sim,
+            )
+        if area.relative_clock_hour is not None:
+            return ScanPlan(
+                commanded_sector=None,
+                commanded_legs=(area.relative_clock_hour,),
+                command_t_sim=task.created_sim,
+            )
+        if area.sector is not None:
+            absolute_center = _SECTOR_CENTER_DEG[area.sector]
+            relative_center = (
+                absolute_center - heading_true_deg + 180.0
+            ) % 360.0 - 180.0
+            legs = legs_within_wedge(relative_center, _SECTOR_HALF_WIDTH_DEG)
+            return ScanPlan(
+                commanded_sector=None,
+                commanded_legs=legs,
                 command_t_sim=task.created_sim,
             )
     return FREE_SCAN_PLAN
@@ -611,6 +653,14 @@ def _search_sweep(
     The band swept starts where the naked eye runs out and ends where the
     binoculars do -- sweeping nearer than that re-covers ground the scan
     phase alternating with this one has already covered.
+
+    **Still gated on `commanded_sector` alone, not `commanded_legs`**
+    (Stage 5, `plans/voice-command-completeness/plan.md`): a bare o'clock
+    hour or a converted compass-sector scan gets no binocular search band.
+    `SECTOR_WEDGE_DEG` has no entry for either -- there is no named sector
+    to look up a half-width for -- and Stage 5's own scope is gaze, not
+    binocular search; extending this to the new commanded-legs cases is
+    left for a later stage if wanted.
     """
     if scan_plan.commanded_sector is None:
         return []
@@ -681,12 +731,18 @@ def _format_gaze_line(scan_plan: ScanPlan, gaze: Gaze) -> str:
     the scan loop at all without this). `gaze.label` is always an o'clock
     hour under `gaze_at` (`"11_oclock"`, `perception.gaze.Gaze`'s own
     docstring: a label meant for exactly this kind of debug/trace display),
-    reformatted here rather than branched on."""
+    reformatted here rather than branched on. A `commanded_legs`-only plan
+    (Stage 5: a bare o'clock hour, or a compass-sector scan converted to
+    relative legs) has no single sector name to speak -- it says "commanded
+    scan" rather than naming a sector, since the sector-naming detail lives
+    on `AttentionArea`/`crew_console.py`'s own readback, not here."""
     where = gaze.label.replace("_oclock", " o'clock")
     if scan_plan.commanded_sector is not None:
         return (
             f"Petrovich: looking {where} (commanded {scan_plan.commanded_sector} scan)"
         )
+    if scan_plan.commanded_legs is not None:
+        return f"Petrovich: looking {where} (commanded scan)"
     return f"Petrovich: looking {where} (free scan)"
 
 
