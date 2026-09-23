@@ -218,3 +218,31 @@ deliberate press (including the short one) produced at least one logged sample.
 - ~~**Full-press (radio-transmit) numeric value of arg 738**~~ — **RESOLVED 2026-09-20: 1.0**,
   stated directly by `arg_value = {1.0, 0.5}` in `clickabledata.lua:1009-1025`. The guess of "~1.0"
   was right.
+
+---
+
+### Addendum 2026-09-23 — the stdlib-only fallback is confirmed working, first-party
+
+The last bullet of "Possible Approaches" listed raw Windows joystick polling through `winmm.dll`'s
+`joyGetPosEx` as a fallback "if, for some reason, no cockpit-argument PTT path holds up", and noted
+it as a real but untested option. It has now been **run on the user's own Windows box**
+(`audio-adapter/tools/probe_joystick.py`, which shares its binding with the production
+`audio-adapter/src/ptt_source.py` rather than carrying its own copy):
+
+- **Four devices answer, ids 0-3.** The specific doubt was that `joyGetPosEx` predates DirectInput
+  and addresses devices by a small numeric id, so a multi-device pit (stick, throttle, pedals)
+  might appear only partially. It does not — all four are enumerated and pollable.
+- **A held press is read as a held state.** Device 2, button 0, **613 ms held**, down and up edges
+  both captured. This was the second half of the doubt: an API that reported only edges would have
+  been unusable as a talk gate.
+- **Evidence: reproduced-locally** (the user ran it; output pasted into the session).
+
+This does not change the recommendation for Stage 5 — arg 738's right press remains the in-fiction
+control, needs no new binding, and its declared values are already first-party. What it changes is
+that **Stage 4 no longer depends on Stage 5**: capture has a real, held, physical talk control on
+Windows today, with DCS closed, so the whole speech chain can be exercised before any sim
+dependency exists. That was the reason for preferring a joystick button over the plan's manual
+`--capture-window-s` stub, and it now rests on a measurement rather than an expectation.
+
+**Not probed, still:** `Export.probe-ptt.lua` remains unrun, so what `get_argument_value(738)`
+actually *returns* mid-sortie is still a different claim from what `clickabledata.lua` declares.

@@ -213,6 +213,17 @@ body-side view and the slice numbering both files share.
       actual gesture, so the trigger never has to be replaced — only the source behind the
       protocol, which is what Stage 5 does.
 
+    **The joystick doubt is closed — probed on the Windows box 2026-09-23.** `joyGetPosEx` reports
+    **four devices (ids 0-3)**, so a multi-device pit does appear under legacy ids rather than only
+    the first controller, and a real press-and-hold on **device 2, button 0** was read cleanly at
+    **613 ms held**. Both halves of the doubt answered at once: the API sees the hardware, and it
+    reports a *held* state rather than an edge. Windows therefore gets the real gesture — hold to
+    talk — where the Mac's keyboard source can only offer press-to-start/press-to-stop.
+
+    Capture on that box is `--ptt joystick --joystick-device 2 --joystick-button 0`. Note the button
+    is 0-based as the API and the probe report it; DCS's own binding UI numbers from 1, so this is
+    "JOY_BTN1" there.
+
     **The finding worth carrying forward: the first ~0.14 s after a press is not captured.** sox
     returns from `Popen` in ~2 ms but the audio device is not open yet, and the loss is a fixed
     open cost, not a proportional one — four runs at holds from 0.6 s to 2.0 s lost 0.134-0.144 s
