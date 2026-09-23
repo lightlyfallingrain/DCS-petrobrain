@@ -406,3 +406,54 @@ def test_an_all_filler_transmission_stays_an_ordinary_no_match() -> None:
     `plans/inbound-speech/plan.md` instead.
     """
     assert match_transcript("okay").token is None
+
+
+class TestNarrowCancels:
+    """`cancel scan` / `cancel watch` by voice (user, 2026-09-23).
+
+    These tokens existed on the F10 menu first and were deliberately kept
+    out of the spoken vocabulary, because this subproject's 99.2% gate was
+    measured on a recorded corpus that contains no examples of them. The
+    user's answer was that a menu-only way to say something they are
+    already saying out loud is the wrong side of that trade. The risk that
+    remains is real and worth naming: **these two phrasings are unbenched**
+    -- the tests below prove they are unambiguous against the rest of the
+    vocabulary, which is a different claim from proving whisper hears them.
+    """
+
+    def test_cancel_scan_resolves(self) -> None:
+        assert match_transcript("cancel scan").token == "cancel_scan"
+
+    def test_cancel_watch_resolves(self) -> None:
+        assert match_transcript("cancel watch").token == "cancel_watch"
+
+    def test_stop_scan_is_a_cancel_not_a_silence_request(self) -> None:
+        """`stop` alone silences Petrovich, so the two readings share a
+        first word. The stop rule counts only when the whole transmission
+        is that single word, which is what keeps these apart."""
+        assert match_transcript("stop scan").token == "cancel_scan"
+        assert match_transcript("stop scanning").token == "cancel_scan"
+        assert match_transcript("stop watch").token == "cancel_watch"
+        assert match_transcript("stop watching").token == "cancel_watch"
+
+    def test_a_bare_stop_still_silences(self) -> None:
+        assert match_transcript("stop").token == "stop_talking"
+
+    def test_a_bare_cancel_stays_the_all_modes_form(self) -> None:
+        """An unqualified "cancel" cannot name which mode it means, and
+        guessing is exactly what the narrow tokens were introduced to
+        stop. The all-modes reading is the honest one, and its readback
+        names everything it stopped."""
+        assert match_transcript("cancel").token == "cancel_task"
+        assert match_transcript("cancel task").token == "cancel_task"
+
+    def test_the_three_cancels_are_separable(self) -> None:
+        """None of them is ambiguous against the others -- the property
+        that matters, since all three destroy standing state."""
+        for phrase in ("cancel", "cancel task", "cancel scan", "cancel watch"):
+            assert match_transcript(phrase).ambiguous is False, phrase
+
+    def test_a_scan_command_is_not_a_cancel(self) -> None:
+        """ "scan left" and "cancel scan" share a word; confusing them
+        would start a scan when the pilot asked to end one."""
+        assert match_transcript("scan left").token == "scan_left"

@@ -19,6 +19,7 @@ from __future__ import annotations
 from belief.voice_commands import (
     ACT_FLOOR,
     ACT_FLOOR_CANCEL,
+    CANCEL_TOKENS,
     CONFIRM_FLOOR,
     BandDecision,
     classify_response,
@@ -177,3 +178,42 @@ def test_measured_constants_have_documented_grounding() -> None:
     assert ACT_FLOOR == 0.60
     assert ACT_FLOOR_CANCEL == 0.80
     assert CONFIRM_FLOOR == 0.35
+
+
+def test_every_cancel_token_is_held_to_the_higher_floor() -> None:
+    """The narrow cancels (2026-09-23) must not inherit the ordinary act
+    floor. A mis-heard "stop watch" destroys standing state exactly as a
+    mis-heard "cancel task" does, and the reason the higher floor exists
+    does not care which mode is being ended -- this asserts the property
+    rather than the list, so a fourth cancel added later fails here if it
+    is forgotten."""
+    just_under = (ACT_FLOOR_CANCEL + ACT_FLOOR) / 2
+    assert ACT_FLOOR < just_under < ACT_FLOOR_CANCEL
+
+    for token in CANCEL_TOKENS:
+        decision = classify_response(
+            token=token,
+            match_ratio=1.0,
+            confidence=just_under,
+            verb_anchored=True,
+            ambiguous=False,
+        )
+        assert decision.disposition == "confirm", token
+
+
+def test_a_non_cancel_token_acts_at_that_same_confidence() -> None:
+    """The contrast that makes the test above mean something: the exact
+    confidence that only confirms a cancel is enough to act on a scan."""
+    just_under = (ACT_FLOOR_CANCEL + ACT_FLOOR) / 2
+    decision = classify_response(
+        token="scan_left",
+        match_ratio=1.0,
+        confidence=just_under,
+        verb_anchored=True,
+        ambiguous=False,
+    )
+    assert decision.disposition == "act"
+
+
+def test_the_narrow_cancels_are_in_the_cancel_set() -> None:
+    assert {"cancel_task", "cancel_scan", "cancel_watch"} <= CANCEL_TOKENS

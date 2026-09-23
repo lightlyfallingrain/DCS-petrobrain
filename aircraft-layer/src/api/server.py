@@ -99,6 +99,10 @@ the body/brain process, on either Windows or Mac (compute topology note in
   unconfigured -- there is no live effector here to be "not configured,"
   only an always-valid, possibly-empty queue.
 
+- `GET /ptt/state` -> the pilot's push-to-talk trigger, or `null` before it
+  has moved at all (`plans/inbound-speech/plan.md` Stage 5). A pure,
+  idempotent read of a *state*, not a queue: the capture process polls it
+  tens of times a second and must never consume anything by asking.
 - `GET /unit_velocity/latest` -> the most recent `UnitVelocitySnapshot`
   (`plans/movement-detection/plan.md` Stage 1) as JSON, or JSON `null` on
   the same "not an error" basis as every other `/latest` endpoint. A
@@ -141,6 +145,7 @@ from collector.cache import (
     F10CommandQueue,
     PetrovichIndicationCache,
     PetrovichWheelCache,
+    PttCache,
     TelemetryCache,
     UnitVelocityCache,
     WorldObjectsCache,
@@ -157,6 +162,7 @@ DEFAULT_PORT = 7791
 _TELEMETRY_LATEST_PATH = "/telemetry/latest"
 _WORLD_OBJECTS_LATEST_PATH = "/world_objects/latest"
 _UNIT_VELOCITY_LATEST_PATH = "/unit_velocity/latest"
+_PTT_STATE_PATH = "/ptt/state"
 _PETROVICH_INDICATION_LATEST_PATH = "/petrovich_indication/latest"
 _PETROVICH_WHEEL_LATEST_PATH = "/petrovich_wheel/latest"
 _TEXT_PUSH_PATH = "/text/push"
@@ -189,6 +195,15 @@ def _handle_unit_velocity_latest(
     return None if snapshot is None else snapshot.to_dict()
 
 
+def _handle_ptt_state(cache: PttCache) -> dict[str, Any] | None:
+    """`null` until the trigger first moves. That is the ordinary startup
+    state, not an error -- `Export.lua` sends a line only on change, so an
+    untouched trigger produces nothing. A consumer reads `null` as "not
+    pressed", which is also what it means."""
+    sample = cache.latest()
+    return None if sample is None else sample.to_api_dict()
+
+
 def _handle_petrovich_indication_latest(
     cache: PetrovichIndicationCache,
 ) -> dict[str, Any] | None:
@@ -217,6 +232,7 @@ def _make_handler(
     command_sender: CommandSender | None,
     audio_sender: AudioPlaybackSender | None,
     unit_velocity_cache: UnitVelocityCache,
+    ptt_cache: PttCache,
 ) -> type[BaseHTTPRequestHandler]:
     class TelemetryRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -233,6 +249,9 @@ def _make_handler(
                 self._respond_json(
                     200, _handle_unit_velocity_latest(unit_velocity_cache)
                 )
+                return
+            if path == _PTT_STATE_PATH:
+                self._respond_json(200, _handle_ptt_state(ptt_cache))
                 return
             if path == _PETROVICH_INDICATION_LATEST_PATH:
                 self._respond_json(
@@ -411,6 +430,7 @@ class TelemetryAPIServer:
         f10_command_queue: F10CommandQueue | None = None,
         audio_sender: AudioPlaybackSender | None = None,
         unit_velocity_cache: UnitVelocityCache | None = None,
+        ptt_cache: PttCache | None = None,
     ) -> None:
         # `world_objects_cache`/`petrovich_indication_cache`/
         # `petrovich_wheel_cache`/`f10_command_queue`/`unit_velocity_cache`
@@ -447,6 +467,7 @@ class TelemetryAPIServer:
             if unit_velocity_cache is not None
             else UnitVelocityCache()
         )
+        self._ptt_cache = ptt_cache if ptt_cache is not None else PttCache()
         self._text_sender = text_sender
         self._command_sender = command_sender
         self._audio_sender = audio_sender
@@ -487,6 +508,7 @@ class TelemetryAPIServer:
                 self._command_sender,
                 self._audio_sender,
                 self._unit_velocity_cache,
+                self._ptt_cache,
             ),
         )
         logger.info("telemetry API listening on %s:%d", self._host, self.port)

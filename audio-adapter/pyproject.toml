@@ -30,4 +30,8 @@ known-first-party = [
     "vocabulary",
     "command_matcher",
     "transcript_queue",
+    "audio_capture",
+    "capture_loop",
+    "ptt_source",
+    "transcribe_client",
 ]

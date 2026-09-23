@@ -194,8 +194,168 @@ body-side view and the slice numbering both files share.
       floor. The fix points the constant at the quantity it was measured on, and gives the brain
       layer its **second route in**: speech heard clearly that matches no command is free speech,
       not a failure.
-  - [ ] Stage 4 — Windows capture.
-  - [ ] Stage 5 — real PTT through DCS.
+  - [x] **Stage 4 — capture. FLOWN AND ACCEPTED 2026-09-23.** Built 2026-09-22
+    (`feature/inbound-speech-stage4`). Voice through the live path works: the clip is captured,
+    recognised, dispatched and read back.
+
+    `ptt_source.py` (`PTTSource` protocol, `JoystickPTT` over winmm, `KeyTogglePTT` for the Mac),
+    `audio_capture.py` (`SoxRecorder`, `ClipGate`), `capture_loop.py` (`CaptureLoop`),
+    `transcribe_client.py`, and `python -m audio_adapter.capture`.
+
+    **Two deviations from the plan, both narrowing it:**
+    - **sox, not `ffmpeg -f dshow`.** Part of Stage 4's stated job was discovering the dshow device
+      name for the user's headset — but `tools/record_corpus.py` already recorded 252 corpus clips
+      through that exact headset with sox, so the driver name, input-argument order, buffer size
+      and truncation repair are all already settled against the hardware that matters. A second
+      audio binary would have re-learned them and added a dependency.
+    - **A real PTT, not the planned manual `--capture-window-s` trigger.** The stub existed to
+      avoid a DCS dependency; a joystick button avoids it just as completely while being the
+      actual gesture, so the trigger never has to be replaced — only the source behind the
+      protocol, which is what Stage 5 does.
+
+    **The joystick doubt is closed — probed on the Windows box 2026-09-23.** `joyGetPosEx` reports
+    **four devices (ids 0-3)**, so a multi-device pit does appear under legacy ids rather than only
+    the first controller, and a real press-and-hold on **device 2, button 0** was read cleanly at
+    **613 ms held**. Both halves of the doubt answered at once: the API sees the hardware, and it
+    reports a *held* state rather than an edge. Windows therefore gets the real gesture — hold to
+    talk — where the Mac's keyboard source can only offer press-to-start/press-to-stop.
+
+    Capture on that box is `--ptt joystick --joystick-device 2 --joystick-button 0`. Note the button
+    is 0-based as the API and the probe report it; DCS's own binding UI numbers from 1, so this is
+    "JOY_BTN1" there.
+
+    **The finding worth carrying forward: the first ~0.14 s after a press is not captured.** sox
+    returns from `Popen` in ~2 ms but the audio device is not open yet, and the loss is a fixed
+    open cost, not a proportional one — four runs at holds from 0.6 s to 2.0 s lost 0.134-0.144 s
+    every time. `record_corpus.py` solved the same thing with a 0.35 s preroll before prompting,
+    which a PTT gate cannot do because the press *is* the prompt. Left uncorrected on purpose: the
+    natural press-then-speak gesture leaves more than that, and the fix (a permanently hot mic with
+    the pressed interval trimmed out of a rolling recording) costs continuous capture and file
+    rotation to buy something no evidence yet says is needed. If Stage 6 shows first words clipped,
+    that is the fix, and the measurement is recorded so it is not re-derived.
+
+  - [x] **Stage 5 — real PTT through DCS. FLOWN AND ACCEPTED 2026-09-23.** Built the same day on
+    `feature/inbound-speech-stage4` (stacked on Stage 4 at user direction, tested as one).
+
+    **The sortie's four verdicts:** the trigger works; a radio call stays out of it; the two-stage
+    trigger *"is natural"*; and the audio path is right. The one item not exercised is endurance —
+    false-fire and miss rates over a whole flight — which needs a real sortie rather than a systems
+    check.
+
+    **One bug was found and fixed between building and flying, and it is the interesting part.**
+    `push_ptt_state` was defined above `safe_call` in `Export.lua`, and Lua has no hoisting: a name
+    referenced before its `local` declaration compiles as a *global* lookup, nil at call time. Every
+    frame called nil, the trigger published nothing, and from the capture process's side that is
+    indistinguishable from a talk control nobody pressed. `luac5.1 -p` passes it — the syntax is
+    valid — so the syntax check cannot see this class at all. `Export.probe-ptt.lua` was run and arg 738 returned 0.5 held and 0.0 released on the
+    user's own bound trigger, a 209 ms press was captured, and the value held across frames rather
+    than pulsing. Crucially the *binding* was confirmed too — a DCS binding can be a game action
+    that never animates the cockpit control, which would have left the argument right and still
+    dead. Full addendum: `aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md`.
+
+    **Gate on the intercom stop specifically, not SRS's `>= 0.1`.** The full press is the player
+    talking on the radio to someone else, and Petrovich has no business hearing it; the half press
+    routes to intercom regardless of the SPU-8 selector, so this is also what the real aircraft does.
+
+    **But `abs(v - 0.5) < 0.1` alone is not enough, and a second probe run proved it.** A full press
+    *transits* the half stop for 19–32 ms on its way to 1.0 — it is a two-stage mechanical trigger,
+    so it must. That bare gate would therefore open a capture on every radio call. Two mitigations,
+    covering different cases: **debounce the 0.5 state by ~100 ms** (three times the observed worst
+    transit, still far below any deliberate press-and-speak), and **treat a rise to 1.0 as an abort**
+    of any capture in flight, which catches a slow full press that dwells past the debounce. The
+    failure this prevents is silent — a discarded sub-threshold clip per radio transmission, which
+    presents as an audio problem rather than a trigger one.
+
+    **What was built.** `Export.lua` reads arg 738 every frame and sends `{"t":…,"ptt":…}` **only
+    when it changes** — deliberately not on the 5 Hz telemetry line, because a press waiting behind
+    that throttle could lose up to 200 ms off the front of an utterance, on top of the ~140 ms the
+    audio device already costs to open, and the front of an utterance is where the verb is. A real
+    trigger produces two lines per press, not a stream. `PttSample`/`PttCache` carry it,
+    `GET /ptt/state` serves it, and `DcsPTT` implements the same `PTTSource` protocol the joystick
+    already does. Wire version `2026-09-22b` → **`2026-09-23a`**.
+
+    **The layer boundary is doing real work here.** `Export.lua` and the collector carry the raw
+    value and decide nothing; the two thresholds and both mitigations live in `DcsPTT`, where they
+    can be tuned and tested without copying a file into Saved Games. The endpoint still serves the
+    decided booleans alongside the raw value, so a consumer that wants them need not re-derive two
+    thresholds.
+
+    **`discard_if` is a hook on `CaptureLoop`, not a new `PTTSource` method.** Only `DcsPTT` has
+    anything to say about radio presses; widening the protocol would have made the joystick and
+    keyboard sources carry a method that always answers False.
+  - [x] **The ~0.14 s device-open gap — CLOSED 2026-09-23, not felt, nothing built.** The sortie
+    answered it: press-then-speak *"is the natural, normal way how aviation radios work"*, and
+    press-while-speaking *"works surprisingly well"* — the verb survives. So none of the three
+    candidate fixes gets built, and the measurement's whole purpose is served: it stopped a fix
+    being paid for before there was evidence it was needed.
+
+    The options are kept below rather than deleted, because the gap is real and a different
+    microphone or a slower machine could make it matter. **Do not build any of them without a
+    fresh observation that it is felt.**
+
+    **A. Open the device speculatively, on any press.** Start recording the moment arg 738 leaves
+    0.0, and discard the clip if the trigger never settles at the intercom stop. **This is the
+    strongest of the three, and for a reason that is easy to miss: it makes the 100 ms debounce
+    free.** Today the two delays *add* — 100 ms of debounce, then ~140 ms of device open, so ~240 ms
+    before a word can be captured. Opened speculatively they *overlap*: the device is warming during
+    the debounce window, and by the time the trigger is confirmed as intercom the channel is already
+    live. The saving is therefore larger than the 0.14 s figure suggests.
+
+    Costs, both real: a sox process is spawned and killed on **every radio call** as well, so a
+    device open/close cycle per ATC transmission — worth listening for an audible artefact on the
+    user's own hardware, since a device that clicks on open would be trading one annoyance for
+    another. And it needs a second signal out of `DcsPTT`: the capture loop currently sees only
+    `is_down()`, which is the *decided* state; speculative opening needs "something is happening",
+    which means exposing the raw value or adding a `pending()` alongside it.
+
+    **B. A radio click as the cue.** A short click played on the press, timed so that **it ends as
+    the channel goes live**. It does not remove the delay, it removes the *uncertainty* — and it
+    teaches the press-then-speak gesture rather than asking the pilot to remember it, which is a
+    better solution to a human problem than a faster machine would be. Cheap, and in-fiction: real
+    PTT systems click.
+
+    The timing property is load-bearing rather than decorative: a click that ends exactly when
+    capture starts cannot be recorded by the capture, so it needs no special handling in the gate.
+    A click that overlapped would appear at the front of every clip and be handed to whisper.
+
+    **A and B compose**, and the combination is better than either: with the device opened
+    speculatively the click can be shorter, because it only has to cover what remains.
+
+    **C. A permanently hot microphone** with the pressed interval trimmed out of a rolling
+    recording. Removes the gap completely and costs continuous capture, continuous disk writes and
+    file rotation. Listed last deliberately: it is the most thorough and the least proportionate,
+    and A gets most of its benefit for none of its running cost.
+
+    **The gate is block 3 of the voice sortie** (`docs/acceptance/2026-09-23-voice-command-sortie.md`):
+    press-then-speak versus speaking into the press. If the gap is not felt, none of these gets
+    built.
+
+  - [ ] **Press-to-readback is ~3 s, and that is the next real problem.** Measured on the
+    2026-09-23 sortie (user: *"time from release to feedback is about 3 s"*). A crew member answers
+    in well under a second, so this is what will keep him feeling like a machine no matter how good
+    the recognition is.
+
+    **One component is certain rather than estimated: the logger polls `GET /transcripts/poll` once
+    per `poll_interval_s`, default 1.0 s**, so a recognised command waits 0 to 1 s — half a second
+    on average — purely to be noticed. It is the cheapest half-second in the chain to remove, and
+    it costs nothing but loopback HTTP requests.
+
+    The rest of the budget is estimated and should be **measured before anything is optimised**:
+    the 0.4 s tail (deliberate), sox's stop and `--ignore-length` re-encode, the LAN hop, whisper
+    itself, and `say`'s synthesis (previously measured at 0.6-0.8 s). Every hop already carries a
+    wall-clock stamp, so instrumenting this is reading timestamps rather than adding machinery.
+
+    **Two candidate fixes that need no accuracy trade:**
+    - **Poll transcripts faster than the telemetry cadence.** They are different jobs on the same
+      timer today.
+    - **Cache synthesized readbacks.** The readback vocabulary is small and fixed (*"Scanning
+      left."*, *"Copy, stop scan."*), so the same handful of WAVs are re-synthesized every flight.
+
+    **Not a candidate: a smaller whisper model.** `small.en` was chosen on unsafe-error count, not
+    accuracy — `tiny.en` produced seven confident wrong commands and `base.en` two, against
+    `small.en`'s none. Trading that for latency would buy speed with the one failure the pilot
+    cannot catch.
+
   - [ ] Stage 6 — live sortie acceptance.
 
   **Settled before design (user, 2026-09-19):**

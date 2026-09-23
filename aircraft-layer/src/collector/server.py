@@ -45,6 +45,7 @@ from typing import Self
 from collector.cache import (
     PetrovichIndicationCache,
     PetrovichWheelCache,
+    PttCache,
     TelemetryCache,
     WorldObjectsCache,
 )
@@ -53,6 +54,8 @@ from schema import (
     PetrovichIndicationSample,
     PetrovichWheelParseError,
     PetrovichWheelSample,
+    PttParseError,
+    PttSample,
     TelemetryParseError,
     TelemetrySample,
     WorldObjectParseError,
@@ -74,7 +77,7 @@ logger = logging.getLogger(__name__)
 #: every poll, 4113 times in one flight, and a Windows probe plus an hour of
 #: tracing went into a bug that did not exist in the code. A mismatch warning
 #: costs one log line and makes that failure loud instead of invisible.
-EXPECTED_EXPORT_VERSION = "2026-09-22b"
+EXPECTED_EXPORT_VERSION = "2026-09-23b"
 #: Bumped again 2026-09-22 (`b` suffix, `plans/movement-detection/plan.md`
 #: Stage 1) for the `unit_name` field added to `WorldObjectSample` -- the
 #: join key the unit-velocity feed needs (see `schema/world_objects.py`'s
@@ -100,6 +103,11 @@ class CollectorServer:
         world_objects_cache: WorldObjectsCache,
         petrovich_indication_cache: PetrovichIndicationCache,
         petrovich_wheel_cache: PetrovichWheelCache,
+        # Optional so every existing construction site -- and every test
+        # that does not care about the trigger -- keeps working unchanged.
+        # A collector without a PTT cache simply drops ptt lines, which is
+        # the correct behaviour for one: nothing downstream is listening.
+        ptt_cache: PttCache | None = None,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_PORT,
     ) -> None:
@@ -107,6 +115,7 @@ class CollectorServer:
         self._world_objects_cache = world_objects_cache
         self._petrovich_indication_cache = petrovich_indication_cache
         self._petrovich_wheel_cache = petrovich_wheel_cache
+        self._ptt_cache = ptt_cache
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
@@ -225,6 +234,23 @@ class CollectorServer:
                 return
             logger.debug("parsed petrovich-indication sample: %r", indication_sample)
             self._petrovich_indication_cache.push(indication_sample)
+            return
+
+        if "ptt" in data:
+            # Ahead of the telemetry fallthrough for the same reason every
+            # other named kind is: a line carrying "ptt" is never a
+            # telemetry sample, and letting it reach TelemetrySample.
+            # from_dict would log it as malformed.
+            try:
+                ptt_sample = PttSample.from_dict(
+                    data, received_wall_clock_s=time.time()
+                )
+            except PttParseError:
+                logger.warning("dropping malformed ptt line: %r", line)
+                return
+            logger.debug("parsed ptt sample: %r", ptt_sample)
+            if self._ptt_cache is not None:
+                self._ptt_cache.push(ptt_sample)
             return
 
         if "wheel" in data:
