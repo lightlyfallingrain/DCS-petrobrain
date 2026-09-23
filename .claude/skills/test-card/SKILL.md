@@ -46,21 +46,29 @@ the exercise, which is their time in the seat.
 the number or behaviour that would mean it worked — a card without expectations makes the user
 judge against memory. "Record" is the list of specific observations wanted back.
 
-**Record items come in two shapes, and using the wrong one loses the answer.** Found the hard way
-on the voice card (user, 2026-09-23): *"there are checkboxes for open ended questions, yes/no is
-not an answer to an open ended question"*. Every item had been a checkbox, so *"time from release
-to readback, roughly"* offered a tick — which records that the pilot looked, and throws away the
-number, which was the entire point of asking.
+**The card cannot collect anything, so do not build it as if it can.** It is a prompt list read in
+the cockpit; the answers come back in conversation afterwards. This was learned twice in one day
+(2026-09-23). First the user pointed out that a checkbox is not an answer to an open question —
+*"yes/no is not an answer to an open ended question, would need a textbox"* — so text fields were
+added. They persist to `localStorage`, which lives in the pilot's browser and is unreadable from
+here, and the next message was the correction that matters: *"input fields on cards are useless
+unless you can read them. I can write my notes directly here too."*
 
-- **A check** is for something that either happened or did not. *"Did a full press ever execute a
-  command"*. A checkbox is exactly right.
-- **A note** is for a value, a duration, a range, a judgement, or anything phrased as *how much*,
-  *how long*, *which*, or *does it feel*. It needs a **text field**. This is most of what a card
-  actually wants back — the numbers and the impressions are what no test could produce, and they
-  are precisely the items a binary loses.
+So the card's job is to **ask the right questions in the right order**, not to receive answers:
 
-When writing a block, read each item back as a question and ask what a truthful answer looks like.
-If the answer is a word or a number, it is a note.
+- **Phrase every open item as a question with a speakable answer.** *"How long from release to
+  readback?"* — not *"Latency acceptable?"*. The pilot reads it, observes it, and says the number
+  later. The phrasing is the whole contribution: a badly-phrased item produces a vague answer no
+  matter what widget sits next to it.
+- **The checkbox is a place-keeper, not a record.** Its only job is surviving a five-minute
+  interruption so the pilot knows which items they have already covered. It is fine for that and
+  should not be asked to do more.
+- **The bring-back list is the actual mechanism.** It is what gets read out afterwards, so it
+  carries the real questions — keep it short enough to answer from memory in one sitting.
+
+Never add a text input, a form, a copy-to-clipboard block or a download. Anything the page appears
+to save is lost, and a control that looks like it captured an observation is worse than no control
+at all: it takes a real answer and quietly discards it.
 
 **One block marked as the prize.** There is almost always a single measurement worth more than the
 rest, and saying so changes what gets done when attention runs short. On the Stage 6 card it was
@@ -95,39 +103,21 @@ the existing cards — Barlow Condensed display, Source Sans body, JetBrains Mon
 the palette should suit *reading in a cockpit*: dark ground, amber instrument accent, a distinct
 colour for the "record this" rail.
 
-Include the persistence script; it is a dozen lines and it is the difference between a card the
-user ticks through and a card they lose their place in. **It has to cover the text fields too** —
-a typed observation lost to a stray reload is worse than an unticked box, because the box can be
-re-checked from memory and the number cannot:
+Include the persistence script for the checkboxes; it is a dozen lines and it is the difference
+between a card the user ticks through and a card they lose their place in. **Checkboxes only** —
+see above for why the page must not appear to save anything else:
 
 ```js
 const KEY='<test-name>';
 const saved=JSON.parse(localStorage.getItem(KEY)||'{}');
-const save=(k,v)=>{
-  const s=JSON.parse(localStorage.getItem(KEY)||'{}');
-  s[k]=v; localStorage.setItem(KEY,JSON.stringify(s));
-};
 document.querySelectorAll('input[type=checkbox][data-k]').forEach(b=>{
   if(saved[b.dataset.k]) b.checked=true;
-  b.addEventListener('change',()=>save(b.dataset.k,b.checked));
-});
-document.querySelectorAll('textarea[data-k],input[type=text][data-k]').forEach(f=>{
-  if(saved[f.dataset.k]) f.value=saved[f.dataset.k];
-  f.addEventListener('input',()=>save(f.dataset.k,f.value));
+  b.addEventListener('change',()=>{
+    const s=JSON.parse(localStorage.getItem(KEY)||'{}');
+    s[b.dataset.k]=b.checked; localStorage.setItem(KEY,JSON.stringify(s));
+  });
 });
 ```
-
-A note item is a label plus a field, styled to match the checkbox rail:
-
-```html
-<li class="note-item">
-  <label for="a2">Time from release to readback, roughly</label>
-  <input type="text" data-k="a2" id="a2" placeholder="e.g. half a second">
-</li>
-```
-
-Give text fields a `placeholder` that shows the *shape* of the wanted answer — a duration, a range,
-a word. It costs nothing and it is the difference between "about half a second" and "yes".
 
 ## Afterwards
 
