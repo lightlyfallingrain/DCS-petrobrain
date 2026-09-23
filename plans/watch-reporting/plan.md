@@ -3,7 +3,7 @@
 A contact the pilot has told Petrovich to watch reports itself — on movement change, on crossing a
 whole-kilometre mark inside 5 km, and on entering or leaving its believed weapon envelope — and
 "follow" becomes both a synonym for "watch" and a new way to *name* which contact to watch
-(`follow 1 o'clock [3 km]`).
+(`follow [armor] [2 o'clock] [3 km]`, resolved by best match).
 
 ---
 
@@ -28,9 +28,10 @@ worktree, not inferred.
   watched. This milestone introduces the first watched-only speech.
 - **`ContactStore.tick(now_sim)` takes no ownship and no enrichment**, and `enrichment.py` imports
   `contacts.py` — so passing `EnrichmentContext` into `tick` would be an import cycle. It is not
-  needed: range-to-ownship is pure geometry, and `contacts.py` already imports `GeoPosition` from
-  `perception.geometry`. `logger.run_once` constructs exactly that `GeoPosition` two lines above its
-  `self.store.tick(ownship.t_sim)` call, for `reproject_relative_areas`.
+  needed: `contacts.py` already imports `GeoPosition` from `perception.geometry` **and `Observation`
+  from `perception.source`**, so passing the whole `OwnshipState` (position, `alt_agl_m`, heading)
+  adds no import and no cycle. `logger.run_once` already has it in hand at the
+  `self.store.tick(ownship.t_sim)` call site.
 - **`tick` has a five-block shape** (lifecycle → classification → cardinality → motion → attention),
   every block identical: compute current → compare against `last_emitted_*` → `if kind is not None
   and self._cooldown_elapsed(...)` → append `Event` + stamp `last_event_emitted_sim[kind]` → update
@@ -65,37 +66,45 @@ worktree, not inferred.
 - `body-layer/src/belief/events.py` — two new `EventKind`s (`CONTACT_RANGE_CROSSED`,
   `CONTACT_ENGAGEMENT_CHANGED`), their `Final` constants, two new `Event` snapshot field pairs, and
   two pure comparison functions in the established `*_event_kind` shape.
-- `body-layer/src/belief/contacts.py` — `tick` gains `ownship_position: GeoPosition | None = None`
-  and `los_clear: Callable[[GeoPosition, GeoPosition], bool] | None = None` (4f); two new blocks in
-  the five-block loop; new `Contact` fields (`last_announced_range_km`, `last_emitted_engagement`,
-  and the watched-seed bookkeeping below).
-- `body-layer/src/belief/threat.py` — **new module.** The ingested table (range band, altitude band,
-  radar range, acquire time), the per-`op_class` worst-case rollup, and the believed-classification
-  lookup. The only new module in the plan. Two of its four fields have no consumer yet, deliberately
-  (4f).
+- `body-layer/src/belief/contacts.py` — `tick` gains `ownship: OwnshipState | None = None` (position
+  *and* `alt_agl_m`, 4f) and `los_clear: Callable[[GeoPosition, GeoPosition], bool] | None = None`;
+  two new blocks in the five-block loop; new `Contact` fields (`last_announced_range_km`,
+  `last_emitted_engagement`, and the watched-seed bookkeeping below).
+- `body-layer/src/belief/threat.py` — **new module.** Loads `data/threat_envelopes.json`, derives the
+  per-`op_class` worst-case rollup, and exposes the believed-classification lookup. The only new
+  module in the plan. Carries the per-field null rules (4f-i) and the match from a threat row to
+  `object_model`'s keyword table.
+- `body-layer/data/threat_envelopes.json` + the saved source page under `docs/concept/` —
+  **extracted, untracked, must be committed before Stage 4** (4g). The `_files/` asset directory
+  beside the HTML is 1.8 MB of page chrome and must be gitignored, not committed.
 - `body-layer/src/belief/callouts.py` — `_WATCHED_ONLY_KINDS`; the watched test in `tick`'s filter;
   a per-contact `_last_spoken_sim` gap for the watched-only family.
 - `body-layer/src/belief/speech.py` — `_contact_report_text` gains two optional affixes
   (`lead`, `event_clause`); `_render_lifecycle_text` gains the two new kinds; `render_no_contact`.
   **No second rendering path.**
-- `body-layer/src/belief/crew_console.py` — `_handle_follow`; `_FOLLOW_CLOCK_TOKENS`; dispatch
-  entries; `range_km` threaded through `handle_command`/`handle_transcript`/`_act_on_voice_decision`;
-  `DISPATCHED_COMMAND_TOKENS` updated; `_describe_token_for_confirm` says the range.
-- `body-layer/src/belief/voice_commands.py` — `PendingConfirmation` gains `range_km`.
-- `body-layer/src/logger.py` — pass the already-built `GeoPosition` into `store.tick`, plus the
-  `los_clear` closure over the existing `world_model_conn`/`theatre`; read `range_km` off the
-  transcript event; `!voice` harness gains the optional range argument.
+- `body-layer/src/belief/crew_console.py` — `_handle_follow` and `_resolve_follow_target` (the
+  scoring resolver, Decision 2b-iii) with its weights/thresholds; `slots` threaded through
+  `handle_command`/`handle_transcript`/`_act_on_voice_decision` **replacing** `bearing_degrees`;
+  `DISPATCHED_COMMAND_TOKENS` updated; `_describe_token_for_confirm` renders the slot set.
+- `body-layer/src/belief/voice_commands.py` — `PendingConfirmation.slots` replaces
+  `PendingConfirmation.bearing_degrees`.
+- `body-layer/src/logger.py` — pass the `OwnshipState` it already holds into `store.tick`, plus the
+  `los_clear` closure over the existing `world_model_conn`/`theatre`; read `slots` off the
+  transcript event; `!voice` harness takes the slot set.
 - Tests: `test_events.py`, `test_contacts.py`, `test_threat.py` (new), `test_callouts.py`,
   `test_speech.py`, `test_crew_console.py`, `test_logger.py`.
 
 **audio-adapter**
 
 - `audio-adapter/src/vocabulary.py` — `follow` phrasings on `watch_nearest`/
-  `watch_nearest_air_defence`/`cancel_watch`; nine new `follow_clock_<p>` tokens; `parse_range_km`.
-- `audio-adapter/src/command_matcher.py` — `_RANGE_TOKEN_VERBS` sibling of `_BEARING_TOKEN_VERBS`;
-  `MatchResult.range_km`.
-- `audio-adapter/src/transcript_queue.py`, `server.py` — a ninth `TranscriptEvent` field, exactly as
-  Stage 3 of `plans/voice-command-completeness/plan.md` added the eighth.
+  `watch_nearest_air_defence`/`cancel_watch`; a single `follow` token (no `follow_clock_*` family —
+  the clock is a slot, Decision 2b-i); `parse_clock`/`parse_range_km`/`parse_descriptor`; the closed
+  descriptor set mirroring `speech._OP_CLASS_DISPLAY`.
+- `audio-adapter/src/command_matcher.py` — slot parsing for the `follow` verb alongside the existing
+  bearing slot; `MatchResult.slots: dict[str, int | str] | None` **replacing** `bearing_degrees`.
+- `audio-adapter/src/transcript_queue.py`, `server.py` — `TranscriptEvent.slots` replaces
+  `TranscriptEvent.bearing_degrees` and its `to_dict` key. **A breaking wire change**, cheap because
+  both ends are Mac-local processes restarted together (Decision 2b-i).
 - Tests: `test_vocabulary.py`, `test_command_matcher.py`, `test_transcript_queue.py`, `test_server.py`.
 
 **Prose**
@@ -158,57 +167,139 @@ So the milestone adds exactly three watched-only report kinds and touches nothin
 
 ---
 
-### Decision 2 — `follow` is two separate changes, and only one of them is a synonym
+### Decision 2 — `follow` is two changes: a free synonym, and a descriptor-match resolver
 
 **(a) The synonym is free.** `follow nearest` / `follow nearest air defence` become extra phrasings
 on the existing `watch_nearest` / `watch_nearest_air_defence` tokens; `stop following` / `cancel
 follow` join `cancel_watch`. `VERB_ANCHOR_WORDS` picks up `follow` automatically. **Zero body-layer
 change.** This is a `vocabulary.py` edit and nothing else.
 
-**(b) `follow <clock> [<n> km]` is a new referring expression** — the first command in this project
-that selects a contact by *where it is* rather than by "whichever is nearest". This is the
-`o'clock-and-distance location form` that `body-layer/ROADMAP.md` records as *rejected for the F10
-menu and owned by voice* (user, 2026-09-16). It combines the two mechanisms that already exist,
-rather than inventing a third:
+**(b) `follow [<descriptor>] [<clock> o'clock] [<n> km]` — a best-match referring expression.**
+User direction, 2026-09-24:
 
-- **The clock is enumerated**, exactly like `report_clock_*` and `scan_clock_*`: nine
-  `follow_clock_<p>` tokens over `FORWARD_CLOCK_POSITIONS`, one phrasing each
-  (`"follow one o'clock"`), plus a `_FOLLOW_CLOCK_TOKENS: dict[str, int]` in `crew_console.py`
-  alongside the two identical dicts already there.
-- **The range is a slot**, threaded exactly as `bearing_degrees` was in Stage 3 of
-  `plans/voice-command-completeness/plan.md`: `vocabulary.parse_range_km` → `MatchResult.range_km` →
-  `TranscriptEvent.range_km` (a ninth field) → `logger._poll_transcripts` →
-  `handle_transcript(range_km=…)` → `handle_command(range_km=…)` → `PendingConfirmation.range_km`.
-  **Missing the `PendingConfirmation` field is the specific way this breaks**: a `follow` command
-  that lands in the confirm band would lose its range on "affirm" and act on a bare clock.
+> *this really needs the brain so I can freetext tell which contact to follow. Let's approximate it
+> by "follow/watch [group/class/type] &lt;where o'clock&gt; &lt;distance&gt;" then find the closest
+> match to it and watch that.*
 
-Enumerating the product instead — 9 clocks × range values — would be ~60 tokens for one command.
-The clock is closed and the range is not; that is precisely the closed-grammar / slot split
-`vocabulary.py`'s own "Slots, not enumerated phrases" section already draws.
+**Frame this as the stopgap it is, in the code and not only here.** The user named it an
+approximation of a brain-layer capability. When free text arrives, `_resolve_follow_target` should be
+**deleted, not extended**, and its weights are not a model of anything — they are a scoring hack
+standing in for comprehension. Say that in the function's own docstring, or someone will tune it as
+if it were a perception model.
 
-**The range checksum is weaker than the bearing one, and that must be said.** `parse_bearing`'s 5°
-constraint rejects roughly four in five mishearings. Whole kilometres 1–20 have no such redundancy:
-"three" misheard as "two" is a legal value and is undetectable. Consequence: constrain to integer
-kilometres 1–20, and rely on the readback (which names the range) to expose a mishearing. Do **not**
-copy the "resolution is a checksum" comment across — it would be false here.
+#### 2b-i — the vocabulary shape, which is the crux of the stage
 
-**Resolution.** `_handle_follow(now_sim, *, clock: int, range_km: int | None)` reads the same source
-`_handle_report` does — `tools.get_contacts(store, now_sim, enrichment=self.enrichment)`, drop
-`facts["certainty"] == "lost"`, drop contacts with no `relative_now`, and answer the existing
-"no world-model connection configured" line when `self.enrichment is None`. Then:
+`follow armor 2 o'clock 3 km` **cannot be a token.** Descriptors × nine hours × ranges is a
+cross-product in the hundreds, and `vocabulary.py`'s closed grammar has to list what it admits. This
+needs parsed slots, and there is exactly one precedent: `bearing_degrees`, threaded matcher → wire →
+console in Stage 3 of `plans/voice-command-completeness/plan.md`.
 
-- filter `relative_now["clock_position"] == clock` — **exact hour match, reusing `_handle_report`'s
-  rule verbatim**. `_clock_position` already quantises 30° buckets; layering a second tolerance on a
-  quantisation produces overlap the speaker did not ask for. (`_handle_report`'s own note.)
-- if `range_km is not None`, additionally require
-  `abs(relative_now["range_m"] / 1000.0 - range_km) <= FOLLOW_RANGE_TOLERANCE_KM` (proposed `0.75`,
-  uncalibrated, isolated constant).
-- **no matches** → `speech.render_no_contact(label)` → `"Nothing at two o'clock."` The rear-hemisphere
-  "can't see there" carve-out from the report family does **not** apply: `FORWARD_CLOCK_POSITIONS` is
-  8–4, all inside the Mi-24P mask's `rear_cutoff_deg` by construction.
-- **exactly one** → `watch_contact_task(...)`, readback via the existing
-  `render_watch_nearest_readback`.
-- **several** → **watch all of them** (see the open decision below).
+**Three slots at once is where the flat-field shape stops being right.** `TranscriptEvent` carries 8
+fields today, 9 with `bearing_degrees`. Adding `descriptor`/`clock`/`range_km` makes 12, of which 4
+are mutually-exclusive per-token payloads — the wire would be describing a transcript in terms of
+whichever command it happened to be. So:
+
+**Replace `bearing_degrees` with one structured field, in the same change:**
+
+```python
+slots: dict[str, int | str] | None = None     # on MatchResult and TranscriptEvent
+```
+
+`handle_command(token, *, slots=None)`; `PendingConfirmation.slots`. `bearing_degrees` becomes
+`slots["bearing_degrees"]`.
+
+**Why migrate rather than add a second mechanism:** doing it now, with exactly one existing slot, is
+strictly cheaper than doing it later with four, and the alternative is precisely the "second
+mechanism" this project keeps warning against. **The wire is ours end to end** — audio-adapter and
+body-layer are both Mac-local processes restarted together — so a breaking change costs a coordinated
+restart, not a migration. (The Windows collector is a different endpoint and is untouched.) It also
+collapses Stage 3's six-item plumbing list into one generic path, so the three follow slots need
+*zero* new wire work.
+
+**Missing `PendingConfirmation.slots` is the specific way this breaks**: a `follow` that lands in the
+confirm band would lose all three qualifiers on "affirm" and act on a bare verb. Stage 3 hit the same
+trap with `bearing_degrees`.
+
+**Three parsers in `vocabulary.py`**, siblings of `parse_bearing`:
+
+- `parse_clock` — reuses `_CLOCK_WORDS` and the existing `o’clock`/`o clock`/`oclock` normalisation
+  that `report_clock_*` already needed.
+- `parse_range_km` — anchored on `km` / `kilometre(s)` / `klick(s)`.
+- `parse_descriptor` — matched against the closed descriptor set below.
+
+**The range slot has no checksum, and that must be said.** `parse_bearing`'s 5° constraint rejects
+roughly four in five mishearings. Whole kilometres have no such redundancy — "three" heard as "two"
+is a legal, undetectable value. Constrain to integers 1–20 and rely on the readback. Do **not** copy
+the "resolution is a checksum" comment across; it would be false here.
+
+#### 2b-ii — the descriptor vocabulary is closed, and admits two of the user's three kinds
+
+The descriptor set is **exactly the words Petrovich himself speaks** — `speech._OP_CLASS_DISPLAY`'s
+vocabulary ("armor", "truck", "SAM", "AAA", "infantry", "ship"), plus `group`. If he calls it armor,
+the pilot must be able to say "follow armor"; any other vocabulary is one the pilot cannot learn
+without reading the source.
+
+- `group` → matches on `cardinality.lo > 1` (the user's own example word).
+- a class word → matches `classification.value`'s `OP_*` bucket through the same display map.
+- **Type names are deliberately not admitted**, narrowing the user's "group/class/type" to two.
+  Reasons: a type set is open and cannot be enumerated into a closed grammar (`vocabulary.py`'s own
+  rule for why "report the tanks" was excluded), and a type-level descriptor only helps once he has
+  *type*-classified the contact — which needs ~250 m unaided (2b-iv). It would be vocabulary that
+  almost never fires. **This is a stated scope cut, not an oversight.**
+
+#### 2b-iii — the scoring: minimise a distance-to-request, with a floor
+
+All three qualifiers are optional; **at least one must be present.** A missing qualifier contributes
+nothing and does not penalise. Candidate set is the same one `_handle_report` builds —
+`tools.get_contacts(...)`, drop `certainty == "lost"`, drop contacts with no `relative_now`, and
+answer the existing "no world-model connection configured" line when `self.enrichment is None`.
+
+| qualifier | contribution to the score (lower is better) |
+|---|---|
+| descriptor | `0` exact class/group match · `W_DESC_UNKNOWN` if the contact is presence-level or unclassified · `W_DESC_WRONG` (large) if it is a *different* known class |
+| clock | `abs(wrapped hour delta) × W_CLOCK` |
+| range | `abs(range_km − actual_km) × W_RANGE` |
+
+**The unclassified case is the one that earns the soft descriptor.** If the pilot says "follow armor"
+and the only thing at two o'clock is an unresolved dot, he is pointing at a thing he *believes* is
+armour — matching it is right. Matching a known *truck* when he said armor is wrong. A hard filter
+gets the first case wrong; the three-way soft score gets both right.
+
+**Clock is a soft match here, unlike `report_clock_*`, and the divergence is deliberate.** `report
+three o'clock` asks about a *region* and an exact 30°-bucket match is correct — layering a tolerance
+on a quantisation would overlap regions the speaker did not name. `follow` names *a thing*, and a
+pilot's eyeball estimate of which hour it sits in is routinely an hour out. Same word, different
+question. Write the reason next to the weight or someone will "unify" the two rules.
+
+- **Match floor.** If the best score exceeds `FOLLOW_MATCH_FLOOR`, watch **nothing** and say so —
+  `"Nothing like that."`, or `"Nothing at two o'clock."` when the clock was the only qualifier given.
+  Direct precedent: `command_matcher.MATCH_FLOOR` refusing a phrase rather than taking the least-bad
+  one. Watching the least-bad contact is worse than admitting no match, because the pilot then gets
+  confident reports about the wrong object.
+- **Ties: prefer the nearer, and let the readback expose it.** When the best two scores fall within
+  `FOLLOW_SEPARATION`, take the closer contact rather than asking. A confirm round-trip costs seconds
+  while the pilot is pointing at something *now*; `render_watch_nearest_readback` already names unit,
+  clock and range, so a wrong pick is audible immediately and `cancel watch` + re-issue is one
+  utterance. This is a deliberate divergence from the matcher's `ambiguous` → ask behaviour, which
+  can afford the round-trip because it has no target decaying in front of it.
+- **Winner** → `watch_contact_task(...)`, readback via the existing `render_watch_nearest_readback`.
+  **Exactly one contact, never a set** — confirmed by the user's *"find the closest match to it and
+  watch that"*.
+
+**Every weight and both thresholds are guesses**, uncalibrated in the same way `SPEECH_RATE_WPS` is.
+They are isolated module constants in `crew_console.py` and are meant to be thrown away with the
+resolver.
+
+The rear-hemisphere "can't see there" carve-out does **not** apply: `FORWARD_CLOCK_POSITIONS` is 8–4,
+all inside the Mi-24P mask's `rear_cutoff_deg` by construction.
+
+#### 2b-iv — "follow" attaches to the contact, not to the hour — **confirmed**
+
+The alternative was a `relative_clock_hour` `AttentionArea`, which `reproject_relative_areas` already
+tracks through turns: any contact entering the hour becomes watched, any leaving stops. **The user
+confirmed the per-contact reading.** It is also the only one consistent with the resolver above — a
+best-match score picks a *thing*, and the descriptor and range qualifiers have no meaning for a
+region. Recorded as decided, not assumed.
 
 ---
 
@@ -282,10 +373,11 @@ plan extends it rather than re-litigating it.
 
 ### Decision 4 — engagement envelopes: ingest the Hoggit table, key the lookup on belief
 
-**Source:** `https://wiki.hoggitworld.com/view/Threat_Database`. Per-type engagement range band (NMI),
-altitude band (feet), radar range (NMI) and acquire time (seconds), by threat category. **Every range
+**Source:** `https://wiki.hoggitworld.com/view/Threat_Database`, **already extracted** to
+`body-layer/data/threat_envelopes.json` (28 entries) with the saved page committed beside it as
+provenance. Per-type engagement range band and altitude band, by threat category. **Every range
 column is a min/max band written as one cell** (`0 - 6500`) — see 4f, which is where two successive
-misreadings of that fact were caught.
+misreadings of that fact were caught and where the data now settles the question empirically.
 
 #### 4a — provenance
 
@@ -293,27 +385,28 @@ This is a **community wiki**, not DCS ground truth and not ED documentation. It 
 class as the pydcs-derived projections in `world-model` and takes the same treatment recorded in this
 project's provenance memory: **provisional until confirmed**, never silently promoted to fact.
 
-- Every row carries `source="hoggit-threat-database"`, `confidence="provisional"`, and the
-  **retrieval date**, in the module docstring of `belief/threat.py` — it is a dated snapshot of a
-  page that can change under us, and saying so is the whole point.
-- **A missing or `TBC` value degrades to "no warning", never to a default.** There is no fallback
-  envelope, no `DEFAULT_ENGAGEMENT_RANGE_M`. A contact whose class resolves to no row simply never
-  produces a danger call. Inventing a number here would be worse than silence: it would be an
-  authoritative-sounding warning derived from nothing, and it would be invisible, because the output
-  would merely look like slightly odd prioritisation.
-- **Conversion happens once, at transcription.** The table is committed in **metres** (ranges *and*
-  altitudes) and **seconds**, with the source's NMI/feet figures in a trailing comment per row. This
-  project works in metres throughout; a runtime conversion is a unit bug waiting for the one caller
-  that forgets it — and with two different source units on one row, that caller will exist.
+- **The payload carries its own provenance and `threat.py` must read it, not restate it** — the
+  JSON header already holds `source`, `source_file`, `retrieved: 2026-09-24`, `provenance` and
+  `units`. Two copies of a retrieval date drift; one does not.
+- **No fallback envelope, ever.** There is no `DEFAULT_ENGAGEMENT_RANGE_M`. A contact whose class
+  resolves to no row simply never produces a danger call. Inventing a number would be worse than
+  silence: an authoritative-sounding warning derived from nothing, and an invisible one, because the
+  output would merely look like slightly odd prioritisation. **Which nulls mean silence and which
+  mean "no protection" is not uniform — see 4f-i**, where applying one blanket rule would have been
+  backwards for three fields out of four.
+- **Conversion already happened, once, at extraction.** The file is metres throughout; the source's
+  NMI and feet never reach the code. No caller converts.
 
-#### 4b — why hand-transcription, rather than a scraper or the DCS install
+#### 4b — why a transcribed snapshot, rather than the DCS install
 
-*(How the rows physically reach the repo, which is a gate on Stage 4, is 4g.)*
+*(The rows are extracted; what remains before Stage 4 can start is committing them — 4g.)*
 
-**Recommended: hand-transcribe.** There is no JSON/Lua/CSV export — only HTML tables. The set that
-matters is small (the air-defence categories, ~40 rows; ground armour and trucks have no relevant
-envelope against a helicopter beyond gun range). A scraper for a page with no stable schema, run
-once, is more code than the data it produces and rots the moment the wiki's markup changes.
+Extraction was one-off, from a saved copy of the page, into a committed JSON payload. There is no
+JSON/Lua/CSV export upstream and the set that matters is small (air-defence categories only — ground
+armour and trucks have no envelope worth modelling against a helicopter beyond gun range). A live
+scraper against a page with no stable schema would be more code than the data it produces and would
+rot the moment the wiki's markup changed; the saved HTML beside the payload is the reproducible
+artifact instead.
 
 **What the alternative would buy.** An investigator pass against the DCS install's own unit
 definitions would be strictly higher provenance — DCS ground truth rather than a community
@@ -379,32 +472,60 @@ accept the type that carries it. **Add a test asserting the module imports nothi
 `perception.source`.** The roadmap's own warning is that computing this from ground truth would be
 *"an omniscience backdoor wearing a prioritisation label — and an invisible one."*
 
-#### 4d — the no-omniscience consequence: the warning arrives with recognition, not before
+#### 4d — the warning arrives with recognition — **accepted by the user, and it is gated on the 9K113**
 
-**This is the honest statement of what the pilot will experience, and it is not a detail.**
+**Accepted, 2026-09-24**, with a qualification that changes what this milestone is worth:
+
+> *useful for SHORAD, longer range SAM's can't be identified that far. Even for SHORAD, the 9K113
+> view is needed for identification at safe range.*
 
 Because the envelope is keyed on believed classification, Petrovich cannot warn about a contact he
-has not yet classified. `perception/visibility.py`'s recalibrated tiers put class recognition for a
-7 m vehicle at ~2 km and presence at up to ~9.3 km. An SA-8's envelope is ~14 km. **So by the time he
-can say "that's a SAM", you have been inside its envelope for twelve kilometres.**
+has not yet classified. **For long-range SAMs that is not a defect of this feature** — you cannot
+identify an S-300 at 40 km by eye, with or without this milestone, and no design choice here changes
+that. The feature's real target is **SHORAD**, where recognition range and weapon range are the same
+order of magnitude and the warning can actually precede the shot.
 
-**That is a feature, and it is the single most valuable thing this trigger produces** — not despite
-being late, but because being late is *true*. A real operator cannot warn you about a launcher he
-has not recognised, and flying into an unidentified SAM is the actual danger. A system that warned
-earlier would be warning from data Petrovich does not have.
+**But for SHORAD the margin is currently negative, and the arithmetic says so.** Class recognition —
+the tier that matters, since `envelope_for` resolves at class level via the rollup — is
+`recognition_extent_m / MEDRES_ANGULAR_RADIUS_RAD × optic.class_range_mult`. For a 7 m vehicle
+(`0.014 rad`), against a ZSU-23-4's own 2 NM (3,704 m) envelope:
+
+| optic | `class_range_mult` | class recognition | vs. a Shilka's 3,704 m envelope |
+|---|---|---|---|
+| unaided | 1.00 | **500 m** | recognised at 13% of the way in — useless |
+| binocular | 3.50 | **1,750 m** | recognised at 47% in — already engaged |
+| **9K113 (wide), deferred** | **7.00** | **3,500 m** | **recognised at the envelope edge** |
+
+So with the two optics that exist, **the danger call fires from inside the envelope of nearly every
+threat it can recognise.** With the 9K113 it fires as you arrive at the edge — which is the
+difference between a warning and a statement of fact.
+
+**That does not make the milestone wrong.** The data and the trigger are correct, the class tier
+reaches considerably further than type, and the warning is still worth having late. But record the
+dependency plainly: **the practical value of the engagement trigger is gated on an optic that does
+not exist yet** — *"Model the 9K113 Raduga-Sh as a selectable optic"*, deferred 2026-09-20 in
+`todo/todo.md`.
+
+**This is the strongest argument yet for un-deferring the 9K113, and it is a different argument than
+the one that was deferred.** The 9K113 was shelved as *more detail* — a third optic when two already
+worked. The case now is *identify the thing before it can shoot you*: it is the only optic in the
+table whose class range reaches a SHORAD envelope's edge, and its multipliers (wide 3.55/7.00/6.50)
+are **already measured and already written down** in `perception/optics.py`'s module docstring,
+waiting for a slice that wires them. Add this to the todo entry as the reason the deferral should be
+revisited — do not un-defer it inside this milestone.
 
 Two consequences the implementer must not get wrong:
 
-1. **"Entering the envelope" is not only an outside→inside geometric crossing.** It is far more often
-   a *recognition* event while already deep inside. Hence Decision 1's "seed as outside" convention:
-   the first evaluation that resolves a class and finds itself inside fires. One wording covers both —
-   the pilot needs the same fact and can take the same action either way, and a second wording for a
-   distinction he cannot act on is noise.
-2. **Reliability tracks recognisability, not threat.** An S-300 radar is `distinctiveness=2.6` and
-   recognisable a long way out, so its danger call will be genuinely early. A Strela-10 in a treeline
-   will be recognised at knife-fight range or not at all, and its call will be useless. Say this in
-   the sortie card, because a pilot who gets one good warning and one absent one will otherwise read
-   the absent one as a bug.
+1. **"Entering the envelope" is not only an outside→inside geometric crossing.** Per the table above
+   it is far more often a *recognition* event while already deep inside. Hence Decision 1's "seed as
+   outside" convention: the first evaluation that resolves a class and finds itself inside fires. One
+   wording covers both — the pilot needs the same fact and can take the same action either way, and a
+   second wording for a distinction he cannot act on is noise.
+2. **Reliability tracks recognisability, not threat.** An S-300 radar carries `distinctiveness=2.6`
+   and is recognisable a long way out, so its danger call will be comparatively early — while the
+   launcher beside it is not. A Strela-10 in a treeline will be recognised at knife-fight range or
+   not at all. Say this in the sortie card, because a pilot who gets one good
+   warning and one absent one will otherwise read the absent one as a bug.
 
 #### 4e — the 1.5 factor is hysteresis, and that is why it exists
 
@@ -414,134 +535,215 @@ sitting near the boundary flaps between "danger" and "safe from" every few secon
 `EVENT_COOLDOWN_S` budget doing it. Implement it as hysteresis and say so, so nobody later
 "simplifies" it to a single threshold.
 
-#### 4f — four fields, four different questions, and only two of them are consumed now
+#### 4f — three independent ways to be safe, settled by the data rather than by argument
 
-The source table's real columns, per the user's own reading of the page (a summarising fetch
-flattened the band into a maximum twice; the literal cells say otherwise):
+The table is extracted: **`body-layer/data/threat_envelopes.json`, 28 entries** (19 SAM, 6 AAA,
+3 MANPADS), with the saved source page committed beside it at
+`docs/concept/Threat Database - DCS World Wiki - Hoggitworld.com.html` as its provenance. Fields:
+`threat`, `nato`, `category`, `range_min_m`, `range_max_m`, `alt_min_m`, `alt_max_m` — **metres,
+converted once at extraction** from NMI and feet, so no caller ever converts.
 
-```
-Threat | NATO Designation | RWR Symbology | HARM Code | Range (NMI) min/max |
-Altitude (Feet) min/max | Acquire Time (Seconds) | Guidance Type | Ammunition
-```
+**The altitude question is now measured, and my earlier "drop the column" was wrong.** The column is
+a band, and 12 of 28 entries carry a non-zero floor. The split is **by category, not by reach** —
+which is the more useful rule and the physically sensible one (radar-guided SAMs suffer ground
+clutter; optically- and IR-aimed weapons do not):
 
-Worked example, ZSU-23-4 Shilka: engagement range **0–2 NM**, **radar range 12 NM**, acquire time
-**8 s**, altitude **0–6,500 ft**.
+| category | entries with a non-zero floor |
+|---|---|
+| SAM | **12 of 19** |
+| AAA | **0 of 6** |
+| MANPADS | **0 of 3** |
 
-`EngagementEnvelope` therefore carries four distinct facts. They are easy to collapse into one
-"threat range" and the collapse would be wrong in a different way each time, so the module docstring
-must name what each one answers:
-
-| field | answers | consumed by this milestone |
+| system | floor | reach |
 |---|---|---|
-| `range_min_m` / `range_max_m` | *Can it shoot me from here?* | **yes** — the user's "nearing their engagement range of us" |
-| `alt_min_m` / `alt_max_m` | *Can it shoot me at this height?* | **yes** — see the floor rule below |
-| `radar_range_m` | *Can it see me?* — separate from and **longer** than weapon range | **no** |
-| `acquire_time_s` | *Does it get a shot off before I'm past?* | **no** |
+| S-125 / SA-3 | 213 m | 25.0 km |
+| MIM-23 Hawk | 137 m | 47.4 km |
+| MIM-104 Patriot | 61 m | 159.3 km |
+| MIM-72G Chaparral | 46 m | 5.6 km |
+| 2K12 / SA-6 | 30 m | 35.6 km |
+| 9K31 / SA-9 | 30 m | 4.6 km |
+| **9K35 / SA-13** | **23 m** | **5.2 km** |
+| 9K331 / SA-15, 9K37 / SA-11 | 18 m | 12.0 / 35.6 km |
+| 9K33 / SA-8, S-300PS / SA-10 | 15 m | 13.9 / 74.1 km |
+| MIM-115 Roland | 9 m | 6.3 km |
 
-**The min end of the range band is real, not a rounding artefact.** Too close to engage is a genuine
-state and a helicopter closing on a SAM actually reaches it. The envelope is an annulus, not a disc.
+**Correcting the summary this section was first written from: the floor is not confined to
+long-reach systems.** SA-13 (23 m / 5.2 km), SA-9 (30 m / 4.6 km), Roland (9 m / 6.3 km) and
+Chaparral (46 m / 5.6 km) are SHORAD, and their floors sit at exactly the NOE altitudes a Mi-24P
+actually flies. So the floor is tactically live **in the same SHORAD band where 4d says this feature
+is worth having at all** — better news than "it only matters under a Hawk". Meanwhile every gun and
+every MANPADS will engage on the deck, and the data says so uniformly rather than by assumption.
 
-**The altitude floor is the tactical fact, and it only binds when non-zero.** I was wrong in the
-previous revision of this section, twice over: the column is a band, and even the ceiling binds —
-the Shilka's 6,500 ft is ~2,000 m, squarely inside a Mi-24P's operating range, not the unreachable
-150,000 ft an S-300 ceiling suggested. More importantly the floor is where the tactics live:
-
-- Shilka, `0–6,500 ft`: **no floor**, so flying low buys nothing against it. You are inside its
-  altitude band on the deck.
-- A system with a genuine minimum engagement altitude is **defeated by flying under it**.
-
-That distinction is the whole point, and it falls straight out of the data with no special-casing:
-the test is `alt_min_m <= h <= alt_max_m`, and `alt_min_m == 0` makes the lower bound vacuous on its
-own. Do not write an `if floor == 0` branch — the arithmetic already does it.
-
-`h` is ownship's height **above the threat's own position**, not MSL and not AGL:
-`ownship_position.alt_m - contact.last_position.alt_m`. Both are already in hand inside `tick`. A SAM
-on a 1,500 m plateau and one in a valley have the same band relative to themselves, and comparing
-either against an MSL figure would be wrong by the terrain.
-
-**Terrain LOS composes with both bands; it does not replace either.** The previous revision presented
-LOS as a substitute for altitude, which was the wrong framing — they answer different questions. All
-three are ANDed:
+**The test ANDs three independent conditions**, and each answers a different question:
 
 ```
 threatened = range_min_m <= range <= range_max_m          # can it shoot this far
-             and alt_min_m <= height_above_threat <= alt_max_m   # can it shoot this high/low
-             and los_clear(threat_position, ownship_position)    # is there a ridge in the way
+             and (alt_min_m is None or ownship_agl >= alt_min_m)   # am I under its floor
+             and los_clear(threat_position, ownship_position)      # is there a ridge in the way
 ```
 
-with `range_max_m` scaled by `1.5` on the leaving side (4e). A helicopter hiding behind a ridge is
-defeated by none of range or altitude — only by terrain — which is exactly why the third term is
-needed and why it is not interchangeable with the second.
+with `range_max_m` scaled by `1.5` on the leaving side (4e), and the terms ordered **range →
+altitude → LOS** so the cheap arithmetic rejects before the elevation-grid walk.
 
-Two properties of the LOS term worth protecting from a later "simplification":
+Three different ways to be safe: **out of range, under the floor, behind a ridge.** The terrain
+reasoning below survives intact — it was only ever wrong as a *replacement* for altitude.
 
-- **It is symmetric with perception.** He cannot see through terrain; neither can the SAM.
-  `perception/visibility.py` already gates every sighting on `geometry.line_of_sight_clear`, and the
-  same primitive answers both directions. The model needs no separate notion of "can it see me".
-- **It subsumes the stale-contact cry-wolf case.** A contact decayed to `estimated` because you slid
-  behind a ridge now fails LOS on its remembered position and goes "safe from", rather than warning
-  off a position he cannot confirm.
+**`alt_max_m` is carried and never tested against.** The lowest ceiling in the table is 1,372 m,
+which a Mi-24P can technically reach but essentially never occupies on a combat profile. Keep the
+field (it is already extracted, and a future high-altitude or fixed-wing consumer would want it) and
+say in the docstring that nothing reads it, so its absence from the test reads as a decision rather
+than an omission.
 
-**Cost.** `line_of_sight_clear` is a sampled elevation-grid walk against world-model's SQLite store —
-the same call the naked-eye channel already makes per candidate per poll. Bounded here by *watched
-contacts that resolved an envelope*, not by contact count: `envelope_for` returns `None` for
-unknown/presence-level contacts and for classes with no row, and that check is free and runs first.
-Order the three terms range → altitude → LOS so the cheap arithmetic rejects before the grid walk.
+**Which altitude: `alt_agl_m`, and this is settled, not inferred** (user, 2026-09-24). The floor is
+a *minimum engagement altitude* — physically a ground-clutter and radar-horizon limit — so height
+above the terrain is the meaningful quantity, and it is also the number the pilot actually flies to
+("stay under 200 feet"). MSL would be nonsense over a 1,500 m plateau. `OwnshipState.alt_agl_m` was
+added by the binocular milestone and is already populated from the wire's `altitude_agl_m`; nothing
+new is needed to read it.
 
-**Wiring, and the import cycle it avoids.** `contacts.py` cannot import `belief.enrichment` (cycle),
-and `line_of_sight_clear` needs `conn` and `theatre`. Rather than widening `tick` with two
-world-model arguments, inject the check:
+**This changes what `tick` receives.** An earlier revision passed a bare `GeoPosition`; AGL is not on
+it. Pass the whole `OwnshipState` instead — `contacts.py` already imports from `perception.source`
+(it uses `Observation`), so this adds no import and no cycle, and it supplies position, AGL and
+heading in one argument:
 
 ```python
-def tick(self, now_sim: float, ownship_position: GeoPosition | None = None,
+def tick(self, now_sim: float, ownship: OwnshipState | None = None,
          los_clear: Callable[[GeoPosition, GeoPosition], bool] | None = None) -> None
 ```
 
-`logger.run_once` supplies a closure over its existing `world_model_conn`/`theatre`. `contacts.py`
-stays free of both world-model and enrichment imports, the engagement block keeps its place in the
-five-block loop (and its free `EVENT_COOLDOWN_S`), and a fixture tests the hysteresis with a two-line
-lambda instead of a terrain database. `los_clear=None` skips the term — correct degradation for the
-no-world-model path the console already handles elsewhere.
+#### 4f-i — nulls do **not** all degrade the same way, and the payload's own rule is inverted for three of four fields
 
-**`radar_range_m` and `acquire_time_s` are ingested and nothing reads them.** Say so explicitly in
-the module docstring, because an unused field invites either deletion or invention:
+`threat_envelopes.json` states: *"a null MUST degrade to no warning, never to a default."* **That is
+correct for `range_max_m` and dangerously backwards for the other three.** Read literally, a missing
+`alt_min_m` would *suppress* a warning — i.e. a system whose floor we do not know would be treated as
+though flying low defeated it. The conservative direction is the opposite: unknown protection is no
+protection.
 
-- **Radar range is the natural home of a future "he's looking at us" warning**, and it is a
-  *different* claim from "he can shoot us" — being tracked at 12 NM by a Shilka whose gun reaches
-  2 NM is information, not a threat. The roadmap already records that "tracking us" is *observable*
-  (a slewed dish is a visible fact) rather than an omniscience problem, so the perception half is
-  legitimate; the knowledge half is this column. Transcribing it now costs one more cell per row and
-  saves re-transcribing the whole table later.
-- **Acquire time is what would eventually decide whether a fast crossing pass actually gets engaged**
-  — the difference between overflying a Shilka and loitering in front of one. Nothing models
-  time-in-envelope today.
+| field | null count | degrades to | why |
+|---|---|---|---|
+| `range_max_m` | 1 (SA-5) | **no envelope at all — silence** | with no reach there is nothing to test; this is the payload's rule, and it is right here |
+| `range_min_m` | 5 (SA-2, SA-5, SA-11, Rapier, NASAMS) | **0 — no inner hole** | assume it can shoot you close in |
+| `alt_min_m` | 6 | **no floor — altitude never protects** | assume flying low does not help |
+| `alt_max_m` | 2 | unused anyway | — |
 
-Neither is speculative scope: they are cells in a row already being typed. **They must not acquire a
-consumer in this milestone.**
+**The SA-2 case is why this matters and why the blanket rule had to be split.** S-75 / SA-2 has a
+null `range_min_m` and a null `alt_min_m` but a perfectly good **51.9 km** `range_max_m`. Applying
+"any null ⇒ silence" entry-wide would throw away a 51 km envelope over two missing inner bounds — for
+one of the most recognisable threats on the map. **Only SA-5 (S-200) is genuinely unusable**, with
+every numeric field null.
 
-#### 4g — getting the data into the repo, which is a real gate
+Write this per-field table into `threat.py`'s docstring. A single "nulls mean silence" line is the
+kind of rule that reads as safe and is not.
 
-The wiki page is HTML-only with no JSON/Lua/CSV export, and **the fetching tool available to the
-planning session declines to reproduce the tables in full**, so the ingest cannot be automated from
-here. This is a genuine blocker on Stage 4, not a formality — name it rather than discovering it
-mid-implementation.
+#### 4f-ii — LOS is a *precondition for tracking*, not a terrain nicety
 
-Two honest routes, and the first is better:
+Reframed by the user, 2026-09-24: *"LOS is required for radar tracking."* This is stronger than "a
+ridge happens to be in the way", and it changes what the term means. **A radar-guided system cannot
+track what it cannot see**, so line of sight is not a modifier on an otherwise-live threat — it is
+part of what makes the threat live at all. Three behavioural consequences follow, and they are
+behaviours rather than restatements:
 
-1. **The user pastes the tables.** They already have the page open — the Shilka row above came from
-   them. Air-defence categories only (AAA, MANPADS, SAM, and the radar rows); ground armour and
-   trucks have no envelope worth modelling against a helicopter beyond gun range. That is roughly 40
-   rows, one paste, and it puts the literal cells in front of whoever transcribes them — which is
-   exactly what would have prevented the two errors in this section's own history.
-2. **An investigator pass with different tooling**, if the paste is inconvenient. Slower, and it
-   reintroduces the summarisation risk that caused the problem.
+1. **Losing LOS *ends* the threat state; it does not merely fail to start it.** A system that had you
+   and then lost you when you dropped behind a ridge stops being a threat, and a standing danger
+   warning should **clear** — `CONTACT_ENGAGEMENT_CHANGED` fires in the "safe from" direction on an
+   LOS loss exactly as it does on a range exit. This is the duck-behind-terrain behaviour the pilot
+   will actually fly, and it will be immediately obvious in the air as working or not — which makes
+   it the best acceptance test in the milestone.
+2. **It is symmetric with perception.** He cannot see through terrain; neither can the SAM.
+   `perception/visibility.py` already gates every sighting on `geometry.line_of_sight_clear` (a thin
+   wrapper on world-model's `query.line_of_sight`), and the same primitive answers both directions.
+   The model needs no separate notion of "can it see me".
+3. **It is why `acquire_time` will eventually earn its column** (4f-iii). A brief exposure crossing a
+   gap may not last long enough for the system to acquire. LOS-as-precondition *plus* acquire time is
+   what separates "it saw me for a second" from "it has me". Nothing consumes it here, but the reason
+   to extract it later is now concrete rather than speculative.
 
-**Do not begin Stage 4 before the data is in hand.** Transcribing from memory or from a summary is
-how a wrong max range becomes a confident wrong danger call.
+#### 4f-ii-a — the LOS test inherits belief uncertainty, and that is the part most likely to bite
 
-Whichever route: the result is a **transcribed snapshot of a community wiki**, carrying
-`source="hoggit-threat-database"`, `confidence="provisional"` and the retrieval date per 4a, with a
-missing or `TBC` cell degrading to **no warning** — never to an invented default.
+**Ownship's end of the sightline is exact; the threat's end is a belief.** `Contact.last_position` is
+reconstructed from a percept, and `Contact.last_position_uncertainty_m` is its error budget — a
+conservative scalar radius in **metres** (`association_over_time.uncertainty_radius_m`). *Use it as
+metres of position error, which is what it is; do not convert it into a bearing error* — that
+misreading already cost a pass on `plans/binocular-optic/stage3b.md`. The terrain profile between the
+**believed** position and ownship can be nothing like the profile to the real one.
+
+**Resolution: sweep the uncertainty rather than pretend it is not there** — the same answer the
+binocular search arrived at for the same class of problem.
+
+- **Sample LOS at three points, not one:** the believed position and two lateral offsets at
+  `±last_position_uncertainty_m` perpendicular to the ownship→threat bearing. **If any sample is
+  clear, treat the threat as having LOS.** Lateral is the axis that matters — whether a ridge
+  intervenes turns on *which side of it* the threat is, far more than on how far along the bearing.
+- **Fail open, deliberately, because the costs are asymmetric.** A false danger call costs the pilot
+  a glance; a missed one costs the aircraft. So LOS may only *suppress* a warning when the whole
+  uncertainty disc is masked.
+- **Do not shrink the effective range to account for uncertainty.** That would smear a positional
+  error into a capability figure and quietly make the envelope table wrong. Keep the table honest and
+  put the uncertainty where it belongs — in the geometry query.
+
+**Consistency check, and it comes out right:** fail-open plus three samples still delivers the
+duck-behind-a-ridge behaviour, because a ridge is hundreds of metres to kilometres across while a
+freshly-observed contact's uncertainty is tens to low hundreds of metres — the ridge masks the whole
+disc and the warning clears. For a *stale* contact the disc is large and the warning persists longer.
+That is honest rather than a defect: he does not know you are safe, he knows he has lost sight of the
+thing. Note the tension with consequence 1 above and resolve it that way in the implementation, not
+by tightening the samples.
+
+**Cost.** Three elevation-grid walks instead of one, per watched contact that resolved an envelope
+per poll — the same primitive the naked-eye channel already runs per candidate per poll. Bounded by
+*watched contacts with an envelope*, not by contact count: `envelope_for` returns `None` for
+unknown/presence-level contacts and for classes with no row, and that check is free and runs first.
+`LOS_UNCERTAINTY_SAMPLES = 3` is an isolated constant.
+
+**Wiring, and the import cycle it avoids.** `contacts.py` cannot import `belief.enrichment` (cycle),
+and `line_of_sight_clear` needs `conn` and `theatre`. Rather than widening `tick` with two
+world-model arguments, inject the check as the `los_clear` callable above; `logger.run_once` supplies
+a closure over its existing `world_model_conn`/`theatre`. `contacts.py` stays free of world-model and
+enrichment imports, the engagement block keeps its place in the five-block loop (and its free
+`EVENT_COOLDOWN_S`), and a fixture tests the hysteresis with a two-line lambda instead of a terrain
+database. `los_clear=None` skips the term — correct degradation for the no-world-model path.
+
+#### 4f-iii — what was *not* extracted, and whether it is worth a pass
+
+The SAM table carries separate **`Track RADAR` and `Search RADAR` columns with HARM codes**, and an
+acquire-time column; none is in the extracted payload. An earlier revision of this plan speculatively
+designed `radar_range_m`/`acquire_time_s` fields — **drop them from the schema**: the extracted file
+is the schema, and inventing fields it does not contain is how a table and its reader drift.
+
+They are worth a **later** pass, not this one:
+
+- **Search/track radar is detection range, which is a different and longer claim than weapon range** —
+  being tracked at 12 NM by a gun that reaches 2 NM is information, not a threat. That is the natural
+  home of a future *"he's looking at us"* warning, which the roadmap already records as legitimate
+  (a slewed dish is *observable*, not an omniscience problem). It needs a behaviour-change channel
+  that does not exist, so the data would sit unused.
+- **Acquire time** would decide whether a fast crossing pass actually gets engaged — it needs a
+  time-in-envelope model that nothing has.
+
+Record both in `todo/todo.md` as a follow-on extraction against the same saved HTML, so the next pass
+does not re-fetch a page that may have changed.
+
+#### 4g — the data is extracted but **not yet committed**
+
+`body-layer/data/threat_envelopes.json` and the saved HTML exist in the main checkout as **untracked
+files**, on no branch. Stage 4 cannot start until they are committed. Three things to settle when
+they are:
+
+1. **Neither path is gitignored** — `.gitignore` covers `graphify-*`, `win-mac-sync` and the `.miz`
+   samples, not `body-layer/data/`. So `git add` will work; the file is not at risk of being silently
+   swallowed the way `world-model/data/` would be.
+2. **The saved page brings a 1.8 MB `..._files/` asset directory** (CSS, images, scripts) beside the
+   160 KB HTML. Commit the **HTML only**; the assets are page chrome and carry no evidence.
+   `.gitignore` the `_files/` directory, or the repo gains 1.8 MB of wiki styling as permanent
+   history.
+3. **Provenance travels with the payload, and already does** — the JSON's own header carries
+   `source`, `source_file`, `retrieved: 2026-09-24`, `provenance: community wiki, transcribed
+   snapshot -- not DCS ground truth`, and `units`. `threat.py` must not restate those as literals;
+   read them from the file so the two cannot disagree.
+
+**Community wiki, not DCS ground truth, and not ED documentation.** Same evidence class as the
+pydcs-derived projections in `world-model`, and the same treatment: provisional until confirmed. A
+wrong `range_max_m` produces a confidently wrong danger call and does not announce itself.
 
 ---
 
@@ -593,17 +795,23 @@ Flyable alone; body-layer only.
 **Stage 3 — `follow`.** Split in two, and 3a is worth shipping on its own:
 - **3a — the synonym.** `vocabulary.py` phrasings only. Needs an audio-adapter redeploy (Mac-side),
   nothing else.
-- **3b — the selector.** Nine `follow_clock_*` tokens, `parse_range_km`, the range slot through all
-  five layers, `_handle_follow`, `render_no_contact`. The body-layer half is exercisable from the
-  `!voice` harness and the typed console **before** any redeploy, which is how to test the selector
-  logic without burning a sortie on recognition.
+- **3b — the slot migration.** `slots` replaces `bearing_degrees` end to end (matcher → wire →
+  console → `PendingConfirmation`). **No behaviour change**, and worth its own commit for exactly
+  that reason: it is the one step that touches already-flown paths, so a regression here is
+  attributable rather than tangled up with the new command.
+- **3c — the resolver.** The `follow` token, three slot parsers, the descriptor set,
+  `_resolve_follow_target` with its weights, floor and tie rule, `render_no_contact`. The body-layer
+  half is exercisable from the `!voice` harness and the typed console **before** any redeploy — which
+  is how to tune the weights without burning a sortie on recognition, and the only part of this
+  milestone whose behaviour is a judgement call rather than a threshold.
 
-**Stage 4 — engagement envelopes. Gated on the table being in hand (4g) — do not start without it.**
+**Stage 4 — engagement envelopes. Gated on the payload being committed (4g) — do not start without it.**
 `belief/threat.py` (transcription + rollup + `envelope_for`); `CONTACT_ENGAGEMENT_CHANGED`; the
-seventh block in `tick` with the range annulus ANDed with the altitude band and the injected
-`los_clear` term, the 1.5× hysteresis on the leaving side, and the seed-as-outside convention; the
-two wordings. `radar_range_m`/`acquire_time_s` are transcribed and left unconsumed. Largest and least
-certain — last, so the sortie after Stage 3 informs it.
+seventh block in `tick` ANDing the range annulus, the AGL floor and the three-sample `los_clear`
+term, the 1.5× hysteresis on the leaving side, and the seed-as-outside convention; the two wordings.
+Largest and least certain — last, so the sortie after Stage 3 informs it. **Its acceptance test is
+the duck-behind-a-ridge behaviour** (4f-ii): fly under a ridge from a recognised SAM and hear the
+danger call clear.
 
 **Stage 5 — prose and roadmap.** `STATE_TRANSITIONS.md`'s "Watching" block, both `ROADMAP.md`s,
 `todo/todo.md` for the deferrals named below.
@@ -616,9 +824,9 @@ for Stage 3.
 
 ### Risks & Unknowns
 
-- **Every new token is unbenched.** `follow nearest`, `follow nearest air defence`, `stop following`,
-  `cancel follow`, nine `follow_clock_*`, and every `parse_range_km` phrasing have **no recordings in
-  this corpus**. Their recognition accuracy on this user's voice is unmeasured — the same cost that
+- **Every new token and every slot phrasing is unbenched.** `follow nearest`, `follow nearest air
+  defence`, `stop following`, `cancel follow`, the `follow` verb, and every descriptor / clock /
+  range phrasing have **no recordings in this corpus**. Their recognition accuracy on this user's voice is unmeasured — the same cost that
   kept `cancel_scan`/`cancel_watch` off voice until 2026-09-23. They should go into the next corpus
   recording. Until then, Stage 3's behaviour is verified only through the typed harness.
 - **`follow` and `full` are one edit apart** (`scan_full` is an existing token) and both anchor at the
@@ -626,35 +834,44 @@ for Stage 3.
   ambiguity band exists and will ask, but this collision deserves an explicit matcher test.
 - **The range slot has no checksum.** "Follow two o'clock three kilometres" misheard as "two
   kilometres" is a legal, undetectable value. Only the readback protects against it.
-- **`WATCH_REPORT_MIN_GAP_S = 8.0` and `FOLLOW_RANGE_TOLERANCE_KM = 0.75` are guesses**, uncalibrated
-  like `SPEECH_RATE_WPS` and `MIN_UTTERANCE_S` next door. Both are isolated single constants.
+- **The resolver's weights, `FOLLOW_MATCH_FLOOR`, `FOLLOW_SEPARATION` and `WATCH_REPORT_MIN_GAP_S`
+  are all guesses**, uncalibrated like `SPEECH_RATE_WPS` next door. They are isolated constants and
+  are meant to be deleted with the resolver when free text arrives — **do not tune them as if they
+  modelled something.**
+- **The descriptor resolver is a stopgap for a brain-layer capability** (user's own framing). The
+  risk is that it works *well enough* to become load-bearing, and then nobody replaces it. Its
+  docstring must say it is temporary.
 - **Suppressed callouts are lost, not deferred** (Decision 3). Under load Petrovich will miss a
   "stopped" and never say it, because `last_emitted_motion` advances outside the cooldown guard.
   Pre-existing behaviour for every other kind; now applies to three more.
-- **Hoggit data is a dated community snapshot** and some cells read `TBC`. A wrong max range produces
-  a confidently wrong danger call. Missing values degrade to silence by design; wrong ones do not
-  announce themselves.
-- **Stage 4 is blocked until the table is physically in the repo** (4g), and the page cannot be
-  fetched in full by the tooling available to planning. This is the only hard external dependency in
-  the milestone; Stages 1–3 are unaffected.
-- **The altitude column was misread twice before this plan settled** — a summarising fetch flattened
-  `0 - 6500` into "6500 max", which inverted the conclusion (from "the floor is the tactical fact"
-  to "drop the column"). Transcribe from the literal cells, never from a summary, and treat any
-  single-number altitude as suspect.
-- **Two ingested fields have no consumer** (`radar_range_m`, `acquire_time_s`). They will read as
-  dead code to a reviewer. The module docstring must say what each is for and that neither is wired,
-  or one will be deleted as unused and the other pressed into service as a threat range — being
-  *tracked* is not being *shootable*.
-- **The LOS term makes the danger state flap over broken ground.** Terrain masking is binary and
-  changes fast at 150 kt through valleys, so danger/safe could alternate at the poll rate. The 1.5×
-  hysteresis only damps the *range* boundary, not the LOS one. `EVENT_COOLDOWN_S` (15 s) and
+- **Hoggit data is a dated community snapshot** (retrieved 2026-09-24). A wrong `range_max_m`
+  produces a confidently wrong danger call and does not announce itself.
+- **Nulls are not rare and not uniform** (4f-i). SA-5 is fully unusable and will never produce a
+  warning; SA-2 keeps a 51.9 km reach but has no inner bound; six entries have no floor. "Degrades
+  to silence" is the behaviour for a real, recognisable threat, not an edge case — say so in the
+  sortie card, or its silence reads as a bug.
+- **Stage 4 is blocked until the payload is committed** (4g). It exists but is untracked, on no
+  branch. Only hard dependency in the milestone; Stages 1–3 are unaffected.
+- **The altitude column was misread twice before the data settled it** — a summarising fetch
+  flattened `0 - 6500` into "6500 max", which inverted the conclusion twice over (first "gate on the
+  ceiling", then "drop the column"; the answer was "gate on the floor"). Read literal cells, never a
+  summary, and treat any single-number range as suspect.
+- **The LOS term makes the danger state flap over broken ground, and it now drives a real
+  transition.** Since losing LOS *clears* a warning (4f-ii), terrain masking that changes fast at
+  150 kt through valleys will alternate danger/safe at the poll rate. The 1.5× hysteresis damps only
+  the *range* boundary, not the LOS one. `EVENT_COOLDOWN_S` (15 s) and
   `WATCH_REPORT_MIN_GAP_S` (8 s) bound how often that reaches speech, but the underlying state will
   chatter in the event log, and if it proves audible the fix is a dwell on the LOS term — **not** a
   fourth suppression constant applied to speech.
-- **`line_of_sight_clear` costs a sampled elevation walk per watched threat per poll.** Bounded by
-  watched contacts with a resolved envelope (4f), not by contact count, but it is the first time this
-  project calls the primitive outside the perception gate. If a watched-heavy sortie shows poll-time
-  growth, this is the first thing to measure.
+- **`line_of_sight_clear` now costs three sampled elevation walks per watched threat per poll**
+  (4f-ii-a's uncertainty sweep). Bounded by watched contacts with a resolved envelope, not by contact
+  count, but it is the first time this project calls the primitive outside the perception gate. If a
+  watched-heavy sortie shows poll-time growth, this is the first thing to measure.
+- **Fail-open LOS and prompt duck-behind-ridge clearing are in tension** (4f-ii-a). A stale contact's
+  uncertainty disc is wide enough that some sample stays clear, so the warning persists after you
+  are actually masked. That is honest — he has lost sight of it and does not know you are safe — but
+  a pilot may read it as the feature not working. Resolve it by letting uncertainty shrink with fresh
+  observation, **not** by tightening the sample set.
 - **The `OP_SRSAM` bucket has a ~4× internal range spread** (Decision 4c), so the class-level warning
   will often be wrong in magnitude until type-level recognition lands. Recorded against the buckets,
   not fixed here.
@@ -662,7 +879,7 @@ for Stage 3.
   S-300. Pre-existing, not touched by this plan, and the implementer should not fix it silently: it
   may be deliberate (an S-300 is rarely the nearest thing that matters). **Raise it, do not patch
   it.**
-- **`store.tick`'s signature widens twice** (`ownship_position`, `los_clear`). Every existing caller —
+- **`store.tick`'s signature widens twice** (`ownship`, `los_clear`). Every existing caller —
   tests especially — passes only `now_sim`. Both default to `None` and the new blocks no-op without
   them, so nothing breaks; but a fixture that forgets to pass them will silently test nothing, and
   an `los_clear=None` in production would make every envelope fire without the terrain term. Assert
@@ -682,31 +899,45 @@ for Stage 3.
 This **unblocks the deferred threat-band milestone**, which names unit engagement envelopes as its
 principal missing input alongside terrain control and a behaviour-change channel. After Stage 4 the
 envelope data exists behind a belief-keyed lookup, so `callouts._DEFAULT_THREAT_BAND` can be replaced
-with a real band without any new data — and, importantly, without the omniscience hazard that item
-warns about, because `envelope_for` structurally cannot see ground truth. It also **narrows** the
-DCS-native unit-database investigation from "needed" to "a provenance upgrade", since the
-belief-keyed lookup shape would not change if better numbers arrived.
+with a real band without any new data — and without the omniscience hazard that item warns about,
+because `envelope_for` structurally cannot see ground truth. It also **narrows** the DCS-native
+unit-database investigation from "needed" to "a provenance upgrade", since the belief-keyed lookup
+shape would not change if better numbers arrived.
+
+Two further effects, both new in this revision:
+
+- **It makes the case for un-deferring the 9K113 concrete** (4d). The optic was shelved as *more
+  detail*; the argument now is *identify the thing before it can shoot you*, and it is arithmetic
+  rather than preference — only the 9K113's class multiplier reaches a SHORAD envelope's edge. Its
+  multipliers are already measured and sitting in `perception/optics.py`'s docstring.
+- **The `slots` migration (2b-i) pays forward.** Every future command that takes a parameter — and
+  free-text targeting will take several — threads through one field instead of adding a wire column
+  per command family. It is the last cheap moment to do it, with one slot in flight rather than four.
 
 ---
 
-### Decisions Requiring User Input
+### Decisions — all three resolved by the user, 2026-09-24
 
-1. **`follow <clock>` when several contacts sit in that hour — watch all, or the nearest?**
-   **Recommendation: all of them.** The pilot's own phrasing is *"follow **group** 1 o'clock"*, and
-   a clustering model already means one contact ≈ one group of units at one bearing; several contacts
-   in one hour are, from the cockpit, one patch of marks in one direction. Picking the nearest
-   silently drops most of what he pointed at, and asking "which one?" is unanswerable by voice —
-   contact ids are deliberately never spoken. The readback would name the count
-   (*"Following four contacts, one o'clock."*). The cost is that `cancel_watch` must clear a set, and
-   that one careless `follow` can mark a dozen contacts watched, multiplying Stage 1's reports.
-2. **Does `follow` mean "watch that hour" or "watch those contacts"?** This plan assumes the latter —
-   a per-contact mark that stays attached as the contact moves out of the hour. The alternative is
-   cheaper and already built: a `relative_clock_hour` `AttentionArea`, which `reproject_relative_areas`
-   already tracks through turns, so any contact entering the hour becomes watched and any leaving
-   stops. But "follow" connotes following *the thing*, and the optional range slot has no meaning for
-   an area. **Recommendation: contacts, as planned** — but this is a genuine fork and cheap to reverse
-   only before Stage 3b is built.
-3. **Is the late danger warning (Decision 4d) acceptable?** He cannot warn about a SAM he has not
-   recognised, so in practice the first "Danger, SAM" often arrives when you are already well inside
-   the envelope. I argue that is correct and valuable. If the expectation was an *early* warning, this
-   trigger will disappoint, and that is better known before Stage 4 is built than after.
+Recorded rather than open, so a later reader does not reopen them.
+
+1. **How `follow` picks a contact: neither "all" nor "nearest" — a best-match over optional
+   qualifiers.** *"this really needs the brain so I can freetext tell which contact to follow. Let's
+   approximate it by 'follow/watch [group/class/type] &lt;where o'clock&gt; &lt;distance&gt;' then
+   find the closest match to it and watch that."* Designed in Decision 2b: parsed slots, a scored
+   resolver, a match floor, and exactly one contact watched. **Explicitly a stopgap for the brain
+   layer** — delete it when free text arrives, do not extend it. Type-level descriptors are dropped
+   from the user's "group/class/type" as unenumerable in a closed grammar and almost never
+   satisfiable at realistic recognition range (2b-ii).
+2. **`follow` attaches to the contacts, not to the hour — confirmed** (2b-iv). The per-contact mark
+   was the assumption and it is now the decision; it is also the only reading consistent with a
+   best-match resolver, since descriptor and range qualifiers have no meaning for a region.
+3. **The late danger warning is accepted, with a qualification that matters** (4d). *"useful for
+   SHORAD, longer range SAM's can't be identified that far. Even for SHORAD, the 9K113 view is
+   needed for identification at safe range."* So the feature targets SHORAD, the lateness against
+   long-range SAMs is a fact about recognition rather than a defect here — and its practical value
+   is **gated on the deferred 9K113 optic**, which is now recorded as the strongest argument for
+   revisiting that deferral.
+
+Also settled in passing: **the altitude floor compares against `OwnshipState.alt_agl_m`** (4f), and
+**LOS is a precondition for radar tracking**, not a terrain nicety — which is what makes losing LOS
+*clear* a standing warning (4f-ii).
