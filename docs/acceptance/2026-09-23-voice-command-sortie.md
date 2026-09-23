@@ -96,8 +96,22 @@ Mac, two terminals:
 
 ```sh
 cd audio-adapter
-PYTHONPATH=src .venv/bin/python -m audio_adapter --whisper-model ~/whisper-models/ggml-small.en.bin
+PYTHONPATH=src .venv/bin/python -m audio_adapter \
+  --host 0.0.0.0 --whisper-model ~/whisper-models/ggml-small.en.bin
 ```
+
+**`--host 0.0.0.0` is not optional for this flight.** The adapter defaults to loopback because it
+was built as a Mac-local service; the capture process calling in from Windows is a new role. Without
+it the Windows box cannot reach it at all, and the symptom looks like a firewall problem.
+
+macOS will then block the incoming connection until the *resolved* interpreter is allowed — the
+venv's `python` is a symlink, and the firewall registers what it points at
+(`python -c "import os,sys; print(os.path.realpath(sys.executable))"`). Click **Allow** on the
+prompt, or add it with `socketfilterfw --add` / `--unblockapp`. The Homebrew path carries a version
+number, so a Python upgrade silently revokes the permission.
+
+Check from Windows before flying: `curl http://<mac-ip>:7795/transcripts/poll` should answer `[]`.
+
 ```sh
 cd body-layer
 PYTHONPATH=src:../world-model/src .venv/bin/python -m logger \
