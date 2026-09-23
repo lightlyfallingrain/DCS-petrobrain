@@ -691,6 +691,7 @@ def check_visibility(
                 threshold_bound=threshold_bound,
                 outcome=outcome,
                 achieved_tier=achieved_tier,
+                optic=optic.name,
             )
         )
 
