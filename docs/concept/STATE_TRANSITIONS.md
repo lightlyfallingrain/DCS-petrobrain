@@ -186,7 +186,13 @@ degrades to a shared class or the presence root).
 
 ## Player commands
 
-The sidebar note: **"player commands need to be accessible to set via F10 comms menu"**.
+The sidebar note: **"player commands need to be accessible to set via F10 comms menu"**. That
+framing has since inverted (user direction, 2026-09-19): voice is primary and the F10 radio menu
+is one legacy transport into the same dispatcher (`CrewConsole.handle_command`), kept running
+until it is retired wholesale rather than renamed piecemeal — see `plans/
+voice-command-completeness/plan.md` Decision 4 and `body-layer/CLAUDE.md`'s "surface is commands,
+not F10 commands" note. The vocabulary below is unaffected by that framing change; it describes
+what a command means, not which transport carries it.
 
 ```
 cancel task

@@ -1071,6 +1071,74 @@ def test_poll_transcripts_skips_malformed_items() -> None:
     assert client.poll_count == 1
 
 
+class _RecordingCrewConsole:
+    """Stands in for `CrewConsole` in `_poll_transcripts` -- records the
+    exact arguments `handle_transcript` was called with, so a bearing
+    round trip through this function can be asserted without standing up a
+    real `EnrichmentContext`/`TaskStore` (that belongs to `test_crew_
+    console.py`'s own, deeper `handle_command`/`_handle_scan` tests)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, int | None]] = []
+
+    def handle_transcript(
+        self,
+        transcript: str,
+        confidence: float,
+        token: str | None,
+        match_ratio: float,
+        verb_anchored: bool,
+        ambiguous: bool,
+        now_sim: float,
+        bearing_degrees: int | None = None,
+    ) -> list[str]:
+        self.calls.append((transcript, token, bearing_degrees))
+        return []
+
+
+def test_poll_transcripts_threads_bearing_degrees_into_handle_transcript() -> None:
+    """`plans/voice-command-completeness/plan.md` Stage 3's own regression
+    guard: `bearing_degrees` used to be dropped at the `TranscriptEvent`
+    wire and never reached `handle_transcript` at all."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan bearing three two zero",
+                "confidence": 0.9,
+                "token": "scan_bearing_deg",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "bearing_degrees": 320,
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == [("scan bearing three two zero", "scan_bearing_deg", 320)]
+
+
+def test_poll_transcripts_skips_items_with_a_malformed_bearing_degrees() -> None:
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan bearing three two zero",
+                "confidence": 0.9,
+                "token": "scan_bearing_deg",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "bearing_degrees": "320",  # wrong type, must be skipped
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == []
+
+
 def test_a_player_command_lowers_the_binoculars() -> None:
     """`plans/binocular-optic/plan.md` D4 ("not a special case per
     command... the pilot asking for something is itself evidence") wired
@@ -1080,13 +1148,13 @@ def test_a_player_command_lowers_the_binoculars() -> None:
     the binoculars if it changed. Reproduces that exact conditional (see
     `logger._run_crew_text_poll_loop`) rather than checking the counter and
     `lower_binoculars` as two unrelated facts, which is what let the real
-    D4 gap (only `handle_f10_command` incremented the counter -- a typed or
+    D4 gap (only `handle_command` incremented the counter -- a typed or
     voice-fallthrough free-form request did not) go uncaught: a resolvable
     F10 token always passed this test, whichever surface actually carried
     D4's rule.
 
     **Drives the free-form typed path** (`handle_line`, not
-    `handle_f10_command`) -- the surface the review found broken -- and
+    `handle_command`) -- the surface the review found broken -- and
     asserts the binoculars actually come down as a consequence, not merely
     that the counter moved."""
     from belief.crew_console import CrewConsole
