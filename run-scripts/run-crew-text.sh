@@ -7,5 +7,6 @@ pushd ../body-layer/ && PYTHONPATH=src:../world-model/src .venv/bin/python -m lo
     --crew-text \
     --f10-commands \
     --audio-adapter-url http://127.0.0.1:7795 \
+    --speech-log ~/dcs-speech.jsonl \
     $@
 popd
