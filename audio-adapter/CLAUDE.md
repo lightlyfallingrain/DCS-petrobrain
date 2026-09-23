@@ -132,6 +132,14 @@ other subproject running (`--target local` is the default):
 curl -X POST http://127.0.0.1:7795/speak -d '{"text": "Watching Charlie one seven.", "urgent": false}'
 ```
 
+**`--host` defaults to `127.0.0.1`,** because this server was built as a Mac-local collaborator of
+body-layer's. **The capture process (Slice 3 Stage 4/5) calls in from the Windows box, so that flight
+needs `--host 0.0.0.0`** — and then macOS's application firewall blocks the incoming connection until
+the *resolved* interpreter is allowed (the venv's `python` is a symlink; the firewall registers its
+target, and the Homebrew path carries a version number, so an upgrade silently revokes it). The
+default is deliberately left on loopback rather than widened: a public release should not ship
+listening on every interface, and `/speak`/`/transcribe`/`/stop` carry no authentication.
+
 Add `--target aircraft-layer --aircraft-layer-url http://<aircraft-layer-host>:7791` to POST the
 synthesized WAV to a running aircraft-layer collector instead (needs `aircraft-layer`'s collector
 running standalone; does not need DCS running — see `aircraft-layer/WORKFLOW.md`).
