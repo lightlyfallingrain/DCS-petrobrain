@@ -67,16 +67,22 @@ copy "<repo>\aircraft-layer\dcs-export\petrobrain-f10-commands-hook.lua" ^
 (matches)`. A `VERSION MISMATCH` means the copy did not take, and the trigger will read as
 permanently released.
 
-**Three processes.** Windows:
+**Three processes.** Windows — **note the two `cd`s: these are different subprojects**, and
+`PYTHONPATH=src` is relative to whichever one you are standing in:
 
 ```
+cd <repo>\aircraft-layer
 set PYTHONPATH=src
 python -m collector
 ```
 ```
+cd <repo>\audio-adapter
 set PYTHONPATH=src
 python -m audio_adapter.capture --adapter-url http://<mac-ip>:7795 --ptt dcs
 ```
+
+Capture is stdlib-only, so no venv is needed for it on Windows — but it does need `sox` on PATH,
+which the corpus recording already required.
 
 Mac, two terminals:
 
