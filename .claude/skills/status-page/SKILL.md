@@ -110,6 +110,40 @@ The page was designed once; regeneration is a content update, not a redesign.
   its tab and its gallery entry.
 - Wide content scrolls inside its own container; the body never scrolls sideways.
 
+## The architecture diagram (third graph, at the foot of the page)
+
+Added 2026-09-24 on user request. It answers the question neither other graph does: **what are the
+pieces, where does each one run, and what flows between them.** The two milestone graphs are about
+*time* — how we got here, what is next. This one is about *shape*, and it is the only part of the
+page that stays useful when every milestone is done.
+
+**Derive it from the architecture that exists, not from the roadmaps.** Root `CLAUDE.md`'s
+"Architecture" section and each subproject's own `CLAUDE.md` "What this is" are the sources. If the
+diagram and the code disagree, the diagram is wrong — same contract as the rest of the page.
+
+**What it must show**, because these are the facts a newcomer gets wrong:
+
+- **Which machine each process runs on.** The Windows/Mac split is not incidental — it is why the
+  aircraft layer exists as a separate subproject and why the seams are HTTP.
+- **The two seam kinds, distinguished visually.** `body-layer ↔ world-model` is an **in-process
+  Python import**, the sole sanctioned exception to module independence; everything else is
+  **HTTP/JSON** across a subproject boundary. Drawing those the same way loses the single most
+  important architectural rule in the repo.
+- **Direction of flow.** DCS is read *and* written (telemetry and world objects out; text overlay,
+  commands and audio in). An arrow that only points outward is wrong.
+- **What is offline versus in the loop.** The Mission Interpreter runs pre-mission and produces an
+  artifact; it is not a runtime participant.
+- **The brain layer as absent.** It is the point of the whole project and does not exist — draw it
+  as a `hold` node so its absence is visible rather than implied.
+
+**Keep it structural.** No milestone status, no percentages, no "next" markers — those belong to
+the graphs above. If a reader cannot tell this diagram from the dependency map at a glance, it has
+drifted into restating them.
+
+Same `classDef` block as the other two graphs, an `id`, and an expand button carrying
+`data-graph="#<id>"` — see the lightbox note immediately below, which is exactly the trap a third
+graph walks into.
+
 ## The graph lightbox
 
 Every graph gets an expand button, and the button must carry `data-graph="#<diagram-id>"`. The
