@@ -338,6 +338,15 @@ class CrewConsole:
     #: `scan_*` token reports "no task store configured" and "Cancel Task"
     #: always reports "no pending task", rather than raising.
     tasks: TaskStore | None = None
+    #: How many player commands this console has dispatched, F10 or spoken
+    #: (`plans/binocular-optic/plan.md` D4). A counter rather than a flag
+    #: or a callback: the poll loop compares it across one iteration to
+    #: learn "did the player ask for anything just now", which stays true
+    #: for a command surface added later without this class knowing what
+    #: the answer is used for. It is deliberately not reset -- a monotonic
+    #: count is what makes the comparison safe across any number of
+    #: commands in one poll.
+    commands_handled: int = 0
     #: In-cockpit text overlay mirror (`plans/overlay-speech-callouts/
     #: plan.md`), mirroring `logger.ConsolePerceptionRunner.overlay_client`'s
     #: None-means-no-op pattern exactly. **Deliberately a separate field
@@ -405,6 +414,11 @@ class CrewConsole:
         self._print(spoken, now_sim, bypass_gate=False)
         return spoken
 
+    def _note_player_command(self) -> None:
+        """Record that the player asked for something. See
+        `commands_handled`."""
+        self.commands_handled += 1
+
     def handle_f10_command(self, token: str, now_sim: float) -> list[str]:
         """Dispatches one player-selected F10 radio-menu token (`plans/
         f10-command-vocabulary/plan.md`) -- `logger.py`'s `--crew-text
@@ -419,6 +433,7 @@ class CrewConsole:
         anything -- aircraft-layer's `F10CommandReceiver` already filters to
         its own `ALLOWED_COMMANDS`, so this branch is defensive, not a real
         path in practice."""
+        self._note_player_command()
         if token in _RELATIVE_SCAN_TOKENS:
             relative_sector = _RELATIVE_SCAN_TOKENS[token]
             lines = self._handle_scan(

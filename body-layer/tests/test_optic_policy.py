@@ -464,3 +464,72 @@ def test_a_look_is_not_ended_by_its_own_attempt_marking() -> None:
 
     assert state.phase is OpticPhase.GLASSING  # ...but this one continues
     assert decision.optic is BINOCULAR_OPTIC
+
+
+class TestFixedLookPlan:
+    """A glass phase overrides the scan by handing the source a plan that
+    answers with one direction -- so nothing downstream has to learn that
+    binoculars exist."""
+
+    def test_a_fixed_look_ignores_the_clock(self) -> None:
+        from perception.gaze import ScanPlan, gaze_at
+
+        plan = ScanPlan.fixed_look_at(azimuth_deg=-45.0, elevation_deg=-7.0)
+
+        for t_sim in (0.0, 3.0, 11.5, 900.0):
+            gaze = gaze_at(t_sim, plan)
+            assert gaze.center_azimuth_deg == -45.0
+            assert gaze.center_elevation_deg == -7.0
+
+    def test_a_free_scan_plan_still_cycles(self) -> None:
+        """The regression that matters: adding the fixed look must not
+        freeze the ordinary scan."""
+        from perception.gaze import FREE_SCAN_PLAN, gaze_at
+
+        labels = {gaze_at(float(t), FREE_SCAN_PLAN).label for t in range(0, 16, 2)}
+        assert len(labels) > 1
+
+    def test_a_scan_gaze_is_level(self) -> None:
+        """Elevation exists for aiming an optic; the scan sweeps
+        horizontally and must be unaffected."""
+        from perception.gaze import FREE_SCAN_PLAN, gaze_at
+
+        assert gaze_at(0.0, FREE_SCAN_PLAN).center_elevation_deg == 0.0
+
+
+class TestLookTargetGeometry:
+    def test_a_contact_below_is_a_negative_elevation(self) -> None:
+        """The sign convention the whole aiming fix depends on: ground
+        contacts are *below*, and getting this backwards would point the
+        binoculars at the sky."""
+        from belief.optic_policy import look_target_for
+        from perception.geometry import GeoPosition
+
+        target = look_target_for(
+            "CONTACT_1",
+            observer=GeoPosition(x=0.0, z=0.0, alt_m=500.0),
+            target_position=GeoPosition(x=1_000.0, z=0.0, alt_m=380.0),
+            heading_true_deg=0.0,
+            object_type="T-72",
+            current_level="presence",
+        )
+
+        assert target.elevation_deg < 0.0
+        assert -10.0 < target.elevation_deg < -5.0  # ~120 m down over ~1 km
+
+    def test_azimuth_is_body_relative(self) -> None:
+        """A contact due north with the nose due east is off the left
+        side, not at 0 degrees."""
+        from belief.optic_policy import look_target_for
+        from perception.geometry import GeoPosition
+
+        target = look_target_for(
+            "CONTACT_1",
+            observer=GeoPosition(x=0.0, z=0.0, alt_m=500.0),
+            target_position=GeoPosition(x=1_000.0, z=0.0, alt_m=500.0),
+            heading_true_deg=90.0,
+            object_type="T-72",
+            current_level="presence",
+        )
+
+        assert target.azimuth_deg == -90.0

@@ -65,8 +65,14 @@ So: **`belief/optic_policy.py` decides; `perception` receives a frozen `Optic` b
 
 ### D1. The raise window is computed from the existing calibration, not a new constant
 
-*"at distance where binoculars would identify type"* is exactly computable. For a contact of
-believed class, with `distinctiveness` and the calibrated tier bases already in `visibility.py`:
+**Revised while building: the window is whichever tier is *next*, not type.** The brief said both
+*"raise to classify"* and *"at distance where binoculars would identify type"*, and the numbers
+decide between them — for a 7 m vehicle, presence→class is 500 m unaided against **1750 m**
+glassed, while class→type is 250 m against 750 m. A type-only trigger would have confined
+binoculars to inside 750 m, where the question actually worth asking is *"what is that"* at three
+times the range. Classification is both the commoner want and the far wider band.
+
+The original derivation below is unchanged in method — only which pair of thresholds it compares:
 
 ```
 unaided_type_range  = TYPE_BASE  * distinctiveness * 1.00
@@ -221,9 +227,18 @@ observable changes — the same regression gate 2B used, for the same reason: it
 before any behaviour rides on it. **The trace gains the optic**, so every later stage is legible in
 `--detection-trace` rather than inferred.
 
-**Stage 2 — raise to identify.** `belief/optic_policy.py`: the D1 window, the D2 budget and
-lockout, the D3 smoothness gate, D4's command interrupt, D5's retry rule. This is the milestone's
-substance and it is where the constants that need a sortie are introduced.
+**Stage 2 — raise to look closer. DONE 2026-09-23.** `belief/optic_policy.py` plus its wiring:
+the phase cycle, the improvement window, the steadiness gate, the command interrupt, the retry
+rule. Three things the building of it changed or revealed:
+
+- **The trigger is the next tier, not type** (see D1, revised). Type-only would have confined
+  binoculars to inside 750 m.
+- **`within_optic_fov`'s boresight was fixed level**, which made a narrow optic useless at exactly
+  the ranges it exists for — a ground contact 1 km out from 120 m AGL is ~6.9° down, outside a
+  4.25° half-angle. `Gaze` gained `center_elevation_deg`.
+- **A glass phase overrides the scan with a `ScanPlan.fixed_look_at`** rather than a branch in the
+  source. The source already resolves `gaze_at(now_sim, plan)` every poll, so a plan that answers
+  with one direction *is* a stare, and nothing downstream had to learn that binoculars exist.
 
 **Stage 3 — binocular search within a commanded sector.** D6's raster, sky clamp and far-band
 restriction, alternating with the naked-eye scan.

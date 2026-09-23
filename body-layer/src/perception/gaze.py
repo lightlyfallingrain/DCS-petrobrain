@@ -263,12 +263,41 @@ class ScanPlan:
     commanded_sector: RelativeSector | None
     command_t_sim: float | None
 
+    #: A fixed direction to stare at, overriding the cycling legs entirely
+    #: (`plans/binocular-optic/plan.md` Stage 2). Set only while binoculars
+    #: are up.
+    #:
+    #: **Expressed as a plan rather than as a branch in the source**, which
+    #: is what keeps the stare from costing anything downstream: the source
+    #: already calls `gaze_at(now_sim, scan_plan)` every poll, so a plan
+    #: that answers with one direction *is* a fixed look, and nothing below
+    #: has to learn that binoculars exist.
+    fixed_look: Gaze | None = None
+
     def __post_init__(self) -> None:
         if (self.commanded_sector is None) != (self.command_t_sim is None):
             raise ValueError(
                 "ScanPlan.command_t_sim must be set if and only if "
                 "commanded_sector is set"
             )
+
+    @staticmethod
+    def fixed_look_at(*, azimuth_deg: float, elevation_deg: float) -> ScanPlan:
+        """A plan that stares in one direction. The wedge keeps the naked
+        eye's own focus half-width: the gaze gate is about where the head
+        is turned, and the *optic* is what narrows what that buys -- which
+        is why a binocular look needs no narrower `Gaze` as well as a
+        narrower field of view."""
+        return ScanPlan(
+            commanded_sector=None,
+            command_t_sim=None,
+            fixed_look=Gaze(
+                center_azimuth_deg=azimuth_deg,
+                half_width_deg=FOCUS_CONE_HALF_WIDTH_DEG,
+                center_elevation_deg=elevation_deg,
+                label="fixed_look",
+            ),
+        )
 
 
 #: Free scan, module docstring's default -- `NakedEyePerceptionSource.
@@ -296,7 +325,11 @@ def gaze_at(t_sim: float, plan: ScanPlan) -> Gaze:
     sim time (module docstring, hard part 1): a modulo and a table index,
     never a mutation. Free scan indexes `SCAN_PLAN` by `t_sim %
     SCAN_CYCLE_PERIOD_S`; a commanded scan indexes that sector's own
-    `_SECTOR_LEGS` entry by elapsed time since `plan.command_t_sim`."""
+    `_SECTOR_LEGS` entry by elapsed time since `plan.command_t_sim`. A
+    plan carrying a `fixed_look` returns it unchanged -- still a pure
+    function of its inputs, just one that ignores the clock."""
+    if plan.fixed_look is not None:
+        return plan.fixed_look
     if plan.commanded_sector is None:
         legs = SCAN_PLAN
         elapsed_s = t_sim % SCAN_CYCLE_PERIOD_S
