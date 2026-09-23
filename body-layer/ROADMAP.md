@@ -660,7 +660,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
   See `plans/group-detectability/plan.md`.
 
-- [x] **Five-fix sortie — FLOWN 2026-09-23, four passes.**
+- [x] **Five-fix sortie — FLOWN AND ACCEPTED 2026-09-23** (user: *"with these fixes, Five-Fix Sortie is done and accepted"*), four passes.
   (`docs/acceptance/2026-09-22-five-fixes-sortie.md`.)
 
   | | result |
@@ -812,8 +812,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
   spoken id. Typed `watch <id>` readback unchanged.
 
-- [~] **Movement detection — design settled 2026-09-20 (user), implemented 2026-09-22
-  (`plans/movement-detection/plan.md`), pending live acceptance.** The velocity transport
+- [x] **Movement detection — ACCEPTED 2026-09-23** on the five-fix sortie (user: *"pass on
+  preliminary test, will test and adjust more in future"*). Design settled 2026-09-20 (user),
+  implemented 2026-09-22 (`plans/movement-detection/plan.md`).
+
+  **Accepted on a preliminary reading, not a thorough one** — the user said so explicitly, and the
+  distinction is worth keeping rather than rounding up to "done": what was confirmed is that moving
+  units are called as moving and static ones are not, which is the behaviour the milestone exists
+  to produce. The constants (`MOTION_STOP_CONFIRM_S`, `MOTION_COCKPIT_PENALTY`) remain uncalibrated
+  and will move once there are more flights behind them. The velocity transport
   (`petrobrain-mission-telemetry-hook.lua` + `GET /unit_velocity/latest`), the apparent-angular-rate
   gate (`perception/motion.py`), the belief fold and event (`belief/motion.py`,
   `CONTACT_MOTION_CHANGED`), and the reporting surface (`get_situation`'s `facts["motion"]`, one
