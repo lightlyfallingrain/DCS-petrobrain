@@ -1021,6 +1021,34 @@ def test_active_gaze_compass_conversion_tracks_current_heading() -> None:
     assert plan_heading_90.commanded_legs == (8, 9, 10)
 
 
+def test_active_gaze_compass_conversion_handles_the_360_0_wrap() -> None:
+    # Optional refinement, `plans/voice-command-completeness/review.md`:
+    # Decision 2's own risk note named the 350/0/10 heading wrap as
+    # unguarded -- the reviewer hand-verified `legs_within_wedge` directly
+    # rather than through `_active_gaze`, and this file's existing compass
+    # tests only cover heading 0 and heading 90, neither of which crosses
+    # the 360/0 boundary the modulo arithmetic exists to handle. A
+    # commanded "scan north" task must resolve to the same (11, 12, 1) legs
+    # regardless of which side of the wrap the nose sits on.
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan_350 = _active_gaze(tasks, heading_true_deg=350.0)
+    plan_0 = _active_gaze(tasks, heading_true_deg=0.0)
+    plan_10 = _active_gaze(tasks, heading_true_deg=10.0)
+
+    assert plan_350.commanded_legs == (11, 12, 1)
+    assert plan_0.commanded_legs == (11, 12, 1)
+    assert plan_10.commanded_legs == (11, 12, 1)
+    assert plan_350 == plan_0 == plan_10
+
+
 def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
     tasks = TaskStore()
     tasks.create(
