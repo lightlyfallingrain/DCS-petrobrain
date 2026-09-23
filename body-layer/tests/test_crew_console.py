@@ -1927,6 +1927,67 @@ def test_report_bearing_s_still_reports_a_contact_believed_to_be_there(
     assert lines == ["BMP-2, 6 o'clock, 1 kilometre near Jableh (~200 metres)."]
 
 
+def _enrichment_context_with_heading(
+    monkeypatch: pytest.MonkeyPatch, heading_true_deg: float
+) -> EnrichmentContext:
+    """`_enrichment_context`'s twin with a caller-controlled ownship
+    heading -- needed to place `_SECTOR_CENTER_DEG["S"]` (180 degrees) at
+    an exact relative bearing from the nose, for the `rear_cutoff_deg`
+    boundary test below. Same monkeypatches as `_enrichment_context`."""
+    monkeypatch.setattr(
+        enrichment_module,
+        "describe_position",
+        lambda conn, theatre, x, z: _FakeDescription(
+            nearest_settlement=_FakeInfo(name="Jableh", distance_m=250.0)
+        ),
+    )
+    monkeypatch.setattr(
+        enrichment_module,
+        "project_terrain_aware",
+        lambda conn, theatre, observer, bearing, rng, *, max_iterations: observer,
+    )
+    return EnrichmentContext(
+        conn=_FAKE_CONN,
+        theatre="Syria",
+        ownship=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=heading_true_deg
+        ),
+    )
+
+
+def test_report_bearing_s_just_inside_rear_cutoff_says_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Optional refinement, `plans/voice-command-completeness/review.md`:
+    the two existing rear-hemisphere tests (dead-ahead-north, dead-astern-
+    south) are far from `COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg`
+    (130 degrees) -- this pins the `>=` comparison itself. Heading 51 puts
+    `S`'s sector center (180) at exactly 129 degrees relative -- just
+    inside the forward-visible envelope, so an empty result must still
+    answer "clear", not the rear-hemisphere refusal."""
+    console = CrewConsole(
+        store=ContactStore(),
+        enrichment=_enrichment_context_with_heading(monkeypatch, 51.0),
+    )
+    assert console.handle_command("report_bearing_s", now_sim=0.0) == ["South, clear."]
+
+
+def test_report_bearing_s_just_past_rear_cutoff_cannot_see_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`rear_cutoff_deg`'s other side: heading 49 puts `S`'s sector center
+    at exactly 131 degrees relative -- just past the cutoff, so an empty
+    result must refuse rather than claim a look that is physically
+    impossible."""
+    console = CrewConsole(
+        store=ContactStore(),
+        enrichment=_enrichment_context_with_heading(monkeypatch, 49.0),
+    )
+    assert console.handle_command("report_bearing_s", now_sim=0.0) == [
+        "Can't see south."
+    ]
+
+
 def test_report_bearing_deg_quantises_onto_the_nearest_sector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1952,6 +2013,69 @@ def test_report_bearing_deg_without_a_bearing_says_say_again(
     )
     assert console.handle_command("report_bearing_deg", now_sim=0.0) == [
         "say again -- no bearing heard"
+    ]
+
+
+def test_report_all_groups_and_truncates_multiple_contacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Optional refinement, `plans/voice-command-completeness/review.md`:
+    `group_facts`'s bucketing and `render_report`'s `REPORT_MAX_GROUPS`
+    truncation are each unit-tested in isolation (`test_callouts.py`,
+    `test_speech.py`) but never driven together through the real
+    `_handle_report` dispatch path -- the reviewer verified this seam
+    correct by hand, once, with a throwaway script; this pins it. Four
+    distinct classification types, each due east at a different range,
+    never share a `(unit word, range word)` bucket, so each forms its own
+    singleton group -- four groups, capped at `REPORT_MAX_GROUPS` (3),
+    ordered nearest-first (`report_priority`'s equal-attention-rank
+    tiebreak), with a trailing "And more."."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_at(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=1000.0,
+                classification_raw="BMP-2",
+            ),
+            _observation_at(
+                obs_id="OBS_2",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=2000.0,
+                classification_raw="T-72",
+            ),
+            _observation_at(
+                obs_id="OBS_3",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=3000.0,
+                classification_raw="BTR-70",
+            ),
+            _observation_at(
+                obs_id="OBS_4",
+                t_sim=0.0,
+                ownship_x=0.0,
+                ownship_z=4000.0,
+                classification_raw="ZSU-23-4",
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("report_all", now_sim=0.0)
+
+    assert lines == [
+        (
+            "BMP-2, 3 o'clock, 1 kilometre near Jableh (~200 metres). "
+            "T-72, 3 o'clock, 2 kilometres near Jableh (~200 metres). "
+            "BTR-70, 3 o'clock, 3 kilometres near Jableh (~200 metres). "
+            "And more."
+        )
     ]
 
 
