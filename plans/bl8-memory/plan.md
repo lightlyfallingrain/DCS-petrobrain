@@ -323,7 +323,27 @@ correctness-sensitive module in the body layer gains no field and no branch.
 
 ---
 
-### Decisions Requiring User Input
+### Decisions — Resolved by the User (2026-09-24)
+
+1. **Kneeboard file identity: option (c).** One file per mission-understanding artifact path, plus a
+   sim-time-went-backwards reset. Stored in the memory layer as a local file (or DB) — the user's
+   words: *"1 per mission data, stored in memory layer, local file (or db)"*. Notes survive a
+   mid-sortie restart within the same mission; campaign persistence remains later BL-8 work.
+2. **Stage 5's auto-entry waits for `threat.py`.** No temporary rule keyed on
+   `_AIR_DEFENCE_OP_CLASSES`. Accepted cost: the one automatic writer is delayed a full milestone,
+   and every kneeboard entry until then is player-commanded or briefing-sourced.
+3. **The four new voice tokens ship unbenched.** No corpus recording gates BL-8 — user direction:
+   *"just add them, let's not worry about recognition now"*. Recognition data comes from the speech
+   log instead, which was made **default-on** the same day (`--speech-log` now defaults to
+   `logs/speech.jsonl` whenever `--crew-text --speech-input` are active; `--no-speech-log` opts out).
+   Every unrecognised utterance is already one row there with `disposition: "say_again"`, a
+   `t_wall` stamp and the seven recognition fields, so garbling is measured post-hoc from real
+   sorties rather than predicted from a corpus that does not exist. **This inverts the usual order:
+   the first sorties after BL-8 are themselves the recognition experiment, so expect misfires in the
+   air before there is data to fix them.**
+
+### Superseded — the original open questions
+
 
 1. **What identifies a kneeboard file — and therefore when a new one starts?** Options: (a) one file
    per body-layer process run, timestamped at startup (simplest, but a mid-sortie restart loses the
