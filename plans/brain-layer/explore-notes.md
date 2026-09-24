@@ -275,3 +275,68 @@ rather than a milestone of its own — the target-resolution half is BR-2's refe
 a different verb, and the guidance half is deterministic body work that could be built in parallel
 with either. It should not start before the probe answers, because the probe determines whether
 this feature's most-watched moment is buildable at all.
+
+## Three resolutions, same session — all three were open questions above
+
+### The register switch is parameter-free, and falls out of the clock vocabulary
+
+> "when target is 12 o'clock sector, use x degrees left/right. When outside 12 o'clock sector, use
+> o'clock. km to m when distance <1km."
+
+So the switch is **not a range threshold and needs no tuned constant**. The o'clock vocabulary
+already partitions the horizon into twelve 30° sectors; the rule is simply *which sector the target
+is in*:
+
+| condition | azimuth said as |
+|---|---|
+| target inside the 12 o'clock sector (within ±15° of the nose) | signed degrees — "10 degrees left" |
+| target in any other sector | the o'clock — "10 o'clock" |
+
+Range is a separate, independent switch: **kilometres above 1 km, metres below it.** The two do not
+have to change together, and this is why "10 o'clock, 2 km" and "at nose, 5 degrees down, 800 m"
+are both natural while an intermediate mixture is not.
+
+This also explains the elevation half by analogy: degrees down has no clock equivalent, so it
+appears only once the azimuth has already switched to degrees — i.e. once the target is in the
+windscreen, which is the only place a pilot can act on it anyway.
+
+Worth noting what this avoids. The obvious design — pick a range at which the callout register
+changes — would have needed a constant nobody could defend, and would have read wrong whenever
+range and bearing disagreed (a target at 400 m and 4 o'clock is close but not being run in on).
+Keying on the sector makes the vocabulary mean *"can you see it through the windscreen"*, which is
+the thing the pilot is actually being helped with.
+
+### Miss detection is deferred; hit and damage are kept
+
+> "defer miss detection. Keep hit/damaged detection"
+
+This settles the "missed, aim higher / lower / left / right" line above — it does not ship in the
+first version. The reason it was flagged stands: knowing a round *connected* is plausibly
+answerable, while knowing *where the rounds went when they did not* needs an impact point no
+identified channel provides.
+
+So the callout set narrows to **"hit"**, the damage-state family (**"target smoking / on fire /
+destroyed"**), and **"target not hit, attack again?"** — which does not require knowing *why* it
+was not hit, only that it was not. That distinction is what makes the re-attack prompt survive the
+deferral while the correction advice does not.
+
+The damage probe remains a prerequisite; nothing about this deferral relaxes that.
+
+### Requested advisory, not autonomous advisory
+
+> "attack run is *requested* advisory. Autonomous advisory is deferred."
+
+**This is a better axis than the one drawn above**, and it replaces it. The earlier framing called
+attack run a "bounded first instance" of the deferred advisory channel — bounded by scope, by a
+named target and by an end condition. That reads as a partial exception carved out of a rule, which
+invites exactly the later argument it was written to prevent.
+
+The real distinction is **who initiated it**. The pilot said *"engaging"*. Everything Petrovich then
+says about where to point the aircraft is an answer to a question that was asked — the same
+category as a readback or a contact report, just continuous. What stays deferred is Petrovich
+deciding *on his own* that the aircraft should be flown differently: "break right", "don't cross
+that ridge", "we're drifting off the road". Nobody asked.
+
+Stated as one line for whoever reads this next: **advisory output is allowed when the pilot
+requested it and is still in the manoeuvre he requested it for; unrequested advisory is deferred.**
+That rule decides future cases on its own, which the "bounded instance" framing could not.
