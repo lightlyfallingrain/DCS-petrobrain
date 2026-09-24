@@ -541,7 +541,14 @@ def _identification_lead(value: object, unit_type: str) -> str:
     nothing sayable -- `BM-30` and `SA-10 Flap Lid radar` both do -- so
     those keep `"unit"` rather than opening with `"group"`, which would read
     as a formation rather than as a description. Nor does the lead repeat
-    the payload: *"truck ... is truck"* is a stutter, not a report.
+    the payload: *"truck ... is truck"* is a stutter, not a report --
+    and so is *"truck ... is KrAZ truck"* (a real live callout,
+    `plans/position-belief-runaway/debug.md`), where the class word is not
+    the *whole* type string but still reads back as the same word once
+    spoken. The original check only caught an exact match; it is now a
+    whole-word containment test (`\btruck\b` against `"kraz truck"`), since
+    a type name repeating the class word anywhere as its own word is the
+    same stutter, not merely the identical-string case.
     """
     if not isinstance(value, str) or not value:
         return "unit"
@@ -555,9 +562,13 @@ def _identification_lead(value: object, unit_type: str) -> str:
         return "unit"
     spoken = _respell_for_tts(word)
     # "truck 11 o'clock ... is truck" says the same word twice and sounds
-    # like a stutter rather than a report. When the lead would repeat the
-    # payload, the generic noun carries the sentence instead.
-    if spoken.lower() == unit_type.lower():
+    # like a stutter rather than a report -- and so does "... is KrAZ
+    # truck", where the class word appears as its own word inside a longer
+    # type name. A whole-word containment test catches both; a bare
+    # substring test would not (it would also risk a false hit on an
+    # unrelated word that merely contains these letters, which `\b`
+    # avoids).
+    if re.search(rf"\b{re.escape(spoken.lower())}\b", unit_type.lower()):
         return "unit"
     return spoken
 

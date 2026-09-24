@@ -1028,6 +1028,233 @@ def test_repeated_looks_from_orbiting_observer_tighten_and_never_reach_bare_trut
     assert abs(contact.last_position.x - true_target.x) > 5.0
 
 
+# --- position-belief runaway (plans/position-belief-runaway/debug.md) -----
+
+
+def test_two_near_parallel_disagreeing_naked_eye_looks_do_not_run_away() -> None:
+    """`belief.position_belief`'s own unit-level reproduction (two looks 5
+    degrees apart, ranges 3000m/5012m, `fold_position` called directly) is
+    a controlled illustration of the arithmetic defect, deliberately large
+    enough to be unmistakable -- large enough, in fact, that
+    `association_over_time.passes_gate`'s pre-existing 3-sigma spatial gate
+    already rejects a merge that disagreed, founding a fresh contact
+    instead of ever reaching the fusion this test is about (confirmed
+    directly: `passes_gate` returns `False` for this exact pair, both
+    before and after this fix -- the gate was never broken). This test
+    exercises the same near-parallel-disagreement mechanism at a residual
+    small enough to pass that gate (as the live flight's own consecutive
+    polls did, 1 second apart), so the runaway is exercised through the
+    real `ContactStore.ingest` path, not fed to `fold_position` in
+    isolation. See `test_slow_directional_drift_never_reports_a_range_
+    beyond_the_detection_cap` below for the cumulative, many-poll version
+    of this same mechanism, and this file's own `debug.md` for the
+    3-sigma-gate finding."""
+    uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
+    ownship = _ownship()
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                bearing_deg=0.0,
+                range_m=8000.0,
+                source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+                ownship=ownship,
+                position_uncertainty=uncertainty,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                bearing_deg=0.3,
+                range_m=8150.0,
+                source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+                ownship=ownship,
+                position_uncertainty=uncertainty,
+            )
+        ],
+        now_sim=1.0,
+    )
+
+    assert len(store.contacts) == 1
+    contact = store.contacts[0]
+    believed_range = geometry_range_m(
+        GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m),
+        contact.last_position,
+    )
+    # Both raw looks implied a range between 8000m and 8150m -- a runaway
+    # would have put this far outside that band.
+    assert 7000.0 < believed_range < 9000.0
+
+
+def test_slow_directional_drift_never_reports_a_range_beyond_the_detection_cap() -> (
+    None
+):
+    """A second, independent way the runaway showed up: not one big jump,
+    but many small, individually-plausible near-parallel disagreements
+    (`FUSION_SANITY_SIGMA` alone would not catch any single step) whose
+    bias compounds over a sortie. `clamp_to_detection_envelope`
+    (`perception.visibility.NAKED_EYE_RANGE_CAP_M`) is the independent
+    safety net for exactly this case -- verified end to end through
+    `ContactStore.ingest`, not just the unit-level `position_belief`
+    functions, since this is the invariant the user asked for directly:
+    a believed position may never be reported farther away than the range
+    at which it could have been detected."""
+    from perception.visibility import NAKED_EYE_RANGE_CAP_M
+
+    uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
+    ownship = _ownship()
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    store = ContactStore()
+    bearing, rng = 0.0, 8000.0
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_0",
+                t_sim=0.0,
+                bearing_deg=bearing,
+                range_m=rng,
+                source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+                ownship=ownship,
+                position_uncertainty=uncertainty,
+            )
+        ],
+        now_sim=0.0,
+    )
+    # Bounded to the polls over which `association_over_time.passes_gate`
+    # still accepts the drift as the same contact -- past this, the gate
+    # itself (unaffected by this fix) starts a new contact, which is
+    # correct behaviour, not part of the invariant this test checks.
+    for i in range(1, 22):
+        bearing += 0.3
+        rng += 150.0
+        store.ingest(
+            [
+                _observation(
+                    obs_id=f"OBS_{i}",
+                    t_sim=float(i),
+                    bearing_deg=bearing,
+                    range_m=rng,
+                    source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+                    ownship=ownship,
+                    position_uncertainty=uncertainty,
+                )
+            ],
+            now_sim=float(i),
+        )
+        assert len(store.contacts) == 1
+        believed_range = geometry_range_m(observer, store.contacts[0].last_position)
+        assert believed_range <= NAKED_EYE_RANGE_CAP_M
+
+
+def test_position_runaway_does_not_corrupt_a_second_contacts_cardinality() -> None:
+    """A live sortie also reported `"couple contacts, 4 o'clock, 87.5
+    kilometres"` alongside the range runaway -- a real second question:
+    was the cardinality itself a separate defect, or a casualty of the
+    same one? `association_over_time.passes_gate` sizes its spatial gate
+    from `contact.position.covariance` directly (that module's own
+    docstring); a covariance the position bug had let run away or blow up
+    would also widen the gate that is supposed to keep unrelated objects
+    from merging -- a genuinely separate real object's naked-eye cluster
+    report (its own, different `count_bucket`) could then incorrectly pass
+    the gate and fold its count claim onto a contact it does not belong to,
+    producing an inflated cardinality as a side effect of the position
+    defect rather than a defect of its own.
+
+    `perception.clustering` itself was inspected and found to operate on
+    each poll's own true `LoGetWorldObjects` geometry, never on fused
+    belief (see that module's docstring) -- so a cluster's own count is not
+    where a position-driven corruption could enter; the gate above is the
+    only place a position defect and a cardinality defect could interact.
+    This test does not re-run the old, unfixed code to prove the
+    counterfactual -- it pins the invariant that matters directly: with the
+    position fix in place, a contact whose own believed position has been
+    perturbed by a run of near-parallel, disagreeing, close-to-the-cap
+    looks (exactly `test_slow_directional_drift_never_reports_a_range_
+    beyond_the_detection_cap`'s own sequence) still keeps a well-separated,
+    genuinely different real object's report out of its gate -- no
+    cross-contact cardinality bleed. No change was made to `perception.
+    clustering` or `belief.cardinality` for this finding, per the
+    instruction not to "fix" clustering on the strength of a symptom the
+    position bug produced."""
+    uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
+    ownship = _ownship()
+    store = ContactStore()
+    bearing, rng = 0.0, 8000.0
+    store.ingest(
+        [
+            dataclasses.replace(
+                _observation(
+                    obs_id="OBS_0",
+                    t_sim=0.0,
+                    bearing_deg=bearing,
+                    range_m=rng,
+                    source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+                    ownship=ownship,
+                    position_uncertainty=uncertainty,
+                ),
+                count_bucket="OP_1UNIT",
+            )
+        ],
+        now_sim=0.0,
+    )
+    for i in range(1, 22):
+        bearing += 0.3
+        rng += 150.0
+        store.ingest(
+            [
+                dataclasses.replace(
+                    _observation(
+                        obs_id=f"OBS_{i}",
+                        t_sim=float(i),
+                        bearing_deg=bearing,
+                        range_m=rng,
+                        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+                        ownship=ownship,
+                        position_uncertainty=uncertainty,
+                    ),
+                    count_bucket="OP_1UNIT",
+                )
+            ],
+            now_sim=float(i),
+        )
+    assert len(store.contacts) == 1
+    driven_contact_id = store.contacts[0].id
+
+    # A genuinely different, well-separated real object -- 90 degrees off,
+    # much closer -- reporting a plural count of its own.
+    store.ingest(
+        [
+            dataclasses.replace(
+                _observation(
+                    obs_id="OBS_SEPARATE",
+                    t_sim=21.0,
+                    bearing_deg=90.0,
+                    range_m=3000.0,
+                    source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+                    ownship=ownship,
+                    position_uncertainty=uncertainty,
+                ),
+                count_bucket="OP_TO5UNITS",
+            )
+        ],
+        now_sim=21.0,
+    )
+
+    assert len(store.contacts) == 2
+    driven_contact = next(c for c in store.contacts if c.id == driven_contact_id)
+    separate_contact = next(c for c in store.contacts if c.id != driven_contact_id)
+    # The driven contact's own cardinality is untouched by the unrelated
+    # object's plural report.
+    assert (driven_contact.cardinality.lo, driven_contact.cardinality.hi) == (1, 1)
+    assert (separate_contact.cardinality.lo, separate_contact.cardinality.hi) == (4, 5)
+
+
 # --- kilometre range crossings (plans/watch-reporting/plan.md Stage 2) -----
 
 
