@@ -392,3 +392,24 @@ two functions that must agree (2026-09-19).
   cheaper than a live-flight surprise (watch-reporting plan Decision 4d, 2026-09-24).
 
 - **A plan's internal contradiction sits at the seam between sections, not inside one.** Twice in the detection-cones slice-2 series (2B, 2C), the literal wording of an Implementation Plan step said one thing while an earlier "hard part" section in the *same document* had already established the opposite: 2B's step 9 called `FULL_GAZE` a no-op while hard part 3 (and the real 130° cockpit envelope) made that false for the 90–130° band; 2C's step 12 read as a static commanded wedge while hard parts 1 and 2a required a commanded sector to itself sub-cycle. Both were caught only because the implementer cross-referenced sections rather than executing the literal step — a single-section read of either plan would have shipped the contradiction. Lesson: a plan review (self- or Reviewer-driven) should explicitly check the Implementation Plan's steps against the earlier discussion sections' own stated constraints, not just against CLAUDE.md invariants — the defect class this project keeps finding lives in that gap, not in either section read alone.
+
+## Debugging & Root-Cause Diagnosis
+
+- **A confident, code-derived reproduction can be a real defect on an unreachable path, while the
+  user's own one-line diagnosis names the path that actually fires.** The `position-belief-runaway`
+  debug session's own hypothesis (ill-conditioned triangulation — near-parallel disagreeing looks
+  intersecting far outside either input) reproduced the reported numbers exactly, and was fixed.
+  But the pre-existing association gate in `association_over_time.passes_gate` already rejects
+  that large a single-poll disagreement before it ever reaches fusion in production — a fact
+  established only by tracing `ContactStore.ingest`'s call path, not by the reproduction script
+  itself. The mechanism that actually produced the live 87.5 km callout was a slow directional
+  drift (many small, individually-plausible steps, each passing every existing gate), which is
+  exactly what the user's own diagnosis named: *"position uncertainty needs a gate, cannot be
+  further than detection range."* That one line pointed at a missing invariant (nothing checked a
+  fused position against physical detection range at all), not at a numerically fragile formula.
+  Lesson: when a live defect prompts a debugging session, a hypothesis that reproduces the
+  reported numbers under direct construction is not yet shown to be the *production* path — trace
+  whether the gates the real pipeline runs the input through would actually let that input reach
+  the reproduced code, and weigh a domain expert's structural diagnosis ("there's no gate for X")
+  as seriously as a numerically-confirmed mechanism (`position-belief-runaway` debug report +
+  review, 2026-09-25).
