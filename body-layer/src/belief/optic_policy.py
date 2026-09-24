@@ -40,7 +40,7 @@ from enum import Enum
 from itertools import pairwise
 from typing import Final
 
-from belief.association_over_time import CLOCK_BUCKET_DEG
+from belief.enrichment import CLOCK_BUCKET_DEG
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
