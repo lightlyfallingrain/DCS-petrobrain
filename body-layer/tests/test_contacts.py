@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import inspect
+import itertools
+import math
 import pathlib
 
 from belief import contacts as contacts_module
@@ -19,7 +21,9 @@ from belief.events import (
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
-from perception.geometry import GeoPosition
+from perception.geometry import GeoPosition, project_from_bearing_range
+from perception.geometry import bearing_deg as geometry_bearing_deg
+from perception.geometry import range_m as geometry_range_m
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
@@ -95,26 +99,34 @@ def test_two_well_separated_objects_produce_two_contacts() -> None:
 def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     """Two existing contacts both close enough and class-compatible with a
     new percept must produce a *third* contact -- the plan's deliberate
-    anti-guessing rule (Stage 1 decision rule)."""
+    anti-guessing rule (Stage 1 decision rule).
+
+    Every observation here declares no `position_uncertainty`, so each one
+    falls back to the isotropic `_FALLBACK_UNCERTAINTY_RADIUS_M` (300m) on
+    both the percept and (once a contact is founded from one) the contact
+    side -- `belief.association_over_time`'s 2D gate (`plans/
+    precise-position-belief/plan.md` Stage 3) then allows a candidate at up
+    to `GATE_SIGMA_THRESHOLD` (3) sigma of the summed covariance, which for
+    two isotropic 300m-radius sides at zero elapsed time works out to 900m
+    (see that module's own `_isotropic_covariance_from_radius` and
+    `GATE_SIGMA_THRESHOLD`)."""
     store = ContactStore()
-    # A and B are 800m apart -- far enough that B does not merge into A when
-    # it is created (gate radius at t=0 is uncertainty_radius_m(B)=
-    # SCOPE_UNCERTAINTY_M=300 *plus* A's own stored
-    # last_position_uncertainty_m=300, i.e. 600 -- both sides' uncertainty is
-    # budgeted, see `association_over_time`'s module docstring), but close
-    # enough that a percept exactly between them (400m from each) falls
-    # within both of their gates (each gate is also 600 at t=0).
+    # A and B are 1000m apart -- far enough that B does not merge into A when
+    # it is created (each side's isotropic gate covariance allows 900m at
+    # t=0, per this test's own docstring), but close enough that a percept
+    # exactly between them (500m from each) falls within both of their
+    # gates.
     contact_a_obs = _observation(
         obs_id="OBS_A", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
     contact_b_obs = _observation(
-        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
+        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=2000.0
     )
     store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
     assert len(store.contacts) == 2
 
     ambiguous_obs = _observation(
-        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1400.0
+        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1500.0
     )
     store.ingest([ambiguous_obs], now_sim=0.0)
 
@@ -137,10 +149,10 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
 
     Reuses `test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`'s
     own already-verified overlapping-gate geometry (A at bearing 0 range
-    1000, B at bearing 0 range 1800, 800m apart -- a percept at range 1400
+    1000, B at bearing 0 range 2000, 1000m apart -- a percept at range 1500
     falls within both gates) rather than re-deriving new numbers, since that
     test already proves the overlap is real. Every re-observation of A or B
-    below is placed at that same ambiguous midpoint (bearing 0, range 1400)
+    below is placed at that same ambiguous midpoint (bearing 0, range 1500)
     -- if continuity were not skipping the gate, *every one* of these would
     be genuinely ambiguous between the two existing contacts, reproducing
     the runaway exactly. Object-permanence correlation is expected to
@@ -159,7 +171,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
         obs_id="OBS_A0", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
     contact_b_obs = _observation(
-        obs_id="OBS_B0", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
+        obs_id="OBS_B0", t_sim=0.0, bearing_deg=0.0, range_m=2000.0
     )
     store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
     assert len(store.contacts) == 2
@@ -167,7 +179,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
     # Confirm the gate really is overlapping at this geometry: an unrelated
     # percept (no continuity reference) at the shared midpoint is still
     # genuinely ambiguous, per the reused test above.
-    probe = _observation(obs_id="OBS_PROBE", t_sim=0.0, bearing_deg=0.0, range_m=1400.0)
+    probe = _observation(obs_id="OBS_PROBE", t_sim=0.0, bearing_deg=0.0, range_m=1500.0)
     store.ingest([probe], now_sim=0.0)
     assert len(store.contacts) == 3
     probe_contact_id = store.contacts[-1].id
@@ -190,7 +202,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
                 obs_id=observation_id,
                 t_sim=t_sim,
                 bearing_deg=0.0,
-                range_m=1400.0,  # the same genuinely-ambiguous midpoint
+                range_m=1500.0,  # the same genuinely-ambiguous midpoint
                 continues_observation_id=last_observation_id[label],
             )
             last_observation_id[label] = observation_id
@@ -891,3 +903,120 @@ def test_different_source_same_poll_observations_still_fuse() -> None:
         SOURCE_NAKED_EYE_VISUAL_FILTERED,
         SOURCE_PETROVICH_DETECTION_ASSOCIATED,
     ]
+
+
+# --- Stage 4 fusion (plans/precise-position-belief/plan.md) -----------------
+
+
+def _looks_from_orbiting_observer(
+    target: GeoPosition, *, radius_m: float, count: int
+) -> list[tuple[float, float, GeoPosition]]:
+    """`count` `(bearing_deg, range_m, observer)` triples, each a look at
+    `target` from an observer placed at `radius_m` around it on a different
+    bearing -- a moving-observer stand-in, without needing real ownship
+    kinematics. `project_from_bearing_range(target, ...)` is used in
+    reverse (from the target, at 180 degrees opposite the desired look
+    bearing) purely to place the observer; the look itself is still
+    computed the ordinary way, target from observer."""
+    triples = []
+    for i in range(count):
+        look_bearing = (30.0 + i * (300.0 / max(1, count - 1))) % 360.0
+        observer = project_from_bearing_range(
+            target, (look_bearing + 180.0) % 360.0, radius_m
+        )
+        triples.append(
+            (
+                geometry_bearing_deg(observer, target),
+                geometry_range_m(observer, target),
+                observer,
+            )
+        )
+    return triples
+
+
+def test_repeated_looks_from_orbiting_observer_tighten_and_never_reach_bare_truth() -> (
+    None
+):
+    """`plans/precise-position-belief/plan.md` Stage 4's own verify list:
+    repeated looks converge (uncertainty strictly decreases), converge to
+    truth + systematic bias and not to truth, and never below the floor.
+    Exercised directly against `Contact.record` -- the fold itself, not
+    `ContactStore.ingest`'s gate (already covered by `test_association_
+    over_time.py`'s own gate tests)."""
+    true_target = GeoPosition(x=1000.0, z=500.0, alt_m=500.0)
+    bias_x, bias_z = 25.0, -15.0
+    biased_target = GeoPosition(
+        x=true_target.x + bias_x, z=true_target.z + bias_z, alt_m=true_target.alt_m
+    )
+    uncertainty = PositionUncertainty(sigma_cross_m=50.0, sigma_down_m=500.0)
+    looks = _looks_from_orbiting_observer(biased_target, radius_m=1200.0, count=12)
+
+    founding_bearing, founding_range, founding_observer = looks[0]
+    founding = Observation(
+        id="OBS_0",
+        contact_id=None,
+        t_sim=0.0,
+        t_wall=0.0,
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        classification_raw="OP_TRUCK",
+        bearing_deg=founding_bearing,
+        range_m=founding_range,
+        ownship_at_observation=OwnshipState(
+            t_sim=0.0,
+            x=founding_observer.x,
+            z=founding_observer.z,
+            alt_m=founding_observer.alt_m,
+            heading_true_deg=0.0,
+        ),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="test_fixture"
+        ),
+        provenance="test_fixture",
+        position_uncertainty=uncertainty,
+    )
+    contact = contacts_module.Contact.from_percept(
+        "CONTACT_1", percept_module.percept_of(founding)
+    )
+
+    radii = [contact.last_position_uncertainty_m]
+    floor = (
+        (0.4 * uncertainty.sigma_cross_m) ** 2 + (0.4 * uncertainty.sigma_down_m) ** 2
+    ) ** 0.5
+    for i, (look_bearing, look_range, observer) in enumerate(looks[1:], start=1):
+        observation = Observation(
+            id=f"OBS_{i}",
+            contact_id=None,
+            t_sim=float(i),
+            t_wall=float(i),
+            source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+            classification_raw="OP_TRUCK",
+            bearing_deg=look_bearing,
+            range_m=look_range,
+            ownship_at_observation=OwnshipState(
+                t_sim=float(i),
+                x=observer.x,
+                z=observer.z,
+                alt_m=observer.alt_m,
+                heading_true_deg=0.0,
+            ),
+            derived_world_position=DerivedWorldPosition(
+                x=99999.0, z=99999.0, confidence=0.9, method="test_fixture"
+            ),
+            provenance="test_fixture",
+            position_uncertainty=uncertainty,
+        )
+        contact.record(percept_module.percept_of(observation))
+        # Never below the floor, at every step, not just the last one.
+        assert contact.last_position_uncertainty_m >= floor - 1e-6
+        radii.append(contact.last_position_uncertainty_m)
+
+    # Strictly decreasing overall (allow the very first fold, which can
+    # briefly not tighten if the two looks are nearly parallel -- the
+    # bearing sweep above avoids that, so this checks the whole sequence).
+    assert radii[-1] < radii[0]
+    assert all(later <= earlier + 1e-9 for earlier, later in itertools.pairwise(radii))
+
+    # Converged near truth-plus-bias, not bare truth.
+    assert math.isclose(contact.last_position.x, biased_target.x, abs_tol=5.0)
+    assert math.isclose(contact.last_position.z, biased_target.z, abs_tol=5.0)
+    assert abs(contact.last_position.x - true_target.x) > 5.0

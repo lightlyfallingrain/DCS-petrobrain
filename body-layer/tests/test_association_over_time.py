@@ -224,3 +224,53 @@ def test_gate_radius_grows_with_elapsed_time() -> None:
     )
 
     assert passes_gate(later_percept, contact, now_sim=100.0)
+
+
+def test_gate_is_tighter_across_the_line_of_sight_than_along_it() -> None:
+    """`plans/precise-position-belief/plan.md` Stage 3's own named risk: "a
+    contact observed from two crossing bearings still gates correctly (the
+    case a scalar radius handles worst)". A highly elongated look ellipse
+    (declared `sigma_cross_m=50`, `sigma_down_m=500` -- a 10:1 ratio, the
+    same shape the real naked-eye error model produces, just exaggerated for
+    a clean assertion) at `bearing_deg=0.0` is elongated along world x (the
+    down-range axis at that bearing) and tight along world z (cross-range).
+    Both re-observations below share that same `bearing_deg=0.0` (the same
+    look direction, so the same ellipse orientation) and differ only in
+    which world axis their offset from the contact falls on -- a
+    same-magnitude offset (1200m) must therefore pass when it lies along x
+    (down-range, where both the percept's own ellipse and the founding
+    contact's isotropic proxy are wide) but fail when it lies along z
+    (cross-range, where only the isotropic proxy contributes width). A
+    scalar radius could not distinguish these two offsets at all, since it
+    collapses the ellipse's orientation away entirely."""
+    elongated_uncertainty = PositionUncertainty(sigma_cross_m=50.0, sigma_down_m=500.0)
+    founding = _percept(
+        bearing_deg=0.0,
+        range_m=1000.0,
+        position_uncertainty=elongated_uncertainty,
+    )
+    contact = _contact_from(founding)
+
+    down_range_offset = _percept(
+        t_sim=0.0,
+        bearing_deg=0.0,
+        range_m=1000.0 + 1200.0,
+        observation_id="OBS_DOWN",
+        position_uncertainty=elongated_uncertainty,
+    )
+    # Observed from (500, 1200) at the same bearing_deg=0.0/range_m=500.0 as
+    # the founding look's own axis, so the implied position lands at
+    # (1000, 1200) -- a dz=1200, dx=0 offset from the contact's (1000, 0),
+    # with the percept's own ellipse still oriented exactly as above (wide
+    # along x, tight along z).
+    cross_range_offset = _percept(
+        t_sim=0.0,
+        bearing_deg=0.0,
+        range_m=500.0,
+        ownship=_ownship(x=500.0, z=1200.0),
+        observation_id="OBS_CROSS",
+        position_uncertainty=elongated_uncertainty,
+    )
+
+    assert passes_gate(down_range_offset, contact, now_sim=0.0)
+    assert not passes_gate(cross_range_offset, contact, now_sim=0.0)

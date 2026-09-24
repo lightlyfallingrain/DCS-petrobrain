@@ -625,6 +625,7 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
             heading_true_deg=ownship.heading_true_deg,
             object_type=contact.last_class_raw,
             current_level=contact.classification.level.name.lower(),
+            position=contact.position,
         )
         for contact in store.contacts
     ]

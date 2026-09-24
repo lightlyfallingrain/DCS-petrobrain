@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import pytest
 
 from belief import enrichment
+from belief.association_over_time import implied_position, percept_position_uncertainty
 from belief.contacts import ContactStore
 from belief.enrichment import (
     NEAR_FACT_RADIUS_M,
@@ -26,6 +27,8 @@ from belief.enrichment import (
     relative_geometry,
     semantic_facts_for,
 )
+from belief.percept import percept_of
+from belief.position_belief import fold_position
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -445,6 +448,85 @@ def _store_with_one_contact() -> tuple[ContactStore, str]:
     store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
     contact_id = store.contacts[0].id
     return store, contact_id
+
+
+def test_terrain_aware_position_reprojects_the_fused_estimate_not_the_last_look(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/precise-position-belief/plan.md` Stage 4's own named risk: a
+    real bug where `_terrain_aware_world_position` walked back to the most
+    recent contributing `Percept` and reprojected *its own* raw bearing/
+    range, so every rendered report silently kept using one stale look
+    while `Contact.position`'s fused estimate improved invisibly beside it
+    -- unit tests on the fusion itself would all still pass, since none of
+    them render a report. Pinned here by feeding two looks at the *same*
+    bearing but different range (so the fused range sits strictly between
+    the two, per `belief.position_belief.fold_position`'s information-form
+    average) and asserting the range actually handed to
+    `project_terrain_aware` is that fused figure, not the second look's own
+    raw `range_m=1200.0`."""
+    recorded_ranges: list[float] = []
+
+    def fake_project_terrain_aware(
+        conn: sqlite3.Connection,
+        theatre: str,
+        observer: GeoPosition,
+        bearing: float,
+        rng: float,
+        *,
+        max_iterations: int,
+    ) -> GeoPosition:
+        recorded_ranges.append(rng)
+        return GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    monkeypatch.setattr(enrichment, "project_terrain_aware", fake_project_terrain_aware)
+    monkeypatch.setattr(
+        enrichment, "describe_position", lambda conn, theatre, x, z: _FakeDescription()
+    )
+
+    store = ContactStore()
+    first = _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0)
+    second = _observation(obs_id="OBS_2", t_sim=1.0, bearing_deg=0.0, range_m=1200.0)
+    store.ingest([first], now_sim=0.0)
+    store.ingest([second], now_sim=1.0)
+    contact = store.contacts[0]
+
+    # Ground truth for what the fused range *should* be, computed directly
+    # from the same primitives Contact.record uses -- both looks carry no
+    # declared position_uncertainty, so both use the isotropic fallback.
+    first_percept = percept_of(first)
+    second_percept = percept_of(second)
+    first_position = implied_position(first_percept)
+    second_position = implied_position(second_percept)
+    fused = fold_position(
+        fold_position(
+            None,
+            x=first_position.x,
+            z=first_position.z,
+            uncertainty=percept_position_uncertainty(first_percept),
+            look_bearing_deg=first_percept.bearing_deg,
+            t_sim=first_percept.t_sim,
+        ),
+        x=second_position.x,
+        z=second_position.z,
+        uncertainty=percept_position_uncertainty(second_percept),
+        look_bearing_deg=second_percept.bearing_deg,
+        t_sim=second_percept.t_sim,
+    )
+    # Sanity: the fused mean must sit strictly between the two raw looks,
+    # not coincide with either -- otherwise this test could not actually
+    # distinguish "fused" from "last raw look".
+    assert 1000.0 < fused.x < 1200.0
+
+    cache = WorldEnrichmentCache()
+    cache.get_or_compute(_FAKE_CONN, "Syria", store, contact, now_sim=1.0)
+
+    assert len(recorded_ranges) == 1
+    # The range actually handed to the terrain-aware projection matches the
+    # fused position (within floating point), not the last raw look's own
+    # range_m=1200.0.
+    assert recorded_ranges[0] == pytest.approx(fused.x, abs=1e-6)
+    assert recorded_ranges[0] != pytest.approx(1200.0)
 
 
 def test_cache_miss_on_first_lookup_computes_and_stores(
