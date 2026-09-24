@@ -1,16 +1,16 @@
 """Tests for `belief.association_over_time` -- the percept->contact gate
 (`plans/pb2-contact-memory/plan.md` Stage 1; made anisotropic by Stage 3b-i
-of `plans/group-contact-model/plan.md`, then reverted to this isotropic,
-quantisation-derived form by Stage 3b-i rev.2 -- see that module's
-docstring for why sharing a formula with `perception.clustering` was the
-defect, not the fix)."""
+of `plans/group-contact-model/plan.md`, then reverted to an isotropic,
+quantisation-derived form by Stage 3b-i rev.2, then promoted to a 2D
+covariance gate by `plans/precise-position-belief/plan.md` Stage 3 -- see
+that module's docstring for the full history)."""
 
 from __future__ import annotations
 
 import math
 
 from belief.association_over_time import (
-    SCOPE_UNCERTAINTY_M,
+    _FALLBACK_UNCERTAINTY_RADIUS_M,
     class_compatibility,
     implied_position,
     passes_gate,
@@ -18,8 +18,15 @@ from belief.association_over_time import (
 )
 from belief.contacts import Contact
 from belief.percept import Percept
-from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
-from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
+from perception.hybrid_source import (
+    SCOPE_UNCERTAINTY_M,
+    SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+)
+from perception.source import (
+    SOURCE_NAKED_EYE_VISUAL_FILTERED,
+    OwnshipState,
+    PositionUncertainty,
+)
 
 
 def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
@@ -35,7 +42,12 @@ def _percept(
     range_m: float = 1000.0,
     ownship: OwnshipState | None = None,
     observation_id: str = "OBS_1",
+    position_uncertainty: PositionUncertainty | None = None,
 ) -> Percept:
+    if position_uncertainty is None:
+        position_uncertainty = PositionUncertainty(
+            sigma_cross_m=SCOPE_UNCERTAINTY_M, sigma_down_m=SCOPE_UNCERTAINTY_M
+        )
     return Percept(
         t_sim=t_sim,
         source=source,
@@ -44,6 +56,7 @@ def _percept(
         range_m=range_m,
         ownship_at_observation=ownship if ownship is not None else _ownship(),
         observation_id=observation_id,
+        position_uncertainty=position_uncertainty,
     )
 
 
@@ -51,26 +64,48 @@ def _contact_from(percept: Percept, contact_id: str = "CONTACT_1") -> Contact:
     return Contact.from_percept(contact_id, percept)
 
 
-def test_scope_channel_uses_fixed_uncertainty() -> None:
+def test_scope_channel_uses_its_declared_uncertainty() -> None:
     percept = _percept(source=SOURCE_PETROVICH_DETECTION_ASSOCIATED, range_m=5000.0)
 
-    assert uncertainty_radius_m(percept) == SCOPE_UNCERTAINTY_M
+    assert uncertainty_radius_m(percept) == math.hypot(
+        SCOPE_UNCERTAINTY_M, SCOPE_UNCERTAINTY_M
+    )
 
 
-def test_naked_eye_uncertainty_derived_from_quantisation_buckets() -> None:
-    """At range=1000m the percept falls in the `OP_D1000M` bucket, whose
-    width is 1000 - 900 = 100m (`association_over_time._RANGE_BUCKETS_M`'s
-    `OP_D900M`->`OP_D1000M` pair). Cross-range is `1000 * sin(15deg)`. Pinned
-    against these real table values, not a re-derivation of the formula.
-    Reverted to this isotropic form by Stage 3b-i rev.2 (`plans/
-    group-contact-model/plan.md`) -- see module docstring."""
-    percept = _percept(source=SOURCE_NAKED_EYE_VISUAL_FILTERED, range_m=1000.0)
+def test_naked_eye_uncertainty_reads_the_declared_ellipse() -> None:
+    """`uncertainty_radius_m` no longer derives anything itself -- it is a
+    plain `hypot` of whatever `position_uncertainty` the percept already
+    carries, regardless of source."""
+    percept = _percept(
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        range_m=1000.0,
+        position_uncertainty=PositionUncertainty(
+            sigma_cross_m=52.4, sigma_down_m=170.0
+        ),
+    )
 
-    expected_cross_range_m = 1000.0 * math.sin(math.radians(15.0))
-    expected_down_range_m = 100.0
-    expected = math.hypot(expected_cross_range_m, expected_down_range_m)
+    assert uncertainty_radius_m(percept) == math.hypot(52.4, 170.0)
 
-    assert uncertainty_radius_m(percept) == expected
+
+def test_uncertainty_radius_falls_back_when_undeclared() -> None:
+    """A percept somehow missing a declared uncertainty (should not happen
+    for either concrete source in production) gets the defensive
+    isotropic fallback, not a crash. Constructed directly rather than via
+    `_percept` -- that helper always fills in a declared uncertainty when
+    `None` is passed, since every other test in this module wants a real
+    one by default."""
+    percept = Percept(
+        t_sim=0.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw="Ural truck",
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        observation_id="OBS_1",
+        position_uncertainty=None,
+    )
+
+    assert uncertainty_radius_m(percept) == _FALLBACK_UNCERTAINTY_RADIUS_M
 
 
 def test_implied_position_matches_bearing_range_from_observer() -> None:

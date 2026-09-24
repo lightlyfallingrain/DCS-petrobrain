@@ -81,12 +81,23 @@ from perception.geometry import (
 from perception.source import OwnshipState
 from query.describe import describe_position
 
+#: The width of naked-eye's own clock-position reporting vocabulary, 30
+#: degrees per hour -- moved here from `belief.association_over_time` by
+#: `plans/precise-position-belief/plan.md` Stage 1: it is a *speech*
+#: vocabulary constant (how a clock position is spoken/read back), not a
+#: gating one, and belongs on the reporting side next to `_clock_position`
+#: below, which already duplicated it as a literal `30.0`. `belief.
+#: optic_policy.LookTarget.bearing_uncertainty_deg`'s default imports this
+#: too (`plans/binocular-optic/stage3b.md` D1's "one fact, two honest
+#: derivations" reasoning still holds after the move).
+CLOCK_BUCKET_DEG: Final[float] = 30.0
+
 #: Slant range within which a contact's terrain-aware position is worth the
 #: extra iteration cost (`project_terrain_aware`'s `max_iterations=5`) --
 #: below this, or when `Contact.attention == "watch"`, the fixed-point
 #: solve is run to convergence; otherwise a single pass
 #: (`max_iterations=1`) is used. Placeholder, same status as
-#: `belief.association_over_time.SCOPE_UNCERTAINTY_M` -- tune once a live
+#: `perception.hybrid_source.SCOPE_UNCERTAINTY_M` -- tune once a live
 #: session shows whether far-but-watched contacts (or close-but-unwatched
 #: ones just inside this threshold) get visibly worse position quality than
 #: they should.
@@ -102,7 +113,7 @@ _SINGLE_SHOT_MAX_ITERATIONS: Final[int] = 1
 #: World-model's `StoredFeature.confidence` string enum
 #: (`"high"`/`"medium"`/`"low"`/`"unknown"`, see `world-model/src/store/
 #: models.py`'s docstring and its callers) mapped to a numeric 0-1 value --
-#: same "declared and revisitable" status as `association_over_time.
+#: same "declared and revisitable" status as `perception.hybrid_source.
 #: SCOPE_UNCERTAINTY_M`, not a derivation. Combined with a contact's own
 #: `position_confidence` (simple product, `_combined_confidence` below) to
 #: produce `SemanticFact.confidence` -- both the mapping and the
@@ -525,7 +536,7 @@ class WorldEnrichmentCache:
 def _clock_position(relative_bearing_deg: float) -> int:
     """A true bearing relative to ownship heading, in `[0, 360)`, mapped to
     a 1-12 clock position (`12` dead ahead)."""
-    clock = round(relative_bearing_deg / 30.0) % 12
+    clock = round(relative_bearing_deg / CLOCK_BUCKET_DEG) % 12
     return 12 if clock == 0 else clock
 
 

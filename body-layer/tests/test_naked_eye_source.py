@@ -28,8 +28,6 @@ from perception.naked_eye_source import (
     NAKED_EYE_MAX_NEW_GROUPS_PER_POLL,
     PROVENANCE_VISIBILITY_FILTER_ONLY,
     NakedEyePerceptionSource,
-    _quantise_bearing,
-    _quantise_range_m,
 )
 from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED, OwnshipState
 from replay import replay
@@ -832,44 +830,13 @@ def test_a_dense_group_larger_than_the_cap_admits_whole_in_one_poll() -> None:
         assert record.observation_id == observations[0].id
 
 
-def test_quantise_bearing_snaps_to_nearest_clock_position() -> None:
-    # 47 deg relative bearing (from heading 0) is nearer 2 o'clock (60 deg)
-    # than 1 o'clock (30 deg) -- a clean, non-boundary regression anchor.
-    quantised_deg, bucket_name = _quantise_bearing(0.0, 47.0)
-
-    assert bucket_name == "OP_A2H"
-    assert quantised_deg == pytest.approx(60.0)
-
-
-def test_quantise_bearing_dead_ahead_is_12_oclock() -> None:
-    quantised_deg, bucket_name = _quantise_bearing(0.0, 5.0)
-
-    assert bucket_name == "OP_A12H"
-    assert quantised_deg == pytest.approx(0.0)
-
-
-def test_quantise_bearing_is_relative_to_heading() -> None:
-    # True bearing 100 deg, ownship heading 90 deg -> 10 deg relative ->
-    # nearest clock position is dead ahead (12 o'clock), expressed back as
-    # true bearing 90 deg.
-    quantised_deg, bucket_name = _quantise_bearing(90.0, 100.0)
-
-    assert bucket_name == "OP_A12H"
-    assert quantised_deg == pytest.approx(90.0)
-
-
-def test_quantise_range_snaps_to_bucket_upper_bound() -> None:
-    quantised_m, bucket_name = _quantise_range_m(1247.0)
-
-    assert bucket_name == "OP_D1_1p5k"
-    assert quantised_m == pytest.approx(1500.0)
-
-
-def test_quantise_range_exact_boundary_uses_that_bucket() -> None:
-    quantised_m, bucket_name = _quantise_range_m(1000.0)
-
-    assert bucket_name == "OP_D1000M"
-    assert quantised_m == pytest.approx(1000.0)
+# Bearing/range quantisation (`_quantise_bearing`/`_quantise_range_m`) was
+# deleted from this channel's emission path by `plans/
+# precise-position-belief/plan.md` Stage 2, replaced by `perception.
+# estimation`'s error model + perturbation -- see `test_estimation.py` for
+# that module's own coverage, and the tests below for this source's use of
+# it (`test_emitted_bearing_range_are_perturbed_not_quantised`,
+# `test_position_uncertainty_is_declared_on_every_observation`).
 
 
 # --- Stage 2 clustering (plans/group-contact-model/plan.md) -----------------
