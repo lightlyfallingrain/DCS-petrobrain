@@ -204,6 +204,7 @@ from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
+    CONTACT_ENGAGEMENT_CHANGED,
     CONTACT_LOST,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
@@ -985,6 +986,16 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         # `_contact_report_text`'s own clock/range clause: "Armor, two
         # o'clock, three kilometres." verbatim.
         return _contact_report_text(result["facts"])
+    if event.kind == CONTACT_ENGAGEMENT_CHANGED:
+        # Decision 3's two wordings, taken from `docs/concept/
+        # STATE_TRANSITIONS.md`'s own "danger <unit> <where>"/"safe from
+        # <unit> <where>" rather than invented. `lead` already carries its
+        # own trailing punctuation/spacing, per `_contact_report_text`'s
+        # own docstring.
+        if event.engaged is None:
+            return None
+        lead = "Danger, " if event.engaged else "Safe from "
+        return _contact_report_text(result["facts"], lead=lead)
     return None
 
 

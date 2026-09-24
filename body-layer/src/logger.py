@@ -220,7 +220,7 @@ from perception.gaze import (
     gaze_at,
     legs_within_wedge,
 )
-from perception.geometry import GeoPosition, open_world_model
+from perception.geometry import GeoPosition, line_of_sight_clear, open_world_model
 from perception.hybrid_source import HybridPerceptionSource
 from perception.naked_eye_source import NakedEyePerceptionSource
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
@@ -480,8 +480,19 @@ class ConsolePerceptionRunner:
         events_before = len(self.store.events)
         # `plans/watch-reporting/plan.md` Stage 2 -- `ownship` is already in
         # hand at this call site; `ContactStore.tick`'s sixth block (range
-        # crossings) is a no-op without it.
-        self.store.tick(ownship.t_sim, ownship=ownship)
+        # crossings) is a no-op without it. Stage 4's seventh block (engagement)
+        # additionally needs `los_clear` -- a closure over this runner's own
+        # `world_model_conn`/`theatre`, `None` (correct degradation, the term
+        # is simply skipped) when no world-model connection is configured.
+        los_clear = None
+        if self.world_model_conn is not None and self.theatre is not None:
+            conn = self.world_model_conn
+            theatre = self.theatre
+
+            def los_clear(observer: GeoPosition, target: GeoPosition) -> bool:
+                return line_of_sight_clear(conn, theatre, observer, target)
+
+        self.store.tick(ownship.t_sim, ownship=ownship, los_clear=los_clear)
         self.tasks.tick(self.store, ownship.t_sim)
         self.last_t_sim = ownship.t_sim
         if self.overlay_client is not None:

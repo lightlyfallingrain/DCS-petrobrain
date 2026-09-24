@@ -1000,3 +1000,55 @@ def test_route_event_contact_range_crossed_returns_none_for_unknown_contact() ->
         range_km=3,
     )
     assert route_event(store, event, now_sim=0.0) is None
+
+
+# --- CONTACT_ENGAGEMENT_CHANGED speech (plans/watch-reporting/plan.md
+# Stage 4) --------------------------------------------------------------
+
+
+def test_route_event_contact_engagement_changed_entering_says_danger() -> None:
+    store, contact_id = _store_with_one_contact()
+    event = Event(
+        id="EVENT_ENGAGE",
+        contact_id=contact_id,
+        kind="CONTACT_ENGAGEMENT_CHANGED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_engaged=False,
+        engaged=True,
+    )
+    speech = route_event(store, event, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "Danger, BMP-2."
+
+
+def test_route_event_contact_engagement_changed_leaving_says_safe_from() -> None:
+    store, contact_id = _store_with_one_contact()
+    event = Event(
+        id="EVENT_ENGAGE",
+        contact_id=contact_id,
+        kind="CONTACT_ENGAGEMENT_CHANGED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_engaged=True,
+        engaged=False,
+    )
+    speech = route_event(store, event, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "Safe from BMP-2."
+
+
+def test_route_event_contact_engagement_changed_returns_none_for_unknown_contact() -> (
+    None
+):
+    store = ContactStore()
+    event = Event(
+        id="EVENT_ENGAGE",
+        contact_id="CONTACT_999",
+        kind="CONTACT_ENGAGEMENT_CHANGED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_engaged=False,
+        engaged=True,
+    )
+    assert route_event(store, event, now_sim=0.0) is None

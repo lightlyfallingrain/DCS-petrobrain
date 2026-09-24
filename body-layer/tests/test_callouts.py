@@ -1108,3 +1108,73 @@ def test_watched_contact_speaks_a_range_crossing() -> None:
     scheduler = CalloutScheduler()
     spoken = scheduler.tick(store, now_sim=1.0)
     assert spoken == ["BMP-2."]  # unenriched, classification_raw as-is
+
+
+# --- watched-only speech: CONTACT_ENGAGEMENT_CHANGED (plans/watch-reporting/
+# plan.md Stage 4) -----------------------------------------------------
+
+
+def _founded_far_threat_contact() -> tuple[ContactStore, str]:
+    """Founds a watched AAA-type contact whose fixed ground-truth position
+    (`dwp_x`/`dwp_z`) is 1000m from the origin. Three ticks, each moving
+    ownship closer, so `CONTACT_DETECTED` (t=0) and `CONTACT_RANGE_
+    CROSSED` (t=1, the sixth block's own watched-only kind -- inevitably
+    also eligible on the same km-crossing transition since both share the
+    same ownship-closing geometry) each get their own tick to fire and be
+    drained/cooled down, leaving only `CONTACT_ENGAGEMENT_CHANGED` live
+    for the caller's own scheduler at the final, close tick (t=2) --
+    avoiding the watched-only-kind collision `_store_with_a_founded_
+    contact_that_then_starts_moving` (Stage 1) exists to avoid, extended
+    to a *second* colliding kind here."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="ZU-23-3 Sergey",  # AAA, range_max_m=2408
+                classification_level=3,
+                dwp_x=1000.0,
+                dwp_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship(x=-50000.0))  # far -- seeds both silently
+    CalloutScheduler().tick(store, now_sim=0.0)  # drain CONTACT_DETECTED
+    store.tick(now_sim=1.0, ownship=_ownship(x=-3000.0))  # range=4000 -- range-crossed
+    CalloutScheduler().tick(store, now_sim=1.0)  # drain CONTACT_RANGE_CROSSED
+    return store, contact_id
+
+
+def test_watched_contact_speaks_a_danger_call_on_entering_an_envelope() -> None:
+    store, _ = _founded_far_threat_contact()
+    store.tick(now_sim=2.0, ownship=_ownship())  # close -- range=1000 < 2408
+
+    scheduler = CalloutScheduler()
+    spoken = scheduler.tick(store, now_sim=2.0)
+    assert spoken == ["Danger, ZU-23-3 Sergey."]
+
+
+def test_unwatched_contact_never_speaks_an_engagement_change() -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="ZU-23-3 Sergey",
+                classification_level=3,
+                dwp_x=1000.0,
+                dwp_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0, ownship=_ownship())  # unwatched -- no-op
+    CalloutScheduler().tick(store, now_sim=0.0)  # drain CONTACT_DETECTED
+
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=0.0) == []
