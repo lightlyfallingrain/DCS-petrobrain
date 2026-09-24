@@ -141,13 +141,20 @@ confirmations (*"is this threat &lt;description&gt; real?"*), accepting yes/no. 
 threats and effectively nothing else — ownship, purpose and task ambiguities did not produce
 questions on any of the three missions. Backlog, not a regression: MI-5 was never claimed to be
 exhaustive, but the gap between "player questions" and "threat confirmations" is wide enough to
-name.
+name. **Deferred to the brain** (user, 2026-09-24: *"yes, refine later, again we need brain"*) —
+a richer ambiguity detector written now would be a second, hand-rolled judgement layer that the
+brain would then replace.
 
 **A5 — unicode in place names** surfaced in the compact artifact. Probably already fixed upstream
 in the world-model builder and simply not rebuilt into the store the server is reading; unconfirmed
 until a rebuild. Not blocking.
 
-**B (sortie half) could not be run at all — see the finding below.**
+**B (sortie half) could not be run at all — see the finding below. Deferred to the brain layer by
+user direction the same day; not a Mission Interpreter defect.**
+
+**Verdict: MI is tested and passed, with notes** (user, 2026-09-24). The two open notes — MI-5's
+narrow question set (A2) and the unreachable phase data (B) — are both explicitly gated on the
+brain layer, not on further MI work. Nothing here reopens an MI milestone.
 
 ### MI-6's artifact reaches body-layer and then stops
 

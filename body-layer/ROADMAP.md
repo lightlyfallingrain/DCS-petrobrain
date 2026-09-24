@@ -282,7 +282,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `--crew-text`'s stdout, not `--overlay`'s cockpit text panel) — not part of BL-6's own scope, a
   separate follow-on.
 
-- [ ] **BL-7's phase data is unreachable in a sortie — found 2026-09-24, first real MI acceptance.**
+- [>] **BL-7's phase data is unreachable in a sortie — found 2026-09-24, DEFERRED TO THE BRAIN (user, 2026-09-24).**
   `--mission-understanding` loads the artifact and `MissionPhaseTracker` updates every poll, but
   **nothing a pilot can reach in flight reads it.** `mission_phase` appears in four files
   (`console.py`, `tools.py`, `mission_phase.py`, `tool_api.py`) and in none of `attention.py`,
@@ -295,6 +295,11 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   directly (what BL-7's own plan implies, and what would make the tie-break matter unprompted).
   Pilot's report of the same gap: *"the commands to exercise it during mission do not exist yet."*
   Blocks the B half of `docs/acceptance/2026-09-24-mission-interpreter-sortie.md`.
+
+  **Deferred deliberately, not forgotten.** User direction 2026-09-24: *"situation/phase — not
+  needed yet, there is nothing that consumes it yet. Defer till brain."* Building a `situation`
+  command now would produce a readout nothing acts on; phase earns its place once a brain is
+  reasoning over it. Do not start this without the brain layer existing.
 
 - [x] **BL-7 — Mission phase and relevance (≈ PB-9's deterministic half; done, merged 2026-09-13,
   `feature/bl7-mission-phase-relevance`, merge commit `ec4cf12`).** `MissionPhaseTracker` consumes
