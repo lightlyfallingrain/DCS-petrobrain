@@ -172,3 +172,106 @@ channel as velocity), or object-disappearance as a coarse and late proxy. Neithe
 This was raised in the conversation and not resolved. It should be probed before the brain plan
 promises the answer, because it is the most natural question a pilot asks after a strike, and a
 brain that cannot answer it will feel broken exactly where it matters most.
+
+---
+
+# Attack run (user-raised, 2026-09-24, same session)
+
+Raised by the user after the conversation above, as *"one important feature"*. Recorded here
+because it is the first request that exercises every part of the frame above at once — and because
+two parts of it change decisions already made today.
+
+## The shape, in the user's own terms
+
+Player: **"engaging `<target>` `<where>` [`<weapon>`]"**, where weapon is guns / rockets /
+missiles / bombs.
+
+1. Brain resolves *which unit* `<target>` is, then commands **attack-run `<target>`** to body.
+2. Body puts an automatic **watch** on that target.
+3. Readback: *"attack run `<target>` `<where>`"*.
+4. Petrovich then **guides the pilot onto the target by frequent callouts**, whose register changes
+   as the run develops:
+
+   | phase | what he says |
+   |---|---|
+   | far | "10 o'clock, 2 km, edge of forest" · "11 o'clock, 2 km" · "12 o'clock, 1.5 km" |
+   | close, boresight-relative | "10 degrees left, 15 degrees down, edge of forest" · "5 degrees left, 10 degrees down, 1 km" · "at nose, 5 degrees down, 800 m" |
+   | lined up | "lined up, 700 m" |
+   | after | "hit" / "missed, aim higher" · "target smoking / on fire / destroyed" |
+   | re-attack | "target not hit, attack again?" → yes: keep the run and the watch · no: stop the run, **keep the watch** |
+
+   The user's own note on the lined-up call: *"with rockets/gun attack run is almost never exactly
+   boresight, it has to take trajectory into account, that's pilots job."* So "lined up" means
+   *aligned in azimuth on the target*, not *the weapon will hit* — ballistics stay with the pilot,
+   deliberately.
+
+## What this changes
+
+### 1. It is the sharpest case yet of "the brain is not in the speech path"
+
+The brain does exactly one thing here: resolve `<target>` from `"engaging the tank by the village"`
+into a contact id, once, before the run starts. **Everything after that is deterministic geometry
+at a high callout rate** — bearing, range, boresight-relative azimuth and elevation, and a
+world-model semantic fragment. None of it may go through a model: a 5–10 s deliberation budget is
+fine for "where is the T-72", and fatal for "at nose, 5 degrees down, 800 m" during a gun run.
+
+This is the two-loop split from §1 above, applied where the latency actually bites.
+
+### 2. Boresight-relative callouts are buildable today — the data is already there
+
+*Verified rather than assumed.* `OwnshipState` (`body-layer/src/perception/source.py`) already
+carries `pitch_deg` and `bank_deg` alongside `heading_true_deg`, converted from the aircraft
+layer's radians, **with both sign conventions confirmed against DCS by the user on 2026-09-17**
+(positive pitch = nose up, positive bank = right wing down). That was banked for cockpit
+visibility; it is exactly what "10 degrees left, 15 degrees down" needs, and it means this
+vocabulary costs geometry and phrasing, not a new data channel.
+
+What is genuinely new is the *register*: `belief/speech.py` speaks o'clock and kilometres because
+the pilot wants relative position. Attack run needs a second vocabulary — signed degrees off the
+nose, in two axes — and a rule for when to switch from one to the other. The switch point is a real
+design question (range? angular rate? the moment the target enters the windscreen?), not a constant
+to pick casually.
+
+### 3. It makes the damage probe a prerequisite, not reconnaissance
+
+*"hit" / "missed" / "target smoking / on fire / destroyed"* and *"target not hit, attack again?"*
+all require perceiving what the strike did. That is precisely what
+`aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md` is probing,
+and today it is recorded as optional recon with the outcome unknown.
+
+It is not optional any more. **Attack run cannot deliver its last three lines without it**, and if
+the probe comes back negative on damage the feature ships with a hole exactly where the pilot is
+paying most attention.
+
+**The hardest part is not "hit" — it is "missed, aim higher".** Knowing *that* a round connected is
+plausibly answerable (a life-fraction drop, or `S_EVENT_HIT`). Knowing *where the rounds went* when
+they did not connect is a different problem with no identified channel at all: it needs the impact
+point relative to the target, which nothing in the probe covers. Flagged now rather than discovered
+during implementation. A defensible first version says "missed" and stops there, and only offers a
+correction if a real impact-point signal turns up.
+
+### 4. It carves out the advisory channel that was deferred four hours earlier
+
+Earlier in this same conversation the user deferred the co-pilot advising the pilot — *"break
+right", "don't cross that ridge"* — with *"yes, but defer"*. **Attack-run guidance is that channel**:
+"10 degrees left, 5 degrees down" is an instruction to fly, not an observation.
+
+This is not a contradiction, and it should not be read as one. It is a **bounded first instance**:
+advisory output confined to a single commanded manoeuvre, with the player having just declared the
+intent, a named target, and an explicit end condition. That is much narrower than general flight
+advice, and it is the natural shape for the advisory channel to be built in first. Recorded
+explicitly so nobody later "discovers" the inconsistency and reopens the general deferral.
+
+### 5. "Attack again?" is the same round trip as everything else
+
+Third use of `awaiting_reply_id` / `awaiting_reply_to`, after confirm-a-doubtful-command and
+disambiguate-a-referent. Same machinery, and the *"no"* branch carries a real detail worth keeping:
+**stop the run, keep the watch.** The target does not stop mattering because this pass ended.
+
+## Sequencing
+
+This sits **after** BR-1 (the loop) and the damage probe, and it is a natural BR-2/BR-3 consumer
+rather than a milestone of its own — the target-resolution half is BR-2's reference resolution with
+a different verb, and the guidance half is deterministic body work that could be built in parallel
+with either. It should not start before the probe answers, because the probe determines whether
+this feature's most-watched moment is buildable at all.
