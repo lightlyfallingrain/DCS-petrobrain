@@ -488,3 +488,61 @@ def test_follow_is_derived_into_the_verb_anchor_words() -> None:
     from command_matcher import VERB_ANCHOR_WORDS
 
     assert "follow" in VERB_ANCHOR_WORDS
+
+
+# --- follow slot resolution (plans/watch-reporting/plan.md Decision 2b) ----
+
+
+def test_follow_with_all_three_slots_resolves_to_the_follow_token() -> None:
+    result = match_transcript("follow armor two o'clock three km")
+    assert result.token == "follow"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"descriptor": "armor", "clock": 2, "range_km": 3}
+
+
+def test_follow_with_only_a_descriptor() -> None:
+    result = match_transcript("follow the sam")
+    assert result.token == "follow"
+    assert result.slots == {"descriptor": "sam"}
+
+
+def test_follow_with_only_a_clock() -> None:
+    result = match_transcript("follow two o'clock")
+    assert result.token == "follow"
+    assert result.slots == {"clock": 2}
+
+
+def test_follow_with_only_a_range() -> None:
+    result = match_transcript("follow three km")
+    assert result.token == "follow"
+    assert result.slots == {"range_km": 3}
+
+
+def test_bare_follow_alone_has_no_slots() -> None:
+    """A bare "follow" (no qualifiers) resolves via the ordinary phrase
+    table (Decision 2b-i's own `PHRASES["follow"] = ("follow",)` entry),
+    not the slot fallback -- `slots` stays `None`, which is what tells the
+    body-layer resolver there is nothing to match against."""
+    result = match_transcript("follow")
+    assert result.token == "follow"
+    assert result.slots is None
+
+
+def test_follow_nearest_is_still_the_watch_nearest_synonym_not_the_follow_token() -> (
+    None
+):
+    """The phrase table must win over the slot fallback for the exact
+    synonym phrasings -- `_parse_follow_slots` is never even consulted."""
+    result = match_transcript("follow nearest")
+    assert result.token == "watch_nearest"
+    assert result.slots is None
+
+
+def test_follow_with_no_recognisable_slots_says_again() -> None:
+    """A follow-anchored utterance whose words parse to zero slots (and
+    which does not match any enumerated phrase) is a detected recognition
+    gap, not a silent fallthrough."""
+    result = match_transcript("follow the thing over there")
+    assert result.verb_anchored is True
+    assert result.token is None

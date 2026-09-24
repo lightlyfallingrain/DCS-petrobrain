@@ -12,6 +12,7 @@ behave as `stt_engine.py`/`tools/stt_bench.py` need them to.
 from __future__ import annotations
 
 from vocabulary import (
+    DESCRIPTOR_WORDS,
     LEGACY_F10_TOKENS,
     LEGAL_BEARINGS_DEG,
     PHRASES,
@@ -23,6 +24,9 @@ from vocabulary import (
     normalize_for_match,
     normalized_phrase_index,
     parse_bearing,
+    parse_clock,
+    parse_descriptor,
+    parse_range_km,
     spoken_phrases,
     to_gbnf,
     token_for_phrase,
@@ -318,3 +322,44 @@ def test_collapsing_leaves_genuine_phrases_alone() -> None:
     for phrase in spoken_phrases():
         assert normalize_for_match(phrase) == normalize_for_match(phrase)
         assert len(normalize_for_match(phrase).split()) == len(phrase.split())
+
+
+# --- follow's slot parsers (plans/watch-reporting/plan.md Decision 2b-i) ---
+
+
+def test_parse_clock_reads_a_number_word_before_oclock() -> None:
+    assert parse_clock("follow two o'clock") == 2
+    assert parse_clock("follow twelve o'clock three km") == 12
+
+
+def test_parse_clock_accepts_a_single_digit_and_apostrophe_variants() -> None:
+    assert parse_clock("follow 3 oclock") == 3
+    assert parse_clock("follow 3 o clock") == 3
+
+
+def test_parse_clock_returns_none_with_no_clock_phrase() -> None:
+    assert parse_clock("follow armor three km") is None
+    assert parse_clock("follow nearest") is None
+
+
+def test_parse_range_km_reads_word_and_digit_forms() -> None:
+    assert parse_range_km("follow three km") == 3
+    assert parse_range_km("follow fifteen kilometres") == 15
+    assert parse_range_km("follow 3 km") == 3
+
+
+def test_parse_range_km_rejects_out_of_range_values() -> None:
+    assert parse_range_km("follow 50 km") is None
+
+
+def test_parse_range_km_returns_none_with_no_range_phrase() -> None:
+    assert parse_range_km("follow armor two o'clock") is None
+
+
+def test_parse_descriptor_matches_the_closed_set() -> None:
+    for word in DESCRIPTOR_WORDS:
+        assert parse_descriptor(f"follow the {word}") == word
+
+
+def test_parse_descriptor_returns_none_for_an_unrecognised_word() -> None:
+    assert parse_descriptor("follow the helicopter") is None
