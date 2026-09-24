@@ -970,9 +970,16 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   **unbenched** tokens (no recordings in this corpus), the same cost class as `cancel_scan`/
   `cancel_watch` before 2026-09-23 -- next corpus recording's job. **Unflown as of merge.**
 
-- [x] **Watch reporting — Stages 1 through 5. DONE**, `feature/watch-reporting`. A watched
-  contact now reports itself unprompted on three new triggers, plus `follow` becomes both a
-  `watch` synonym and a new best-match way to *name* which contact to watch.
+- [~] **Watch reporting — Stages 1 through 5 implemented and reviewed, not yet merged
+  (`feature/watch-reporting`).** A watched contact now reports itself unprompted on three new
+  triggers, plus `follow` becomes both a `watch` synonym and a new best-match way to *name* which
+  contact to watch. Correctness review APPROVED (full read), performance review flagged a real
+  finding (LOS called before the range/altitude gate) which was fixed and the fix re-reviewed
+  APPROVED, security review APPROVED with three non-blocking hardening recommendations carried to
+  backlog below. DoD gate run 2026-09-24: format/lint/type/test all green in both touched
+  subprojects (body-layer 1177 passed/4 xfailed, audio-adapter 198 passed/1 skipped). **Live
+  acceptance outstanding** — this entry stays `[~]` until a real sortie exercises it; card at
+  `docs/acceptance/2026-09-24-watch-reporting-sortie.md`.
 
   **Stage 1 — movement.** `CONTACT_MOTION_CHANGED` has fired since `movement-detection` and was
   never spoken; `belief.callouts._WATCHED_ONLY_KINDS` gates it at the speech layer (not at
@@ -1067,6 +1074,32 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   specific row directly (which already works correctly for every row, independent of this gap).
   Not a defect in the join mechanism itself (a hand-authored patch here is exactly what Decision 4c
   warns against) — the fix belongs in `object_model.py`'s own keyword coverage.
+
+- [ ] **`alt_ok` has no hysteresis counterpart to `range_ok`'s `ENGAGEMENT_LEAVING_HYSTERESIS` —
+  found during the watch-reporting performance-review fix, 2026-09-24.** The short-circuit that
+  skips `line_of_sight_clear` when `range_ok and alt_ok` is already `False` (performance fix,
+  `contacts.py`) means any tick where ownship altitude oscillates right at `envelope.alt_min_m`
+  now discards an in-progress LOS mask dwell (`los_masked_since_sim = None` on the skip path),
+  which didn't happen before (LOS ran unconditionally every tick pre-fix). Traced as fail-safe,
+  not a correctness bug: resetting the dwell only pushes `masked_for_s` back toward 0, which keeps
+  `los_ok` (and `current_engaged`) `True` longer, never shorter — it can delay a warning clearing,
+  never drop or falsely clear one. Fix (not done in `watch-reporting`, deliberately, per the fix
+  review): a matching hysteresis margin on `alt_min_m` for symmetry with the range side.
+
+- [ ] **Two non-blocking hardening items from `watch-reporting`'s security deep review, deferred
+  to backlog by user direction, 2026-09-24.** Both are unreachable through the code that exists
+  today; recorded because the two processes that make them unreachable restart independently.
+  - `body-layer/src/belief/crew_console.py:486,1009` (and the token-keyed siblings at
+    `:474,477,762`) — `_CLOCK_REPORT_LABELS[clock]` is a plain dict index on a value that arrives
+    over the audio-adapter -> body-layer wire. `logger._poll_transcripts` validates only that a
+    `slots` value is `int | str`, not that a `clock` value is one of the nine legal forward hours.
+    Change to `_CLOCK_REPORT_LABELS.get(clock, str(clock))` so an out-of-range value degrades to a
+    plain number instead of raising.
+  - `body-layer/src/logger.py`'s `_poll_transcripts` slot validation — add a membership check for
+    `slots["clock"]` against the same forward-hour set `audio-adapter`'s `vocabulary.
+    FORWARD_CLOCK_POSITIONS` names, hand-mirrored the same way `crew_console.
+    _FOLLOW_DESCRIPTOR_OP_CLASSES` already is, so a wire violation is dropped at the boundary
+    rather than reaching the dict index above three calls later.
 
 - [x] **`OP_LRSAM` folded into the air-defence command classes — merged 2026-09-24
   (`fix/lrsam-air-defence`).** "Watch nearest air defence" could not select an S-300:
