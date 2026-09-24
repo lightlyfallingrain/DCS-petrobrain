@@ -256,10 +256,16 @@ PHRASES: dict[str, tuple[str, ...]] = {
     "scan_bearing_sw": ("scan southwest",),
     "scan_bearing_w": ("scan west",),
     "scan_bearing_nw": ("scan northwest",),
-    "watch_nearest": ("watch nearest",),
+    # `follow` is `watch`'s synonym (`plans/watch-reporting/plan.md`
+    # Decision 2a) -- extra phrasings on the same tokens, not a new token.
+    # `VERB_ANCHOR_WORDS` (`command_matcher.py`) is derived from `PHRASES`
+    # at import time, so `follow` becomes an anchorable verb for free.
+    "watch_nearest": ("watch nearest", "follow nearest"),
     "watch_nearest_air_defence": (
         "watch nearest air defence",
         "watch nearest air defense",
+        "follow nearest air defence",
+        "follow nearest air defense",
     ),
     "cancel_task": ("cancel task", "cancel"),
     # Narrow cancels (user, 2026-09-23: *"cancel task <task> should work
@@ -276,7 +282,13 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # `"stop scan"`/`"stop watch"` do not collide with the `stop` token:
     # that one counts only when it is the entire transmission.
     "cancel_scan": ("cancel scan", "stop scan", "stop scanning"),
-    "cancel_watch": ("cancel watch", "stop watch", "stop watching"),
+    "cancel_watch": (
+        "cancel watch",
+        "stop watch",
+        "stop watching",
+        "cancel follow",
+        "stop following",
+    ),
     # Voice-only. `report` carries three phrasings because it is the
     # command most likely to be said casually and differently each time.
     "report_all": ("report", "report contacts", "what do you see"),
