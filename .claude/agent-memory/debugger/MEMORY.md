@@ -13,3 +13,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Association gate fragility](project_association_gate_fragility.md) — spatial gate sizing vs. ContactStore ambiguity policy: fixing one duplicate-contact failure mode reopens another.
 - [Escalate gate policy changes](feedback_escalate_gate_policy_changes.md) — don't patch association_over_time.py gate sizing or ContactStore ambiguity rule as Debugger; escalate to Architect.
 - [Stale backlog already fixed](project_stale_backlog_already_fixed.md) — reproduce against current code first; a milestone Stage fix can leave the standalone backlog entry stale/open.
+- [Position-belief fusion pitfalls](project_position_belief_fusion_pitfalls.md) — bearing-only ill-conditioning guards break repeated-same-bearing looks; determinant-floor mis-scaling now fixed, see next entry.
+- [Covariance2D determinant floor scale](project_covariance2d_determinant_floor_scale.md) — an absolute determinant floor is wrong for a function inverting matrices at two different scales; use `RATIO * trace**2` instead (scale-invariant under `.inverse()`).
