@@ -21,6 +21,7 @@ from belief.audio_client import AudioAdapterError
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import (
+    _AIR_DEFENCE_OP_CLASSES,
     DISPATCHED_COMMAND_TOKENS,
     CrewConsole,
     _describe_token_for_confirm,
@@ -31,6 +32,7 @@ from belief.enrichment import EnrichmentContext
 from belief.escalation import EscalationPayload
 from belief.tasks import TaskStore
 from belief.voice_commands import ACT_FLOOR, CONFIRM_FLOOR, CONFIRM_WINDOW_S
+from perception import object_model
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -992,6 +994,79 @@ def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
     assert sam.attention == "watch"
     # The nearer tank must be untouched -- it was never a candidate.
     assert tank.attention == "normal"
+
+
+def test_watch_nearest_air_defence_selects_a_long_range_sam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression, 2026-09-24: `OP_LRSAM` was absent from
+    `_AIR_DEFENCE_OP_CLASSES`, so an S-300 -- long-range SAM, unambiguously
+    air defence -- could never be selected by "watch nearest air defence".
+
+    This is the worst contact to have missed. The vision calibration found
+    the S-300's tracking-radar mast detectable out to 8.89 km, further than
+    anything else in the profile table, so it is both the most dangerous
+    thing the command can be asked about and the one most likely to be the
+    only air-defence contact held at all."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_S300",
+                t_sim=0.0,
+                classification_raw="S-300PS 40B6M tr",
+                ownship_x=4000.0,
+            ),
+            _observation_with_ownship_x(
+                obs_id="OBS_TANK", t_sim=0.0, classification_raw="T-72", ownship_x=500.0
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    s300 = next(c for c in store.contacts if "S-300" in c.classification.value)
+    tank = next(c for c in store.contacts if c.classification.value == "T-72")
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command("watch_nearest_air_defence", now_sim=0.0)
+
+    assert s300.attention == "watch"
+    assert lines and "no air defence contact" not in lines[0]
+    assert tank.attention == "normal"
+
+
+def test_air_defence_classes_cover_every_air_defence_class_in_the_object_model() -> (
+    None
+):
+    """Guards the drift that caused the `OP_LRSAM` omission above, rather
+    than only the one instance of it.
+
+    `_AIR_DEFENCE_OP_CLASSES` is enumerated by hand against
+    `perception.object_model`'s profile table, and nothing connects the two:
+    when that table gained a long-range SAM entry, this set had no way to
+    notice. `object_model` carries no structural air-defence marker to
+    derive the set from (an `ObjectTypeProfile` is a size and an `op_class`,
+    nothing more), so this test matches on the `OP_*` naming instead -- any
+    class whose name says SAM or names a gun system must be covered.
+
+    If a future profile entry introduces an air-defence class this pattern
+    does not catch, that is a signal to give `object_model` a real marker,
+    not to loosen the assertion."""
+    profiled_classes = {
+        profile.op_class
+        for _keyword, profile in (
+            *object_model._KEYWORD_PROFILES,
+            *object_model._REPORTING_NAME_KEYWORD_PROFILES,
+        )
+    }
+    air_defence_by_name = {
+        op_class
+        for op_class in profiled_classes
+        if op_class.endswith("SAM") or op_class in {"OP_SPAAG", "OP_ZU23"}
+    }
+
+    assert air_defence_by_name, "naming heuristic matched nothing -- it has gone stale"
+    assert air_defence_by_name <= _AIR_DEFENCE_OP_CLASSES
 
 
 def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(

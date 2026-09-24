@@ -197,8 +197,18 @@ _RELATIVE_SCAN_LABELS: dict[RelativeSector, str] = {
 #: `object_model` because "which classes a *crew command* treats as air
 #: defence" is a command-vocabulary question, not a property of the object
 #: model -- a future `watch armour` would add its own set the same way.
+#:
+#: **`OP_LRSAM` was missing here until 2026-09-24**, so "watch nearest air
+#: defence" silently could not select an S-300 -- the one emitter the vision
+#: calibration found visible out to 8.89 km, i.e. the single contact this
+#: command most needed to return. The omission was drift, not a decision:
+#: this set was written when `object_model`'s profile table genuinely had no
+#: long-range SAM entry, and the comment above ("exactly the air-defence
+#: entries in `perception.object_model`") stayed true only until that table
+#: gained one. A set enumerated by hand against another module's contents
+#: has no mechanism to notice when that module grows.
 _AIR_DEFENCE_OP_CLASSES: frozenset[str] = frozenset(
-    {"OP_SPAAG", "OP_ZU23", "OP_SRSAM", "OP_MRSAM"}
+    {"OP_SPAAG", "OP_ZU23", "OP_SRSAM", "OP_MRSAM", "OP_LRSAM"}
 )
 
 #: The classification lattice levels at which an air-defence claim is
