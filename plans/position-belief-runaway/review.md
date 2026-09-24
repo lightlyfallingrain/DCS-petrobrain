@@ -131,3 +131,100 @@ claims most load-bearing for the verdict: the slow-drift reproduction against re
 source, the `passes_gate` numeric threshold, and the `_MIN_DETERMINANT` corruption's reach and
 its interaction with the new guard. Did not re-run the full branch test suite (reused the
 already-reported clean run per the task's instruction).
+
+---
+
+## 2026-09-25 re-review — required fix (`97d5c65`)
+
+Re-review of the single commit responding to the required fix above. Read `97d5c65`'s diff
+(`git diff c1cba89..97d5c65`) and the corresponding `plans/position-belief-runaway/debug.md`
+addendum in full.
+
+**Working-note on this review's own setup**: my assigned worktree is based on `main`
+(`a04eec8`), which predates this whole branch, so `body-layer/src` on disk here is *not* the
+fix — it is `main`'s pre-`b5b79b8` `position_belief.py` (confirmed: no `FUSION_SANITY_SIGMA`,
+absolute `_MIN_DETERMINANT`, `git log -1` on the file shows `5676b09`, unrelated). A first probe
+script that imported "the current code" via this worktree's own `PYTHONPATH` was silently
+running pre-fix code for both "old" and "new" cases and produced a false match. Caught before
+it reached this report by noticing `pytest`'s own `pythonpath` config (`body-layer/pyproject.toml`)
+inserts `src` ahead of anything on `PYTHONPATH`, and by then noticing the two `git show` dumps
+disagreed with what `grep` found on disk. Fixed by `git archive`-ing the branch tip (`97d5c65`)
+and the pre-fix commit (`c1cba89`) into two clean scratch trees and running pytest/scripts with
+those directories as `cwd`, so each tree's own `pyproject.toml` resolves `pythonpath` against
+itself. All findings below are from those two clean trees, not this worktree's checkout.
+
+### Findings, against the review's five numbered checks
+
+1. **Invariance claim** — true, and true for the anisotropic, rotated case, not just the
+   diagonal one. Derived analytically first (2x2 symmetric `M` with eigenvalues `a, b`:
+   `det(M)=ab`, `trace(M)=a+b`; `M^-1` has eigenvalues `1/a, 1/b`, so
+   `det(M^-1)/trace(M^-1)^2 = (1/(ab)) / ((a+b)^2/(ab)^2) = ab/(a+b)^2 = det(M)/trace(M)^2`
+   exactly — trace and det are basis-independent, so this holds regardless of rotation), then
+   confirmed numerically against `covariance_from_uncertainty(157.08, 510.0, bearing)` at five
+   bearings (0°, 17°, 37°, 90°, 123.4°): `det/trace²` before and after `.inverse()` match to
+   float precision at every bearing. The claim is correct as written, not just for the diagonal
+   case the addendum's own worked example happened to check.
+2. **Is `1e-9` the right ratio** — yes, with real margin, and the same-digits-as-before is
+   coincidence, not carried-over laziness (the addendum's own math derives it from the same
+   quantity, `ab/(a+b)^2`, at a value that happens to still read as `1e-9`). The floor permits a
+   sigma-axis ratio down to `sqrt(1/1e-9) ≈ 31623:1` before firing. Checked real anisotropy this
+   code produces: `naked_eye_sigma_m` pairs run `ratio ≈ 0.0056` (60,800) to `≈ 0.079` (157.08,
+   510) — 7-8 orders of magnitude of margin. Pushed a deliberately extreme synthetic pair
+   (`sigma_cross=1.0, sigma_down=5000.0`, a 5000:1 ratio, well beyond anything
+   `covariance_from_uncertainty`'s real callers produce) and the ratio is still `~4e-8`, 40x
+   above the floor. No cross-channel or elapsed-inflation path was found that could push a real
+   ratio anywhere near `1e-9` — `inflated()` adds an *isotropic* term to both axes, which moves
+   the ratio *toward* 1 (less anisotropic), never toward the floor.
+3. **Does the floor still fire when it should** — yes. A genuinely singular matrix
+   (`xx=100, zz=25, xz=50`, `det=0` exactly by construction) still floors to a finite inverse
+   (`Covariance2D(1.6e6, 6.4e6, -3.2e6)`, no inf/NaN). The fully-degenerate `trace==0` case
+   (`xx=zz=xz=0.0`) is caught by `_MIN_DETERMINANT_ABSOLUTE` and also returns finite (all-zero)
+   output — the relative floor alone would divide by zero there, confirming the backstop is
+   load-bearing and not decorative. Also ran the fix's own repeated-identical-look case out to 15
+   folds (not just the 6 the regression test pins): the mean holds exactly at `x=3000.0` for
+   every fold, and the covariance itself converges and stabilises after fold 6 (matches the
+   `_apply_floor` systematic-bias floor) — no re-drift on repeated application.
+4. **Trap 1** (`test_optic_policy.py::test_a_well_refined_contact_collapses_the_look_to_a_single_
+   step`) — read the test body directly (`tests/test_optic_policy.py:602-670`). Confirmed its
+   only assertion is `assert len(steps) == 1`; nothing in the test body or its fixture asserts or
+   depends on any intermediate numeric value from the ten folds that precede it, and no other
+   assertion elsewhere in that file reads a value calibrated against the corrupted intermediates.
+   The debugger's account holds.
+5. **The two new regression tests** — independently re-executed against a clean `git archive`
+   of `c1cba89` (pre-fix) and confirmed both **fail** there
+   (`test_..._is_exact_at_floor_triggering_sigma`: `1869.817...  == 3000.0 ± 1e-6` fails;
+   `test_..._still_fuses_at_floor_triggering_sigma`: `(0.0, 3000.0) != (0.0, 3000.0)` fails, i.e.
+   the guard holds the prior when it should fuse) — then re-executed against a clean `git
+   archive` of `97d5c65` (post-fix) and confirmed both pass. This is the crux check the task
+   asked for and it was run against real isolated trees, not inferred from the diff or reused
+   from the debugger's own account (which the setup note above explains I could not simply
+   trust without also independently getting a clean environment, after my first pass showed a
+   false-positive from an environment mistake of my own).
+
+**Optional item (`last_seen_sim`)** — the debug addendum's "Deliberately not fixed here (logged
+as a decision, not an oversight)" section states plainly that this is a known, pre-existing,
+bounded gap left out of this fix's scope, restates the review's own recovery-time finding
+(~20s via `GATE_GROWTH_RATE_MPS`), and frames it as a follow-up rather than silence. That reads
+as a recorded decision, not an oversight — no further action needed here.
+
+**Full verification, independently re-run** (not reused from the debug report) against the
+clean `97d5c65` tree: `ruff format --check src tests` — 103 files already formatted; `ruff check
+src tests` — all checks passed; `mypy src` — success, no issues in 48 source files; `pytest
+tests -q` — 1191 passed, 4 xfailed, matching the debug addendum's own count.
+
+### Verdict
+
+**APPROVED.** The required fix is satisfied: the invariance claim is correct and shown to hold
+for the general (rotated, anisotropic) case, the chosen ratio carries real margin against every
+real and a deliberately extreme synthetic anisotropy this code can produce, the floor still
+catches genuine singularity, Trap 1 is confirmed a non-issue for the stated reason, and the two
+regression tests are confirmed to fail pre-fix and pass post-fix by direct, isolated execution.
+Nothing new surfaced. The branch as a whole (`b5b79b8` + `97d5c65`) is approved.
+
+### Review Confidence
+
+Full read of `97d5c65`'s diff and the debug addendum. Every one of the five numbered checks was
+verified by direct execution against a clean, isolated snapshot of the relevant commit (`git
+archive` into scratch directories), not by reading alone — including re-deriving and
+numerically confirming the eigenvalue-ratio invariance claim for rotated matrices, which the
+original debug addendum had only checked for one bearing.
