@@ -260,6 +260,45 @@ def test_bearing_uncertainty_deg_at_zero_range_is_zero() -> None:
     assert estimate.bearing_uncertainty_deg(observer) == 0.0
 
 
+def test_range_uncertainty_m_reads_only_the_down_range_component() -> None:
+    """`range_uncertainty_m` (`plans/watch-reporting/plan.md` Decision
+    5a-i) is `bearing_uncertainty_deg`'s exact mirror: a highly elongated
+    estimate (wide down-range, tight cross-range) observed from directly
+    down its own down-range axis must report a *large* range uncertainty --
+    the opposite of the cross-range test above."""
+    from perception.geometry import GeoPosition
+
+    estimate = estimate_from_look(
+        x=1000.0,
+        z=0.0,
+        uncertainty=PositionUncertainty(sigma_cross_m=10.0, sigma_down_m=1000.0),
+        look_bearing_deg=0.0,  # elongated along x
+        t_sim=0.0,
+    )
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)  # looking along +x too
+
+    range_uncertainty_m = estimate.range_uncertainty_m(observer)
+
+    assert range_uncertainty_m > 500.0
+
+
+def test_range_uncertainty_m_small_for_a_tight_down_range_estimate() -> None:
+    from perception.geometry import GeoPosition
+
+    estimate = estimate_from_look(
+        x=1000.0,
+        z=0.0,
+        uncertainty=PositionUncertainty(sigma_cross_m=1000.0, sigma_down_m=10.0),
+        look_bearing_deg=0.0,
+        t_sim=0.0,
+    )
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    range_uncertainty_m = estimate.range_uncertainty_m(observer)
+
+    assert range_uncertainty_m < 50.0
+
+
 def test_radius_m_is_sqrt_of_trace() -> None:
     estimate = estimate_from_look(
         x=0.0,

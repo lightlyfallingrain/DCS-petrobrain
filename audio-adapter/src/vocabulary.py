@@ -127,6 +127,15 @@ VOICE_ONLY_TOKENS: tuple[str, ...] = (
         "say_again",
         "scan_bearing_deg",
         "report_bearing_deg",
+        # `follow [<descriptor>] [<clock> o'clock] [<n> km]` -- a best-match
+        # referring expression (`plans/watch-reporting/plan.md` Decision
+        # 2b), the stopgap approximation of free-text targeting. A single
+        # token, not a `follow_clock_*` family: descriptor/clock/range are
+        # all parsed slots (`parse_descriptor`/`parse_clock`/
+        # `parse_range_km` below), not enumerated phrases -- the
+        # descriptor x nine hours x twenty ranges cross-product is in the
+        # hundreds, far past what a closed grammar can list.
+        "follow",
     )
     + tuple(f"report_bearing_{d}" for d in ("n", "ne", "e", "se", "s", "sw", "w", "nw"))
     + tuple(f"report_clock_{p}" for p in FORWARD_CLOCK_POSITIONS)
@@ -256,10 +265,16 @@ PHRASES: dict[str, tuple[str, ...]] = {
     "scan_bearing_sw": ("scan southwest",),
     "scan_bearing_w": ("scan west",),
     "scan_bearing_nw": ("scan northwest",),
-    "watch_nearest": ("watch nearest",),
+    # `follow` is `watch`'s synonym (`plans/watch-reporting/plan.md`
+    # Decision 2a) -- extra phrasings on the same tokens, not a new token.
+    # `VERB_ANCHOR_WORDS` (`command_matcher.py`) is derived from `PHRASES`
+    # at import time, so `follow` becomes an anchorable verb for free.
+    "watch_nearest": ("watch nearest", "follow nearest"),
     "watch_nearest_air_defence": (
         "watch nearest air defence",
         "watch nearest air defense",
+        "follow nearest air defence",
+        "follow nearest air defense",
     ),
     "cancel_task": ("cancel task", "cancel"),
     # Narrow cancels (user, 2026-09-23: *"cancel task <task> should work
@@ -276,7 +291,13 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # `"stop scan"`/`"stop watch"` do not collide with the `stop` token:
     # that one counts only when it is the entire transmission.
     "cancel_scan": ("cancel scan", "stop scan", "stop scanning"),
-    "cancel_watch": ("cancel watch", "stop watch", "stop watching"),
+    "cancel_watch": (
+        "cancel watch",
+        "stop watch",
+        "stop watching",
+        "cancel follow",
+        "stop following",
+    ),
     # Voice-only. `report` carries three phrasings because it is the
     # command most likely to be said casually and differently each time.
     "report_all": ("report", "report contacts", "what do you see"),
@@ -307,6 +328,14 @@ PHRASES: dict[str, tuple[str, ...]] = {
     # bench measures. Asking beats both guessing and silence -- a crew
     # member who did not catch something says so.
     "say_again": ("say again", "repeat", "repeat that"),
+    # The bare verb -- descriptor/clock/range are parsed slots
+    # (`command_matcher.py`'s follow-slot fallback path), never enumerated
+    # here. "follow nearest"/"follow nearest air defence" are NOT this
+    # token's phrasings -- they are extra phrasings on `watch_nearest`/
+    # `watch_nearest_air_defence` (Decision 2a, the free synonym), matched
+    # by the ordinary phrase table before this token's fallback path is
+    # ever reached.
+    "follow": ("follow",),
     # Routing, not commands -- see ROUTING_TOKENS.
     #
     # The wake word carries both the bare and the greeted form because a
@@ -608,6 +637,133 @@ def parse_bearing(text: str) -> BearingParse:
     if value > 359 or value % BEARING_RESOLUTION_DEG != 0:
         return BearingParse(None, value)
     return BearingParse(value, value)
+
+
+#: `follow`'s three slot parsers (`plans/watch-reporting/plan.md` Decision
+#: 2b-i), siblings of `parse_bearing` above. Unlike `parse_bearing`, none
+#: of the three is anchored on a single fixed marker word the way
+#: `"bearing"` anchors a numeric heading -- `parse_clock` looks for a
+#: number word immediately before `"o'clock"`, `parse_range_km` for one
+#: immediately before a distance unit, `parse_descriptor` for any word in
+#: the closed descriptor set, each scanning the whole normalised
+#: transcript rather than requiring a fixed position.
+
+#: Reverse of `_CLOCK_WORDS` -- number word -> forward-hemisphere hour.
+_CLOCK_WORD_TO_HOUR: dict[str, int] = {
+    word: hour for hour, word in _CLOCK_WORDS.items()
+}
+
+
+def parse_clock(text: str) -> int | None:
+    """The clock-position slot -- a number word immediately before
+    `"o'clock"` (`normalize_for_match` has already folded every apostrophe
+    variant onto `"o'clock"` and, via `_DIGIT_WORDS`, a single recognised
+    digit like `"3"` onto its word form `"three"`, so both spellings reach
+    this function identically). Restricted to `FORWARD_CLOCK_POSITIONS`
+    (via `_CLOCK_WORD_TO_HOUR`), the same no-omniscience reason every other
+    clock-taking token in this vocabulary is restricted -- a rear-hemisphere
+    hour cannot resolve here at all, by construction. `None` if no
+    recognised clock phrase is found anywhere in `text`."""
+    words = normalize_for_match(text).split()
+    for index, word in enumerate(words):
+        if word == "o'clock" and index > 0:
+            hour = _CLOCK_WORD_TO_HOUR.get(words[index - 1])
+            if hour is not None:
+                return hour
+    return None
+
+
+#: Number words 1-20 for the range slot -- wider than `_DIGIT_NAMES`
+#: (0-9), since a kilometre range legitimately runs up to
+#: `crew_console`'s own cap. Recognisers spell small numbers as words and
+#: larger ones as digits inconsistently (`parse_bearing`'s own docstring
+#: makes the identical observation), so `parse_range_km` below checks both
+#: forms rather than assuming one.
+_RANGE_NUMBER_WORDS: dict[str, int] = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+
+#: Distance-unit words the range slot recognises -- "km"/"kilometre(s)"/
+#: "klick(s)" (`plans/watch-reporting/plan.md` Decision 2b-i's own list),
+#: both spellings of "kilometre" included since a recognizer trained on
+#: American English may emit either.
+_RANGE_UNIT_WORDS: frozenset[str] = frozenset(
+    {"km", "kilometre", "kilometres", "kilometer", "kilometers", "klick", "klicks"}
+)
+
+
+def parse_range_km(text: str) -> int | None:
+    """The range slot -- a number immediately before a distance-unit word.
+    **Constrained to 1-20, with no checksum** (unlike `parse_bearing`'s 5
+    degree resolution, which rejects roughly four in five mishearings):
+    whole kilometres have no such redundancy, so "three" heard as "two" is
+    a legal, undetectable value here -- the readback is the only
+    protection. `None` if no recognised range phrase is found anywhere in
+    `text`, or the number before the unit is out of range."""
+    words = normalize_for_match(text).split()
+    for index, word in enumerate(words):
+        if word in _RANGE_UNIT_WORDS and index > 0:
+            number_word = words[index - 1]
+            value: int | None = None
+            if number_word.isdigit():
+                value = int(number_word)
+            elif number_word in _RANGE_NUMBER_WORDS:
+                value = _RANGE_NUMBER_WORDS[number_word]
+            if value is not None and 1 <= value <= 20:
+                return value
+    return None
+
+
+#: The closed descriptor vocabulary (`plans/watch-reporting/plan.md`
+#: Decision 2b-ii) -- **exactly the words Petrovich himself speaks**,
+#: `belief.speech._OP_CLASS_DISPLAY`'s vocabulary plus `"group"` (the
+#: user's own example word, matching `cardinality.lo > 1`). A hand-synced
+#: mirror, like every other cross-subproject vocabulary table in this
+#: file (module docstring) -- `audio-adapter` cannot import `body-layer`'s
+#: `belief.speech` module (module independence). Type names are
+#: deliberately not admitted -- an open set cannot be enumerated into a
+#: closed grammar, and a type-level descriptor only helps once a contact
+#: is already type-classified (Decision 2b-ii's own reasoning).
+DESCRIPTOR_WORDS: tuple[str, ...] = (
+    "armor",
+    "truck",
+    "infantry",
+    "sam",
+    "aaa",
+    "ship",
+    "group",
+)
+
+
+def parse_descriptor(text: str) -> str | None:
+    """The descriptor slot -- the first `DESCRIPTOR_WORDS` member found
+    anywhere in the normalised transcript, or `None`. `DESCRIPTOR_WORDS`
+    order is the tie-break when a transcript somehow contains more than
+    one (not expected in practice for a single referring expression)."""
+    words = set(normalize_for_match(text).split())
+    for descriptor in DESCRIPTOR_WORDS:
+        if descriptor in words:
+            return descriptor
+    return None
 
 
 #: Framing sentence for `to_prompt`. Whisper's initial prompt conditions

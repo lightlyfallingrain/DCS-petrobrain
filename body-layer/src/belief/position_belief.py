@@ -181,6 +181,28 @@ class PositionEstimate:
         sigma_cross_m = math.sqrt(max(0.0, cross_var))
         return math.degrees(math.atan2(sigma_cross_m, slant_m))
 
+    def range_uncertainty_m(self, observer: GeoPosition) -> float:
+        """`bearing_uncertainty_deg`'s exact down-range mirror -- the same
+        covariance projected onto the observer->target bearing itself
+        rather than its perpendicular, returned as a metres figure (there
+        is no small-angle conversion to a range figure the way cross-range
+        needs `atan2` to become degrees; a down-range sigma already *is* a
+        distance). `plans/watch-reporting/plan.md` Decision 5a-i: the
+        kilometre-crossing trigger's deadband is derived from this rather
+        than a tuned constant, so a precise estimate re-arms almost
+        immediately and a noisy one has to actually mean it."""
+        target = GeoPosition(x=self.x, z=self.z, alt_m=observer.alt_m)
+        theta = math.radians(bearing_deg(observer, target))
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+        # Down-range variance is the covariance projected onto (cos, sin) --
+        # `covariance_from_uncertainty`'s own axis convention, mirrored.
+        down_var = (
+            self.covariance.xx * cos_t * cos_t
+            + 2.0 * self.covariance.xz * sin_t * cos_t
+            + self.covariance.zz * sin_t * sin_t
+        )
+        return math.sqrt(max(0.0, down_var))
+
 
 def estimate_from_look(
     x: float,
