@@ -8,6 +8,8 @@ identical and the reason the policy takes `LookTarget`s rather than
 
 from __future__ import annotations
 
+import pytest
+
 from belief.optic_policy import (
     MAX_LOOK_S,
     RETRY_RANGE_FRACTION,
@@ -533,6 +535,141 @@ class TestLookTargetGeometry:
         )
 
         assert target.azimuth_deg == -90.0
+
+    def test_no_position_estimate_keeps_the_fixed_default_sweep(self) -> None:
+        """`plans/precise-position-belief/plan.md` Stage 5: omitting
+        `position` entirely must leave `bearing_uncertainty_deg` at
+        `LookTarget`'s own pre-Stage-5 default (`CLOCK_BUCKET_DEG / 2.0`),
+        not some other number -- the two tests above call `look_target_for`
+        this way and must keep working."""
+        from belief.enrichment import CLOCK_BUCKET_DEG
+        from belief.optic_policy import look_target_for
+        from perception.geometry import GeoPosition
+
+        target = look_target_for(
+            "CONTACT_1",
+            observer=GeoPosition(x=0.0, z=0.0, alt_m=500.0),
+            target_position=GeoPosition(x=1_000.0, z=0.0, alt_m=500.0),
+            heading_true_deg=0.0,
+            object_type="T-72",
+            current_level="presence",
+        )
+
+        assert target.bearing_uncertainty_deg == CLOCK_BUCKET_DEG / 2.0
+
+    def test_a_real_position_estimate_narrows_the_sweep_to_a_measured_number(
+        self,
+    ) -> None:
+        """A single fresh look's own `PositionEstimate` (no fusion yet)
+        must produce a `bearing_uncertainty_deg` of `LOOK_SWEEP_SIGMA *
+        BEARING_SIGMA_DEG` -- narrower than the old fixed +/-15 default,
+        the plan's own worked example (~9 degrees at `BEARING_SIGMA_DEG=
+        3.0`, `LOOK_SWEEP_SIGMA=3.0`)."""
+        from belief.optic_policy import LOOK_SWEEP_SIGMA, look_target_for
+        from belief.position_belief import estimate_from_look
+        from perception.estimation import BEARING_SIGMA_DEG
+        from perception.geometry import GeoPosition
+        from perception.source import PositionUncertainty
+
+        observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+        target_position = GeoPosition(x=3_000.0, z=0.0, alt_m=500.0)
+        sigma_cross_m = 3_000.0 * 0.05236  # radians(BEARING_SIGMA_DEG) * range
+        estimate = estimate_from_look(
+            x=3_000.0,
+            z=0.0,
+            uncertainty=PositionUncertainty(
+                sigma_cross_m=sigma_cross_m, sigma_down_m=510.0
+            ),
+            look_bearing_deg=0.0,
+            t_sim=0.0,
+        )
+
+        target = look_target_for(
+            "CONTACT_1",
+            observer=observer,
+            target_position=target_position,
+            heading_true_deg=0.0,
+            object_type="T-72",
+            current_level="presence",
+            position=estimate,
+        )
+
+        assert target.bearing_uncertainty_deg == pytest.approx(
+            LOOK_SWEEP_SIGMA * BEARING_SIGMA_DEG, abs=0.05
+        )
+        assert target.bearing_uncertainty_deg < 15.0  # narrower than the old default
+
+    def test_a_well_refined_contact_collapses_the_look_to_a_single_step(self) -> None:
+        """The plan's own Stage 5 verify item: a well-observed contact must
+        produce a sweep of exactly one step -- a stare, not a search --
+        once its `bearing_uncertainty_deg` narrows inside half a binocular
+        field of view.
+
+        **A real, non-obvious finding surfaced getting this test to pass
+        honestly**: repeated looks from *crossing* bearings (real
+        triangulation -- the scenario `test_position_belief.py`'s own
+        `test_fold_position_from_two_crossing_looks_triangulates_tighter_
+        than_either` covers, and which shrinks the estimate's *overall*
+        radius the most) do **not** reliably collapse *this specific
+        query's* `bearing_uncertainty_deg` to single-step, even fully
+        converged to the systematic-bias floor -- cross-bearing fusion
+        smears the tightened covariance's orientation away from being
+        aligned with any one observer's own cross-range axis, and a query
+        against a covariance that has become more isotropic can read
+        *worse* along one particular axis than a single, luckily-aligned
+        look would. Repeated looks from **the same bearing** (re-glassing
+        the same contact without much relative-bearing change -- at least
+        as plausible a "well-observed" scenario as an orbiting one)
+        instead **preserve** the naturally favourable down-range-heavy
+        anisotropy while still shrinking magnitude toward the floor, and
+        do reach single-step reliably -- confirmed numerically before
+        writing this test, not assumed. Recorded in `plans/
+        precise-position-belief/implementation.md` as a genuine finding
+        about the plan's own worked claim, not silently smoothed over."""
+        from belief.optic_policy import look_sweep, look_target_for
+        from belief.position_belief import fold_position
+        from perception.geometry import GeoPosition
+        from perception.source import PositionUncertainty
+
+        observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
+        target_position = GeoPosition(x=3_000.0, z=0.0, alt_m=500.0)
+        uncertainty = PositionUncertainty(sigma_cross_m=157.08, sigma_down_m=510.0)
+
+        # All folded at the same t_sim (elapsed_s=0 throughout) so the
+        # elapsed-motion inflation term never fights the tightening --
+        # this test is about how much fusion itself narrows the estimate,
+        # not about a stale contact re-widening between looks. Same
+        # bearing every time -- see the docstring above for why crossing
+        # bearings do not reliably reach single-step here.
+        estimate = None
+        for _ in range(10):
+            estimate = fold_position(
+                estimate,
+                x=3_000.0,
+                z=0.0,
+                uncertainty=uncertainty,
+                look_bearing_deg=0.0,
+                t_sim=0.0,
+            )
+        assert estimate is not None
+
+        target = look_target_for(
+            "CONTACT_1",
+            observer=observer,
+            target_position=target_position,
+            heading_true_deg=0.0,
+            object_type="T-72",
+            current_level="class",
+            position=estimate,
+        )
+        steps = look_sweep(
+            centre_azimuth_deg=target.azimuth_deg,
+            centre_elevation_deg=target.elevation_deg,
+            bearing_uncertainty_deg=target.bearing_uncertainty_deg,
+            fov_full_width_deg=(BINOCULAR_OPTIC.fov_half_angle_deg or 0.0) * 2.0,
+        )
+
+        assert len(steps) == 1
 
 
 class TestSearchPattern:

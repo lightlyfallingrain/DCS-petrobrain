@@ -41,8 +41,27 @@ from itertools import pairwise
 from typing import Final
 
 from belief.enrichment import CLOCK_BUCKET_DEG
+from belief.position_belief import PositionEstimate
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
+
+#: How many sigma of a contact's own `PositionEstimate.bearing_uncertainty_
+#: deg` the look sweep must cover -- `plans/precise-position-belief/plan.md`
+#: Stage 5. Declared independently of `belief.association_over_time.
+#: GATE_SIGMA_THRESHOLD` (which happens to share this value) rather than
+#: importing it: that constant answers a different question (does an
+#: incoming percept plausibly refer to this contact) from this one (how
+#: wide must a sweep be to actually cover the belief), and the two
+#: modules' own history (`association_over_time.py`'s docstring, Stage
+#: 3b-i) is exactly about not letting two different questions share a
+#: number by accident. At 3 km with `perception.estimation.
+#: BEARING_SIGMA_DEG=3.0`, a single fresh look's own 1-sigma cross-range
+#: angle is ~3 degrees, so a 3-sigma sweep is +/-9 degrees -- narrower than
+#: the pre-Stage-5 fixed +/-15 (`CLOCK_BUCKET_DEG / 2.0`), and a
+#: well-refined contact (several looks fused, tight covariance) narrows
+#: further still, collapsing to a single-step stare once the sweep fits in
+#: one binocular field of view.
+LOOK_SWEEP_SIGMA: Final[float] = 3.0
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
 from perception.visibility import tier_ranges
 
@@ -127,14 +146,23 @@ class LookTarget:
     current_level: str
     #: How far the *believed* bearing may be from the true one, degrees.
     #:
-    #: **This is why a look is a sweep and not a stare.** A contact's
-    #: position is reconstructed from a quantised percept -- the reporting
-    #: vocabulary's 30-degree clock bucket -- so the belief can be up to
-    #: 15 degrees off in azimuth, against a binocular field of view of
-    #: 4.25. Aiming a single stare at the believed position would miss the
-    #: target most of the time, and a mock-flight test caught exactly that
-    #: as four vanished observations. He knows it is "around two o'clock";
-    #: he sweeps around two o'clock.
+    #: **This is why a look is a sweep and not a stare.** Originally, a
+    #: contact's position was reconstructed from a quantised percept -- the
+    #: reporting vocabulary's 30-degree clock bucket -- so the belief could
+    #: be up to 15 degrees off in azimuth, against a binocular field of view
+    #: of 4.25. Aiming a single stare at the believed position would miss
+    #: the target most of the time, and a mock-flight test caught exactly
+    #: that as four vanished observations. He knows it is "around two
+    #: o'clock"; he sweeps around two o'clock.
+    #:
+    #: **As of `plans/precise-position-belief/plan.md` Stage 5, this is a
+    #: real measured number, not the fixed bucket half-width.**
+    #: `look_target_for`'s `bearing_uncertainty_deg` parameter passes
+    #: `LOOK_SWEEP_SIGMA * contact.position.bearing_uncertainty_deg(observer)`
+    #: when the caller has a real `PositionEstimate` to hand -- see that
+    #: function's own docstring. The `CLOCK_BUCKET_DEG / 2.0` default below
+    #: is kept as the fallback for any caller (present or future) that does
+    #: not yet have one, not because it is still the honest figure.
     bearing_uncertainty_deg: float = CLOCK_BUCKET_DEG / 2.0
 
 
@@ -751,6 +779,7 @@ def look_target_for(
     heading_true_deg: float,
     object_type: str,
     current_level: str,
+    position: PositionEstimate | None = None,
 ) -> LookTarget:
     """Build a `LookTarget` from a contact's believed position.
 
@@ -758,12 +787,31 @@ def look_target_for(
     convention is stated once: body-relative azimuth (0 dead ahead,
     positive clockwise) and elevation positive up, the same frame
     `within_optic_fov` tests in.
+
+    `position` (`plans/precise-position-belief/plan.md` Stage 5, `Contact.
+    position` -- the fused `belief.position_belief.PositionEstimate`) is
+    optional and keyword-only, kept separate from `target_position` rather
+    than replacing it: `target_position` is *always* needed (it is what the
+    azimuth/elevation/range below are computed from -- `Contact.
+    last_position`, which already reads `position`'s mean under the hood),
+    while `position`'s own covariance is only needed for the sweep width.
+    When supplied, `LookTarget.bearing_uncertainty_deg` becomes
+    `LOOK_SWEEP_SIGMA * position.bearing_uncertainty_deg(observer)` -- a
+    real, measured sweep width instead of the fixed clock-bucket half-width
+    default (see that field's own docstring). `None` (the default) leaves
+    `LookTarget`'s own default untouched, for any caller with no
+    `PositionEstimate` to hand.
     """
     true_bearing = bearing_deg(observer, target_position)
     slant_m = range_m(observer, target_position)
     azimuth = (true_bearing - heading_true_deg + 540.0) % 360.0 - 180.0
     height_delta = target_position.alt_m - observer.alt_m
     elevation = math.degrees(math.asin(max(-1.0, min(1.0, height_delta / slant_m))))
+    kwargs: dict[str, float] = {}
+    if position is not None:
+        kwargs["bearing_uncertainty_deg"] = (
+            LOOK_SWEEP_SIGMA * position.bearing_uncertainty_deg(observer)
+        )
     return LookTarget(
         contact_id=contact_id,
         azimuth_deg=azimuth,
@@ -771,4 +819,5 @@ def look_target_for(
         range_m=slant_m,
         object_type=object_type,
         current_level=current_level,
+        **kwargs,
     )
