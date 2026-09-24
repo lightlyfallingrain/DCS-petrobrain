@@ -27,9 +27,9 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   unbenched `scan <clock>` tokens' recognition accuracy in particular has no measurement of any
   kind yet, benched or live. **Precise position belief's own debt item is superseded by the entry
   below** — the version merged here had the range-runaway defect the fix branch corrects; do not
-  fly this card's position-belief items until that fix has merged.
+  fly this card's position-belief items until that fix has merged. **It merged 2026-09-25 (`bfbcf8d`), so they are now judgeable.**
 
-- [ ] **Position-belief-runaway fix — reviewed, not yet merged, card written ahead of merge**
+- [ ] **Position-belief-runaway fix — merged 2026-09-25 (`bfbcf8d`), unflown**
   (`fix/position-belief-runaway`, 2026-09-25). Corrects the range-runaway defect above (see the
   Status entry for the four fixes). Card: `docs/acceptance/2026-09-25-position-belief-sortie.md`
   — its own headline check (no naked-eye range beyond 10 km) is checkable by ear in one flight;
@@ -1045,8 +1045,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Full design and every measured/decided number: `plans/watch-reporting/plan.md`,
   `plans/watch-reporting/implementation.md`.
 
-- [~] **Position-belief-runaway fix — implemented and reviewed, NOT YET MERGED**
-  (`fix/position-belief-runaway`, head `0465290` at time of writing; plan/review paper trail:
+- [x] **Position-belief-runaway fix — merged 2026-09-25 (merge `bfbcf8d`,
+  `fix/position-belief-runaway`). Merged before flying, deliberately, so any correction the sortie
+  produces lands on `main`; live acceptance remains outstanding.**
+  (branch head was `0465290` at the DoD gate; plan/review paper trail:
   `plans/position-belief-runaway/`). Corrects a live defect the sortie the day after
   `precise-position-belief` merged actually found: `"couple contacts, 4 o'clock, 87.5
   kilometres"` against a 10 km naked-eye cap. Four distinct fixes under one report:
