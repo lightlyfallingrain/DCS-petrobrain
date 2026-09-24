@@ -440,6 +440,56 @@ def test_route_event_classification_changed_speaks_position_and_new_type(
     assert speech.text.endswith(" is T-72.")
 
 
+def test_route_event_classification_changed_does_not_double_the_unit_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real live callout (`plans/position-belief-runaway/debug.md`):
+    *"truck 5 o'clock, 79.5 kilometres is KrAZ truck"* -- the class word
+    ("truck") repeated as the leading noun and again inside the type
+    string ("KrAZ truck"). `_identification_lead`'s stutter guard used to
+    check for an exact string match only, which a type name that merely
+    *contains* the class word as one of its own words does not trigger.
+    The lead must fall back to "unit" here, exactly as it already does for
+    the plain "truck ... is truck" case."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="KrAZ truck",
+                classification_level=3,
+            )
+        ],
+        now_sim=1.0,
+    )
+    store.tick(now_sim=1.0)
+    changed = store.events[-1]
+    assert changed.kind == "CONTACT_CLASSIFICATION_CHANGED"
+
+    speech = route_event(
+        store, changed, now_sim=1.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text.startswith("unit ")
+    assert speech.text.endswith(" is KrAZ truck.")
+    # The regression this guards: "truck" must not appear twice.
+    assert speech.text.lower().count("truck") == 1
+
+
 def test_route_event_classification_changed_omits_range_when_not_enriched() -> None:
     """No `relative_now` on the contact's facts (no `EnrichmentContext`
     supplied) drops the position clause entirely, same absent-not-null
