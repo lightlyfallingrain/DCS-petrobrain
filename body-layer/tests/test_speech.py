@@ -23,6 +23,7 @@ from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
+    CONTACT_MOTION_CHANGED,
     Event,
 )
 from belief.speech import (
@@ -887,3 +888,77 @@ class TestSpokenVocabularyIsSayable:
         assert speech_module._format_range_km(1000.0) == "1 kilometre"
         assert speech_module._format_range_km(1500.0) == "1.5 kilometres"
         assert speech_module._format_range_km(500.0) == "0.5 kilometres"
+
+
+# --- _contact_report_text: lead/event_clause affixes (watch-reporting) -----
+
+
+def test_contact_report_text_event_clause_replaces_the_automatic_moving_clause() -> (
+    None
+):
+    """`plans/watch-reporting/plan.md` Decision 3: `event_clause` is spoken
+    instead of, never alongside, the automatic ", moving" clause -- a motion
+    callout must not read "..., moving, moving."."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=True)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    result = describe_contact(store, store.contacts[0].id, now_sim=0.0)
+    assert result is not None
+    text = _contact_report_text(result["facts"], event_clause="stopped")
+    assert text == "BMP-2, stopped."
+    assert text.count("moving") == 0
+
+
+def test_contact_report_text_lead_prefixes_with_its_own_punctuation() -> None:
+    """`lead` carries its own trailing punctuation/spacing -- see the
+    function's own docstring for why "Danger, " and "Safe from " join
+    differently and a shared separator would get one of them wrong."""
+    store, contact_id = _store_with_one_contact()
+    result = describe_contact(store, contact_id, now_sim=0.0)
+    assert result is not None
+    assert _contact_report_text(result["facts"], lead="Danger, ") == "Danger, BMP-2."
+    assert (
+        _contact_report_text(result["facts"], lead="Safe from ") == "Safe from BMP-2."
+    )
+
+
+def test_contact_report_text_lead_and_event_clause_combine() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    result = describe_contact(store, store.contacts[0].id, now_sim=0.0)
+    assert result is not None
+    text = _contact_report_text(
+        result["facts"], lead="Danger, ", event_clause="entering range"
+    )
+    assert text == "Danger, BMP-2, entering range."
+
+
+# --- CONTACT_MOTION_CHANGED speech (plans/watch-reporting/plan.md Stage 1) --
+
+
+def test_route_event_contact_motion_changed_speaks_moving_or_stopped() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=True)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    motion_event = next(e for e in store.events if e.kind == CONTACT_MOTION_CHANGED)
+    assert motion_event.motion == "moving"
+    speech = route_event(store, motion_event, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "BMP-2, moving."
+
+
+def test_route_event_contact_motion_changed_auto_acknowledges() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=True)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    motion_event = next(e for e in store.events if e.kind == CONTACT_MOTION_CHANGED)
+    assert motion_event in store.unacknowledged_events
+    route_event(store, motion_event, now_sim=0.0)
+    assert motion_event not in store.unacknowledged_events
