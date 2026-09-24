@@ -267,3 +267,79 @@ xfailed** (this branch's own prior baseline was 1189/4 -- 2 new tests, no regres
 xfails). Both new regression tests independently confirmed to reproduce the review's exact
 numbers when run against the pre-fix source before the code change was applied (not merely
 asserted to fail -- executed).
+
+## 2026-09-25 addendum: hold-recovery timing (security deep analysis finding)
+
+**Implementer step for the security deep-analysis change request** (`plans/
+position-belief-runaway/security-review.md`, head `4ba3da7`, verdict NEEDS FIXES) -- see that
+report's "The load-bearing finding, in detail" section for the full derivation; not repeated here
+beyond what's needed to record the fix.
+
+**The finding.** Both hold branches above (`fold_position`'s `FUSION_SANITY_SIGMA` guard and
+`clamp_to_detection_envelope`) reset `PositionEstimate.as_of_sim` to the current poll's `t_sim` on
+every hold, and each subsequent hold's elapsed-time inflation was computed against that reset
+timestamp rather than against the time since real evidence last changed the estimate. Under
+continuous polling this composes `(GATE_GROWTH_RATE_MPS * dt) ** 2` once per poll instead of
+`(rate * T) ** 2` once per `T`-second gap -- summing `n` squared pieces of a fixed wall-clock
+budget is always less than squaring the whole budget -- so recovery time scaled as roughly
+`1 / poll_interval_s`: the security pass measured ~47s at `logger._DEFAULT_POLL_INTERVAL_S = 1.0`
+and ~934s at 0.05s, against the single-gap ~20s the merged review's own approval rested on (that
+number is real, but was measured for a single re-acquisition after a gap, not continuous
+disagreeing-look polling).
+
+**Fix applied.** `body-layer/src/belief/position_belief.py`: `PositionEstimate` gains two fields,
+`fused_at_sim` and `fused_covariance`, alongside the existing `as_of_sim`/`covariance` -- the
+invariant, stated in the module and class docstrings: **elapsed-time inflation measures time
+since the last genuinely fused update, never time since the last poll.** `as_of_sim` keeps its
+existing meaning ("current as of this sim-time," bumped every poll, hold included);
+`fused_at_sim` is new and moves only when `fold_position` actually fuses a look.
+`fused_covariance` is the covariance as it stood at `fused_at_sim`, before any inflation -- the
+true, non-compounding base. A new helper, `_inflated_since_last_fuse(prior, t_sim)`, computes
+`prior.fused_covariance.inflated(t_sim - prior.fused_at_sim)` and is now the single place both
+`fold_position` (both the fusion-attempt's own prior-covariance inflation, and its guard's hold
+branch) and `clamp_to_detection_envelope`'s hold branch get "the prior's covariance, brought up to
+date" from -- replacing every prior use of `prior.covariance.inflated(elapsed_s since as_of_sim)`,
+which was the double/compounding-inflation bug. A hold's returned `PositionEstimate` carries
+`fused_at_sim`/`fused_covariance` straight through from `prior` unchanged (no real evidence was
+fused); a genuine fuse (or founding look) sets both to the current `t_sim`/newly-computed
+covariance, so `as_of_sim == fused_at_sim` and `covariance == fused_covariance` hold by
+construction on every non-held estimate. `_apply_floor` (only ever called on a non-held estimate)
+preserves that invariant -- the floored covariance becomes both the reported `covariance` and the
+new `fused_covariance` base. `estimate_from_look` (the founding case) sets both new fields to
+`t_sim`/its own covariance identically.
+
+Four direct `PositionEstimate(...)` test constructions (two in `test_position_belief.py`'s own
+clamp test, one each in `test_cardinality.py`/`test_decay.py`'s contact fixtures) needed the two
+new required constructor arguments added -- mechanical, no change to what any of those tests
+assert; the clamp test's own `prior`/`fused` get `fused_at_sim` equal to their own `as_of_sim` and
+`fused_covariance` equal to their own `covariance`, i.e. "freshly fused, no prior hold," which is
+what a hand-constructed fixture with no fold history means.
+
+**What was deliberately left alone**, per the task's scope: the `FUSION_SANITY_SIGMA` residual
+guard's own math, `clamp_to_detection_envelope`'s placement at `Contact.record`/`from_percept`,
+the scale-relative determinant floor, the `_identification_lead` regex, the cardinality
+reasoning, and the already-logged `last_seen_sim`-reads-as-fresh-during-a-hold decision above (a
+different, adjacent, still-out-of-scope issue -- not widened into by this fix, though the fix
+does make it more addressable if a later session wants to: `fused_at_sim` is now exactly the
+timestamp `certainty_of`/`position_confidence` would need if that follow-up is ever picked up).
+
+**Regression test.** `test_hold_recovery_time_is_bounded_independent_of_poll_interval`
+(`body-layer/tests/test_position_belief.py`) reproduces the same near-parallel disagreeing-looks
+scenario `test_fold_position_near_parallel_disagreeing_looks_holds_prior_not_runaway` pins, but
+polls it continuously -- chaining each hold's own output into the next poll's prior, exactly what
+`Contact.record` does -- at two very different poll intervals (1.0s and 0.05s, the real default
+and a 20x-tighter one) and asserts both recover within one shared 25s ceiling and within 1s of
+each other. **Confirmed to fail against the pre-fix source by direct execution** (copied the
+pre-fix `position_belief.py` back in via a scratch copy, not `git checkout` on a file with
+unstaged work -- `.claude/agent-memory/implementer/feedback_revert_test_scratch_copy.md`): the
+dt=0.05 case never recovered within 4000 polls (200s of sim time), reproducing the ~934s runaway
+directly; restored the fixed source afterward and reran the full suite clean. Probed the actual
+recovery-time numbers first with a throwaway script under both poll intervals (20.0s, 10.0s,
+7.0s, ~7.0s, ~6.85s at dt = 20.0/5.0/1.0/0.2/0.05 respectively) to set the test's bound and
+tolerance from real numbers rather than guessed ones.
+
+**Verification.** `cd body-layer && .venv/bin/ruff format src tests && .venv/bin/ruff check src
+tests && .venv/bin/mypy src && .venv/bin/pytest tests -q`: `ruff format` -- 103 files left
+unchanged; `ruff check` -- all checks passed; `mypy src` -- success, no issues found in 48 source
+files; `pytest tests -q` -- **1192 passed, 4 xfailed** (branch baseline was 1191/4 -- one new
+test, no regressions, no new xfails).

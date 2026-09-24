@@ -441,6 +441,74 @@ def test_fold_position_moderate_near_parallel_residual_still_fuses() -> None:
     assert math.hypot(fused.x, fused.z) < 3300.0
 
 
+def test_hold_recovery_time_is_bounded_independent_of_poll_interval() -> None:
+    """`plans/position-belief-runaway/security-review.md`, 2026-09-25: the
+    ill-conditioning guard's hold branch used to reset `as_of_sim` to the
+    current poll's `t_sim` on every hold, so the *next* poll's elapsed-time
+    inflation was computed against that reset timestamp rather than the
+    time since real evidence last changed the estimate. Under continuous
+    polling that composes `(GATE_GROWTH_RATE_MPS * dt) ** 2` once per poll
+    instead of `(rate * T) ** 2` once per `T`-second gap -- summing `n`
+    squared pieces of a fixed budget is always less than squaring the whole
+    budget -- so recovery time scaled as roughly `1 / poll_interval_s` and
+    grew without bound as poll rate increased: measured (pre-fix, direct
+    execution) ~47s at `logger._DEFAULT_POLL_INTERVAL_S = 1.0`, ~934s at
+    0.05s, against the single-gap ~20s the merged review's approval rested
+    on. This test fails against that code: it reproduces the same
+    near-parallel disagreeing-looks scenario `test_fold_position_near_
+    parallel_disagreeing_looks_holds_prior_not_runaway` pins, but polls it
+    continuously (chaining each hold's own output into the next poll's
+    prior, exactly what `Contact.record` does) at two very different poll
+    intervals, and asserts recovery time is bounded by one shared ceiling
+    regardless -- the direct expression of "must not scale with poll
+    interval." Fixed, both recover in ~7s, close to each other and well
+    under the ceiling; pre-fix numbers above are far outside it."""
+    uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
+
+    def recovery_time(poll_interval_s: float, max_polls: int) -> float:
+        founding = fold_position(
+            None,
+            x=0.0,
+            z=3000.0,
+            uncertainty=uncertainty,
+            look_bearing_deg=0.0,
+            t_sim=0.0,
+        )
+        estimate = founding
+        t_sim = 0.0
+        for _ in range(max_polls):
+            t_sim += poll_interval_s
+            estimate = fold_position(
+                estimate,
+                x=350.0,
+                z=5000.0,
+                uncertainty=uncertainty,
+                look_bearing_deg=5.0,
+                t_sim=t_sim,
+            )
+            if (estimate.x, estimate.z) != (founding.x, founding.z):
+                return t_sim
+        raise AssertionError(
+            f"never recovered within {max_polls} polls at dt={poll_interval_s}"
+        )
+
+    # Generous relative to the single-gap ~20s the approving review
+    # measured -- the pre-fix code blew past this at both poll intervals
+    # below (~47s, ~934s); the fix lands both comfortably under it.
+    recovery_bound_s = 25.0
+
+    slow = recovery_time(poll_interval_s=1.0, max_polls=200)
+    fast = recovery_time(poll_interval_s=0.05, max_polls=4000)
+
+    assert slow <= recovery_bound_s
+    assert fast <= recovery_bound_s
+    # Not just "both under the ceiling" -- close to *each other*, the
+    # actual "independent of poll interval" claim. Pre-fix these differed
+    # by ~20x (47s vs 934s) over a 20x change in dt; fixed, they agree to
+    # within a poll's own step size.
+    assert abs(slow - fast) <= 1.0
+
+
 def test_clamp_to_detection_envelope_is_a_no_op_within_range() -> None:
     observer = GeoPosition(x=0.0, z=0.0, alt_m=500.0)
     fused = estimate_from_look(
@@ -461,8 +529,22 @@ def test_clamp_to_detection_envelope_holds_prior_when_fused_exceeds_cap() -> Non
     covariance = covariance_from_uncertainty(
         PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0), 0.0
     )
-    prior = PositionEstimate(x=3000.0, z=0.0, covariance=covariance, as_of_sim=0.0)
-    fused = PositionEstimate(x=15000.0, z=0.0, covariance=covariance, as_of_sim=1.0)
+    prior = PositionEstimate(
+        x=3000.0,
+        z=0.0,
+        covariance=covariance,
+        as_of_sim=0.0,
+        fused_at_sim=0.0,
+        fused_covariance=covariance,
+    )
+    fused = PositionEstimate(
+        x=15000.0,
+        z=0.0,
+        covariance=covariance,
+        as_of_sim=1.0,
+        fused_at_sim=1.0,
+        fused_covariance=covariance,
+    )
 
     result = clamp_to_detection_envelope(fused, prior, observer, max_range_m=10000.0)
 
