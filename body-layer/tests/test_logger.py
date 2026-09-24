@@ -1267,13 +1267,13 @@ def test_poll_transcripts_skips_malformed_items() -> None:
 
 class _RecordingCrewConsole:
     """Stands in for `CrewConsole` in `_poll_transcripts` -- records the
-    exact arguments `handle_transcript` was called with, so a bearing
-    round trip through this function can be asserted without standing up a
-    real `EnrichmentContext`/`TaskStore` (that belongs to `test_crew_
-    console.py`'s own, deeper `handle_command`/`_handle_scan` tests)."""
+    exact arguments `handle_transcript` was called with, so a slots round
+    trip through this function can be asserted without standing up a real
+    `EnrichmentContext`/`TaskStore` (that belongs to `test_crew_console.
+    py`'s own, deeper `handle_command`/`_handle_scan` tests)."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str | None, int | None]] = []
+        self.calls: list[tuple[str, str | None, dict[str, int | str] | None]] = []
 
     def handle_transcript(
         self,
@@ -1284,16 +1284,18 @@ class _RecordingCrewConsole:
         verb_anchored: bool,
         ambiguous: bool,
         now_sim: float,
-        bearing_degrees: int | None = None,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
-        self.calls.append((transcript, token, bearing_degrees))
+        self.calls.append((transcript, token, slots))
         return []
 
 
-def test_poll_transcripts_threads_bearing_degrees_into_handle_transcript() -> None:
+def test_poll_transcripts_threads_slots_into_handle_transcript() -> None:
     """`plans/voice-command-completeness/plan.md` Stage 3's own regression
-    guard: `bearing_degrees` used to be dropped at the `TranscriptEvent`
-    wire and never reached `handle_transcript` at all."""
+    guard, extended by `plans/watch-reporting/plan.md` Decision 2b-i's
+    `bearing_degrees` -> `slots` migration: a parsed slot used to be
+    dropped at the `TranscriptEvent` wire and never reached
+    `handle_transcript` at all."""
     console = _RecordingCrewConsole()
     client = FakeSpeechInputClient(
         transcripts=[
@@ -1305,15 +1307,17 @@ def test_poll_transcripts_threads_bearing_degrees_into_handle_transcript() -> No
                 "verb_anchored": True,
                 "ambiguous": False,
                 "t_wall": 100.0,
-                "bearing_degrees": 320,
+                "slots": {"bearing_degrees": 320},
             }
         ]
     )
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
-    assert console.calls == [("scan bearing three two zero", "scan_bearing_deg", 320)]
+    assert console.calls == [
+        ("scan bearing three two zero", "scan_bearing_deg", {"bearing_degrees": 320})
+    ]
 
 
-def test_poll_transcripts_skips_items_with_a_malformed_bearing_degrees() -> None:
+def test_poll_transcripts_skips_items_with_slots_that_are_not_a_dict() -> None:
     console = _RecordingCrewConsole()
     client = FakeSpeechInputClient(
         transcripts=[
@@ -1325,7 +1329,31 @@ def test_poll_transcripts_skips_items_with_a_malformed_bearing_degrees() -> None
                 "verb_anchored": True,
                 "ambiguous": False,
                 "t_wall": 100.0,
-                "bearing_degrees": "320",  # wrong type, must be skipped
+                "slots": "not-a-dict",  # wrong shape, must be skipped
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == []
+
+
+def test_poll_transcripts_skips_items_with_a_malformed_slot_value() -> None:
+    """A `slots` value must be `int | str` -- a `bool` (a `int` subtype in
+    Python) or any other type must be rejected the same way every other
+    field's `isinstance` check already excludes `bool` from `int`/`float`
+    above."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan bearing three two zero",
+                "confidence": 0.9,
+                "token": "scan_bearing_deg",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "slots": {"bearing_degrees": True},
             }
         ]
     )

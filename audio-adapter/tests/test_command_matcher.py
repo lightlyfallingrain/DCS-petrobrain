@@ -136,7 +136,7 @@ def test_legal_bearing_resolves_via_the_parsed_slot_not_the_phrase_table() -> No
         token="scan_bearing_deg",
         match_ratio=1.0,
         verb_anchored=True,
-        bearing_degrees=175,
+        slots={"bearing_degrees": 175},
     )
 
 
@@ -147,7 +147,7 @@ def test_legal_bearing_report_verb() -> None:
         token="report_bearing_deg",
         match_ratio=1.0,
         verb_anchored=True,
-        bearing_degrees=90,
+        slots={"bearing_degrees": 90},
     )
 
 
@@ -161,7 +161,7 @@ def test_illegal_bearing_is_a_detected_error_not_a_fallthrough() -> None:
     assert result.verb_anchored is True
     assert result.token is None
     assert result.ambiguous is False
-    assert result.bearing_degrees is None
+    assert result.slots is None
 
 
 def test_never_mind_anchors_despite_not_being_in_the_plans_prose_list() -> None:
@@ -292,7 +292,7 @@ def test_skin_bearing_315_matches_end_to_end() -> None:
         token="scan_bearing_deg",
         match_ratio=1.0,
         verb_anchored=True,
-        bearing_degrees=315,
+        slots={"bearing_degrees": 315},
     )
 
 

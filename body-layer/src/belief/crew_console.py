@@ -347,7 +347,9 @@ _TOKEN_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) -> str:
+def _describe_token_for_confirm(
+    token: str, slots: dict[str, int | str] | None = None
+) -> str:
     """A plain human phrase for `token`, for `belief.speech.
     render_confirm_request`'s `description` argument (Stage 2,
     `plans/inbound-speech/plan.md`, extended by `plans/
@@ -365,8 +367,8 @@ def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) 
     expose a misunderstanding, and repeating the raw number while the
     dispatch itself acts on a coarser bucket would hide the only
     discrepancy worth hearing, the same reasoning `render_scan_readback`'s
-    own call site already follows. `bearing_degrees` is only consulted for
-    those two tokens; every other token ignores it."""
+    own call site already follows. `slots["bearing_degrees"]` is only
+    consulted for those two tokens; every other token ignores it."""
     if token in _RELATIVE_SCAN_TOKENS:
         return f"scan {_RELATIVE_SCAN_LABELS[_RELATIVE_SCAN_TOKENS[token]]}"
     if token in _BEARING_SCAN_TOKENS:
@@ -379,9 +381,9 @@ def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) 
     if token in _CLOCK_SCAN_TOKENS:
         clock = _CLOCK_SCAN_TOKENS[token]
         return f"scan {_CLOCK_REPORT_LABELS[clock]} o'clock"
-    if (
-        token in ("scan_bearing_deg", "report_bearing_deg")
-        and bearing_degrees is not None
+    bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
+    if token in ("scan_bearing_deg", "report_bearing_deg") and isinstance(
+        bearing_degrees, int
     ):
         sector = _nearest_sector(bearing_degrees)
         verb = "scan" if token == "scan_bearing_deg" else "report"
@@ -396,7 +398,7 @@ def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) 
 #: `cancel_nevermind`/`say_again` (handled above `handle_command` entirely,
 #: per the module docstring -- this method never even sees those three
 #: tokens) and `scan_bearing_deg`/`report_bearing_deg` are included even
-#: though a missing `bearing_degrees` argument degrades them to a "say
+#: though a missing `slots["bearing_degrees"]` degrades them to a "say
 #: again" line rather than raising, matching every other graceful-
 #: degradation branch in this class. `test_crew_console.py` asserts every
 #: member of this set returns a non-empty result from `handle_command`.
@@ -594,7 +596,10 @@ class CrewConsole:
         self.commands_handled += 1
 
     def handle_command(
-        self, token: str, now_sim: float, bearing_degrees: int | None = None
+        self,
+        token: str,
+        now_sim: float,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
         """Dispatches one player-issued command token -- originally F10
         radio-menu selections only (`plans/f10-crew-commands/plan.md`),
@@ -619,6 +624,9 @@ class CrewConsole:
         nothing was indistinguishable, from the cockpit, from not having
         been heard at all."""
         self._note_player_command()
+        bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
+        if not isinstance(bearing_degrees, int):
+            bearing_degrees = None
         if token in _RELATIVE_SCAN_TOKENS:
             relative_sector = _RELATIVE_SCAN_TOKENS[token]
             lines = self._handle_scan(
@@ -1127,7 +1135,7 @@ class CrewConsole:
         verb_anchored: bool,
         ambiguous: bool,
         now_sim: float,
-        bearing_degrees: int | None = None,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
         """`plans/inbound-speech/plan.md` Stage 2's voice-command entry
         point -- a sibling of `handle_line`/`handle_command`, per the
@@ -1135,10 +1143,12 @@ class CrewConsole:
         with the fields `audio_adapter.command_matcher.MatchResult` already
         resolved (Stage 3 wires the real HTTP poll; this stage is driven
         by tests and the `!voice` REPL harness, see `_handle_voice_test_
-        command`). `bearing_degrees` (`plans/voice-command-completeness/
-        plan.md` Stage 3) is `MatchResult.bearing_degrees` carried through
-        unchanged -- populated only when `token` is `"scan_bearing_deg"`/
-        `"report_bearing_deg"`.
+        command`). `slots` (`plans/watch-reporting/plan.md` Decision 2b-i,
+        replacing the earlier single-purpose `bearing_degrees` parameter)
+        is `MatchResult.slots` carried through unchanged -- populated only
+        for tokens that take a parsed slot (`scan_bearing_deg`/
+        `report_bearing_deg`'s `"bearing_degrees"`, `follow`'s
+        `"descriptor"`/`"clock"`/`"range_km"`).
 
         **A pending confirm-band question, if any, is checked first** --
         `classify_yes_no` decides whether this transcript commits, discards,
@@ -1150,11 +1160,11 @@ class CrewConsole:
         are valid only inside this branch, i.e. only while a confirmation
         is pending -- outside it the same words are ordinary text and reach
         `belief.voice_commands.classify_response` like anything else.
-        Committing (`affirm`) passes `pending.bearing_degrees` through to
-        `handle_command`, not this call's own `bearing_degrees` -- the
-        number belongs to whichever transcript originally proposed the
-        pending command, not to the (typically bearing-less) "affirm" reply
-        that commits it."""
+        Committing (`affirm`) passes `pending.slots` through to
+        `handle_command`, not this call's own `slots` -- the qualifiers
+        belong to whichever transcript originally proposed the pending
+        command, not to the (typically slot-less) "affirm" reply that
+        commits it."""
         if self._pending_confirmation is not None:
             pending = self._pending_confirmation
             if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:
@@ -1162,7 +1172,7 @@ class CrewConsole:
                 self._pending_confirmation = None
                 if answer == "affirm":
                     return self.handle_command(
-                        pending.token, now_sim, bearing_degrees=pending.bearing_degrees
+                        pending.token, now_sim, slots=pending.slots
                     )
                 if answer == "negative":
                     return []
@@ -1185,9 +1195,7 @@ class CrewConsole:
             disposition=decision.disposition,
             acted_token=decision.token,
         )
-        return self._act_on_voice_decision(
-            decision, transcript, now_sim, bearing_degrees
-        )
+        return self._act_on_voice_decision(decision, transcript, now_sim, slots)
 
     def _log_transcript(self, **row: object) -> None:
         """Write one row to `transcript_log`, if configured.
@@ -1206,7 +1214,7 @@ class CrewConsole:
         decision: BandDecision,
         transcript: str,
         now_sim: float,
-        bearing_degrees: int | None = None,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
         if decision.disposition == "fallthrough":
             # `handle_line` re-strips/re-checks the `!`-prefixed harness
@@ -1216,17 +1224,15 @@ class CrewConsole:
             return self.handle_line(transcript, now_sim)
         if decision.disposition == "act":
             assert decision.token is not None
-            return self.handle_command(
-                decision.token, now_sim, bearing_degrees=bearing_degrees
-            )
+            return self.handle_command(decision.token, now_sim, slots=slots)
         if decision.disposition == "confirm":
             assert decision.token is not None
-            description = _describe_token_for_confirm(decision.token, bearing_degrees)
+            description = _describe_token_for_confirm(decision.token, slots)
             self._pending_confirmation = PendingConfirmation(
                 token=decision.token,
                 description=description,
                 pending_since_sim=now_sim,
-                bearing_degrees=bearing_degrees,
+                slots=slots,
             )
             lines = [render_confirm_request(description).text]
         else:  # "say_again"
@@ -1250,14 +1256,15 @@ class CrewConsole:
         <ambiguous:0|1> <transcript...>` -- `-` for `token` means "no
         match" (`None`). `<transcript...>` accepts an **optional trailing
         degrees argument** (`plans/voice-command-completeness/plan.md`
-        Stage 3, decision 3 item 6): if the transcript's last word is a
-        bare integer, it is peeled off as `bearing_degrees` and the
-        remaining words are the transcript, mirroring `MatchResult.
-        bearing_degrees`'s real shape (a number attached to, but distinct
-        from, the transcript text) without adding a new fixed positional
-        argument that would break every existing `!voice` invocation.
-        `!voice scan_bearing_deg 1.0 1.0 1 0 scan bearing three two zero
-        320` sets `bearing_degrees=320`; a transcript with no trailing
+        Stage 3, decision 3 item 6, now populating `slots["bearing_
+        degrees"]` -- `plans/watch-reporting/plan.md` Decision 2b-i): if
+        the transcript's last word is a bare integer, it is peeled off and
+        the remaining words are the transcript, mirroring `MatchResult.
+        slots`'s real shape (a parsed value attached to, but distinct from,
+        the transcript text) without adding a new fixed positional argument
+        that would break every existing `!voice` invocation. `!voice
+        scan_bearing_deg 1.0 1.0 1 0 scan bearing three two zero 320` sets
+        `slots={"bearing_degrees": 320}`; a transcript with no trailing
         integer (every pre-existing test/harness use) is unaffected."""
         usage = [
             (
@@ -1282,11 +1289,11 @@ class CrewConsole:
             self._print(usage, now_sim)
             return usage
         token = None if token_arg == "-" else token_arg
-        bearing_degrees: int | None = None
+        slots: dict[str, int | str] | None = None
         split_transcript = transcript.rsplit(maxsplit=1)
         if len(split_transcript) == 2 and split_transcript[1].lstrip("-").isdigit():
             transcript, degrees_word = split_transcript
-            bearing_degrees = int(degrees_word)
+            slots = {"bearing_degrees": int(degrees_word)}
         return self.handle_transcript(
             transcript,
             confidence,
@@ -1295,7 +1302,7 @@ class CrewConsole:
             verb_arg == "1",
             ambiguous_arg == "1",
             now_sim,
-            bearing_degrees=bearing_degrees,
+            slots=slots,
         )
 
     def _new_utterance_id(self) -> str:
