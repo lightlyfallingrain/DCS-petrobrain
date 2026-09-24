@@ -23,7 +23,7 @@ from belief.cardinality import (
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact, ContactStore
 from belief.decay import IDENTITY_HALF_LIFE_S, cardinality_confidence_at
-from perception.geometry import GeoPosition
+from belief.position_belief import Covariance2D, PositionEstimate
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -53,8 +53,13 @@ def _contact_with_cardinality(
 ) -> Contact:
     return Contact(
         id="CONTACT_1",
-        last_position=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
-        last_position_uncertainty_m=0.0,
+        position=PositionEstimate(
+            x=0.0,
+            z=0.0,
+            covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+            as_of_sim=last_seen_sim,
+        ),
+        last_alt_m=0.0,
         last_class_raw="OP_TRUCK",
         classification=new_classification_belief(
             value="OP_TRUCK",

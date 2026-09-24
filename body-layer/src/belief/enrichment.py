@@ -8,19 +8,22 @@ it) and without changing `perception.geometry.project_from_bearing_range`
 (BL-2's gating primitive).
 
 **Where a contact's terrain-aware world position comes from.** `Contact`
-itself only ever stores `last_position` -- the *flat* position `belief.
-association_over_time.implied_position` computed at record time -- plus the
-ids of the observations that contributed to it, never the bearing/range
-pair that produced it. To feed `perception.geometry.project_terrain_aware`
-(which needs a fresh observer/bearing/range, not an already-flattened
-position), `_terrain_aware_world_position` below walks
-`contact.contributing_observation_ids` back through `ContactStore.
-observations` (the same pattern `motion_when_seen` uses) to recover the
-most recent contributing `Percept` and re-derives from *its*
-`ownship_at_observation`/`bearing_deg`/`range_m`. This is a concrete
-resolution of a gap the plan's prose leaves implicit (it names `position`
-as the input to the projection without saying where a bearing/range pair
-comes back from), not a deviation from its intent.
+stores `last_position` -- as of `plans/precise-position-belief/plan.md`
+Stage 4, the *fused* position `Contact.position` (`belief.position_belief.
+PositionEstimate`) resolves to, refined across every look via covariance
+fusion, never a single raw percept's own flat projection -- plus the ids of
+the observations that contributed to it, never a bearing/range pair. To
+feed `perception.geometry.project_terrain_aware` (which needs a fresh
+observer/bearing/range, not an already-flattened position),
+`_terrain_aware_world_position` below walks `contact.
+contributing_observation_ids` back through `ContactStore.observations` (the
+same pattern `motion_when_seen` uses) to recover the most recent
+contributing `Percept`'s own *observer* position, then derives a fresh
+bearing/range pair from that observer *to `contact.last_position`* (the
+fused mean) -- never using the percept's own perceived bearing/range
+directly, which would silently discard every improvement fusion made since
+that one look (Stage 4's own fix for exactly that bug, see that function's
+own docstring).
 
 **`SemanticFact.feature_id`.** The plan's prose says to use `StoredFeature.
 id`, falling back to a stable `f"{kind}:{id}"` string only when absent.
@@ -460,35 +463,59 @@ def _terrain_aware_world_position(
     store: ContactStore,
     contact: Contact,
 ) -> GeoPosition:
-    """`contact.last_position`'s terrain-aware counterpart -- see module
-    docstring for why this needs to walk back to the contact's most recent
-    contributing `Percept` rather than reprojecting `last_position` itself.
-    Falls back to `contact.last_position` unchanged (already the flat
+    """`contact.last_position`'s terrain-aware counterpart.
+
+    **Reprojects the contact's *fused* believed position, not the last
+    contributing percept's own raw bearing/range** (`plans/
+    precise-position-belief/plan.md` Stage 4 -- a real bug this plan's own
+    Risks section named: `Contact.last_position` is now `Contact.position`'s
+    covariance-fused mean, refined across every look, but this function used
+    to walk back to the single most recent `Percept` and reproject *its*
+    bearing/range instead, so every semantic fact and terrain-aware position
+    silently kept using one raw look while the fused estimate improved
+    invisibly beside it -- unit tests on the fusion itself would all still
+    pass, since none of them render a report). The fix: derive a fresh
+    bearing/range pair from the most recent percept's own observer position
+    *to `contact.last_position`* (the fused mean), instead of using that
+    percept's own perceived bearing/range directly -- `project_terrain_
+    aware`'s fixed-point terrain solve still needs *some* observer/bearing/
+    range triple to iterate from (see that function's own docstring), and
+    the most recent look's observer is the most reasonable vantage point to
+    iterate from, but the *target* fed into it is always the fused position
+    now, never the raw look.
+
+    Only the observer (for the fixed-point solve's starting point) and the
+    iteration-count policy (`PROJECTION_ITERATIVE_RANGE_M`, watched-contact
+    override) still come from the most recent contributing `Percept` --
+    falls back to `contact.last_position` unchanged (already the flat
     projection) if no contributing observation is still in the log."""
     percepts = _recent_percepts(store, contact)
     if not percepts:
         return contact.last_position
     percept = percepts[0]
 
-    max_iterations = (
-        _ITERATIVE_MAX_ITERATIONS
-        if (
-            percept.range_m <= PROJECTION_ITERATIVE_RANGE_M
-            or contact.attention == "watch"
-        )
-        else _SINGLE_SHOT_MAX_ITERATIONS
-    )
     observer = GeoPosition(
         x=percept.ownship_at_observation.x,
         z=percept.ownship_at_observation.z,
         alt_m=percept.ownship_at_observation.alt_m,
     )
+    target = contact.last_position
+    look_bearing_deg = bearing_deg(observer, target)
+    look_range_m = range_m(observer, target)
+
+    max_iterations = (
+        _ITERATIVE_MAX_ITERATIONS
+        if (
+            look_range_m <= PROJECTION_ITERATIVE_RANGE_M or contact.attention == "watch"
+        )
+        else _SINGLE_SHOT_MAX_ITERATIONS
+    )
     return project_terrain_aware(
         conn,
         theatre,
         observer,
-        percept.bearing_deg,
-        percept.range_m,
+        look_bearing_deg,
+        look_range_m,
         max_iterations=max_iterations,
     )
 

@@ -22,8 +22,8 @@ from belief.decay import (
     position_confidence,
 )
 from belief.motion import MotionBelief
+from belief.position_belief import Covariance2D, PositionEstimate
 from perception.gaze import FOCUS_DWELL_S, SCAN_CYCLE_PERIOD_S
-from perception.geometry import GeoPosition
 
 
 def _contact(
@@ -31,8 +31,13 @@ def _contact(
 ) -> Contact:
     return Contact(
         id="CONTACT_1",
-        last_position=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
-        last_position_uncertainty_m=0.0,
+        position=PositionEstimate(
+            x=0.0,
+            z=0.0,
+            covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
+            as_of_sim=last_seen_sim,
+        ),
+        last_alt_m=0.0,
         last_class_raw="OP_TRUCK",
         classification=new_classification_belief(
             value="OP_TRUCK",
