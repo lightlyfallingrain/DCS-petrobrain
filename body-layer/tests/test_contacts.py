@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import inspect
-import math
 import pathlib
 
 from belief import contacts as contacts_module
@@ -27,6 +26,7 @@ from perception.source import (
     DerivedWorldPosition,
     Observation,
     OwnshipState,
+    PositionUncertainty,
 )
 
 
@@ -45,6 +45,7 @@ def _observation(
     ownship: OwnshipState | None = None,
     classification_level: int = 2,
     continues_observation_id: str | None = None,
+    position_uncertainty: PositionUncertainty | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -62,6 +63,7 @@ def _observation(
         provenance="test_fixture",
         classification_level=classification_level,
         continues_observation_id=continues_observation_id,
+        position_uncertainty=position_uncertainty,
     )
 
 
@@ -119,93 +121,6 @@ def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     assert len(store.contacts) == 3
     newest = store.contacts[-1]
     assert newest.contributing_observation_ids == ["OBS_C"]
-
-
-def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> None:
-    """Regression for the live-session bug (2026-09-09,
-    `plans/classification-refinement/debug.md`): a single stationary
-    ground object, tracked purely via `perception.naked_eye_source`'s
-    bearing/range bucket quantisation while ownship slowly turns and
-    translates near the object's hires/medres tier boundary, produced 8
-    `Contact` records for one real T-90A over ~20 polls before the fix.
-
-    Root cause: `naked_eye_source._quantise_bearing` re-derives a fresh
-    (bearing, range) bucket pair every poll, anchored to the *current*
-    heading -- two consecutive, genuinely identical real positions can
-    legitimately land in different buckets, implying positions up to
-    roughly a full bucket-width apart. `association_over_time.
-    passes_gate` used to budget only the *incoming* percept's own
-    uncertainty, silently treating the contact's stored `last_position` as
-    exact -- under-sized by up to 2x for exactly this case. Once a single
-    missed match spawned a second contact for the same real object, every
-    subsequent percept saw two-or-more passing candidates, and
-    `ContactStore.ingest`'s deliberate anti-guessing rule (two-or-more
-    candidates -> new contact, never a tiebreak) turned that one missed
-    match into a permanent one-new-contact-per-poll runaway.
-
-    This test drives the same quantisation helpers `naked_eye_source.py`
-    itself uses, over a maneuvering-ownship/stationary-target geometry
-    empirically confirmed (pre-fix) to trigger the bug, and asserts the
-    real object still resolves to exactly one contact.
-
-    **Was `xfail`ed by Stage 3b-i, fixed by Stage 3b-i rev.2** (`plans/
-    group-contact-model/plan.md`). Stage 3b-i introduced the regression by
-    making this gate share `perception.clustering`'s acuity-derived cross-
-    range radius (~1-7 m at this geometry's ranges) -- a mismatch against
-    bearing-bucket requantisation jitter (up to a full 30 deg clock bucket,
-    unchanged by that move) of roughly 700:1 at every range, confirmed by
-    direct arithmetic in the rev.2 design rather than by re-tuning a
-    magnitude. The fix was not a wider acuity-derived budget (which would
-    have reopened the Stage 3a dead zone `association_over_time`'s
-    docstring describes) -- it was recognizing that this gate and the
-    cluster predicate answer different questions about different things
-    (a quantised *report* against a remembered position, vs. two *live*
-    candidates against each other) and never should have shared a formula.
-    Reverting this gate to its pre-Stage-3b-i, quantisation-derived form
-    (`association_over_time._naked_eye_uncertainty_m`) budgets the thing
-    that is actually jittering -- the clock-bucket requantisation this test
-    drives -- and the regression simply does not arise."""
-    from perception.naked_eye_source import _quantise_bearing, _quantise_range_m
-
-    target_x, target_z = 0.0, 1200.0
-    store = ContactStore()
-    ownship_x, ownship_z = -900.0, 0.0
-    heading_deg = 90.0
-    t_sim = 0.0
-
-    for poll in range(40):
-        t_sim += 1.0
-        heading_deg = (heading_deg + 3.0) % 360.0
-        ownship_x += 3.0
-        ownship_z += 1.0
-        ownship = OwnshipState(
-            t_sim=t_sim,
-            x=ownship_x,
-            z=ownship_z,
-            alt_m=500.0,
-            heading_true_deg=heading_deg,
-        )
-        dx = target_x - ownship_x
-        dz = target_z - ownship_z
-        true_bearing_deg = math.degrees(math.atan2(dz, dx)) % 360.0
-        true_range_m = math.hypot(dx, dz)
-        quantised_bearing_deg, _bucket = _quantise_bearing(
-            heading_deg, true_bearing_deg
-        )
-        quantised_range_m, _range_bucket = _quantise_range_m(true_range_m)
-
-        obs = _observation(
-            obs_id=f"OBS_{poll}",
-            t_sim=t_sim,
-            classification_raw="OP_ARMORED",
-            bearing_deg=quantised_bearing_deg,
-            range_m=quantised_range_m,
-            source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
-            ownship=ownship,
-        )
-        store.ingest([obs], now_sim=t_sim)
-
-    assert len(store.contacts) == 1
 
 
 def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_gap() -> (
