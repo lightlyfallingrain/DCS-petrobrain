@@ -461,3 +461,30 @@ class TestNarrowCancels:
         """ "scan left" and "cancel scan" share a word; confusing them
         would start a scan when the pilot asked to end one."""
         assert match_transcript("scan left").token == "scan_left"
+
+
+# --- follow: watch's synonym (plans/watch-reporting/plan.md Decision 2a) ---
+
+
+def test_follow_nearest_is_a_synonym_for_watch_nearest() -> None:
+    result = match_transcript("follow nearest")
+    assert result.token == "watch_nearest"
+    assert result.match_ratio == 1.0
+    assert result.ambiguous is False
+
+
+def test_follow_nearest_air_defence_is_a_synonym() -> None:
+    result = match_transcript("follow nearest air defence")
+    assert result.token == "watch_nearest_air_defence"
+    assert result.ambiguous is False
+
+
+def test_stop_following_and_cancel_follow_are_synonyms_for_cancel_watch() -> None:
+    assert match_transcript("stop following").token == "cancel_watch"
+    assert match_transcript("cancel follow").token == "cancel_watch"
+
+
+def test_follow_is_derived_into_the_verb_anchor_words() -> None:
+    from command_matcher import VERB_ANCHOR_WORDS
+
+    assert "follow" in VERB_ANCHOR_WORDS
