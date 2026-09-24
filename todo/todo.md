@@ -10,6 +10,47 @@ the relevant roadmap to be updated in the same push as any merge.
 ## User priority tasks
 Prioritize any open task here over any other task in this file or roadmap files.
 
+### State of play — end of 2026-09-24 (read this first after a context clear)
+
+`main` is at `c912478`, clean and pushed. `feature/binocular-optic` merged today (`c398675`) and
+the local branch still exists, unneeded.
+
+**Three milestones are merged and unflown**, by the user's deliberate decision to merge before
+flying — so any correction the sortie produces now lands on `main`, not a branch:
+binocular optic, voice command completeness, precise position belief. The outstanding card is
+`docs/acceptance/2026-09-23-eyes-and-voice-sortie.md`. **Name that card and that state whenever
+asking the user to test.** Two things changed after it was written and are worth repeating to them:
+the speech log now writes by default to `body-layer/logs/speech.jsonl` (every utterance, including
+unrecognised ones, `t_wall` stamped — so garbling data accumulates with no flag to remember), and
+belief now carries a fused covariance rather than quantised buckets, so ranges that feel *wrong but
+consistent* are the new error model working, not a bug.
+
+**Mission Interpreter passed its first real acceptance** (three missions the user built, Syria).
+Verdict: tested and passed with notes. Both notes are deferred to the brain layer, deliberately —
+building either now would stand up a second hand-rolled judgement layer the brain would replace.
+
+**The brain layer is the bottleneck, and it is the only component with no plan file.** Four
+already-built things now wait on it: free-text commands, BL-7's mission-phase relevance, MI-5's
+question set, and anything conversational in BL-8's kneeboard. Its seams already exist and sit
+idle — `BrainClient` has an `awaiting_reply_id` round trip designed in, `EscalationPayload` already
+carries `partial_parse` and `situational_header`, and the tool API has been frozen at 15
+deterministic tools since BL-6. Every free-text utterance already arrives correctly formed at
+`NullBrainClient` and is dropped. So this is not an integration project; it is a model loop plugged
+into an interface that has been waiting for it.
+
+**Recommended next move: `/explore` the brain layer with the user before any architect pass.**
+This project's repeated pattern is that the decisive constraint arrives *after* implementation
+starts and reverses it. The alternative, lower-risk move is to build `watch-reporting` (plan ready,
+Decision 5a amended) — it sits underneath BL-8's Stages 3 and 5 and produces `threat.py`.
+`plans/bl8-memory/plan.md` is also ready, decisions resolved.
+
+**Gated on the merge that just happened:** re-enable `performance-reviewer` and `security`, running
+**once per whole feature, before DoD, not mid-feature** (user, 2026-09-24). Scoping in the user's
+own terms: single-user, LAN-only, under active development; deeper effort once brain and memory are
+done. This needs a root `CLAUDE.md` "Agents" edit — see the deferred entry in the cross-cutting
+backlog below for why the exemption's premise is already false.
+
+
 - [x] Route crew-text speech callouts ("tank, 12 o'clock, 3 km" style contact reports, from
   `body-layer/src/belief/speech.py`'s `render_contact_report`/`route_event`) to the in-game
   Petrobrain overlay (`aircraft-layer`'s `POST /text/push` channel, `--overlay` flag). **Done
@@ -203,6 +244,24 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 
 
 ## Cross-cutting / unscoped backlog
+
+- [ ] **The knowledge graph was rebuilt under the OLD graphify node-ID format — the next rebuild
+  needs `graphify extract --force`.** Added 2026-09-24, and this will fail silently if missed.
+  The `/graph-refresh` on 2026-09-24 (3287 nodes, 5829 edges) used the extraction spec's
+  *immediate-parent* ID format (`auth_session_validatetoken`). The installed skill's
+  `references/extraction-spec.md` changed during that same session to a **full-repo-relative-path**
+  format (`src_auth_session_validatetoken`), explicitly to keep same-named files in different
+  directories distinct. The two formats produce different IDs for the same symbol, so the next
+  incremental extraction will create **orphan ghost-duplicate nodes** alongside the existing ones
+  rather than updating them — the spec names this outcome itself and prescribes
+  `graphify extract --force` to rebuild cleanly. Nothing warns about it; the graph just quietly
+  grows two of everything it touches. Do the forced rebuild *before* trusting any query after the
+  next doc change.
+
+  Also noticed then: the installed graphify skill is 0.8.41 against package 0.9.64
+  (`graphify install --platform claude` updates it). Probably the same root cause as the spec
+  change — worth updating in the same pass.
+
 
 - [>] **Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
   shipped while they were exempt. Deferred until Stage 4b of the group contact model is done**
