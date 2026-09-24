@@ -420,3 +420,29 @@ building only once fact 1 is confirmed.
 **Confidence on Finding 12 is accordingly raised from "inferred, moderate" to "user-reported
 recollection, pending a one-command check"** — still not confirmed, but no longer resting on the
 absence of an exclusion clause in a wiki page.
+
+### Second addendum — Tacview, and what it does not prove
+
+The user also notes that Tacview captures AAA and renders the individual rounds (seen in others'
+recordings; Tacview is not installed here). Tacview has precedent as evidence on this project —
+`aircraft-layer/research/2026-09-10-worldobjects-object-id-stability-tacview-confirmation.md` used
+it to confirm `object_id` stability.
+
+**It lands in the same category as `debrief.log`, for the same reason.** Tacview's DCS exporter is
+a compiled plugin, not Lua this project can read or imitate, so "Tacview shows the rounds" is
+evidence that the *engine* tracks gun rounds as first-class objects — not evidence that any
+documented Lua surface exposes them to us. It is a third independent signal pointing at fact 1
+above, and silent on fact 2.
+
+Checked locally and found nothing either way: no combat-sortie `LoGetWorldObjects` capture exists
+in this repo (only elevation/terrain probe output), and `win-mac-sync/from-windows/collector.log`
+contains no shell/bullet/tracer/projectile/weapon token. That is an absence in a log that may never
+have recorded object types at all, so it is not a negative result — recorded only so the next
+reader does not repeat the search.
+
+**Open question this raises, worth one line in a future probe rather than its own pass:** whether
+`LoGetWorldObjects()` returns in-flight weapon objects at all. If it does, the tracer channel needs
+no event handler whatsoever — it becomes an ordinary object in the feed the naked-eye channel
+already gates on LOS and visual range, which would be by far the cheapest possible answer. Fold
+this into Probe A's run rather than building anything for it: the probe already walks the object
+table, so it costs one extra look at what is in there while something is firing.
