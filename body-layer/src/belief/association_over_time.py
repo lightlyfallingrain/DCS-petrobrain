@@ -80,21 +80,23 @@ see `plans/classification-refinement/debug.md` -- the scalar-era version of
 exactly this failure mode).
 
 `percept_covariance` is `belief.position_belief.covariance_from_uncertainty`
-applied to `percept.position_uncertainty` (an isotropic fallback,
-`_isotropic_covariance_from_radius(_FALLBACK_UNCERTAINTY_RADIUS_M)`, for the
-rare percept missing one) rotated onto world x/z at the percept's own true
+applied to `percept_position_uncertainty(percept)` (the declared value, or
+an isotropic fallback for the rare percept missing one -- see that
+function's own docstring) rotated onto world x/z at the percept's own true
 `bearing_deg` -- the elongated look ellipse `plans/precise-position-belief/
 plan.md`'s error model describes, oriented along that look's own line of
 sight, not a scalar radius collapsing the anisotropy away. **`contact_
-covariance` is, for now, an isotropic proxy** built from the scalar
-`contact.last_position_uncertainty_m` via the same helper
-(`_isotropic_covariance_from_radius`) -- `Contact` does not hold a real 2x2
-covariance until Stage 4 gives it one (`Contact.position: PositionEstimate`);
-once it does, this module's own `_contact_covariance` reads that real,
-anisotropic, fused covariance directly instead of this isotropic stand-in
-(Stage 4 is a small, separate diff here for exactly that reason -- see this
+covariance` is `Contact.position.covariance`, the real fused covariance**
+(`plans/precise-position-belief/plan.md` Stage 4 -- `belief.contacts.
+Contact.record`/`from_percept` build and refine it via `belief.
+position_belief.fold_position` on every merge), inflated for elapsed motion
+the same way the scalar formula's `GATE_GROWTH_RATE_MPS * elapsed_s` term
+did. Stage 3 (which landed first, as its own commit) read an isotropic
+proxy here instead, built from the scalar `last_position_uncertainty_m`,
+because `Contact` did not yet hold a real 2x2 covariance -- see this
 module's own history below for why a shared-formula shortcut between two
-different questions has bitten this gate before).
+different questions has bitten this gate before, which is also why that
+upgrade was its own later, separate diff rather than bundled into Stage 3.
 
 **Why this is not simply "the old scalar formula with squares"**: summing
 covariances (variances add) is not the same arithmetic as summing radii
@@ -210,6 +212,7 @@ from belief.classification import class_compatibility
 from belief.percept import Percept
 from belief.position_belief import Covariance2D, covariance_from_uncertainty
 from perception.geometry import GeoPosition, project_from_bearing_range
+from perception.source import PositionUncertainty
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
@@ -261,42 +264,50 @@ def implied_position(percept: Percept) -> GeoPosition:
     return project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)
 
 
-def _isotropic_covariance_from_radius(radius_m: float) -> Covariance2D:
-    """An isotropic `Covariance2D` whose own `sqrt(trace)` (`belief.
-    position_belief.PositionEstimate.radius_m`'s definition) is exactly
-    `radius_m` -- i.e. variance `radius_m ** 2 / 2` on each axis, since
-    `trace = xx + zz = 2 * (radius_m ** 2 / 2) = radius_m ** 2`. Used both
-    for a percept missing a declared `position_uncertainty` and (until
-    Stage 4 gives `Contact` a real 2x2 covariance) for the contact side of
-    the gate -- see module docstring's "Spatial gate" section."""
-    variance = (radius_m * radius_m) / 2.0
-    return Covariance2D(xx=variance, zz=variance, xz=0.0)
+#: The isotropic-equivalent `PositionUncertainty` for
+#: `_FALLBACK_UNCERTAINTY_RADIUS_M` -- `sigma_cross_m == sigma_down_m ==
+#: radius / sqrt(2)`, chosen so `covariance_from_uncertainty` on this value
+#: (at any bearing, since it is isotropic) has trace `radius ** 2`, i.e.
+#: `PositionEstimate.radius_m()`-style `sqrt(trace) == radius`
+#: (`hypot(sigma, sigma) == radius`). Declared once so `percept_position_
+#: uncertainty` below needs no special-case branch of its own.
+_FALLBACK_POSITION_UNCERTAINTY: Final = PositionUncertainty(
+    sigma_cross_m=_FALLBACK_UNCERTAINTY_RADIUS_M / math.sqrt(2.0),
+    sigma_down_m=_FALLBACK_UNCERTAINTY_RADIUS_M / math.sqrt(2.0),
+)
+
+
+def percept_position_uncertainty(percept: Percept) -> PositionUncertainty:
+    """`percept.position_uncertainty` if declared, else the isotropic
+    `_FALLBACK_POSITION_UNCERTAINTY` -- the single place both this module's
+    own `_percept_covariance` (the gate) and `belief.contacts.Contact.
+    record`/`from_percept` (the fusion, `plans/precise-position-belief/
+    plan.md` Stage 4) resolve "what uncertainty does this percept declare,
+    really" from, so the gate and the fused estimate can never silently
+    disagree about a percept missing one."""
+    if percept.position_uncertainty is not None:
+        return percept.position_uncertainty
+    return _FALLBACK_POSITION_UNCERTAINTY
 
 
 def _percept_covariance(percept: Percept) -> Covariance2D:
     """The look's own elongated error ellipse, rotated onto world x/z at
-    its own true `bearing_deg` -- `_isotropic_covariance_from_radius(
-    _FALLBACK_UNCERTAINTY_RADIUS_M)` for the rare percept carrying no
-    declared `position_uncertainty` at all."""
-    if percept.position_uncertainty is not None:
-        return covariance_from_uncertainty(
-            percept.position_uncertainty, percept.bearing_deg
-        )
-    return _isotropic_covariance_from_radius(_FALLBACK_UNCERTAINTY_RADIUS_M)
+    its own true `bearing_deg` -- via `percept_position_uncertainty` above,
+    so a percept missing a declared uncertainty gets the same isotropic
+    fallback the fused estimate would use for the identical look."""
+    return covariance_from_uncertainty(
+        percept_position_uncertainty(percept), percept.bearing_deg
+    )
 
 
 def _contact_covariance(contact: Contact, elapsed_s: float) -> Covariance2D:
-    """The contact side of the gate's covariance sum, inflated for elapsed
-    motion since `contact.last_seen_sim`. **Isotropic proxy, pre-Stage-4**:
-    `Contact` does not yet hold a real 2x2 covariance (`Contact.position`
-    lands in Stage 4), so this reads the scalar `last_position_uncertainty_m`
-    through `_isotropic_covariance_from_radius` rather than the contact's
-    own declared anisotropy -- see module docstring's "Spatial gate"
-    section for why that upgrade is a separate, later diff to this one
-    function, not a Stage 3 change."""
-    return _isotropic_covariance_from_radius(
-        contact.last_position_uncertainty_m
-    ).inflated(elapsed_s)
+    """The contact side of the gate's covariance sum: `Contact.position`'s
+    own real, fused, anisotropic covariance (`plans/precise-position-belief/
+    plan.md` Stage 4), inflated for elapsed motion since `contact.
+    last_seen_sim`. Pre-Stage-4 this read an isotropic proxy built from the
+    scalar `last_position_uncertainty_m` -- now that `Contact` holds a real
+    2x2 covariance, that proxy is gone; this function reads it directly."""
+    return contact.position.covariance.inflated(elapsed_s)
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
