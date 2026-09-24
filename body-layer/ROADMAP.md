@@ -972,6 +972,27 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 ## Backlog (body-layer)
 
+- [x] **`OP_LRSAM` folded into the air-defence command classes — merged 2026-09-24
+  (`fix/lrsam-air-defence`).** "Watch nearest air defence" could not select an S-300:
+  `crew_console._AIR_DEFENCE_OP_CLASSES` held the two gun systems and the short/medium SAM tiers
+  and nothing else. The excluded contact was the worst possible one to miss — at the calibrated
+  8.89 km detection range the S-300's tracking-radar mast is the furthest-detectable thing in the
+  profile table, so it is both the most dangerous thing the command exists to find and the one
+  most likely to be the *only* air-defence contact held at all.
+
+  **Drift, not a decision.** The set was enumerated by hand against `perception.object_model`'s
+  profile table when that table genuinely had no long-range SAM entry, and its own comment
+  ("exactly the air-defence entries in `object_model`") stayed true only until the table gained
+  one. Nothing connected the two. So the fix ships a guard test that recomputes the air-defence
+  classes present in the profile table and asserts the command set covers them — verified to fail
+  against the pre-fix set rather than assumed to — alongside the S-300 regression itself.
+  `object_model` carries no structural air-defence marker to derive the set from, so the guard
+  matches on `OP_*` naming and says in its own docstring that a class escaping that pattern is a
+  signal to give `object_model` a real marker, not to loosen the assertion.
+
+  Found while reading `plans/watch-reporting/plan.md`, which flagged it and deliberately left it
+  unfixed; fixed on user direction ("it is air defence"). Merged as a small fix, no DoD pass.
+
 - [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
   `eacc45c`, `feature/f10-crew-commands`).** The player's preferred in-cockpit command UI: the
   native DCS F10 radio menu, not keybinds (F-4E-style radial wheel explicitly out of scope). A
@@ -1000,7 +1021,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   **Bearing** items (absolute), **Watch** → Nearest/Nearest Air Defence, **Cancel Task**;
   `scan_forward` was *replaced* by `scan_ahead`, not kept as a synonym. **Watch → Nearest Air
   Defence** (D6) filters on the *believed* classification -- `class`/`type` level resolving into
-  the four air-defence `OP_*` buckets -- so a `presence`-level contact is never matched even when
+  the air-defence `OP_*` buckets (four of them at this merge — `OP_LRSAM` was missing and was
+  folded in 2026-09-24, see the entry below) -- so a `presence`-level contact is never matched even when
   the object really is a SAM; it will honestly report nothing rather than name an unidentified
   blob as air defence. New ownship-relative `AttentionArea` kind
   (`belief/attention.py`'s `RelativeSector`/`wedge_deg`/`project_relative_area`) that re-projects
