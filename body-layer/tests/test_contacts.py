@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import itertools
 import math
@@ -11,16 +12,19 @@ import pathlib
 from belief import contacts as contacts_module
 from belief import percept as percept_module
 from belief.classification import SpecificityLevel
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S, OBJECT_ID_MEMORY_S
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
+    CONTACT_ENGAGEMENT_CHANGED,
     CONTACT_LOST,
+    CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
+from belief.tools import set_attention
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.geometry import bearing_deg as geometry_bearing_deg
 from perception.geometry import range_m as geometry_range_m
@@ -34,8 +38,10 @@ from perception.source import (
 )
 
 
-def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
-    return OwnshipState(t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0)
+def _ownship(x: float = 0.0, z: float = 0.0, alt_agl_m: float = 0.0) -> OwnshipState:
+    return OwnshipState(
+        t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=alt_agl_m
+    )
 
 
 def _observation(
@@ -1020,3 +1026,417 @@ def test_repeated_looks_from_orbiting_observer_tighten_and_never_reach_bare_trut
     assert math.isclose(contact.last_position.x, biased_target.x, abs_tol=5.0)
     assert math.isclose(contact.last_position.z, biased_target.z, abs_tol=5.0)
     assert abs(contact.last_position.x - true_target.x) > 5.0
+
+
+# --- kilometre range crossings (plans/watch-reporting/plan.md Stage 2) -----
+
+
+def test_range_crossing_seeds_silently_when_first_watched() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_announced_range_km == 4
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+def test_unwatched_contact_never_gets_range_crossing_bookkeeping() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_announced_range_km is None
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+def test_range_crossing_fires_when_ownship_closes_past_the_deadband() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))  # range=3000 -> km=3
+    contact = store.contacts[0]
+    assert contact.last_announced_range_km == 3
+    crossed = [e for e in store.events if e.kind == CONTACT_RANGE_CROSSED]
+    assert len(crossed) == 1
+    assert crossed[0].previous_range_km == 4
+    assert crossed[0].range_km == 3
+
+
+def test_range_crossing_fires_on_opening_too() -> None:
+    """The user said "passes a whole kilometre mark", not "closes through
+    one" -- drawing away is the same kind of news."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=1500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=1
+    store.tick(now_sim=1.0, ownship=_ownship(x=-1500.0))  # range=3000 -> km=3
+    crossed = [e for e in store.events if e.kind == CONTACT_RANGE_CROSSED]
+    assert len(crossed) == 1
+    assert crossed[0].previous_range_km == 1
+    assert crossed[0].range_km == 3
+
+
+def test_range_crossing_never_fires_beyond_the_cap() -> None:
+    """`WATCH_RANGE_REPORT_MAX_KM` -- the user's own cap. A reading beyond
+    it is never adopted as the new baseline either, so re-entering the cap
+    later still compares against the last value that was actually inside
+    it."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=8000.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=8
+    store.tick(
+        now_sim=1.0, ownship=_ownship(x=2000.0)
+    )  # range=6000 -> km=6, still > cap
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 8
+
+
+def test_range_crossing_deadband_suppresses_a_boundary_jitter() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    # range=3990 -> km=3, but only 10m past the 4000m boundary -- well
+    # inside even the bare RANGE_CROSS_MIN_DEADBAND_M (50m) floor.
+    store.tick(now_sim=1.0, ownship=_ownship(x=510.0))
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 4
+
+
+def test_range_crossing_gated_on_freshness_not_position_alone() -> None:
+    """Decision 5's own named risk: a decayed position must never
+    manufacture a crossing nobody observed. `contact.last_announced_
+    range_km` stays untouched too -- Decision 5's "keeps its own last-
+    announced mark" rule, resuming on reacquisition rather than replaying a
+    silent km jump."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    stale_t = 60.0  # between POSITION_HALF_LIFE_S (30) and LOST_THRESHOLD_S (120) -> "estimated"
+    store.tick(
+        now_sim=stale_t, ownship=_ownship(x=1500.0)
+    )  # would cross to km=3 if fresh
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 4
+
+
+def test_range_crossing_suppressed_when_uncertainty_exceeds_the_sigma_ceiling() -> None:
+    """Decision 5a-i's ceiling: a fresh but imprecise estimate cannot
+    resolve which kilometre it is in, so nothing is reported -- distinct
+    from (and not caught by) the freshness gate above."""
+    huge_uncertainty = PositionUncertainty(sigma_cross_m=10.0, sigma_down_m=1000.0)
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                range_m=4500.0,
+                bearing_deg=0.0,
+                position_uncertainty=huge_uncertainty,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))  # would cross to km=3
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 4
+
+
+def test_range_crossing_clears_on_unwatch_and_reseeds_on_rewatch() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_announced_range_km == 4
+
+    set_attention(store, contact_id, "normal")
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))
+    assert store.contacts[0].last_announced_range_km is None
+
+    set_attention(store, contact_id, "watch")
+    store.tick(
+        now_sim=2.0, ownship=_ownship(x=1500.0)
+    )  # range=3000 -> re-seeds at km=3
+    assert store.contacts[0].last_announced_range_km == 3
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+def test_tick_without_ownship_is_a_no_op_for_range_crossing() -> None:
+    """Every pre-existing caller passes only `now_sim` -- `ownship` must
+    default to `None` and leave this block inert."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0)
+    assert store.contacts[0].last_announced_range_km is None
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+# --- believed engagement (plans/watch-reporting/plan.md Stage 4) -----------
+
+_AAA_TYPE = "ZU-23-3 Sergey"  # range_min_m=0, range_max_m=2408, alt_min_m=0
+_SAM_WITH_FLOOR_TYPE = "S-125 Neva/Pechora"  # range 5926-25002, alt_min_m=213
+
+
+def _watched_threat_contact(
+    threat_type: str, range_m: float, obs_id: str = "OBS_1", t_sim: float = 0.0
+) -> tuple[ContactStore, str]:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id=obs_id,
+                t_sim=t_sim,
+                classification_raw=threat_type,
+                classification_level=3,  # TYPE
+                range_m=range_m,
+            )
+        ],
+        now_sim=t_sim,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    return store, contact_id
+
+
+def _place_contact_at_range(contact: Contact, range_m_value: float) -> None:
+    """Move a contact's believed position to `range_m_value` from the
+    `_ownship()` these engagement tests use: along +x at ownship altitude,
+    so slant range equals the requested figure exactly (`_ownship()` sits
+    at the origin with `alt_m=500`, and `last_alt_m` is already 500 for a
+    contact founded by `_watched_threat_contact`).
+
+    Writes `position`'s mean through `dataclasses.replace`, keeping the
+    fused covariance and `as_of_sim` intact — `last_position` itself is a
+    read-only property over `position` plus `last_alt_m`. Moving the
+    contact this directly is the point: these tests exercise `tick`'s
+    engagement block against a chosen geometry, and re-ingesting an
+    observation to move it would drag association and decay in too."""
+    contact.position = dataclasses.replace(contact.position, x=range_m_value, z=0.0)
+
+
+def test_engagement_fires_danger_on_the_first_tick_already_inside() -> None:
+    """Decision 1: engagement seeds as outside, but the first evaluation
+    that finds itself already inside DOES fire (late-recognition
+    behaviour) -- no silent seed, unlike range-crossing."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    engaged = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged) == 1
+    assert engaged[0].previous_engaged is False
+    assert engaged[0].engaged is True
+
+
+def test_engagement_never_fires_for_an_unwatched_contact() -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw=_AAA_TYPE,
+                classification_level=3,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)
+    assert store.contacts[0].last_emitted_engagement is None
+
+
+def test_engagement_none_for_a_class_with_no_threat_rows() -> None:
+    """Ground armour has no envelope worth modelling (4b) -- `envelope_for`
+    returns `None`, and the seventh block must not fire anything."""
+    store, _ = _watched_threat_contact("BMP-2", range_m=500.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)
+    assert store.contacts[0].last_emitted_engagement is None
+
+
+def test_engagement_leaves_with_1_5x_hysteresis() -> None:
+    """Decision 4e's Schmitt trigger -- enter at 1.0x max range, leave at
+    1.5x. A contact sitting between the two thresholds must stay engaged,
+    not flap. The contact is founded once and its position never
+    re-ingested -- only ownship moves between ticks, mirroring the
+    kilometre-crossing tests' own "move the observer, not the target"
+    pattern (re-ingesting a huge same-contact jump would instead fail the
+    percept-gate and found a second contact)."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0, ownship=_ownship())  # range 1000 < 2408 -- enters
+    assert store.contacts[0].last_emitted_engagement is True
+
+    # ownship backs off to make range 3000: past max range (2408) but
+    # inside the 1.5x hysteresis band (3612) -- must NOT leave.
+    store.tick(now_sim=1.0, ownship=_ownship(x=-2000.0))
+    assert store.contacts[0].last_emitted_engagement is True
+    engaged_events = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged_events) == 1  # only the original entering event
+
+    # ownship backs off further to make range 4000: past even the 1.5x
+    # hysteresis band -- now it leaves. t=20 clears EVENT_COOLDOWN_S (15s)
+    # since the entering event at t=0.
+    store.tick(now_sim=20.0, ownship=_ownship(x=-3000.0))
+    assert store.contacts[0].last_emitted_engagement is False
+    engaged_events = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged_events) == 2
+    assert engaged_events[1].previous_engaged is True
+    assert engaged_events[1].engaged is False
+
+
+def test_engagement_respects_the_altitude_floor() -> None:
+    """A radar-guided SAM's own minimum engagement altitude -- flying
+    under it must not read as engaged, per `OwnshipState.alt_agl_m`."""
+    store, _ = _watched_threat_contact(_SAM_WITH_FLOOR_TYPE, range_m=10000.0)
+    # Below the 213m floor -- must not engage even though in range.
+    store.tick(now_sim=0.0, ownship=_ownship(alt_agl_m=50.0))
+    assert store.contacts[0].last_emitted_engagement is False
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)
+
+    # Above the floor -- now engages.
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw=_SAM_WITH_FLOOR_TYPE,
+                classification_level=3,
+                range_m=10000.0,
+            )
+        ],
+        now_sim=1.0,
+    )
+    store.tick(now_sim=1.0, ownship=_ownship(alt_agl_m=300.0))
+    assert store.contacts[0].last_emitted_engagement is True
+
+
+def test_engagement_los_masked_needs_the_full_dwell_to_clear() -> None:
+    """Decision 5a-ii: a masked verdict may only clear a danger state
+    after holding continuously for `LOS_MASK_CONFIRM_S` (5.0) -- a clear
+    verdict takes effect immediately, in the other direction."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    always_clear = lambda observer, target: True
+    always_masked = lambda observer, target: False
+
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_clear)
+    assert store.contacts[0].last_emitted_engagement is True
+
+    # Masked starting at t=16 (past EVENT_COOLDOWN_S from the entering
+    # event, so the eventual "leaving" event below is not itself
+    # cooldown-suppressed), but not yet for the full LOS_MASK_CONFIRM_S
+    # dwell -- must still read engaged.
+    store.tick(now_sim=16.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].last_emitted_engagement is True
+
+    # Masked continuously past the dwell -- now clears.
+    store.tick(now_sim=21.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].last_emitted_engagement is False
+    engaged_events = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged_events) == 2
+    assert engaged_events[1].engaged is False
+
+
+def test_engagement_los_dwell_resets_on_an_intervening_clear_sample() -> None:
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    always_clear = lambda observer, target: True
+    always_masked = lambda observer, target: False
+
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_clear)
+    store.tick(now_sim=1.0, ownship=_ownship(), los_clear=always_masked)
+    # A clear sample resets the countdown.
+    store.tick(now_sim=2.0, ownship=_ownship(), los_clear=always_clear)
+    assert store.contacts[0].los_masked_since_sim is None
+    store.tick(now_sim=3.0, ownship=_ownship(), los_clear=always_masked)
+    # Only 3 seconds masked since the reset (t=3) at t=1.0+... -- must
+    # still be engaged, since less than LOS_MASK_CONFIRM_S has elapsed
+    # since the *reset* mask began (at t=3.0).
+    store.tick(now_sim=6.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].last_emitted_engagement is True
+
+
+def test_engagement_skips_the_los_call_when_out_of_range() -> None:
+    """LOS is the most expensive primitive `belief/` can reach, and this
+    block runs once per watched contact on every poll of the live loop. A
+    contact outside its own envelope's range cannot be engaging us whatever
+    the terrain says, so asking is pure cost.
+
+    Counts calls rather than asserting on behaviour, because behaviour
+    cannot see this: `current_engaged` is `False` either way. The
+    performance review measured 20 LOS calls per tick for 20 watched
+    contacts 20 km out against a 2,408 m envelope -- every one of them
+    answering a question range had already settled."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=20000.0)
+    calls: list[tuple[object, object]] = []
+
+    def counting_los(observer: object, target: object) -> bool:
+        calls.append((observer, target))
+        return True
+
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=counting_los)
+
+    assert calls == []
+    assert store.contacts[0].last_emitted_engagement is False
+
+
+def test_engagement_out_of_range_leaves_a_fresh_dwell_for_re_entry() -> None:
+    """The skip above also skips the masking bookkeeping, so the skip path
+    must clear `los_masked_since_sim` rather than leave it standing.
+
+    Without the reset a contact that is masked, then drifts out of range,
+    then returns would come back carrying a mask timestamp from before it
+    left -- `masked_for_s` instantly past `LOS_MASK_CONFIRM_S`, so it would
+    read as masked on its first tick back in range, with no masked sample
+    ever having been taken there. Clearing it is also the honest reading: a
+    masking dwell accumulated while the threat could not reach us at all
+    measures nothing worth carrying across."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    always_masked = lambda observer, target: False
+    always_clear = lambda observer, target: True
+
+    # In range and masked -- the dwell starts.
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].los_masked_since_sim == 0.0
+
+    # Out of range: the call is skipped and the dwell is discarded.
+    _place_contact_at_range(store.contacts[0], 20000.0)
+    store.tick(now_sim=10.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].los_masked_since_sim is None
+
+    # Back in range with a clear sample -- engaged again immediately,
+    # rather than starting life behind a dwell it never earned.
+    _place_contact_at_range(store.contacts[0], 1000.0)
+    store.tick(now_sim=20.0, ownship=_ownship(), los_clear=always_clear)
+    assert store.contacts[0].last_emitted_engagement is True
+
+
+def test_engagement_clears_bookkeeping_on_unwatch() -> None:
+    store, contact_id = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_emitted_engagement is True
+
+    set_attention(store, contact_id, "normal")
+    store.tick(now_sim=1.0, ownship=_ownship())
+    assert store.contacts[0].last_emitted_engagement is None
+    assert store.contacts[0].los_masked_since_sim is None
+
+
+def test_tick_without_ownship_is_a_no_op_for_engagement() -> None:
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0)
+    assert store.contacts[0].last_emitted_engagement is None
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)

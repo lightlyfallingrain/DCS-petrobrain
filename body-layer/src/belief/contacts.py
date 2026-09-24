@@ -36,7 +36,10 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 
 from __future__ import annotations
 
+import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Final
 
 from belief.association_over_time import (
     implied_position,
@@ -67,12 +70,19 @@ from belief.classification import (
     fold_classification,
     new_classification_belief,
 )
-from belief.decay import Certainty, certainty_of, object_id_continuity_valid
+from belief.decay import (
+    LOS_MASK_CONFIRM_S,
+    Certainty,
+    certainty_of,
+    object_id_continuity_valid,
+)
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
+    CONTACT_ENGAGEMENT_CHANGED,
     CONTACT_MOTION_CHANGED,
+    CONTACT_RANGE_CROSSED,
     EVENT_COOLDOWN_S,
     Event,
     EventKind,
@@ -85,8 +95,41 @@ from belief.events import (
 from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
 from belief.position_belief import PositionEstimate, fold_position
-from perception.geometry import GeoPosition
-from perception.source import Observation
+from belief.threat import envelope_for
+from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.source import Observation, OwnshipState
+
+#: `plans/watch-reporting/plan.md` Decision 5 -- the user's own cap: a
+#: watched contact's whole-kilometre range mark is only ever announced
+#: inside this radius. Past it, `CONTACT_RANGE_CROSSED` simply stops firing
+#: (`Contact.last_announced_range_km` is left at whatever it last was, per
+#: `tick`'s sixth block).
+WATCH_RANGE_REPORT_MAX_KM: Final[int] = 5
+
+#: Decision 5a-i's floor on the uncertainty-derived deadband -- a Schmitt
+#: gap around the whole-kilometre boundary, sized so a very tight position
+#: estimate still gets a minimal gap (a zero deadband would silently
+#: reintroduce the jitter bug this amendment exists to fix).
+RANGE_CROSS_MIN_DEADBAND_M: Final[float] = 50.0
+
+#: Decision 5a-i's ceiling -- half a kilometre band. Past this down-range
+#: sigma (`belief.position_belief.PositionEstimate.range_uncertainty_m`),
+#: the estimate cannot resolve *which* kilometre it is in, so a crossing is
+#: suppressed entirely rather than announced on a coin flip.
+RANGE_CROSS_MAX_SIGMA_M: Final[float] = 500.0
+
+#: Decision 4e's Schmitt trigger -- enter an envelope at `1.0 x` its max
+#: range, leave at `1.5 x`. Without the gap, a contact sitting near the
+#: boundary flaps between "danger" and "safe from" every few seconds and
+#: burns the `EVENT_COOLDOWN_S` budget doing it.
+ENGAGEMENT_LEAVING_HYSTERESIS: Final[float] = 1.5
+
+#: Decision 4f-ii-a's uncertainty sweep -- the believed position plus two
+#: lateral offsets at `+-Contact.last_position_uncertainty_m`,
+#: perpendicular to the ownship->threat bearing. An isolated constant
+#: documenting the sample count `_threat_has_los`'s three-point sweep
+#: below is written against, not a loop bound it reads.
+LOS_UNCERTAINTY_SAMPLES: Final[int] = 3
 
 #: `ContactStore`-minted contact id prefix. Distinct in shape from the
 #: per-source `Observation.id` prefixes (`perception.source.
@@ -102,6 +145,36 @@ _EVENT_ID_PREFIX = "EVENT"
 #: `ContactStore`-minted `AttentionArea.id` prefix, distinct in shape from
 #: every id space above for the same reason (BL-4).
 _AREA_ID_PREFIX = "AREA"
+
+
+def _threat_has_los(
+    los_clear: Callable[[GeoPosition, GeoPosition], bool],
+    observer: GeoPosition,
+    believed_target: GeoPosition,
+    uncertainty_radius_m: float,
+) -> bool:
+    """Decision 4f-ii-a's uncertainty sweep: samples the believed target
+    position and two lateral offsets at `+-uncertainty_radius_m`,
+    perpendicular to the observer->target bearing -- **if any sample is
+    clear, the threat is treated as having LOS** (fail-open: a false
+    danger call costs a glance, a missed one costs the aircraft, so LOS
+    may only *suppress* a warning when the whole uncertainty disc is
+    masked). Lateral is the axis that matters -- whether a ridge
+    intervenes turns on which side of it the threat is, far more than on
+    how far along the bearing."""
+    if uncertainty_radius_m <= 0.0:
+        return los_clear(observer, believed_target)
+    theta = math.radians(bearing_deg(observer, believed_target) + 90.0)
+    perp_x, perp_z = math.cos(theta), math.sin(theta)
+    for offset in (0.0, uncertainty_radius_m, -uncertainty_radius_m):
+        sample = GeoPosition(
+            x=believed_target.x + offset * perp_x,
+            z=believed_target.z + offset * perp_z,
+            alt_m=believed_target.alt_m,
+        )
+        if los_clear(observer, sample):
+            return True
+    return False
 
 
 @dataclass
@@ -280,6 +353,33 @@ class Contact:
     motion_pending_stop_since_sim: float | None = None
     last_emitted_motion: MotionState | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
+    #: `plans/watch-reporting/plan.md` Decision 5's kilometre-crossing
+    #: bookkeeping -- the whole-kilometre band this contact was last
+    #: *announced* at, `None` whenever it is not currently watched or has
+    #: never been announced since it started being watched (both the
+    #: "never watched yet" and "just re-watched" cases -- see `ContactStore.
+    #: tick`'s sixth block for the silent-seed/clear-on-unwatch rules this
+    #: field's `None` state drives). Written only by `tick`, never by
+    #: `record` -- this is a speech-adjacent bookkeeping field, not a belief
+    #: fold.
+    last_announced_range_km: int | None = None
+    #: `plans/watch-reporting/plan.md` Stage 4's engagement bookkeeping --
+    #: the believed engaged/not-engaged state this contact was last
+    #: *evaluated* at, `None` whenever it is not currently watched or has
+    #: no resolvable envelope (`ContactStore.tick`'s seventh block clears
+    #: it, the same "clear on unwatch" rule `last_announced_range_km`
+    #: follows). Unlike that field, there is no silent seed -- the first
+    #: evaluation after `None` compares against an implicit `False`
+    #: ("outside"), so a contact already inside its envelope the moment it
+    #: is recognised *does* fire (Decision 1's "seed as outside" rule).
+    #: Written only by `tick`, never by `record`.
+    last_emitted_engagement: bool | None = None
+    #: `fold_motion`'s `motion_pending_stop_since_sim` twin for the LOS
+    #: term's asymmetric dwell (`belief.decay.LOS_MASK_CONFIRM_S`,
+    #: Decision 5a-ii): the sim-time a **masked** LOS sample first started
+    #: holding continuously, reset to `None` the instant any sample comes
+    #: back clear. `None` means "not currently in a masked run."
+    los_masked_since_sim: float | None = None
 
     @property
     def last_position(self) -> GeoPosition:
@@ -741,7 +841,12 @@ class ContactStore:
             return None
         return contact
 
-    def tick(self, now_sim: float) -> None:
+    def tick(
+        self,
+        now_sim: float,
+        ownship: OwnshipState | None = None,
+        los_clear: Callable[[GeoPosition, GeoPosition], bool] | None = None,
+    ) -> None:
         """Materialise lifecycle, classification, *and* attention events
         for every known contact as of `now_sim`. For each contact, per event
         kind: compute its current state, compare against the contact's own
@@ -756,16 +861,28 @@ class ContactStore:
         are deliberately independent).
 
         **Ordering, per contact: lifecycle event first, then classification,
-        then cardinality, then motion, then attention** (`plans/
-        classification-refinement/plan.md` Stage 3, extended by `plans/
-        bl4-attention-events/plan.md`, then `plans/group-contact-model/
-        plan.md` Stage 4b, then `plans/movement-detection/plan.md` Stage 3)
-        -- a `CONTACT_DETECTED` must precede that same contact's first
-        classification refinement, cardinality/motion change, or attention
-        change, never follow it. Cardinality and motion both sit ahead of
-        attention since all three are identity/state-shaped beliefs about
-        what/how-many/whether-moving, and attention's own event should still
-        see the contact's fully up-to-date facts first.
+        then cardinality, then motion, then attention, then range-crossing**
+        (`plans/classification-refinement/plan.md` Stage 3, extended by
+        `plans/bl4-attention-events/plan.md`, then `plans/
+        group-contact-model/plan.md` Stage 4b, then `plans/
+        movement-detection/plan.md` Stage 3, then `plans/watch-reporting/
+        plan.md` Stage 2) -- a `CONTACT_DETECTED` must precede that same
+        contact's first classification refinement, cardinality/motion
+        change, or attention change, never follow it. Cardinality and
+        motion both sit ahead of attention since all three are
+        identity/state-shaped beliefs about what/how-many/whether-moving,
+        and attention's own event should still see the contact's fully
+        up-to-date facts first. Range-crossing sits last and reuses
+        `current_attention` from the attention block directly, rather than
+        recomputing `belief.attention.effective_attention` a second time --
+        it needs to already know whether this contact is watched.
+
+        **`ownship` (`plans/watch-reporting/plan.md` Stage 2) drives the
+        sixth block alone** -- every existing caller passes only `now_sim`,
+        which leaves `ownship` at its `None` default and makes the
+        range-crossing block a no-op (see that block's own docstring). Not
+        threaded into any of the five pre-existing blocks above, which have
+        no use for ownship position.
 
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
@@ -880,6 +997,200 @@ class ContactStore:
                 )
                 contact.last_event_emitted_sim[CONTACT_ATTENTION_CHANGED] = now_sim
             contact.last_emitted_attention = current_attention
+
+            # Sixth block: whole-kilometre range crossings for a watched
+            # contact (`plans/watch-reporting/plan.md` Decisions 1/5/5a).
+            # **Gated (and its own bookkeeping kept) at emission, not via a
+            # pure comparison function in `events.py`** -- unlike every
+            # block above, `last_announced_range_km` is only meaningful for
+            # a watched contact, and computing/emitting it for every
+            # contact in the theatre would flood the event log (see
+            # `CONTACT_RANGE_CROSSED`'s own docstring).
+            if ownship is not None:
+                is_watched = current_attention in ("watch", "priority")
+                if not is_watched:
+                    # Decision 1: clear on un-watch so a re-watched contact
+                    # re-seeds rather than comparing against a stale mark.
+                    contact.last_announced_range_km = None
+                elif contact.last_announced_range_km is None:
+                    # Decision 1: silent seed -- the first tick this
+                    # contact is watched (or the first tick after being
+                    # re-watched), emit nothing.
+                    observer = GeoPosition(
+                        x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
+                    )
+                    contact.last_announced_range_km = math.floor(
+                        range_m(observer, contact.last_position) / 1000.0
+                    )
+                else:
+                    observer = GeoPosition(
+                        x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
+                    )
+                    range_m_value = range_m(observer, contact.last_position)
+                    current_km = math.floor(range_m_value / 1000.0)
+                    if (
+                        current_km != contact.last_announced_range_km
+                        and current_km <= WATCH_RANGE_REPORT_MAX_KM
+                    ):
+                        # Decision 5a-i: the deadband is the belief's own
+                        # down-range uncertainty, floored/ceilinged rather
+                        # than a bare tuned constant.
+                        sigma_m = contact.position.range_uncertainty_m(observer)
+                        if sigma_m <= RANGE_CROSS_MAX_SIGMA_M:
+                            # The single km-mark boundary between the old
+                            # and new bands -- for an adjacent (+-1 km)
+                            # crossing, the one shared edge; for a rarer
+                            # multi-km jump in one tick (e.g. a
+                            # reacquisition after a gap), the first edge
+                            # outside the narrower of the two bands.
+                            boundary_km = (
+                                min(current_km, contact.last_announced_range_km) + 1
+                            )
+                            deadband_m = max(RANGE_CROSS_MIN_DEADBAND_M, sigma_m)
+                            past_deadband = (
+                                abs(range_m_value - boundary_km * 1000.0) >= deadband_m
+                            )
+                            # Decision 5: gate on freshness, not just the
+                            # arithmetic -- a decayed position must never
+                            # manufacture a crossing nobody observed. An
+                            # `"estimated"` contact keeps its own last-
+                            # announced mark untouched (resumes announcing
+                            # on reacquisition), which is why this check
+                            # guards the field update below too, not only
+                            # the event.
+                            fresh = certainty_of(contact, now_sim) in (
+                                "observed",
+                                "tracked",
+                            )
+                            if past_deadband and fresh:
+                                if self._cooldown_elapsed(
+                                    contact, CONTACT_RANGE_CROSSED, now_sim
+                                ):
+                                    self._events.append(
+                                        Event(
+                                            id=self._new_event_id(),
+                                            contact_id=contact.id,
+                                            kind=CONTACT_RANGE_CROSSED,
+                                            t_sim=now_sim,
+                                            certainty=current_certainty,
+                                            previous_range_km=contact.last_announced_range_km,
+                                            range_km=current_km,
+                                        )
+                                    )
+                                    contact.last_event_emitted_sim[
+                                        CONTACT_RANGE_CROSSED
+                                    ] = now_sim
+                                contact.last_announced_range_km = current_km
+
+            # Seventh block: believed engagement state for a watched
+            # contact (`plans/watch-reporting/plan.md` Decision 4).
+            # Reuses `is_watched` from the sixth block above -- both are
+            # only meaningful for a watched contact, and both are gated
+            # (and their own bookkeeping kept) at emission, not via a pure
+            # comparison function in `events.py` (see `CONTACT_ENGAGEMENT_
+            # CHANGED`'s own docstring).
+            if ownship is not None:
+                envelope = envelope_for(contact.classification) if is_watched else None
+                if envelope is None:
+                    # Not watched, or `belief.threat.envelope_for` has
+                    # nothing for this belief (unresolved, or a class/type
+                    # with no threat row) -- clear both pieces of state so
+                    # a later re-watch/re-classification re-seeds rather
+                    # than comparing against a stale mark.
+                    contact.last_emitted_engagement = None
+                    contact.los_masked_since_sim = None
+                else:
+                    observer = GeoPosition(
+                        x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
+                    )
+                    range_m_value = range_m(observer, contact.last_position)
+                    prior_engaged = (
+                        contact.last_emitted_engagement
+                        if contact.last_emitted_engagement is not None
+                        else False  # Decision 1: seed as outside
+                    )
+                    max_range_m = envelope.range_max_m * (
+                        ENGAGEMENT_LEAVING_HYSTERESIS if prior_engaged else 1.0
+                    )
+                    range_ok = envelope.range_min_m <= range_m_value <= max_range_m
+                    alt_ok = ownship.alt_agl_m >= envelope.alt_min_m
+
+                    if not (range_ok and alt_ok):
+                        # Short-circuit: `current_engaged` is `False`
+                        # whatever LOS says, so asking is pure cost --
+                        # `line_of_sight_clear` samples terrain elevation
+                        # out of an on-disk SQLite store and is the most
+                        # expensive primitive `belief/` can reach, while
+                        # this block runs once per watched contact on every
+                        # poll of the live loop. Measured before fixing
+                        # (`plans/watch-reporting/performance-review.md`):
+                        # 20 watched contacts 20 km out, against a 2,408 m
+                        # envelope, produced 20 LOS calls per tick -- ~3x
+                        # that in practice, since a real detection carries
+                        # nonzero position uncertainty and `_threat_has_los`
+                        # sweeps three points. Watch count is not capped in
+                        # code either: one `AttentionArea` ("watch left")
+                        # can pull an arbitrary number of contacts into
+                        # watch-equivalent attention.
+                        #
+                        # **The reset is load-bearing, not tidying.**
+                        # Skipping the call also skips the masking
+                        # bookkeeping below, so without it a contact that
+                        # drifts out of range keeps a stale
+                        # `los_masked_since_sim`; on re-entry `masked_for_s`
+                        # is instantly far past `LOS_MASK_CONFIRM_S` and it
+                        # reads as masked on its first tick back. Clearing
+                        # it also states the honest thing: a masking dwell
+                        # accumulated while the threat could not reach us
+                        # measures nothing worth carrying.
+                        los_ok = True
+                        contact.los_masked_since_sim = None
+                    elif los_clear is None:
+                        # No world-model connection -- correct degradation
+                        # is to skip the term entirely, not to fail closed.
+                        los_ok = True
+                        contact.los_masked_since_sim = None
+                    else:
+                        raw_clear = _threat_has_los(
+                            los_clear,
+                            observer,
+                            contact.last_position,
+                            contact.last_position_uncertainty_m,
+                        )
+                        if raw_clear:
+                            contact.los_masked_since_sim = None
+                            los_ok = True
+                        else:
+                            if contact.los_masked_since_sim is None:
+                                contact.los_masked_since_sim = now_sim
+                            masked_for_s = now_sim - contact.los_masked_since_sim
+                            # Decision 5a-ii: a masked verdict may only
+                            # clear a danger state after holding
+                            # continuously for LOS_MASK_CONFIRM_S -- until
+                            # then, still treated as having LOS (fail-open,
+                            # in the direction of not clearing a warning
+                            # too eagerly).
+                            los_ok = masked_for_s < LOS_MASK_CONFIRM_S
+
+                    current_engaged = range_ok and alt_ok and los_ok
+                    if current_engaged != prior_engaged and self._cooldown_elapsed(
+                        contact, CONTACT_ENGAGEMENT_CHANGED, now_sim
+                    ):
+                        self._events.append(
+                            Event(
+                                id=self._new_event_id(),
+                                contact_id=contact.id,
+                                kind=CONTACT_ENGAGEMENT_CHANGED,
+                                t_sim=now_sim,
+                                certainty=current_certainty,
+                                previous_engaged=prior_engaged,
+                                engaged=current_engaged,
+                            )
+                        )
+                        contact.last_event_emitted_sim[CONTACT_ENGAGEMENT_CHANGED] = (
+                            now_sim
+                        )
+                    contact.last_emitted_engagement = current_engaged
 
     @staticmethod
     def _cooldown_elapsed(contact: Contact, kind: EventKind, now_sim: float) -> bool:

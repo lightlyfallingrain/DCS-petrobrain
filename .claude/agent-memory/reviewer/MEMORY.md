@@ -95,3 +95,5 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Precise position belief hybrid gap](project_precise_position_belief_hybrid_gap.md) — NEEDS REVISION: hybrid_source.py never got Stage 2's perturbation, still hands belief exact truth; also no ROADMAP entry.
 - [Binocular optic stage2 3b review](project_binocular_optic_stage2_3b_review.md) — APPROVED WITH MINOR FIXES; D4 "any command lowers binoculars" only wired for F10 path, not free-form utterances.
 - [Voice command completeness stages1 5 approved](project_voice_command_completeness_stages1_5_approved.md) — APPROVED clean; compass-wrap and multi-contact-report-truncation seams verified by direct execution, both untested but correct.
+- [Watch reporting approved](project_watch_reporting_approved.md) — APPROVED clean; all four flagged judgement calls verified true; Stage-5 ROADMAP "merged" claims land before actual merge, a recurring pattern to watch for.
+- [Watch reporting fix review](project_watch_reporting_fix_review.md) — single follow-up fix (7f4f24d) APPROVED; how to judge whether an asymmetric gate-reset (hysteresis on one gate, none on another) is fail-safe or a real bug.

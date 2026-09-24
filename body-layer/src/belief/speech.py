@@ -204,7 +204,10 @@ from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
+    CONTACT_ENGAGEMENT_CHANGED,
     CONTACT_LOST,
+    CONTACT_MOTION_CHANGED,
+    CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
     Event,
 )
@@ -402,6 +405,25 @@ def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
     return OutgoingSpeech(
         text=f"Watching {_contact_report_text(facts)}", template="readback"
     )
+
+
+def render_no_contact(only_clock_label: str | None = None) -> OutgoingSpeech:
+    """`follow`'s match-floor failure (`plans/watch-reporting/plan.md`
+    Decision 2b-iii): "watch nothing and say so" rather than watching the
+    least-bad candidate, which would be worse than admitting no match --
+    the pilot would get confident reports about the wrong object.
+
+    `only_clock_label`, when given (already formatted, e.g. `"two
+    o'clock"`), narrows the wording to `"Nothing at two o'clock."` -- used
+    only when the clock was the sole qualifier the pilot gave, since
+    naming the one thing he actually said is more informative than the
+    generic line. `None` (descriptor or range was also given, or nothing
+    was given at all) speaks the generic `"Nothing like that."`."""
+    if only_clock_label is not None:
+        return OutgoingSpeech(
+            text=f"Nothing at {only_clock_label}.", template="contact_report"
+        )
+    return OutgoingSpeech(text="Nothing like that.", template="contact_report")
 
 
 #: `class`-level `OP_*` buckets -> a human word, for the contact report's
@@ -717,7 +739,12 @@ def _round_enrichment_fragment(text: str) -> str:
     return f"{text[: match.start()]}(~{rounded} metres)"
 
 
-def _contact_report_text(facts: dict[str, object]) -> str:
+def _contact_report_text(
+    facts: dict[str, object],
+    *,
+    lead: str | None = None,
+    event_clause: str | None = None,
+) -> str:
     """The id-less, coalition-less positional-callout text shared by
     `render_contact_report` and `_render_lifecycle_text`'s `CONTACT_DETECTED`/
     `CONTACT_REACQUIRED` branches (see module docstring's "Contact report
@@ -739,7 +766,19 @@ def _contact_report_text(facts: dict[str, object]) -> str:
     on the singular path (`facts["cardinality"]` absent, or present with an
     exactly-one interval) this calls the exact same `_unit_type_display`
     with the exact same arguments and executes no new code** -- every
-    existing test in this module is that guard."""
+    existing test in this module is that guard.
+
+    **`lead`/`event_clause` (`plans/watch-reporting/plan.md` Decision 3).**
+    Both optional, both `None` by default so every pre-existing caller is
+    byte-for-byte unaffected. `lead`, when given, already carries its own
+    trailing punctuation/spacing (`"Danger, "`, `"Safe from "`) and is
+    simply prepended -- no separator logic here, since the two wordings
+    this milestone needs join differently ("Danger, SAM..." vs. "Safe from
+    SAM...") and baking a comma in would get one of them wrong.
+    `event_clause`, when given, is inserted before the terminating period
+    in place of -- not in addition to -- the automatic `", moving"` clause
+    below: a motion callout that got both would read "armor, two o'clock,
+    three kilometres, moving, moving.\""""
     classification = facts["classification"]
     assert isinstance(classification, dict)
     cardinality = facts.get("cardinality")
@@ -761,6 +800,8 @@ def _contact_report_text(facts: dict[str, object]) -> str:
             f"{phrase} "
             f"{_plural_unit_type_display(classification.get('value'), classification.get('level'))}"
         )
+    if lead is not None:
+        text = f"{lead}{text}"
     relative_now = facts.get("relative_now")
     if relative_now is not None:
         assert isinstance(relative_now, dict)
@@ -772,16 +813,21 @@ def _contact_report_text(facts: dict[str, object]) -> str:
     if isinstance(semantic, list) and semantic:
         best = max(semantic, key=lambda fact: fact["confidence"])
         text += f" {_round_enrichment_fragment(best['text'])}"
-    motion = facts.get("motion")
-    # `plans/movement-detection/plan.md` Stage 4 -- one trimmable clause,
-    # deliberately last and deliberately thin (this milestone's value is
-    # the belief and the event, not wording iteration). Only `"moving"` is
-    # ever spoken: a crew member volunteers motion when there IS motion to
-    # report, not a "stationary" clause on every single contact report --
-    # the semantic-fragment/count-clause precedent above (both omitted
-    # rather than stated when there's nothing notable to add).
-    if isinstance(motion, dict) and motion.get("state") == "moving":
-        text += ", moving"
+    if event_clause is not None:
+        text += f", {event_clause}"
+    else:
+        motion = facts.get("motion")
+        # `plans/movement-detection/plan.md` Stage 4 -- one trimmable
+        # clause, deliberately last and deliberately thin (this milestone's
+        # value is the belief and the event, not wording iteration). Only
+        # `"moving"` is ever spoken: a crew member volunteers motion when
+        # there IS motion to report, not a "stationary" clause on every
+        # single contact report -- the semantic-fragment/count-clause
+        # precedent above (both omitted rather than stated when there's
+        # nothing notable to add). Suppressed entirely when `event_clause`
+        # was supplied -- see this function's own docstring.
+        if isinstance(motion, dict) and motion.get("state") == "moving":
+            text += ", moving"
     text += "."
     return text
 
@@ -923,6 +969,33 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         return f"{_identification_lead(classification.get('value'), unit_type)} is {unit_type}."
     if event.kind == CONTACT_CARDINALITY_CHANGED:
         return None
+    if event.kind == CONTACT_MOTION_CHANGED:
+        # `plans/watch-reporting/plan.md` Stage 1 -- watched-only (gated by
+        # `belief.callouts.CalloutScheduler.tick`, not here; this function
+        # only renders). `event.motion` is `None` only when `current is
+        # None`, which `belief.events.motion_event_kind` already refuses to
+        # fire an event for -- reachable here only if a caller routed a
+        # motion event through this function directly, so this is
+        # defensive, not a real path.
+        if event.motion is None:
+            return None
+        return _contact_report_text(result["facts"], event_clause=event.motion)
+    if event.kind == CONTACT_RANGE_CROSSED:
+        # `plans/watch-reporting/plan.md` Decision 3 -- no affixes at all.
+        # The range *is* the news, and it is already in
+        # `_contact_report_text`'s own clock/range clause: "Armor, two
+        # o'clock, three kilometres." verbatim.
+        return _contact_report_text(result["facts"])
+    if event.kind == CONTACT_ENGAGEMENT_CHANGED:
+        # Decision 3's two wordings, taken from `docs/concept/
+        # STATE_TRANSITIONS.md`'s own "danger <unit> <where>"/"safe from
+        # <unit> <where>" rather than invented. `lead` already carries its
+        # own trailing punctuation/spacing, per `_contact_report_text`'s
+        # own docstring.
+        if event.engaged is None:
+            return None
+        lead = "Danger, " if event.engaged else "Safe from "
+        return _contact_report_text(result["facts"], lead=lead)
     return None
 
 

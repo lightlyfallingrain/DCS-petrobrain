@@ -136,7 +136,7 @@ def test_legal_bearing_resolves_via_the_parsed_slot_not_the_phrase_table() -> No
         token="scan_bearing_deg",
         match_ratio=1.0,
         verb_anchored=True,
-        bearing_degrees=175,
+        slots={"bearing_degrees": 175},
     )
 
 
@@ -147,7 +147,7 @@ def test_legal_bearing_report_verb() -> None:
         token="report_bearing_deg",
         match_ratio=1.0,
         verb_anchored=True,
-        bearing_degrees=90,
+        slots={"bearing_degrees": 90},
     )
 
 
@@ -161,7 +161,7 @@ def test_illegal_bearing_is_a_detected_error_not_a_fallthrough() -> None:
     assert result.verb_anchored is True
     assert result.token is None
     assert result.ambiguous is False
-    assert result.bearing_degrees is None
+    assert result.slots is None
 
 
 def test_never_mind_anchors_despite_not_being_in_the_plans_prose_list() -> None:
@@ -292,7 +292,7 @@ def test_skin_bearing_315_matches_end_to_end() -> None:
         token="scan_bearing_deg",
         match_ratio=1.0,
         verb_anchored=True,
-        bearing_degrees=315,
+        slots={"bearing_degrees": 315},
     )
 
 
@@ -461,3 +461,88 @@ class TestNarrowCancels:
         """ "scan left" and "cancel scan" share a word; confusing them
         would start a scan when the pilot asked to end one."""
         assert match_transcript("scan left").token == "scan_left"
+
+
+# --- follow: watch's synonym (plans/watch-reporting/plan.md Decision 2a) ---
+
+
+def test_follow_nearest_is_a_synonym_for_watch_nearest() -> None:
+    result = match_transcript("follow nearest")
+    assert result.token == "watch_nearest"
+    assert result.match_ratio == 1.0
+    assert result.ambiguous is False
+
+
+def test_follow_nearest_air_defence_is_a_synonym() -> None:
+    result = match_transcript("follow nearest air defence")
+    assert result.token == "watch_nearest_air_defence"
+    assert result.ambiguous is False
+
+
+def test_stop_following_and_cancel_follow_are_synonyms_for_cancel_watch() -> None:
+    assert match_transcript("stop following").token == "cancel_watch"
+    assert match_transcript("cancel follow").token == "cancel_watch"
+
+
+def test_follow_is_derived_into_the_verb_anchor_words() -> None:
+    from command_matcher import VERB_ANCHOR_WORDS
+
+    assert "follow" in VERB_ANCHOR_WORDS
+
+
+# --- follow slot resolution (plans/watch-reporting/plan.md Decision 2b) ----
+
+
+def test_follow_with_all_three_slots_resolves_to_the_follow_token() -> None:
+    result = match_transcript("follow armor two o'clock three km")
+    assert result.token == "follow"
+    assert result.verb_anchored is True
+    assert result.ambiguous is False
+    assert result.slots == {"descriptor": "armor", "clock": 2, "range_km": 3}
+
+
+def test_follow_with_only_a_descriptor() -> None:
+    result = match_transcript("follow the sam")
+    assert result.token == "follow"
+    assert result.slots == {"descriptor": "sam"}
+
+
+def test_follow_with_only_a_clock() -> None:
+    result = match_transcript("follow two o'clock")
+    assert result.token == "follow"
+    assert result.slots == {"clock": 2}
+
+
+def test_follow_with_only_a_range() -> None:
+    result = match_transcript("follow three km")
+    assert result.token == "follow"
+    assert result.slots == {"range_km": 3}
+
+
+def test_bare_follow_alone_has_no_slots() -> None:
+    """A bare "follow" (no qualifiers) resolves via the ordinary phrase
+    table (Decision 2b-i's own `PHRASES["follow"] = ("follow",)` entry),
+    not the slot fallback -- `slots` stays `None`, which is what tells the
+    body-layer resolver there is nothing to match against."""
+    result = match_transcript("follow")
+    assert result.token == "follow"
+    assert result.slots is None
+
+
+def test_follow_nearest_is_still_the_watch_nearest_synonym_not_the_follow_token() -> (
+    None
+):
+    """The phrase table must win over the slot fallback for the exact
+    synonym phrasings -- `_parse_follow_slots` is never even consulted."""
+    result = match_transcript("follow nearest")
+    assert result.token == "watch_nearest"
+    assert result.slots is None
+
+
+def test_follow_with_no_recognisable_slots_says_again() -> None:
+    """A follow-anchored utterance whose words parse to zero slots (and
+    which does not match any enumerated phrase) is a detected recognition
+    gap, not a silent fallthrough."""
+    result = match_transcript("follow the thing over there")
+    assert result.verb_anchored is True
+    assert result.token is None
