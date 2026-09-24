@@ -48,39 +48,71 @@ correlation didn't resolve or has expired (`belief.decay.
 object_id_continuity_valid`). Nothing in this module's own formulas
 changed for that fix; only how often they get called did.
 
-**Spatial gate -- isotropic, quantisation-derived** (reverted 2026-09-18 by
-"Stage 3b-i rev.2" of `plans/group-contact-model/plan.md`, §3 -- see below
-for why). The percept's implied position is `geometry.
-project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)`,
-using the percept's own `ownship_at_observation` as the observer -- flat, no
-terrain, per that function's own documented limitation. A candidate contact
-passes the spatial gate when this implied position is within `gate_radius_m`
-of the contact's last-known perceived position:
+**Spatial gate -- a 2D covariance (Mahalanobis) test, as of
+`plans/precise-position-belief/plan.md` Stage 3.** The percept's implied
+position is `geometry.project_from_bearing_range(observer,
+percept.bearing_deg, percept.range_m)`, using the percept's own
+`ownship_at_observation` as the observer -- flat, no terrain, per that
+function's own documented limitation. A candidate contact passes the
+spatial gate when this implied position's offset from the contact's
+last-known perceived position sits within `GATE_SIGMA_THRESHOLD` (3,
+"generous", per the plan) sigma of the **sum** of both sides' own
+covariance, using `belief.position_belief.Covariance2D`'s Mahalanobis
+reduction:
 
-    gate_radius_m = uncertainty_radius_m(percept)
-        + contact.last_position_uncertainty_m
-        + GATE_GROWTH_RATE_MPS * elapsed_s
+    covariance = percept_covariance + contact_covariance.inflated(elapsed_s)
+    passes iff covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD ** 2
 
-Both sides' uncertainty are summed -- `contact.last_position` is itself only
+This promotes the pre-Stage-3 scalar-radius formula (`uncertainty_radius_m(
+percept) + contact.last_position_uncertainty_m + GATE_GROWTH_RATE_MPS *
+elapsed_s`, tested against plain Euclidean distance) from a scalar to a full
+2x2 covariance, budgeted symmetrically on both sides for the same reason the
+scalar formula summed both radii: `contact.last_position` is itself only
 known to within *its own* founding/most-recent percept's uncertainty, not
 exactly, so gating on the incoming percept's uncertainty alone silently
-assumes the stored position is exact. It is not: naked-eye's bucket
-quantisation in particular re-derives a fresh (bearing, range) pair from
-scratch every poll (the buckets are anchored to the *current* heading -- see
-`naked_eye_source._quantise_bearing`), so two consecutive, genuinely
-identical real positions can legitimately quantise to different buckets and
-imply positions up to roughly a full bucket-width apart, not just the
-half-bucket-width `uncertainty_radius_m` models for a single reading. Only
-budgeting the incoming side under-sizes the gate by up to 2x for exactly
-this case -- confirmed live 2026-09-09: a single missed match from this
-under-sizing spawns a duplicate contact, and because that duplicate itself
-then counts as a second candidate for every subsequent percept near the same
-real object, the two-or-more-candidates ambiguity rule above turns one
-missed match into a permanent one-new-contact-per-poll runaway for the rest
-of the contact's session (see `plans/classification-refinement/debug.md`).
-Summing both sides' uncertainty is the minimal correction: it restores the
-gate to the symmetric, standard-radar-fusion shape (both estimates carry
-error, not just the newer one) without touching the ambiguity policy itself.
+assumes the stored position is exact. It is not -- a single missed match
+from under-budgeting the stored side spawns a duplicate contact, and because
+that duplicate itself then counts as a second candidate for every subsequent
+percept near the same real object, the two-or-more-candidates ambiguity rule
+above turns one missed match into a permanent one-new-contact-per-poll
+runaway for the rest of the contact's session (confirmed live 2026-09-09,
+see `plans/classification-refinement/debug.md` -- the scalar-era version of
+exactly this failure mode).
+
+`percept_covariance` is `belief.position_belief.covariance_from_uncertainty`
+applied to `percept.position_uncertainty` (an isotropic fallback,
+`_isotropic_covariance_from_radius(_FALLBACK_UNCERTAINTY_RADIUS_M)`, for the
+rare percept missing one) rotated onto world x/z at the percept's own true
+`bearing_deg` -- the elongated look ellipse `plans/precise-position-belief/
+plan.md`'s error model describes, oriented along that look's own line of
+sight, not a scalar radius collapsing the anisotropy away. **`contact_
+covariance` is, for now, an isotropic proxy** built from the scalar
+`contact.last_position_uncertainty_m` via the same helper
+(`_isotropic_covariance_from_radius`) -- `Contact` does not hold a real 2x2
+covariance until Stage 4 gives it one (`Contact.position: PositionEstimate`);
+once it does, this module's own `_contact_covariance` reads that real,
+anisotropic, fused covariance directly instead of this isotropic stand-in
+(Stage 4 is a small, separate diff here for exactly that reason -- see this
+module's own history below for why a shared-formula shortcut between two
+different questions has bitten this gate before).
+
+**Why this is not simply "the old scalar formula with squares"**: summing
+covariances (variances add) is not the same arithmetic as summing radii
+(a scalar sum), so a handful of `tests/test_contacts.py` fixtures whose
+exact geometry was tuned against the old linear formula needed re-deriving
+against the new one -- the *behaviour* under test (ambiguity still produces
+a visible duplicate, a genuinely overlapping gate still does not runaway)
+is unchanged, only the specific separations that exercise it.
+
+**Why anisotropy is safe here, unlike Stage 3b-i's reverted attempt (see
+below).** The reverted mistake was budgeting a *quantised report's* jitter
+(up to a full clock bucket) against an *acuity*-derived radius (~1-7 m) --
+two different error sources, a ~700:1 mismatch. Here, the covariance comes
+from `perception.estimation`'s own declared error model for exactly the
+number being gated (the percept's own perturbed bearing/range), and the
+quantisation that used to jitter independently of that budget is deleted
+(Stage 2 of this same plan) -- the thing being budgeted and the thing that
+can jitter are, for the first time, the same model.
 
 **Why this gate is isotropic and quantisation-derived again, not the
 anisotropic acuity-derived ellipse Stage 3b-i built.** Stage 3b-i's Decision
@@ -110,6 +142,14 @@ test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts` was
 `xfail`ed for. Reverting this gate to its pre-Stage-3b-i, quantisation-
 derived form fixes that regression directly, by budgeting the thing that is
 actually jittering -- see that test's own (now-passing) assertion.
+
+**This paragraph describes the gate as of Stage 3b-i rev.2 -- `plans/
+precise-position-belief/plan.md` Stage 3 (above) is a later, distinct
+reintroduction of anisotropy.** It is not a re-run of the Stage 3b-i
+mistake: see "Why anisotropy is safe here" above for the precise
+distinction (a shared *formula* with a different question's error source,
+vs. this module's own declared error model applied to its own gated
+number).
 
 `elapsed_s` is the time since *that contact's* last observation (not the
 percept's own age), so a contact that has not been seen in a while gets a
@@ -168,17 +208,19 @@ from typing import TYPE_CHECKING, Final
 
 from belief.classification import class_compatibility
 from belief.percept import Percept
+from belief.position_belief import Covariance2D, covariance_from_uncertainty
 from perception.geometry import GeoPosition, project_from_bearing_range
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
 
-#: How fast a contact could plausibly have moved since it was last observed,
-#: for the spatial gate's elapsed-time growth term -- a generic ground-vehicle
-#: order-of-magnitude figure (72 km/h), not derived from any specific unit's
-#: real top speed. Placeholder -- revisit once real sessions show whether
-#: contacts are gated too tightly or too loosely.
-GATE_GROWTH_RATE_MPS: Final[float] = 20.0
+#: How many sigma (in the summed covariance's own shape) an incoming
+#: percept's implied position may sit from a contact's last-known position
+#: and still pass the gate -- `plans/precise-position-belief/plan.md` Stage
+#: 3's "keep the threshold generous" instruction. Squared once here rather
+#: than at every call site (`passes_gate` compares `mahalanobis_squared`
+#: directly against `GATE_SIGMA_THRESHOLD ** 2`).
+GATE_SIGMA_THRESHOLD: Final[float] = 3.0
 
 #: Isotropic fallback radius for a percept somehow missing a declared
 #: `position_uncertainty` (`plans/precise-position-belief/plan.md` Stage 1)
@@ -219,22 +261,48 @@ def implied_position(percept: Percept) -> GeoPosition:
     return project_from_bearing_range(observer, percept.bearing_deg, percept.range_m)
 
 
-def spatial_gate_radius_m(percept: Percept, contact: Contact, now_sim: float) -> float:
-    """The spatial gate radius for `percept` against `contact` at `now_sim`.
-    See module docstring's formula -- both the incoming percept's own
-    uncertainty and the contact's stored `last_position_uncertainty_m` are
-    budgeted, not just the former."""
-    elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
-    return (
-        uncertainty_radius_m(percept)
-        + contact.last_position_uncertainty_m
-        + GATE_GROWTH_RATE_MPS * elapsed_s
-    )
+def _isotropic_covariance_from_radius(radius_m: float) -> Covariance2D:
+    """An isotropic `Covariance2D` whose own `sqrt(trace)` (`belief.
+    position_belief.PositionEstimate.radius_m`'s definition) is exactly
+    `radius_m` -- i.e. variance `radius_m ** 2 / 2` on each axis, since
+    `trace = xx + zz = 2 * (radius_m ** 2 / 2) = radius_m ** 2`. Used both
+    for a percept missing a declared `position_uncertainty` and (until
+    Stage 4 gives `Contact` a real 2x2 covariance) for the contact side of
+    the gate -- see module docstring's "Spatial gate" section."""
+    variance = (radius_m * radius_m) / 2.0
+    return Covariance2D(xx=variance, zz=variance, xz=0.0)
+
+
+def _percept_covariance(percept: Percept) -> Covariance2D:
+    """The look's own elongated error ellipse, rotated onto world x/z at
+    its own true `bearing_deg` -- `_isotropic_covariance_from_radius(
+    _FALLBACK_UNCERTAINTY_RADIUS_M)` for the rare percept carrying no
+    declared `position_uncertainty` at all."""
+    if percept.position_uncertainty is not None:
+        return covariance_from_uncertainty(
+            percept.position_uncertainty, percept.bearing_deg
+        )
+    return _isotropic_covariance_from_radius(_FALLBACK_UNCERTAINTY_RADIUS_M)
+
+
+def _contact_covariance(contact: Contact, elapsed_s: float) -> Covariance2D:
+    """The contact side of the gate's covariance sum, inflated for elapsed
+    motion since `contact.last_seen_sim`. **Isotropic proxy, pre-Stage-4**:
+    `Contact` does not yet hold a real 2x2 covariance (`Contact.position`
+    lands in Stage 4), so this reads the scalar `last_position_uncertainty_m`
+    through `_isotropic_covariance_from_radius` rather than the contact's
+    own declared anisotropy -- see module docstring's "Spatial gate"
+    section for why that upgrade is a separate, later diff to this one
+    function, not a Stage 3 change."""
+    return _isotropic_covariance_from_radius(
+        contact.last_position_uncertainty_m
+    ).inflated(elapsed_s)
 
 
 def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     """Whether `percept` may be merged into `contact` -- the spatial gate and
-    the class-compatibility gate must both pass. See module docstring."""
+    the class-compatibility gate must both pass. See module docstring's
+    "Spatial gate" section for the 2D covariance test."""
     if class_compatibility(percept.classification_raw, contact.last_class_raw) == (
         "incompatible"
     ):
@@ -243,5 +311,6 @@ def passes_gate(percept: Percept, contact: Contact, now_sim: float) -> bool:
     percept_position = implied_position(percept)
     dx = percept_position.x - contact.last_position.x
     dz = percept_position.z - contact.last_position.z
-    distance_m = math.hypot(dx, dz)
-    return distance_m <= spatial_gate_radius_m(percept, contact, now_sim)
+    elapsed_s = max(0.0, now_sim - contact.last_seen_sim)
+    covariance = _percept_covariance(percept) + _contact_covariance(contact, elapsed_s)
+    return covariance.mahalanobis_squared(dx, dz) <= GATE_SIGMA_THRESHOLD**2

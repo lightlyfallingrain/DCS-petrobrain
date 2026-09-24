@@ -95,26 +95,34 @@ def test_two_well_separated_objects_produce_two_contacts() -> None:
 def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     """Two existing contacts both close enough and class-compatible with a
     new percept must produce a *third* contact -- the plan's deliberate
-    anti-guessing rule (Stage 1 decision rule)."""
+    anti-guessing rule (Stage 1 decision rule).
+
+    Every observation here declares no `position_uncertainty`, so each one
+    falls back to the isotropic `_FALLBACK_UNCERTAINTY_RADIUS_M` (300m) on
+    both the percept and (once a contact is founded from one) the contact
+    side -- `belief.association_over_time`'s 2D gate (`plans/
+    precise-position-belief/plan.md` Stage 3) then allows a candidate at up
+    to `GATE_SIGMA_THRESHOLD` (3) sigma of the summed covariance, which for
+    two isotropic 300m-radius sides at zero elapsed time works out to 900m
+    (see that module's own `_isotropic_covariance_from_radius` and
+    `GATE_SIGMA_THRESHOLD`)."""
     store = ContactStore()
-    # A and B are 800m apart -- far enough that B does not merge into A when
-    # it is created (gate radius at t=0 is uncertainty_radius_m(B)=
-    # SCOPE_UNCERTAINTY_M=300 *plus* A's own stored
-    # last_position_uncertainty_m=300, i.e. 600 -- both sides' uncertainty is
-    # budgeted, see `association_over_time`'s module docstring), but close
-    # enough that a percept exactly between them (400m from each) falls
-    # within both of their gates (each gate is also 600 at t=0).
+    # A and B are 1000m apart -- far enough that B does not merge into A when
+    # it is created (each side's isotropic gate covariance allows 900m at
+    # t=0, per this test's own docstring), but close enough that a percept
+    # exactly between them (500m from each) falls within both of their
+    # gates.
     contact_a_obs = _observation(
         obs_id="OBS_A", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
     contact_b_obs = _observation(
-        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
+        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=2000.0
     )
     store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
     assert len(store.contacts) == 2
 
     ambiguous_obs = _observation(
-        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1400.0
+        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1500.0
     )
     store.ingest([ambiguous_obs], now_sim=0.0)
 
@@ -137,10 +145,10 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
 
     Reuses `test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`'s
     own already-verified overlapping-gate geometry (A at bearing 0 range
-    1000, B at bearing 0 range 1800, 800m apart -- a percept at range 1400
+    1000, B at bearing 0 range 2000, 1000m apart -- a percept at range 1500
     falls within both gates) rather than re-deriving new numbers, since that
     test already proves the overlap is real. Every re-observation of A or B
-    below is placed at that same ambiguous midpoint (bearing 0, range 1400)
+    below is placed at that same ambiguous midpoint (bearing 0, range 1500)
     -- if continuity were not skipping the gate, *every one* of these would
     be genuinely ambiguous between the two existing contacts, reproducing
     the runaway exactly. Object-permanence correlation is expected to
@@ -159,7 +167,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
         obs_id="OBS_A0", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
     contact_b_obs = _observation(
-        obs_id="OBS_B0", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
+        obs_id="OBS_B0", t_sim=0.0, bearing_deg=0.0, range_m=2000.0
     )
     store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
     assert len(store.contacts) == 2
@@ -167,7 +175,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
     # Confirm the gate really is overlapping at this geometry: an unrelated
     # percept (no continuity reference) at the shared midpoint is still
     # genuinely ambiguous, per the reused test above.
-    probe = _observation(obs_id="OBS_PROBE", t_sim=0.0, bearing_deg=0.0, range_m=1400.0)
+    probe = _observation(obs_id="OBS_PROBE", t_sim=0.0, bearing_deg=0.0, range_m=1500.0)
     store.ingest([probe], now_sim=0.0)
     assert len(store.contacts) == 3
     probe_contact_id = store.contacts[-1].id
@@ -190,7 +198,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
                 obs_id=observation_id,
                 t_sim=t_sim,
                 bearing_deg=0.0,
-                range_m=1400.0,  # the same genuinely-ambiguous midpoint
+                range_m=1500.0,  # the same genuinely-ambiguous midpoint
                 continues_observation_id=last_observation_id[label],
             )
             last_observation_id[label] = observation_id
