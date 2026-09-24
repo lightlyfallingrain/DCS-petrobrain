@@ -36,7 +36,9 @@ between `association_over_time.passes_gate` (pure decision) and `ingest`
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from typing import Final
 
 from belief.association_over_time import (
     implied_position,
@@ -73,6 +75,7 @@ from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_MOTION_CHANGED,
+    CONTACT_RANGE_CROSSED,
     EVENT_COOLDOWN_S,
     Event,
     EventKind,
@@ -85,8 +88,27 @@ from belief.events import (
 from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
 from belief.position_belief import PositionEstimate, fold_position
-from perception.geometry import GeoPosition
-from perception.source import Observation
+from perception.geometry import GeoPosition, range_m
+from perception.source import Observation, OwnshipState
+
+#: `plans/watch-reporting/plan.md` Decision 5 -- the user's own cap: a
+#: watched contact's whole-kilometre range mark is only ever announced
+#: inside this radius. Past it, `CONTACT_RANGE_CROSSED` simply stops firing
+#: (`Contact.last_announced_range_km` is left at whatever it last was, per
+#: `tick`'s sixth block).
+WATCH_RANGE_REPORT_MAX_KM: Final[int] = 5
+
+#: Decision 5a-i's floor on the uncertainty-derived deadband -- a Schmitt
+#: gap around the whole-kilometre boundary, sized so a very tight position
+#: estimate still gets a minimal gap (a zero deadband would silently
+#: reintroduce the jitter bug this amendment exists to fix).
+RANGE_CROSS_MIN_DEADBAND_M: Final[float] = 50.0
+
+#: Decision 5a-i's ceiling -- half a kilometre band. Past this down-range
+#: sigma (`belief.position_belief.PositionEstimate.range_uncertainty_m`),
+#: the estimate cannot resolve *which* kilometre it is in, so a crossing is
+#: suppressed entirely rather than announced on a coin flip.
+RANGE_CROSS_MAX_SIGMA_M: Final[float] = 500.0
 
 #: `ContactStore`-minted contact id prefix. Distinct in shape from the
 #: per-source `Observation.id` prefixes (`perception.source.
@@ -280,6 +302,16 @@ class Contact:
     motion_pending_stop_since_sim: float | None = None
     last_emitted_motion: MotionState | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
+    #: `plans/watch-reporting/plan.md` Decision 5's kilometre-crossing
+    #: bookkeeping -- the whole-kilometre band this contact was last
+    #: *announced* at, `None` whenever it is not currently watched or has
+    #: never been announced since it started being watched (both the
+    #: "never watched yet" and "just re-watched" cases -- see `ContactStore.
+    #: tick`'s sixth block for the silent-seed/clear-on-unwatch rules this
+    #: field's `None` state drives). Written only by `tick`, never by
+    #: `record` -- this is a speech-adjacent bookkeeping field, not a belief
+    #: fold.
+    last_announced_range_km: int | None = None
 
     @property
     def last_position(self) -> GeoPosition:
@@ -741,7 +773,7 @@ class ContactStore:
             return None
         return contact
 
-    def tick(self, now_sim: float) -> None:
+    def tick(self, now_sim: float, ownship: OwnshipState | None = None) -> None:
         """Materialise lifecycle, classification, *and* attention events
         for every known contact as of `now_sim`. For each contact, per event
         kind: compute its current state, compare against the contact's own
@@ -756,16 +788,28 @@ class ContactStore:
         are deliberately independent).
 
         **Ordering, per contact: lifecycle event first, then classification,
-        then cardinality, then motion, then attention** (`plans/
-        classification-refinement/plan.md` Stage 3, extended by `plans/
-        bl4-attention-events/plan.md`, then `plans/group-contact-model/
-        plan.md` Stage 4b, then `plans/movement-detection/plan.md` Stage 3)
-        -- a `CONTACT_DETECTED` must precede that same contact's first
-        classification refinement, cardinality/motion change, or attention
-        change, never follow it. Cardinality and motion both sit ahead of
-        attention since all three are identity/state-shaped beliefs about
-        what/how-many/whether-moving, and attention's own event should still
-        see the contact's fully up-to-date facts first.
+        then cardinality, then motion, then attention, then range-crossing**
+        (`plans/classification-refinement/plan.md` Stage 3, extended by
+        `plans/bl4-attention-events/plan.md`, then `plans/
+        group-contact-model/plan.md` Stage 4b, then `plans/
+        movement-detection/plan.md` Stage 3, then `plans/watch-reporting/
+        plan.md` Stage 2) -- a `CONTACT_DETECTED` must precede that same
+        contact's first classification refinement, cardinality/motion
+        change, or attention change, never follow it. Cardinality and
+        motion both sit ahead of attention since all three are
+        identity/state-shaped beliefs about what/how-many/whether-moving,
+        and attention's own event should still see the contact's fully
+        up-to-date facts first. Range-crossing sits last and reuses
+        `current_attention` from the attention block directly, rather than
+        recomputing `belief.attention.effective_attention` a second time --
+        it needs to already know whether this contact is watched.
+
+        **`ownship` (`plans/watch-reporting/plan.md` Stage 2) drives the
+        sixth block alone** -- every existing caller passes only `now_sim`,
+        which leaves `ownship` at its `None` default and makes the
+        range-crossing block a no-op (see that block's own docstring). Not
+        threaded into any of the five pre-existing blocks above, which have
+        no use for ownship position.
 
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
@@ -880,6 +924,90 @@ class ContactStore:
                 )
                 contact.last_event_emitted_sim[CONTACT_ATTENTION_CHANGED] = now_sim
             contact.last_emitted_attention = current_attention
+
+            # Sixth block: whole-kilometre range crossings for a watched
+            # contact (`plans/watch-reporting/plan.md` Decisions 1/5/5a).
+            # **Gated (and its own bookkeeping kept) at emission, not via a
+            # pure comparison function in `events.py`** -- unlike every
+            # block above, `last_announced_range_km` is only meaningful for
+            # a watched contact, and computing/emitting it for every
+            # contact in the theatre would flood the event log (see
+            # `CONTACT_RANGE_CROSSED`'s own docstring).
+            if ownship is not None:
+                is_watched = current_attention in ("watch", "priority")
+                if not is_watched:
+                    # Decision 1: clear on un-watch so a re-watched contact
+                    # re-seeds rather than comparing against a stale mark.
+                    contact.last_announced_range_km = None
+                elif contact.last_announced_range_km is None:
+                    # Decision 1: silent seed -- the first tick this
+                    # contact is watched (or the first tick after being
+                    # re-watched), emit nothing.
+                    observer = GeoPosition(
+                        x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
+                    )
+                    contact.last_announced_range_km = math.floor(
+                        range_m(observer, contact.last_position) / 1000.0
+                    )
+                else:
+                    observer = GeoPosition(
+                        x=ownship.x, z=ownship.z, alt_m=ownship.alt_m
+                    )
+                    range_m_value = range_m(observer, contact.last_position)
+                    current_km = math.floor(range_m_value / 1000.0)
+                    if (
+                        current_km != contact.last_announced_range_km
+                        and current_km <= WATCH_RANGE_REPORT_MAX_KM
+                    ):
+                        # Decision 5a-i: the deadband is the belief's own
+                        # down-range uncertainty, floored/ceilinged rather
+                        # than a bare tuned constant.
+                        sigma_m = contact.position.range_uncertainty_m(observer)
+                        if sigma_m <= RANGE_CROSS_MAX_SIGMA_M:
+                            # The single km-mark boundary between the old
+                            # and new bands -- for an adjacent (+-1 km)
+                            # crossing, the one shared edge; for a rarer
+                            # multi-km jump in one tick (e.g. a
+                            # reacquisition after a gap), the first edge
+                            # outside the narrower of the two bands.
+                            boundary_km = (
+                                min(current_km, contact.last_announced_range_km) + 1
+                            )
+                            deadband_m = max(RANGE_CROSS_MIN_DEADBAND_M, sigma_m)
+                            past_deadband = (
+                                abs(range_m_value - boundary_km * 1000.0) >= deadband_m
+                            )
+                            # Decision 5: gate on freshness, not just the
+                            # arithmetic -- a decayed position must never
+                            # manufacture a crossing nobody observed. An
+                            # `"estimated"` contact keeps its own last-
+                            # announced mark untouched (resumes announcing
+                            # on reacquisition), which is why this check
+                            # guards the field update below too, not only
+                            # the event.
+                            fresh = certainty_of(contact, now_sim) in (
+                                "observed",
+                                "tracked",
+                            )
+                            if past_deadband and fresh:
+                                if self._cooldown_elapsed(
+                                    contact, CONTACT_RANGE_CROSSED, now_sim
+                                ):
+                                    self._events.append(
+                                        Event(
+                                            id=self._new_event_id(),
+                                            contact_id=contact.id,
+                                            kind=CONTACT_RANGE_CROSSED,
+                                            t_sim=now_sim,
+                                            certainty=current_certainty,
+                                            previous_range_km=contact.last_announced_range_km,
+                                            range_km=current_km,
+                                        )
+                                    )
+                                    contact.last_event_emitted_sim[
+                                        CONTACT_RANGE_CROSSED
+                                    ] = now_sim
+                                contact.last_announced_range_km = current_km
 
     @staticmethod
     def _cooldown_elapsed(contact: Contact, kind: EventKind, now_sim: float) -> bool:

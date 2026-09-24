@@ -206,6 +206,7 @@ from belief.events import (
     CONTACT_DETECTED,
     CONTACT_LOST,
     CONTACT_MOTION_CHANGED,
+    CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
     Event,
 )
@@ -959,6 +960,12 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
         if event.motion is None:
             return None
         return _contact_report_text(result["facts"], event_clause=event.motion)
+    if event.kind == CONTACT_RANGE_CROSSED:
+        # `plans/watch-reporting/plan.md` Decision 3 -- no affixes at all.
+        # The range *is* the news, and it is already in
+        # `_contact_report_text`'s own clock/range clause: "Armor, two
+        # o'clock, three kilometres." verbatim.
+        return _contact_report_text(result["facts"])
     return None
 
 

@@ -962,3 +962,41 @@ def test_route_event_contact_motion_changed_auto_acknowledges() -> None:
     assert motion_event in store.unacknowledged_events
     route_event(store, motion_event, now_sim=0.0)
     assert motion_event not in store.unacknowledged_events
+
+
+# --- CONTACT_RANGE_CROSSED speech (plans/watch-reporting/plan.md Stage 2) --
+
+
+def test_route_event_contact_range_crossed_speaks_with_no_affixes() -> None:
+    """Decision 3: no affixes at all -- the range is already in the body of
+    `_contact_report_text`'s own clock/range clause."""
+    store, contact_id = _store_with_one_contact()
+    event = Event(
+        id="EVENT_RANGE",
+        contact_id=contact_id,
+        kind="CONTACT_RANGE_CROSSED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_range_km=4,
+        range_km=3,
+    )
+    speech = route_event(store, event, now_sim=0.0)
+    assert speech is not None
+    # No enrichment supplied -> no clock/range clause at all, same as any
+    # other unenriched report -- confirming this kind adds no wording of
+    # its own beyond `_contact_report_text`'s normal shape.
+    assert speech.text == "BMP-2."
+
+
+def test_route_event_contact_range_crossed_returns_none_for_unknown_contact() -> None:
+    store = ContactStore()
+    event = Event(
+        id="EVENT_RANGE",
+        contact_id="CONTACT_999",
+        kind="CONTACT_RANGE_CROSSED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_range_km=4,
+        range_km=3,
+    )
+    assert route_event(store, event, now_sim=0.0) is None

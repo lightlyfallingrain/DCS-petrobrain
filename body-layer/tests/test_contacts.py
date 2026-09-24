@@ -18,9 +18,11 @@ from belief.events import (
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_LOST,
+    CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
+from belief.tools import set_attention
 from perception.geometry import GeoPosition, project_from_bearing_range
 from perception.geometry import bearing_deg as geometry_bearing_deg
 from perception.geometry import range_m as geometry_range_m
@@ -1020,3 +1022,161 @@ def test_repeated_looks_from_orbiting_observer_tighten_and_never_reach_bare_trut
     assert math.isclose(contact.last_position.x, biased_target.x, abs_tol=5.0)
     assert math.isclose(contact.last_position.z, biased_target.z, abs_tol=5.0)
     assert abs(contact.last_position.x - true_target.x) > 5.0
+
+
+# --- kilometre range crossings (plans/watch-reporting/plan.md Stage 2) -----
+
+
+def test_range_crossing_seeds_silently_when_first_watched() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_announced_range_km == 4
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+def test_unwatched_contact_never_gets_range_crossing_bookkeeping() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_announced_range_km is None
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+def test_range_crossing_fires_when_ownship_closes_past_the_deadband() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))  # range=3000 -> km=3
+    contact = store.contacts[0]
+    assert contact.last_announced_range_km == 3
+    crossed = [e for e in store.events if e.kind == CONTACT_RANGE_CROSSED]
+    assert len(crossed) == 1
+    assert crossed[0].previous_range_km == 4
+    assert crossed[0].range_km == 3
+
+
+def test_range_crossing_fires_on_opening_too() -> None:
+    """The user said "passes a whole kilometre mark", not "closes through
+    one" -- drawing away is the same kind of news."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=1500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=1
+    store.tick(now_sim=1.0, ownship=_ownship(x=-1500.0))  # range=3000 -> km=3
+    crossed = [e for e in store.events if e.kind == CONTACT_RANGE_CROSSED]
+    assert len(crossed) == 1
+    assert crossed[0].previous_range_km == 1
+    assert crossed[0].range_km == 3
+
+
+def test_range_crossing_never_fires_beyond_the_cap() -> None:
+    """`WATCH_RANGE_REPORT_MAX_KM` -- the user's own cap. A reading beyond
+    it is never adopted as the new baseline either, so re-entering the cap
+    later still compares against the last value that was actually inside
+    it."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=8000.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=8
+    store.tick(
+        now_sim=1.0, ownship=_ownship(x=2000.0)
+    )  # range=6000 -> km=6, still > cap
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 8
+
+
+def test_range_crossing_deadband_suppresses_a_boundary_jitter() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    # range=3990 -> km=3, but only 10m past the 4000m boundary -- well
+    # inside even the bare RANGE_CROSS_MIN_DEADBAND_M (50m) floor.
+    store.tick(now_sim=1.0, ownship=_ownship(x=510.0))
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 4
+
+
+def test_range_crossing_gated_on_freshness_not_position_alone() -> None:
+    """Decision 5's own named risk: a decayed position must never
+    manufacture a crossing nobody observed. `contact.last_announced_
+    range_km` stays untouched too -- Decision 5's "keeps its own last-
+    announced mark" rule, resuming on reacquisition rather than replaying a
+    silent km jump."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    stale_t = 60.0  # between POSITION_HALF_LIFE_S (30) and LOST_THRESHOLD_S (120) -> "estimated"
+    store.tick(
+        now_sim=stale_t, ownship=_ownship(x=1500.0)
+    )  # would cross to km=3 if fresh
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 4
+
+
+def test_range_crossing_suppressed_when_uncertainty_exceeds_the_sigma_ceiling() -> None:
+    """Decision 5a-i's ceiling: a fresh but imprecise estimate cannot
+    resolve which kilometre it is in, so nothing is reported -- distinct
+    from (and not caught by) the freshness gate above."""
+    huge_uncertainty = PositionUncertainty(sigma_cross_m=10.0, sigma_down_m=1000.0)
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                range_m=4500.0,
+                bearing_deg=0.0,
+                position_uncertainty=huge_uncertainty,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))  # would cross to km=3
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+    assert store.contacts[0].last_announced_range_km == 4
+
+
+def test_range_crossing_clears_on_unwatch_and_reseeds_on_rewatch() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_announced_range_km == 4
+
+    set_attention(store, contact_id, "normal")
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))
+    assert store.contacts[0].last_announced_range_km is None
+
+    set_attention(store, contact_id, "watch")
+    store.tick(
+        now_sim=2.0, ownship=_ownship(x=1500.0)
+    )  # range=3000 -> re-seeds at km=3
+    assert store.contacts[0].last_announced_range_km == 3
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+def test_tick_without_ownship_is_a_no_op_for_range_crossing() -> None:
+    """Every pre-existing caller passes only `now_sim` -- `ownship` must
+    default to `None` and leave this block inert."""
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0, range_m=4500.0)], now_sim=0.0)
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0)
+    assert store.contacts[0].last_announced_range_km is None
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
