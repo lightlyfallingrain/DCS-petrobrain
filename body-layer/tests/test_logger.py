@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import pathlib
 import sqlite3
 import sys
 import threading
@@ -1599,3 +1600,78 @@ def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(
     assert row["disposition"] == "say_again"
     assert row["acted_token"] is None
     assert "t_wall" in row
+
+
+# --- the poll thread must survive a raising dispatch -----------------------
+
+
+def test_console_poll_loop_survives_a_raising_poll_and_keeps_going(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The poll loop runs on a *daemon* thread, so an exception escaping it
+    kills the thread without killing the process: the REPL keeps accepting
+    input, the overlay holds its last frame, and perception/belief/speech
+    are dead for the rest of the sortie with only a stderr traceback to say
+    so. Nothing in the cockpit reports it.
+
+    That cost -- a whole flight, silently -- is why the guard catches
+    everything rather than an enumerated set. A skipped poll costs one
+    cycle at 5 Hz and the next one recovers.
+
+    Found by the security pass on `plans/watch-reporting/`
+    (`security-review.md`); pre-existing rather than introduced there, and
+    unreachable through today's narrow wire path, which is exactly why no
+    existing test covered it.
+
+    Drives the real `_run_console_poll_loop` on a real thread, with a
+    `run_once` that raises on its first call and succeeds afterwards, and
+    asserts the second poll actually happened -- not merely that the thread
+    is still alive, which a loop that had exited cleanly would also
+    satisfy.
+    """
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": [_t72_world_object()]}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+
+    real_run_once = runner.run_once
+    calls: list[int] = []
+    # Signalled by the *second* poll, so the test waits on the thing it is
+    # asserting rather than on a deadline -- this runs a real thread, and a
+    # poll-count spin loop is exactly the shape that goes flaky under load.
+    recovered = threading.Event()
+
+    def flaky_run_once() -> None:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise RuntimeError("simulated dispatch failure inside the poll body")
+        real_run_once()
+        recovered.set()
+
+    runner.run_once = flaky_run_once  # type: ignore[method-assign]
+    stop_event = threading.Event()
+
+    poll_thread = threading.Thread(
+        target=_run_console_poll_loop,
+        args=(runner, aircraft_client, "Syria", db_path, 0.01, stop_event),
+    )
+    poll_thread.start()
+    try:
+        assert recovered.wait(timeout=10.0), (
+            "the poll loop did not run a second cycle after the first raised "
+            "-- the guard is missing and the thread died silently"
+        )
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    # The first poll raised; the loop kept going and the second one ran to
+    # completion, ingesting normally.
+    assert len(calls) >= 2
+    assert runner.last_t_sim == 200.0
+    assert len(runner.store.observations) == 1
