@@ -102,3 +102,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Voice command completeness Stage 1-4](project_voice_command_completeness_stage1_4.md) — enrichment test fixture reports observer's own position not bearing/range-projected; plan named wrong audio-adapter test file.
 - [logger.py main() untested by design](project_logger_main_untested_by_design.md) — factor CLI decision logic into pure functions instead of testing main() directly.
 - [watch-reporting Stage 1-5](project_watch_reporting_stage1_5.md) — watched-only kind needs singleton grouping too; move-observer-not-target fixtures; slot resolvers must precede phrase table.
+- [position-belief hold-recovery fix](project_position_belief_hold_recovery_fix.md) — quadratic-under-inflation pattern in hold-and-decay branches; fix is two timestamps + always-fresh-from-base inflation.

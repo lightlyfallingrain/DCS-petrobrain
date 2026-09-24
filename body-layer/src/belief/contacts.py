@@ -94,10 +94,44 @@ from belief.events import (
 )
 from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
-from belief.position_belief import PositionEstimate, fold_position
+from belief.position_belief import (
+    PositionEstimate,
+    clamp_to_detection_envelope,
+    fold_position,
+)
 from belief.threat import envelope_for
+from perception.association import RANGE_CAP_M as _HYBRID_RANGE_CAP_M
 from perception.geometry import GeoPosition, bearing_deg, range_m
-from perception.source import Observation, OwnshipState
+from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
+from perception.source import (
+    SOURCE_NAKED_EYE_VISUAL_FILTERED,
+    Observation,
+    OwnshipState,
+)
+from perception.visibility import NAKED_EYE_RANGE_CAP_M as _NAKED_EYE_RANGE_CAP_M
+
+#: `plans/position-belief-runaway/debug.md` -- the physical detection-range
+#: cap `clamp_to_detection_envelope` checks a fused position against,
+#: keyed by `Percept.source`. Each concrete channel already enforces its
+#: own cap when *admitting* a look (`perception.visibility.check_visibility`
+#: for naked-eye, `perception.association.associate` for the scope/hybrid
+#: channel) -- this is the same physical bound, reused rather than
+#: reinvented, applied to the *fused belief* instead of a single look. An
+#: unrecognised source (should not arise; both concrete sources are listed)
+#: falls back to the larger of the two -- conservative in the direction of
+#: never spuriously rejecting a fusion this module has no data to judge.
+_MAX_DETECTION_RANGE_M: Final[dict[str, float]] = {
+    SOURCE_NAKED_EYE_VISUAL_FILTERED: _NAKED_EYE_RANGE_CAP_M,
+    SOURCE_PETROVICH_DETECTION_ASSOCIATED: _HYBRID_RANGE_CAP_M,
+}
+_FALLBACK_MAX_DETECTION_RANGE_M: Final[float] = max(_MAX_DETECTION_RANGE_M.values())
+
+
+def _max_detection_range_m(source: str) -> float:
+    """`_MAX_DETECTION_RANGE_M[source]`, or the conservative fallback for a
+    source this table does not name -- see that table's own docstring."""
+    return _MAX_DETECTION_RANGE_M.get(source, _FALLBACK_MAX_DETECTION_RANGE_M)
+
 
 #: `plans/watch-reporting/plan.md` Decision 5 -- the user's own cap: a
 #: watched contact's whole-kilometre range mark is only ever announced
@@ -410,13 +444,25 @@ class Contact:
         covariance` directly (see that module's docstring), so there is
         nothing left that needs the pre-fusion number."""
         look_position = implied_position(percept)
-        self.position = fold_position(
-            self.position,
+        prior_position = self.position
+        observer = GeoPosition(
+            x=percept.ownship_at_observation.x,
+            z=percept.ownship_at_observation.z,
+            alt_m=percept.ownship_at_observation.alt_m,
+        )
+        fused_position = fold_position(
+            prior_position,
             x=look_position.x,
             z=look_position.z,
             uncertainty=percept_position_uncertainty(percept),
             look_bearing_deg=percept.bearing_deg,
             t_sim=percept.t_sim,
+        )
+        self.position = clamp_to_detection_envelope(
+            fused_position,
+            prior_position,
+            observer,
+            _max_detection_range_m(percept.source),
         )
         self.last_alt_m = look_position.alt_m
         self.last_class_raw = percept.classification_raw
@@ -484,15 +530,26 @@ class Contact:
         first covariance identically (`belief.position_belief.
         fold_position`'s own docstring)."""
         look_position = implied_position(percept)
+        observer = GeoPosition(
+            x=percept.ownship_at_observation.x,
+            z=percept.ownship_at_observation.z,
+            alt_m=percept.ownship_at_observation.alt_m,
+        )
+        founding_position = fold_position(
+            None,
+            x=look_position.x,
+            z=look_position.z,
+            uncertainty=percept_position_uncertainty(percept),
+            look_bearing_deg=percept.bearing_deg,
+            t_sim=percept.t_sim,
+        )
         contact = Contact(
             id=contact_id,
-            position=fold_position(
+            position=clamp_to_detection_envelope(
+                founding_position,
                 None,
-                x=look_position.x,
-                z=look_position.z,
-                uncertainty=percept_position_uncertainty(percept),
-                look_bearing_deg=percept.bearing_deg,
-                t_sim=percept.t_sim,
+                observer,
+                _max_detection_range_m(percept.source),
             ),
             last_alt_m=look_position.alt_m,
             last_class_raw=percept.classification_raw,
