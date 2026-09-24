@@ -406,6 +406,25 @@ def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
     )
 
 
+def render_no_contact(only_clock_label: str | None = None) -> OutgoingSpeech:
+    """`follow`'s match-floor failure (`plans/watch-reporting/plan.md`
+    Decision 2b-iii): "watch nothing and say so" rather than watching the
+    least-bad candidate, which would be worse than admitting no match --
+    the pilot would get confident reports about the wrong object.
+
+    `only_clock_label`, when given (already formatted, e.g. `"two
+    o'clock"`), narrows the wording to `"Nothing at two o'clock."` -- used
+    only when the clock was the sole qualifier the pilot gave, since
+    naming the one thing he actually said is more informative than the
+    generic line. `None` (descriptor or range was also given, or nothing
+    was given at all) speaks the generic `"Nothing like that."`."""
+    if only_clock_label is not None:
+        return OutgoingSpeech(
+            text=f"Nothing at {only_clock_label}.", template="contact_report"
+        )
+    return OutgoingSpeech(text="Nothing like that.", template="contact_report")
+
+
 #: `class`-level `OP_*` buckets -> a human word, for the contact report's
 #: unit-type field. See module docstring's "Contact report format" note.
 #:
