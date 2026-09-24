@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from belief.association_over_time import (
     implied_position,
     passes_gate,
-    uncertainty_radius_m,
+    percept_position_uncertainty,
 )
 from belief.attention import (
     Attention,
@@ -84,6 +84,7 @@ from belief.events import (
 )
 from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
+from belief.position_belief import PositionEstimate, fold_position
 from perception.geometry import GeoPosition
 from perception.source import Observation
 
@@ -119,21 +120,37 @@ class SightingSpan:
 
 @dataclass
 class Contact:
-    """One persistent belief record. `last_position` and `last_class_raw`
-    are always derived from the most recent percept merged into this
-    contact, never from any earlier one -- there is no fusion or averaging
-    across observations.
+    """One persistent belief record. `last_class_raw` is always derived
+    from the most recent percept merged into this contact, never from any
+    earlier one -- there is no fusion or averaging of classification claims
+    (that is `classification`'s job, a separate fold, see below).
 
-    `last_position_uncertainty_m` is `last_position`'s own error budget --
-    `belief.association_over_time.uncertainty_radius_m` (the conservative
-    scalar reduction of that percept's own ellipse, see that function's
-    docstring) of whichever percept most recently set `last_position` (the
-    founding percept, or the most recent `record()` call). `association_
-    over_time.passes_gate` sums this with the *incoming* percept's own
-    ellipse on both axes; gating on the incoming side alone silently
+    **`last_position` and `last_position_uncertainty_m` are no longer a raw
+    percept's own numbers -- `plans/precise-position-belief/plan.md` Stage
+    4.** The real state is `position: PositionEstimate`
+    (`belief.position_belief`) -- a fused mean (x, z) plus its own 2x2
+    covariance, refined by `belief.position_belief.fold_position` on every
+    `record()` call (real covariance fusion/triangulation, not a running
+    average or a last-writer-wins overwrite -- see that module's docstring).
+    `last_position`/`last_position_uncertainty_m` are read-only properties
+    derived from `position` (`GeoPosition(x=position.x, z=position.z,
+    alt_m=last_alt_m)`, `position.radius_m()` respectively) kept for every
+    pre-Stage-4 reader that wants those exact names/shapes -- assigning to
+    either raises `AttributeError`, only `record()`/`from_percept()` ever
+    change the underlying `position`/`last_alt_m` fields, via `fold_
+    position`, never a direct field write. `last_alt_m` is *not* fused (no
+    altitude uncertainty model exists) -- it is simply the most recent
+    look's own flat-projection altitude (`perception.geometry.
+    project_from_bearing_range`'s "target at observer's own altitude"
+    convention), same placeholder status it always had.
+
+    `association_over_time.passes_gate`'s 2D gate (Stage 3) budgets `position
+    .covariance` (inflated for elapsed motion) against the *incoming*
+    percept's own ellipse; gating on the incoming side alone silently
     treated `last_position` as exact, which it is not -- see that module's
     docstring for the live duplication bug this fixes (2026-09-09) and for
-    Stage 3b-i's anisotropic gate this field now feeds.
+    the gate's own anisotropy, now drawn from this real fused covariance
+    rather than an isotropic proxy.
 
     `classification` is `plans/classification-refinement/plan.md` Stage 2's
     addition: the contact's *folded* best classification claim (`belief.
@@ -219,8 +236,15 @@ class Contact:
     `classification.py`'s `CLASSIFICATION_CONTRADICTION_LOCKOUT_S`."""
 
     id: str
-    last_position: GeoPosition
-    last_position_uncertainty_m: float
+    #: The fused believed position -- `belief.position_belief.
+    #: PositionEstimate` (mean x/z + 2x2 covariance + `as_of_sim`). Read via
+    #: `last_position`/`last_position_uncertainty_m` below, not directly, by
+    #: every caller that predates Stage 4.
+    position: PositionEstimate
+    #: The most recent look's own flat-projection altitude -- not fused
+    #: (no altitude uncertainty model exists). See `last_position`'s own
+    #: docstring paragraph above.
+    last_alt_m: float
     last_class_raw: str
     classification: ClassificationBelief
     #: Defaults to a freshly-seeded `OP_1UNIT` claim (rather than being a
@@ -257,13 +281,44 @@ class Contact:
     last_emitted_motion: MotionState | None = None
     last_event_emitted_sim: dict[EventKind, float] = field(default_factory=dict)
 
+    @property
+    def last_position(self) -> GeoPosition:
+        """`position`'s (x, z) plus `last_alt_m` -- see `position`'s own
+        field docstring above. Read-only: `record`/`from_percept` are the
+        only writers, both via `fold_position`, never a direct assignment
+        to this property."""
+        return GeoPosition(x=self.position.x, z=self.position.z, alt_m=self.last_alt_m)
+
+    @property
+    def last_position_uncertainty_m(self) -> float:
+        """`position.radius_m()` -- the fused covariance's own scalar
+        reduction, kept under this exact pre-Stage-4 name for every reader
+        that wants a single number rather than the full `PositionEstimate`.
+        Read-only, same posture as `last_position` above."""
+        return self.position.radius_m()
+
     def record(self, percept: Percept) -> None:
         """Fold `percept` into this contact's last-known state. Called only
         by `ContactStore.ingest`, which has already decided this percept
         belongs to this contact (via the gate in `belief.
-        association_over_time`, or as this contact's founding observation)."""
-        self.last_position = implied_position(percept)
-        self.last_position_uncertainty_m = uncertainty_radius_m(percept)
+        association_over_time`, or as this contact's founding observation).
+
+        `position` is *fused* here (`belief.position_belief.fold_position`),
+        not overwritten -- unlike `last_class_raw`/`classification`'s split,
+        there is no separate "most recent raw position" field any more: the
+        percept-gate (`association_over_time.passes_gate`) reads `position.
+        covariance` directly (see that module's docstring), so there is
+        nothing left that needs the pre-fusion number."""
+        look_position = implied_position(percept)
+        self.position = fold_position(
+            self.position,
+            x=look_position.x,
+            z=look_position.z,
+            uncertainty=percept_position_uncertainty(percept),
+            look_bearing_deg=percept.bearing_deg,
+            t_sim=percept.t_sim,
+        )
+        self.last_alt_m = look_position.alt_m
         self.last_class_raw = percept.classification_raw
         incoming = new_classification_belief(
             value=percept.classification_raw,
@@ -322,11 +377,24 @@ class Contact:
 
     @staticmethod
     def from_percept(contact_id: str, percept: Percept) -> Contact:
-        """Found a new contact from its first percept."""
+        """Found a new contact from its first percept. `position` is
+        founded via `fold_position(None, ...)` -- the same call `record`
+        makes on every subsequent percept, just with no prior to fuse
+        against -- so a founding contact and a re-observed one build their
+        first covariance identically (`belief.position_belief.
+        fold_position`'s own docstring)."""
+        look_position = implied_position(percept)
         contact = Contact(
             id=contact_id,
-            last_position=implied_position(percept),
-            last_position_uncertainty_m=uncertainty_radius_m(percept),
+            position=fold_position(
+                None,
+                x=look_position.x,
+                z=look_position.z,
+                uncertainty=percept_position_uncertainty(percept),
+                look_bearing_deg=percept.bearing_deg,
+                t_sim=percept.t_sim,
+            ),
+            last_alt_m=look_position.alt_m,
             last_class_raw=percept.classification_raw,
             classification=new_classification_belief(
                 value=percept.classification_raw,
@@ -445,25 +513,38 @@ class ContactStore:
         source: str,
         sector: Sector | None = None,
         relative_sector: RelativeSector | None = None,
+        relative_clock_hour: int | None = None,
     ) -> AttentionArea:
         """Register a new `AttentionArea`, minting its `id` the same way
         `_new_contact_id`/`_new_event_id` mint theirs. Returns the stored
         `AttentionArea` (with its minted `id`) so a caller (`tools.
         watch_area`) can report it back.
 
-        Passing `relative_sector` makes this an ownship-anchored area
-        (`belief.attention`'s module docstring, second kind): `center` is
-        then only its initial projection, replaced on every
-        `reproject_relative_areas` call. `sector` and `relative_sector` are
-        mutually exclusive -- they are two different frames for the same
-        angular filter, and silently letting one win would make the
-        resulting area's behaviour depend on `area_wedge_deg`'s precedence
-        rule rather than on what the caller asked for."""
-        if sector is not None and relative_sector is not None:
+        Passing `relative_sector` or `relative_clock_hour` (Stage 5,
+        `plans/voice-command-completeness/plan.md` Decision 5) makes this
+        an ownship-anchored area (`belief.attention`'s module docstring,
+        second kind): `center` is then only its initial projection,
+        replaced on every `reproject_relative_areas` call. `sector`,
+        `relative_sector`, and `relative_clock_hour` are pairwise mutually
+        exclusive -- they are three different frames for the same angular
+        filter, and silently letting one win would make the resulting
+        area's behaviour depend on `area_wedge_deg`'s precedence rule
+        rather than on what the caller asked for."""
+        directional = [
+            name
+            for name, value in (
+                ("sector", sector),
+                ("relative_sector", relative_sector),
+                ("relative_clock_hour", relative_clock_hour),
+            )
+            if value is not None
+        ]
+        if len(directional) > 1:
             raise ValueError(
-                "add_area takes sector (compass-absolute) or relative_sector "
-                "(ownship-relative), not both -- they are two frames for the "
-                f"same angular filter, got {sector!r} and {relative_sector!r}"
+                "add_area takes at most one of sector (compass-absolute), "
+                "relative_sector (ownship-relative), or relative_clock_hour "
+                "(ownship-relative, single o'clock hour) -- they are "
+                f"different frames for the same angular filter, got {directional!r}"
             )
         area = AttentionArea(
             id=self._new_area_id(),
@@ -473,6 +554,7 @@ class ContactStore:
             source=source,
             sector=sector,
             relative_sector=relative_sector,
+            relative_clock_hour=relative_clock_hour,
         )
         self._areas[area.id] = area
         return area

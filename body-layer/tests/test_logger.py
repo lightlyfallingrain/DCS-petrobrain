@@ -14,7 +14,9 @@ fake needed -- it's already pure/fixture-testable per `test_contacts.py`).
 from __future__ import annotations
 
 import io
+import json
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
@@ -35,6 +37,7 @@ from belief.mission_phase import (
 )
 from belief.tasks import TaskStore
 from logger import (
+    DEFAULT_SPEECH_LOG_PATH,
     ConsolePerceptionRunner,
     PerceptionLogger,
     _active_gaze,
@@ -42,15 +45,18 @@ from logger import (
     _format_gaze_line,
     _poll_transcripts,
     _push_gaze_line,
+    _resolve_speech_log_path,
     _run_console_poll_loop,
     _run_console_repl,
     format_observation_line,
+    main,
 )
 from perception import association
 from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
 from perception.geometry import GeoPosition
+from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.naked_eye_source import NakedEyePerceptionSource
-from perception.source import Observation, OwnshipState
+from perception.source import DerivedWorldPosition, Observation, OwnshipState
 from store.writer import open_for_build
 
 
@@ -64,6 +70,7 @@ def _telemetry_dict() -> dict[str, Any]:
         "pitch_rad": 0.0,
         "bank_rad": 0.0,
         "altitude_msl_m": 350.0,
+        "altitude_agl_m": 350.0,
     }
 
 
@@ -400,6 +407,17 @@ def test_format_gaze_line_names_the_commanded_sector() -> None:
     assert line == "Petrovich: looking 11 o'clock (commanded left scan)"
 
 
+def test_format_gaze_line_names_a_commanded_legs_scan_generically() -> None:
+    # A `commanded_legs`-only plan (Stage 5: a bare o'clock hour, or a
+    # converted compass scan) has no single sector name to speak.
+    plan = ScanPlan(commanded_sector=None, command_t_sim=0.0, commanded_legs=(1,))
+    gaze = gaze_at(0.0, plan)
+
+    line = _format_gaze_line(plan, gaze)
+
+    assert line == "Petrovich: looking 1 o'clock (commanded scan)"
+
+
 def test_push_gaze_line_pushes_once_and_is_a_no_op_on_no_change() -> None:
     overlay_client = FakeOverlayClient()
 
@@ -583,6 +601,7 @@ def _console_telemetry_dict() -> dict[str, Any]:
         "pitch_rad": 0.0,
         "bank_rad": 0.0,
         "altitude_msl_m": 500.0,
+        "altitude_agl_m": 500.0,
     }
 
 
@@ -899,6 +918,142 @@ def test_active_gaze_picks_the_most_recently_created_pending_task() -> None:
     assert plan == ScanPlan(commanded_sector="right", command_t_sim=1.0)
 
 
+# -- Stage 5 (plans/voice-command-completeness/plan.md Decision 5):
+# compass-sector and relative_clock_hour tasks, and the absolute->relative
+# heading conversion. --------------------------------------------------------
+
+
+def _sector_area(area_id: str, sector: str) -> AttentionArea:
+    return AttentionArea(
+        id=area_id,
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=None,
+        level="watch",
+        source="scan_area",
+        sector=sector,  # type: ignore[arg-type]
+    )
+
+
+def _clock_area(area_id: str, clock_hour: int) -> AttentionArea:
+    return AttentionArea(
+        id=area_id,
+        center=GeoPosition(x=0.0, z=0.0, alt_m=0.0),
+        radius_m=None,
+        level="watch",
+        source="scan_area",
+        relative_clock_hour=clock_hour,
+    )
+
+
+def test_active_gaze_resolves_a_relative_clock_hour_task() -> None:
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _clock_area("AREA_1", 1),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan = _active_gaze(tasks)
+
+    assert plan == ScanPlan(
+        commanded_sector=None, command_t_sim=3.0, commanded_legs=(1,)
+    )
+
+
+def test_active_gaze_was_previously_silently_skipping_a_compass_only_task() -> None:
+    # The measured pre-existing defect this stage fixes: before Stage 5,
+    # `_active_gaze` only ever read `task.area.relative_sector`, so a
+    # compass-only task (`scan north`) fell through this filter entirely
+    # and the function returned `FREE_SCAN_PLAN` even though a scan was
+    # commanded and still active.
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=3.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan = _active_gaze(tasks, heading_true_deg=0.0)
+
+    assert plan != FREE_SCAN_PLAN
+    assert plan.commanded_legs is not None
+
+
+def test_active_gaze_converts_a_compass_sector_to_relative_legs_using_heading() -> None:
+    # Nose pointed north (heading 0): "scan north" should resolve to legs
+    # centered on dead ahead (12 o'clock) -- 11, 12, 1.
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan = _active_gaze(tasks, heading_true_deg=0.0)
+
+    assert plan == ScanPlan(
+        commanded_sector=None, command_t_sim=0.0, commanded_legs=(11, 12, 1)
+    )
+
+
+def test_active_gaze_compass_conversion_tracks_current_heading() -> None:
+    # Same commanded "scan north" task, but the nose is now pointed east
+    # (heading 90) -- north is 90 degrees to the left of the nose, so the
+    # resolved legs must shift accordingly (this is the "per tick, using
+    # current heading" half of Decision 5).
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan_heading_0 = _active_gaze(tasks, heading_true_deg=0.0)
+    plan_heading_90 = _active_gaze(tasks, heading_true_deg=90.0)
+
+    assert plan_heading_0 != plan_heading_90
+    assert plan_heading_0.commanded_legs == (11, 12, 1)
+    # Relative bearing of true north with the nose on 90: 0 - 90 = -90 ->
+    # dead left (9 o'clock), so the admitted legs center on 9.
+    assert plan_heading_90.commanded_legs == (8, 9, 10)
+
+
+def test_active_gaze_compass_conversion_handles_the_360_0_wrap() -> None:
+    # Optional refinement, `plans/voice-command-completeness/review.md`:
+    # Decision 2's own risk note named the 350/0/10 heading wrap as
+    # unguarded -- the reviewer hand-verified `legs_within_wedge` directly
+    # rather than through `_active_gaze`, and this file's existing compass
+    # tests only cover heading 0 and heading 90, neither of which crosses
+    # the 360/0 boundary the modulo arithmetic exists to handle. A
+    # commanded "scan north" task must resolve to the same (11, 12, 1) legs
+    # regardless of which side of the wrap the nose sits on.
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=60.0,
+        reason="scan-area",
+    )
+
+    plan_350 = _active_gaze(tasks, heading_true_deg=350.0)
+    plan_0 = _active_gaze(tasks, heading_true_deg=0.0)
+    plan_10 = _active_gaze(tasks, heading_true_deg=10.0)
+
+    assert plan_350.commanded_legs == (11, 12, 1)
+    assert plan_0.commanded_legs == (11, 12, 1)
+    assert plan_10.commanded_legs == (11, 12, 1)
+    assert plan_350 == plan_0 == plan_10
+
+
 def test_apply_active_gaze_sets_scan_plan_only_on_naked_eye_sources() -> None:
     tasks = TaskStore()
     tasks.create(
@@ -953,6 +1108,48 @@ def test_run_once_wires_the_active_gaze_onto_a_naked_eye_source() -> None:
     runner.run_once()
 
     assert naked_eye.scan_plan == ScanPlan(commanded_sector="left", command_t_sim=0.0)
+
+
+def test_run_once_compass_scan_actually_changes_naked_eye_gaze() -> None:
+    # The test that would have failed before Stage 5: a compass scan
+    # ("scan north") used to register a real `AttentionArea`/`PendingIntent`
+    # and speak a readback while `NakedEyePerceptionSource.scan_plan` stayed
+    # `FREE_SCAN_PLAN` -- the pilot heard "Scanning north" and Petrovich kept
+    # free-scanning regardless. This asserts the gaze the naked-eye source is
+    # actually handed changes, not merely that a task was registered.
+    telemetry = _telemetry_dict()  # heading_true_rad=0.0 -- nose points north
+    store = ContactStore()
+    tasks = TaskStore()
+    tasks.create(
+        "scan_area",
+        _sector_area("AREA_1", "N"),
+        created_sim=0.0,
+        deadline_sim=600.0,
+        reason="scan-area",
+    )
+    naked_eye = _naked_eye_source()
+    runner = ConsolePerceptionRunner(
+        aircraft_client=FakeAircraftClient(telemetry),  # type: ignore[arg-type]
+        sources=[naked_eye],
+        store=store,
+        tasks=tasks,
+    )
+
+    runner.run_once()
+
+    # The scan plan actually assigned to the source is a real commanded
+    # one, not free scan -- heading 0 puts north dead ahead, so the
+    # resolved legs are dead-ahead-and-either-side (11, 12, 1).
+    assert naked_eye.scan_plan == ScanPlan(
+        commanded_sector=None, command_t_sim=0.0, commanded_legs=(11, 12, 1)
+    )
+    # And the gaze it resolves to genuinely differs from what free scan
+    # would have produced at the same t_sim -- this is the property that
+    # actually matters: Petrovich's eyes moved differently because of the
+    # command, not merely that a differently-shaped object got assigned.
+    commanded_gaze = gaze_at(3.0, naked_eye.scan_plan)
+    free_scan_gaze = gaze_at(3.0, FREE_SCAN_PLAN)
+    assert commanded_gaze != free_scan_gaze
 
 
 # -- _poll_transcripts (plans/inbound-speech/plan.md Stage 3) ---------------
@@ -1066,3 +1263,311 @@ def test_poll_transcripts_skips_malformed_items() -> None:
     # Must not raise, and the well-formed second item must still dispatch.
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
     assert client.poll_count == 1
+
+
+class _RecordingCrewConsole:
+    """Stands in for `CrewConsole` in `_poll_transcripts` -- records the
+    exact arguments `handle_transcript` was called with, so a bearing
+    round trip through this function can be asserted without standing up a
+    real `EnrichmentContext`/`TaskStore` (that belongs to `test_crew_
+    console.py`'s own, deeper `handle_command`/`_handle_scan` tests)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, int | None]] = []
+
+    def handle_transcript(
+        self,
+        transcript: str,
+        confidence: float,
+        token: str | None,
+        match_ratio: float,
+        verb_anchored: bool,
+        ambiguous: bool,
+        now_sim: float,
+        bearing_degrees: int | None = None,
+    ) -> list[str]:
+        self.calls.append((transcript, token, bearing_degrees))
+        return []
+
+
+def test_poll_transcripts_threads_bearing_degrees_into_handle_transcript() -> None:
+    """`plans/voice-command-completeness/plan.md` Stage 3's own regression
+    guard: `bearing_degrees` used to be dropped at the `TranscriptEvent`
+    wire and never reached `handle_transcript` at all."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan bearing three two zero",
+                "confidence": 0.9,
+                "token": "scan_bearing_deg",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "bearing_degrees": 320,
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == [("scan bearing three two zero", "scan_bearing_deg", 320)]
+
+
+def test_poll_transcripts_skips_items_with_a_malformed_bearing_degrees() -> None:
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan bearing three two zero",
+                "confidence": 0.9,
+                "token": "scan_bearing_deg",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "bearing_degrees": "320",  # wrong type, must be skipped
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == []
+
+
+def test_a_player_command_lowers_the_binoculars() -> None:
+    """`plans/binocular-optic/plan.md` D4 ("not a special case per
+    command... the pilot asking for something is itself evidence") wired
+    through a counter rather than a callback -- `_run_crew_text_poll_loop`
+    asks "did the player ask for anything just now" by comparing
+    `CrewConsole.commands_handled` across one poll iteration, then lowers
+    the binoculars if it changed. Reproduces that exact conditional (see
+    `logger._run_crew_text_poll_loop`) rather than checking the counter and
+    `lower_binoculars` as two unrelated facts, which is what let the real
+    D4 gap (only `handle_command` incremented the counter -- a typed or
+    voice-fallthrough free-form request did not) go uncaught: a resolvable
+    F10 token always passed this test, whichever surface actually carried
+    D4's rule.
+
+    **Drives the free-form typed path** (`handle_line`, not
+    `handle_command`) -- the surface the review found broken -- and
+    asserts the binoculars actually come down as a consequence, not merely
+    that the counter moved."""
+    from belief.crew_console import CrewConsole
+    from belief.optic_policy import OpticPhase, OpticState, lower_binoculars
+
+    store = ContactStore()
+    store.ingest(
+        [
+            Observation(
+                id="OBS_1",
+                contact_id=None,
+                t_sim=0.0,
+                t_wall=0.0,
+                source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                classification_raw="BMP-2",
+                bearing_deg=0.0,
+                range_m=1000.0,
+                ownship_at_observation=OwnshipState(
+                    t_sim=0.0, x=0.0, z=0.0, alt_m=500.0, heading_true_deg=0.0
+                ),
+                derived_world_position=DerivedWorldPosition(
+                    x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+                ),
+                provenance="test_fixture",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+
+    console = CrewConsole(store=store)
+    optic_state = OpticState(
+        phase=OpticPhase.GLASSING,
+        phase_started_sim=0.0,
+        look_azimuth_deg=30.0,
+        look_elevation_deg=-5.0,
+    )
+
+    commands_before = console.commands_handled
+    readback_lines = console.handle_line(f"watch {contact_id}", now_sim=1.0)
+    assert readback_lines == [f"Watching {contact_id}."]  # a real free-form request
+
+    if console.commands_handled != commands_before:
+        optic_state = lower_binoculars(optic_state, now_sim=1.0)
+
+    assert optic_state.phase is OpticPhase.SCANNING
+    assert optic_state.look_azimuth_deg is None
+
+
+def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
+    """The no-omniscience property of the binocular trigger: a
+    presence-level contact has no believed type, so the window is sized
+    from the object model's default profile. A Petrovich who sized it by
+    what the thing really is would be deciding with knowledge he does not
+    have."""
+    from belief.optic_policy import improvement_window_m
+
+    unknown_lower, unknown_upper = improvement_window_m(
+        "OP_GROUPSOMETHING", current_level="presence"
+    )
+    assert unknown_upper > unknown_lower > 0.0
+
+    known_lower, known_upper = improvement_window_m("T-72", current_level="presence")
+    assert (unknown_lower, unknown_upper) != (known_lower, known_upper)
+
+
+# -- speech-log defaulting (plans/binocular-optic/plan.md's speech-log side
+# feature: "every not recognised command is appended to a log file, with
+# timestamp" should not require the pilot to remember a flag) ------------
+
+
+def test_speech_log_defaults_on_with_crew_text_and_speech_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    resolved = _resolve_speech_log_path(
+        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
+    )
+    assert resolved == DEFAULT_SPEECH_LOG_PATH
+    assert (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).is_dir()
+
+
+def test_speech_log_does_not_default_without_crew_text_and_speech_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    # Neither flag.
+    assert (
+        _resolve_speech_log_path(
+            speech_log=None, no_speech_log=False, crew_text=False, speech_input=False
+        )
+        is None
+    )
+    # Only one of the two.
+    assert (
+        _resolve_speech_log_path(
+            speech_log=None, no_speech_log=False, crew_text=True, speech_input=False
+        )
+        is None
+    )
+    assert (
+        _resolve_speech_log_path(
+            speech_log=None, no_speech_log=False, crew_text=False, speech_input=True
+        )
+        is None
+    )
+    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
+
+
+def test_no_speech_log_suppresses_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    resolved = _resolve_speech_log_path(
+        speech_log=None, no_speech_log=True, crew_text=True, speech_input=True
+    )
+    assert resolved is None
+    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
+
+
+def test_explicit_speech_log_wins_over_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    explicit = tmp_path / "elsewhere" / "speech.jsonl"
+    resolved = _resolve_speech_log_path(
+        speech_log=explicit, no_speech_log=False, crew_text=True, speech_input=True
+    )
+    assert resolved == explicit
+    # No default-path directory creation happens on the explicit-path route.
+    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
+
+
+def test_speech_log_default_degrades_to_none_when_directory_is_unwritable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unwritable default location must not stop the logger from
+    starting -- it degrades to no log and says so on stderr, exactly the
+    posture `CrewConsole._log_transcript`'s own per-write try/except
+    already has."""
+    monkeypatch.chdir(tmp_path)
+
+    def _boom(self: Path, parents: bool = False, exist_ok: bool = False) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _boom)
+
+    resolved = _resolve_speech_log_path(
+        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
+    )
+
+    assert resolved is None
+    assert "speech-log" in capsys.readouterr().err
+
+
+def test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--speech-log` and `--no-speech-log` together must be rejected by
+    `main()`'s own argparse validation, the same posture as the other
+    `parser.error` mutual-exclusivity checks in this file."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--theatre",
+            "Syria",
+            "--world-model-db",
+            str(tmp_path / "wm.sqlite"),
+            "--crew-text",
+            "--speech-input",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
+            "--speech-log",
+            str(tmp_path / "speech.jsonl"),
+            "--no-speech-log",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """Not just a writer unit test: wires a real `SpeechLogWriter` through
+    `CrewConsole.transcript_log` the same way `main()` does, then confirms
+    a genuinely unrecognised (`say_again`) utterance lands in the file --
+    the exact case the user wants to later mine for what gets garbled or
+    mistranscribed."""
+    from speech_log import SpeechLogWriter
+
+    log_path = tmp_path / "speech.jsonl"
+    writer = SpeechLogWriter(log_path)
+    console = CrewConsole(store=ContactStore(), transcript_log=writer.write)
+
+    # verb_anchored=True, token=None: heard as an attempted command but
+    # nothing matched -- classify_response's say_again route.
+    console.handle_transcript(
+        transcript="scan uh the thing",
+        confidence=0.9,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["transcript"] == "scan uh the thing"
+    assert row["disposition"] == "say_again"
+    assert row["acted_token"] is None
+    assert "t_wall" in row

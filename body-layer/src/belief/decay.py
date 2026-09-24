@@ -70,7 +70,7 @@ IDENTITY_HALF_LIFE_S: Final[float] = 600.0
 
 #: Fastest-decaying attribute: the exact perceived position. Chosen as the
 #: order-of-magnitude time a ground vehicle needs to move roughly its own
-#: uncertainty radius at `association_over_time.GATE_GROWTH_RATE_MPS`
+#: uncertainty radius at `belief.position_belief.GATE_GROWTH_RATE_MPS`
 #: (20 m/s) -- i.e. "trust the exact spot for about half a minute, then
 #: start hedging." This is the one half-life `certainty_of` below actually
 #: uses to separate "tracked" from "estimated".

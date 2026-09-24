@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from perception.source import Observation, OwnshipState
+from perception.source import Observation, OwnshipState, PositionUncertainty
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +61,13 @@ class Percept:
     unchanged, for the same reason (`plans/movement-detection/plan.md`):
     `perception.motion.is_apparently_moving`'s tri-state verdict is
     perceived metadata, not a truth field -- the velocity vector it was
-    computed from never reaches this side of the boundary at all."""
+    computed from never reaches this side of the boundary at all.
+
+    `position_uncertainty` carries `Observation.position_uncertainty`
+    through unchanged (`plans/precise-position-belief/plan.md` Stage 1) --
+    the channel's own declared error ellipse for `bearing_deg`/`range_m`,
+    perceived metadata on the same footing as everything else on this
+    dataclass, never a truth field."""
 
     t_sim: float
     source: str
@@ -74,6 +80,7 @@ class Percept:
     continues_observation_id: str | None = None
     count_bucket: str | None = None
     apparent_motion: bool | None = None
+    position_uncertainty: PositionUncertainty | None = None
 
 
 def percept_of(observation: Observation) -> Percept:
@@ -94,4 +101,5 @@ def percept_of(observation: Observation) -> Percept:
         continues_observation_id=observation.continues_observation_id,
         count_bucket=observation.count_bucket,
         apparent_motion=observation.apparent_motion,
+        position_uncertainty=observation.position_uncertainty,
     )
