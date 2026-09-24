@@ -970,7 +970,103 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   **unbenched** tokens (no recordings in this corpus), the same cost class as `cancel_scan`/
   `cancel_watch` before 2026-09-23 -- next corpus recording's job. **Unflown as of merge.**
 
+- [x] **Watch reporting — Stages 1 through 5. DONE**, `feature/watch-reporting`. A watched
+  contact now reports itself unprompted on three new triggers, plus `follow` becomes both a
+  `watch` synonym and a new best-match way to *name* which contact to watch.
+
+  **Stage 1 — movement.** `CONTACT_MOTION_CHANGED` has fired since `movement-detection` and was
+  never spoken; `belief.callouts._WATCHED_ONLY_KINDS` gates it at the speech layer (not at
+  emission), so a contact watched *after* its motion event already fired still gets the callout.
+  `_contact_report_text` gained `lead`/`event_clause` affixes reused by every later stage.
+  `WATCH_REPORT_MIN_GAP_S` bounds how often one contact can interrupt with watched-only speech,
+  independent of `EVENT_COOLDOWN_S`.
+
+  **Stage 2 — kilometre range crossings.** `CONTACT_RANGE_CROSSED`, gated and bookkept *at
+  emission* in `ContactStore.tick`'s new sixth block (the opposite placement from Stage 1's
+  events, since the bookkeeping — `Contact.last_announced_range_km` — only means anything for a
+  watched contact). Seeds silently on first watch. Gated on `certainty_of` so a decayed position
+  never manufactures a crossing nobody observed. The trigger's deadband is derived from
+  `PositionEstimate.range_uncertainty_m` (new, `bearing_uncertainty_deg`'s down-range mirror) —
+  floored/ceilinged rather than a bare tuned constant, forced by `precise-position-belief`
+  landing underneath this plan mid-design and turning the input from a step function into a
+  continuous, noisy one.
+
+  **Stage 3 — `follow`.** 3a: `follow nearest`/`follow nearest air defence`/`stop following`/
+  `cancel follow` as free phrasings on the existing `watch_nearest`/`watch_nearest_air_defence`/
+  `cancel_watch` tokens (`audio-adapter`, zero body-layer change). 3b: `MatchResult`/
+  `TranscriptEvent`/`PendingConfirmation`/`handle_command`/`handle_transcript` all migrate their
+  single-purpose `bearing_degrees` field to a generic `slots: dict[str, int | str] | None` — a
+  breaking wire change between `audio-adapter` and `body-layer`, cheap because both are Mac-local
+  processes restarted together, done while there was exactly one slot in flight rather than
+  after `follow` added three more. 3c: `follow [<descriptor>] [<clock> o'clock] [<n> km]` — a new
+  `follow` token whose three qualifiers are parsed slots, not enumerated phrases (the
+  cross-product is in the hundreds); resolved by `_resolve_follow_target`, a scored best-match
+  over the qualifiers, explicitly framed in its own docstring as a stopgap for the brain layer
+  (user's own words) to be deleted, not extended, once free-text targeting exists.
+
+  **Stage 4 — engagement envelopes.** `belief/threat.py` (new module) reads
+  `body-layer/data/threat_envelopes.json` (28 Hoggit-derived entries, committed with its saved
+  source page as provenance) and exposes `envelope_for(ClassificationBelief)` — the structural
+  no-omniscience guard, since the signature cannot accept the type that would carry ground
+  truth. Class-level envelopes are *derived* at import by joining the table through
+  `perception.object_model.profile_for`, not hand-written (though the join rate against this
+  particular table turned out low — see Notable Discoveries in `plans/watch-reporting/
+  implementation.md`). `ContactStore.tick`'s seventh block ANDs three independent ways to be
+  safe (out of range / under the altitude floor / behind a ridge), a 1.5x Schmitt trigger on the
+  leaving side, and a fail-open, uncertainty-swept LOS term with an asymmetric dwell
+  (`LOS_MASK_CONFIRM_S`) — a masked verdict needs to hold before it clears a danger call; a clear
+  verdict takes effect immediately. Engagement is the one watched-only kind that does **not**
+  silently seed: a contact recognised already inside its envelope fires immediately, since that
+  is exactly the late-recognition warning this trigger exists for. Speech: `"Danger, <unit>..."`/
+  `"Safe from <unit>..."` via `_contact_report_text`'s `lead` affix, `STATE_TRANSITIONS.md`'s own
+  wording. **The practical value of this trigger is gated on an optic that does not exist yet**
+  (the 9K113) — see the deferred-9K113 backlog entry below, un-deferred in reasoning but not in
+  scope by this plan.
+
+  Full design and every measured/decided number: `plans/watch-reporting/plan.md`,
+  `plans/watch-reporting/implementation.md`.
+
 ## Backlog (body-layer)
+
+- [ ] **Threat-database follow-on extraction: search/track radar + acquire time — raised
+  `plans/watch-reporting/plan.md` Decision 4f-iii, 2026-09-24.** The Hoggit source page (saved
+  beside `body-layer/data/threat_envelopes.json` for exactly this) carries `Track RADAR`/`Search
+  RADAR` columns with HARM codes and an acquire-time column; none of it is in the extracted
+  payload. Both are worth a *later* pass, not the one that just landed:
+  - **Search/track radar is detection range, a different and longer claim than weapon range** —
+    being tracked at 12 NM by a gun that reaches 2 NM is information, not a threat. Natural home of
+    a future "he's looking at us" warning (a slewed dish is *observable*, not an omniscience
+    problem) — needs a behaviour-change channel that does not exist yet, so the data would sit
+    unused if extracted now.
+  - **Acquire time** would decide whether a fast crossing pass actually gets engaged — needs a
+    time-in-envelope model nothing in this codebase has.
+  Re-extract from the already-saved HTML; no re-fetch needed.
+
+- [ ] **`OP_SRSAM`'s ~4x-7x internal range spread makes its class-level danger call early and
+  often badly wrong in magnitude — recorded, not fixed, `plans/watch-reporting/plan.md` Decision
+  4c, 2026-09-24.** `belief.threat._CLASS_ENVELOPES`'s derived rollup for `OP_SRSAM` is driven by
+  whichever member has the longest reach in the extracted table (S-125/SA-3 at 25.0 km,
+  `body-layer/data/threat_envelopes.json`) while the bucket also holds SA-8/SA-9/SA-13/SA-15, some
+  under 6 km — a pilot told "danger" at 25 km for what turns out to be an SA-13 is being warned
+  roughly 4-7x earlier than the real threat. Tightens automatically once type-level recognition
+  resolves which member it actually is; this is a property of this project's own `op_class`
+  buckets grouping systems with a wide range spread, not a defect in the belief-keyed lookup
+  design, and should be recorded against the buckets (a future `object_model.py`/classification
+  pass) rather than patched in `threat.py`.
+
+- [ ] **`belief.threat`'s class-level rollup only actually joined 3 of ~19 SAM/AAA threat rows into
+  a class bucket on the real table — found during `watch-reporting` implementation, 2026-09-24.**
+  `_derive_class_envelopes` joins `body-layer/data/threat_envelopes.json`'s `threat` names through
+  `perception.object_model.profile_for` by design (Decision 4c: computed, not hand-written), but
+  `object_model`'s keyword table was authored against DCS unit names, not Hoggit's wiki names, and
+  most rows (Kub, Tor, Tunguska, Rapier, Roland, Chaparral, Hawk, Patriot, NASAMS, S-75, S-300, …)
+  do not share a matching substring with any `_KEYWORD_PROFILES` entry, so `envelope_for` at
+  `CLASS` level currently only resolves for `OP_ZU23`/`OP_SPAAG`/`OP_SRSAM` (the last via S-125
+  alone) — every other SAM tier's class-level warning is silently absent until either
+  `object_model.py`'s keyword table gains matching entries or `TYPE`-level recognition supplies the
+  specific row directly (which already works correctly for every row, independent of this gap).
+  Not a defect in the join mechanism itself (a hand-authored patch here is exactly what Decision 4c
+  warns against) — the fix belongs in `object_model.py`'s own keyword coverage.
 
 - [x] **`OP_LRSAM` folded into the air-defence command classes — merged 2026-09-24
   (`fix/lrsam-air-defence`).** "Watch nearest air defence" could not select an S-300:

@@ -38,11 +38,16 @@ deterministic tools since BL-6. Every free-text utterance already arrives correc
 `NullBrainClient` and is dropped. So this is not an integration project; it is a model loop plugged
 into an interface that has been waiting for it.
 
+**`watch-reporting` is done, merged 2026-09-24** (`feature/watch-reporting`, all five stages) —
+`plans/watch-reporting/plan.md`/`implementation.md`, `body-layer/ROADMAP.md`'s Status entry. Adds
+`belief/threat.py` (the module BL-8's Stages 3/5 sit underneath) and threat.py's provenance data
+is now committed. **Unflown**, same "merge before flying" posture as the three milestones above —
+add it to the next acceptance card.
+
 **Recommended next move: `/explore` the brain layer with the user before any architect pass.**
 This project's repeated pattern is that the decisive constraint arrives *after* implementation
-starts and reverses it. The alternative, lower-risk move is to build `watch-reporting` (plan ready,
-Decision 5a amended) — it sits underneath BL-8's Stages 3 and 5 and produces `threat.py`.
-`plans/bl8-memory/plan.md` is also ready, decisions resolved.
+starts and reverses it. `plans/bl8-memory/plan.md` is also ready, decisions resolved, and is now
+unblocked on `threat.py` existing.
 
 **Done 2026-09-24, no longer gated:** re-enabled `performance-reviewer` and `security`, running
 **once per whole feature, before DoD, not mid-feature** (user, 2026-09-24). Scoping in the user's
@@ -109,6 +114,18 @@ surface and inbound speech capture).
     outer — so "Observ off" means the sight genuinely cannot see, not merely that it is unselected).
   - **Depends on mode selection**, which is cones slice 2. An optic nothing can select is table data
     nothing reads — the reason the 9K113 entries were cut from slice 1 in the first place.
+  - **`plans/watch-reporting/plan.md` Stage 4 (merged 2026-09-24) makes the strongest case yet for
+    revisiting this deferral, and it is a different argument than the one that shelved it.** The
+    9K113 was deferred as *more detail* — a third optic when two already worked. The case now is
+    *identify the thing before it can shoot you*: class-level recognition (`recognition_extent_m /
+    MEDRES_ANGULAR_RADIUS_RAD × optic.class_range_mult`) against a ZSU-23-4's own 2 NM (3,704 m)
+    envelope resolves at 500 m unaided (13% of the way in) and 1,750 m through binoculars (47% in
+    — already inside engagement range either way), but **3,500 m through the 9K113 wide field** —
+    the envelope's own edge. It is the only optic in the table whose class-range multiplier
+    reaches a SHORAD envelope's edge rather than deep inside it, and its multipliers (wide
+    3.55/7.00/6.50) are already measured and sitting in `perception/optics.py`'s module docstring,
+    waiting for a slice that wires them. Full arithmetic: `plans/watch-reporting/plan.md` Decision
+    4d.
   - Also recorded there and relevant: the operator commands an angular **rate**, not a position, so
     pointing the sight costs time proportional to angular distance; the gyro-stabilised head needs
     **~3 minutes** from power-on before it is ready; and launch entry requires the sight line within
