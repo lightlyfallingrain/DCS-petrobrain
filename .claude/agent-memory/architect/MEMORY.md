@@ -53,3 +53,5 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Watch reporting design](project_watch_reporting_design.md) — the _TEMPLATED_KINDS speech allowlist; envelope lookup keyed on belief by signature; range/altitude/LOS threat test; nulls degrade per-field, not uniformly; slots replaced per-command wire fields.
 - [Binocular Stage 3b](project_binocular_stage3b.md) — the mock-flight xfail names the wrong cause (search, not stare); never read last_position_uncertainty_m as a bearing error.
 - [Voice command completeness](project_voice_command_completeness.md) — absolute-vs-relative frame rule for direction vocabulary; rename what survives, not what's retired; _print owns speech occupancy.
+- [BL-8 kneeboard design](project_bl8_kneeboard_design.md) — append-only note store beside ContactStore; the fold door is deliberately shut; import-direction is the real invariant.
+- [Amend plans when the ground shifts](feedback_amend_plans_when_ground_shifts.md) — amend unimplemented plans in place, say what forced it, reuse the branch's existing damper patterns.

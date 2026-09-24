@@ -749,7 +749,9 @@ wrong `range_max_m` produces a confidently wrong danger call and does not announ
 
 ### Decision 5 — the kilometre trigger, and the decay trap in it
 
-Straightforward, with one non-obvious correctness rule.
+Straightforward, with one non-obvious correctness rule — **and, since 2026-09-24, one amendment
+forced by a change underneath it: see 5a below, which supersedes the bare `floor()` in the first
+bullet.**
 
 - New `Contact.last_announced_range_km: int | None`.
 - In `tick`, for a watched contact with `ownship_position` supplied:
@@ -776,6 +778,79 @@ Note this is a *different* question from whether to report at all — an `"estim
 watched, keeps its `last_announced_range_km`, and resumes announcing on reacquisition. Only the
 *claim* is withheld, exactly as `render_no_view` withholds an absence claim rather than the belief.
 
+#### 5a — amendment (2026-09-24): the trigger's input stopped being a step function
+
+**This amendment was forced by `plans/precise-position-belief/` merging, not by a review of this
+plan's own reasoning.** Decision 5 was designed when `Contact.last_position` moved in discrete
+~500 m quantised buckets: jumps were infrequent, noise-free, and a bare `floor(range / 1000)` was a
+faithful reading of the belief. `last_position` is now a *derived read* of a continuously fused
+`PositionEstimate` carrying per-look noise — the plan's own "Second-order effects" section predicted
+this would make the trigger *better* ("a continuous position makes the trigger mean what it says"),
+and it does, but it also introduces two failure modes the staleness gate above does not touch:
+
+1. **Jitter across a kilometre boundary.** Two successive looks on a contact sitting near 3000 m can
+   put the fused mean either side of the line. The old bucketing made this impossible; nothing in
+   Decision 5 as written prevents it, and each flip is a spoken report.
+2. **A borderline `line_of_sight_clear` verdict flipping frame to frame** near a ridge (Decision 4f-ii
+   makes losing LOS *clear* a danger state, so this is now a real transition, not a cosmetic one).
+   This was already logged in Risks as "if it proves audible the fix is a dwell on the LOS term" —
+   the amendment promotes that from contingency to design, because the position change makes the
+   threat's end of the sightline move continuously too.
+
+**Reuse, do not invent.** Two patterns already exist on this branch for exactly this shape and the
+amendment uses both rather than adding a third:
+
+- **The Schmitt trigger of Decision 4e** (enter at `1.0 ×`, leave at `1.5 ×` max range) — a deadband
+  around a boundary so a value hovering on it cannot flap.
+- **`belief.motion.fold_motion`'s asymmetric confirm-window** (`belief.decay.MOTION_STOP_CONFIRM_S`
+  + a `pending_*_since_sim` field): promote on the first positive reading, demote only after the
+  contradicting reading has held continuously. Its module docstring names the flapping case
+  explicitly as what the asymmetry exists to stop.
+
+**Amendment 5a-i — the kilometre deadband is the belief's own uncertainty, not a tuned constant.**
+
+Add `PositionEstimate.range_uncertainty_m(observer)` — the exact down-range mirror of the existing
+`bearing_uncertainty_deg`, projecting the covariance onto the ownship→contact bearing instead of its
+perpendicular. Then:
+
+- A crossing into kilometre band `k` is only announced once `range_m` is **at least
+  `range_uncertainty_m` past the boundary** into `k`. A precise estimate re-arms almost immediately;
+  a noisy one has to actually mean it.
+- **Floor it** at `RANGE_CROSS_MIN_DEADBAND_M = 50.0` so a very tight estimate still gets a minimal
+  Schmitt gap, and because a zero deadband is a silent reintroduction of the bug.
+- **Ceiling: suppress entirely** when `range_uncertainty_m > RANGE_CROSS_MAX_SIGMA_M = 500.0` — half
+  a kilometre band. At that point the estimate cannot resolve *which kilometre it is in*, so the
+  report has no content. This catches a case the `certainty_of` freshness gate above misses
+  completely: a **fresh** single-look contact at long range is `"observed"` and passes that gate,
+  while being nowhere near precise enough to name a kilometre mark.
+
+The value of deriving the deadband from the estimate rather than declaring it: it needs no
+calibration sortie, and it degrades in the right direction automatically as the position milestone's
+own constants are tuned.
+
+**Amendment 5a-ii — the LOS term gets an asymmetric dwell, in the fail-open direction.**
+
+Declare `LOS_MASK_CONFIRM_S: Final[float] = 5.0` in `belief/decay.py` — beside
+`MOTION_STOP_CONFIRM_S`, which is the module that owns this project's named-seconds constants, and
+with the same uncalibrated-placeholder status. Then, per watched contact with a resolved envelope:
+
+- A **clear** verdict (the threat can see us) takes effect **immediately**. No dwell.
+- A **masked** verdict may only clear a danger state after holding continuously for
+  `LOS_MASK_CONFIRM_S`; an intervening clear sample resets the countdown. State lives in a
+  `los_masked_since_sim: float | None` field on `Contact` — `motion_pending_stop_since_sim`'s direct
+  twin, same shape, same reset rule.
+
+The asymmetry is the same argument 4f-ii-a already makes for fail-open sampling: a false danger call
+costs a glance, a missed one costs the aircraft. Note the dwell is *not* a speech suppressor — it
+damps the underlying state, which is what the Risks entry insisted on ("**not** a fourth suppression
+constant applied to speech"). `EVENT_COOLDOWN_S` and `WATCH_REPORT_MIN_GAP_S` keep their existing
+jobs unchanged.
+
+**Two tests, both of which fail against the unamended design:** a contact held at exactly 3000 m with
+per-look noise across twenty polls must produce at most one `CONTACT_RANGE_CROSSED`; and an
+`los_clear` lambda alternating true/false every poll must not toggle the danger state at the poll
+rate.
+
 ---
 
 ### Implementation Plan
@@ -790,7 +865,9 @@ watched contact says anything unprompted. Flyable alone, body-layer only.
 **Stage 2 — kilometre crossings.** `CONTACT_RANGE_CROSSED` in `events.py`;
 `Contact.last_announced_range_km`; `tick` gains `ownship_position`; the sixth block in the loop;
 `logger.run_once` passes the `GeoPosition` it already builds. The freshness gate and its named test.
-Flyable alone; body-layer only.
+**Plus Decision 5a-i**: `PositionEstimate.range_uncertainty_m`, the uncertainty-derived deadband,
+`RANGE_CROSS_MIN_DEADBAND_M`/`RANGE_CROSS_MAX_SIGMA_M`, and the twenty-poll jitter test. Flyable
+alone; body-layer only.
 
 **Stage 3 — `follow`.** Split in two, and 3a is worth shipping on its own:
 - **3a — the synonym.** `vocabulary.py` phrasings only. Needs an audio-adapter redeploy (Mac-side),
@@ -863,6 +940,16 @@ for Stage 3.
   `WATCH_REPORT_MIN_GAP_S` (8 s) bound how often that reaches speech, but the underlying state will
   chatter in the event log, and if it proves audible the fix is a dwell on the LOS term — **not** a
   fourth suppression constant applied to speech.
+  **Superseded 2026-09-24 by Decision 5a-ii**: the dwell is now designed in rather than held as a
+  contingency (`LOS_MASK_CONFIRM_S`, asymmetric in the fail-open direction), because the
+  precise-position merge made the threat's end of the sightline move continuously as well. The
+  remaining risk is that 5 s is an uncalibrated guess and too long a dwell delays the
+  duck-behind-a-ridge clearing the pilot is looking for.
+- **The kilometre report can now go silent for a reason nobody asked for** (Decision 5a-i's
+  `RANGE_CROSS_MAX_SIGMA_M` ceiling). A distant, freshly-seen contact passes the `certainty_of`
+  freshness gate and still says nothing, because its down-range sigma exceeds half a band. That is
+  correct — he genuinely cannot tell which kilometre it is in — but from the cockpit it is
+  indistinguishable from the feature not working, so it belongs in the sortie card.
 - **`line_of_sight_clear` now costs three sampled elevation walks per watched threat per poll**
   (4f-ii-a's uncertainty sweep). Bounded by watched contacts with a resolved envelope, not by contact
   count, but it is the first time this project calls the primitive outside the perception gate. If a
