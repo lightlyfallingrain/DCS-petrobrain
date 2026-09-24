@@ -140,7 +140,12 @@ aircraft position, which is body-layer's job) and `key_locations` keyed by locat
 
 ---
 
-## Part B — Sortie
+## Part B — Sortie · BLOCKED, do not attempt
+
+**B1–B3 cannot be run today.** Loading the artifact works, but mission phase reaches no
+pilot-reachable code path — there is no crew command that surfaces it, and phase does not feed
+attention or callout ordering. Flying this half would measure nothing. Kept below for when that
+gap closes.
 
 ### B1 · Start body-layer with the mission
 
@@ -155,9 +160,11 @@ cd /Users/sg/Code/DCS-petrobrain/body-layer
 
 **UNVERIFIED** — needs DCS.
 
-Note: the flag's help text says "only meaningful with `--console`". **That help text is stale** —
-the phase tracker is wired into the `--crew-text` path too. Worth confirming in flight, since this
-card is the first time anyone has run it that way.
+**CORRECTED 2026-09-24 (this card was wrong).** An earlier version called the flag's
+"only meaningful with `--console`" help text stale, on the grounds that the phase tracker is passed
+into the `--crew-text` paths. It is passed — and nothing there reads it. `mission_phase` appears in
+four body-layer files and none of them is `attention.py`, `callouts.py` or `crew_console.py`. The
+help text is effectively correct. See `body-layer/ROADMAP.md`'s open BL-7 entry.
 
 ### B2 · Does phase tracking follow the flight
 
@@ -198,3 +205,27 @@ chose to report — did it feel like he knew what the flight was for?
 7. Did mission context change what he reported? (B3)
 
 **Anything that surprises you is worth more than anything on this list.**
+
+---
+
+## Results — 2026-09-24
+
+Run against three real missions: `MI24-outpost-M03.miz`, `M04`, `M06` (Syria, built for this test).
+
+| Block | Verdict |
+|---|---|
+| A1 · gets through | **pass** |
+| A2 · player questions | **kinda pass** — asked threat confirmations only (*"is this threat &lt;description&gt; real?"*), accepted yes/no. *"Will do for now, needs further work."* |
+| A3 · did it understand the mission | **pass** — *"well enough for first iteration implementation"* |
+| A4 · author-only boundary | **pass** — no hidden-group leak against real content |
+| A5 · compact artifact | **pass with a wart** — unicode in place names; likely already fixed in the world-model builder and simply not rebuilt into the store being served. Unconfirmed. |
+| B1–B3 | **not run** — nothing pilot-reachable consumes the artifact (see above) |
+
+**Wall-clock:** 1:12 with `qwen3:14b` already resident · 3:19 cold · 2:28 warm-ish. The first run of
+a session pays roughly two extra minutes for model load alone. MI is a minutes-scale pre-mission
+pass, not an interactive one.
+
+**What came out of it:**
+- MI-5's question set is threat-confirmation only in practice — ownship, purpose and task
+  ambiguities produced no questions on any of the three missions. Backlog, `mission-interpreter/ROADMAP.md`.
+- BL-7 is complete as designed and unreachable in flight. New open item in `body-layer/ROADMAP.md`.

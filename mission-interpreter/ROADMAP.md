@@ -119,6 +119,51 @@ Milestones below are from `plans/mission-interpreter/plan.md`'s Implementation P
   explicitly out of this plan's scope. This is the last planned Mission Interpreter stage per the
   parent plan's original stage list.
 
+## First real acceptance — 2026-09-24
+
+**MI ran end to end against three missions the pilot actually intends to fly**
+(`MI24-outpost-M03/M04/M06.miz`, Syria), the first time it has faced anything other than the
+committed synthetic fixture or the third-party Bagram sample. Card:
+`docs/acceptance/2026-09-24-mission-interpreter-sortie.md`.
+
+**Desk half: pass.** A1 (completes end to end), A3 (mission understanding — *"well enough for first
+iteration implementation"*) and A4 (author-only-knowledge boundary — no hidden-group leak against
+real content, not a fixture) all passed.
+
+**Wall-clock, three runs:** 1:12 with `qwen3:14b` already resident, 3:19 cold (model load
+dominates), 2:28 warm-ish. Worth knowing before anyone treats MI as interactive: the pre-mission
+pass is minutes, not seconds, and the first run of a session pays roughly two extra minutes for the
+model load alone.
+
+**A2 — MI-5's question set is narrower than the stage claims.** In practice it asked only threat
+confirmations (*"is this threat &lt;description&gt; real?"*), accepting yes/no. Pilot's verdict:
+*"kinda pass ... will do for now, needs further work."* The ambiguity detector is doing its job for
+threats and effectively nothing else — ownship, purpose and task ambiguities did not produce
+questions on any of the three missions. Backlog, not a regression: MI-5 was never claimed to be
+exhaustive, but the gap between "player questions" and "threat confirmations" is wide enough to
+name.
+
+**A5 — unicode in place names** surfaced in the compact artifact. Probably already fixed upstream
+in the world-model builder and simply not rebuilt into the store the server is reading; unconfirmed
+until a rebuild. Not blocking.
+
+**B (sortie half) could not be run at all — see the finding below.**
+
+### MI-6's artifact reaches body-layer and then stops
+
+`body-layer`'s `--mission-understanding` loads the compact artifact and `MissionPhaseTracker`
+updates every poll, but **no code path a pilot can reach in flight reads it.** `mission_phase`
+appears in exactly four body-layer files (`console.py`, `tools.py`, `mission_phase.py`,
+`tool_api.py`) — *not* `attention.py`, not `callouts.py`, not `crew_console.py`. BL-7's
+phase-proximity tie-break is real but lives inside `_highest_attention_contact`, whose only caller
+is `get_situation`, whose only caller is the `--console` debug harness. The brain layer that would
+otherwise call the tool API is still `NullBrainClient`.
+
+So BL-7 is complete as designed and **currently unreachable in a sortie**: mission phase changes
+nothing about what Petrovich attends to or says. Closing that is a body-layer question (a
+crew-facing way to ask for the situation, or phase feeding attention directly), tracked in
+`body-layer/ROADMAP.md`, not more Mission Interpreter work.
+
 ## Keeping this current
 
 See root `ROADMAP.md`'s "Keeping this current" note -- this file is the source of truth for Mission
