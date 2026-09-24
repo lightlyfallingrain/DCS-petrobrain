@@ -4,9 +4,8 @@ Fixes a live defect: Petrovich reported `"couple contacts, 4 o'clock, 87.5 kilom
 10 km detection cap. Four distinct defects were found and fixed under this one report, plus one
 unrelated speech bug caught along the way.
 
-**Branch: `fix/position-belief-runaway`, not yet merged.** DoD (format/lint/type/test, Reviewer,
-Security) is complete and clean at the time this card was written; this card is written for the
-**Merged 2026-09-25 (`bfbcf8d`).** Everything is on `main`, alongside the three other outstanding
+**Merged 2026-09-25 (`bfbcf8d`).** DoD — format, lint, type check, tests, Reviewer, Security — is
+complete and clean. Everything is on `main`, alongside the three other outstanding
 cards — one checkout covers all four:
 
 ```sh
@@ -24,16 +23,15 @@ four sorties of live-acceptance debt, this one included — do not treat this as
 outstanding.
 
 **This one is a precondition for the eyes-and-voice card's position-belief items making sense.**
-The eyes-and-voice card was written against the buggy position belief; flying it before this
-branch merges risks re-finding the same 87.5 km defect and re-reporting it as new. Once this
-branch merges, fly this card first (or fold both into one flight — nothing here needs a separate
-setup) before judging eyes-and-voice's position-related items.
+That card was written against the buggy position belief, so flying it beforehand would have risked
+re-finding the same 87.5 km defect and reporting it as new. It has merged, so those items are now
+judgeable — fly this card first, or fold both into one flight, since nothing here needs a separate
+setup.
 
 ## Setup — nothing to redeploy
 
-No Windows-side change. Only `body-layer/` is touched (`git diff --stat main..fix/
-position-belief-runaway` confirms it — `Export.lua`, the Hook scripts, and the collector are
-untouched). Same processes, same flags as prior sorties:
+No Windows-side change. Only `body-layer/` was touched — `Export.lua`, the Hook scripts and the
+collector are untouched. Same processes, same flags as prior sorties:
 
 - Windows: collector, and capture with `--ptt dcs`
 - Mac: `run-scripts/run-audio-adapter.sh`, then `run-scripts/run-crew-text.sh` (add
