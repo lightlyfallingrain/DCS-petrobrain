@@ -111,6 +111,7 @@ EventKind = Literal[
     "CONTACT_ATTENTION_CHANGED",
     "CONTACT_CARDINALITY_CHANGED",
     "CONTACT_MOTION_CHANGED",
+    "CONTACT_RANGE_CROSSED",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
@@ -120,6 +121,16 @@ CONTACT_CLASSIFICATION_CHANGED: Final[EventKind] = "CONTACT_CLASSIFICATION_CHANG
 CONTACT_ATTENTION_CHANGED: Final[EventKind] = "CONTACT_ATTENTION_CHANGED"
 CONTACT_CARDINALITY_CHANGED: Final[EventKind] = "CONTACT_CARDINALITY_CHANGED"
 CONTACT_MOTION_CHANGED: Final[EventKind] = "CONTACT_MOTION_CHANGED"
+#: `plans/watch-reporting/plan.md` Stage 2 -- a watched contact's whole-
+#: kilometre range mark (inside `WATCH_RANGE_REPORT_MAX_KM`) changed since
+#: it was last announced. Unlike every kind above, this one is **gated (and
+#: its own per-contact bookkeeping kept) at emission**, in `ContactStore.
+#: tick`'s own sixth block, not derived from a pure comparison function in
+#: this module -- see that block's docstring for why: the bookkeeping
+#: (`Contact.last_announced_range_km`) is only meaningful for a watched
+#: contact, and computing/emitting it for every contact in the theatre
+#: would flood the event log with reports nobody watching would ever read.
+CONTACT_RANGE_CROSSED: Final[EventKind] = "CONTACT_RANGE_CROSSED"
 
 ClassificationDirection = Literal["refined", "contradicted"]
 
@@ -183,6 +194,15 @@ class Event:
     #: "the other belief snapshots are already plain values" precedent.
     previous_motion: MotionState | None = None
     motion: MotionState | None = None
+    #: `plans/watch-reporting/plan.md` Stage 2's addition, same
+    #: default-`None`-everywhere-else shape as every belief-snapshot pair
+    #: above -- only a `CONTACT_RANGE_CROSSED` event populates them. The
+    #: whole-kilometre band the contact was in before/after the crossing
+    #: (`Contact.last_announced_range_km`'s own snapshot shape), not the
+    #: raw range in metres -- a console/debug reader wants the same figure
+    #: `_contact_report_text` would say, not the un-rounded number.
+    previous_range_km: int | None = None
+    range_km: int | None = None
 
 
 def lifecycle_event_kind(

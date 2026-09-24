@@ -478,7 +478,10 @@ class ConsolePerceptionRunner:
         ]
         self.store.ingest(observations, now_sim=ownship.t_sim)
         events_before = len(self.store.events)
-        self.store.tick(ownship.t_sim)
+        # `plans/watch-reporting/plan.md` Stage 2 -- `ownship` is already in
+        # hand at this call site; `ContactStore.tick`'s sixth block (range
+        # crossings) is a no-op without it.
+        self.store.tick(ownship.t_sim, ownship=ownship)
         self.tasks.tick(self.store, ownship.t_sim)
         self.last_t_sim = ownship.t_sim
         if self.overlay_client is not None:

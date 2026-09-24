@@ -1077,3 +1077,34 @@ def test_watch_report_min_gap_allows_a_callout_once_it_elapses() -> None:
 
     past_gap = WATCH_REPORT_MIN_GAP_S + 1.0
     assert scheduler.tick(store, now_sim=past_gap) == ["BMP-2, moving."]
+
+
+# --- watched-only speech: CONTACT_RANGE_CROSSED (plans/watch-reporting/
+# plan.md Stage 2) ------------------------------------------------------
+
+
+def test_watched_contact_speaks_a_range_crossing() -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                classification_level=3,
+                ownship_x=0.0,
+                ownship_z=0.0,
+                dwp_x=4500.0,
+                dwp_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4
+    store.tick(now_sim=1.0, ownship=_ownship(x=1500.0))  # range=3000 -> km=3
+
+    scheduler = CalloutScheduler()
+    spoken = scheduler.tick(store, now_sim=1.0)
+    assert spoken == ["BMP-2."]  # unenriched, classification_raw as-is

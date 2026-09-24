@@ -72,6 +72,7 @@ from belief.events import (
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
     CONTACT_MOTION_CHANGED,
+    CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
     Event,
     EventKind,
@@ -96,6 +97,7 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
         CONTACT_REACQUIRED,
         CONTACT_CLASSIFICATION_CHANGED,
         CONTACT_MOTION_CHANGED,
+        CONTACT_RANGE_CROSSED,
     }
 )
 
@@ -112,7 +114,9 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: affixes (`belief.speech`), which `render_group_report` has no concept of,
 #: so merging one into a multi-contact group would silently drop the very
 #: fact the event exists to report.
-_WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset({CONTACT_MOTION_CHANGED})
+_WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
+    {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED}
+)
 
 #: Suppresses **all** watched-only speech about one contact, across kinds --
 #: `belief.events.EVENT_COOLDOWN_S`'s sibling but a different mechanism (see
