@@ -50,7 +50,11 @@ cheap-final-gate saving was not worth a gate that reports work as verified when 
 role file now carries the run-it-before-you-write-it rule alongside the model change, since the
 model was only half the problem. For architecturally complex or high-risk planning (coordinate system design, spatial schema, cross-theatre generalization), re-invoke architect with an explicit opus model override rather than relying on its sonnet default.
 
-**Skip `performance-reviewer` and `security` for now** — this phase is an offline single-user local pipeline with no hot path and no untrusted-input surface yet. Do not insert them into the default role sequence from `AGENTS.md`. Only run either when the user explicitly asks for it.
+**`performance-reviewer` and `security` run once per whole feature, immediately before DoD** — not mid-feature, and not once per stage of a multi-stage feature. Enabled 2026-09-24 (user direction, from the 2026-09-22→2026-09-25 retro), replacing the previous blanket skip.
+
+Scoping, in the user's own terms: this is for now a single-user, LAN-only project under active development, so this is one pass per feature rather than "both roles fully on everywhere" — deeper security and performance effort comes once the important milestones (brain and memory) are complete.
+
+The previous rule ("skip both for now — an offline single-user local pipeline with no hot path and no untrusted-input surface") was written when that description was true and carried **no lapse condition**, which is the gap the retro actually found: it stayed in force unexamined after the project grew a live 5 Hz DCS I/O pipeline, a LAN HTTP surface between subprojects, and inbound speech capture. A standing exemption needs a stated condition for ending, or it outlives its premise silently.
 
 **`investigator`** is this project's recon role, needed because much of the World Model Builder depends on unverified DCS internals (file formats, coordinate systems, scripting-API availability). It sits *before* Architect's plan is finalized, not in the Implementer→Reviewer→DoD chain: **Architect invokes it proactively whenever a plan would otherwise depend on an unverified DCS-internals claim** (see `.claude/agents/architect.md` step 2) — this is not a user-invocation-only role. It writes dated findings to the `research/` directory of whichever module the finding is about (e.g. `world-model/research/`, `aircraft-layer/research/`), per the format in `docs/concept/WORLD_MODEL_BUILDER.md`, and does not write pipeline code.
 

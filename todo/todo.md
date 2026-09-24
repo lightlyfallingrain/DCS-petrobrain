@@ -44,11 +44,12 @@ starts and reverses it. The alternative, lower-risk move is to build `watch-repo
 Decision 5a amended) — it sits underneath BL-8's Stages 3 and 5 and produces `threat.py`.
 `plans/bl8-memory/plan.md` is also ready, decisions resolved.
 
-**Gated on the merge that just happened:** re-enable `performance-reviewer` and `security`, running
+**Done 2026-09-24, no longer gated:** re-enabled `performance-reviewer` and `security`, running
 **once per whole feature, before DoD, not mid-feature** (user, 2026-09-24). Scoping in the user's
 own terms: single-user, LAN-only, under active development; deeper effort once brain and memory are
-done. This needs a root `CLAUDE.md` "Agents" edit — see the deferred entry in the cross-cutting
-backlog below for why the exemption's premise is already false.
+done. The root `CLAUDE.md` "Agents" edit is made; it also records why the old blanket skip outlived
+its premise (no lapse condition, while the project grew a live 5 Hz DCS pipeline, a LAN HTTP
+surface and inbound speech capture).
 
 
 - [x] Route crew-text speech callouts ("tank, 12 o'clock, 3 km" style contact reports, from
@@ -73,8 +74,11 @@ backlog below for why the exemption's premise is already false.
   merge time. Fix applied at the process level, not just the data level: `.claude/skills/merge/SKILL.md`
   and `.claude/agents/dod.md` now both require the relevant `ROADMAP.md` to be updated *in the
   same push* as any merge — see root `ROADMAP.md`'s "Keeping this current" note.
-- [ ] **Enable `performance-reviewer` and `security` in the default role sequence, once per whole
-  feature before DoD (not mid-feature)** — but only **after `feature/binocular-optic` merges**.
+- [x] **Enable `performance-reviewer` and `security` in the default role sequence, once per whole
+  feature before DoD (not mid-feature). DONE 2026-09-24** — gate cleared when
+  `feature/binocular-optic` merged (`c398675`); root `CLAUDE.md`'s "Agents" section now states the
+  once-per-feature-before-DoD rule, the user's scoping, and why the old blanket skip outlived its
+  premise. Original text follows.
   User decision from the 2026-09-22→2026-09-25 retro (retro finding 1). Scoping, as the user
   stated it: this is for now a single-user, LAN-only project under active development; deeper
   security and performance effort comes once the important milestones (brain and memory) are
