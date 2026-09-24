@@ -71,6 +71,7 @@ from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
+    CONTACT_ENGAGEMENT_CHANGED,
     CONTACT_MOTION_CHANGED,
     CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
@@ -98,6 +99,7 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
         CONTACT_CLASSIFICATION_CHANGED,
         CONTACT_MOTION_CHANGED,
         CONTACT_RANGE_CROSSED,
+        CONTACT_ENGAGEMENT_CHANGED,
     }
 )
 
@@ -115,7 +117,7 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: so merging one into a multi-contact group would silently drop the very
 #: fact the event exists to report.
 _WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
-    {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED}
+    {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, CONTACT_ENGAGEMENT_CHANGED}
 )
 
 #: Suppresses **all** watched-only speech about one contact, across kinds --

@@ -17,6 +17,7 @@ from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
+    CONTACT_ENGAGEMENT_CHANGED,
     CONTACT_LOST,
     CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
@@ -36,8 +37,10 @@ from perception.source import (
 )
 
 
-def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
-    return OwnshipState(t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0)
+def _ownship(x: float = 0.0, z: float = 0.0, alt_agl_m: float = 0.0) -> OwnshipState:
+    return OwnshipState(
+        t_sim=0.0, x=x, z=z, alt_m=500.0, heading_true_deg=0.0, alt_agl_m=alt_agl_m
+    )
 
 
 def _observation(
@@ -1180,3 +1183,188 @@ def test_tick_without_ownship_is_a_no_op_for_range_crossing() -> None:
     store.tick(now_sim=0.0)
     assert store.contacts[0].last_announced_range_km is None
     assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
+# --- believed engagement (plans/watch-reporting/plan.md Stage 4) -----------
+
+_AAA_TYPE = "ZU-23-3 Sergey"  # range_min_m=0, range_max_m=2408, alt_min_m=0
+_SAM_WITH_FLOOR_TYPE = "S-125 Neva/Pechora"  # range 5926-25002, alt_min_m=213
+
+
+def _watched_threat_contact(
+    threat_type: str, range_m: float, obs_id: str = "OBS_1", t_sim: float = 0.0
+) -> tuple[ContactStore, str]:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id=obs_id,
+                t_sim=t_sim,
+                classification_raw=threat_type,
+                classification_level=3,  # TYPE
+                range_m=range_m,
+            )
+        ],
+        now_sim=t_sim,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    return store, contact_id
+
+
+def test_engagement_fires_danger_on_the_first_tick_already_inside() -> None:
+    """Decision 1: engagement seeds as outside, but the first evaluation
+    that finds itself already inside DOES fire (late-recognition
+    behaviour) -- no silent seed, unlike range-crossing."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    engaged = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged) == 1
+    assert engaged[0].previous_engaged is False
+    assert engaged[0].engaged is True
+
+
+def test_engagement_never_fires_for_an_unwatched_contact() -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw=_AAA_TYPE,
+                classification_level=3,
+                range_m=1000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)
+    assert store.contacts[0].last_emitted_engagement is None
+
+
+def test_engagement_none_for_a_class_with_no_threat_rows() -> None:
+    """Ground armour has no envelope worth modelling (4b) -- `envelope_for`
+    returns `None`, and the seventh block must not fire anything."""
+    store, _ = _watched_threat_contact("BMP-2", range_m=500.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)
+    assert store.contacts[0].last_emitted_engagement is None
+
+
+def test_engagement_leaves_with_1_5x_hysteresis() -> None:
+    """Decision 4e's Schmitt trigger -- enter at 1.0x max range, leave at
+    1.5x. A contact sitting between the two thresholds must stay engaged,
+    not flap. The contact is founded once and its position never
+    re-ingested -- only ownship moves between ticks, mirroring the
+    kilometre-crossing tests' own "move the observer, not the target"
+    pattern (re-ingesting a huge same-contact jump would instead fail the
+    percept-gate and found a second contact)."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0, ownship=_ownship())  # range 1000 < 2408 -- enters
+    assert store.contacts[0].last_emitted_engagement is True
+
+    # ownship backs off to make range 3000: past max range (2408) but
+    # inside the 1.5x hysteresis band (3612) -- must NOT leave.
+    store.tick(now_sim=1.0, ownship=_ownship(x=-2000.0))
+    assert store.contacts[0].last_emitted_engagement is True
+    engaged_events = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged_events) == 1  # only the original entering event
+
+    # ownship backs off further to make range 4000: past even the 1.5x
+    # hysteresis band -- now it leaves. t=20 clears EVENT_COOLDOWN_S (15s)
+    # since the entering event at t=0.
+    store.tick(now_sim=20.0, ownship=_ownship(x=-3000.0))
+    assert store.contacts[0].last_emitted_engagement is False
+    engaged_events = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged_events) == 2
+    assert engaged_events[1].previous_engaged is True
+    assert engaged_events[1].engaged is False
+
+
+def test_engagement_respects_the_altitude_floor() -> None:
+    """A radar-guided SAM's own minimum engagement altitude -- flying
+    under it must not read as engaged, per `OwnshipState.alt_agl_m`."""
+    store, _ = _watched_threat_contact(_SAM_WITH_FLOOR_TYPE, range_m=10000.0)
+    # Below the 213m floor -- must not engage even though in range.
+    store.tick(now_sim=0.0, ownship=_ownship(alt_agl_m=50.0))
+    assert store.contacts[0].last_emitted_engagement is False
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)
+
+    # Above the floor -- now engages.
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw=_SAM_WITH_FLOOR_TYPE,
+                classification_level=3,
+                range_m=10000.0,
+            )
+        ],
+        now_sim=1.0,
+    )
+    store.tick(now_sim=1.0, ownship=_ownship(alt_agl_m=300.0))
+    assert store.contacts[0].last_emitted_engagement is True
+
+
+def test_engagement_los_masked_needs_the_full_dwell_to_clear() -> None:
+    """Decision 5a-ii: a masked verdict may only clear a danger state
+    after holding continuously for `LOS_MASK_CONFIRM_S` (5.0) -- a clear
+    verdict takes effect immediately, in the other direction."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    always_clear = lambda observer, target: True
+    always_masked = lambda observer, target: False
+
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_clear)
+    assert store.contacts[0].last_emitted_engagement is True
+
+    # Masked starting at t=16 (past EVENT_COOLDOWN_S from the entering
+    # event, so the eventual "leaving" event below is not itself
+    # cooldown-suppressed), but not yet for the full LOS_MASK_CONFIRM_S
+    # dwell -- must still read engaged.
+    store.tick(now_sim=16.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].last_emitted_engagement is True
+
+    # Masked continuously past the dwell -- now clears.
+    store.tick(now_sim=21.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].last_emitted_engagement is False
+    engaged_events = [e for e in store.events if e.kind == CONTACT_ENGAGEMENT_CHANGED]
+    assert len(engaged_events) == 2
+    assert engaged_events[1].engaged is False
+
+
+def test_engagement_los_dwell_resets_on_an_intervening_clear_sample() -> None:
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    always_clear = lambda observer, target: True
+    always_masked = lambda observer, target: False
+
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_clear)
+    store.tick(now_sim=1.0, ownship=_ownship(), los_clear=always_masked)
+    # A clear sample resets the countdown.
+    store.tick(now_sim=2.0, ownship=_ownship(), los_clear=always_clear)
+    assert store.contacts[0].los_masked_since_sim is None
+    store.tick(now_sim=3.0, ownship=_ownship(), los_clear=always_masked)
+    # Only 3 seconds masked since the reset (t=3) at t=1.0+... -- must
+    # still be engaged, since less than LOS_MASK_CONFIRM_S has elapsed
+    # since the *reset* mask began (at t=3.0).
+    store.tick(now_sim=6.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].last_emitted_engagement is True
+
+
+def test_engagement_clears_bookkeeping_on_unwatch() -> None:
+    store, contact_id = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert store.contacts[0].last_emitted_engagement is True
+
+    set_attention(store, contact_id, "normal")
+    store.tick(now_sim=1.0, ownship=_ownship())
+    assert store.contacts[0].last_emitted_engagement is None
+    assert store.contacts[0].los_masked_since_sim is None
+
+
+def test_tick_without_ownship_is_a_no_op_for_engagement() -> None:
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    store.tick(now_sim=0.0)
+    assert store.contacts[0].last_emitted_engagement is None
+    assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)

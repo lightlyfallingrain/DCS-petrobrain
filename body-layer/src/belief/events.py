@@ -112,6 +112,7 @@ EventKind = Literal[
     "CONTACT_CARDINALITY_CHANGED",
     "CONTACT_MOTION_CHANGED",
     "CONTACT_RANGE_CROSSED",
+    "CONTACT_ENGAGEMENT_CHANGED",
 ]
 
 CONTACT_DETECTED: Final[EventKind] = "CONTACT_DETECTED"
@@ -131,6 +132,13 @@ CONTACT_MOTION_CHANGED: Final[EventKind] = "CONTACT_MOTION_CHANGED"
 #: contact, and computing/emitting it for every contact in the theatre
 #: would flood the event log with reports nobody watching would ever read.
 CONTACT_RANGE_CROSSED: Final[EventKind] = "CONTACT_RANGE_CROSSED"
+#: `plans/watch-reporting/plan.md` Stage 4 -- a watched contact's believed
+#: engagement state (inside/outside its `belief.threat.envelope_for`
+#: envelope, annulus + AGL floor + LOS all ANDed) changed since it was last
+#: announced. Gated and bookkept at emission exactly like `CONTACT_RANGE_
+#: CROSSED` (`ContactStore.tick`'s seventh block), for the identical
+#: reason: the bookkeeping only means anything for a watched contact.
+CONTACT_ENGAGEMENT_CHANGED: Final[EventKind] = "CONTACT_ENGAGEMENT_CHANGED"
 
 ClassificationDirection = Literal["refined", "contradicted"]
 
@@ -203,6 +211,13 @@ class Event:
     #: `_contact_report_text` would say, not the un-rounded number.
     previous_range_km: int | None = None
     range_km: int | None = None
+    #: `plans/watch-reporting/plan.md` Stage 4's addition, same
+    #: default-`None`-everywhere-else shape as every belief-snapshot pair
+    #: above -- only a `CONTACT_ENGAGEMENT_CHANGED` event populates them.
+    #: `True` means "now believed inside the envelope" (a danger call),
+    #: `False` means "now believed outside it" (a safe-from call).
+    previous_engaged: bool | None = None
+    engaged: bool | None = None
 
 
 def lifecycle_event_kind(

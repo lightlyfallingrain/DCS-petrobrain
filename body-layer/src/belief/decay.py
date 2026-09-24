@@ -98,6 +98,20 @@ MOTION_HALF_LIFE_S: Final[float] = 60.0
 #: not keep hearing "moving" long after a vehicle has visibly halted.
 MOTION_STOP_CONFIRM_S: Final[float] = 5.0
 
+#: `plans/watch-reporting/plan.md` Decision 5a-ii -- how long a **masked**
+#: LOS verdict must hold continuously before an engagement danger state is
+#: allowed to clear, `MOTION_STOP_CONFIRM_S`'s direct twin (same
+#: uncalibrated-placeholder status, same "named, isolated, movable in one
+#: place" reasoning). **Deliberately asymmetric, in the fail-open
+#: direction**: a **clear** verdict (the threat can see us) takes effect
+#: immediately, no dwell -- only a masked-therefore-safer verdict has to
+#: wait. A false danger call costs the pilot a glance; a missed one costs
+#: the aircraft, so the dwell only ever delays the *optimistic* transition,
+#: never the cautious one. Consumed by `belief.contacts.ContactStore.tick`'s
+#: seventh block via `Contact.los_masked_since_sim`, `motion_pending_stop_
+#: since_sim`'s direct twin in shape.
+LOS_MASK_CONFIRM_S: Final[float] = 5.0
+
 #: Medium/slow decay: the general area, independent of the exact point.
 #: Slower than motion -- "somewhere near that village" stays true long after
 #: "moving north at that exact spot" has gone stale. Not yet consumed (no
