@@ -32,6 +32,16 @@ Prioritize any open task here over any other task in this file or roadmap files.
   merge time. Fix applied at the process level, not just the data level: `.claude/skills/merge/SKILL.md`
   and `.claude/agents/dod.md` now both require the relevant `ROADMAP.md` to be updated *in the
   same push* as any merge — see root `ROADMAP.md`'s "Keeping this current" note.
+- [ ] **Enable `performance-reviewer` and `security` in the default role sequence, once per whole
+  feature before DoD (not mid-feature)** — but only **after `feature/binocular-optic` merges**.
+  User decision from the 2026-09-22→2026-09-25 retro (retro finding 1). Scoping, as the user
+  stated it: this is for now a single-user, LAN-only project under active development; deeper
+  security and performance effort comes once the important milestones (brain and memory) are
+  complete — this is not "turn both roles fully on everywhere now," it's one pass per feature, and
+  only starting after the named merge. Requires editing root `CLAUDE.md`'s "Agents" section, which
+  currently says to skip both roles outright with no stated lapse condition — that missing lapse
+  condition is exactly the gap this retro found. **Do not make that `CLAUDE.md` edit until
+  `feature/binocular-optic` has merged** — this item is gated on the merge, not actionable yet.
 
 
 ### Model the 9K113 sight as an optic (deferred, 2026-09-20)

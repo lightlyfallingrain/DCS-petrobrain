@@ -4,8 +4,8 @@ description: Multi-agent retrospective — every workflow role (architect, imple
 type: user-invocable
 ---
 
-Multi-agent retrospective. Usage: `/retro` (defaults to today) or `/retro <window>` (e.g.
-`/retro this week`, `/retro since 2026-09-08`).
+Multi-agent retrospective. Usage: `/retro` (defaults to the window since the last retro) or
+`/retro <window>` (e.g. `/retro this week`, `/retro since 2026-09-08`) as an explicit override.
 
 This is a meta-process review of *how the agents worked* — the 8 workflow roles and the
 orchestrator (you, running this skill) — not of the product. Each participant reads only its own
@@ -24,9 +24,31 @@ record; read it fresh each time instead of maintaining a parallel store of self-
 
 ## Step 1 — Resolve the time window
 
-Default: today (`00:00`–`24:00` in the project's date, i.e. `--since="<date> 00:00"
---until="<next-date> 00:00"` for `git log`). If the user gives a window, resolve it to concrete
-`--since`/`--until` values before spawning anything — every role agent needs the same window.
+Default: since the last retro. Read `.claude/state/last-retro` (repo root, tracked in git) — it
+holds a single ISO date, the end of the last successful retro's window. If present, the window is
+`--since="<that date> 00:00" --until="<today> 00:00"`. If absent (first run, or the file was
+never created), fall back to today (`--since="<date> 00:00" --until="<next-date> 00:00"`) and say
+plainly in the retro's own output that no marker was found and today was used as the default. If
+the user gives an explicit `<window>` argument, that overrides the marker entirely — resolve it to
+concrete `--since`/`--until` values before spawning anything. Either way, every role agent needs
+the same resolved window.
+
+## Step 1b — Resolve the branch under review
+
+Determine which branch this retro is actually reviewing (the active feature branch, or `main` if
+nothing is in flight — check `git branch --show-current` and/or ask the user if it's ambiguous).
+Resolve this to a concrete ref **before spawning anything**, and pass it explicitly in every role
+agent's prompt: each role's `git log` must run against that ref (e.g. `git log <branch>
+--since=... --until=... -- .claude/agent-memory/<role>/`), not against whatever branch its own
+worktree happens to have checked out. A read-mostly role agent runs in its own worktree, whose
+checked-out history is not guaranteed to contain the branch under review — a `git log` run
+against the wrong ref can find zero activity and report a confident, wrong "nothing happened"
+when the work is actually there.
+
+Tell every role agent explicitly: if you find no activity in the window, first confirm you are
+looking at the right ref (`git log <branch> ...`, not just `git log ...` on whatever's checked
+out) before concluding nothing happened. "I see nothing [from where I'm looking]" and "nothing
+happened" are different claims — only report the latter after ruling out the former.
 
 ## Step 2 — Spawn all 8 roles in parallel
 
@@ -38,11 +60,15 @@ context) and state:
 
 - This is a retrospective, not a request to do the role's normal work — don't plan/implement/
   review/debug/investigate/run-DoD on anything.
-- The resolved `--since`/`--until` window.
-- Look at `.claude/agent-memory/<role>/` (repo root) via `git log --since=... --until=...
-  --oneline -- .claude/agent-memory/<role>/` (and `git log -p` on specific files if needed) —
-  meta-data the role itself wrote (memory files, `MEMORY.md`, and narrative sections of its own
-  plan/review/debug/dod-check output), never the underlying code.
+- The resolved branch under review (Step 1b) and the resolved `--since`/`--until` window (Step 1).
+- Look at `.claude/agent-memory/<role>/` (repo root) via `git log <branch> --since=... --until=...
+  --oneline -- .claude/agent-memory/<role>/` (and `git log <branch> -p` on specific files if
+  needed) — always against the resolved branch, not whichever branch the role's own worktree
+  happens to have checked out — meta-data the role itself wrote (memory files, `MEMORY.md`, and
+  narrative sections of its own plan/review/debug/dod-check output), never the underlying code.
+  If this comes back empty, re-run against the resolved branch explicitly before concluding there
+  was no activity — "I see nothing from my worktree's checkout" and "nothing happened" are
+  different claims.
 - Role-specific supplementary sources, since not every role's output lives only in
   `agent-memory/`:
   - `dod`: also check `plans/*/dod-check.md` files touched in the window — DoD's real findings
@@ -134,6 +160,15 @@ invoking the skill. When implementing:
   invent a new section pattern per retro.
 - Commit with a message that names which retro findings drove which change, so a future retro
   (or integrity audit) can see the causal chain instead of an unexplained config diff.
+
+## Step 6 — Write the last-retro marker
+
+On successful completion (Step 3's synthesis was presented and Step 4's proposals were resolved
+with the user, whether or not any were implemented), write today's date to
+`.claude/state/last-retro` (create the file and its directory if absent), overwriting any previous
+value. This is what makes the next `/retro`'s default window start where this one left off — skip
+it and the next run silently re-reads the same window. Commit this alongside any Step 5 changes
+(or by itself, if the user declined every proposal).
 
 ## Rules
 

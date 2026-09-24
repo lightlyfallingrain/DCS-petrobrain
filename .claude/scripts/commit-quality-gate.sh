@@ -99,6 +99,27 @@ check_memory '^plans/[^/]+/debug\.md$'          debugger     "a debug report"
 check_memory '^plans/[^/]+/dod-check\.md$'      dod          "a DoD check"
 check_memory '/research/[0-9]{4}-[0-9]{2}-[0-9]{2}-.*\.md$' investigator "a research finding"
 
+# Warn (never block) when a commit adds/modifies a plans/*/dod-check.md without also touching a
+# ROADMAP.md (root or any subproject's) in the same commit. This is the missing-roadmap-entry
+# gap: it recurred three times, each time caught reactively by a reviewer noticing (cross-linked
+# in reviewer memory as m10-junction-review and group-detectability-roadmap-lag) rather than
+# mechanically. Warn rather than hard-block: DoD's own report commit legitimately lands *before*
+# the merge commit that updates the roadmap in this project's normal sequencing (see root
+# CLAUDE.md "Milestone Completion" and root ROADMAP.md "Keeping this current") -- a hard block
+# here would misfire on that common, correct case and train people to bypass the gate, which is
+# worse than the gap it's meant to close.
+ROADMAP_WARN=""
+DOD_CHECK_FILES=$(printf '%s\n' "$STAGED" | grep -E '^plans/[^/]+/dod-check\.md$' || true)
+if [ -n "$DOD_CHECK_FILES" ]; then
+    if ! printf '%s\n' "$STAGED" | grep -qE '(^|/)ROADMAP\.md$'; then
+        ROADMAP_WARN="
+  - dod-check.md staged, but no ROADMAP.md (root ROADMAP.md, or a subproject's, e.g.
+    world-model/ROADMAP.md, aircraft-layer/ROADMAP.md, body-layer/ROADMAP.md) is touched in
+    this commit:
+$(printf '%s\n' "$DOD_CHECK_FILES" | sed 's/^/      /')"
+    fi
+fi
+
 # Agent-memory index: APPEND, never rewrite. On 2026-09-20 one commit replaced
 # the reviewer index's 27 entries with 1, leaving 73 memory files on disk and
 # unreachable by the role that wrote them -- undetected for a day, and found
@@ -157,7 +178,24 @@ fi
 
 if [ $FAIL -ne 0 ]; then
     printf '{"continue":false,"stopReason":%s}' "$(printf '%s' "$OUT" | jq -Rs .)"
-elif [ -n "$MEM_WARN" ]; then
-    printf '{"continue":true,"systemMessage":%s}' "$(printf 'Agent-memory index not updated:%s\n\nThe artifact is committed either way -- this is a reminder, not a gate. Write the note only if the work taught something a future session would want retrieved; skip it for a typo fix.' "$MEM_WARN" | jq -Rs .)"
+elif [ -n "$MEM_WARN" ] || [ -n "$ROADMAP_WARN" ]; then
+    WARN_MSG=""
+    if [ -n "$MEM_WARN" ]; then
+        WARN_MSG="${WARN_MSG}Agent-memory index not updated:${MEM_WARN}
+
+The artifact is committed either way -- this is a reminder, not a gate. Write the note only if the work taught something a future session would want retrieved; skip it for a typo fix."
+    fi
+    if [ -n "$ROADMAP_WARN" ]; then
+        [ -n "$WARN_MSG" ] && WARN_MSG="${WARN_MSG}
+
+"
+        WARN_MSG="${WARN_MSG}Roadmap not updated alongside dod-check:${ROADMAP_WARN}
+
+The commit proceeds either way -- this is a reminder, not a gate. If this dod-check is not yet
+merged/complete, updating the roadmap in a later commit (e.g. at merge time) is expected and
+fine; if the milestone this dod-check covers is actually done, update the relevant ROADMAP.md
+now so it doesn't silently drift stale."
+    fi
+    printf '{"continue":true,"systemMessage":%s}' "$(printf '%s' "$WARN_MSG" | jq -Rs .)"
 fi
 # All touched subprojects clean (or nothing relevant staged): exit 0 silently, commit proceeds.

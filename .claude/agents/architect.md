@@ -75,6 +75,19 @@ When asked to plan a feature or resolve a design question:
 6. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
 7. **State a second-order effect** — one sentence on how this feature affects later milestones (unblocks/narrows/complicates a future one), or "none identified" if genuinely isolated. First-order correctness isn't enough; value chains further than the immediate change.
 8. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
+9. **After a plan merges, scan open (unimplemented) plan files for assumptions that plan just
+   invalidated, and amend in place.** A merged plan can change a behavior another, still-open plan
+   was designed against — the amendment happens only if someone thinks to look, so make that look
+   a standing step, not something that depends on remembering. Add a numbered sub-decision stating
+   what forced the change (`Decision N REVISED` per `docs/PROCESS.md`, "Superseding a decision" —
+   the original stays in place with a pointer to its replacement, never deleted or silently
+   rewritten). Worked example: `precise-position-belief` replaced a quantised position that stepped
+   in ~500 m buckets with a continuously fused estimate carrying per-look noise. `plans/watch-
+   reporting/plan.md` Decision 5's kilometre-crossing trigger had been designed against the
+   bucketed behaviour and would now jitter across a kilometre boundary; it was amended as
+   Decision 5a. Do this scan every time a plan you or another architect pass produced merges —
+   check `plans/*/plan.md` for open (not-yet-implemented, or implemented-but-still-referenced)
+   decisions that assume the just-merged behavior, not only the plan directly in front of you.
 
 ---
 
