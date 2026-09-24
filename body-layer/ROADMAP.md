@@ -282,6 +282,20 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `--crew-text`'s stdout, not `--overlay`'s cockpit text panel) — not part of BL-6's own scope, a
   separate follow-on.
 
+- [ ] **BL-7's phase data is unreachable in a sortie — found 2026-09-24, first real MI acceptance.**
+  `--mission-understanding` loads the artifact and `MissionPhaseTracker` updates every poll, but
+  **nothing a pilot can reach in flight reads it.** `mission_phase` appears in four files
+  (`console.py`, `tools.py`, `mission_phase.py`, `tool_api.py`) and in none of `attention.py`,
+  `callouts.py` or `crew_console.py`. The phase-proximity tie-break is real but sits inside
+  `_highest_attention_contact`, called only by `get_situation`, called only by the `--console`
+  debug harness; the brain that would otherwise call the tool API is still `NullBrainClient`. So
+  mission phase currently changes nothing about what Petrovich attends to or says on a `--crew-text`
+  sortie. Two ways out, and they are not equivalent: a crew-facing way to *ask* (a `situation`
+  command — cheap, but only surfaces phase when asked), or phase feeding attention/callout ordering
+  directly (what BL-7's own plan implies, and what would make the tie-break matter unprompted).
+  Pilot's report of the same gap: *"the commands to exercise it during mission do not exist yet."*
+  Blocks the B half of `docs/acceptance/2026-09-24-mission-interpreter-sortie.md`.
+
 - [x] **BL-7 — Mission phase and relevance (≈ PB-9's deterministic half; done, merged 2026-09-13,
   `feature/bl7-mission-phase-relevance`, merge commit `ec4cf12`).** `MissionPhaseTracker` consumes
   Mission Interpreter's MI-6 `--emit-compact` JSON output (file read, no cross-subproject import —
