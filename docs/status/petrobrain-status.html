@@ -513,23 +513,26 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 23 Sep 2026</span>
+      <span>Derived from ROADMAP.md · 24 Sep 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Five subsystems, one hundred and twenty-five tracked items, one question worth answering
-      at a glance: what is actually blocking a crew member who sees, remembers, and talks back. Both of last
-      week&rsquo;s hard blockers are gone — one was re-shot, the other turned out to have been built a week
-      earlier. What replaced them is smaller and entirely human: one flight, and one sentence spoken into a
-      microphone.</p>
+    <p class="lede">Five subsystems, one hundred and twenty-one tracked items. The five-fix sortie
+      flew and passed, and so did the voice-command sortie — every blocker that stood a week ago is
+      answered. Three more milestones landed the same day, unflown by user decision: binoculars,
+      full voice-command coverage, and a believed position that is now precise <em>and wrong</em>
+      rather than exact behind a cosmetic error bar. Mission Interpreter had its first real test
+      against missions the pilot actually built, and passed with notes. The most useful finding
+      wasn&rsquo;t a bug: BL-7&rsquo;s mission-phase tracking is complete and reaches nothing a pilot
+      can hear, and it is one of four things now sitting behind the same absent brain layer.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>81</b><span>Done</span></div>
-    <div class="count is-active"><b>7</b><span>In progress</span></div>
+    <div class="count is-done"><b>80</b><span>Done</span></div>
+    <div class="count is-active"><b>5</b><span>In progress</span></div>
     <div class="count is-open"><b>27</b><span>Open</span></div>
-    <div class="count is-hold"><b>10</b><span>Deferred</span></div>
-    <div class="count is-block"><b>5</b><span>Await you</span></div>
+    <div class="count is-hold"><b>7</b><span>Deferred</span></div>
+    <div class="count is-block"><b>2</b><span>Await you</span></div>
   </div>
 
   <section>
@@ -550,11 +553,12 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
       <article class="sys" role="button" tabindex="0" data-detail="al">
         <h3>Aircraft Layer</h3>
         <span class="path">aircraft-layer/</span>
-        <div class="bar"><i style="width:90%"></i></div>
-        <span class="chip done">Core complete</span>
-        <p class="next">Live DCS I/O stable since Sept 7; plays Petrovich's voice, and now carries
-          per-unit velocity out of the mission sandbox. <b>Next:</b> that channel's live acceptance,
-          on the same flight as everything else.</p>
+        <div class="bar"><i style="width:95%"></i></div>
+        <span class="chip done">Core complete, both new channels accepted</span>
+        <p class="next">Live DCS I/O stable since Sept 7. Both channels added this cycle &mdash;
+          per-unit velocity out of the mission sandbox, and the intercom trigger for push-to-talk
+          &mdash; flew and were accepted on 2026-09-23. <b>Next:</b> two small tuning items,
+          neither urgent.</p>
         <span class="more">Details</span>
       </article>
 
@@ -562,32 +566,33 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Mission Interpreter</h3>
         <span class="path">mission-interpreter/</span>
         <div class="bar"><i style="width:94%"></i></div>
-        <span class="chip done">MI-0–MI-6 complete</span>
-        <p class="next">Last planned stage shipped; consumed by BL-7.
-          <b>Next:</b> MI-5b, a web form for player questions — optional.</p>
+        <span class="chip done">MI-0–MI-6 complete, tested with notes</span>
+        <p class="next">First run against missions the pilot actually built, 2026-09-24: passed, with
+          a narrower player-question set than the stage claimed. <b>Next:</b> nothing of MI's own
+          &mdash; both open notes are deferred to the brain layer.</p>
         <span class="more">Details</span>
       </article>
 
       <article class="sys" role="button" tabindex="0" data-detail="bl">
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
-        <div class="bar"><i style="width:91%"></i></div>
-        <span class="chip active">Five merges, none of them flown</span>
-        <p class="next">His gaze is now an o'clock scan loop, Scan and Watch are standing modes that
-          coexist, callouts are decided at speech time instead of queued, a group is easier to spot
-          than a lone vehicle, and he can tell moving from stopped. <b>Next:</b> fly it — all five
-          landed in two days and none has been in the air.</p>
+        <div class="bar"><i style="width:92%"></i></div>
+        <span class="chip active">Five-fix sortie passed; three more merges unflown</span>
+        <p class="next">The five-fix sortie flew and was accepted 2026-09-23. The same day, three more
+          landed unflown by user decision: binoculars, full voice-command coverage, and a believed
+          position that is precise <em>and wrong</em> rather than exact. <b>Next:</b> fly those three
+          &mdash; one card covers all of them.</p>
         <span class="more">Details</span>
       </article>
 
       <article class="sys" role="button" tabindex="0" data-detail="srs">
         <h3>Audio Adapter</h3>
         <span class="path">audio-adapter/</span>
-        <div class="bar"><i style="width:78%"></i></div>
-        <span class="chip active">Voice out done · speech in, stages 1–4</span>
-        <p class="next">He is audible, urgent calls cut in mid-word, recognition runs as a service, and
-          capture now closes the loop: hold a control, speak, and the command arrives. <b>Next:</b> one
-          sentence of your own voice through it — the only link no test can stand in for.</p>
+        <div class="bar"><i style="width:88%"></i></div>
+        <span class="chip active">Voice out done · speech in flown &amp; accepted</span>
+        <p class="next">Capture and the real intercom trigger both flew and passed 2026-09-23 &mdash;
+          he is audible and he listens. <b>Next:</b> live sortie acceptance for voice quality itself
+          (stage 6), and press-to-readback latency, measured at ~3s.</p>
         <span class="more">Details</span>
       </article>
 
@@ -596,8 +601,9 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
 
   <section>
     <h2>Dependency map</h2>
-    <p class="section-note">What gates what. The chain that matters right now runs left to right along the
-      bottom: a voice out, then a voice in, then a brain worth talking to.</p>
+    <p class="section-note">What gates what. Both sorties that mattered last cycle flew and passed.
+      What's left runs into one place: four separate branches now wait on a brain layer that has no
+      plan file yet.</p>
 
     <div class="diagram-wrap">
       <button class="expand" id="gv-open" data-graph="#graph-deps" type="button">Expand graph</button>
@@ -612,11 +618,12 @@ flowchart LR
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
   WM["World Model<br/>M0–M10"]:::done
-  AL["Aircraft Layer<br/>DCS I/O + audio"]:::done
-  MI["Mission Interpreter<br/>MI-0–MI-6"]:::done
+  AL["Aircraft Layer<br/>DCS I/O + audio + PTT"]:::done
+  MI["Mission Interpreter<br/>MI-0–MI-6, tested"]:::done
 
   BL27["BL-2 … BL-7<br/>contacts → mission phase"]:::done
   BL5a["BL-5a<br/>text crew interaction"]:::done
+  BL7I["BL-7 reaches nothing<br/>in a sortie"]:::hold
 
   GC["Group contacts<br/>stages 0–4a"]:::done
   GC4B["Stage 4b<br/>counts, spoken"]:::open
@@ -624,30 +631,32 @@ flowchart LR
 
   S1["Slice 1<br/>voice out, stages 1–5"]:::done
   S6["Stage 6<br/>live sortie"]:::block
-  ST13["Speech in 1–3<br/>gate, matcher, service"]:::done
-  ST4["Stage 4<br/>capture + PTT"]:::active
-  ST56["Stages 5–6<br/>real PTT, sortie"]:::block
+  ST15["Speech in 1–5<br/>gate → capture → real PTT"]:::done
   CKPT["Cockpit audio state<br/>intercom + volume"]:::hold
   CONES["Cones 1 · 2A–2C<br/>optics, gaze, scan loop"]:::done
-  CALL["Callouts + groups<br/>+ movement"]:::active
-  SORT["Five-fix sortie"]:::block
+  CALL["Callouts + groups<br/>+ movement"]:::done
+  SORT5["Five-fix sortie<br/>PASSED 2026-09-23"]:::done
+  NEW3["Binoculars + voice commands<br/>+ precise position"]:::done
+  EVS["Eyes-and-voice sortie<br/>unflown"]:::block
 
   BL8["BL-8<br/>memory interfaces"]:::open
-  BRAIN["Brain layer<br/>not started"]:::hold
+  BRAIN["Brain layer<br/>no plan file yet"]:::hold
 
   WM --> BL27
   AL --> BL27
   MI --> BL27
+  BL27 --> BL7I -.->|"deferred to the brain"| BRAIN
   BL27 --> BL5a
   BL27 --> GC
   GC --> GC4B --> GC5
   BL5a --> S1
   S1 --> S6
   S1 --> CKPT
-  S1 --> ST13 --> ST4 --> ST56 --> BRAIN
-  BL27 --> CONES --> CALL --> SORT
-  BL27 -.->|"needs real flights"| BL8
-  SORT -.->|"judge after flying"| GC5
+  S1 --> ST15 --> BRAIN
+  BL27 --> CONES --> CALL --> SORT5
+  SORT5 --> NEW3 --> EVS -.->|"gates BL-10"| BRAIN
+  BL27 -.->|"needs real flights"| BL8 --> BRAIN
+  EVS -.->|"judge after flying"| GC5
   GC4B -.->|"judge after flying"| GC5
 </pre>
       </div>
@@ -665,9 +674,10 @@ flowchart LR
   <section>
     <h2>What&rsquo;s left, and what gates it</h2>
     <p class="section-note">Everything still open, deferred, or blocked &mdash; and nothing that is done.
-      The map above shows how the project got here; this one shows what is in front of it. Read it as
-      three separate chains that barely touch: <strong>speech</strong>, <strong>perception</strong>, and
-      <strong>reporting</strong>. Only the perception chain is moving right now.</p>
+      Perception and Speech both cleared their sorties this cycle, so this map now reads differently
+      from last time: the live branches are short, and almost everything that used to look separate
+      now converges on one node that does not exist yet &mdash; <strong>the brain</strong>. It gets
+      its own group below rather than sitting silently at the right edge of three others.</p>
 
     <div class="diagram-wrap">
       <button class="expand" data-graph="#graph-upcoming" type="button">Expand graph</button>
@@ -683,48 +693,56 @@ flowchart LR
 
   subgraph PERC ["Perception"]
     direction LR
-    SORT["Five-fix sortie<br/>five merges, none flown"]:::block
+    EVS["Eyes-and-voice sortie<br/>unflown, 2026-09-24"]:::block
     RECAL["LOWRES recalibration<br/>held on purpose"]:::hold
     CAP["Attention capture<br/>peripheral has no triggers"]:::open
-    C2D["2D — dwell as an act"]:::hold
     COND["Conditions<br/>vegetation, light, weather"]:::open
     K9["9K113 as an optic"]:::hold
   end
 
   subgraph SPEECH ["Speech"]
     direction LR
-    CLIP["One spoken clip<br/>through live capture"]:::block
-    JOY["Joystick probe<br/>does winmm see the HOTAS"]:::block
-    S5["Stage 5<br/>real PTT in DCS"]:::block
-    S6["Stage 6<br/>sortie acceptance"]:::block
-    BL10["BL-10<br/>audio transport"]:::active
-    VOICE["Voice character<br/>accent + prosody"]:::open
-    SPU8["Cockpit audio state<br/>SPU-8"]:::hold
+    S6["Stage 6<br/>voice-quality sortie"]:::block
+    LAT["Press-to-readback<br/>~3s, next real problem"]:::open
+    VOICE["Voice character<br/>accent + prosody"]:::hold
+    SPU8["Cockpit audio state<br/>intercom + SPU-8"]:::hold
   end
 
   subgraph REPORT ["Reporting"]
     direction LR
+    REP["Repetition reopened<br/>2026-09-23"]:::open
     BEH["Behaviour channel<br/>tracking / engaging"]:::open
     TERR["Terrain control<br/>world-model"]:::hold
     IFF["Coalition / IFF<br/>inferred, never truth"]:::hold
     THR["Threat banding"]:::hold
-    GC4B["Group stage 4b<br/>counts, spoken"]:::open
-    GC5["Stage 5<br/>composition"]:::hold
+    GC5["Group stage 5<br/>composition"]:::hold
+  end
+
+  subgraph BRAINGATE ["Waiting on the brain"]
+    direction LR
+    FREETEXT["Free-text commands<br/>arrive, are dropped"]:::hold
+    PHASE["Mission-phase relevance<br/>built, unreachable"]:::hold
+    MI5Q["MI-5 question refinement"]:::hold
+    KNEE["BL-8 kneeboard<br/>4 voice tokens unbenched"]:::hold
   end
 
   BL8["BL-8<br/>memory interfaces"]:::open
-  BRAIN["Brain layer<br/>not started"]:::hold
+  BRAIN["Brain layer<br/>no plan file yet"]:::hold
 
-  SORT --> RECAL --> K9
-  SORT --> CAP --> C2D
-  SORT -.->|"judge after flying"| COND
-  SORT --> BEH --> THR
+  EVS --> RECAL --> K9
+  EVS --> CAP
+  EVS -.->|"judge after flying"| COND
+  EVS -.->|"judge after flying"| GC5
+  EVS --> BEH --> THR
   TERR --> IFF --> THR
-  CLIP --> JOY --> S5 --> S6 --> BL10 --> BRAIN
-  GC4B --> GC5
-  SORT -.->|"judge after flying"| GC5
-  SORT -.->|"needs many flights"| BL8
-  BL8 --> BRAIN
+  EVS --> S6 --> VOICE
+  EVS --> LAT
+  S6 --> SPU8
+  EVS -.->|"needs many flights"| BL8 --> BRAIN
+  FREETEXT --> BRAIN
+  PHASE --> BRAIN
+  MI5Q --> BRAIN
+  KNEE --> BRAIN
   THR -.->|"needs judgement"| BRAIN
 </pre>
       </div>
@@ -738,69 +756,52 @@ flowchart LR
     </div>
 
     <p class="section-note"><strong>What the drawing shows that the lists do not.</strong>
-      <strong>Last week&rsquo;s two red nodes are both gone, and they went in opposite ways.</strong>
-      The contaminated calibration ladder was simply re-shot with the detection aid off. The
-      mission-sandbox probe was never needed: the bridge had been in production since 13 September,
-      so three sessions of planning a probe were planning to discover something already running.
-      <strong>One red node replaced both, and it now carries far more than either did</strong> &mdash;
-      a single unflown sortie sitting upstream of recalibration, attention capture, conditions, group
-      composition, behaviour reporting and BL-8, because five separate behaviours merged in two days
-      and every one of them waits on the same flight. That concentration is the risk the list cannot
-      show: if the flight goes badly, six branches move at once.</p>
-    <p class="section-note">The reporting chain&rsquo;s gate moved rather than lifted. Movement
-      detection used to sit behind &ldquo;can we even get velocity&rdquo;; it is built now, so the
-      question became &ldquo;does it behave&rdquo; &mdash; which is the sortie again. Behind it
-      nothing changed: threat banding still needs believed coalition, which needs terrain control,
-      which does not exist in world-model at all. <code>threat-levels.md</code> reads like one table;
-      drawn out, it is still the longest unbuilt chain in the project.</p>
+      <strong>Every red node from the last drawing is gone.</strong> The five-fix sortie flew and
+      passed; the voice-command sortie flew and passed, taking the joystick probe and the
+      capture-clip blocker with it. What replaced them is one new red node, upstream of five
+      branches instead of six &mdash; smaller, and for a different reason: three milestones merged
+      unflown by deliberate user decision, not because a probe was still pending.</p>
+    <p class="section-note"><strong>The fourth group is the real finding.</strong> Drawing the brain
+      as one hold node at the right edge of three chains made it look like a single, ordinary
+      dependency. It is not: four separate, already-built things &mdash; free-text commands arriving
+      and being silently dropped by <code>NullBrainClient</code>, BL-7's mission-phase tie-break that
+      no code path in a sortie ever calls, MI-5's question set that only ever asks about threats, and
+      BL-8's kneeboard design that is waiting on judgement no fixture can supply &mdash; converge on
+      a component with no plan file. The brain is not the next milestone; it is the one thing four
+      milestones are already finished except for.</p>
+    <p class="section-note">The reporting chain is otherwise unchanged: threat banding still needs
+      believed coalition, which needs terrain control, which does not exist in world-model at all.
+      <code>threat-levels.md</code> reads like one table; drawn out, it is still the longest unbuilt
+      chain in the project that isn't waiting on the brain.</p>
   </section>
 
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Everything that was blocked on a machine has been answered. What is left is blocked on
-        <em>you</em> — one flight, one spoken sentence, one button press. Two of the three take
-        minutes; the flight is the one carrying real weight, because five merged behaviours are
-        waiting behind it.</p>
+      <p>Last cycle's four blockers are all answered — the five-fix sortie and the voice-command
+        sortie both flew and passed. What replaced them is smaller: one flight carrying three
+        merges nobody has heard yet, and one flight judging whether Petrovich's voice itself is
+        good enough.</p>
       <ul class="blockers">
+        <li class="bl" role="button" tabindex="0" data-detail="eyesvoice">
+          <span class="chip block">Sortie</span>
+          <div>
+            <b>Fly the eyes-and-voice sortie</b>
+            <p>Three milestones merged to <code>main</code> unflown, by your own decision so the
+              flight's corrections land on <code>main</code> rather than a branch: binoculars, every
+              voice command actually doing something, and a believed position that is precise and
+              wrong instead of exact behind a cosmetic error bar. No Windows-side redeploy needed —
+              only the Mac side changed. Card: <code>docs/acceptance/2026-09-23-eyes-and-voice-
+              sortie.md</code>.</p>
+          </div>
+        </li>
         <li class="bl" role="button" tabindex="0" data-detail="stage6">
           <span class="chip block">Sortie</span>
           <div>
             <b>Hear it in the air</b>
             <p>Whether 0.6–0.8 s of synthesis latency reads as crew-like or laggy, whether callouts queue
               acceptably under load, and whether a generic voice is tolerable in a loud cockpit. No test
-              can answer any of it.</p>
-          </div>
-        </li>
-        <li class="bl" role="button" tabindex="0" data-detail="sortie5">
-          <span class="chip block">Sortie</span>
-          <div>
-            <b>Fly the five-fix sortie</b>
-            <p>Five things merged in two days and none has been in the air: the scan loop and standing
-              modes, callouts decided at speech time, aggregation, group detectability, and movement.
-              Four of the five came from what you noticed on the last flight. One card covers them all,
-              and the deployment block leads it — movement changed the wire format, so
-              <code>Export.lua</code> and a Hook script both have to be recopied.</p>
-          </div>
-        </li>
-        <li class="bl" role="button" tabindex="0" data-detail="clip">
-          <span class="chip block">Two minutes</span>
-          <div>
-            <b>Say one sentence into the capture chain</b>
-            <p>Capture is built and runs on the Mac with the space bar as the talk control. Everything
-              around it is verified — sox records, the gate measures, a corpus clip came back
-              <code>scan_ahead</code> through real whisper — but no clip of <em>your</em> voice has
-              gone through the live path. It is the one link a test cannot stand in for.</p>
-          </div>
-        </li>
-        <li class="bl" role="button" tabindex="0" data-detail="joy">
-          <span class="chip block">Probe</span>
-          <div>
-            <b>Does Windows see your HOTAS buttons?</b>
-            <p>The joystick push-to-talk reads <code>winmm</code>'s legacy joystick API, which predates
-              DirectInput: 32 buttons per device, devices addressed by number. Whether a multi-device
-              pit appears there at all is a property of your hardware and cannot be reasoned out.
-              One minute, no DCS: run the probe, press the button, read the number back.</p>
+              can answer any of it — stage 5 already proved the pipeline works.</p>
           </div>
         </li>
       </ul>
@@ -852,14 +853,26 @@ flowchart LR
         <span class="chip hold">Deferred</span>
       </div>
 
-      <div class="row s-open" role="button" tabindex="0" data-detail="s3">
+      <div class="row s-open" role="button" tabindex="0" data-detail="repetition">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Repetition is better but not gone</b>
+          <p>Aggregation works on same-type, same-range, adjacent-clock contacts, and the five-fix
+            sortie's transcript shows it firing — but five presence-level calls in one sector,
+            differing only in range, are not aggregated, because range is exactly the part that
+            carries no information at presence level. Two candidate rules, neither chosen yet.</p>
+        </div>
+        <span class="chip open">Reopened</span>
+      </div>
+
+      <div class="row s-open" role="button" tabindex="0" data-detail="latency">
         <span class="who">audio-adapter</span>
         <div class="what">
-          <b>Speech in — stage 5, the real intercom trigger</b>
-          <p>Capture landed on a branch: hold a control, speak, and the clip is recognised and dispatched.
-            What is left is swapping the talk control for the aircraft's own — the pilot stick trigger's
-            right press, argument 738, whose values are already read first-party from the install. It is
-            one more implementation behind the same protocol; nothing else in the chain moves.</p>
+          <b>Press-to-readback is ~3s</b>
+          <p>Measured on the voice-command sortie. A crew member answers in well under a second, so
+            this is what will keep Petrovich feeling like a machine no matter how good recognition
+            gets. One component is certain rather than estimated: the logger polls transcripts once
+            a second, so half a second is spent purely being noticed.</p>
         </div>
         <span class="chip open">Next</span>
       </div>
@@ -932,6 +945,67 @@ flowchart LR
     </div>
   </section>
 
+  <section>
+    <h2>Architecture</h2>
+    <p class="section-note">The other two graphs are about time — how we got here, what is next. This
+      one is about shape, and stays useful once every milestone above is done. Two machines, two seam
+      kinds, and one absent component drawn where it belongs rather than implied.</p>
+
+    <div class="diagram-wrap">
+      <button class="expand" data-graph="#graph-arch" type="button">Expand graph</button>
+      <div class="diagram" id="graph-arch">
+<pre class="mermaid">
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 30, "rankSpacing": 50}} }%%
+flowchart TB
+  classDef done   fill:#1E7A5E,stroke:#0F4436,stroke-width:1px,color:#FFFFFF;
+  classDef active fill:#D98E1F,stroke:#8A5810,stroke-width:1.5px,color:#231705;
+  classDef open   fill:#2C6E9B,stroke:#174761,stroke-width:1px,color:#FFFFFF;
+  classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
+  classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
+
+  subgraph WIN ["Windows — the DCS box"]
+    direction TB
+    DCS["DCS World<br/>Mi-24P / Petrovich cockpit"]:::done
+    AL["Aircraft Layer<br/>Export.lua + collector"]:::done
+  end
+
+  subgraph MAC ["Mac — everything else"]
+    direction TB
+    WM["World Model<br/>offline-built theatre store"]:::done
+    BL["Body Layer<br/>Petrovich's belief state"]:::done
+    AA["Audio Adapter<br/>TTS + speech recognition"]:::done
+    BRAIN["Brain layer<br/>no plan file yet"]:::hold
+  end
+
+  MI["Mission Interpreter<br/>offline, pre-mission"]:::done
+
+  DCS ==>|"telemetry, world objects,<br/>HelperAI indication"| AL
+  AL ==>|"text overlay, F10/voice<br/>commands, audio playback"| DCS
+  AL -->|"HTTP/JSON"| BL
+  BL ---|"in-process Python import<br/>(the sole sanctioned exception)"| WM
+  BL -->|"HTTP/JSON"| AA
+  AA -->|"HTTP/JSON"| AL
+  MI -.->|"HTTP/JSON, offline query"| WM
+  MI -.->|"compact artifact, read at startup"| BL
+  BL -.->|"tool API frozen since BL-6,<br/>15 tools, idle"| BRAIN
+  AA -.->|"transcripts, currently dropped"| BRAIN
+</pre>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="chip done">Built</span>
+      <span class="chip hold">Does not exist</span>
+    </div>
+
+    <p class="section-note">The double-line edges are DCS itself &mdash; read <em>and</em> written,
+      never a one-way feed. The single plain edge between Body Layer and World Model is the one
+      in-process import this project allows anywhere; every other subproject boundary, including
+      the two crossing back to Windows, is HTTP. Mission Interpreter runs offline and hands off one
+      artifact before a sortie starts &mdash; it has no seat in the runtime loop. The brain is drawn
+      as absent on purpose: everything upstream of it already works.</p>
+  </section>
+
   <footer>
     Generated from <code>ROADMAP.md</code> across five subprojects plus <code>todo/todo.md</code>. This page is a
     view, never a second source of truth — every status here is derived, and any disagreement with the roadmap
@@ -986,47 +1060,50 @@ const DETAIL = {
     src: "world-model/ROADMAP.md"
   },
   al: {
-    kicker: "aircraft-layer/", title: "Aircraft Layer", chip: ["done", "Core complete"],
+    kicker: "aircraft-layer/", title: "Aircraft Layer", chip: ["done", "Core complete, two new channels accepted"],
     facts: [["Scope", "Live DCS I/O pipeline"], ["Shape", "Export.lua &rarr; Windows collector &rarr; LAN API"], ["Stable since", "2026-09-07"]],
     sections: [
       { h: "What it does", p: "Telemetry, world objects and Petrovich's own indication text out of DCS; text overlay, F10 radio commands and now audio playback back in. It is the only component that talks to DCS, deliberately — everything above it consumes HTTP." },
-      { h: "Newest addition: velocity", p: "Unit velocity does not exist in the Export API this project reads \u2014 it lives in DCS's mission scripting environment. A Hook script bridges the two and publishes it as <code>GET /unit_velocity/latest</code>, joined to world objects by unit name. The wire format was versioned at the same time, and the collector now warns on a mismatch, because a stale <code>Export.lua</code> after a redeploy is otherwise a silent feature outage." },
+      { h: "Velocity \u2014 ACCEPTED 2026-09-23", p: "Unit velocity does not exist in the Export API this project reads \u2014 it lives in DCS's mission scripting environment. A Hook script bridges the two and publishes it as <code>GET /unit_velocity/latest</code>, joined to world objects by unit name. Flew on the five-fix sortie: movement callouts were produced in flight, exercising the whole transport end to end." },
+      { h: "Push-to-talk \u2014 ACCEPTED 2026-09-23", p: "<code>Export.lua</code> publishes the pilot stick trigger (arg 738) as its own line, sent only on change rather than on the 5Hz telemetry throttle \u2014 a press waiting behind that throttle could lose up to 200ms off the front of an utterance, and the front is where the verb is. The voice-command sortie's verdict: the trigger works, and a radio call stays out of it." },
       { h: "Audio playback", p: "<code>POST /audio/play</code> landed with the TTS slice: base64 WAV in, played through <code>winsound</code> by a single worker thread. Routine lines queue FIFO; an urgent line clears the queue and interrupts whatever is already speaking." },
       { h: "Open: split the export throttle", p: "<code>EXPORT_INTERVAL_S = 0.2</code> is one shared 5 Hz throttle gating all three feeds together. Ground units do not need 5 Hz; self-data may want to stay fast. The fix is two interval constants. Not urgent, because there is no measured cost to react to yet — see below." },
-      { h: "Open: measure the real FPS cost", p: "No quantified per-call cost for <code>LoGetWorldObjects</code> exists at realistic unit counts of 50-200 — only forum folklore. The test is to fly with world-objects export on and off at 5, 2 and 1 Hz and diff frame times. Worth checking at the same time whether being fired at is served by this poll at all; nothing currently reads it for threat detection, and urgent callouts may need their own signal." }
+      { h: "Open: measure the real FPS cost", p: "No quantified per-call cost for <code>LoGetWorldObjects</code> exists at realistic unit counts of 50-200 — only forum folklore. The test is to fly with world-objects export on and off at 5, 2 and 1 Hz and diff frame times. Worth checking at the same time whether being fired at is served by this poll at all; nothing currently reads it for threat detection, and urgent callouts may need their own signal." },
+      { h: "A found gap in our own documentation", p: "The clickabledata.lua dump that documents Mi-24P controls missed 13 of 749 elements — precisely the ones with more than one action, including both push-to-talk triggers. Listed by hand in a warning box at the top of the reference for now; the generator is the real fix." }
     ],
-    items: [["done","Core telemetry pipeline"],["done","/world_objects/latest"],["done","/petrovich_indication/latest"],["done","Text overlay write channel"],["done","F10 command inbound channel"],["done","POST /audio/play"],["active","/unit_velocity/latest - unflown"],["open","Split the export throttle"],["open","Measure LoGetWorldObjects FPS cost"]],
+    items: [["done","Core telemetry pipeline"],["done","/world_objects/latest"],["done","/petrovich_indication/latest"],["done","Text overlay write channel"],["done","F10 command inbound channel"],["done","POST /audio/play"],["done","/unit_velocity/latest - ACCEPTED 2026-09-23"],["done","Push-to-talk channel - ACCEPTED 2026-09-23"],["open","Split the export throttle"],["open","Measure LoGetWorldObjects FPS cost"],["open","Regenerate command-surface reference with a raw-table parser"]],
     src: "aircraft-layer/ROADMAP.md"
   },
   mi: {
-    kicker: "mission-interpreter/", title: "Mission Interpreter", chip: ["done", "MI-0-MI-6 complete"],
-    facts: [["Scope", "Understands one mission, offline, pre-flight"], ["Model", "qwen3:14b for synthesis (MI-4)"], ["Consumer", "body-layer BL-7"]],
+    kicker: "mission-interpreter/", title: "Mission Interpreter", chip: ["done", "MI-0-MI-6 complete, tested with notes"],
+    facts: [["Scope", "Understands one mission, offline, pre-flight"], ["Model", "qwen3:14b for synthesis (MI-4)"], ["First real test", "2026-09-24, three real missions"]],
     sections: [
       { h: "What it does", p: "Takes a <code>.miz</code>, its briefing, the world model and the player's stated intent, and produces a structured Mission Understanding — not prose. Critically, it filters out mission-author-only knowledge (hidden triggers, scripted ambushes) before any of it can reach the crew layer, because Petrovich must never know things the crew could not know." },
-      { h: "Why it's done", p: "MI-6 was the last planned stage: it compiles the full understanding into a compact runtime form that BL-7 consumes for mission phase and relevance. There is no MI-7 in the plan." },
-      { h: "The one open item", p: "MI-5b, a web form for player questions, replacing MI-5's text console. Explicitly future — no design work until the console version proves out in use. Genuinely optional." },
-      { h: "Known gap", p: "Key locations in the compact output carry no position field, so relevance can only be scored against route waypoints, not named mission-critical areas. Documented rather than worked around." }
+      { h: "First real acceptance, 2026-09-24", p: "Run end to end against three missions the pilot actually intends to fly (<code>MI24-outpost-M03/M04/M06</code>, Syria) — the first time it has faced anything other than the committed synthetic fixture or a third-party sample. Completion, mission understanding, and the author-only-knowledge boundary all passed. Wall-clock: 1:12 with the model already resident, up to 3:19 cold — minutes, not seconds; worth knowing before treating this as interactive." },
+      { h: "The weak note: MI-5's question set", p: "In practice it asked only threat confirmations, not the ownship/purpose/task questions the stage was meant to cover. Pilot's verdict: <em>\"kinda pass ... will do for now, needs further work.\"</em> Deferred to the brain layer at user direction — a richer ambiguity detector written now would be a second, hand-rolled judgement layer the brain would just replace." },
+      { h: "The finding that matters more: BL-7 is inert", p: "Discovered during this same acceptance run. <code>mission_phase</code> reaches exactly four body-layer files and none of <code>attention.py</code>, <code>callouts.py</code> or <code>crew_console.py</code> — the phase-proximity tie-break is real but only reachable from the <code>--console</code> debug harness. Mission phase currently changes nothing about what Petrovich attends to or says in a sortie. Not an MI defect — the artifact is correct and delivered; nothing downstream reads it yet." },
+      { h: "The one open item of MI's own", p: "MI-5b, a web form for player questions, replacing MI-5's text console. Explicitly future — no design work until the console version proves out in use." }
     ],
-    items: [["done","MI-0 - real .miz parse"],["done","MI-1 / MI-1.5 - structured extraction"],["done","MI-2 - world enrichment"],["done","MI-3 - understanding schema"],["done","MI-4 - capable-model synthesis"],["done","MI-5 - player questions, console"],["done","MI-6 - runtime compilation"],["open","MI-5b - web form"]],
-    src: "mission-interpreter/ROADMAP.md"
+    items: [["done","MI-0 - real .miz parse"],["done","MI-1 / MI-1.5 - structured extraction"],["done","MI-2 - world enrichment"],["done","MI-3 - understanding schema"],["done","MI-4 - capable-model synthesis"],["done","MI-5 - player questions, console"],["done","MI-6 - runtime compilation"],["done","First real acceptance - passed with notes"],["open","MI-5b - web form"]],
+    src: "mission-interpreter/ROADMAP.md, docs/acceptance/2026-09-24-mission-interpreter-sortie.md"
   },
   bl: {
-    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Five merges, none flown"],
-    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["Tests", "929 passing"]],
+    kicker: "body-layer/", title: "Body Layer", chip: ["active", "Five-fix sortie passed; three more unflown"],
+    facts: [["Scope", "Petrovich's belief state"], ["Tool surface", "15 tools, frozen since BL-6"], ["Tests", "1076 passing"]],
     sections: [
       { h: "What it does", p: "Contacts, classification, attention, events, mission phase, and the deterministic API a brain will eventually query. Memory is explicit application state -- never LLM chat history." },
       { h: "The invariant everything serves", p: "Contact identity is <strong>perceptual</strong>, never a DCS object id or any truth field. That is deliberate: Petrovich can confuse two identical trucks, which is exactly the fallibility this project exists to model." },
-      { h: "He now looks somewhere", p: "The default gaze is an o'clock scan loop -- 12, then 11/10/9, then 12 again, then 1/2/3, two seconds per 30 degree cone, sixteen seconds round, forward arc twice per cycle. <code>gaze_at(t_sim, plan)</code> is a pure function of sim time, so replay determinism falls out of purity rather than being managed. Scan and Watch became standing <em>modes</em> in the same work: a task marked itself succeeded on first contact, so a commanded scan silently reverted to free scan the moment it found anything -- which is why \"scan left\" still produced 12 o'clock reports." },
-      { h: "Four fixes that came from one flight", p: "Callouts are decided at speech time rather than queued, so a bearing cannot be stale by the time it is spoken. Repetitive reports aggregate -- seven observed lines render as four -- while identification lines never do, which is what stops a BTR-70 disappearing into \"three infantry\". A member of a cohesive group is admitted at a looser threshold than a lone vehicle. And he can tell moving from stopped. Every one of those came from the pilot noticing something no test could." },
-      { h: "The split worth understanding", p: "Group detectability was not a tuning change. One constant was answering two different questions -- can the eye register a mark at all (<em>resolution</em>), and would a lone mark be noticed while scanning (<em>salience</em>) -- which is why the dots-off ladder and the single-unit sortie looked contradictory. Split in two, the contradiction dissolves, and the model then predicted a rung it was not fitted to: infantry's group ceiling at 1406 m sits just below the 1.91 km rung where the pilot reports seeing the complex but not the infantry." },
-      { h: "What's next", p: "Flying it. Five behaviours merged in two days and not one has been in the air, so almost every open perception item now sits downstream of a single sortie." }
+      { h: "The five-fix sortie -- FLOWN AND ACCEPTED, 2026-09-23", p: "The o'clock scan loop, Scan/Watch as standing modes, speech-time callouts, aggregation, group detectability, and movement all flew together. User's own verdict: <em>\"with these fixes, Five-Fix Sortie is done and accepted.\"</em> Movement detection produced real callouts in flight -- the full transport end to end. One item reopened from the same flight: presence-level repetition is better but not gone (five same-sector calls differing only in range are not aggregated, since range carries no information at that level)." },
+      { h: "Three more merged the same day, deliberately unflown -- 2026-09-24 (`c398675`)", p: "Binoculars: a phase cycle, not an interrupt -- detecting something does not yank the glasses up mid-sector, and raising them is gated on an improvement window computed from the existing calibration, not a new constant. Voice command completeness: every one of 20 previously-hollow tokens now does something real, closing the gap where the machinery existed but did nothing. Precise position belief: replaced quantised clock/range buckets -- which were doing two jobs at once, perceptual error model and reporting vocabulary -- with a real fused 2x2 covariance. A believed position is now precise <strong>and wrong</strong>, with a per-object bias that survives averaging, closing a live omniscience hole in <code>hybrid_source.py</code> that had been writing near-ground-truth positions behind a cosmetic uncertainty band." },
+      { h: "The finding that landed the same week: BL-7 is inert", p: "Mission-phase tracking is complete and correct, and reaches nothing a pilot can hear -- <code>mission_phase</code> touches no file in the attention/callout/crew-console chain, only a debug harness. Deferred to the brain layer, not reworked here." },
+      { h: "What's next", p: "Fly the three unflown merges -- one card (`docs/acceptance/2026-09-23-eyes-and-voice-sortie.md`) covers all three, since binoculars and voice commands are one cockpit loop: he looks, he tells you what he sees, you tell him where to look." }
     ],
-    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Group detectability - resolution vs salience"],["done","Watch as a standing mode"],["active","Movement detection - unflown"],["open","Attention capture - no triggers yet"],["open","Stage 4b - counts, spoken"],["open","BL-8 - memory interfaces"],["hold","Stage 5 - composition"]],
+    items: [["done","BL-0..BL-7 - harness through mission phase"],["done","Vision range calibration"],["done","Group contacts, stages 0-4a"],["done","Cones 1, 2A, 2A.5, 2B, 2C"],["done","Callout scheduling + aggregation"],["done","Group detectability - resolution vs salience"],["done","Watch as a standing mode"],["done","Movement detection - ACCEPTED 2026-09-23"],["done","Five-fix sortie - PASSED 2026-09-23"],["done","Binocular optic - unflown"],["done","Voice command completeness - unflown"],["done","Precise position belief - unflown"],["open","Repetition - reopened 2026-09-23"],["open","Attention capture - no triggers yet"],["open","BL-8 - memory interfaces"],["hold","BL-7 - deferred to the brain"],["hold","Stage 5 - composition"]],
     src: "body-layer/ROADMAP.md"
   },
   srs: {
-    kicker: "audio-adapter/", title: "Audio Adapter", chip: ["active", "Voice out done - speech in, stages 1-4"],
-    facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Speech in", "Stages 1-4 built"]],
+    kicker: "audio-adapter/", title: "Audio Adapter", chip: ["active", "Voice out done - speech in flown & accepted"],
+    facts: [["Scope", "Everything audio"], ["Created", "2026-09-17"], ["Speech in", "Stages 1-5, ACCEPTED 2026-09-23"]],
     sections: [
       { h: "Why it exists separately", p: "So neither the body layer nor the aircraft layer grows a speech dependency. Body and brain deal in text only and never see audio bytes. The seam is HTTP throughout, so no new in-process cross-subproject import was introduced \u2014 the world-model import remains the sole sanctioned exception." },
       { h: "The SRS dependency is gone", p: "Renamed from <code>srs-adapter</code> on 2026-09-20. SRS was never actually wired: playback already posted a WAV to the collector, which plays it with <code>winsound</code>. Dropping it removes a planned integration rather than a working one \u2014 and dissolves the \"stay on the mission frequency\" constraint, which only existed because SRS was in the picture. Research notes still say SRS, deliberately: they record sessions that really did." },
@@ -1035,10 +1112,11 @@ const DETAIL = {
       { h: "The model was chosen on the wrong-command column", p: "Not on accuracy. A no-match costs a \"say again\" the player notices; a wrong-but-valid command executes with nothing to flag it. <code>tiny.en</code> produces seven of those, <code>base.en</code> two, <code>small.en</code> none \u2014 a difference the four-point accuracy gap hides completely." },
       { h: "Capture closed the loop", p: "Hold a control, speak, release: the clip is recorded, gated on duration and level, POSTed for recognition, matched and dispatched. Two talk controls sit behind one protocol \u2014 the space bar on the Mac, a joystick button on Windows \u2014 so the aircraft's own intercom trigger becomes a third implementation rather than a rewrite. Capture deliberately knows nothing about recognition: it posts a WAV, and the result comes back through the body layer's own poll, so it can run on a machine with no model on it." },
       { h: "sox rather than a second audio binary", p: "The plan called for <code>ffmpeg -f dshow</code>, and part of the stage's stated job was discovering the dshow device name for the pilot's headset. That work already existed in another currency: 252 corpus clips were recorded through that exact headset with sox, so the driver name, argument order, buffer size and truncation repair were all settled against the hardware that matters. Every one of those is a scar \u2014 the 1024-byte buffer exists because the default silently discarded a quarter-second off the end of every clip, and the bench read the truncations as an accent problem." },
-      { h: "A measurement that may yet matter", p: "The first ~0.14 s after a press is not captured: sox returns in two milliseconds but the audio device is not open yet, and four holds from 0.6 s to 2.0 s each lost the same fixed amount. Press-then-speak leaves more than that, so it is recorded rather than corrected \u2014 the fix, a permanently hot microphone with the pressed interval trimmed out, costs continuous capture and file rotation to buy something no evidence yet asks for." },
-      { h: "Next", p: "One spoken sentence through the live path, then the real intercom trigger. Cockpit audio state is deferred at the user's direction, though its prerequisite is already gone: the device argument numbers were read off the install." }
+      { h: "Capture and real PTT -- FLOWN AND ACCEPTED, 2026-09-23", p: "Both the ~0.14 s device-open gap and the two-stage mechanical trigger (a full press transits the intercom stop for 19-32 ms on its way to radio) were resolved live rather than guessed at. The gap: <em>\"is the natural, normal way how aviation radios work\"</em> -- not felt, nothing built to fix it. The trigger: works, and a radio call stays out of it." },
+      { h: "The new problem: press-to-readback is ~3 s", p: "Measured the same sortie. A crew member answers in well under a second, so this -- not recognition accuracy -- is what will keep Petrovich feeling like a machine. One component is certain rather than estimated: the logger polls transcripts once a second, so half a second is spent purely waiting to be noticed. Not a candidate fix: a smaller whisper model -- <code>small.en</code> was chosen on wrong-command count, and trading it for speed would buy latency with the one failure the pilot cannot catch." },
+      { h: "Next", p: "Stage 6, live sortie acceptance for voice quality and latency-feel itself -- stage 5 already proved the pipeline works. Cockpit audio state stays deferred at the user's direction, though its prerequisite is already gone: the device argument numbers were read off the install." }
     ],
-    src: "audio-adapter/ROADMAP.md, research/2026-09-19-corpus-bench-results.md"
+    src: "audio-adapter/ROADMAP.md, docs/acceptance/2026-09-23-voice-command-sortie.md"
   },
 
   gc4b: {
@@ -1090,41 +1168,39 @@ const DETAIL = {
     facts: [["Needs", "DCS, a real sortie"], ["Type", "Acceptance, not a correctness gate"]],
     sections: [
       { h: "What only a human can judge", p: "Whether 0.6-0.8 s of synthesis latency reads as crew-like or laggy. Whether several callouts arriving in one poll queue acceptably or feel like a backlog. And whether a generic English voice is tolerable in the cockpit, or whether the missing Russian accent breaks the illusion badly enough to promote that backlog item." },
-      { h: "Why it isn't a gate", p: "Stage 5 already proves the pipeline works. This measures whether it <em>feels</em> right, which is a different question and one no test can answer." }
+      { h: "Why it isn't a gate", p: "Stage 5 already proves the pipeline works \u2014 it flew and was accepted 2026-09-23. This measures whether it <em>feels</em> right, which is a different question and one no test can answer." }
     ],
     src: "audio-adapter/ROADMAP.md"
   },
-  sortie5: {
-    kicker: "body-layer/ - blocker", title: "Fly the five-fix sortie", chip: ["block", "Five merges, none flown"],
-    facts: [["Card", "docs/acceptance/2026-09-22-five-fixes-sortie.md"], ["Branch", "main"], ["Merged", "2026-09-21/22"]],
+  eyesvoice: {
+    kicker: "body-layer/ - blocker", title: "Fly the eyes-and-voice sortie", chip: ["block", "Three merges, none flown"],
+    facts: [["Card", "docs/acceptance/2026-09-23-eyes-and-voice-sortie.md"], ["Branch", "main"], ["Merged", "2026-09-24 (`c398675`)"]],
     sections: [
-      { h: "Why one flight and not five", p: "Four of the five changes came from findings on the same previous sortie, and they interact: aggregation is only judgeable once callouts are current, and group detectability is only judgeable once you can see where he is looking. Splitting them across flights would cost four sorties to learn what one can show." },
-      { h: "Deployment leads the card, deliberately", p: "Movement detection changed the Export wire format, so <code>Export.lua</code> and a new Hook script both have to be recopied. Nothing else on the card depends on it \u2014 which is exactly the trap: skip the redeploy and everything appears to work while movement silently reports nothing. The collector now prints the deployed script's version on connect, so the check is one line rather than a diagnosis." },
-      { h: "What is deliberately not testable", p: "Attention capture has no triggers, so nothing outside the focus cone can interrupt him. And lone-unit detection range is knowingly short: the salience constant was <em>not</em> recalibrated, so the group term could be judged uncoupled from a threshold change. An isolated vehicle picked up late is expected, not a regression \u2014 saying so on the card is what stops flight time being spent on it." },
-      { h: "The prize", p: "Whether callouts are current. It was the clearest defect of the last flight, and it is what makes every other block on the card legible." }
+      { h: "Why one flight and not three", p: "Binoculars and full voice-command coverage are one cockpit loop \u2014 he looks, he tells you what he sees, you tell him where to look \u2014 so judging either in isolation would be judging half a conversation. Precise position belief rides along because it changes what every report in that loop actually says." },
+      { h: "Merged before the flight, on purpose", p: "User decision, 2026-09-24: land all three on <code>main</code> now, so any correction this sortie produces lands there too rather than on a branch that then has to be re-merged. All three passed DoD on fixtures/console only." },
+      { h: "What no fixture can supply", p: "The nine unbenched <code>scan &lt;clock&gt;</code> voice tokens have no recognition-accuracy measurement of any kind yet, benched or live. Whether binoculars raising itself feels like a crewman's habit or a tic. And whether the covariance-fusion spatial gate \u2014 the one piece in precise position belief carrying real regression risk \u2014 reproduces the 2026-09-09 duplicate-contact runaway from a different mechanism than the one that caused it the first time." },
+      { h: "No Windows-side redeploy needed", p: "Export.lua, the Hook scripts and the collector are untouched by this work \u2014 only the Mac side changed, so whatever is already deployed stays deployed." }
     ],
-    src: "docs/acceptance/2026-09-22-five-fixes-sortie.md"
+    src: "docs/acceptance/2026-09-23-eyes-and-voice-sortie.md"
   },
-  clip: {
-    kicker: "audio-adapter/ - blocker", title: "One spoken clip through capture", chip: ["block", "Two minutes, on the Mac"],
-    facts: [["Needs", "Your voice"], ["Not needed", "Windows, DCS, a joystick"]],
+  repetition: {
+    kicker: "body-layer/", title: "Repetition is better but not gone", chip: ["open", "Reopened 2026-09-23"],
+    facts: [["Fixed", "Same-type, same-range, adjacent-clock"], ["Not fixed", "Same-sector, differing range only"]],
     sections: [
-      { h: "What is already proven", p: "sox records real audio from the default input and the header repair after a mid-write stop works; the gate measures a real peak and correctly rejects a silent room; and a corpus clip posted through capture's own client came back \"Look ahead.\" \u2192 <code>scan_ahead</code> at 0.80 confidence through real whisper. The links either side of the microphone are done." },
-      { h: "What no test can stand in for", p: "A clip of your own voice, recorded live rather than replayed from the corpus, travelling the whole path. Acoustic loopback was attempted from this machine and produced nothing but room noise, which is itself the gate working \u2014 but it means the last link is unverified." },
-      { h: "How", p: "Run the adapter with the small.en model, run the capture process beside it, press space, say \"look ahead\", press space again. Press-to-start and press-to-stop rather than a true hold, because a terminal never receives a key-release event \u2014 the same wall the corpus recorder hit." }
+      { h: "What the five-fix sortie's transcript showed", p: "Aggregation works and fires, but leaves behind runs like five presence-level \"ground, 12 o'clock\" calls in one scan, differing only in range \u2014 two of them identical. They are not aggregated because the range differs, and range is precisely the part that carries no information at presence level." },
+      { h: "Two candidate rules, neither chosen", p: "Widen aggregation to a range <em>band</em> at presence level only, or suppress re-reporting a contact already called within some window. The second is probably the real fix \u2014 the identical repeat suggests the same contact was called twice, not two different contacts at similar range." }
+    ],
+    src: "body-layer/ROADMAP.md"
+  },
+  latency: {
+    kicker: "audio-adapter/", title: "Press-to-readback is ~3s", chip: ["open", "Measured 2026-09-23"],
+    facts: [["Measured on", "the voice-command sortie"], ["Certain component", "poll interval, 0-1s"]],
+    sections: [
+      { h: "Why it matters more than recognition accuracy", p: "A crew member answers in well under a second. No matter how good the recognition gets, a three-second pause will keep Petrovich feeling like a machine rather than a crewman." },
+      { h: "One number is certain, the rest is estimated", p: "The logger polls <code>GET /transcripts/poll</code> once per second by default, so a recognised command waits 0-1s, half a second on average, purely to be noticed \u2014 the cheapest chunk to remove, costing nothing but more frequent loopback requests. The rest of the budget (sox's stop and re-encode, the LAN hop, whisper itself, synthesis) is estimated and should be measured before anything is optimised." },
+      { h: "Not a candidate fix", p: "A smaller whisper model. <code>small.en</code> was chosen on wrong-command count, not accuracy \u2014 <code>tiny.en</code> produced seven confident wrong commands, <code>base.en</code> two, <code>small.en</code> none. Trading that for speed would buy latency with the one failure the pilot cannot catch." }
     ],
     src: "audio-adapter/ROADMAP.md"
-  },
-  joy: {
-    kicker: "audio-adapter/ - blocker", title: "Does Windows see your HOTAS?", chip: ["block", "One minute, no DCS"],
-    facts: [["Probe", "tools/probe_joystick.py"], ["API", "winmm joyGetPosEx"], ["Gates", "Stage 5"]],
-    sections: [
-      { h: "The specific doubt", p: "<code>joyGetPosEx</code> predates DirectInput. It exposes at most 32 buttons per device and addresses devices by a small numeric id rather than by name. A modern pit is several separate USB devices, and whether each appears under a legacy id \u2014 and whether the button you would actually press falls inside the first 32 \u2014 is a property of your hardware. It cannot be reasoned out from here." },
-      { h: "Why probe rather than just build", p: "The failure mode is silent and badly placed: code that looks right, a button that does nothing, discovered on the Windows box in flight. One minute of pressing a button and reading a number removes the whole class." },
-      { h: "Read the number carefully", p: "The probe reports buttons 0-based, as the API does. DCS's own binding UI numbers from 1, so the probe's button 7 is DCS's \"JOY_BTN8\". That off-by-one is the single most likely way this goes wrong." },
-      { h: "If it answers nothing", p: "Then the legacy API does not see that hardware and joystick PTT is the wrong route for it \u2014 which is worth knowing before Stage 5 rather than after. Capture still works from the keyboard, and the aircraft's own intercom trigger does not go through this API at all." }
-    ],
-    src: "audio-adapter/ROADMAP.md, aircraft-layer/research/2026-09-19-ptt-gate-feasibility.md"
   },
   capture: {
     kicker: "body-layer/", title: "Attention capture", chip: ["open", "Standing exposure"],
@@ -1148,23 +1224,13 @@ const DETAIL = {
     ],
     src: "audio-adapter/ROADMAP.md"
   },
-  s3: {
-    kicker: "audio-adapter/", title: "Speech in - the real trigger", chip: ["open", "Stage 5"],
-    facts: [["Gate", "Passed at 99.2%"], ["Built", "Stages 1-4"], ["Left", "Stage 5, then a sortie"]],
-    sections: [
-      { h: "Where it stands", p: "The recognition gate passed, the matcher and the recognition service merged, and capture now closes the loop: hold a control, speak, release, and the command is dispatched with a readback. What remains is swapping the talk control for the aircraft's own." },
-      { h: "Push-to-talk removes a hard problem rather than solving it", p: "Press to release is one clip, one transmission, one decision. Live speech systems normally have to solve endpointing \u2014 deciding where an utterance ends, usually with voice-activity detection and usually badly. This deletes the question. It also delimits <em>commands</em>: two orders means two presses, so the matcher never has to split a sentence." },
-      { h: "The real trigger is already identified, first-party", p: "The pilot stick trigger is argument 738, and its values come from the module's own <code>clickabledata.lua</code> rather than from a forum: 1.0 full press (radio), <strong>0.5 right press (intercom)</strong>, 0.0 released. The half press routes to intercom regardless of what the SPU-8 selector has chosen, so reusing it needs no new binding and matches the real aircraft's crew-communication control exactly." },
-      { h: "Nothing acts before the transmission closes", p: "\"Nevermind\" at the end can retract everything before it, so every decision waits for release. <code>stop</code> counts only when the whole transmission is that single word \u2014 a rule that deleted a mid-stream recognition mechanism and a false-positive class at once." }
-    ],
-    src: "audio-adapter/ROADMAP.md, plans/inbound-speech/plan.md"
-  },
   bl8: {
     kicker: "body-layer/", title: "BL-8 - memory layer interfaces", chip: ["open", "Deliberately gated"],
     facts: [["Decision", "User, 2026-09-10"], ["Gated on", "BL-2..BL-7 flying for real"]],
     sections: [
       { h: "Why it's last", p: "\"The shape of what's worth remembering is only knowable after BL-2 through BL-7 have run for real.\" Building a persistence model before knowing what survives a sortie would be guessing at a schema." },
-      { h: "Standing awareness, not a constraint", p: "Every milestone touching in-mission memory shapes — contacts, the attention area registry — should keep the eventual export boundary in mind. Not as a design constraint yet; just don't shape something in a way that obviously fights it." }
+      { h: "Standing awareness, not a constraint", p: "Every milestone touching in-mission memory shapes — contacts, the attention area registry — should keep the eventual export boundary in mind. Not as a design constraint yet; just don't shape something in a way that obviously fights it." },
+      { h: "Now one of four things waiting on the brain", p: "The kneeboard design this feeds (`plans/bl8-memory/plan.md`) has its decisions resolved already, including four voice tokens shipped unbenched — it is ready to build, but judging what is worth remembering still needs the real flights this entry was always gated on." }
     ],
     src: "body-layer/ROADMAP.md"
   },
