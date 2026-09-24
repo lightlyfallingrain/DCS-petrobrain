@@ -4,10 +4,11 @@ A watched contact now talks back: it reports its own movement, whole-kilometre r
 believed weapon-envelope entry/exit, unprompted. `follow` becomes both a synonym for `watch` and a
 new way to *name* which contact to watch by descriptor/clock/range.
 
-**Branch: `feature/watch-reporting`** — not merged yet.
+**Branch: `main`** — merged 2026-09-24 (`9b16c3b`), before flying, deliberately: any correction
+this sortie produces lands on `main` rather than on a branch that then has to be rebased.
 
 ```sh
-git checkout feature/watch-reporting && git pull
+git checkout main && git pull
 ```
 
 ## Where this sits among the outstanding sorties
@@ -17,19 +18,13 @@ Three other milestones are already merged to `main` and unflown, with their own 
 completeness, precise position belief). There is also a separate probe card,
 `docs/acceptance/2026-09-24-damage-and-firing-probes.md`, for damage/firing recon questions.
 
-**This branch has not merged**, so it cannot ride the same flight as those three without checking
-out `feature/watch-reporting` specifically — the main checkout will not be on `main` while you fly
-this card. Two reasonable orders:
+**This has now merged, which simplifies the choice: everything is on `main` together.** One
+checkout carries watch reporting *and* all three of those milestones, so a single sortie can work
+through both card's lists if you want it to — or you can fly them separately, same checkout either
+way.
 
-- Fly the eyes-and-voice card first on `main` (it has been waiting longest), then check out this
-  branch for a second flight once you're ready to look at watch reporting specifically.
-- Or fly this branch first, since `feature/watch-reporting` branched from a point that already
-  contains all three merged milestones (`3409b66`, after `c398675`) — everything the eyes-and-voice
-  card tests is present here too, so one sortie on this branch can plausibly clear both cards at
-  once if you're willing to work through both lists in the same flight.
-
-Either way, say which sortie cleared which card when you report back — the roadmap's live-acceptance
-debt list tracks that per-item, not per-flight.
+Say which sortie cleared which card when you report back. The roadmap's live-acceptance debt is
+tracked per item, not per flight.
 
 ## Setup — nothing to redeploy
 

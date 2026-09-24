@@ -970,8 +970,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   **unbenched** tokens (no recordings in this corpus), the same cost class as `cancel_scan`/
   `cancel_watch` before 2026-09-23 -- next corpus recording's job. **Unflown as of merge.**
 
-- [~] **Watch reporting — Stages 1 through 5 implemented and reviewed, not yet merged
-  (`feature/watch-reporting`).** A watched contact now reports itself unprompted on three new
+- [x] **Watch reporting — Stages 1 through 5, merged 2026-09-24 (merge `9b16c3b`,
+  `feature/watch-reporting`). Merged before flying, deliberately, so any correction the sortie
+  produces lands on `main` rather than a branch — live acceptance is still outstanding
+  (`docs/acceptance/2026-09-24-watch-reporting-sortie.md`).** A watched contact now reports itself unprompted on three new
   triggers, plus `follow` becomes both a `watch` synonym and a new best-match way to *name* which
   contact to watch. Correctness review APPROVED (full read), performance review flagged a real
   finding (LOS called before the range/altitude gate) which was fixed and the fix re-reviewed
