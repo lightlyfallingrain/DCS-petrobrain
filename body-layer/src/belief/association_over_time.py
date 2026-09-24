@@ -118,22 +118,22 @@ is 2D (x/z only): both channels report ground contacts and neither carries a
 perceived-altitude field precise enough to gate on independently of the
 horizontal position it was derived alongside.
 
-`uncertainty_radius_m` is source-derived, not a single tuned constant:
-
-- **Naked-eye** (`perception.naked_eye_source.SOURCE_NAKED_EYE_VISUAL_
-  FILTERED`): `_naked_eye_uncertainty_m`, derived from that channel's own
-  output quantisation (cross-range error ~= `range_m * sin(half the 30 deg
-  clock bucket)`, down-range error = the width of the `OP_D*` range bucket,
-  combined with `math.hypot`). This function and the range-bucket table it
-  depends on live here, in `belief/` -- their pre-Stage-3b-i home -- since
-  `perception.clustering` no longer has any use for a reporting
-  quantisation of its own (see that module's docstring).
-- **Everything else** (the scope/hybrid channel): a single fixed constant,
-  `SCOPE_UNCERTAINTY_M`. This channel does not quantise its geometry the same
-  way (see `hybrid_source.py`), so there is no bucket width to derive an
-  honest figure from. Per the plan: "use a reasonable fixed uncertainty and
-  say so plainly in a comment -- don't overthink it, this gets revisited."
-  This is exactly that placeholder, not a calibrated value.
+**`uncertainty_radius_m` is source-declared, not derived here at all, as of
+`plans/precise-position-belief/plan.md` Stage 1.** Every percept carries its
+own `position_uncertainty` (`perception.source.PositionUncertainty`), an
+honest (cross-range, down-range) sigma pair each concrete source computes
+from its own error model -- `perception.estimation.naked_eye_sigma_m` for
+the naked-eye channel (range-fractional down-range error, a declared
+bearing-sigma constant for cross-range), a fixed isotropic pair declared in
+`hybrid_source.py` for the scope/hybrid channel. This module used to hold a
+private, duplicated copy of naked-eye's reporting-quantisation bucket table
+purely to re-derive this figure from a channel's *output* -- that
+duplication (and the category error it invited, see the "why this gate is
+isotropic" paragraph above) is gone: `uncertainty_radius_m` is now just
+`hypot` of whatever the source already declared. See `_FALLBACK_
+UNCERTAINTY_RADIUS_M`'s own docstring for the one remaining case (a percept
+missing a declared uncertainty) this module still derives a number for
+itself.
 
 **Class-compatibility gate.** Three-valued (`compatible` / `unknown` /
 `incompatible`) because the two channels speak different vocabularies:
@@ -169,113 +169,43 @@ from typing import TYPE_CHECKING, Final
 from belief.classification import class_compatibility
 from belief.percept import Percept
 from perception.geometry import GeoPosition, project_from_bearing_range
-from perception.source import SOURCE_NAKED_EYE_VISUAL_FILTERED
 
 if TYPE_CHECKING:
     from belief.contacts import Contact
 
-#: Placeholder fixed uncertainty for the scope/hybrid channel -- see module
-#: docstring. Not range-derived: this channel has no bucket structure to
-#: derive an honest figure from, and the plan explicitly says not to
-#: overthink this now.
-SCOPE_UNCERTAINTY_M: Final[float] = 300.0
-
 #: How fast a contact could plausibly have moved since it was last observed,
 #: for the spatial gate's elapsed-time growth term -- a generic ground-vehicle
 #: order-of-magnitude figure (72 km/h), not derived from any specific unit's
-#: real top speed. Placeholder, like `SCOPE_UNCERTAINTY_M` -- revisit once
-#: real sessions show whether contacts are gated too tightly or too loosely.
+#: real top speed. Placeholder -- revisit once real sessions show whether
+#: contacts are gated too tightly or too loosely.
 GATE_GROWTH_RATE_MPS: Final[float] = 20.0
 
-#: The width of naked-eye's own clock-position reporting bucket. Moved back
-#: here from `perception.clustering` by Stage 3b-i rev.2 (see module
-#: docstring) -- this is a reporting-quantisation figure, not a clustering
-#: one. **Public as of Stage 3b of `plans/binocular-optic/plan.md`**: a
-#: binocular look's own sweep width is half this figure, for the same
-#: reason the spatial gate's bearing-uncertainty term is -- both are
-#: honest derivations from the one fact "the clock bucket is 30 deg wide",
-#: not two independently-tuned numbers that happen to agree
-#: (`plans/binocular-optic/stage3b.md` D1).
-CLOCK_BUCKET_DEG: Final[float] = 30.0
-_HALF_CLOCK_BUCKET_RAD: Final[float] = math.radians(CLOCK_BUCKET_DEG / 2.0)
-
-#: The 24 ED range-bucket upper bounds -- moved back here from `perception.
-#: clustering` by Stage 3b-i rev.2 (originally copied from `perception.
-#: naked_eye_source._RANGE_BUCKETS_M` -- kept as an independent literal
-#: copy here rather than importing that module, to avoid this module
-#: depending on `naked_eye_source`).
-_RANGE_BUCKETS_M: Final[tuple[tuple[str, float], ...]] = (
-    ("OP_D100M", 100.0),
-    ("OP_D200M", 200.0),
-    ("OP_D300M", 300.0),
-    ("OP_D400M", 400.0),
-    ("OP_D500M", 500.0),
-    ("OP_D600M", 600.0),
-    ("OP_D700M", 700.0),
-    ("OP_D800M", 800.0),
-    ("OP_D900M", 900.0),
-    ("OP_D1000M", 1000.0),
-    ("OP_D1_1p5k", 1500.0),
-    ("OP_D1p5_2k", 2000.0),
-    ("OP_D2_2p5k", 2500.0),
-    ("OP_D2p5_3k", 3000.0),
-    ("OP_D3_3p5k", 3500.0),
-    ("OP_D3p5_4k", 4000.0),
-    ("OP_D4_4p5k", 4500.0),
-    ("OP_D4p5_5k", 5000.0),
-    ("OP_D5_6k", 6000.0),
-    ("OP_D6_7k", 7000.0),
-    ("OP_D7_8k", 8000.0),
-    ("OP_D8_9k", 9000.0),
-    ("OP_D9_10k", 10000.0),
-    ("OP_D10k", math.inf),
-)
-
-
-def _build_bucket_widths_m() -> tuple[float, ...]:
-    """Precompute each `_RANGE_BUCKETS_M` bucket's width. The last bucket is
-    open-ended (`math.inf` upper bound) and has no true width -- falls back
-    to the previous bucket's width rather than `inf`, which would make the
-    gate radius infinite for anything in the last bucket."""
-    widths: list[float] = []
-    previous_bound_m = 0.0
-    for _name, upper_bound_m in _RANGE_BUCKETS_M:
-        if math.isinf(upper_bound_m):
-            widths.append(widths[-1] if widths else previous_bound_m)
-        else:
-            widths.append(upper_bound_m - previous_bound_m)
-        previous_bound_m = upper_bound_m
-    return tuple(widths)
-
-
-_RANGE_BUCKET_WIDTHS_M: Final[tuple[float, ...]] = _build_bucket_widths_m()
-
-
-def _range_bucket_width_m(range_m: float) -> float:
-    """Width of the `OP_D*` bucket `range_m` falls into."""
-    for index, (_name, upper_bound_m) in enumerate(_RANGE_BUCKETS_M):
-        if range_m <= upper_bound_m:
-            return _RANGE_BUCKET_WIDTHS_M[index]
-    return _RANGE_BUCKET_WIDTHS_M[-1]  # unreachable: last bound is inf
-
-
-def _naked_eye_uncertainty_m(range_m: float) -> float:
-    """The naked-eye channel's own honest position-uncertainty radius at
-    `range_m`, combining cross-range and down-range error via `math.hypot`
-    -- this gate's private figure again as of Stage 3b-i rev.2 (module
-    docstring): no longer shared with `perception.clustering`, which now
-    tests true angular separability instead of a reporting quantisation."""
-    cross_range_m = range_m * math.sin(_HALF_CLOCK_BUCKET_RAD)
-    down_range_m = _range_bucket_width_m(range_m)
-    return math.hypot(cross_range_m, down_range_m)
+#: Isotropic fallback radius for a percept somehow missing a declared
+#: `position_uncertainty` (`plans/precise-position-belief/plan.md` Stage 1)
+#: -- should not happen in production as of that plan, since both concrete
+#: sources (`perception.naked_eye_source`, `perception.hybrid_source`)
+#: declare one unconditionally. Kept as a defensive fallback, not a real
+#: derivation, and set to the same value the scope/hybrid channel used to
+#: declare directly here (`SCOPE_UNCERTAINTY_M`, now moved into that
+#: source module).
+_FALLBACK_UNCERTAINTY_RADIUS_M: Final[float] = 300.0
 
 
 def uncertainty_radius_m(percept: Percept) -> float:
-    """Perceived-position uncertainty for `percept`, source-derived. See
-    module docstring."""
-    if percept.source == SOURCE_NAKED_EYE_VISUAL_FILTERED:
-        return _naked_eye_uncertainty_m(percept.range_m)
-    return SCOPE_UNCERTAINTY_M
+    """Perceived-position uncertainty for `percept`, as a scalar radius --
+    `hypot` of `percept.position_uncertainty`'s declared (cross, down) sigma
+    pair (`plans/precise-position-belief/plan.md` Stage 1: each source now
+    declares its own honest error ellipse, rather than this module
+    re-deriving one from a duplicated copy of a reporting-quantisation
+    table). Falls back to `_FALLBACK_UNCERTAINTY_RADIUS_M` when a percept
+    carries no declared uncertainty at all -- see that constant's own
+    docstring."""
+    if percept.position_uncertainty is not None:
+        return math.hypot(
+            percept.position_uncertainty.sigma_cross_m,
+            percept.position_uncertainty.sigma_down_m,
+        )
+    return _FALLBACK_UNCERTAINTY_RADIUS_M
 
 
 def implied_position(percept: Percept) -> GeoPosition:

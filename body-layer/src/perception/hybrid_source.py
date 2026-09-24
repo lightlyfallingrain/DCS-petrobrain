@@ -80,9 +80,22 @@ from perception.source import (
     DerivedWorldPosition,
     Observation,
     OwnshipState,
+    PositionUncertainty,
 )
 
 logger = logging.getLogger(__name__)
+
+#: Placeholder fixed uncertainty for this channel, declared here rather
+#: than in `belief.association_over_time` (`plans/precise-position-belief/
+#: plan.md` Stage 1 -- that module's duplicated copy is deleted, moved to
+#: the source that actually knows it). Isotropic, not range-derived: this
+#: channel does not quantise its geometry into a reporting vocabulary the
+#: way naked-eye does, so there is no bucket width to derive an honest
+#: figure from. Per the original plan this constant was written against:
+#: "use a reasonable fixed uncertainty and say so plainly in a comment --
+#: don't overthink it, this gets revisited." Still exactly that placeholder,
+#: not a calibrated value.
+SCOPE_UNCERTAINTY_M: Final[float] = 300.0
 
 #: The five HelperAI list-text controller names, in on-screen top-to-bottom
 #: order -- a scrolling window into a multi-row target list (see module
@@ -228,6 +241,10 @@ class HybridPerceptionSource:
                     # by parsing the string.
                     classification_level=3,
                     continues_observation_id=continues_observation_id,
+                    position_uncertainty=PositionUncertainty(
+                        sigma_cross_m=SCOPE_UNCERTAINTY_M,
+                        sigma_down_m=SCOPE_UNCERTAINTY_M,
+                    ),
                 )
             )
 

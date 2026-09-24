@@ -156,6 +156,29 @@ class OwnshipState:
 
 
 @dataclass(frozen=True, slots=True)
+class PositionUncertainty:
+    """One look's own honest statement of its position error, in metres, as
+    an elongated ellipse oriented along that look's own line of sight
+    (`plans/precise-position-belief/plan.md`'s "The model"). Perceived
+    metadata -- a channel's own declared estimate of how wrong its own
+    report might be -- identical footing to `count_bucket`/`apparent_
+    motion`/`classification_level` on `Observation`, never a truth field: a
+    concrete source computes both fields from its own honest error model
+    (`perception.estimation`), never from anything DCS-truth-derived beyond
+    what the perceived bearing/range already carry.
+
+    `sigma_cross_m` -- 1-sigma error perpendicular to the line of sight
+    (bearing error turned into metres at the observation's own true range).
+    `sigma_down_m` -- 1-sigma error along the line of sight (range error).
+    Both are declared at the observation's own true range; `belief.
+    position_belief` is what turns this pair into a 2x2 covariance oriented
+    along `Observation.bearing_deg`/`Percept.bearing_deg`."""
+
+    sigma_cross_m: float
+    sigma_down_m: float
+
+
+@dataclass(frozen=True, slots=True)
 class DerivedWorldPosition:
     """A target position derived from bearing/range rather than read
     directly off ground truth -- `plans/body-layer/plan.md` §5's
@@ -238,6 +261,13 @@ class Observation:
     #: poll) -- unknown, never "stopped", same tri-state discipline as
     #: `is_ownship`/`heading_true_deg` elsewhere in this package.
     apparent_motion: bool | None = None
+    #: `plans/precise-position-belief/plan.md` Stage 1 -- the channel's own
+    #: declared error ellipse for this look's `bearing_deg`/`range_m`. Both
+    #: concrete sources populate this unconditionally as of that plan;
+    #: `None` is the default only so a construction site that predates it
+    #: (test fixtures included) keeps compiling. `belief.percept.percept_of`
+    #: carries this straight through -- see that module's own field.
+    position_uncertainty: PositionUncertainty | None = None
 
 
 @runtime_checkable
