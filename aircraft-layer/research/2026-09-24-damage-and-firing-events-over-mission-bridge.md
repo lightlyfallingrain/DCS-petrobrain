@@ -363,3 +363,60 @@ finding, since it would reverse Finding 12's current "likely yes" inference.**
   payload/frequency notes, no additional information beyond Hoggit found.
 - Search-engine summaries (not directly read) for DCS native damage-smoke behavior and ED changelog
   language — labeled forum-claim throughout, not promoted to documented.
+
+---
+
+## Addendum, same day — `debrief.log` is a cheaper route to Finding 12
+
+**Added by the main loop after the user reported lived evidence**, which outranks anything in the
+documentation search above: *"I've seen DCS post mission logs show the likes of SHOOTING_START /
+_END for AAA."*
+
+This reorders the probes, and makes the most important open question answerable with **no Lua, no
+Hook script and no code at all**.
+
+`Saved Games/DCS/Logs/debrief.log` carries a post-mission `events = { … }` table whose entries have
+a human-readable `type` string. Confirmed directly against the one debrief log synced into this
+repo (`win-mac-sync/from-windows/dcs-logs/debrief.log`, 13511 lines, the Mi-24P Caucasus Free
+Flight quick-start):
+
+```
+events =
+{
+	[1] =
+	{
+		linked_event_id	=	0,
+		t	=	0,
+		event_id	=	215,
+		type	=	"group change option",
+	}, -- end of [1]
+```
+
+Its full set of `type` values is `group change option` (86), `""` (32), `under control`,
+`mission start`, `mission end`, `Mi-24P`. **No shooting event appears — and that neither confirms
+nor refutes anything**, because it is a free-flight mission in which nothing fired. The log is
+useful here only as proof of the *shape*: a named-event table, which is where the user's
+recollection of `SHOOTING_START`/`SHOOTING_END` would have come from.
+
+### What this changes
+
+**Probe the debrief log before running Probe B.** Fly (or let run) any mission with an AAA unit
+actually firing, then read `debrief.log`'s `events` table for a shooting-typed entry naming that
+unit. That settles Finding 12 — whether ground AAA raises the event *at the engine level* — at
+essentially zero cost, against Probe B's new Hook script, event-handler registration and 1 Hz poll.
+
+**The two facts are genuinely separate, and this route only establishes one of them:**
+
+1. *Does the engine raise a shooting event for ground AAA?* — `debrief.log` answers this.
+2. *Does a `world.addEventHandler` registered through the `net.dostring_in("scripting", …)` bridge
+   receive it?* — `debrief.log` cannot answer this; only Probe B can (Finding 15's unprobed
+   reachability question).
+
+Do not let the first stand in for the second. But the ordering is now clear: if the debrief log
+shows no shooting event for a firing AAA unit, **Probe B is pointless** and the naked-eye/LOS
+tracer channel is the only route, exactly as this report's Q2 verdict warned. Probe B is worth
+building only once fact 1 is confirmed.
+
+**Confidence on Finding 12 is accordingly raised from "inferred, moderate" to "user-reported
+recollection, pending a one-command check"** — still not confirmed, but no longer resting on the
+absence of an exclusion clause in a wiki page.
