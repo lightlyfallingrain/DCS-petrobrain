@@ -178,17 +178,18 @@ class PendingConfirmation:
     if the player never answers and it needs re-describing, and when it
     was asked (for `CONFIRM_WINDOW_S` expiry).
 
-    `bearing_degrees` (`plans/voice-command-completeness/plan.md` Decision
-    3) carries a numeric bearing slot's parsed value across the confirm
-    round trip -- without it, a `scan_bearing_deg`/`report_bearing_deg`
-    command that lands in the confirm band would lose its heading the
-    moment the player says "affirm", since `handle_command` is called
-    again on commit with no other way to recover the number."""
+    `slots` (`plans/watch-reporting/plan.md` Decision 2b-i, replacing the
+    single-purpose `bearing_degrees` field this dataclass used to carry)
+    carries a command's parsed slot set across the confirm round trip --
+    without it, a `scan_bearing_deg`/`report_bearing_deg`/`follow` command
+    that lands in the confirm band would lose its qualifiers the moment
+    the player says "affirm", since `handle_command` is called again on
+    commit with no other way to recover them."""
 
     token: str
     description: str
     pending_since_sim: float
-    bearing_degrees: int | None = None
+    slots: dict[str, int | str] | None = None
 
 
 Disposition = Literal["fallthrough", "confirm", "say_again", "act"]

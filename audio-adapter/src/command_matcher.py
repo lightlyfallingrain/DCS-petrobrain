@@ -300,16 +300,23 @@ class MatchResult:
       candidate; the caller combines `match_ratio` with its own STT
       confidence to choose act/confirm/say-again.
 
-    `bearing_degrees` is populated only for a resolved bearing-slot match
-    (`token` is `"scan_bearing_deg"`/`"report_bearing_deg"`) -- the actual
-    parsed value, since `token` alone names the family, not the heading.
-    """
+    `slots` (`plans/watch-reporting/plan.md` Decision 2b-i) replaces the
+    single-purpose `bearing_degrees` field this dataclass used to carry --
+    a bare numeric bearing was the one precedent for a parsed value
+    attached to a token rather than enumerated as a phrase, and `follow`'s
+    three qualifiers (descriptor/clock/range) are three more of the same
+    shape. Rather than grow a fourth mutually-exclusive optional field,
+    every parsed slot lives in one dict: `"bearing_degrees"` for
+    `scan_bearing_deg`/`report_bearing_deg` (the value unchanged from the
+    old field, only the container changed), `"descriptor"`/`"clock"`/
+    `"range_km"` for `follow`. `None` (the default) means no slots were
+    parsed -- the common case, every token besides these four."""
 
     token: str | None
     match_ratio: float
     verb_anchored: bool
     ambiguous: bool = False
-    bearing_degrees: int | None = None
+    slots: dict[str, int | str] | None = None
 
 
 def _verb_anchor_ratio(verb: str) -> float:
@@ -431,7 +438,7 @@ def match_transcript(text: str) -> MatchResult:
                         token=bearing_token,
                         match_ratio=1.0,
                         verb_anchored=True,
-                        bearing_degrees=bearing.degrees,
+                        slots={"bearing_degrees": bearing.degrees},
                     )
             # Heard digits after "bearing" that either do not name a legal
             # bearing, or a verb that fits no bearing-taking token -- a

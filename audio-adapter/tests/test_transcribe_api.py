@@ -129,7 +129,7 @@ def test_transcribe_then_poll_round_trips_a_matched_command(
     assert isinstance(event["match_ratio"], float)
     assert isinstance(event["confidence"], float)
     assert isinstance(event["t_wall"], float)
-    assert event["bearing_degrees"] is None
+    assert event["slots"] is None
     # Never audio-shaped fields.
     assert set(event) == {
         "transcript",
@@ -139,7 +139,7 @@ def test_transcribe_then_poll_round_trips_a_matched_command(
         "verb_anchored",
         "ambiguous",
         "t_wall",
-        "bearing_degrees",
+        "slots",
     }
 
 
@@ -147,11 +147,11 @@ def test_transcribe_carries_a_parsed_bearing_through_to_poll(
     running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
 ) -> None:
     """`plans/voice-command-completeness/plan.md` Stage 3's own regression
-    guard: `MatchResult.bearing_degrees` used to be computed by
-    `command_matcher.match_transcript` and then dropped at this exact wire
-    (`TranscriptEvent` carried seven fields, not eight). A legal, resolved
-    bearing must now survive `POST /transcribe` -> `GET /transcripts/poll`
-    intact."""
+    guard: `MatchResult.slots` (formerly `bearing_degrees`) used to be
+    computed by `command_matcher.match_transcript` and then dropped at this
+    exact wire (`TranscriptEvent` carried seven fields, not eight). A legal,
+    resolved bearing must now survive `POST /transcribe` -> `GET /transcripts/
+    poll` intact, inside the `slots` dict."""
     server, engine = running_server_with_stt
     engine.text = "scan bearing three two zero"
     status, body = _post(server, "/transcribe", {"wav_b64": _wav_b64()})
@@ -164,7 +164,7 @@ def test_transcribe_carries_a_parsed_bearing_through_to_poll(
     assert len(body) == 1
     event = body[0]
     assert event["token"] == "scan_bearing_deg"
-    assert event["bearing_degrees"] == 320
+    assert event["slots"] == {"bearing_degrees": 320}
 
 
 def test_poll_drains_and_is_empty_afterwards(

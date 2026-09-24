@@ -2075,7 +2075,7 @@ def test_report_bearing_deg_quantises_onto_the_nearest_sector(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
     lines = console.handle_command(
-        "report_bearing_deg", now_sim=0.0, bearing_degrees=185
+        "report_bearing_deg", now_sim=0.0, slots={"bearing_degrees": 185}
     )
     assert lines == ["Can't see south."]
 
@@ -2168,7 +2168,9 @@ def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
 
-    lines = console.handle_command("scan_bearing_deg", now_sim=0.0, bearing_degrees=317)
+    lines = console.handle_command(
+        "scan_bearing_deg", now_sim=0.0, slots={"bearing_degrees": 317}
+    )
 
     assert lines == ["Scanning northwest."]
     assert len(tasks.tasks) == 1
@@ -2188,8 +2190,14 @@ def test_describe_token_for_confirm_names_the_quantised_sector_not_the_number() 
     misunderstanding, and repeating the raw number while the dispatch
     itself acts on a coarser bucket would hide the only discrepancy worth
     hearing."""
-    assert _describe_token_for_confirm("scan_bearing_deg", 317) == "scan northwest"
-    assert _describe_token_for_confirm("report_bearing_deg", 5) == "report north"
+    assert (
+        _describe_token_for_confirm("scan_bearing_deg", {"bearing_degrees": 317})
+        == "scan northwest"
+    )
+    assert (
+        _describe_token_for_confirm("report_bearing_deg", {"bearing_degrees": 5})
+        == "report north"
+    )
     assert _describe_token_for_confirm("report_clock_3") == "report three o'clock"
     assert _describe_token_for_confirm("report_bearing_n") == "report north"
     assert _describe_token_for_confirm("report_all") == "report"
@@ -2199,11 +2207,11 @@ def test_describe_token_for_confirm_names_the_quantised_sector_not_the_number() 
 def test_a_confirm_band_bearing_survives_the_affirm_round_trip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without `PendingConfirmation.bearing_degrees`, a bearing command
-    that lands in the confirm band loses its number the moment the player
-    says "affirm" -- `handle_command` is called again on commit with no
-    other way to recover it. This is the test that would fail if that
-    field were removed."""
+    """Without `PendingConfirmation.slots`, a bearing command that lands
+    in the confirm band loses its number the moment the player says
+    "affirm" -- `handle_command` is called again on commit with no other
+    way to recover it. This is the test that would fail if that field were
+    removed."""
     store = ContactStore()
     tasks = TaskStore()
     console = CrewConsole(
@@ -2219,7 +2227,7 @@ def test_a_confirm_band_bearing_survives_the_affirm_round_trip(
         verb_anchored=True,
         ambiguous=False,
         now_sim=0.0,
-        bearing_degrees=317,
+        slots={"bearing_degrees": 317},
     )
     assert lines == ["Scan northwest, confirm?"]
 

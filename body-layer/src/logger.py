@@ -995,10 +995,10 @@ def _poll_transcripts(
     simpler payload. `t_wall` (wall-clock time the adapter recognised the
     clip) is intentionally not threaded into `handle_transcript` --
     `now_sim` is this poll's own DCS sim time, the same clock every other
-    dispatch path in this loop already uses. `bearing_degrees` (`plans/
-    voice-command-completeness/plan.md` Stage 3) is threaded straight
-    through, `None` allowed (populated only for the two numeric-bearing
-    tokens)."""
+    dispatch path in this loop already uses. `slots` (`plans/
+    watch-reporting/plan.md` Decision 2b-i, replacing the earlier
+    single-purpose `bearing_degrees` field) is threaded straight through,
+    `None` allowed -- populated only for tokens that take a parsed slot."""
     try:
         transcripts = audio_client.get_transcripts()
     except AudioAdapterError:
@@ -1011,7 +1011,7 @@ def _poll_transcripts(
         match_ratio = item.get("match_ratio")
         verb_anchored = item.get("verb_anchored")
         ambiguous = item.get("ambiguous")
-        bearing_degrees = item.get("bearing_degrees")
+        slots_raw = item.get("slots")
         if not isinstance(transcript, str):
             continue
         if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
@@ -1024,10 +1024,14 @@ def _poll_transcripts(
             continue
         if not isinstance(ambiguous, bool):
             continue
-        if bearing_degrees is not None and not (
-            isinstance(bearing_degrees, int) and not isinstance(bearing_degrees, bool)
-        ):
-            continue
+        slots: dict[str, int | str] | None = None
+        if slots_raw is not None:
+            if not isinstance(slots_raw, dict) or not all(
+                isinstance(value, (int, str)) and not isinstance(value, bool)
+                for value in slots_raw.values()
+            ):
+                continue
+            slots = slots_raw
         crew_console.handle_transcript(
             transcript,
             float(confidence),
@@ -1036,7 +1040,7 @@ def _poll_transcripts(
             verb_anchored,
             ambiguous,
             now_sim,
-            bearing_degrees=bearing_degrees,
+            slots=slots,
         )
 
 
