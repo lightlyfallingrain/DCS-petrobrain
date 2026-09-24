@@ -14,7 +14,9 @@ fake needed -- it's already pure/fixture-testable per `test_contacts.py`).
 from __future__ import annotations
 
 import io
+import json
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
@@ -35,6 +37,7 @@ from belief.mission_phase import (
 )
 from belief.tasks import TaskStore
 from logger import (
+    DEFAULT_SPEECH_LOG_PATH,
     ConsolePerceptionRunner,
     PerceptionLogger,
     _active_gaze,
@@ -42,9 +45,11 @@ from logger import (
     _format_gaze_line,
     _poll_transcripts,
     _push_gaze_line,
+    _resolve_speech_log_path,
     _run_console_poll_loop,
     _run_console_repl,
     format_observation_line,
+    main,
 )
 from perception import association
 from perception.gaze import FREE_SCAN_PLAN, ScanPlan, gaze_at
@@ -1410,3 +1415,159 @@ def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
 
     known_lower, known_upper = improvement_window_m("T-72", current_level="presence")
     assert (unknown_lower, unknown_upper) != (known_lower, known_upper)
+
+
+# -- speech-log defaulting (plans/binocular-optic/plan.md's speech-log side
+# feature: "every not recognised command is appended to a log file, with
+# timestamp" should not require the pilot to remember a flag) ------------
+
+
+def test_speech_log_defaults_on_with_crew_text_and_speech_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    resolved = _resolve_speech_log_path(
+        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
+    )
+    assert resolved == DEFAULT_SPEECH_LOG_PATH
+    assert (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).is_dir()
+
+
+def test_speech_log_does_not_default_without_crew_text_and_speech_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    # Neither flag.
+    assert (
+        _resolve_speech_log_path(
+            speech_log=None, no_speech_log=False, crew_text=False, speech_input=False
+        )
+        is None
+    )
+    # Only one of the two.
+    assert (
+        _resolve_speech_log_path(
+            speech_log=None, no_speech_log=False, crew_text=True, speech_input=False
+        )
+        is None
+    )
+    assert (
+        _resolve_speech_log_path(
+            speech_log=None, no_speech_log=False, crew_text=False, speech_input=True
+        )
+        is None
+    )
+    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
+
+
+def test_no_speech_log_suppresses_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    resolved = _resolve_speech_log_path(
+        speech_log=None, no_speech_log=True, crew_text=True, speech_input=True
+    )
+    assert resolved is None
+    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
+
+
+def test_explicit_speech_log_wins_over_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    explicit = tmp_path / "elsewhere" / "speech.jsonl"
+    resolved = _resolve_speech_log_path(
+        speech_log=explicit, no_speech_log=False, crew_text=True, speech_input=True
+    )
+    assert resolved == explicit
+    # No default-path directory creation happens on the explicit-path route.
+    assert not (tmp_path / DEFAULT_SPEECH_LOG_PATH.parent).exists()
+
+
+def test_speech_log_default_degrades_to_none_when_directory_is_unwritable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unwritable default location must not stop the logger from
+    starting -- it degrades to no log and says so on stderr, exactly the
+    posture `CrewConsole._log_transcript`'s own per-write try/except
+    already has."""
+    monkeypatch.chdir(tmp_path)
+
+    def _boom(self: Path, parents: bool = False, exist_ok: bool = False) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "mkdir", _boom)
+
+    resolved = _resolve_speech_log_path(
+        speech_log=None, no_speech_log=False, crew_text=True, speech_input=True
+    )
+
+    assert resolved is None
+    assert "speech-log" in capsys.readouterr().err
+
+
+def test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--speech-log` and `--no-speech-log` together must be rejected by
+    `main()`'s own argparse validation, the same posture as the other
+    `parser.error` mutual-exclusivity checks in this file."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "logger",
+            "--aircraft-layer-url",
+            "http://127.0.0.1:7791",
+            "--theatre",
+            "Syria",
+            "--world-model-db",
+            str(tmp_path / "wm.sqlite"),
+            "--crew-text",
+            "--speech-input",
+            "--audio-adapter-url",
+            "http://127.0.0.1:7795",
+            "--speech-log",
+            str(tmp_path / "speech.jsonl"),
+            "--no-speech-log",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+
+def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """Not just a writer unit test: wires a real `SpeechLogWriter` through
+    `CrewConsole.transcript_log` the same way `main()` does, then confirms
+    a genuinely unrecognised (`say_again`) utterance lands in the file --
+    the exact case the user wants to later mine for what gets garbled or
+    mistranscribed."""
+    from speech_log import SpeechLogWriter
+
+    log_path = tmp_path / "speech.jsonl"
+    writer = SpeechLogWriter(log_path)
+    console = CrewConsole(store=ContactStore(), transcript_log=writer.write)
+
+    # verb_anchored=True, token=None: heard as an attempted command but
+    # nothing matched -- classify_response's say_again route.
+    console.handle_transcript(
+        transcript="scan uh the thing",
+        confidence=0.9,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=10.0,
+    )
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["transcript"] == "scan uh the thing"
+    assert row["disposition"] == "say_again"
+    assert row["acted_token"] is None
+    assert "t_wall" in row
