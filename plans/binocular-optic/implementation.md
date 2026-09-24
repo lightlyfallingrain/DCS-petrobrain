@@ -157,3 +157,83 @@ plan's four settled decisions (D1-D4); no re-litigation.
   deliberately — no command was ever decided in that branch, so D4's "the pilot asking for
   something is itself evidence" premise doesn't apply to it, and the review did not name it as a
   gap.
+
+---
+
+### Follow-up: `--speech-log` defaults on (2026-09-24)
+
+The user wants every unrecognised transcript appended to a log with a timestamp, to later study
+what gets garbled or mistranscribed. The sink already existed (`speech_log.SpeechLogWriter`,
+`CrewConsole._log_transcript`, the `disposition`/`acted_token` fields) — the only gap was that
+`--speech-log` defaulted to `None`, so an ordinary sortie left no trace, exactly when the garbling
+data would be produced. No new mechanism was built; this only changes when the existing sink gets
+wired up.
+
+### Files Changed
+- `body-layer/src/logger.py`:
+  - New `DEFAULT_SPEECH_LOG_PATH = Path("logs/speech.jsonl")` and `_resolve_speech_log_path(*,
+    speech_log, no_speech_log, crew_text, speech_input) -> Path | None` — pure decision function
+    (module-level, above `main()`), factored out specifically so the defaulting logic is unit
+    testable without driving all of `main()`'s CLI wiring (`main()` itself is explicitly marked
+    "not exercised by automated tests" and stays that way). Order: explicit `--speech-log` always
+    wins; `--no-speech-log` returns `None`; otherwise `None` unless both `crew_text` and
+    `speech_input` are set; on the default route it creates the default directory
+    (`Path.mkdir(parents=True, exist_ok=True)`) and degrades to `None` + a stderr message on
+    `OSError`, so an unwritable default location cannot stop the logger from starting. Directory
+    creation happens **only** on the default route, once at startup — an explicit `--speech-log`
+    path is left to `SpeechLogWriter.write`'s own existing per-call try/except
+    (`CrewConsole._log_transcript`), unchanged from before this feature, so asking for a specific
+    path that turns out to be bad degrades exactly as it always did.
+  - New `--no-speech-log` flag (`store_true`); validated mutually exclusive with `--speech-log` via
+    `parser.error`, same style as the file's other CLI validations.
+  - `--speech-log`'s help text rewritten: it now states the default (path, created-if-absent,
+    appended-across-sorties) instead of the now-false "defaults off, a true no-op when absent".
+  - `main()` calls `_resolve_speech_log_path(...)` right after the existing validation block and
+    reassigns `args.speech_log` with the result — everything downstream (the
+    `SpeechLogWriter(args.speech_log).write if args.speech_log is not None else None` wiring into
+    `CrewConsole`) is untouched.
+- `body-layer/.gitignore` — added `logs/` (no prior entry covered a generated log directory).
+- `body-layer/tests/test_logger.py` — see below.
+
+### Tests Added
+- `test_speech_log_defaults_on_with_crew_text_and_speech_input` — default fires, default directory
+  created.
+- `test_speech_log_does_not_default_without_crew_text_and_speech_input` — all three cases short of
+  both flags (neither, crew_text only, speech_input only) resolve to `None`, and no directory is
+  created.
+- `test_no_speech_log_suppresses_the_default` — `--no-speech-log` beats the default even with both
+  flags set.
+- `test_explicit_speech_log_wins_over_the_default` — an explicit path is returned unchanged and
+  does not trigger default-directory creation.
+- `test_speech_log_default_degrades_to_none_when_directory_is_unwritable` — `Path.mkdir` patched to
+  raise `OSError`; asserts `None` is returned and `"speech-log"` appears on stderr, never a crash.
+- `test_speech_log_cli_validation_rejects_speech_log_with_no_speech_log` — drives real `main()`
+  with `sys.argv` patched to pass both flags; asserts `SystemExit` (argparse's `parser.error`
+  path). The one CLI-argv-level test in this batch — everything else exercises
+  `_resolve_speech_log_path` directly since `main()` is otherwise untested by design.
+- `test_say_again_disposition_reaches_the_speech_log_file_end_to_end` — wires a real
+  `SpeechLogWriter(tmp_path/...)` into a real `CrewConsole` (not a fake sink), drives a
+  `verb_anchored=True, token=None` transcript (the `say_again` route in
+  `belief.voice_commands.classify_response`), then reads the JSONL file back and checks
+  `transcript`/`disposition`/`acted_token`/`t_wall` — the specific case the plan asked to prove
+  reaches the file, not just the writer in isolation.
+
+### Checks
+(body-layer/ only — the sole subproject touched)
+- ruff format --check: pass
+- ruff check: pass
+- mypy --strict (`cd body-layer && mypy src`): pass, 47 source files
+- pytest -q: pass — 1111 passed, 4 xfailed (baseline was 1104 passed, 4 xfailed; 7 new tests, no
+  regressions)
+
+### Notable Discoveries
+- No existing test exercised `main()`'s CLI argument parsing/validation at all before this change —
+  the module docstring's "not exercised by automated tests" note is accurate and applies to the
+  whole function, not just the poll-loop body. `_resolve_speech_log_path` was factored out
+  specifically to give the new defaulting logic real unit coverage without changing that posture;
+  only one new test drives `main()` itself (the `--speech-log`/`--no-speech-log` mutual-exclusion
+  check), since that particular validation has to live in argparse's own error path.
+- `SpeechLogWriter.write` opens the file in append mode on every call rather than holding a handle
+  open — so the degrade-on-failure behaviour for an *explicit* `--speech-log` path was already
+  correct (per-write try/except in `CrewConsole._log_transcript`) and needed no change; only the
+  *default* path's one-time directory creation at startup needed its own guard.

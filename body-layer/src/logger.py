@@ -1139,6 +1139,56 @@ def _run_crew_text_repl(
         pass
 
 
+DEFAULT_SPEECH_LOG_PATH = Path("logs/speech.jsonl")
+
+
+def _resolve_speech_log_path(
+    *,
+    speech_log: Path | None,
+    no_speech_log: bool,
+    crew_text: bool,
+    speech_input: bool,
+) -> Path | None:
+    """Decide what `--speech-log` should end up pointing at, after
+    argparse's own mutual-exclusivity/requires checks have already run.
+
+    An ordinary sortie (`--crew-text --speech-input`, no explicit
+    `--speech-log`, no `--no-speech-log`) gets `DEFAULT_SPEECH_LOG_PATH`
+    without the user having to remember a flag -- that is precisely when
+    the garbled-transcript data this file exists for gets produced.
+    `--no-speech-log` opts back out; an explicit `--speech-log` always
+    wins (already validated by the caller to require `--crew-text
+    --speech-input`).
+
+    Directory creation happens here, once, at startup -- not per write --
+    so an unwritable default location degrades to no log (reported on
+    stderr) instead of crashing a sortie over a debug artifact. A failure
+    creating an *explicit* `--speech-log` path is left to
+    `SpeechLogWriter.write`'s own per-call try/except (`CrewConsole.
+    _log_transcript`), same as before this default existed: the user asked
+    for that exact path, so silently discarding it here would be more
+    surprising than letting the existing degrade-on-write behaviour handle
+    it.
+    """
+    if speech_log is not None:
+        return speech_log
+    if no_speech_log:
+        return None
+    if not (crew_text and speech_input):
+        return None
+    try:
+        DEFAULT_SPEECH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"speech-log: could not create default log directory "
+            f"{DEFAULT_SPEECH_LOG_PATH.parent} ({exc}); continuing without "
+            f"a speech log",
+            file=sys.stderr,
+        )
+        return None
+    return DEFAULT_SPEECH_LOG_PATH
+
+
 def main() -> None:
     """CLI entrypoint: `python -m logger --aircraft-layer-url ... --theatre
     ... --world-model-db ...` -- polls `PerceptionLogger.run_once()` on a
@@ -1294,7 +1344,19 @@ def main() -> None:
             "'why did nothing happen when I said that': an utterance matching "
             "no command otherwise reaches only the brain-layer stand-in, "
             "which does nothing. Only meaningful with --crew-text "
-            "--speech-input; defaults off, a true no-op when absent."
+            f"--speech-input, where it defaults on ({DEFAULT_SPEECH_LOG_PATH}, "
+            "created if absent, appended across sorties) even without this "
+            "flag -- pass it only to log somewhere else. See --no-speech-log "
+            "to suppress the default instead."
+        ),
+    )
+    parser.add_argument(
+        "--no-speech-log",
+        action="store_true",
+        help=(
+            "suppress --speech-log's default sink. Only meaningful with "
+            "--crew-text --speech-input (a no-op otherwise, same as the "
+            "default it suppresses); mutually exclusive with --speech-log."
         ),
     )
     parser.add_argument(
@@ -1320,6 +1382,8 @@ def main() -> None:
         parser.error("--speech-audio requires --audio-adapter-url")
     if args.speech_input and args.audio_adapter_url is None:
         parser.error("--speech-input requires --audio-adapter-url")
+    if args.speech_log is not None and args.no_speech_log:
+        parser.error("--speech-log is mutually exclusive with --no-speech-log")
     if args.speech_log is not None and not (args.crew_text and args.speech_input):
         parser.error(
             "--speech-log requires --crew-text --speech-input (there are no "
@@ -1327,6 +1391,13 @@ def main() -> None:
         )
     if args.detection_trace is not None and not (args.console or args.crew_text):
         parser.error("--detection-trace requires --console or --crew-text")
+
+    args.speech_log = _resolve_speech_log_path(
+        speech_log=args.speech_log,
+        no_speech_log=args.no_speech_log,
+        crew_text=args.crew_text,
+        speech_input=args.speech_input,
+    )
 
     aircraft_client = AircraftLayerClient(base_url=args.aircraft_layer_url)
 
