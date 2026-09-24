@@ -110,7 +110,36 @@ No `perception.source` truth field is read here -- `PositionUncertainty`
 is perceived metadata (see that dataclass's own docstring), and everything
 else this module touches (`x`, `z`, `bearing_deg`) is either the gate's own
 already-boundary-crossed `implied_position` or the fused mean this module
-itself produces."""
+itself produces.
+
+**Hold-recovery timing, fixed by `plans/position-belief-runaway/debug.md`'s
+2026-09-25 security-review addendum.** Both "hold the prior" branches above
+(the ill-conditioning guard inside `fold_position`, and
+`clamp_to_detection_envelope`) used to reset `PositionEstimate.as_of_sim`
+to the current poll's `t_sim` on every hold, and the *next* call's elapsed-
+time inflation was computed against that reset timestamp. Under continuous
+polling that composes `(GATE_GROWTH_RATE_MPS * dt) ** 2` once per poll
+instead of `(GATE_GROWTH_RATE_MPS * T) ** 2` once per `T`-second gap --
+summing `n` squared pieces of a fixed budget is always less than squaring
+the whole budget, so recovery time scaled as roughly `1 / poll_interval_s`
+and grew without bound as poll rate increased (measured: ~47s at
+`logger._DEFAULT_POLL_INTERVAL_S = 1.0`, ~934s at 0.05s), even though the
+review that approved this branch's own guards had verified only a
+single-gap ~20s recovery.
+
+**The invariant, stated so it cannot regress silently: elapsed-time
+inflation measures time since the last genuinely fused update, never time
+since the last poll (whether or not that poll held).** `PositionEstimate`
+therefore carries two timestamps with two different meanings --
+`as_of_sim` ("this estimate is current as of this sim-time," bumped on
+every poll including a hold, since the belief *is* still the best current
+answer even when unchanged) and `fused_at_sim` ("real evidence last
+changed this estimate's covariance," bumped only when `fold_position`
+actually fuses a look, never by a hold). `fused_covariance` is the
+covariance as computed at `fused_at_sim`, before any elapsed-time
+inflation -- the true, non-compounding base every inflation calculation
+recomputes fresh from, via `_inflated_since_last_fuse` below, rather than
+inflating an already-inflated `covariance` field a second time."""
 
 from __future__ import annotations
 
@@ -174,6 +203,20 @@ _MIN_DETERMINANT_ABSOLUTE: Final[float] = 1e-300
 #: still sits under 4 -- chosen so the guard only fires in the genuinely
 #: degenerate regime, not on ordinary measurement noise.
 FUSION_SANITY_SIGMA: Final[float] = 5.0
+
+
+def _inflated_since_last_fuse(prior: PositionEstimate, t_sim: float) -> Covariance2D:
+    """`prior.fused_covariance`, inflated for elapsed motion since `prior.
+    fused_at_sim` -- **always the last genuinely fused update, never the
+    last poll** (module docstring's "Hold-recovery timing" invariant).
+    Every place this module needs "the prior's covariance, brought up to
+    date" -- fusing a new look against it, or holding it forward another
+    poll -- goes through this one function, so inflation is computed fresh
+    from the true base every time rather than compounding an
+    already-inflated `prior.covariance` a second time across a chain of
+    holds."""
+    elapsed_s = max(0.0, t_sim - prior.fused_at_sim)
+    return prior.fused_covariance.inflated(elapsed_s)
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,12 +297,26 @@ def covariance_from_uncertainty(
 class PositionEstimate:
     """One contact's fused believed position: mean (x, z) plus its own 2x2
     covariance and the sim-time it is current as of. Plain floats, no live
-    references -- see module docstring."""
+    references -- see module docstring.
+
+    `as_of_sim` and `fused_at_sim` carry deliberately different meanings
+    (module docstring's "Hold-recovery timing" section): `as_of_sim` is
+    "this is the current belief as of this sim-time" and moves on every
+    poll, hold included; `fused_at_sim` is "real evidence last changed
+    `fused_covariance`" and moves only when a look is genuinely fused.
+    `fused_covariance` is `covariance` as it stood at `fused_at_sim`,
+    before any elapsed-time inflation -- the base every hold recomputes
+    fresh inflation from, so repeated holds never compound. On a freshly
+    founded or genuinely fused estimate the two pairs are identical by
+    construction (`as_of_sim == fused_at_sim`, `covariance ==
+    fused_covariance`); they diverge only across one or more holds."""
 
     x: float
     z: float
     covariance: Covariance2D
     as_of_sim: float
+    fused_at_sim: float
+    fused_covariance: Covariance2D
 
     def radius_m(self) -> float:
         """Scalar reduction for every pre-existing caller that wants a
@@ -324,11 +381,14 @@ def estimate_from_look(
     """A single look's own `PositionEstimate`, with no prior to fuse
     against -- `fold_position`'s founding case, factored out so a founding
     contact and a re-observed one build their look covariance identically."""
+    covariance = covariance_from_uncertainty(uncertainty, look_bearing_deg)
     return PositionEstimate(
         x=x,
         z=z,
-        covariance=covariance_from_uncertainty(uncertainty, look_bearing_deg),
+        covariance=covariance,
         as_of_sim=t_sim,
+        fused_at_sim=t_sim,
+        fused_covariance=covariance,
     )
 
 
@@ -359,10 +419,16 @@ def fold_position(
     `clamp_to_detection_envelope` uses for the other defect."""
     look_covariance = covariance_from_uncertainty(uncertainty, look_bearing_deg)
     if prior is None:
-        fused = PositionEstimate(x=x, z=z, covariance=look_covariance, as_of_sim=t_sim)
+        fused = PositionEstimate(
+            x=x,
+            z=z,
+            covariance=look_covariance,
+            as_of_sim=t_sim,
+            fused_at_sim=t_sim,
+            fused_covariance=look_covariance,
+        )
     else:
-        elapsed_s = max(0.0, t_sim - prior.as_of_sim)
-        prior_covariance = prior.covariance.inflated(elapsed_s)
+        prior_covariance = _inflated_since_last_fuse(prior, t_sim)
         info_prior = prior_covariance.inverse()
         info_look = look_covariance.inverse()
         info_sum = info_prior + info_look
@@ -382,11 +448,25 @@ def fold_position(
             min(prior_residual_sigma_sq, look_residual_sigma_sq)
             > FUSION_SANITY_SIGMA**2
         ):
+            # Hold: elapsed-time inflation still applies (`prior_covariance`
+            # above already is that fresh, non-compounding inflation), but
+            # `fused_at_sim`/`fused_covariance` carry straight through
+            # unchanged -- no real evidence was fused this poll.
             return PositionEstimate(
-                x=prior.x, z=prior.z, covariance=prior_covariance, as_of_sim=t_sim
+                x=prior.x,
+                z=prior.z,
+                covariance=prior_covariance,
+                as_of_sim=t_sim,
+                fused_at_sim=prior.fused_at_sim,
+                fused_covariance=prior.fused_covariance,
             )
         fused = PositionEstimate(
-            x=fused_x, z=fused_z, covariance=fused_covariance, as_of_sim=t_sim
+            x=fused_x,
+            z=fused_z,
+            covariance=fused_covariance,
+            as_of_sim=t_sim,
+            fused_at_sim=t_sim,
+            fused_covariance=fused_covariance,
         )
     return _apply_floor(fused, uncertainty)
 
@@ -409,8 +489,12 @@ def clamp_to_detection_envelope(
 
     Passes `fused` through unchanged when it already satisfies the
     envelope -- the overwhelming common case, and a true no-op for it.
-    Otherwise **holds the prior** (unchanged mean, covariance still inflated
-    for elapsed motion) rather than clamping the mean onto the envelope
+    Otherwise **holds the prior** (unchanged mean, covariance freshly
+    inflated for elapsed motion since `prior.fused_at_sim` -- module
+    docstring's "Hold-recovery timing" invariant, `_inflated_since_last_
+    fuse` -- never compounded from `prior.covariance`, and never treated as
+    a fuse: `fused_at_sim`/`fused_covariance` carry straight through from
+    `prior` unchanged) rather than clamping the mean onto the envelope
     boundary or discarding the look outright: an implied position beyond
     the envelope is evidence the fusion (or an upstream look) went wrong,
     not evidence of where the target actually is, so the most recent
@@ -430,18 +514,24 @@ def clamp_to_detection_envelope(
     target = GeoPosition(x=fused.x, z=fused.z, alt_m=observer.alt_m)
     if range_m(observer, target) <= max_range_m:
         return fused
-    elapsed_s = max(0.0, fused.as_of_sim - prior.as_of_sim)
     return PositionEstimate(
         x=prior.x,
         z=prior.z,
-        covariance=prior.covariance.inflated(elapsed_s),
+        covariance=_inflated_since_last_fuse(prior, fused.as_of_sim),
         as_of_sim=fused.as_of_sim,
+        fused_at_sim=prior.fused_at_sim,
+        fused_covariance=prior.fused_covariance,
     )
 
 
 def _apply_floor(
     estimate: PositionEstimate, look_uncertainty: PositionUncertainty
 ) -> PositionEstimate:
+    """Only ever called on a freshly founded or genuinely fused `estimate`
+    (`fold_position`'s two non-hold branches), where `as_of_sim ==
+    fused_at_sim` and `covariance == fused_covariance` hold by construction
+    -- so the floored covariance becomes both the reported `covariance` and
+    the new `fused_covariance` base, keeping that invariant intact."""
     floor_trace = (SYSTEMATIC_BIAS_FRACTION * look_uncertainty.sigma_cross_m) ** 2 + (
         SYSTEMATIC_BIAS_FRACTION * look_uncertainty.sigma_down_m
     ) ** 2
@@ -455,5 +545,10 @@ def _apply_floor(
     else:
         floored = estimate.covariance.scaled(floor_trace / current_trace)
     return PositionEstimate(
-        x=estimate.x, z=estimate.z, covariance=floored, as_of_sim=estimate.as_of_sim
+        x=estimate.x,
+        z=estimate.z,
+        covariance=floored,
+        as_of_sim=estimate.as_of_sim,
+        fused_at_sim=estimate.fused_at_sim,
+        fused_covariance=floored,
     )
