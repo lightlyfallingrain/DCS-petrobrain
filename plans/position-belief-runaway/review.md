@@ -228,3 +228,104 @@ verified by direct execution against a clean, isolated snapshot of the relevant 
 archive` into scratch directories), not by reading alone — including re-deriving and
 numerically confirming the eigenvalue-ratio invariance claim for rotated matrices, which the
 original debug addendum had only checked for one bearing.
+
+## 2026-09-25 addendum: `6a8daaf`, security deep-analysis re-entry (hold-recovery timing)
+
+**Scope.** Implementer step for the security deep-analysis change request
+(`plans/position-belief-runaway/security-review.md`, verdict NEEDS FIXES on `4ba3da7`) — reviewing
+only the fix commit `6a8daaf`, per `AGENTS.md`'s "A change request from Security or Performance
+Reviewer re-enters the loop" rule. The rest of the branch was reviewed and approved twice already
+(above) and is not reopened.
+
+**What the fix does.** `PositionEstimate` gains `fused_at_sim`/`fused_covariance` alongside the
+existing `as_of_sim`/`covariance`. `as_of_sim` keeps its old meaning (bumped every poll, hold
+included); `fused_at_sim` advances only when `fold_position` genuinely fuses. A new
+`_inflated_since_last_fuse(prior, t_sim)` is the single place `fold_position`'s prior-inflation
+step, its ill-conditioning hold branch, and `clamp_to_detection_envelope`'s hold branch all
+compute "the prior's covariance, brought up to date" from — replacing every prior
+`prior.covariance.inflated(elapsed since as_of_sim)`, the compounding-inflation defect.
+
+**1. Two-field coherence.** Traced every construction site (`estimate_from_look`, both branches of
+`fold_position`, `clamp_to_detection_envelope`, `_apply_floor`) directly in the diff. Founding and
+genuine-fuse paths always set `fused_at_sim = as_of_sim = t_sim` and
+`fused_covariance = covariance`; both hold branches carry `fused_at_sim`/`fused_covariance`
+straight through from `prior` unchanged while `as_of_sim`/`covariance` move to the current poll.
+`fused_at_sim <= as_of_sim` holds by induction: true at founding, and each hold/fuse step either
+keeps `fused_at_sim` fixed while `as_of_sim` advances to a later `t_sim`, or advances both
+together — never the reverse. On a founding percept there is no prior (`fold_position(None, ...)`,
+`clamp_to_detection_envelope(founding_position, None, ...)` in `Contact.from_percept`), so no hold
+is reachable and the two pairs start identical by construction. No path found that can diverge the
+invariant.
+
+**2. Other readers of `as_of_sim`/`covariance`.** Grepped the whole `src/` tree for
+`as_of_sim`/`.covariance`/`fused_at_sim`/`fused_covariance` outside `position_belief.py`. Only
+reader is `belief.association_over_time._contact_covariance`, which does
+`contact.position.covariance.inflated(elapsed_s since contact.last_seen_sim)` — a *second*,
+independent inflation on top of whatever `position_belief.py` already computed. This is not a new
+double-inflation bug: `Contact.record` bumps `last_seen_sim = percept.t_sim` on every call
+including through a hold (the logged, explicitly out-of-scope decision from the `c1cba89`
+addendum), so `elapsed_s` in that gate call is always ~0 at the point `covariance` was last
+written by `position_belief.py` — the gate's own inflation term is a near-no-op layered on an
+already-current value, not a second exponent on the same growth. `radius_m()`/
+`bearing_uncertainty_deg()` read `covariance` directly (never `fused_covariance`), which is
+correct — they want "the current best answer," not "the answer as of the last real fuse," exactly
+`as_of_sim`'s stated meaning.
+
+**3. Interval-independence, probed beyond the test's two points.** The committed regression test
+(`test_hold_recovery_time_is_bounded_independent_of_poll_interval`) checks dt=1.0 and dt=0.05.
+Reproduced its exact scenario (`sigma_cross=60, sigma_down=800`, founding at `(0, 3000)`,
+disagreeing look at `(350, 5000)`/bearing 5°, continuous chained polling) in an isolated probe
+script run from inside two `git archive` scratch trees (`4ba3da7` pre-fix, `6a8daaf` post-fix; cwd
+set inside each tree's own `body-layer/`, per the standing pythonpath-trap memory) at eight poll
+intervals (0.01 to 10.0s) plus two jittered sequences:
+
+  - Post-fix: recovery lands in a tight 6.85–10.0s band at every interval tested, including
+    dt=0.01 (684 polls) and both jittered runs (~7.0s / ~6.9s) — genuinely interval-independent,
+    not fitted to the two points the test checks.
+  - Pre-fix, same probe, same trees: 47.0s at dt=1.0, 933.9s at dt=0.05 (both match the debug
+    addendum's own measured figures almost exactly), 233.6s at dt=0.2, never recovers within a
+    400,000-poll/4000s budget at dt=0.01, and both jittered runs land at 35.4s/352.2s — a clean
+    ~1/poll_interval scaling in the direction the addendum claims, independently reproduced rather
+    than taken on the addendum's word.
+
+**4. Serialization/equality.** `PositionEstimate` is a frozen slotted dataclass with no custom
+`__eq__`/serialization; grepped for whole-object `==` comparisons and found only field-level
+comparisons (`fused.x == prior.x`, `.z`) in the test suite — nothing compares two
+`PositionEstimate`s wholesale, and no JSON/wire boundary carries this type. The two new fields
+introduce no silent behavior change to anything that existed before this commit. All construction
+sites (`position_belief.py` and the four test-fixture call sites the debug note lists) use keyword
+arguments, not positional.
+
+**5. The "fails pre-fix" claim.** Independently reproduced, not reused: same `git archive`-based
+isolated trees as (3) above (not ambient `PYTHONPATH` inside a real checkout, which is the exact
+trap this branch's own re-review memory already recorded once). Confirmed `fused_at_sim` is
+genuinely absent from `4ba3da7`'s source and present in `6a8daaf`'s, then ran the probe against
+both — pre-fix diverges sharply by poll interval and fails to recover at all at dt=0.01 within
+budget; post-fix does not. This is the crux finding, confirmed by direct execution against
+verifiably distinct trees, not inferred from the diff.
+
+No defects found. One doc-lag, optional only: `Contact`'s own class docstring (unchanged by this
+commit) still describes `position.covariance` as "inflated for elapsed motion" without mentioning
+the new `fused_at_sim`/`fused_covariance` split now underneath it — accurate as far as it goes,
+since `_contact_covariance` still reads `covariance` correctly, but a future reader tracing that
+docstring alone would not learn the new invariant. Not required — the invariant is fully and
+correctly documented in `position_belief.py`'s own module/class docstrings, which is where a
+reader debugging this exact class of issue would land.
+
+### Verdict
+
+**APPROVED.** `6a8daaf` correctly fixes the hold-recovery timing defect the security deep analysis
+found: the two-field split is internally coherent with no divergence path, the one other reader of
+the old single-field semantics still gets the meaning it needs, the interval-independence property
+holds well beyond the two points the committed test checks (probed at 8 intervals plus 2 jittered
+sequences), no serialization/equality hazard exists, and the "fails pre-fix, passes post-fix" claim
+is independently confirmed by direct execution against isolated trees. The branch as a whole —
+`b5b79b8` + `97d5c65` + `6a8daaf` — is approved.
+
+### Review Confidence
+
+Full read of `6a8daaf`'s diff. All five review-prompt items were checked by a combination of
+direct grep/trace of every construction and read site, and independent execution against isolated
+`git archive` scratch trees for the empirical claims (interval-independence beyond the test's two
+points, and the pre-fix/post-fix divergence) — not inferred from the diff or the implementer's
+report alone.
