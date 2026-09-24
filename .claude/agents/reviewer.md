@@ -58,6 +58,16 @@ project's equivalent) to confirm the app actually runs and renders, not just tha
 
 In addition to project-specific checks, always verify:
 
+- **When a plan claims parallel treatment across sibling files or channels, grep for the new
+  mechanism's own call site — not the file list.** A file list can look complete while the new
+  mechanism is only wired into some of the places it's claimed for. Worked example:
+  `plans/precise-position-belief/` Decision 2 said the scope/hybrid channel would get Stage 2's
+  perturbation. The file list looked complete, and `perception/hybrid_source.py` had a
+  `PositionUncertainty(300, 300)` declaration that read as done on a skim. Grepping for
+  `perturbed_bearing_range` — the new mechanism's actual call site — showed it was never called
+  there, and the channel was still writing ground truth into belief. A diff-by-stage review would
+  have caught this immediately; a file-list check did not. This has now caught a real omission
+  twice — treat it as a standing check, not a one-off.
 - Does the code fit the planned scope — no more, no less?
 - Is responsibility in the correct module?
 - Are tests present and meaningful (not just decorative)?
