@@ -6,16 +6,16 @@ unrelated speech bug caught along the way.
 
 **Branch: `fix/position-belief-runaway`, not yet merged.** DoD (format/lint/type/test, Reviewer,
 Security) is complete and clean at the time this card was written; this card is written for the
-unmerged branch on purpose. Once merged, this card's branch line will be corrected to `main` — if
-you're reading it before that correction lands, check out the branch by name, not `main`:
+**Merged 2026-09-25 (`bfbcf8d`).** Everything is on `main`, alongside the three other outstanding
+cards — one checkout covers all four:
 
 ```sh
-git checkout fix/position-belief-runaway && git pull
+git checkout main && git pull
 ```
 
 ## Where this sits among the outstanding sorties
 
-Three other sorties are already open and unflown, all on `main`: `docs/acceptance/
+Three other sorties are already open and unflown, also on `main`: `docs/acceptance/
 2026-09-23-eyes-and-voice-sortie.md` (binocular optic, voice command completeness, and the
 *original* precise-position-belief merge this fix corrects), `docs/acceptance/
 2026-09-24-watch-reporting-sortie.md` (unprompted contact reports, engagement envelopes,
