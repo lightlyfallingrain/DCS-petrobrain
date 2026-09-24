@@ -75,14 +75,38 @@ from typing import Any, Final, Literal
 
 from aircraft_client import AircraftLayerClient
 from perception.association import WorldObjectCandidate, associate, filter_ownship
+from perception.estimation import perturbed_bearing_range
 from perception.source import (
     OBSERVATION_ID_PREFIX_HYBRID,
     DerivedWorldPosition,
     Observation,
     OwnshipState,
+    PositionUncertainty,
 )
 
 logger = logging.getLogger(__name__)
+
+#: Placeholder fixed uncertainty for this channel, declared here rather
+#: than in `belief.association_over_time` (`plans/precise-position-belief/
+#: plan.md` Stage 1 -- that module's duplicated copy is deleted, moved to
+#: the source that actually knows it). Isotropic, not range-derived: this
+#: channel does not quantise its geometry into a reporting vocabulary the
+#: way naked-eye does, so there is no bucket width to derive an honest
+#: figure from. Per the original plan this constant was written against:
+#: "use a reasonable fixed uncertainty and say so plainly in a comment --
+#: don't overthink it, this gets revisited." Still exactly that placeholder,
+#: not a calibrated value.
+#:
+#: **Used as both `sigma_cross_m` and `sigma_down_m`** for this channel's
+#: own perturbation (Stage 2, applied here as a required review fix rather
+#: than in the original Stage 2 commit -- see `perception/estimation.py`'s
+#: module docstring and the plan's Decision 2, now answered "yes" in
+#: `plans/precise-position-belief/implementation.md`). Without this,
+#: `associate()`'s truth-exact geometry would reach `belief/` unperturbed,
+#: behind a cosmetic uncertainty band -- exactly the omniscience hole this
+#: whole plan exists to close, and it sat open on the channel the pilot
+#: actually flies with.
+SCOPE_UNCERTAINTY_M: Final[float] = 300.0
 
 #: The five HelperAI list-text controller names, in on-screen top-to-bottom
 #: order -- a scrolling window into a multi-row target list (see module
@@ -198,6 +222,18 @@ class HybridPerceptionSource:
             self._object_id_to_last_observation_id[result.candidate.object_id] = (
                 observation_id
             )
+            # Perturb, don't hand belief the truth-exact geometry `associate()`
+            # computed -- see SCOPE_UNCERTAINTY_M's docstring above and
+            # `perception.estimation`'s module docstring. `object_id` anchors
+            # the never-redrawn systematic bias; it never leaves `perception/`.
+            estimated_bearing_deg, estimated_range_m = perturbed_bearing_range(
+                observation_id=observation_id,
+                object_id=result.candidate.object_id,
+                true_bearing_deg=result.bearing_deg,
+                true_range_m=result.range_m,
+                sigma_cross_m=SCOPE_UNCERTAINTY_M,
+                sigma_down_m=SCOPE_UNCERTAINTY_M,
+            )
             observations.append(
                 Observation(
                     id=observation_id,
@@ -206,8 +242,8 @@ class HybridPerceptionSource:
                     t_wall=time.time(),
                     source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
                     classification_raw=classification,
-                    bearing_deg=result.bearing_deg,
-                    range_m=result.range_m,
+                    bearing_deg=estimated_bearing_deg,
+                    range_m=estimated_range_m,
                     ownship_at_observation=ownship_state,
                     derived_world_position=DerivedWorldPosition(
                         x=result.candidate.x,
@@ -228,6 +264,10 @@ class HybridPerceptionSource:
                     # by parsing the string.
                     classification_level=3,
                     continues_observation_id=continues_observation_id,
+                    position_uncertainty=PositionUncertainty(
+                        sigma_cross_m=SCOPE_UNCERTAINTY_M,
+                        sigma_down_m=SCOPE_UNCERTAINTY_M,
+                    ),
                 )
             )
 

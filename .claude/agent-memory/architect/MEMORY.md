@@ -48,4 +48,10 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Callout scheduling design](project_callout_scheduling_design.md) — speech occupancy modelled in sim time (playback callbacks rejected); two distinct groupings that must not be unified; threat-band placeholder shape.
 - [Tactical landmarks scoping](project_tactical_landmarks_scoping.md) - 2026-09-12 plan resolving whether world-model content is rich enough for Mission Interpreter — ridge/valley/flat, settlement boundaries, road junct...
 - [Resolution vs salience split](project_resolution_vs_salience_split.md) — presence threshold split in two; clustering floor (A) is coupled to the loosest admission threshold.
+- [Position belief error model](project_position_belief_error_model.md) — range bucket returns its upper bound (biased long); hybrid channel is truth-exact; ED's range ladder is derivable, its clock ladder is not.
 - [Movement detection design](project_movement_detection_design.md) — velocity vector never leaves perception/; UnitName join key; MOTION_HALF_LIFE_S was already waiting in decay.py.
+- [Watch reporting design](project_watch_reporting_design.md) — the _TEMPLATED_KINDS speech allowlist; envelope lookup keyed on belief by signature; range/altitude/LOS threat test; nulls degrade per-field, not uniformly; slots replaced per-command wire fields.
+- [Binocular Stage 3b](project_binocular_stage3b.md) — the mock-flight xfail names the wrong cause (search, not stare); never read last_position_uncertainty_m as a bearing error.
+- [Voice command completeness](project_voice_command_completeness.md) — absolute-vs-relative frame rule for direction vocabulary; rename what survives, not what's retired; _print owns speech occupancy.
+- [BL-8 kneeboard design](project_bl8_kneeboard_design.md) — append-only note store beside ContactStore; the fold door is deliberately shut; import-direction is the real invariant.
+- [Amend plans when the ground shifts](feedback_amend_plans_when_ground_shifts.md) — amend unimplemented plans in place, say what forced it, reuse the branch's existing damper patterns.

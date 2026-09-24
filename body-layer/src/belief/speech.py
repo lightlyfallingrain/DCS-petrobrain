@@ -336,6 +336,62 @@ def render_confirm_request(description: str) -> OutgoingSpeech:
     return OutgoingSpeech(text=f"{capitalized}, confirm?", template="readback")
 
 
+def render_clear(direction_label: str | None) -> OutgoingSpeech:
+    """The `report_*` family's empty answer (`plans/
+    voice-command-completeness/plan.md` Decision 2, user 2026-09-23):
+    `"Clear."` for `report_all`, `"<direction>, clear."` for a directional
+    family with nothing in it (`"Three o'clock, clear."`, `"North,
+    clear."`). `direction_label` is a plain, lowercase human phrase for the
+    direction asked about (`"three o'clock"`, `"north"`) -- `None` for
+    `report_all`, which names no direction at all. `crew_console.py` owns
+    picking the label (the token -> label mapping is command-vocabulary
+    territory, this function only formats and capitalizes it), mirroring
+    `render_confirm_request`'s own division of labour.
+
+    **Not used when the direction cannot be seen at all** -- see
+    `render_no_view` for the rear-hemisphere carve-out this function must
+    never paper over."""
+    if direction_label is None:
+        return OutgoingSpeech(text="Clear.", template="contact_report")
+    capitalized = direction_label[:1].upper() + direction_label[1:]
+    return OutgoingSpeech(text=f"{capitalized}, clear.", template="contact_report")
+
+
+def render_no_view(direction_label: str) -> OutgoingSpeech:
+    """The rear-hemisphere carve-out `render_clear` must never speak
+    (`plans/voice-command-completeness/plan.md` Decision 2): a direction
+    Petrovich cannot see at all is not "clear" -- answering "clear" would
+    claim a look the cockpit mask (`perception.cockpit_mask`'s
+    `rear_cutoff_deg`) makes physically impossible, the no-omniscience
+    invariant inverted (asserting absence from nothing, rather than
+    inventing presence from nothing). `direction_label` is lowercase and
+    spoken mid-sentence, unlike `render_clear`'s sentence-initial
+    capitalized one -- `"Can't see north."`, not `"Can't see North."`;
+    `crew_console.py` owns picking the label, same division of labour as
+    `render_clear`."""
+    return OutgoingSpeech(
+        text=f"Can't see {direction_label}.", template="contact_report"
+    )
+
+
+def render_report(group_texts: list[str], truncated: bool) -> OutgoingSpeech:
+    """Joins a report's per-group texts (`crew_console.CrewConsole.
+    _handle_report`'s own `_contact_report_text`/`render_group_report`
+    calls, one full sentence each, already ending in a period) into the
+    **one** utterance a report is always spoken as (`plans/
+    voice-command-completeness/plan.md` Decision 1b: "One utterance, not
+    one line per group, is the whole point" -- `plans/callout-scheduling/`
+    removed the backlog by never having more than one thing in flight, and
+    a report that pushed several lines through `_print` in a loop would
+    reintroduce exactly that). `truncated` appends `" And more."` when the
+    caller capped the group count (`REPORT_MAX_GROUPS`) below the number of
+    groups that actually matched."""
+    text = " ".join(group_texts)
+    if truncated:
+        text += " And more."
+    return OutgoingSpeech(text=text, template="contact_report")
+
+
 def render_watch_nearest_readback(facts: dict[str, object]) -> OutgoingSpeech:
     """The F10 "Watch Nearest" readback (`plans/f10-crew-commands/plan.md`).
     Unlike a typed `watch <id>`, the player named no contact, so the readback

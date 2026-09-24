@@ -159,3 +159,59 @@ def test_binocular_optic_has_no_peripheral_vision() -> None:
     raising it trades away the wide, change-detecting peripheral channel
     entirely (hard part 2a, `plans/detection-cones-slice2/plan.md`)."""
     assert BINOCULAR_OPTIC.peripheral is False
+
+
+class TestBoresightElevation:
+    """`plans/binocular-optic/plan.md` Stage 2. A level boresight makes a
+    narrow optic useless at exactly the ranges it exists for: you point
+    binoculars *at* a thing, including downwards."""
+
+    def test_a_close_ground_contact_is_outside_a_level_boresight(self) -> None:
+        """The measurement that forced this: 1 km slant from 120 m AGL is
+        ~6.9 degrees down, against a 4.25-degree half-angle."""
+        assert not within_optic_fov(
+            BINOCULAR_OPTIC,
+            boresight_azimuth_deg=0.0,
+            azimuth_deg=0.0,
+            elevation_deg=-6.9,
+        )
+
+    def test_the_same_contact_is_inside_when_aimed_at(self) -> None:
+        assert within_optic_fov(
+            BINOCULAR_OPTIC,
+            boresight_azimuth_deg=0.0,
+            azimuth_deg=0.0,
+            elevation_deg=-6.9,
+            boresight_elevation_deg=-6.9,
+        )
+
+    def test_aiming_down_moves_the_whole_cone_not_just_its_edge(self) -> None:
+        """The horizon leaves the field of view when the look is depressed
+        far enough -- the cost of aiming, and the thing that makes a
+        narrow optic a real trade rather than a free upgrade."""
+        assert not within_optic_fov(
+            BINOCULAR_OPTIC,
+            boresight_azimuth_deg=0.0,
+            azimuth_deg=0.0,
+            elevation_deg=0.0,
+            boresight_elevation_deg=-10.0,
+        )
+
+    def test_the_default_stays_level(self) -> None:
+        """Every existing caller passes no elevation and must be
+        unaffected."""
+        assert within_optic_fov(
+            BINOCULAR_OPTIC,
+            boresight_azimuth_deg=0.0,
+            azimuth_deg=0.0,
+            elevation_deg=0.0,
+        )
+
+    def test_the_unaided_eye_ignores_the_boresight_entirely(self) -> None:
+        assert within_optic_fov(
+            UNAIDED_OPTIC,
+            boresight_azimuth_deg=0.0,
+            azimuth_deg=80.0,
+            elevation_deg=-40.0,
+            boresight_elevation_deg=30.0,
+        )

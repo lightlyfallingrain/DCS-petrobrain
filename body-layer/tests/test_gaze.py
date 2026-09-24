@@ -27,6 +27,7 @@ from perception.gaze import (
     ScanPlan,
     gaze_at,
     gaze_for,
+    legs_within_wedge,
     within_gaze,
 )
 from perception.optics import BINOCULAR_OPTIC, UNAIDED_OPTIC, Optic
@@ -228,3 +229,103 @@ def test_commanded_scan_is_relative_to_command_time_not_absolute_sim_time() -> N
     late = ScanPlan(commanded_sector="left", command_t_sim=100.0)
 
     assert gaze_at(3.0, early).label == gaze_at(103.0, late).label
+
+
+# -- commanded_legs / legs_within_wedge (Stage 5, plans/
+# voice-command-completeness/plan.md Decision 5) --------------------------
+
+
+def test_scan_plan_rejects_both_commanded_sector_and_commanded_legs() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        ScanPlan(commanded_sector="left", command_t_sim=0.0, commanded_legs=(1,))
+
+
+def test_scan_plan_rejects_commanded_legs_with_no_command_time() -> None:
+    with pytest.raises(ValueError, match="command_t_sim"):
+        ScanPlan(commanded_sector=None, command_t_sim=None, commanded_legs=(1,))
+
+
+def test_scan_plan_rejects_a_command_time_with_no_commanded_legs_or_sector() -> None:
+    with pytest.raises(ValueError, match="command_t_sim"):
+        ScanPlan(commanded_sector=None, command_t_sim=0.0, commanded_legs=None)
+
+
+def test_scan_plan_rejects_empty_commanded_legs() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        ScanPlan(commanded_sector=None, command_t_sim=0.0, commanded_legs=())
+
+
+def test_commanded_legs_single_hour_is_a_static_gaze_like_a_one_leg_sector() -> None:
+    # An o'clock command (`scan_clock_1`) is a one-leg plan, exactly as
+    # `ahead` already degenerates to one leg under `commanded_sector`
+    # (`ScanPlan`'s own module docstring, Stage 5's whole point).
+    plan = ScanPlan(commanded_sector=None, command_t_sim=5.0, commanded_legs=(1,))
+
+    for t_sim in (5.0, 5.5, 6.9, 100.0):
+        gaze = gaze_at(t_sim, plan)
+        assert gaze.label == "1_oclock"
+        assert gaze.center_azimuth_deg == pytest.approx(30.0)
+
+
+def test_commanded_legs_multi_hour_cycles_from_command_time() -> None:
+    # Same three legs `commanded_sector="left"` would use, expressed
+    # directly as `commanded_legs` -- must cycle identically.
+    via_legs = ScanPlan(
+        commanded_sector=None, command_t_sim=10.0, commanded_legs=(11, 10, 9)
+    )
+    via_sector = ScanPlan(commanded_sector="left", command_t_sim=10.0)
+
+    for t_sim in (10.0, 11.999, 12.0, 14.0, 16.0):
+        assert gaze_at(t_sim, via_legs) == gaze_at(t_sim, via_sector)
+
+
+def test_commanded_legs_is_a_pure_function_of_sim_time() -> None:
+    plan = ScanPlan(commanded_sector=None, command_t_sim=0.0, commanded_legs=(3,))
+    assert gaze_at(7.0, plan) == gaze_at(7.0, plan)
+
+
+def test_fixed_look_wins_over_commanded_legs() -> None:
+    plan = ScanPlan(
+        commanded_sector=None,
+        command_t_sim=0.0,
+        commanded_legs=(1,),
+        fixed_look=Gaze(
+            center_azimuth_deg=45.0, half_width_deg=4.25, label="fixed_look"
+        ),
+    )
+    assert gaze_at(0.0, plan).label == "fixed_look"
+
+
+def test_legs_within_wedge_matches_the_left_sectors_own_legs_as_a_set() -> None:
+    # Cross-check: `_RELATIVE_SECTOR_WEDGE_DEG["left"] == (-60.0, 30.0)`
+    # admits exactly the same three o'clock hours `_SECTOR_LEGS["left"]`
+    # names -- as a *set*, not necessarily the same sweep order.
+    # `legs_within_wedge` orders left-to-right by ascending signed offset
+    # (its own docstring), which for this wedge is (9, 10, 11) -- the
+    # numeric mirror of `_SECTOR_LEGS`'s own near-center-first (11, 10, 9)
+    # sweep. The two tables serve different callers (a commanded named
+    # sector vs. a converted absolute one) and are not required to agree
+    # on sweep order, only on which hours qualify.
+    assert set(legs_within_wedge(-60.0, 30.0)) == {9, 10, 11}
+    assert legs_within_wedge(-60.0, 30.0) == (9, 10, 11)
+
+
+def test_legs_within_wedge_around_dead_ahead() -> None:
+    # A 90-degree-wide compass sector centered on dead ahead admits three
+    # hours either side of 12, ordered left (11) to right (1).
+    assert legs_within_wedge(0.0, 45.0) == (11, 12, 1)
+
+
+def test_legs_within_wedge_handles_the_rear_wraparound() -> None:
+    # Centered dead astern (180 degrees) -- exercises the +-180 wraparound
+    # in both the admission test and the ordering offset.
+    assert legs_within_wedge(180.0, 45.0) == (5, 6, 7)
+
+
+def test_legs_within_wedge_never_empty_for_a_real_compass_sector_half_width() -> None:
+    # Every one of the eight compass sectors' 45-degree half-width, at every
+    # possible relative center, must resolve to at least one leg -- an empty
+    # result here would silently degrade `logger._active_gaze`'s compass
+    # conversion into an invalid zero-leg `ScanPlan`.
+    for degrees in range(0, 360, 5):
+        assert len(legs_within_wedge(float(degrees), 45.0)) > 0, degrees

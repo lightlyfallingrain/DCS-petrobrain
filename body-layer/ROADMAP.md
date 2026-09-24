@@ -15,6 +15,14 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **Binocular optic (Stages 1-3b) and voice command completeness (Stages 1-5), added
+  2026-09-23.** Both merged on `feature/binocular-optic` and passed DoD on fixtures/console only —
+  neither has flown. They are deliberately batched onto one sortie because they are one cockpit
+  loop (look, report, be told where to look): `docs/acceptance/2026-09-23-eyes-and-voice-sortie.md`.
+  Clears when that sortie is flown and the card's "Bring back" items are answered — the nine
+  unbenched `scan <clock>` tokens' recognition accuracy in particular has no measurement of any
+  kind yet, benched or live.
+
 - [ ] **Two things waiting on the user's own machines, added 2026-09-19.** Neither blocks work.
   - **The daily status-page launchd job** (`.claude/scripts/com.petrobrain.status-page.plist`) is
     written but **not installed** — installing writes outside the repo. Test with
@@ -273,6 +281,25 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   `belief.speech`'s spoken contact callouts to the in-game overlay (currently only reaches
   `--crew-text`'s stdout, not `--overlay`'s cockpit text panel) — not part of BL-6's own scope, a
   separate follow-on.
+
+- [>] **BL-7's phase data is unreachable in a sortie — found 2026-09-24, DEFERRED TO THE BRAIN (user, 2026-09-24).**
+  `--mission-understanding` loads the artifact and `MissionPhaseTracker` updates every poll, but
+  **nothing a pilot can reach in flight reads it.** `mission_phase` appears in four files
+  (`console.py`, `tools.py`, `mission_phase.py`, `tool_api.py`) and in none of `attention.py`,
+  `callouts.py` or `crew_console.py`. The phase-proximity tie-break is real but sits inside
+  `_highest_attention_contact`, called only by `get_situation`, called only by the `--console`
+  debug harness; the brain that would otherwise call the tool API is still `NullBrainClient`. So
+  mission phase currently changes nothing about what Petrovich attends to or says on a `--crew-text`
+  sortie. Two ways out, and they are not equivalent: a crew-facing way to *ask* (a `situation`
+  command — cheap, but only surfaces phase when asked), or phase feeding attention/callout ordering
+  directly (what BL-7's own plan implies, and what would make the tie-break matter unprompted).
+  Pilot's report of the same gap: *"the commands to exercise it during mission do not exist yet."*
+  Blocks the B half of `docs/acceptance/2026-09-24-mission-interpreter-sortie.md`.
+
+  **Deferred deliberately, not forgotten.** User direction 2026-09-24: *"situation/phase — not
+  needed yet, there is nothing that consumes it yet. Defer till brain."* Building a `situation`
+  command now would produce a readout nothing acts on; phase earns its place once a brain is
+  reasoning over it. Do not start this without the brain layer existing.
 
 - [x] **BL-7 — Mission phase and relevance (≈ PB-9's deterministic half; done, merged 2026-09-13,
   `feature/bl7-mission-phase-relevance`, merge commit `ec4cf12`).** `MissionPhaseTracker` consumes
@@ -771,6 +798,173 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Two candidate rules, not yet chosen: widen aggregation to a range *band* at presence level only,
   or suppress re-reporting a contact already called within some window. The second is probably the
   real one, since the identical repeat suggests the same contact was called twice.
+
+- [x] **Precise position belief — Stages 1 through 5. DONE**, merged on `feature/binocular-optic`
+  alongside the two milestones below it (plan/review: `plans/precise-position-belief/`). Replaces
+  the reporting-vocabulary quantisation that used to stand in for a believed position with a real
+  perception-side error model, closing a bug that was worse than "coarse": `naked_eye_source.py`'s
+  old `_quantise_range_m` snapped every range onto its bucket's *upper bound*, not its midpoint, so
+  belief was systematically biased **long** by up to a full bucket width (500 m at 3 km) — not a
+  conservative approximation, a one-directional error nobody had named. The old clock-bucket
+  bearing/range-bucket split was also inverted: it claimed range was known tighter than bearing,
+  when a human points at something far better than he judges its distance to it.
+
+  **The model**: each look's error ellipse is elongated along its own line of sight —
+  `sigma_down_m = RANGE_FRACTIONAL_SIGMA(0.17) * true_range_m` (derived from ED's own `OP_D*`
+  range-bucket ladder, which coarsens with range — the signature of a fractional error), `sigma_
+  cross_m = radians(BEARING_SIGMA_DEG(3.0)) * true_range_m` (a declared, unmeasurable judgement
+  constant — nothing in DCS reports a crewman's own pointing precision). **Every reported bearing/
+  range is perturbed**, not just budgeted with a disclaimer (`perception/estimation.py`,
+  `perturbed_bearing_range`): a per-look draw hashed off the observation id (reproducible, averages
+  down across looks) plus a per-object systematic bias hashed off the object id and never re-drawn
+  (`SYSTEMATIC_BIAS_FRACTION = 0.4` of one look's sigma). The property this defends: a
+  heavily-observed contact must converge to a position that is confidently and precisely **wrong**,
+  not to exact ground truth behind a cosmetic uncertainty figure — stating an uncertainty on an
+  exact number would make `belief/percept.py`'s no-omniscience boundary a comment rather than a
+  mechanism. `derived_world_position` stays ground truth, unperturbed and never crew-facing (trace/
+  debug tooling only).
+
+  **Fusion is 2x2 covariance, not a running mean** (`belief/position_belief.py`'s `PositionEstimate`
+  — mean x/z + covariance + `as_of_sim` — now what `Contact.position` holds and `record()` folds
+  into via the standard information-form update; `last_position`/`last_position_uncertainty_m` stay
+  as derived properties so existing readers compile unchanged). This is real triangulation: two
+  looks from different lines of sight cross and narrow both axes, which a scalar radius cannot
+  express. `association_over_time.py`'s spatial gate was promoted to match — a 2D Mahalanobis-style
+  test on summed covariances instead of a scalar-radius comparison — **and this is the one piece
+  carrying real regression risk pending a live sortie**: a gate that is too tight reproduces the
+  2026-09-09 duplicate-contact runaway, this time from a genuinely different mechanism (covariance
+  fusion, not shared-formula acuity) than the one Stage 3b-i's own revert was about, so the two
+  should not be read as the same risk recurring.
+
+  **Spent downstream**: `belief/optic_policy.py`'s binocular sweep now passes the contact's real,
+  measured `bearing_uncertainty_deg` instead of a hardcoded half-clock-bucket default — a
+  well-observed contact's sweep collapses toward a single stare instead of always stepping the full
+  width Stage 3b assumed.
+
+  **Required review fix, applied post-merge**: Stage 1's `PositionUncertainty` declaration landed
+  on `perception/hybrid_source.py` (the scope/HelperAI channel) but Stage 2's actual perturbation
+  never did — the plan's own Decision 2 ("does the scope channel get the same treatment?") was never
+  recorded as answered by either implementer, so a heavily-observed scope contact was converging on
+  *exact* ground truth behind the declared 300 m band, on the channel the pilot actually flies with
+  today. Fixed by applying `perturbed_bearing_range` there too, isotropic on both axes at
+  `SCOPE_UNCERTAINTY_M` (no reporting bucket on this channel to derive an anisotropic figure from);
+  a regression test now pins that repeated scope-channel looks at a stationary object do not
+  converge on truth. Decision 2 is recorded answered ("yes") in `plans/precise-position-belief/
+  implementation.md`.
+
+  **Uncalibrated, pending a sortie** — same debt class as every perception constant before its
+  first flight: `RANGE_FRACTIONAL_SIGMA`, `BEARING_SIGMA_DEG` (the one number only the user's own
+  cockpit judgement can move, if callouts point at the wrong place), `SYSTEMATIC_BIAS_FRACTION`,
+  and `SCOPE_UNCERTAINTY_M` (still the original placeholder, never revisited). **Unflown as of this
+  entry** — Stage 3's gate in particular needs a live sortie before it can be trusted, per the
+  plan's own "do not merge Stage 3 without a live sortie" instruction.
+
+- [x] **Binocular optic — Stages 1 through 3b. DONE, merged 2026-09-23** (`e91b9ee`,
+  `feature/binocular-optic`; plan/review/stage3b design: `plans/binocular-optic/`). The optical
+  model (`perception/optics.py`, `visibility.py`'s per-tier gates) already existed and was
+  unreachable — nothing ever decided *when* to raise binoculars. This milestone is that decision,
+  `belief/optic_policy.py`'s `decide`.
+
+  **It is a phase cycle, not an interrupt, and the lockout is structural rather than a timer** (user
+  direction: *"when scan detects target, do not immediately raise binoculars. First complete the
+  current sector naked eye scan... then raise binoculars"*). A `GLASSING`/`SEARCHING` (binoculars
+  up) phase is reachable only from the end of a `SCANNING` phase, never mid-scan — so *"at least one
+  naked-eye scan before the next binocular look"* is not a rule that could be got wrong by a
+  mistimed constant, it is a state the code cannot express reaching any other way. Its length then
+  falls out of whichever gaze plan is active rather than being a number this module owns: a free
+  scan gives ~16 s between looks, a commanded o'clock sector far less. A player command — F10 token
+  or free-form text/voice, unconditionally, not a per-command special case — also drops the
+  binoculars immediately (D4: *"the pilot asking for something is itself evidence that what
+  Petrovich is doing matters less than what was just asked for"*), wired through a counter
+  (`CrewConsole.commands_handled`) the poll loop diffs across each iteration rather than a callback,
+  so a command surface added later needs no new wiring here to participate.
+
+  **The trigger is the next classification tier, not always type.** A contact known only to exist
+  is worth glassing to learn what *kind* of thing it is; one already classed is worth glassing to
+  learn what it *is*. `improvement_window_m`'s `(unaided_range, binocular_range)` band is **computed
+  from `tier_ranges` — the same calibration the naked-eye channel itself uses — not a threshold
+  invented for this feature**: closer than the lower bound the eye reaches that tier on its own next
+  dwell, so glassing there spends the look for nothing; beyond the upper bound the binoculars can't
+  reach it either. The band is exactly where the instrument is the difference.
+
+  **Stage 3b — a look is a sweep across the believed bearing's own uncertainty, not a stare at its
+  centre.** Found by a test, not by reasoning: a believed contact's bearing is reconstructed from a
+  quantised percept (the reporting vocabulary's 30° clock bucket), so it can sit up to 15° off true
+  while the binocular field of view is ±4.25° — a single stare at the believed position misses the
+  target most of the time. `look_sweep` steps outward from centre across that uncertainty
+  (defaulted to half a clock bucket), degenerating to one step (a stare, unchanged) when the
+  uncertainty is inside the field of view. `TestSweepFindsAnOffsetContact` is the tripwire that
+  proves it — reviewer-verified by forcing the sweep's half-width to 0 and confirming the test then
+  goes red.
+
+  **Uncalibrated, pending a sortie, same debt class as every perception constant before its
+  first flight:** dwell per look (6 s, split four ways across the Stage 3b sweep), the lockout's
+  scan-plan-derived length, the bearing-uncertainty default the sweep steps across, and the
+  Stage 3 search-band constant. **Unflown as of merge** — Stage 4 (sortie: does it feel like a
+  crewman using binoculars, are the constants anywhere near right) is the next piece of work, and
+  nothing above should be read as validated against a live cockpit.
+
+- [x] **Voice command completeness — Stages 1 through 5. DONE**
+  (`feature/voice-command-completeness`; plan: `plans/voice-command-completeness/plan.md`). 20 of
+  41 recognised voice tokens (`report_all`, the nine `report_clock_*`, the eight
+  `report_bearing_<compass>`, `report_bearing_deg`, `scan_bearing_deg`) reached `CrewConsole.
+  handle_command` (renamed from `handle_f10_command`, Stage 1 — the F10 radio menu is the transport
+  being retired, not the concept the rest of this codebase still needs) and fell through its
+  defensive `else` doing nothing — recognition succeeded, the dispatcher said "act", and the act was
+  a silent no-op, indistinguishable from not having been heard at all.
+
+  **Stage 2 — the report families.** `report` is a read of current belief and nothing else, never a
+  look (*"report is always about current belief. Scan tells to go look"* — user, 2026-09-23): no
+  `AttentionArea`, no task, no gaze change. Drops `certainty == "lost"` contacts (never pruned, so a
+  report would otherwise grow across a sortie) and anything with no `relative_now`, filters by the
+  requested family, groups via a new `belief.callouts.group_facts` (the bucket+chain rule extracted
+  out of `group_candidates` so the report and callout paths share one aggregation rule), and speaks
+  **one utterance**, capped at `REPORT_MAX_GROUPS` (3, uncalibrated) with a trailing `"And more."`
+  when truncated — never one line per group, the same discipline `plans/callout-scheduling/`
+  established. An empty result says `"Clear."`/`"<direction>, clear."` — **except** a compass/
+  numeric-bearing direction past the cockpit mask's rear cutoff relative to current heading, which
+  says `"Can't see <direction>."` instead: `"clear"` there would claim a look that is physically
+  impossible, the no-omniscience invariant's mirror image. A contact actually believed to sit there
+  is still reported normally; only the absence claim is withheld.
+
+  **Stage 3 — the numeric bearing slot.** `scan_bearing_deg`/`report_bearing_deg` quantise onto the
+  nearest of the eight compass sectors (`_nearest_sector`, 45° buckets — *"o'clock direction is
+  enough, no need for x degrees granularity now"*, user 2026-09-23) and then behave exactly like
+  their compass-word sibling tokens, readback and confirm prompt included (naming the sector, never
+  the raw number). Required an `audio-adapter` wire fix: `MatchResult.bearing_degrees` was computed
+  by `command_matcher.match_transcript` and then dropped at the wire — `TranscriptEvent` carried
+  seven fields, not eight. Now eight; `PendingConfirmation.bearing_degrees` carries the parsed value
+  across a confirm round trip so an "affirm" commit does not lose the heading.
+
+  **Stage 4 — prose** (`body-layer/CLAUDE.md`, `docs/concept/STATE_TRANSITIONS.md`, this entry).
+
+  **`DISPATCHED_COMMAND_TOKENS`** (module-level, `crew_console.py`) is now the canonical
+  "what has real behaviour" set, asserted against by test; an unrecognised token logs a warning
+  instead of vanishing silently. `CrewConsole._print`'s non-urgent path now also calls
+  `CalloutScheduler.note_reply`, closing a separate latent defect the reports made audible: every
+  command readback has been unbudgeted since readbacks existed, so a routine callout could queue
+  immediately behind one rather than waiting for it to finish.
+
+  **Stage 5 -- ownship-relative o'clock scans, and compass scans that finally steer the naked eye**
+  (both land together, per Decision 5, since they are two partial fixes to the same seam).
+  `scan_clock_1..12` (nine forward hours, mirroring the report family's own clock tokens) give the
+  ownship-relative frame the fine granularity it lacked: `left` alone spans three o'clock hours (a
+  90-degree wedge), and there was no way to say "just there" relative to the nose (user, 2026-09-23:
+  *"'scan 1 o'clock' directs scan at a narrow sector that is own ship relative. That is needed."*).
+  `perception.gaze.ScanPlan` gained a `commanded_legs: tuple[int, ...] | None` field carrying legs
+  directly -- the architect's own generalisation, rather than widening `RelativeSector` with twelve
+  more literals -- so a single o'clock hour is a one-leg plan exactly as `ahead` already is.
+  `logger._active_gaze` now also resolves a compass-only `AttentionArea.sector` task (previously
+  silently skipped, the measured pre-existing defect: `scan north` registered an area and spoke a
+  readback while Petrovich kept free-scanning), converting it to relative legs every poll via the
+  new `perception.gaze.legs_within_wedge`, using that poll's own ownship heading -- so `scan north`
+  finally moves his eyes, and stays correct as the aircraft turns. `belief.attention.AttentionArea`
+  gained a third, sibling directional field, `relative_clock_hour: int | None`, pairwise mutually
+  exclusive with `sector`/`relative_sector`; `project_relative_area` projects it the same way. The
+  binocular search sweep (`logger._search_sweep`) stays gated on `commanded_sector` alone --
+  deliberately not extended to the new commanded-legs cases, out of this stage's scope. Nine new,
+  **unbenched** tokens (no recordings in this corpus), the same cost class as `cancel_scan`/
+  `cancel_watch` before 2026-09-23 -- next corpus recording's job. **Unflown as of merge.**
 
 ## Backlog (body-layer)
 

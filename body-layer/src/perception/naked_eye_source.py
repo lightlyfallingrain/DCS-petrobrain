@@ -56,7 +56,7 @@ Each `poll()`:
     there is no presence-root equivalent to degrade *to* here.
 2. Runs every candidate through `visibility.check_visibility()`.
 3. **Clusters *every* gate-surviving candidate -- not yet the emission
-   cap's survivors -- then quantises per cluster** (`plans/
+   cap's survivors -- then estimates per cluster** (`plans/
    group-contact-model/plan.md` Stage 2, reordered ahead of the cap by
    `plans/detection-cones-slice2/plan.md`'s 2A.5: see point 5 below for why
    the cap now has to run *after* clustering rather than before it).
@@ -69,32 +69,33 @@ Each `poll()`:
    subtended at the observer against each candidate's own apparent angular
    size, not a world-space ellipse; see `clustering.py`'s docstring);
    single-link, no chaining cap yet -- Stage 3b-ii's job. `_build_observation`
-   emits exactly one `Observation` per resulting
-   cluster: bearing/range quantised from the cluster's *centroid*, not any
-   one member's own geometry (bearing snapped to the nearest of the 12
-   `OP_A1H`...`OP_A12H` clock positions, relative to ownship heading then
-   expressed back as a true bearing per `geometry.py`'s convention; range
-   snapped to the nearest of the 24 `OP_D...` buckets); `classification_raw`/
-   `classification_level` and `count_bucket` come straight from the
-   `Cluster` (identical class across every member keeps that class,
-   otherwise degrades to the presence root -- see `clustering.py`'s
-   docstring). ED's `OP_1UNIT`...`OP_MORETHAN15UNITS` count vocabulary
-   (Session 5 Finding 2, `aircraft-layer/research/2026-09-08-pb1-5-
-   worldobjects-filter-and-ambient-detection.md`), previously out of scope
-   (plan Decision #5) for lack of a clustering mechanism, is exactly what
-   `Cluster.count_bucket` now supplies.
+   emits exactly one `Observation` per resulting cluster: bearing/range are
+   an honest estimate of the cluster's *centroid* (`perception.estimation`,
+   `plans/precise-position-belief/plan.md`), not any one member's own exact
+   geometry and not a snap onto a reporting bucket -- the true centroid
+   geometry perturbed by a per-look draw plus a never-redrawn per-cluster
+   systematic bias, both deterministic (see that module's docstring), with
+   the declared error ellipse riding along as `Observation.position_
+   uncertainty`. `classification_raw`/`classification_level` and `count_
+   bucket` come straight from the `Cluster` (identical class across every
+   member keeps that class, otherwise degrades to the presence root -- see
+   `clustering.py`'s docstring). ED's `OP_1UNIT`...`OP_MORETHAN15UNITS`
+   count vocabulary (Session 5 Finding 2, `aircraft-layer/research/
+   2026-09-08-pb1-5-worldobjects-filter-and-ambient-detection.md`),
+   previously out of scope (plan Decision #5) for lack of a clustering
+   mechanism, is exactly what `Cluster.count_bucket` now supplies.
 
-   **`derived_world_position` is deliberately NOT quantised** -- it carries
-   the cluster's centroid, the mean of its members' exact ground-truth x/z
-   (a documented meaning change from "one candidate's own position" to "a
-   cluster's centroid," per the plan's Risks section), because that field is
-   DCS ground truth (`code owns facts`, never fabricated or fuzzed) reserved
-   for future geometry/fusion work, not the crew-facing report. The
-   anti-omniscience quantisation applies to the fields that represent what a
-   crew member could actually have perceived and said out loud
-   (`bearing_deg`, `range_m`, `classification_raw`, `count_bucket`), not to
-   this channel's internal bookkeeping of where the real objects actually
-   are.
+   **`derived_world_position` is deliberately never perturbed** -- it
+   carries the cluster's centroid, the mean of its members' exact
+   ground-truth x/z (a documented meaning change from "one candidate's own
+   position" to "a cluster's centroid," per the group-contact-model plan's
+   Risks section), because that field is DCS ground truth (`code owns
+   facts`, never fabricated or fuzzed) reserved for future geometry/fusion
+   work, not the crew-facing report. The anti-omniscience perturbation
+   applies to the fields that represent what a crew member could actually
+   have perceived and said out loud (`bearing_deg`, `range_m`,
+   `classification_raw`, `count_bucket`), not to this channel's internal
+   bookkeeping of where the real objects actually are.
 4. **Per-object acquisition state, resolved at cluster granularity**
    (`emit_mode="on_change"`, the default): tracks the `object_id`s that
    were admitted into an *emitted* cluster on a previous poll
@@ -201,7 +202,6 @@ Each `poll()`:
 
 from __future__ import annotations
 
-import math
 import sqlite3
 import time
 from collections import Counter
@@ -213,6 +213,7 @@ from perception import object_model
 from perception.association import WorldObjectCandidate, filter_ownship
 from perception.clustering import Cluster, ClusterCandidate, cluster_candidates
 from perception.detection_trace import DetectionTraceCollector
+from perception.estimation import naked_eye_sigma_m, perturbed_bearing_range
 from perception.gaze import (
     FREE_SCAN_PLAN,
     SCAN_CYCLE_PERIOD_S,
@@ -227,7 +228,7 @@ from perception.motion import (
     MOTION_VELOCITY_MAX_SKEW_S,
     evaluate_motion_gate,
 )
-from perception.optics import UNAIDED_OPTIC
+from perception.optics import UNAIDED_OPTIC, Optic
 from perception.reporting_names import reporting_name_for
 from perception.source import (
     OBSERVATION_ID_PREFIX_NAKED_EYE,
@@ -235,6 +236,7 @@ from perception.source import (
     DerivedWorldPosition,
     Observation,
     OwnshipState,
+    PositionUncertainty,
 )
 from perception.visibility import VisibilityResult, check_visibility
 
@@ -268,61 +270,6 @@ PROVENANCE_VISIBILITY_FILTER_ONLY: Final[str] = "world_objects/visibility_filter
 #: -- distinct from Hybrid's `association.CONFIDENT_ASSOCIATION_METHOD`/
 #: `AMBIGUOUS_ASSOCIATION_METHOD`, since there is no association step here.
 _DERIVED_POSITION_METHOD: Final[str] = "visibility_filter"
-
-#: The 12 ED clock-bearing fragments (`OP_A1H`...`OP_A12H`), keyed by clock
-#: hour, relative to ownship heading -- `OP_A12H` is dead ahead (0 deg
-#: relative), `OP_A6H` is directly astern (180 deg relative).
-_CLOCK_BUCKET_DEG: Final[float] = 30.0
-_CLOCK_BUCKET_NAMES: Final[dict[int, str]] = {
-    1: "OP_A1H",
-    2: "OP_A2H",
-    3: "OP_A3H",
-    4: "OP_A4H",
-    5: "OP_A5H",
-    6: "OP_A6H",
-    7: "OP_A7H",
-    8: "OP_A8H",
-    9: "OP_A9H",
-    10: "OP_A10H",
-    11: "OP_A11H",
-    12: "OP_A12H",
-}
-
-#: The 24 ED range-bucket fragments (`OP_D100M`...`OP_D10k`), as
-#: `(name, upper_bound_m)` pairs in ascending order -- a range snaps to the
-#: first bucket whose upper bound it does not exceed. `NAKED_EYE_RANGE_CAP_M
-#: = 2500.0` (`visibility.py`) means only the first 13 buckets (up to
-#: `OP_D2_2p5k`) are reachable in practice; the full 24-bucket table from
-#: `aircraft-layer/research/2026-09-08-pb1-5-worldobjects-filter-and-
-#: ambient-detection.md` Session 5 Finding 2 is kept intact rather than
-#: truncated, so this table stays a faithful copy of ED's own vocabulary
-#: independent of this channel's own range cap.
-_RANGE_BUCKETS_M: Final[tuple[tuple[str, float], ...]] = (
-    ("OP_D100M", 100.0),
-    ("OP_D200M", 200.0),
-    ("OP_D300M", 300.0),
-    ("OP_D400M", 400.0),
-    ("OP_D500M", 500.0),
-    ("OP_D600M", 600.0),
-    ("OP_D700M", 700.0),
-    ("OP_D800M", 800.0),
-    ("OP_D900M", 900.0),
-    ("OP_D1000M", 1000.0),
-    ("OP_D1_1p5k", 1500.0),
-    ("OP_D1p5_2k", 2000.0),
-    ("OP_D2_2p5k", 2500.0),
-    ("OP_D2p5_3k", 3000.0),
-    ("OP_D3_3p5k", 3500.0),
-    ("OP_D3p5_4k", 4000.0),
-    ("OP_D4_4p5k", 4500.0),
-    ("OP_D4p5_5k", 5000.0),
-    ("OP_D5_6k", 6000.0),
-    ("OP_D6_7k", 7000.0),
-    ("OP_D7_8k", 8000.0),
-    ("OP_D8_9k", 9000.0),
-    ("OP_D9_10k", 10000.0),
-    ("OP_D10k", math.inf),
-)
 
 
 @dataclass
@@ -366,6 +313,19 @@ class NakedEyePerceptionSource:
     #: `poll()` resolves the effective `Gaze` for this poll via
     #: `perception.gaze.gaze_at(now_sim, self.scan_plan)`.
     scan_plan: ScanPlan = field(default_factory=lambda: FREE_SCAN_PLAN)
+
+    #: The instrument this poll looks through (`plans/binocular-optic/
+    #: plan.md` Stage 1). Assigned per poll by `logger._apply_active_gaze`
+    #: alongside `scan_plan`, from the same resolution, for the same
+    #: reason: the *decision* to raise binoculars reads beliefs, which
+    #: `perception` may not import, so belief resolves and perception
+    #: receives a frozen value -- exactly the seam `gaze.py` established.
+    #:
+    #: **Stage 1 always resolves to `UNAIDED_OPTIC`**, so nothing
+    #: observable changes until Stage 2 supplies a policy. That is the
+    #: regression gate 2B used and it is worth repeating here: the
+    #: plumbing is proven before any behaviour rides on it.
+    optic: Optic = UNAIDED_OPTIC
     #: The peripheral channel's output (hard parts 2a/4 of the plan) --
     #: always empty until the attention-capture channel exists (out of
     #: scope this slice); resolved per candidate through `perception.gaze.
@@ -477,6 +437,7 @@ class NakedEyePerceptionSource:
                 candidate,
                 self.world_model_conn,
                 self.theatre,
+                optic=self.optic,
                 gaze=candidate_gaze,
                 trace=self.trace_sink,
                 group_salient=candidate.object_id in salient_ids,
@@ -766,13 +727,24 @@ class NakedEyePerceptionSource:
     ) -> Observation:
         """One `Observation` for `cluster` -- `plans/group-contact-model/
         plan.md` Stage 2: this is the emission unit now, not one per
-        candidate. Bearing/range are quantised from the cluster's centroid
-        (ground-truth mean position of its members), not from any one
-        member's own geometry -- the honest report a crew member could give
-        for a cluster is "that group, over there," not any individual
-        member's exact bearing. `continues_observation_id` is resolved by
-        `_build_observations` across the whole batch, not here -- see that
-        method's docstring.
+        candidate. Bearing/range are an honest *estimate* of the cluster's
+        centroid (`perception.estimation`, `plans/precise-position-belief/
+        plan.md`), not any one member's own geometry -- the honest report a
+        crew member could give for a cluster is "that group, over there,"
+        not any individual member's exact bearing. `continues_observation_
+        id` is resolved by `_build_observations` across the whole batch,
+        not here -- see that method's docstring.
+
+        **The per-object systematic bias is anchored to the cluster's
+        lowest member `object_id`.** A cluster is position-only resolution
+        (`perception.clustering`'s own docstring) and its membership can
+        drift poll to poll (grow, shrink, split, merge) -- there is no
+        stable per-cluster identity to hash a bias off. The lowest member
+        id is deterministic and stable for the common case this milestone
+        targets (a stationary or slowly-moving group whose membership does
+        not change); a cluster that gains or loses members between polls
+        will see its bias shift with it, a documented limitation rather
+        than an attempt to solve cluster-identity tracking here.
 
         `apparent_motion` (`plans/movement-detection/plan.md`, module
         docstring point 1b) is the cluster's members' shared movement
@@ -787,13 +759,19 @@ class NakedEyePerceptionSource:
         )
         true_bearing_deg = bearing_deg(observer, centroid)
         true_range_m = range_m(observer, centroid)
-        quantised_bearing_deg = _quantise_bearing(
-            ownship_state.heading_true_deg, true_bearing_deg
-        )[0]
-        quantised_range_m = _quantise_range_m(true_range_m)[0]
 
         self._observation_count += 1
         observation_id = f"{OBSERVATION_ID_PREFIX_NAKED_EYE}_{self._observation_count}"
+        bias_object_id = min(member.object_id for member in cluster.members)
+        sigma_cross_m, sigma_down_m = naked_eye_sigma_m(true_range_m)
+        estimated_bearing_deg, estimated_range_m = perturbed_bearing_range(
+            observation_id=observation_id,
+            object_id=bias_object_id,
+            true_bearing_deg=true_bearing_deg,
+            true_range_m=true_range_m,
+            sigma_cross_m=sigma_cross_m,
+            sigma_down_m=sigma_down_m,
+        )
         for member in cluster.members:
             self._object_id_to_last_observation_id[member.object_id] = observation_id
 
@@ -813,8 +791,8 @@ class NakedEyePerceptionSource:
             t_wall=time.time(),
             source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
             classification_raw=cluster.classification_raw,
-            bearing_deg=quantised_bearing_deg,
-            range_m=quantised_range_m,
+            bearing_deg=estimated_bearing_deg,
+            range_m=estimated_range_m,
             ownship_at_observation=ownship_state,
             derived_world_position=DerivedWorldPosition(
                 x=cluster.centroid_x,
@@ -826,6 +804,9 @@ class NakedEyePerceptionSource:
             classification_level=cluster.classification_level,
             continues_observation_id=continues_observation_id,
             count_bucket=cluster.count_bucket,
+            position_uncertainty=PositionUncertainty(
+                sigma_cross_m=sigma_cross_m, sigma_down_m=sigma_down_m
+            ),
             apparent_motion=apparent_motion,
         )
 
@@ -923,31 +904,3 @@ def _classification_for_tier(
     if tier == "medres":
         return op_class, _CLASSIFICATION_LEVEL_CLASS
     return object_model.DEFAULT_OP_CLASS, 1
-
-
-def _quantise_bearing(
-    heading_true_deg: float, true_bearing_deg: float
-) -> tuple[float, str]:
-    """Snap `true_bearing_deg` to the nearest of the 12 `OP_A1H`...`OP_A12H`
-    clock positions, relative to `heading_true_deg`. Returns
-    `(quantised_true_bearing_deg, bucket_name)` -- the quantised value is
-    converted back to a true bearing (not left as a heading-relative clock
-    angle) so it stays consistent with `Observation.bearing_deg`'s existing
-    true-bearing convention (`geometry.py`'s module docstring)."""
-    relative_deg = (true_bearing_deg - heading_true_deg) % 360.0
-    clock_hour = round(relative_deg / _CLOCK_BUCKET_DEG) % 12
-    if clock_hour == 0:
-        clock_hour = 12
-    quantised_relative_deg = 0.0 if clock_hour == 12 else clock_hour * _CLOCK_BUCKET_DEG
-    quantised_true_deg = (heading_true_deg + quantised_relative_deg) % 360.0
-    return quantised_true_deg, _CLOCK_BUCKET_NAMES[clock_hour]
-
-
-def _quantise_range_m(range_m: float) -> tuple[float, str]:
-    """Snap `range_m` to the nearest of the 24 `OP_D...` range buckets.
-    Returns `(bucket_upper_bound_m, bucket_name)` -- the first bucket whose
-    upper bound `range_m` does not exceed."""
-    for name, upper_bound_m in _RANGE_BUCKETS_M:
-        if range_m <= upper_bound_m:
-            return upper_bound_m, name
-    return math.inf, _RANGE_BUCKETS_M[-1][0]  # unreachable: last bound is inf

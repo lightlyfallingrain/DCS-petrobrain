@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import inspect
+import itertools
 import math
 import pathlib
 
@@ -20,13 +21,16 @@ from belief.events import (
     CONTACT_REACQUIRED,
     EVENT_COOLDOWN_S,
 )
-from perception.geometry import GeoPosition
+from perception.geometry import GeoPosition, project_from_bearing_range
+from perception.geometry import bearing_deg as geometry_bearing_deg
+from perception.geometry import range_m as geometry_range_m
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
     DerivedWorldPosition,
     Observation,
     OwnshipState,
+    PositionUncertainty,
 )
 
 
@@ -45,6 +49,7 @@ def _observation(
     ownship: OwnshipState | None = None,
     classification_level: int = 2,
     continues_observation_id: str | None = None,
+    position_uncertainty: PositionUncertainty | None = None,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -62,6 +67,7 @@ def _observation(
         provenance="test_fixture",
         classification_level=classification_level,
         continues_observation_id=continues_observation_id,
+        position_uncertainty=position_uncertainty,
     )
 
 
@@ -93,119 +99,40 @@ def test_two_well_separated_objects_produce_two_contacts() -> None:
 def test_two_ambiguous_candidates_create_a_new_contact_not_a_merge() -> None:
     """Two existing contacts both close enough and class-compatible with a
     new percept must produce a *third* contact -- the plan's deliberate
-    anti-guessing rule (Stage 1 decision rule)."""
+    anti-guessing rule (Stage 1 decision rule).
+
+    Every observation here declares no `position_uncertainty`, so each one
+    falls back to the isotropic `_FALLBACK_UNCERTAINTY_RADIUS_M` (300m) on
+    both the percept and (once a contact is founded from one) the contact
+    side -- `belief.association_over_time`'s 2D gate (`plans/
+    precise-position-belief/plan.md` Stage 3) then allows a candidate at up
+    to `GATE_SIGMA_THRESHOLD` (3) sigma of the summed covariance, which for
+    two isotropic 300m-radius sides at zero elapsed time works out to 900m
+    (see that module's own `_isotropic_covariance_from_radius` and
+    `GATE_SIGMA_THRESHOLD`)."""
     store = ContactStore()
-    # A and B are 800m apart -- far enough that B does not merge into A when
-    # it is created (gate radius at t=0 is uncertainty_radius_m(B)=
-    # SCOPE_UNCERTAINTY_M=300 *plus* A's own stored
-    # last_position_uncertainty_m=300, i.e. 600 -- both sides' uncertainty is
-    # budgeted, see `association_over_time`'s module docstring), but close
-    # enough that a percept exactly between them (400m from each) falls
-    # within both of their gates (each gate is also 600 at t=0).
+    # A and B are 1000m apart -- far enough that B does not merge into A when
+    # it is created (each side's isotropic gate covariance allows 900m at
+    # t=0, per this test's own docstring), but close enough that a percept
+    # exactly between them (500m from each) falls within both of their
+    # gates.
     contact_a_obs = _observation(
         obs_id="OBS_A", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
     contact_b_obs = _observation(
-        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
+        obs_id="OBS_B", t_sim=0.0, bearing_deg=0.0, range_m=2000.0
     )
     store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
     assert len(store.contacts) == 2
 
     ambiguous_obs = _observation(
-        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1400.0
+        obs_id="OBS_C", t_sim=0.0, bearing_deg=0.0, range_m=1500.0
     )
     store.ingest([ambiguous_obs], now_sim=0.0)
 
     assert len(store.contacts) == 3
     newest = store.contacts[-1]
     assert newest.contributing_observation_ids == ["OBS_C"]
-
-
-def test_naked_eye_bucket_requantisation_does_not_spawn_duplicate_contacts() -> None:
-    """Regression for the live-session bug (2026-09-09,
-    `plans/classification-refinement/debug.md`): a single stationary
-    ground object, tracked purely via `perception.naked_eye_source`'s
-    bearing/range bucket quantisation while ownship slowly turns and
-    translates near the object's hires/medres tier boundary, produced 8
-    `Contact` records for one real T-90A over ~20 polls before the fix.
-
-    Root cause: `naked_eye_source._quantise_bearing` re-derives a fresh
-    (bearing, range) bucket pair every poll, anchored to the *current*
-    heading -- two consecutive, genuinely identical real positions can
-    legitimately land in different buckets, implying positions up to
-    roughly a full bucket-width apart. `association_over_time.
-    passes_gate` used to budget only the *incoming* percept's own
-    uncertainty, silently treating the contact's stored `last_position` as
-    exact -- under-sized by up to 2x for exactly this case. Once a single
-    missed match spawned a second contact for the same real object, every
-    subsequent percept saw two-or-more passing candidates, and
-    `ContactStore.ingest`'s deliberate anti-guessing rule (two-or-more
-    candidates -> new contact, never a tiebreak) turned that one missed
-    match into a permanent one-new-contact-per-poll runaway.
-
-    This test drives the same quantisation helpers `naked_eye_source.py`
-    itself uses, over a maneuvering-ownship/stationary-target geometry
-    empirically confirmed (pre-fix) to trigger the bug, and asserts the
-    real object still resolves to exactly one contact.
-
-    **Was `xfail`ed by Stage 3b-i, fixed by Stage 3b-i rev.2** (`plans/
-    group-contact-model/plan.md`). Stage 3b-i introduced the regression by
-    making this gate share `perception.clustering`'s acuity-derived cross-
-    range radius (~1-7 m at this geometry's ranges) -- a mismatch against
-    bearing-bucket requantisation jitter (up to a full 30 deg clock bucket,
-    unchanged by that move) of roughly 700:1 at every range, confirmed by
-    direct arithmetic in the rev.2 design rather than by re-tuning a
-    magnitude. The fix was not a wider acuity-derived budget (which would
-    have reopened the Stage 3a dead zone `association_over_time`'s
-    docstring describes) -- it was recognizing that this gate and the
-    cluster predicate answer different questions about different things
-    (a quantised *report* against a remembered position, vs. two *live*
-    candidates against each other) and never should have shared a formula.
-    Reverting this gate to its pre-Stage-3b-i, quantisation-derived form
-    (`association_over_time._naked_eye_uncertainty_m`) budgets the thing
-    that is actually jittering -- the clock-bucket requantisation this test
-    drives -- and the regression simply does not arise."""
-    from perception.naked_eye_source import _quantise_bearing, _quantise_range_m
-
-    target_x, target_z = 0.0, 1200.0
-    store = ContactStore()
-    ownship_x, ownship_z = -900.0, 0.0
-    heading_deg = 90.0
-    t_sim = 0.0
-
-    for poll in range(40):
-        t_sim += 1.0
-        heading_deg = (heading_deg + 3.0) % 360.0
-        ownship_x += 3.0
-        ownship_z += 1.0
-        ownship = OwnshipState(
-            t_sim=t_sim,
-            x=ownship_x,
-            z=ownship_z,
-            alt_m=500.0,
-            heading_true_deg=heading_deg,
-        )
-        dx = target_x - ownship_x
-        dz = target_z - ownship_z
-        true_bearing_deg = math.degrees(math.atan2(dz, dx)) % 360.0
-        true_range_m = math.hypot(dx, dz)
-        quantised_bearing_deg, _bucket = _quantise_bearing(
-            heading_deg, true_bearing_deg
-        )
-        quantised_range_m, _range_bucket = _quantise_range_m(true_range_m)
-
-        obs = _observation(
-            obs_id=f"OBS_{poll}",
-            t_sim=t_sim,
-            classification_raw="OP_ARMORED",
-            bearing_deg=quantised_bearing_deg,
-            range_m=quantised_range_m,
-            source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
-            ownship=ownship,
-        )
-        store.ingest([obs], now_sim=t_sim)
-
-    assert len(store.contacts) == 1
 
 
 def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_gap() -> (
@@ -222,10 +149,10 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
 
     Reuses `test_two_ambiguous_candidates_create_a_new_contact_not_a_merge`'s
     own already-verified overlapping-gate geometry (A at bearing 0 range
-    1000, B at bearing 0 range 1800, 800m apart -- a percept at range 1400
+    1000, B at bearing 0 range 2000, 1000m apart -- a percept at range 1500
     falls within both gates) rather than re-deriving new numbers, since that
     test already proves the overlap is real. Every re-observation of A or B
-    below is placed at that same ambiguous midpoint (bearing 0, range 1400)
+    below is placed at that same ambiguous midpoint (bearing 0, range 1500)
     -- if continuity were not skipping the gate, *every one* of these would
     be genuinely ambiguous between the two existing contacts, reproducing
     the runaway exactly. Object-permanence correlation is expected to
@@ -244,7 +171,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
         obs_id="OBS_A0", t_sim=0.0, bearing_deg=0.0, range_m=1000.0
     )
     contact_b_obs = _observation(
-        obs_id="OBS_B0", t_sim=0.0, bearing_deg=0.0, range_m=1800.0
+        obs_id="OBS_B0", t_sim=0.0, bearing_deg=0.0, range_m=2000.0
     )
     store.ingest([contact_a_obs, contact_b_obs], now_sim=0.0)
     assert len(store.contacts) == 2
@@ -252,7 +179,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
     # Confirm the gate really is overlapping at this geometry: an unrelated
     # percept (no continuity reference) at the shared midpoint is still
     # genuinely ambiguous, per the reused test above.
-    probe = _observation(obs_id="OBS_PROBE", t_sim=0.0, bearing_deg=0.0, range_m=1400.0)
+    probe = _observation(obs_id="OBS_PROBE", t_sim=0.0, bearing_deg=0.0, range_m=1500.0)
     store.ingest([probe], now_sim=0.0)
     assert len(store.contacts) == 3
     probe_contact_id = store.contacts[-1].id
@@ -275,7 +202,7 @@ def test_two_gate_overlapping_objects_stay_at_two_contacts_across_a_mid_session_
                 obs_id=observation_id,
                 t_sim=t_sim,
                 bearing_deg=0.0,
-                range_m=1400.0,  # the same genuinely-ambiguous midpoint
+                range_m=1500.0,  # the same genuinely-ambiguous midpoint
                 continues_observation_id=last_observation_id[label],
             )
             last_observation_id[label] = observation_id
@@ -820,6 +747,64 @@ def test_add_area_rejects_sector_and_relative_sector_together() -> None:
         raise AssertionError("expected ValueError for sector + relative_sector")
 
 
+def test_add_area_rejects_relative_sector_and_relative_clock_hour_together() -> None:
+    # Stage 5 (`plans/voice-command-completeness/plan.md` Decision 5):
+    # `relative_clock_hour` joins `sector`/`relative_sector` as a third,
+    # pairwise mutually exclusive directional field.
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    try:
+        store.add_area(
+            center=center,
+            radius_m=500.0,
+            level="watch",
+            source="console",
+            relative_sector="ahead",
+            relative_clock_hour=1,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "expected ValueError for relative_sector + relative_clock_hour"
+        )
+
+
+def test_add_area_rejects_sector_and_relative_clock_hour_together() -> None:
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+    try:
+        store.add_area(
+            center=center,
+            radius_m=500.0,
+            level="watch",
+            source="console",
+            sector="N",
+            relative_clock_hour=1,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError for sector + relative_clock_hour")
+
+
+def test_add_area_accepts_relative_clock_hour_alone() -> None:
+    store = ContactStore()
+    center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
+
+    area = store.add_area(
+        center=center,
+        radius_m=None,
+        level="watch",
+        source="scan_area",
+        relative_clock_hour=1,
+    )
+
+    assert area.relative_clock_hour == 1
+    assert area.relative_sector is None
+    assert area.sector is None
+
+
 def test_reproject_relative_areas_updates_only_relative_areas() -> None:
     store = ContactStore()
     fixed = store.add_area(
@@ -918,3 +903,120 @@ def test_different_source_same_poll_observations_still_fuse() -> None:
         SOURCE_NAKED_EYE_VISUAL_FILTERED,
         SOURCE_PETROVICH_DETECTION_ASSOCIATED,
     ]
+
+
+# --- Stage 4 fusion (plans/precise-position-belief/plan.md) -----------------
+
+
+def _looks_from_orbiting_observer(
+    target: GeoPosition, *, radius_m: float, count: int
+) -> list[tuple[float, float, GeoPosition]]:
+    """`count` `(bearing_deg, range_m, observer)` triples, each a look at
+    `target` from an observer placed at `radius_m` around it on a different
+    bearing -- a moving-observer stand-in, without needing real ownship
+    kinematics. `project_from_bearing_range(target, ...)` is used in
+    reverse (from the target, at 180 degrees opposite the desired look
+    bearing) purely to place the observer; the look itself is still
+    computed the ordinary way, target from observer."""
+    triples = []
+    for i in range(count):
+        look_bearing = (30.0 + i * (300.0 / max(1, count - 1))) % 360.0
+        observer = project_from_bearing_range(
+            target, (look_bearing + 180.0) % 360.0, radius_m
+        )
+        triples.append(
+            (
+                geometry_bearing_deg(observer, target),
+                geometry_range_m(observer, target),
+                observer,
+            )
+        )
+    return triples
+
+
+def test_repeated_looks_from_orbiting_observer_tighten_and_never_reach_bare_truth() -> (
+    None
+):
+    """`plans/precise-position-belief/plan.md` Stage 4's own verify list:
+    repeated looks converge (uncertainty strictly decreases), converge to
+    truth + systematic bias and not to truth, and never below the floor.
+    Exercised directly against `Contact.record` -- the fold itself, not
+    `ContactStore.ingest`'s gate (already covered by `test_association_
+    over_time.py`'s own gate tests)."""
+    true_target = GeoPosition(x=1000.0, z=500.0, alt_m=500.0)
+    bias_x, bias_z = 25.0, -15.0
+    biased_target = GeoPosition(
+        x=true_target.x + bias_x, z=true_target.z + bias_z, alt_m=true_target.alt_m
+    )
+    uncertainty = PositionUncertainty(sigma_cross_m=50.0, sigma_down_m=500.0)
+    looks = _looks_from_orbiting_observer(biased_target, radius_m=1200.0, count=12)
+
+    founding_bearing, founding_range, founding_observer = looks[0]
+    founding = Observation(
+        id="OBS_0",
+        contact_id=None,
+        t_sim=0.0,
+        t_wall=0.0,
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        classification_raw="OP_TRUCK",
+        bearing_deg=founding_bearing,
+        range_m=founding_range,
+        ownship_at_observation=OwnshipState(
+            t_sim=0.0,
+            x=founding_observer.x,
+            z=founding_observer.z,
+            alt_m=founding_observer.alt_m,
+            heading_true_deg=0.0,
+        ),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="test_fixture"
+        ),
+        provenance="test_fixture",
+        position_uncertainty=uncertainty,
+    )
+    contact = contacts_module.Contact.from_percept(
+        "CONTACT_1", percept_module.percept_of(founding)
+    )
+
+    radii = [contact.last_position_uncertainty_m]
+    floor = (
+        (0.4 * uncertainty.sigma_cross_m) ** 2 + (0.4 * uncertainty.sigma_down_m) ** 2
+    ) ** 0.5
+    for i, (look_bearing, look_range, observer) in enumerate(looks[1:], start=1):
+        observation = Observation(
+            id=f"OBS_{i}",
+            contact_id=None,
+            t_sim=float(i),
+            t_wall=float(i),
+            source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+            classification_raw="OP_TRUCK",
+            bearing_deg=look_bearing,
+            range_m=look_range,
+            ownship_at_observation=OwnshipState(
+                t_sim=float(i),
+                x=observer.x,
+                z=observer.z,
+                alt_m=observer.alt_m,
+                heading_true_deg=0.0,
+            ),
+            derived_world_position=DerivedWorldPosition(
+                x=99999.0, z=99999.0, confidence=0.9, method="test_fixture"
+            ),
+            provenance="test_fixture",
+            position_uncertainty=uncertainty,
+        )
+        contact.record(percept_module.percept_of(observation))
+        # Never below the floor, at every step, not just the last one.
+        assert contact.last_position_uncertainty_m >= floor - 1e-6
+        radii.append(contact.last_position_uncertainty_m)
+
+    # Strictly decreasing overall (allow the very first fold, which can
+    # briefly not tighten if the two looks are nearly parallel -- the
+    # bearing sweep above avoids that, so this checks the whole sequence).
+    assert radii[-1] < radii[0]
+    assert all(later <= earlier + 1e-9 for earlier, later in itertools.pairwise(radii))
+
+    # Converged near truth-plus-bias, not bare truth.
+    assert math.isclose(contact.last_position.x, biased_target.x, abs_tol=5.0)
+    assert math.isclose(contact.last_position.z, biased_target.z, abs_tol=5.0)
+    assert abs(contact.last_position.x - true_target.x) > 5.0

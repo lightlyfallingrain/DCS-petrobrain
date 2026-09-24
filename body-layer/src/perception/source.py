@@ -116,6 +116,20 @@ class OwnshipState:
     pitch_deg: float = 0.0
     bank_deg: float = 0.0
 
+    #: Height above the ground below, metres (`plans/binocular-optic/
+    #: plan.md` Stage 3). Already on the wire (`TelemetrySample.
+    #: altitude_agl_m`) and simply never carried across before, because
+    #: nothing needed it: `alt_m` is MSL, which is the right frame for
+    #: comparing ownship against a contact's own altitude.
+    #:
+    #: **The binocular search needs the other one.** How far below the
+    #: horizon a patch of ground at range R sits is `atan(agl / R)`, and
+    #: over high terrain MSL is not even close -- a sweep aimed with MSL
+    #: over a 1500 m plateau would point at the sky. Defaults to `0.0` so
+    #: every existing constructor (test fixtures included) is unchanged;
+    #: only `from_telemetry_dict` supplies a real value.
+    alt_agl_m: float = 0.0
+
     @staticmethod
     def from_telemetry_dict(data: dict[str, Any]) -> OwnshipState:
         """Convert one aircraft-layer `GET /telemetry/latest` JSON object
@@ -137,7 +151,31 @@ class OwnshipState:
             heading_true_deg=math.degrees(float(data["heading_true_rad"])) % 360.0,
             pitch_deg=math.degrees(float(data["pitch_rad"])),
             bank_deg=math.degrees(float(data["bank_rad"])),
+            alt_agl_m=float(data["altitude_agl_m"]),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class PositionUncertainty:
+    """One look's own honest statement of its position error, in metres, as
+    an elongated ellipse oriented along that look's own line of sight
+    (`plans/precise-position-belief/plan.md`'s "The model"). Perceived
+    metadata -- a channel's own declared estimate of how wrong its own
+    report might be -- identical footing to `count_bucket`/`apparent_
+    motion`/`classification_level` on `Observation`, never a truth field: a
+    concrete source computes both fields from its own honest error model
+    (`perception.estimation`), never from anything DCS-truth-derived beyond
+    what the perceived bearing/range already carry.
+
+    `sigma_cross_m` -- 1-sigma error perpendicular to the line of sight
+    (bearing error turned into metres at the observation's own true range).
+    `sigma_down_m` -- 1-sigma error along the line of sight (range error).
+    Both are declared at the observation's own true range; `belief.
+    position_belief` is what turns this pair into a 2x2 covariance oriented
+    along `Observation.bearing_deg`/`Percept.bearing_deg`."""
+
+    sigma_cross_m: float
+    sigma_down_m: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +261,13 @@ class Observation:
     #: poll) -- unknown, never "stopped", same tri-state discipline as
     #: `is_ownship`/`heading_true_deg` elsewhere in this package.
     apparent_motion: bool | None = None
+    #: `plans/precise-position-belief/plan.md` Stage 1 -- the channel's own
+    #: declared error ellipse for this look's `bearing_deg`/`range_m`. Both
+    #: concrete sources populate this unconditionally as of that plan;
+    #: `None` is the default only so a construction site that predates it
+    #: (test fixtures included) keeps compiling. `belief.percept.percept_of`
+    #: carries this straight through -- see that module's own field.
+    position_uncertainty: PositionUncertainty | None = None
 
 
 @runtime_checkable
