@@ -1,0 +1,365 @@
+# Damage state and firing events over the mission-scripting bridge
+
+**Date:** 2026-09-24
+**DCS version:** 2.9.29.27278 (per prior sessions' `autoupdate.cfg` read — this session had no
+`$DCS_INSTALL_PATH`/`$DCS_SAVED_GAMES_PATH` access, Mac dev machine; desk research only, no live
+probe run)
+**Theatre:** n/a (scripting-API question)
+
+### Question
+
+`plans/brain-layer/explore-notes.md` records two findings that depend on unverified DCS-internals
+claims:
+
+1. **Can Petrovich perceive damage at all** — "is it dead yet?" → "no, but smoking" / "yes" — given
+   `WorldObjectSample` today carries no life/fire/smoke field?
+2. **Are firing events (being engaged) exportable**, and specifically: does AAA/cannon fire — the
+   user's stated most-likely threat case — raise any detectable event, given `S_EVENT_SHOT` is
+   known to be weapon-object-specific?
+
+Both are scoped to what is reachable through the mission-scripting bridge already shipping in
+production: `net.dostring_in("scripting", ...)`, polled at 1 Hz from a Hook script, exactly as
+`petrobrain-f10-commands-hook.lua` (since 2026-09-13) and `petrobrain-mission-telemetry-hook.lua`
+(unit velocity, since 2026-09-22) already do. See those two files and
+`aircraft-layer/research/2026-09-22-mission-bridge-already-shipping.md` /
+`2026-09-21-unit-velocity-via-mission-scripting.md` for the mechanism this note builds on rather
+than re-derives.
+
+### Findings
+
+**Q1 — damage/life**
+
+1. **`Unit.getLife()` / `Unit.getLife0()` are real Mission Scripting API, available since patch
+   1.2.0, and apply to Unit, Static Object, and Scenery Object** — **evidence: documented** —
+   **source:** Hoggit `DCS_func_getLife` / `DCS_func_getLife0`. `getLife()` returns the unit's
+   **current absolute hit points** (a number, e.g. `9`); `getLife0()` returns the unit's **initial
+   ("max") hit points**, fixed at spawn and never changing. Fraction remaining is
+   `getLife() / getLife0()` — Hoggit gives this exact usage pattern. A unit is dead when `getLife()`
+   drops below `1`. Ground/ship units that are actively burning-but-not-yet-detonated read `0`
+   until detonation; aircraft have more complex per-subsystem damage that isn't further documented
+   here.
+2. **This is the same environment and the same per-unit-loop shape already proven live** —
+   **evidence: reproduced-locally (existing production code)** — **source:**
+   `aircraft-layer/dcs-export/petrobrain-mission-telemetry-hook.lua`'s `VELOCITY_CODE`, which
+   already iterates `coalition.getGroups(coa)` → `grp:getUnits()` → per-unit `pcall`, and packs a
+   compact string return (`dostring_in` can only return one simple scalar). Adding `unit:getLife()`
+   and `unit:getLife0()` to that existing loop is a same-shape, same-cost-class extension, not a new
+   mechanism — no new bridge call, no new registration, no new `autoexec.cfg` requirement beyond
+   what unit-velocity already needs.
+3. **No queryable "is visibly smoking" boolean exists anywhere in the documented Mission Scripting
+   API** — **evidence: documented (absence), inferred (mechanism)** — **source:** no Hoggit page,
+   forum thread, or community script found this session exposes such a flag; `getDrawArgumentValue`
+   exists (animation-argument reads, e.g. barrel rotation, canopy open) but nothing found ties a
+   draw argument to a damage-smoke state, and DCS's damage-smoke rendering is not modeled as an
+   `EDM` draw argument in any source surfaced.
+4. **DCS's stock engine does render health-correlated smoke natively, without any mission script,
+   as of a fairly recent version** — **evidence: forum-claim, moderately reliable** — **source:**
+   Hoggit "DCS command smoke on off" / "DCS func smoke" page context plus ED changelog language
+   surfaced in search ("smoke from vehicles and some static objects based on health... different
+   levels of smoke giving a better idea visually of damage inflicted"; changelog entries reference
+   tuning of "smoke after non-lethal damage" and "smoke after damage for ships with old damage
+   model"). This is **not a primary-source read** — no changelog page or ED doc was fetched and
+   read directly this session, only search-engine summary text. Label this **forum-claim**, not
+   documented, until a changelog page is actually read.
+5. **Consequence of 3+4, if 4 holds**: there is no separate boolean to query, but there does not
+   need to be one. The visible "smoking" state a player observes is (per finding 4) already driven
+   by the same health value `getLife()`/`getLife0()` expose. A "smoking, not dead" narration can be
+   derived entirely from the life-fraction threshold (e.g. `life0 > life > 0` combined with a
+   fraction cutoff), without any new DCS capability beyond finding 2. This is **inferred** — the
+   claim is that DCS's own internal smoke-trigger fraction and a narration threshold chosen on the
+   Petrobrain side will roughly agree, not that they are proven identical. A live-observed
+   correlation (shoot a unit, watch when smoke starts, log `getLife()/getLife0()` at that moment)
+   would upgrade this from inferred to reproduced-locally.
+6. **A destroyed unit stops appearing in `LoGetWorldObjects()` — this is the existing, already
+   fairly strong finding from `2026-09-10-worldobjects-object-id-stability-tacview-confirmation.md`,
+   re-cited, not re-derived** — **evidence: reproduced-locally (via Tacview's production source),
+   not a first-party ED statement, not this project's own live probe** — **source:** that file's
+   Finding 1 (Tacview's `TacviewExportDCS.lua` treats a `LoGetWorldObjects` key's disappearance as
+   the object's destroy event, `!20`). **Latency**: bounded only by the export poll interval
+   (currently 5 Hz / 0.2s for world-objects, per `Export.lua`'s shared throttle — see
+   `aircraft-layer/ROADMAP.md`'s open "split the export throttle" item) once DCS's own internal
+   state actually removes the unit. What is **not established** by any source found: how long DCS
+   itself keeps a "dead wreck" as a distinct renderable object internally (a burning hulk visibly
+   persists on screen for a while after a kill) — whether that wreck still appears in
+   `LoGetWorldObjects()` under a different name/type (e.g. as a scenery/static "wreck" object) or
+   vanishes immediately at the moment of death is **unresolved**, not covered by the Tacview read.
+   This matters for the "is it dead yet" UX: if a burning-hulk wreck keeps appearing as some object
+   with `getLife() < 1`, the fallback signal (disappearance) and the health signal (via finding 2)
+   could briefly disagree.
+7. **Cost per poll for ~50 units, if `getLife`/`getLife0` were added to the existing velocity
+   loop**: **not established — same open question as unit-velocity's own unmeasured cost.**
+   `aircraft-layer/ROADMAP.md`'s backlog already flags "no confirmed, quantified per-call cost
+   exists at realistic unit counts (~50-200)" for the `getVelocity()` loop itself, unmeasured as of
+   this session. Two additional field reads per unit (`getLife`, `getLife0`) on top of an
+   already-unmeasured `O(N)` loop is a small constant-factor addition, not a new measurement
+   category — it should ride on the same self-measurement instrumentation
+   (`bridge_call_ms`/`unit_count` already logged every poll by
+   `petrobrain-mission-telemetry-hook.lua`) rather than get its own separate probe.
+
+**Q2 — firing events**
+
+8. **`world.addEventHandler(handler)` is real, documented Mission Scripting API** — **evidence:
+   documented** — **source:** Hoggit `DCS_func_addEventHandler`. Registration pattern: a table with
+   an `onEvent(self, event)` method, passed to `world.addEventHandler`. The wiki does not state
+   whether multiple handlers may coexist, though a paired `removeEventHandler` exists.
+9. **The event-type enumerator (`world.event`) includes `S_EVENT_SHOT` (1), `S_EVENT_HIT` (2),
+   `S_EVENT_DEAD` (8), `S_EVENT_SHOOTING_START`, `S_EVENT_SHOOTING_END`, and 55+ others** —
+   **evidence: documented** — **source:** Hoggit `DCS_singleton_world`.
+10. **`S_EVENT_SHOT` fires for "any unit that fires a weapon" — but explicitly, by name, excludes
+    machine-gun/autocannon fire, which is routed to `S_EVENT_SHOOTING_START` instead** —
+    **evidence: documented, primary Hoggit text quoted directly** — **source:**
+    `DCS_event_shot`: *"whenever any unit in a mission fires a weapon... But not any machine gun or
+    autocannon based weapon, those are handled by shooting_start."* Payload: `id`, `time`,
+    `initiator` (Unit), `weapon` (Weapon object). **This confirms the concern stated in the task
+    directly: `S_EVENT_SHOT` alone would miss AAA/cannon fire — the user's stated most likely
+    threat case — entirely.**
+11. **`S_EVENT_SHOOTING_START` is the documented event for exactly the excluded case** —
+    **evidence: documented** — **source:** `DCS_event_shooting_start`: *"occurs when any unit
+    begins firing a weapon that has a high rate of fire"*, with the wiki's own worked examples
+    naming "aircraft cannons (GAU-8), autocannons, and machine guns." Payload per that page and
+    MOOSE's `Core.Event` docs: `initiator` (the firing unit) and `target` (if the AI has one
+    assigned). A paired `S_EVENT_SHOOTING_END` exists ("occurs when any unit stops firing its
+    weapon").
+12. **Whether ground AAA units (ZU-23, Shilka/2S6, etc.) specifically raise
+    `S_EVENT_SHOOTING_START` — as opposed to only aircraft-mounted cannons — is not stated
+    explicitly by any source read this session.** — **evidence: inferred, moderate confidence** —
+    **source:** the Hoggit description's own wording is unit-generic — *"any unit begins firing a
+    weapon that has a high rate of fire"* — not aircraft-scoped; only the worked examples happen to
+    be aircraft guns (GAU-8). A ZU-23-2/Shilka autocannon is mechanically the same "high
+    rate-of-fire weapon" class the event is defined against. No forum thread, MOOSE source excerpt,
+    or ED doc found this session gives a ground-AAA worked example or states an exclusion. This is
+    the single most important unresolved point in this report, flagged per the task's own framing —
+    **it should not be treated as confirmed until a live probe or an explicit source names a ground
+    AAA unit.**
+13. **`S_EVENT_HIT` fires "whenever an object is hit by a weapon," with no stated weapon-type
+    exclusion** — **evidence: documented** — **source:** `DCS_event_hit`. Payload: `initiator`
+    (Unit that fired), `weapon` (Weapon object — noted as sometimes absent in multiplayer due to
+    desync, not relevant to this project's single-player scope), `target` (Object hit). Read
+    together with Finding 10, this suggests `S_EVENT_HIT` is **not** filtered the way `S_EVENT_SHOT`
+    is — a gun round that actually connects should raise `S_EVENT_HIT` even though its firing never
+    raised `S_EVENT_SHOT`. This was not independently confirmed for gun rounds specifically (no
+    source explicitly states "gun hits raise `S_EVENT_HIT`"); it is an inference from the absence of
+    an exclusion clause, not a positive statement. **Also note: `S_EVENT_HIT` requires an actual
+    hit — a miss (the far more common case for a burst of tracer fire that alerts the crew visually
+    without connecting) raises nothing on this channel.** For the user's stated scenario ("being
+    engaged" perceived before any hit occurs), `S_EVENT_SHOOTING_START` is the relevant event, not
+    `S_EVENT_HIT`.
+14. **`S_EVENT_DEAD` fires "when an object is completely destroyed," payload `id`/`time`/
+    `initiator` (the destroyed object)** — **evidence: documented** — **source:** `DCS_event_dead`.
+    Wording is object-generic, not aircraft-scoped, consistent with Finding 6's `LoGetWorldObjects`-
+    disappearance signal but a distinct, event-driven channel (push, not poll) that could in
+    principle fire with lower latency than the 1 Hz/5 Hz poll cadence — **not measured, since no
+    live probe was run this session.**
+15. **Mechanically, registering `world.addEventHandler` once and draining a queue by poll is the
+    same pattern already proven live for F10 commands, extrapolated, not newly invented** —
+    **evidence: inferred by direct analogy to reproduced-locally code, not itself live-tested** —
+    **source:** `petrobrain-f10-commands-hook.lua`'s `REGISTRATION_CODE`/`POLL_CODE` split: a fixed
+    literal registers a global (`PB_F10_QUEUE` there), idempotently guarded (`removeItem` /
+    equivalent guard before re-adding, so a second `onSimulationStart` doesn't double-register); a
+    second fixed literal drains the queue and returns a compact string every poll. The same shape
+    would work for events: register a `PB_EVENT_QUEUE = PB_EVENT_QUEUE or {}` global once, an
+    `onEvent` handler that appends a compact serialized string
+    (`event.id .. ":" .. tostring(initiator and initiator:getName()) .. ":" .. tostring(event.time)`,
+    etc.) to it, guarded against double-registration the same way (e.g. a
+    `PB_EVENT_HANDLER_REGISTERED` flag global, since `world.addEventHandler` has no documented
+    idempotent-registration behavior the way `missionCommands.removeItem` gives F10 registration —
+    calling it twice would very plausibly install two handlers and duplicate every event). **This
+    exact mechanism — `world.addEventHandler` reachable and persistent across polls in the
+    `"scripting"` state specifically — has never been live-probed by this project.** Findings 7-11
+    of `2026-09-13-f10-radio-menu-command-input.md` confirmed `missionCommands`, `env`, `trigger`,
+    and (later, via the velocity work) `coalition`/`Unit` methods are reachable and that globals
+    persist across polls in that state; `world` itself was never explicitly named in a probe
+    result. It is very likely present (it is core, always-available Mission Scripting API, and
+    `coalition`, a sibling core singleton, already confirmed reachable) but this is **inferred, not
+    confirmed**.
+16. **Event rate in a busy mission is not established by any source read this session.** No
+    Hoggit page, forum thread, or framework doc gives a quantified events/second figure for
+    `S_EVENT_SHOOTING_START`/`S_EVENT_HIT` under sustained AAA fire (a Shilka can fire ~3600 rd/min
+    per barrel across 4 barrels in bursts). Whether `S_EVENT_SHOOTING_START` fires once per burst
+    or is retriggered mid-burst is **not documented** — MOOSE's own docs were checked and don't say
+    either. This bounds confidence on the "cost" half of Q2 to "unknown," separate from the
+    "does it exist" half (Findings 10-13), which is well-documented.
+
+### The no-omniscience gate (per the task's framing, not a design decision made here)
+
+`S_EVENT_SHOT`/`S_EVENT_SHOOTING_START`/`S_EVENT_HIT` are theatre-wide and carry no line-of-sight or
+visual-range information whatsoever — the payload is `initiator`/`weapon`/`target` object
+references and a sim timestamp, nothing spatial-relative-to-ownship, nothing about detectability.
+An ungated consumer of this feed would make Petrovich aware of every gun firing anywhere on the
+map, which is exactly the omniscience violation the project's guiding principle forbids. Any
+consumer of this channel needs the same LOS + visual-range gate `body-layer/src/perception/
+visibility.py` already applies to the naked-eye channel, evaluated against `initiator`'s (or, for
+`S_EVENT_HIT`, `target`'s) position versus ownship — this report does not design that gate, per
+the Investigator role's scope, but flags it as load-bearing: the raw feed by itself is unusable
+without it.
+
+### Reproducible Test
+
+No live probe was run this session (Mac dev machine, no DCS access). Two probes, both direct
+extensions of already-deployed, already-proven Hook scripts — copy-pasteable for the user to run
+on the Windows box. Neither should be committed into `dcs-export/` by this role; they're scoped
+here as throwaway variants, same posture as the project's existing `*.probe-*.lua` spike pattern.
+
+**Probe A — damage/life fraction, extends the existing velocity loop.** Take a disposable copy of
+`petrobrain-mission-telemetry-hook.lua` and change `VELOCITY_CODE` to also read life:
+
+```lua
+local VELOCITY_CODE = [[
+local parts = {}
+local count = 0
+for _, coa in pairs({coalition.side.NEUTRAL, coalition.side.RED, coalition.side.BLUE}) do
+    for _, grp in ipairs(coalition.getGroups(coa) or {}) do
+        for _, unit in ipairs(grp:getUnits() or {}) do
+            if unit and unit:isExist() then
+                local ok, v = pcall(function() return unit:getVelocity() end)
+                local lifeOk, life = pcall(function() return unit:getLife() end)
+                local life0Ok, life0 = pcall(function() return unit:getLife0() end)
+                if ok and v ~= nil then
+                    count = count + 1
+                    parts[#parts + 1] = unit:getName() .. ":" .. tostring(v.x)
+                        .. ":" .. tostring(v.y) .. ":" .. tostring(v.z)
+                        .. ":" .. tostring(lifeOk and life or "NA")
+                        .. ":" .. tostring(life0Ok and life0 or "NA")
+                end
+            end
+        end
+    end
+end
+return tostring(count) .. "|" .. tostring(timer.getTime()) .. "|" .. table.concat(parts, ";")
+]]
+```
+
+Run a mission, shoot one ground unit until it starts visibly smoking (do not kill it yet), and read
+`dcs.log`'s logged line for that unit at that moment. **What settles Finding 5**: does
+`life / life0` cross a consistent, repeatable threshold (e.g. ~0.5) at the moment smoke visibly
+starts, across a few different unit types? Then kill it and confirm whether the id keeps appearing
+in `/world_objects/latest` post-death (settles the wreck-persistence question in Finding 6) — watch
+for either the object vanishing from the next poll, or continuing to appear with `getLife() < 1`
+under the same or a different name/type.
+
+**Probe B — event registration and AAA-specific firing.** New Hook script (or extend the F10
+commands hook's registration pattern with a second, independent `PB_EVENT_QUEUE` global — keep it
+a separate registration call so a failure in one doesn't affect the other):
+
+```lua
+local EVENT_REGISTER_CODE = [[
+if not PB_EVENT_HANDLER_REGISTERED then
+    PB_EVENT_QUEUE = PB_EVENT_QUEUE or {}
+    local handler = {}
+    function handler:onEvent(event)
+        local initName = event.initiator and (pcall(function() return event.initiator:getName() end) and event.initiator:getName() or "?") or "?"
+        table.insert(PB_EVENT_QUEUE, tostring(event.id) .. ":" .. tostring(event.time) .. ":" .. initName)
+    end
+    world.addEventHandler(handler)
+    PB_EVENT_HANDLER_REGISTERED = true
+end
+return "registered"
+]]
+
+local EVENT_POLL_CODE = [[
+local queue = PB_EVENT_QUEUE or {}
+local out = {}
+for i = 1, #queue do out[i] = queue[i] end
+PB_EVENT_QUEUE = {}
+return table.concat(out, ";")
+]]
+```
+
+Register once at `onSimulationStart` (mirroring `registerF10Menu`), poll at 1 Hz (mirroring
+`pollAndForward`), log every drained line to `dcs.log`. Fly a mission with an active AAA unit
+(a ZU-23 or Shilka set to engage) firing at the player or a decoy. **What settles Findings 12 and
+16**: do any `event.id`s matching `S_EVENT_SHOOTING_START` (check the numeric id against the
+Hoggit enumerator) appear with the AAA unit's name as `initiator` while it is firing? If yes, at
+roughly what rate (does the queue fill with one entry per burst, or many)? If the AAA unit fires
+and the queue never shows a `SHOOTING_START`/`SHOT`/`HIT` entry naming it, that is the answer this
+report's Question 2 most needs and could not obtain without DCS access — **write it up as its own
+finding, since it would reverse Finding 12's current "likely yes" inference.**
+
+### Possible Approaches
+
+- **Damage (Q1)**: no new bridge, no new registration — extend the existing unit-velocity poll's
+  per-unit loop with `getLife()`/`getLife0()` (Findings 2, 7). Narration threshold ("smoking, not
+  dead" vs "destroyed") is a design choice for Architect, informed by Probe A's threshold-vs-visual
+  correlation once run. `LoGetWorldObjects` disappearance remains the correct fallback for "gone
+  entirely" regardless of whether the life-fraction correlation is ever tuned tightly.
+- **Firing events (Q2)**: `S_EVENT_SHOOTING_START` (not `S_EVENT_SHOT`) is the correct event to
+  register for the AAA/cannon case; `S_EVENT_SHOT` alone would silently miss the user's stated most
+  likely scenario, per Finding 10. Registering both, plus `S_EVENT_HIT` and `S_EVENT_DEAD`, is cheap
+  (all four just add `if event.id == ... then` branches or a shared serializer inside one
+  `onEvent`) and gives Architect the full set to choose from rather than needing a second probe
+  later. **A LOS/visual-range gate on `initiator`'s position vs ownship, symmetric to
+  `perception/visibility.py`'s naked-eye gate, is a hard precondition for using this feed at all** —
+  see "The no-omniscience gate" above.
+- **If Probe B shows ground AAA does not raise `S_EVENT_SHOOTING_START`** (the one negative outcome
+  this report cannot rule out): the fallback the user already named in the explore-notes conversation
+  — naked-eye tracer visibility via the existing LOS-heuristic perception channel — is not a
+  fallback at all in that scenario, it is the *only* channel, and the event-based "priority danger,
+  we're being engaged" signal the explore-notes conversation wanted would not exist. That would be
+  the most consequential possible finding here and is exactly what Probe B is for.
+
+### Unresolved
+
+- **Ground-AAA applicability of `S_EVENT_SHOOTING_START`** (Finding 12) — the single most important
+  open question, not resolvable from documentation found this session. Needs Probe B.
+- **Whether `world` (and `world.addEventHandler` specifically) is reachable from the `"scripting"`
+  dostring_in state** (Finding 15) — inferred by analogy to `coalition`/`missionCommands`/`env`
+  being reachable there, never itself probed. Needs Probe B.
+- **Event rate under sustained fire** (Finding 16) — no source quantifies this; matters for whether
+  a 1 Hz poll (matching the existing bridge cadence) risks queue overflow or coalesced/lost bursts
+  within a single poll interval, though even a lossy queue is likely acceptable for a threat-alert
+  use case (the alert only needs to fire once, not count rounds).
+- **Whether DCS's native health-correlated smoke (Finding 4) is confirmed by a primary ED source**
+  — currently search-summary-sourced only; a changelog page or forum thread was not directly read.
+  Downgrade to "needs reading" if Architect wants firmer footing before designing the narration
+  threshold; Probe A's live correlation would supersede needing this anyway.
+- **Wreck-object persistence after death** (Finding 6) — whether a burning hulk continues to appear
+  in `LoGetWorldObjects()` post-`S_EVENT_DEAD`, and under what name/type. Needs Probe A's second
+  half (kill the unit, watch subsequent polls).
+- **`forum.dcs.world` threads on this topic were not attempted this session** — per the standing
+  project finding that automated fetches to that domain 403 (`aircraft-layer/research/` memory:
+  `forum-dcs-world-fetch`), no attempt was made and none is recorded as an unread gap in the
+  give-up sense. If the user wants faster resolution than a live probe on some of the above, a
+  targeted forum search (e.g. "S_EVENT_SHOOTING_START AAA" or "getLife smoke threshold") pasted
+  manually would help, particularly for Finding 12.
+
+### Verdict per question
+
+- **Q1 (damage perception)**: **answerable without a new bridge or registration.**
+  `getLife()`/`getLife0()` are documented, reachable via the exact mechanism already shipping, and
+  extend an existing loop at near-zero marginal engineering cost. The "smoking" visual correlate is
+  not a separate queryable flag, but is very likely already implied by the same life fraction
+  (forum-claim-level evidence, Finding 4) — Probe A would upgrade this to confirmed. Destroyed-unit
+  handling already has a working fallback (`LoGetWorldObjects` disappearance, existing finding) with
+  one open edge case (wreck persistence, Finding 6).
+- **Q2 (firing events)**: **answerable in mechanism, unresolved on the one fact that matters most.**
+  Event registration is documented (`world.addEventHandler`) and mechanically a direct extension of
+  the already-proven F10 registration/poll pattern (needs the named live probe to confirm `world`
+  is reachable in `"scripting"` state, Finding 15 — a real but likely gap). `S_EVENT_SHOT` alone
+  would miss AAA fire exactly as the task suspected (Finding 10, confirmed from primary Hoggit
+  text); `S_EVENT_SHOOTING_START` is the documented event for that case, but **whether ground AAA
+  units actually raise it is not confirmed by any source found and is the single question Probe B
+  must answer before Architect designs around this channel.** If Probe B comes back negative, the
+  event channel for Q2 does not deliver the user's stated primary scenario and the naked-eye/LOS
+  channel becomes the only route, not a backstop.
+
+### Sources
+
+- `aircraft-layer/dcs-export/petrobrain-f10-commands-hook.lua` — production code, registration/poll
+  pattern this report extrapolates from.
+- `aircraft-layer/dcs-export/petrobrain-mission-telemetry-hook.lua` — production code, per-unit loop
+  extended in Probe A.
+- `aircraft-layer/research/2026-09-13-f10-radio-menu-command-input.md` — Findings 7-11, state-name
+  reachability (`missionCommands`, `env`, `trigger` confirmed live in `"scripting"` state).
+- `aircraft-layer/research/2026-09-22-mission-bridge-already-shipping.md`,
+  `2026-09-21-unit-velocity-via-mission-scripting.md` — bridge mechanism and `Object.getVelocity()`
+  precedent.
+- `aircraft-layer/research/2026-09-10-worldobjects-object-id-stability-tacview-confirmation.md` —
+  destroyed-unit-disappearance finding, re-cited (Finding 6).
+- Hoggit DCS World Wiki: `DCS_func_getLife`, `DCS_func_getLife0`, `DCS_singleton_world`,
+  `DCS_func_addEventHandler`, `DCS_event_shot`, `DCS_event_shooting_start`, `DCS_event_hit`,
+  `DCS_event_dead`, `DCS_func_getDrawArgumentValue` — fetched and read this session (documented-tier
+  findings).
+- `flightcontrol-master.github.io/MOOSE_DOCS/Documentation/Core.Event.html` — cross-check for event
+  payload/frequency notes, no additional information beyond Hoggit found.
+- Search-engine summaries (not directly read) for DCS native damage-smoke behavior and ED changelog
+  language — labeled forum-claim throughout, not promoted to documented.
