@@ -877,16 +877,28 @@ def _run_console_poll_loop(
         runner.theatre = theatre
         last_gaze_label: str | None = None
         while not stop_event.is_set():
-            runner.run_once()
-            if trace_writer is not None and trace_collector is not None:
-                trace_writer.write_poll(trace_collector, runner.store)
-            if runner.overlay_client is not None and runner.last_t_sim is not None:
-                last_gaze_label = _push_gaze_line(
-                    runner.overlay_client,
-                    runner.scan_plan,
-                    runner.last_t_sim,
-                    last_gaze_label,
-                )
+            # Same log-and-continue guard as `_run_crew_text_poll_loop`'s,
+            # and for the same reason -- see that function for the full
+            # argument. This loop is `--console`'s, the debug harness
+            # rather than the flight path, but the failure mode is
+            # identical: a daemon thread that dies silently and leaves a
+            # REPL answering questions against a store nothing updates any
+            # more. Guarding one loop and not its twin is exactly the
+            # asymmetry a later reader would take for a deliberate
+            # distinction.
+            try:
+                runner.run_once()
+                if trace_writer is not None and trace_collector is not None:
+                    trace_writer.write_poll(trace_collector, runner.store)
+                if runner.overlay_client is not None and runner.last_t_sim is not None:
+                    last_gaze_label = _push_gaze_line(
+                        runner.overlay_client,
+                        runner.scan_plan,
+                        runner.last_t_sim,
+                        last_gaze_label,
+                    )
+            except Exception:
+                logger.exception("console poll cycle failed; continuing")
             stop_event.wait(poll_interval_s)
     finally:
         if trace_writer is not None:
@@ -1107,34 +1119,71 @@ def _run_crew_text_poll_loop(
         runner.theatre = theatre
         last_gaze_label: str | None = None
         while not stop_event.is_set():
-            runner.run_once()
-            if trace_writer is not None and trace_collector is not None:
-                trace_writer.write_poll(trace_collector, runner.store)
-            if runner.last_t_sim is not None:
-                crew_console.enrichment = runner.enrichment
-                crew_console.drain_events(runner.last_t_sim)
-                commands_before = crew_console.commands_handled
-                if f10_commands_enabled:
-                    _poll_f10_commands(aircraft_client, crew_console, runner.last_t_sim)
-                if speech_input_enabled and speech_client is not None:
-                    _poll_transcripts(speech_client, crew_console, runner.last_t_sim)
-                if crew_console.commands_handled != commands_before:
-                    # Any command lowers the binoculars (`plans/
-                    # binocular-optic/plan.md` D4) -- not per command type:
-                    # the pilot asking for something is itself evidence
-                    # that what Petrovich is doing matters less than what
-                    # was just asked for. Counted rather than inspected so
-                    # this stays true for a command surface added later.
-                    runner.optic_state = lower_binoculars(
-                        runner.optic_state, runner.last_t_sim
-                    )
-                if crew_console.overlay_client is not None:
-                    last_gaze_label = _push_gaze_line(
-                        crew_console.overlay_client,
-                        runner.scan_plan,
-                        runner.last_t_sim,
-                        last_gaze_label,
-                    )
+            # One log-and-continue guard around the whole poll body, not
+            # just the HTTP calls inside `_poll_f10_commands`/
+            # `_poll_transcripts` (those catch their own transport errors
+            # and nothing else -- the `CrewConsole` dispatch that follows
+            # each one is outside their `try`).
+            #
+            # **The failure this prevents is silent and costs a whole
+            # sortie.** This runs on a daemon thread, so an exception
+            # escaping here kills the thread without killing the process:
+            # the REPL keeps accepting input, the overlay keeps its last
+            # frame, and perception, belief and speech are simply dead from
+            # that moment on, with a stderr traceback as the only symptom.
+            # Nothing in the cockpit says so. A skipped poll, by contrast,
+            # costs one cycle at 5 Hz and the next one recovers.
+            #
+            # Found by the security pass on `plans/watch-reporting/`
+            # (`security-review.md`), pre-existing rather than introduced
+            # by that branch.
+            try:
+                runner.run_once()
+                if trace_writer is not None and trace_collector is not None:
+                    trace_writer.write_poll(trace_collector, runner.store)
+                if runner.last_t_sim is not None:
+                    crew_console.enrichment = runner.enrichment
+                    crew_console.drain_events(runner.last_t_sim)
+                    commands_before = crew_console.commands_handled
+                    if f10_commands_enabled:
+                        _poll_f10_commands(
+                            aircraft_client, crew_console, runner.last_t_sim
+                        )
+                    if speech_input_enabled and speech_client is not None:
+                        _poll_transcripts(
+                            speech_client, crew_console, runner.last_t_sim
+                        )
+                    if crew_console.commands_handled != commands_before:
+                        # Any command lowers the binoculars (`plans/
+                        # binocular-optic/plan.md` D4) -- not per command
+                        # kind: the pilot asking for something is itself
+                        # evidence that what Petrovich is doing matters
+                        # less than what was just asked for. Counted rather
+                        # than inspected so this stays true for a command
+                        # surface added later.
+                        #
+                        # (Reads "kind" rather than "type" because a
+                        # comment line starting `# type:` is a *type
+                        # comment* to mypy, not prose -- re-indenting this
+                        # block under the new guard reflowed the word to
+                        # the line start and mypy reported a syntax error
+                        # CPython's own parser accepts happily.)
+                        runner.optic_state = lower_binoculars(
+                            runner.optic_state, runner.last_t_sim
+                        )
+                    if crew_console.overlay_client is not None:
+                        last_gaze_label = _push_gaze_line(
+                            crew_console.overlay_client,
+                            runner.scan_plan,
+                            runner.last_t_sim,
+                            last_gaze_label,
+                        )
+            except Exception:
+                # Deliberately bare-ish: anything at all, because the
+                # alternative is a dead crew member the pilot cannot see.
+                # `logger.exception` keeps the traceback, so a real defect
+                # is still diagnosable after the flight rather than hidden.
+                logger.exception("crew-text poll cycle failed; continuing")
             stop_event.wait(poll_interval_s)
     finally:
         if trace_writer is not None:

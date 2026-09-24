@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import itertools
 import math
@@ -11,7 +12,7 @@ import pathlib
 from belief import contacts as contacts_module
 from belief import percept as percept_module
 from belief.classification import SpecificityLevel
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.decay import LOST_THRESHOLD_S, OBJECT_ID_MEMORY_S
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
@@ -1212,6 +1213,22 @@ def _watched_threat_contact(
     return store, contact_id
 
 
+def _place_contact_at_range(contact: Contact, range_m_value: float) -> None:
+    """Move a contact's believed position to `range_m_value` from the
+    `_ownship()` these engagement tests use: along +x at ownship altitude,
+    so slant range equals the requested figure exactly (`_ownship()` sits
+    at the origin with `alt_m=500`, and `last_alt_m` is already 500 for a
+    contact founded by `_watched_threat_contact`).
+
+    Writes `position`'s mean through `dataclasses.replace`, keeping the
+    fused covariance and `as_of_sim` intact — `last_position` itself is a
+    read-only property over `position` plus `last_alt_m`. Moving the
+    contact this directly is the point: these tests exercise `tick`'s
+    engagement block against a chosen geometry, and re-ingesting an
+    observation to move it would drag association and decay in too."""
+    contact.position = dataclasses.replace(contact.position, x=range_m_value, z=0.0)
+
+
 def test_engagement_fires_danger_on_the_first_tick_already_inside() -> None:
     """Decision 1: engagement seeds as outside, but the first evaluation
     that finds itself already inside DOES fire (late-recognition
@@ -1349,6 +1366,61 @@ def test_engagement_los_dwell_resets_on_an_intervening_clear_sample() -> None:
     # still be engaged, since less than LOS_MASK_CONFIRM_S has elapsed
     # since the *reset* mask began (at t=3.0).
     store.tick(now_sim=6.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].last_emitted_engagement is True
+
+
+def test_engagement_skips_the_los_call_when_out_of_range() -> None:
+    """LOS is the most expensive primitive `belief/` can reach, and this
+    block runs once per watched contact on every poll of the live loop. A
+    contact outside its own envelope's range cannot be engaging us whatever
+    the terrain says, so asking is pure cost.
+
+    Counts calls rather than asserting on behaviour, because behaviour
+    cannot see this: `current_engaged` is `False` either way. The
+    performance review measured 20 LOS calls per tick for 20 watched
+    contacts 20 km out against a 2,408 m envelope -- every one of them
+    answering a question range had already settled."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=20000.0)
+    calls: list[tuple[object, object]] = []
+
+    def counting_los(observer: object, target: object) -> bool:
+        calls.append((observer, target))
+        return True
+
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=counting_los)
+
+    assert calls == []
+    assert store.contacts[0].last_emitted_engagement is False
+
+
+def test_engagement_out_of_range_leaves_a_fresh_dwell_for_re_entry() -> None:
+    """The skip above also skips the masking bookkeeping, so the skip path
+    must clear `los_masked_since_sim` rather than leave it standing.
+
+    Without the reset a contact that is masked, then drifts out of range,
+    then returns would come back carrying a mask timestamp from before it
+    left -- `masked_for_s` instantly past `LOS_MASK_CONFIRM_S`, so it would
+    read as masked on its first tick back in range, with no masked sample
+    ever having been taken there. Clearing it is also the honest reading: a
+    masking dwell accumulated while the threat could not reach us at all
+    measures nothing worth carrying across."""
+    store, _ = _watched_threat_contact(_AAA_TYPE, range_m=1000.0)
+    always_masked = lambda observer, target: False
+    always_clear = lambda observer, target: True
+
+    # In range and masked -- the dwell starts.
+    store.tick(now_sim=0.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].los_masked_since_sim == 0.0
+
+    # Out of range: the call is skipped and the dwell is discarded.
+    _place_contact_at_range(store.contacts[0], 20000.0)
+    store.tick(now_sim=10.0, ownship=_ownship(), los_clear=always_masked)
+    assert store.contacts[0].los_masked_since_sim is None
+
+    # Back in range with a clear sample -- engaged again immediately,
+    # rather than starting life behind a dwell it never earned.
+    _place_contact_at_range(store.contacts[0], 1000.0)
+    store.tick(now_sim=20.0, ownship=_ownship(), los_clear=always_clear)
     assert store.contacts[0].last_emitted_engagement is True
 
 

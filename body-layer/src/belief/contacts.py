@@ -1115,7 +1115,37 @@ class ContactStore:
                     range_ok = envelope.range_min_m <= range_m_value <= max_range_m
                     alt_ok = ownship.alt_agl_m >= envelope.alt_min_m
 
-                    if los_clear is None:
+                    if not (range_ok and alt_ok):
+                        # Short-circuit: `current_engaged` is `False`
+                        # whatever LOS says, so asking is pure cost --
+                        # `line_of_sight_clear` samples terrain elevation
+                        # out of an on-disk SQLite store and is the most
+                        # expensive primitive `belief/` can reach, while
+                        # this block runs once per watched contact on every
+                        # poll of the live loop. Measured before fixing
+                        # (`plans/watch-reporting/performance-review.md`):
+                        # 20 watched contacts 20 km out, against a 2,408 m
+                        # envelope, produced 20 LOS calls per tick -- ~3x
+                        # that in practice, since a real detection carries
+                        # nonzero position uncertainty and `_threat_has_los`
+                        # sweeps three points. Watch count is not capped in
+                        # code either: one `AttentionArea` ("watch left")
+                        # can pull an arbitrary number of contacts into
+                        # watch-equivalent attention.
+                        #
+                        # **The reset is load-bearing, not tidying.**
+                        # Skipping the call also skips the masking
+                        # bookkeeping below, so without it a contact that
+                        # drifts out of range keeps a stale
+                        # `los_masked_since_sim`; on re-entry `masked_for_s`
+                        # is instantly far past `LOS_MASK_CONFIRM_S` and it
+                        # reads as masked on its first tick back. Clearing
+                        # it also states the honest thing: a masking dwell
+                        # accumulated while the threat could not reach us
+                        # measures nothing worth carrying.
+                        los_ok = True
+                        contact.los_masked_since_sim = None
+                    elif los_clear is None:
                         # No world-model connection -- correct degradation
                         # is to skip the term entirely, not to fail closed.
                         los_ok = True
