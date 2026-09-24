@@ -196,3 +196,74 @@ Manual reproduction also re-run after the fix (`repro2.py`-equivalent,
 not committed): the task's own numeric case now returns the prior
 unchanged (`x=0.0, z=3000.0, range=3000.0`) instead of `(-5308.1, 3790.7,
 range=6522.7)`.
+
+### 2026-09-25 addendum -- required fix from review (`c1cba89`)
+
+**Observed Issue.** Review of `b5b79b8` (`plans/position-belief-runaway/review.md`) found the
+"found, not fixed, out of scope" `Covariance2D._MIN_DETERMINANT = 1e-9` floor above is neither
+narrow nor safely deferrable: reachable for any same-bearing repeated naked-eye look beyond
+~2.7km (well inside the 10km envelope), corrupts the fused *mean* (not just reported
+uncertainty), and makes the brand-new `FUSION_SANITY_SIGMA` guard itself misfire on a legitimate
+100m near-parallel residual at `naked_eye_sigma_m(3000.0)` -- the same sigma pair
+`test_optic_policy.py`'s pre-existing ten-fold calibration test already uses.
+
+**Hypothesis.** `Covariance2D.inverse()` is called on two very different scales of matrix --
+covariance-form (real declared sigmas, determinants ~1e7-1e12 m^4) and information-form (their
+inverse, determinants ~1e-8 to 1e-12) -- and one absolute floor cannot be "near zero" for both at
+once. The floor needs to be relative to each matrix's own scale, not a fixed constant.
+
+**Evidence.** Reproduced all three of the review's findings directly, against the actual
+`fix/position-belief-runaway` branch source (not re-derived from the review's numbers): the
+floor-reachability table matched (`det(info_sum)` crosses `1e-9` between 2000m and 2700m); the
+repeated-identical-look-at-(3000,0) drift matched exactly
+(`3000.0 -> 1853.5 -> 2125.3 -> 2293.7 -> 2408.6 -> 2492.0`); the guard misfire matched (the
+100m/5deg residual held the prior instead of fusing). Also confirmed mathematically and
+numerically that `determinant / trace^2` -- a matrix's own eigenvalue ratio `ab / (a+b)^2` -- is
+exactly invariant under `inverse()` (verified: both the naked-eye covariance at 3000m and its own
+`.inverse()` report the identical ratio, `0.0791372...`, to full float precision), which is what
+makes a relative floor expressed against `trace^2` the correct fix rather than a second
+scale-specific constant: it guards genuine near-singularity (an axis's variance collapsed toward
+zero relative to the matrix's own other axis) at any scale, covariance or information form alike,
+using the one dimensionless quantity that means the same thing in both.
+
+Trap 1 (`test_optic_policy.py::test_a_well_refined_contact_collapses_the_look_to_a_single_step`,
+which folds ten times at this exact sigma pair): its assertion is `len(steps) == 1`, a coarse
+property, not any of the fold's own numeric intermediate values -- confirmed by reading the test
+body directly. It passed before this fix (i.e. against the clamped, corrupted intermediate
+covariances) and still passes after (against the corrected ones) with no change to the test
+itself required -- the clamping bug happened not to matter to *this* test's specific coarse
+assertion, only to the mean and to the new guard's mahalanobis check, both fixed here.
+
+**Fix Applied.** `body-layer/src/belief/position_belief.py`: replaced the absolute
+`_MIN_DETERMINANT: Final[float] = 1e-9` with `_MIN_DETERMINANT_RATIO: Final[float] = 1e-9`
+(same numeric value, different meaning) applied as `max(_MIN_DETERMINANT_RATIO * trace * trace,
+_MIN_DETERMINANT_ABSOLUTE)` inside `Covariance2D.inverse()` -- `_MIN_DETERMINANT_ABSOLUTE = 1e-300`
+is a pure backstop for the fully-degenerate `trace == 0` case, where a relative floor would itself
+be zero. `body-layer/tests/test_position_belief.py`: added
+`test_fold_position_repeated_identical_look_is_exact_at_floor_triggering_sigma` (pins the mean
+staying exactly put across six identical folds at the floor-triggering sigma pair -- fails
+against the pre-fix absolute floor, confirmed by direct execution before applying the code
+change) and
+`test_fold_position_moderate_near_parallel_residual_still_fuses_at_floor_triggering_sigma` (pins
+the guard-misfire case fusing rather than holding, same pair). Updated
+`test_fold_position_repeated_identical_look_still_tightens`'s docstring to point at the new tests
+and record that the bug it used to route around is now fixed rather than merely deferred.
+
+**Deliberately not fixed here (logged as a decision, not an oversight):** `Contact.record`
+(`body-layer/src/belief/contacts.py`) still bumps `last_seen_sim = percept.t_sim`
+unconditionally, even when `fold_position`'s `FUSION_SANITY_SIGMA` guard or
+`clamp_to_detection_envelope` holds the prior -- so a held position reads as fresh/confident to
+`certainty_of`/`position_confidence` for as long as the hold lasts. Pre-existing field semantics
+(review's own finding, not a new regression from either guard), bounded in practice (~20s,
+`GATE_GROWTH_RATE_MPS`-driven recovery, per the review's own check), and orthogonal to the
+determinant-floor fix above -- left as a follow-up rather than folded into this required fix,
+which is scoped to the floor and its direct consequences.
+
+**Verification.** `cd body-layer && .venv/bin/ruff format src tests && .venv/bin/ruff check src
+tests && .venv/bin/mypy src && .venv/bin/pytest tests -q` (main checkout's venv, worktree has
+none of its own): `ruff format` -- 103 files left unchanged; `ruff check` -- all checks passed;
+`mypy src` -- success, no issues found in 48 source files; `pytest tests -q` -- **1191 passed, 4
+xfailed** (this branch's own prior baseline was 1189/4 -- 2 new tests, no regressions, no new
+xfails). Both new regression tests independently confirmed to reproduce the review's exact
+numbers when run against the pre-fix source before the code change was applied (not merely
+asserted to fail -- executed).
