@@ -382,13 +382,21 @@ def test_fold_position_repeated_identical_look_still_tightens() -> None:
     ill-conditioned triangulation, even though every pair of looks here is
     maximally near-parallel (bearing separation zero). Uses the same
     (60, 800) sigma pair as this file's other new tests -- a different
-    pair, (157.08, 510.0), was tried first and exposed a separate,
-    pre-existing latent bug in `Covariance2D.inverse`'s `_MIN_DETERMINANT`
-    floor (calibrated for covariance-scale determinants, ~1e9, but an
-    information-matrix determinant after only one doubling can legitimately
-    be ~1e-10, below the floor, silently corrupting the result) -- reported
-    in `plans/position-belief-runaway/debug.md` as a separate finding, out
-    of this defect's scope, not fixed here."""
+    pair, (157.08, 510.0) (an ordinary 3km naked-eye look,
+    `naked_eye_sigma_m(3000.0)`), was tried first and exposed a separate,
+    pre-existing latent bug in `Covariance2D.inverse`'s determinant floor
+    (an absolute `1e-9`, calibrated for covariance-scale determinants
+    ~1e9, but an information-matrix determinant after only one fold can
+    legitimately be ~1e-10, below the floor, silently corrupting the
+    result). Reported in `plans/position-belief-runaway/debug.md` as a
+    separate finding, initially out of scope -- the review that followed
+    found it reachable at ordinary naked-eye ranges (beyond ~2.7km) and
+    load-bearing for this very guard's own correctness, so it was fixed as
+    a required follow-up (see that file's 2026-09-25 addendum) and the
+    floor is now relative to each matrix's own trace, not an absolute
+    constant. `test_fold_position_repeated_identical_look_is_exact_at_
+    floor_triggering_sigma` below is the regression pin for that fix using
+    this exact (157.08, 510.0) pair."""
     uncertainty = PositionUncertainty(sigma_cross_m=60.0, sigma_down_m=800.0)
 
     estimate = None
@@ -491,3 +499,64 @@ def test_fusion_sanity_sigma_is_positive_and_generous() -> None:
     """Documents the chosen threshold's own sanity, not just its value --
     a regression here is a deliberate policy change, not an accident."""
     assert FUSION_SANITY_SIGMA >= 3.0
+
+
+def test_fold_position_repeated_identical_look_is_exact_at_floor_triggering_sigma() -> (
+    None
+):
+    """`plans/position-belief-runaway/debug.md`'s 2026-09-25 addendum: with
+    the old absolute `_MIN_DETERMINANT = 1e-9` floor, this exact sigma pair
+    -- `naked_eye_sigma_m(3000.0)`, an entirely ordinary 3km naked-eye look,
+    and the same pair `test_optic_policy.py`'s own ten-fold calibration
+    test uses -- pushed every `info_sum.inverse()` call below the floor
+    from the very first fold, corrupting the fused *mean*: a repeated,
+    *identical* look at (3000, 0), which must stay exactly put and only
+    tighten, instead wandered 3000 -> 1853.5 -> 2125.3 -> 2293.7 -> 2408.6
+    -> 2492.0 across five folds. The strong, readable invariant this pins:
+    fusing the same look with itself must never move the mean at all, not
+    just "eventually reconverge." Fails against the pre-fix absolute
+    floor; passes now that the floor is relative to each matrix's own
+    trace."""
+    uncertainty = PositionUncertainty(sigma_cross_m=157.08, sigma_down_m=510.0)
+
+    estimate = None
+    for _ in range(6):
+        estimate = fold_position(
+            estimate,
+            x=3000.0,
+            z=0.0,
+            uncertainty=uncertainty,
+            look_bearing_deg=0.0,
+            t_sim=0.0,
+        )
+        assert estimate is not None
+        assert estimate.x == pytest.approx(3000.0, abs=1e-6)
+        assert estimate.z == pytest.approx(0.0, abs=1e-6)
+
+
+def test_fold_position_moderate_near_parallel_residual_still_fuses_at_floor_triggering_sigma() -> (
+    None
+):
+    """The guard-misfire half of the same addendum: with the old absolute
+    floor, this exact legitimate 100m near-parallel residual -- identical
+    in shape to `test_fold_position_moderate_near_parallel_residual_still_
+    fuses` above, just at the floor-triggering `(157.08, 510.0)` sigma
+    pair instead of `(60, 800)` -- incorrectly held the prior, because the
+    corrupted `fused_covariance` fed `FUSION_SANITY_SIGMA`'s own mahalanobis
+    check a wrong shape. Fails against the pre-fix absolute floor; passes
+    now."""
+    uncertainty = PositionUncertainty(sigma_cross_m=157.08, sigma_down_m=510.0)
+
+    prior = fold_position(
+        None, x=0.0, z=3000.0, uncertainty=uncertainty, look_bearing_deg=0.0, t_sim=0.0
+    )
+    fused = fold_position(
+        prior,
+        x=100.0,
+        z=3005.0,
+        uncertainty=uncertainty,
+        look_bearing_deg=5.0,
+        t_sim=1.0,
+    )
+
+    assert (fused.x, fused.z) != (prior.x, prior.z)

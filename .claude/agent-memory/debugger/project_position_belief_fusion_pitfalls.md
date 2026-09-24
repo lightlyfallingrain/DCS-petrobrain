@@ -15,16 +15,17 @@ numerical traps beyond the runaway-mean defect itself (fixed in `plans/position-
    residual/Mahalanobis sanity check on the *fused mean itself* against each input's own individual
    covariance (not the sum) — see `FUSION_SANITY_SIGMA` in `position_belief.py`.
 
-2. **`Covariance2D._MIN_DETERMINANT = 1e-9` is scaled for covariance determinants (~1e9), not
-   information-matrix determinants.** Inverting a covariance twice (or summing two infos and
-   inverting again) can legitimately produce a determinant as small as ~1e-10 — below the floor —
-   silently corrupting the result (confirmed: `cov.inverse().inverse() != cov` for
-   `sigma_cross_m=157.08, sigma_down_m=510.0`, the same pair `test_optic_policy.py` already uses,
-   off by ~6.4x). This is a real, pre-existing, **unfixed** latent bug — not touched during the
-   runaway-range fix (out of that defect's scope, no reported symptom tied to it, existing tests
-   don't check exact numeric values there). Worth a dedicated debug/fix pass if a future symptom
-   traces back to it — check the actual determinant magnitude before assuming a fusion result is
-   trustworthy for any sigma pair much smaller than the naked-eye channel's own (60, 800).
+2. **`Covariance2D`'s determinant floor was scaled for covariance determinants (~1e9), not
+   information-matrix determinants — fixed 2026-09-25, see [[project_covariance2d_determinant_floor_scale]].**
+   Originally flagged here as a real, pre-existing, deferred latent bug (out of the runaway-range
+   fix's own scope); a review of that fix (`plans/position-belief-runaway/review.md`) established
+   it was reachable at ordinary naked-eye ranges (beyond ~2.7km, not an exotic corner) and was
+   corrupting the brand-new `FUSION_SANITY_SIGMA` guard's own correctness, so it became a required
+   fix rather than a backlog item. `_MIN_DETERMINANT` (absolute) is now `_MIN_DETERMINANT_RATIO`
+   (relative to each matrix's own `trace**2`) plus a tiny absolute backstop for the fully-degenerate
+   `trace == 0` case — see the linked memory for the fix pattern (`determinant / trace^2` is
+   scale-invariant under `.inverse()`), reusable anywhere else a 2x2 SPD matrix gets inverted at
+   more than one scale.
 
 **Also confirmed:** `association_over_time.passes_gate`'s existing 3-sigma spatial gate is *not*
 broken — a single big near-parallel disagreement (the kind used for a clean unit-level repro) is

@@ -131,11 +131,37 @@ from perception.source import PositionUncertainty
 #: docstring for why the direction of the move avoids an import cycle.
 GATE_GROWTH_RATE_MPS: Final[float] = 20.0
 
-#: Minimum fraction of a *guard* against a degenerate (near-singular)
-#: covariance when inverting -- should never arise from any real declared
-#: sigma, but a defensive floor is cheaper than a `ZeroDivisionError` deep
-#: in a fold.
-_MIN_DETERMINANT: Final[float] = 1e-9
+#: Relative floor against a near-singular matrix when inverting, expressed
+#: as a fraction of the matrix's own squared trace rather than an absolute
+#: value -- `2026-09-25` addendum to `plans/position-belief-runaway/
+#: debug.md`: `inverse()` is called on both covariance-scale matrices (real
+#: declared sigmas, determinants ~1e7-1e12 m^4 for a naked-eye look) and
+#: information-scale matrices (their inverse, determinants ~1e-8 to 1e-12),
+#: so one absolute constant cannot be "near zero" for both regimes -- the
+#: original `1e-9` was calibrated for the former and silently corrupted the
+#: latter for any same-bearing repeated naked-eye look beyond ~2.7km
+#: (reachable well inside the 10km naked-eye envelope, not a corner case;
+#: see that addendum for the measured drift and guard-misfire it caused).
+#:
+#: `determinant / trace^2` is exactly `ab / (a+b)^2` for a matrix's own
+#: eigenvalues `a, b` -- its minor-to-major-eigenvalue eccentricity -- and
+#: this ratio is provably invariant under `inverse()` (inversion flips the
+#: sign of both eigenvalues' exponents, leaving their ratio, and hence this
+#: fraction, unchanged). One fraction therefore guards genuine
+#: near-singularity (an axis whose variance has collapsed toward zero
+#: relative to its own matrix's other axis) at any scale, covariance or
+#: information form alike. An ordinary naked-eye look's own covariance
+#: sits at ratio ~0.08 (confirmed numerically, same addendum) -- many
+#: orders of magnitude above this floor, so it never fires on real data;
+#: it exists purely so a genuinely degenerate matrix (one axis's variance
+#: at or near exactly zero) cannot divide by zero.
+_MIN_DETERMINANT_RATIO: Final[float] = 1e-9
+
+#: Absolute backstop beneath `_MIN_DETERMINANT_RATIO` -- guards the fully
+#: degenerate `trace == 0` case (both variances exactly zero), where a
+#: floor computed relative to the matrix's own trace would itself be zero
+#: and the division below would still fail.
+_MIN_DETERMINANT_ABSOLUTE: Final[float] = 1e-300
 
 #: `plans/position-belief-runaway/debug.md` -- `fold_position`'s
 #: ill-conditioning guard: the fused mean must sit within this many "sigma"
@@ -175,7 +201,9 @@ class Covariance2D:
 
     def inverse(self) -> Covariance2D:
         determinant = self.xx * self.zz - self.xz * self.xz
-        determinant = max(determinant, _MIN_DETERMINANT)
+        trace = self.xx + self.zz
+        floor = max(_MIN_DETERMINANT_RATIO * trace * trace, _MIN_DETERMINANT_ABSOLUTE)
+        determinant = max(determinant, floor)
         return Covariance2D(
             xx=self.zz / determinant,
             zz=self.xx / determinant,
