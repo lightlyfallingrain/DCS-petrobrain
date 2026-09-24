@@ -168,3 +168,38 @@ constant's own docstring). `logger._look_targets` (the sole production caller) n
 - **Stage 3 was not flown live.** This session had no DCS/aircraft-layer access. The plan explicitly
   says "do not merge Stage 3 without a live sortie" — that check is still outstanding and belongs to
   the user before this branch is trusted in flight, not something this session could satisfy.
+
+---
+
+### Review fix — Decision 2 answered, hybrid channel perturbed
+
+`plans/precise-position-belief/review.md` found that Decision 2 ("Does the scope/hybrid channel get
+Stage 2's treatment?") was never actually answered by either implementer above — only Stage 1's
+mechanical `PositionUncertainty(300, 300)` declaration had landed on `perception/hybrid_source.py`;
+Stage 2's perturbation was never applied there, so a heavily-observed scope contact was still
+converging on exact ground truth behind a cosmetic uncertainty band. That is now fixed:
+`hybrid_source.py` calls `perception.estimation.perturbed_bearing_range` exactly as
+`naked_eye_source.py` does, isotropic on both axes at `SCOPE_UNCERTAINTY_M` (this channel has no
+reporting bucket to derive an anisotropic split from, unlike naked-eye's range/bearing asymmetry).
+
+**Decision 2 is answered: yes**, per the plan's own recommendation — the scope channel now gets the
+same perturbation treatment as naked-eye. `derived_world_position` is untouched (still
+`result.candidate`'s ground truth, never crew-facing).
+
+Two pre-existing tests in `test_hybrid_source.py` asserted truth-exact `bearing_deg`/`range_m` and
+were updated to compute the expected perturbed value via the real `perturbed_bearing_range` call
+(not re-derived by hand) rather than asserting against ground truth. Added
+`test_repeated_scope_observations_of_a_stationary_object_do_not_converge_on_truth` — the test the
+review said would have caught this gap: polls a stationary object 60 times under
+`emit_mode="every_poll"` and asserts the *mean* emitted range stays measurably away from true range
+(the never-redrawn systematic bias surviving averaging), not just that any single look differs from
+truth.
+
+**Checks (body-layer/ only):** ruff format --check pass, ruff check pass,
+`mypy src` (`cd body-layer`) pass (47 source files), `pytest tests -q` pass — 1104 passed, 4 xfailed
+(the four xfails are the same pre-existing `detection-cones-slice2` calibration regressions noted
+above; the one new passing test is the regression test described here).
+
+**`body-layer/ROADMAP.md` gained an entry for this milestone** (it had none before this fix) — see
+that file's "Precise position belief" bullet, which also records this fix and the still-outstanding
+Stage 3 live-sortie gate.
