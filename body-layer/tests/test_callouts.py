@@ -32,6 +32,7 @@ from belief import enrichment as enrichment_module
 from belief.callouts import (
     CALLOUT_MAX_AGE_S,
     INTER_UTTERANCE_GAP_S,
+    WATCH_REPORT_MIN_GAP_S,
     CalloutScheduler,
     callout_priority,
     estimate_speech_duration_s,
@@ -42,8 +43,9 @@ from belief.callouts import (
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
-from belief.events import Event
+from belief.events import CONTACT_MOTION_CHANGED, Event
 from belief.speech import render_group_report
+from belief.tools import set_attention
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -62,6 +64,7 @@ def _observation(
     ownship_z: float = 0.0,
     dwp_x: float = 99999.0,
     dwp_z: float = 99999.0,
+    apparent_motion: bool | None = None,
 ) -> Observation:
     """`ownship_x`/`ownship_z` drive `facts["relative_now"]` (clock/range
     against `_enrichment_context`'s fixed ownship at the origin, via the
@@ -87,6 +90,7 @@ def _observation(
         ),
         provenance="test_fixture",
         classification_level=classification_level,
+        apparent_motion=apparent_motion,
     )
 
 
@@ -948,3 +952,128 @@ def test_replay_is_deterministic() -> None:
 
     assert first_run == second_run
     assert first_run != []
+
+
+# --- watched-only speech: CONTACT_MOTION_CHANGED (plans/watch-reporting/
+# plan.md Stage 1) -----------------------------------------------------------
+
+
+def _store_with_a_founded_contact_that_then_starts_moving() -> tuple[ContactStore, str]:
+    """Founds a contact with **no** motion evidence (`apparent_motion=None`)
+    so `CONTACT_DETECTED` carries no automatic ", moving" clause of its own
+    -- if the founding percept carried motion evidence instead,
+    `CONTACT_DETECTED` (always spoken, watched or not) would say "moving"
+    itself via `_contact_report_text`'s own automatic clause, contaminating
+    a test of the *watched-only* `CONTACT_MOTION_CHANGED` gate with a
+    channel that was never gated in the first place. The founding
+    `CONTACT_DETECTED` is drained through a throwaway scheduler so only the
+    later motion event is left live for the caller's own scheduler."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                classification_level=3,
+                apparent_motion=None,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    CalloutScheduler().tick(store, now_sim=0.0)  # drain CONTACT_DETECTED
+    return store, contact_id
+
+
+def _start_moving(store: ContactStore, t_sim: float) -> None:
+    store.ingest(
+        [
+            _observation(
+                obs_id=f"OBS_MOTION_{t_sim}",
+                t_sim=t_sim,
+                classification_raw="BMP-2",
+                classification_level=3,
+                apparent_motion=True,
+            )
+        ],
+        now_sim=t_sim,
+    )
+    store.tick(now_sim=t_sim)
+
+
+def _store_with_a_moving_watched_contact() -> tuple[ContactStore, str]:
+    store, contact_id = _store_with_a_founded_contact_that_then_starts_moving()
+    set_attention(store, contact_id, "watch")
+    _start_moving(store, t_sim=1.0)
+    return store, contact_id
+
+
+def test_unwatched_contact_never_speaks_a_motion_change() -> None:
+    """`_WATCHED_ONLY_KINDS` -- an unwatched contact's `CONTACT_MOTION_
+    CHANGED` event is real (see `belief.events`) but never spoken."""
+    store, _ = _store_with_a_founded_contact_that_then_starts_moving()
+    _start_moving(store, t_sim=1.0)
+    motion_event = next(e for e in store.events if e.kind == CONTACT_MOTION_CHANGED)
+    assert motion_event in store.unacknowledged_events
+
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=1.0) == []
+    # Not consumed -- would still be picked up if the contact became watched.
+    assert motion_event in store.unacknowledged_events
+
+
+def test_watched_contact_speaks_a_motion_change() -> None:
+    store, _ = _store_with_a_moving_watched_contact()
+    scheduler = CalloutScheduler()
+    spoken = scheduler.tick(store, now_sim=1.0)
+    assert spoken == ["BMP-2, moving."]
+
+
+def test_watching_after_the_event_fired_still_speaks_it() -> None:
+    """Decision 1: motion is gated at the speech layer, so attention
+    changing *after* the event still does the right thing."""
+    store, contact_id = _store_with_a_founded_contact_that_then_starts_moving()
+    _start_moving(store, t_sim=1.0)
+    # Watched only now, after the motion event already fired.
+    set_attention(store, contact_id, "watch")
+
+    scheduler = CalloutScheduler()
+    spoken = scheduler.tick(store, now_sim=1.0)
+    assert spoken == ["BMP-2, moving."]
+
+
+def test_watch_report_min_gap_suppresses_a_second_watched_only_callout() -> None:
+    """`WATCH_REPORT_MIN_GAP_S` -- a callout about a contact whose
+    `_last_spoken_sim` entry is still within the gap is lost, not deferred
+    (Decision 3). Exercised directly against the scheduler's own bookkeeping
+    (`EVENT_COOLDOWN_S`, at 15s, already spaces two real same-kind events
+    further apart than `WATCH_REPORT_MIN_GAP_S`'s own 8s, so a natural
+    two-event scenario can never actually land inside this gap in this
+    single-kind stage -- see this milestone's own Decision 3 on why the gap
+    only starts to bind once multiple watched-only kinds exist)."""
+    store, contact_id = _store_with_a_moving_watched_contact()
+    motion_event = next(e for e in store.events if e.kind == CONTACT_MOTION_CHANGED)
+    scheduler = CalloutScheduler()
+    scheduler._last_spoken_sim[contact_id] = 0.0
+
+    within_gap = WATCH_REPORT_MIN_GAP_S / 2.0
+    assert scheduler.tick(store, now_sim=within_gap) == []
+    # Suppressed by the gap -- consumed (never retried by this scheduler),
+    # but still unacknowledged, the same "lost, not deferred" cost
+    # `test_expired_candidate_is_never_spoken_and_never_acknowledged` above
+    # already accepts for `CALLOUT_MAX_AGE_S` expiry.
+    assert motion_event in store.unacknowledged_events
+    assert motion_event.id in scheduler._consumed
+    # Re-ticking must not re-attempt it.
+    assert scheduler.tick(store, now_sim=within_gap + 1.0) == []
+
+
+def test_watch_report_min_gap_allows_a_callout_once_it_elapses() -> None:
+    store, contact_id = _store_with_a_moving_watched_contact()
+    scheduler = CalloutScheduler()
+    scheduler._last_spoken_sim[contact_id] = 0.0
+
+    past_gap = WATCH_REPORT_MIN_GAP_S + 1.0
+    assert scheduler.tick(store, now_sim=past_gap) == ["BMP-2, moving."]
