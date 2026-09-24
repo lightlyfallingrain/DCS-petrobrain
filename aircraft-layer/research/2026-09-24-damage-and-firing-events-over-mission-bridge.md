@@ -446,3 +446,43 @@ no event handler whatsoever — it becomes an ordinary object in the feed the na
 already gates on LOS and visual range, which would be by far the cheapest possible answer. Fold
 this into Probe A's run rather than building anything for it: the probe already walks the object
 table, so it costs one extra look at what is in there while something is firing.
+
+### Probes built, 2026-09-24 — what to deploy and in what order
+
+Both probes are committed (the report above suggested keeping them out of
+`dcs-export/`; project practice is the opposite — `petrobrain-f10-probe-hook.lua` and seven
+`Export.probe-*.lua` files already live there, so these follow that convention). Both write only to
+log files and open no socket, so neither needs the collector running. Both were syntax-checked with
+`luac -p`, including each embedded `dostring_in` snippet extracted and compiled separately.
+
+**Order matters, because each step can make the next one unnecessary.**
+
+1. **`debrief.log`, no deployment at all.** Any already-flown mission where AAA fired. If a shooting
+   event appears in its `events` table, fact 1 is settled for free.
+2. **`aircraft-layer/dcs-export/Export.probe-weapons.lua`** → copy over `Saved Games\DCS\Scripts\
+   Export.lua` (displacing production Export.lua for that sortie; restore it after). Logs total
+   object count plus every first-seen object `Name`, once a second, to
+   `Logs\aircraft_layer_probe_weapons.log`. **If gunfire shows as a count spike and new names, the
+   whole event-handler question is moot** — tracers are ordinary objects in a feed the naked-eye
+   channel already gates on FOV, angular size and terrain LOS, and no new channel is needed.
+3. **`aircraft-layer/dcs-export/petrobrain-damage-events-probe-hook.lua`** → copy to
+   `Saved Games\DCS\Scripts\Hooks\`. Answers both remaining questions in one sortie, logging to
+   `dcs.log` under `PetrobrainDamageProbe`:
+   - **Damage** — `getLife()`/`getLife0()` per unit, logging only units whose life fraction is
+     below 1.0 (an undamaged sortie is silent, so the damaged rows are findable). Shoot a ground
+     unit until it visibly smokes without killing it, and read whether the fraction crosses a
+     consistent value at that moment.
+   - **Firing events** — registers a `world.addEventHandler` inside the scripting state and drains
+     its queue each second. **It resolves each event id back to its name at runtime by reversing
+     the `world.event` enumerator**, rather than hardcoding ids this project has not verified, so
+     the log prints `S_EVENT_SHOOTING_START` rather than a bare number whose meaning would have to
+     be looked up and could be wrong.
+
+The `register: ok=... result=...` line is the one to read first: it answers Finding 15 (whether
+`world` is reachable from the `"scripting"` state) on its own, before any event has to arrive.
+Registration succeeding *and* events then naming a firing AAA unit settles fact 1 and fact 2
+together.
+
+A negative result from step 3 is a real result and should be written up rather than retried — it
+would reverse Finding 12 and leave the naked-eye/LOS tracer channel as the only route to perceiving
+that we are being engaged.
