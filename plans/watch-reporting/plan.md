@@ -363,8 +363,12 @@ rewriting `tests/test_speech.py::test_route_event_contact_range_crossed_speaks_w
 which pins the old behaviour by name. That test is not wrong; it faithfully pinned a decision the
 user has now changed after hearing it, which is the system working rather than failing.
 
-**Not yet implemented.** Recorded here first because `fix/scan-is-not-watch` is in flight against
-the same callout family, and that branch was told explicitly not to touch wording.
+**Implemented 2026-09-25** (`fix/range-crossing-direction`). Direction comes from the event's own
+`previous_range_km`/`range_km` bands, so no new state. Two tests that pinned the bare form were
+rewritten — one of them, `test_watched_contact_speaks_a_range_crossing`, had been passing while
+asserting a string that a fresh `CONTACT_DETECTED` renders identically, so it could not have told
+the two kinds apart. It can now, which is the defect this revision exists to fix showing up in the
+suite as well as in the cockpit.
 
 **What stops it becoming noise.** Four mechanisms already exist and three of them suffice:
 
