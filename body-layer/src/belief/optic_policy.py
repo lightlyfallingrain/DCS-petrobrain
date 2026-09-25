@@ -165,6 +165,21 @@ class LookTarget:
     #: not yet have one, not because it is still the honest figure.
     bearing_uncertainty_deg: float = CLOCK_BUCKET_DEG / 2.0
 
+    #: Whether the pilot asked for this contact to be watched (user,
+    #: 2026-09-25: identify by glass *"for all contacts, but even more so
+    #: watched contacts"*). Read from `belief.attention.
+    #: effective_attention`'s derived level, the same definition the
+    #: watched-only callouts and the eyesight view's orange both use --
+    #: keeping the three in step matters, because "why is he glassing
+    #: that one" and "why is that one reporting to me" should have the
+    #: same answer.
+    #:
+    #: Only `choose_look` reads it. It deliberately does **not** affect
+    #: `is_worth_a_look`/`can_still_improve`: an unwatched contact inside
+    #: its improvement window is still worth identifying, so this changes
+    #: the *order* looks happen in, never whether they happen at all.
+    watched: bool = False
+
 
 @dataclass(frozen=True)
 class OpticState:
@@ -468,8 +483,19 @@ def choose_look(targets: Sequence[LookTarget]) -> LookTarget | None:
     (user: *"if binocular FOV sees multiple units at once, they all get the
     benefit"*). The optic is a property of the look rather than of a
     target, so a look that covers three unresolved contacts resolves three;
-    choosing the nearest instead would spend the same look on one. Ties
-    break toward the closest, which is the one most likely to resolve.
+    choosing the nearest instead would spend the same look on one.
+
+    **Directions covering a watched contact are preferred outright** (user,
+    2026-09-25: identify by glass *"for all contacts, but even more so
+    watched contacts"*). Ordered: how many watched contacts the direction
+    covers, then how many contacts in total, then nearest. So a look at one
+    watched contact beats a look at three unwatched ones, and among looks
+    covering the same number of watched contacts the old coverage rule
+    still applies unchanged.
+
+    This orders looks; it does not gate them. An unwatched contact inside
+    its improvement window is still worth identifying and still gets its
+    turn -- see `LookTarget.watched`.
     """
     if not targets:
         return None
@@ -477,13 +503,14 @@ def choose_look(targets: Sequence[LookTarget]) -> LookTarget | None:
     if half_angle is None:  # pragma: no cover -- binoculars always have one
         return min(targets, key=lambda t: t.range_m)
 
-    def covered(centre: LookTarget) -> tuple[int, float]:
-        count = sum(
-            1
+    def covered(centre: LookTarget) -> tuple[int, int, float]:
+        in_view = [
+            other
             for other in targets
             if _angular_separation_deg(centre, other) <= half_angle
-        )
-        return count, -centre.range_m
+        ]
+        watched_count = sum(1 for other in in_view if other.watched)
+        return watched_count, len(in_view), -centre.range_m
 
     return max(targets, key=covered)
 
@@ -780,6 +807,7 @@ def look_target_for(
     object_type: str,
     current_level: str,
     position: PositionEstimate | None = None,
+    watched: bool = False,
 ) -> LookTarget:
     """Build a `LookTarget` from a contact's believed position.
 
@@ -819,5 +847,6 @@ def look_target_for(
         range_m=slant_m,
         object_type=object_type,
         current_level=current_level,
+        watched=watched,
         **kwargs,
     )

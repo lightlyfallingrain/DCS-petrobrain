@@ -195,7 +195,11 @@ from pathlib import Path
 from typing import Literal, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
-from belief.attention import _SECTOR_CENTER_DEG, _SECTOR_HALF_WIDTH_DEG
+from belief.attention import (
+    _SECTOR_CENTER_DEG,
+    _SECTOR_HALF_WIDTH_DEG,
+    effective_attention,
+)
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
 from belief.brain_client import BrainLayerClient
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
@@ -638,6 +642,13 @@ def _active_gaze(tasks: TaskStore, heading_true_deg: float = 0.0) -> ScanPlan:
 def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget]:
     """Every live contact, as the binocular policy needs to see it.
 
+    `watched` comes from `belief.attention.effective_attention` -- the same
+    derived level the watched-only callouts and the eyesight view's orange
+    read, so "why is he glassing that one" and "why is that one reporting
+    to me" have the same answer. It orders which look happens first
+    (`optic_policy.choose_look`); it never decides whether an unwatched
+    contact gets identified at all.
+
     **Uses the contact's *believed* type, not ground truth** -- which for a
     presence-level contact is no type at all, and `object_model.profile_for`
     degrades to its default profile there. That is the honest model rather
@@ -656,6 +667,10 @@ def _look_targets(store: ContactStore, ownship: OwnshipState) -> list[LookTarget
             object_type=contact.last_class_raw,
             current_level=contact.classification.level.name.lower(),
             position=contact.position,
+            watched=effective_attention(
+                contact.attention, contact.last_position, store.areas
+            )[0]
+            in ("watch", "priority"),
         )
         for contact in store.contacts
     ]
