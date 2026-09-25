@@ -133,8 +133,12 @@ diagram and the code disagree, the diagram is wrong — same contract as the res
   commands and audio in). An arrow that only points outward is wrong.
 - **What is offline versus in the loop.** The Mission Interpreter runs pre-mission and produces an
   artifact; it is not a runtime participant.
-- **The brain layer as absent.** It is the point of the whole project and does not exist — draw it
-  as a `hold` node so its absence is visible rather than implied.
+- **The brain layer, and its two edge directions.** Written when the brain layer did not exist and
+  was drawn as a `hold` node to make its absence visible; **it exists as of 2026-09-25** (BR-1
+  Stage 1 merged) and is now a real node. What matters about it in this diagram is the direction of
+  its two edges: body hands an escalation over and **does not wait** — the reply comes back on a
+  separate poll. A diagram that draws that as one synchronous round trip states the opposite of the
+  layer's founding constraint.
 
 **Keep it structural.** No milestone status, no percentages, no "next" markers — those belong to
 the graphs above. If a reader cannot tell this diagram from the dependency map at a glance, it has
@@ -143,6 +147,23 @@ drifted into restating them.
 Same `classDef` block as the other two graphs, an `id`, and an expand button carrying
 `data-graph="#<id>"` — see the lightbox note immediately below, which is exactly the trap a third
 graph walks into.
+
+## Line breaks in Mermaid labels must be escaped — `&lt;br/&gt;`, never `<br/>`
+
+**Found 2026-09-25 by the user, from the rendered page.** Every multi-line node label on the page
+had lost its break *and* the space where the break had been, so labels rendered as
+`"BR-1 Stage 1async wire, stub decider"`, `"Group contactsstages 0–4a"`, and — worst, because it
+reads as a number — `"FLOWN 2026-09-258 defects, not a pass"`. Sixty labels across all three graphs.
+
+**Why it happens:** the graphs live in `<pre class="mermaid">`, so the browser parses their contents
+as HTML *before* Mermaid ever sees them. A literal `<br/>` becomes a real DOM element, and Mermaid
+reads the block's `textContent` — which drops elements and leaves the surrounding words butted
+together. The break is not merely lost; the two lines are welded.
+
+**The fix, and the rule for every future label:** write the entity, `&lt;br/&gt;`. `textContent`
+then yields the literal characters `<br/>`, which Mermaid's own parser turns into a line break.
+This is invisible in the source diff and only shows up in the rendered page, so **check a rendered
+label with a break in it** after any diagram edit — reading the HTML will not catch it.
 
 ## The graph lightbox
 

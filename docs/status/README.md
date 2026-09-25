@@ -35,6 +35,12 @@ separate artifact).
 - **The dependency graph** — a Mermaid `flowchart` block inside the page. Mermaid renders natively
   both in artifacts and in GitHub-flavoured markdown, so that block can be lifted into a committed
   `STATUS.md` unchanged if a zero-tooling in-repo version is ever wanted.
+
+  **Line breaks in node labels are written `&lt;br/&gt;`, not `<br/>`.** The graphs sit in
+  `<pre class="mermaid">`, so the browser parses a raw `<br/>` into a DOM element before Mermaid
+  runs, and Mermaid reads `textContent` — which drops it and welds the two lines together
+  (`"Group contactsstages 0–4a"`). Sixty labels were affected until 2026-09-25. The bug is
+  invisible in the source and only appears in the rendered page.
 - **Drawer detail** — the `DETAIL` object in the page's script. Each entry carries the *reasoning*
   behind an item (why a constraint exists, what an earlier pass got wrong), which is the part a
   card on a kanban board structurally cannot hold and the main reason this format was chosen.
