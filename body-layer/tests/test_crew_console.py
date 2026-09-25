@@ -1264,10 +1264,13 @@ def test_cancel_task_cancels_the_most_recently_created_pending_task() -> None:
     # phrase falls back to the bare kind rather than naming a sector.
     assert lines == ["Copy, stop scan."]
     assert task2.id not in lines[0]
+    # Both are cancelled, not only the newest (2026-09-25). The readback
+    # still names only the governing one -- naming a superseded scan would
+    # be noise about something that was already inert.
     resolved_task2 = tasks.get(task2.id)
     resolved_task1 = tasks.get(task1.id)
     assert resolved_task2 is not None and resolved_task2.status == "cancelled"
-    assert resolved_task1 is not None and resolved_task1.status == "pending"
+    assert resolved_task1 is not None and resolved_task1.status == "cancelled"
 
 
 def test_handle_command_pushes_to_overlay_via_the_print_funnel(
@@ -1635,13 +1638,28 @@ def test_scan_and_watch_coexist_and_cancel_task_stops_both(
     assert all(task.status == "cancelled" for task in tasks.tasks)
 
 
-def test_cancel_task_only_cancels_the_newest_task_per_kind(
+def test_cancel_task_cancels_superseded_tasks_too_so_none_resurrect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A superseded scan (never explicitly cancelled, just no longer
-    honoured by `logger._active_gaze`) must not be swept up by a later
-    "Cancel Task" alongside the current watch -- only the newest task of
-    each kind is "currently governing" (`_active_tasks_by_kind`)."""
+    """Cancel everything must really cancel everything (user, 2026-09-25,
+    after flying it).
+
+    **This test previously asserted the opposite**, under the name
+    `test_cancel_task_only_cancels_the_newest_task_per_kind`, on the
+    reasoning that a superseded scan is not "currently governing" and so
+    should not be swept up. That reasoning had the consequence backwards.
+    A superseded `scan_area` is inert *precisely because* a newer one
+    outranks it in `logger._active_gaze`'s most-recent-wins tie-break --
+    so cancelling only the newest **promotes the older one straight back
+    into steering the gaze**.
+
+    The user hit exactly the sequence below: he said "cancel", confirmed
+    "cancel everything", heard both current modes named back, and an
+    earlier "scan south" was still steering afterwards.
+
+    The readback is unchanged and still names only the governing tasks --
+    naming every stale scan would be noise about things that were not
+    doing anything anyway."""
     store = ContactStore()
     store.ingest(
         [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
@@ -1661,7 +1679,9 @@ def test_cancel_task_only_cancels_the_newest_task_per_kind(
     lines = console.handle_command("cancel_task", now_sim=2.0)
 
     assert lines == ["Copy, stop scan left and watch."]
-    assert first_scan.status == "pending"
+    # The superseded scan goes too -- otherwise cancelling the newest scan
+    # hands the gaze straight back to this one.
+    assert first_scan.status == "cancelled"
     assert second_scan.status == "cancelled"
 
 
