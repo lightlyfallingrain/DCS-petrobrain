@@ -477,3 +477,155 @@ against the commit's claimed numbers exactly. The three wedge/regression tests n
 brief re-run individually and confirmed passing against real sockets, not mocks. Not independently
 re-run: the older branch's own historical CI state (trusted via direct diff read against `bee408b`
 and `3fc8dc1` instead).
+
+---
+
+### Review Summary — `d51a25b`, the Security/Performance change-request fold
+
+Reviewed `d51a25b` ("BR-1: close CONFIRM's offered-vocabulary gap; give the live check a
+chain-drop scenario") diffed against parent `c1b96b1`, per `AGENTS.md`'s rule that a Security/
+Performance change request re-enters the Implementer → Reviewer loop rather than going straight to
+DoD. Two changes: (1) `belief/brain_reply.py` gains `OFFERED_CONFIRM_VOCABULARY`, narrowing
+`_validate_confirm` to the 7 tokens the classify prompt actually offers, in addition to the
+existing ~30-token `DISPATCHED_COMMAND_TOKENS` check; (2) `brain-layer/tools/
+live_stage2_decider_check.py` gains scenario 5, firing four utterances 0.3s apart with no wait to
+surface the chain-drop pattern the performance review's MONITOR finding named. Worktree was stale
+at launch (checked out at an unrelated later "Status" commit on `worktree-agent-a4ffe69c060f7dc3a`)
+— recreated with `git checkout -B feature/brain-layer-stage2-review d51a25b` before starting.
+
+**One required fix, documentation-only, low urgency.**
+
+### Required Fixes
+
+- **`OFFERED_CONFIRM_VOCABULARY`'s docstring overclaims "never unsafe" — it only proves the safe
+  drift direction, not both.** The docstring (`belief/brain_reply.py`) states: "a legitimate
+  `CONFIRM` for a newly-added classify token would be wrongly degraded to `ASK` here until this
+  list catches up -- annoying, never unsafe, since a stricter validator only ever refuses, it does
+  not admit a token the model was never offered." That is true for exactly one drift direction:
+  body's copy lagging behind a *widened* `prompts.CLASSIFY_COMMAND_VOCABULARY` (brain adds a
+  token body hasn't caught up to) — the validator only ever gets stricter, so it fails safe.
+
+  It is not true for the reverse: if `prompts.CLASSIFY_COMMAND_VOCABULARY` is ever *narrowed*
+  (a token removed from what the live classify prompt actually offers) without the same edit
+  landing in body's `OFFERED_CONFIRM_VOCABULARY`, body's copy is now stale-**wide** relative to
+  what was genuinely offered in that call. If the removed token is still a real, dispatchable
+  command (still in `DISPATCHED_COMMAND_TOKENS` — likely, since removing a token from the classify
+  offer list doesn't imply retiring the command itself), `_validate_confirm`'s two-membership-check
+  (`OFFERED_CONFIRM_VOCABULARY` AND `dispatched_command_tokens`) still passes it, because body's
+  stale copy still lists it. A hallucinated `CONFIRM <that token>` would then validate even though
+  the classify prompt the model actually saw in that call never offered it — this is precisely the
+  asymmetry-with-`_validate_pick` category this stage's fix exists to close, reopened for whichever
+  tokens get removed from the brain-side list and not synced down. Verified this is a real code
+  path, not a theoretical one: `_validate_confirm` degrades on failing *either* check (`or`
+  short-circuit), so passing requires membership in **both** sets — the stale-wide direction is
+  exactly the case where `OFFERED_CONFIRM_VOCABULARY` no longer reflects the true offered set but
+  still intersects with `DISPATCHED_COMMAND_TOKENS`.
+
+  Severity is low — this requires a specific, easy-to-miss-but-narrow maintenance mistake (edit
+  `prompts.py`'s constant, forget the body-side mirror), and the outcome is not privilege
+  escalation, just accepting a `CONFIRM` for a real dispatchable command the model wasn't actually
+  offered in that call, i.e. exactly the pre-fix defect's blast radius, scoped down to the removed
+  token(s) only. But per this reviewer's own standing rule (a bounded/small-magnitude risk is not
+  automatically optional severity when it contradicts a stated invariant/docstring claim — see
+  `feedback_bounded_magnitude_isnt_optional_severity.md`), an incorrect safety claim in the one
+  place a future maintainer will read before touching this coupling is a required fix regardless of
+  how narrow the exposure is: **fix the docstring to state both drift directions honestly** (safe
+  one way, reopens the original gap for affected tokens the other way), so nobody editing
+  `prompts.CLASSIFY_COMMAND_VOCABULARY` later believes this coupling is unconditionally safe to
+  neglect. Consider also updating `prompts.py`'s own comment on `CLASSIFY_COMMAND_VOCABULARY`
+  ("a mismatch here costs accuracy, never safety") — written before this stage's fix, and no longer
+  fully accurate now that body maintains a mirrored constant whose staleness in the narrowing
+  direction *does* have a safety-relevant effect, however narrow.
+
+### Design decision (Change 1) — judged sound
+
+The implementer's reasoning for duplicating rather than wiring the vocabulary through the payload
+holds up: `PICK`'s candidate list is genuine per-call data (different contacts every escalation);
+the classify vocabulary is a call-invariant module constant (same 7 tokens every time), so
+serialising it onto every `EscalationPayload` is pure overhead with no correctness benefit — the
+same duplication-across-the-boundary shape the codebase already uses in the other direction
+(`prompts.CLASSIFY_COMMAND_VOCABULARY` itself a hand-curated subset of body's
+`DISPATCHED_COMMAND_TOKENS`). Confirmed value-for-value: `OFFERED_CONFIRM_VOCABULARY`'s seven
+entries match `brain-layer/src/prompts.py`'s `CLASSIFY_COMMAND_VOCABULARY` tuple exactly. No test
+compares them across the module boundary and none can without violating module independence — an
+acceptable, named gap (see Optional Refinements below), not a defect.
+
+**Tests verified, not just read:**
+- `test_confirm_token_actually_offered_by_classify_prompt_passes_unchanged` and
+  `test_confirm_of_a_real_but_unoffered_dispatch_token_is_rejected` do test what they claim — ran
+  them individually along with the full suite.
+- `test_confirm_of_a_hallucinated_unoffered_token_degrades_to_a_safe_confirm_prompt`'s docstring
+  claims the safe-degradation path (`_handle_brain_confirm`'s `slots=None` fallback,
+  `handle_command`'s "say again" degrade) is "never even exercised" for a reply this validator
+  rejects — checked this is architecturally true, not just asserted by the test itself (which only
+  calls `validate_brain_reply` directly and checks `result.kind == "ask"`, it doesn't touch
+  `CrewConsole`). Traced `crew_console.py`'s `_handle_brain_reply` (lines ~833-853): it calls
+  `validate_brain_reply` first and dispatches on the **returned** `reply.kind`, so a reply
+  degraded from `"confirm"` to `"ask"` by the validator is routed to `_handle_brain_ask`, never to
+  `_handle_brain_confirm` — the claim holds by construction, not just by observation.
+
+### Change 2 — `live_stage2_decider_check.py` scenario 5 — judged effective
+
+Confirmed the scenario can actually surface a chain-drop rather than just look like it can. Read
+`server.py`'s `_handle_escalate`/`_run_job`: each `POST /escalate` spawns its own daemon worker
+thread **immediately**, which calls `decider.decide()` right away — `JobSlot.is_current` is checked
+only once, right before publishing the result, never before starting the decode. This means firing
+four utterances 0.3s apart genuinely produces four concurrent `OllamaClient` calls hitting the same
+serializing Ollama daemon, not four requests silently pre-empted by `JobSlot` before any of them
+reach Ollama — so the scenario's premise (client-side `OllamaClient.DEFAULT_TIMEOUT_S`, 5.0s,
+racing against a real model that can take 32.7s to decide, per D6) is real, not an artifact of this
+tool's own design. The "superseded" vs. "no evidence either way" verdict split is an honest,
+disclosed heuristic (a missing earlier reply is read as "superseded" only if a later one *was*
+answered, and the tool explicitly states in its own output that it cannot distinguish a genuine
+`JobSlot` supersession from a client-side timeout that happened to coincide with a later reply
+landing) — a human reading the output once can tell "answered" from "plausibly superseded, D3
+working as designed" from "no evidence either way, could be chain-drop or still in flight," which
+is what the task brief asked this to surface. `_post`/`_get` helpers are reused correctly from the
+existing scenarios.
+
+### Verification re-run directly (not trusted from the commit message)
+
+- `body-layer/`: `ruff format --check`, `ruff check`, `mypy src` (`cd body-layer`) all clean;
+  `pytest tests -q` → **1292 passed, 4 xfailed**. Matches the claimed 1289→1292/4.
+- `brain-layer/`: `ruff format --check`/`ruff check` clean on `src`/`tests` (the subproject's own
+  `CLAUDE.md`-scoped command set); `mypy src` clean; `pytest tests -q` → **44 passed**, unchanged,
+  matching the claim (the new scenario has no automated test, by design, same posture as the rest
+  of that tool).
+- `ruff format --check tools` (brain-layer, **outside** the subproject's own documented command
+  scope) does flag `tools/live_cross_process_check.py` — confirmed **pre-existing and genuinely
+  untouched by this commit**: `git diff c1b96b1 d51a25b -- brain-layer/tools/
+  live_cross_process_check.py` is empty. The implementer's claim checks out.
+- The three named regression/invariant tests re-run individually and pass:
+  `test_poll_replies_tick_rate_unaffected_by_a_wedged_server`,
+  `test_drain_brain_tick_rate_unaffected_by_a_wedged_brain` (both against real wedged raw sockets,
+  not mocks), and `test_wrong_pick_because_tank_degrades_to_ask`.
+- No Stage 3 answer-leg creep: diff --stat is confined to `belief/brain_reply.py`,
+  `tests/test_brain_reply.py`, `brain-layer/tools/live_stage2_decider_check.py`,
+  `plans/brain-layer/implementation.md`, and two agent-memory files. No touch to `escalation.py`,
+  `tool_api.py`, or `perception/`.
+
+### Optional Refinements
+
+- A mechanical, import-free sync check (e.g. a small script/test parsing both `prompts.py`'s
+  `CLASSIFY_COMMAND_VOCABULARY` and `brain_reply.py`'s `OFFERED_CONFIRM_VOCABULARY` as literal AST
+  tuples/frozensets and asserting equality, without importing either module) would convert the
+  "human must remember" coupling into an enforced one, without violating module independence. Not
+  required at this project phase (single-user, LAN-only, narrow exposure per the Required Fix
+  above) — named for whoever next touches either vocabulary list.
+
+### Verdict
+
+APPROVED WITH MINOR FIXES
+
+### Review Confidence
+
+Full read of both changed files' diffs, `test_brain_reply.py`'s three new tests, and the new
+`overlapping_utterances_scenario()` in full. Traced `crew_console.py`'s `_handle_brain_reply`
+dispatch and `server.py`'s `_handle_escalate`/`_run_job` worker-thread timing directly to verify
+two claims rather than accepting them (the safe-degradation-path-never-reached claim, and the
+chain-drop scenario's premise that requests reach Ollama concurrently rather than being pre-empted
+by `JobSlot`). Both subprojects' full command sets re-run from scratch against this worktree
+(recreated at `d51a25b` after finding it stale) and matched the commit's claimed numbers exactly.
+The pre-existing-formatting-drift claim was independently verified via `git diff` on the specific
+file, not just re-stated. Not separately re-run: the three prior commits' (`68c4b7d`, `8186e7d`,
+`cdb8c7f`) own verification, already covered by the review section above this one.
