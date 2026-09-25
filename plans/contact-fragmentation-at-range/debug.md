@@ -107,6 +107,18 @@ Deliberately not picking one — this needs a decision, and the anti-guessing ru
   exists to stop a burst of new contacts; here it is what spreads one group's founding across ten
   polls and breaks continuity.
 
+  **DONE, 2026-09-25 — `NAKED_EYE_MAX_NEW_GROUPS_PER_POLL` raised 3 → 5** on the user's own
+  perceptual grounding (*"distinction up to 5 is trivial. 6 - 10 take a couple of seconds, 10+ is
+  more difficult and needs more sweeps"* — the subitizing boundary; 3 sat below it). See that
+  constant's comment for why his three tiers need no tiered mechanism: at a 1 s poll, serial
+  admission at 5 per poll reproduces all three.
+
+  **This attacks the trigger, not the runaway.** Fewer polls to admit a dense scene means fewer
+  chances for cluster membership to churn and continuity's majority-overlap vote to fail. Whether
+  that alone is enough is a question for the next sortie over the same outpost — the ambiguity rule
+  below is untouched and still open. If fragmentation persists with the cap at 5, the remaining
+  directions are the real fix and this was only a mitigation.
+
 ## What would confirm a fix
 
 The same sortie shape: a dense outpost approached from 8 km. Success is a small, stable number of
