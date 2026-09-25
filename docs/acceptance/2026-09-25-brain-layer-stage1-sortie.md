@@ -5,13 +5,12 @@ end to end, over HTTP — with no model involved at all. `StubDecider` (a config
 proves every hard part of the wire — non-blocking handoff, stand-by, staleness revalidation,
 newest-wins — without any model risk.
 
-**Branch: `feature/brain-layer`, NOT YET MERGED as this card is written.** DoD (format, lint, type
-check, tests, Reviewer, Security) is complete and clean; the merge itself is the main loop's next
-step, after which this line should read merged with a commit hash — if you are reading this and it
-still says "not yet merged," the merge has not landed and `main` does not have this behaviour yet.
+**Merged 2026-09-25 (`fc4e4af`).** DoD — format, lint, type check, tests, Reviewer, Performance,
+Security — complete and clean. Everything is on `main`, alongside the four other outstanding
+cards.
 
 ```sh
-git checkout feature/brain-layer && git pull
+git checkout main && git pull
 ```
 
 body-layer 1220 tests / 4 xfailed, brain-layer 20 tests — verified this session against an isolated

@@ -1102,8 +1102,9 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   outstanding** — card at `docs/acceptance/2026-09-25-position-belief-sortie.md`. This entry
   flips to `[x]`/merged on merge, per the roadmap-discipline rule below.
 
-- [ ] **BR-1 Stage 1 — Brain layer, first working slice: DoD-passed, Reviewer and Security both
-  APPROVED, NOT YET MERGED (`feature/brain-layer`).** body-layer's half of the first real seam to
+- [x] **BR-1 Stage 1 — Brain layer, first working slice: merged 2026-09-25 (merge `fc4e4af`,
+  `feature/brain-layer`). Merged before flying, deliberately, so any correction the sortie
+  produces lands on `main`; live acceptance remains outstanding.** body-layer's half of the first real seam to
   a new subproject, `brain-layer/` (see that subproject's own roadmap entry in root `ROADMAP.md`,
   Architecture and Status-table sections). A free-text utterance that used to produce silence now
   produces a real spoken response, end to end, over HTTP — with `StubDecider` (a configurable-
