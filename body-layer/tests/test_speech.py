@@ -37,14 +37,19 @@ from belief.speech import (
     render_clear,
     render_confirm_request,
     render_contact_report,
+    render_disambiguation,
+    render_lost_contact,
     render_no_view,
     render_readback,
     render_report,
     render_say_again,
+    render_stand_by,
+    render_unable,
     render_watch_nearest_readback,
     route_event,
 )
 from belief.tools import describe_contact
+from belief.utterance import ReferenceCandidate
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -164,6 +169,59 @@ def test_render_confirm_request_capitalizes_and_appends_confirm() -> None:
 
 def test_render_confirm_request_empty_description() -> None:
     assert render_confirm_request("").text == ", confirm?"
+
+
+def test_render_unable_known_reasons() -> None:
+    assert render_unable("NO_SUCH_COMMAND").text == "Unable, no such command."
+    assert render_unable("NO_MATCH").text == "Unable, I don't see it."
+    assert render_unable("NO_LINE_OF_SIGHT").text == "Unable, no line of sight."
+
+
+def test_render_unable_unrecognised_reason_degrades_plainly() -> None:
+    speech = render_unable("SOMETHING_MADE_UP")
+    assert speech.text == "Unable."
+    assert speech.template == "readback"
+
+
+def test_render_lost_contact() -> None:
+    speech = render_lost_contact()
+    assert speech.text == "Lost him."
+    assert speech.template == "readback"
+
+
+def test_render_stand_by() -> None:
+    speech = render_stand_by()
+    assert speech.text == "Stand by."
+    assert speech.template == "readback"
+
+
+def test_render_disambiguation_two_candidates() -> None:
+    candidates = [
+        ReferenceCandidate(id="CONTACT_1", why="a T-72, near Gemerek"),
+        ReferenceCandidate(id="CONTACT_2", why="a T-72, on the road"),
+    ]
+    speech = render_disambiguation(candidates)
+    assert speech.text == ("Which one -- a T-72, near Gemerek, or a T-72, on the road?")
+    assert "CONTACT_1" not in speech.text
+    assert "CONTACT_2" not in speech.text
+
+
+def test_render_disambiguation_one_candidate() -> None:
+    candidates = [ReferenceCandidate(id="CONTACT_1", why="a T-72, near Gemerek")]
+    speech = render_disambiguation(candidates)
+    assert speech.text == "Which one -- a T-72, near Gemerek?"
+
+
+def test_render_disambiguation_no_candidates() -> None:
+    assert render_disambiguation([]).text == "Which one?"
+
+
+def test_render_disambiguation_caps_at_three() -> None:
+    candidates = [
+        ReferenceCandidate(id=f"CONTACT_{i}", why=f"candidate {i}") for i in range(5)
+    ]
+    speech = render_disambiguation(candidates)
+    assert speech.text.count("candidate") == 3
 
 
 def test_render_clear_with_no_direction_is_bare_clear() -> None:
