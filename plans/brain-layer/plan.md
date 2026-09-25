@@ -99,8 +99,16 @@ never whether he *acts wrongly*.** Model choice becomes a tuning knob rather tha
 dependency. That is what makes it safe to treat the model as swappable.
 
 *(Models pulled onto the user's disk during this investigation: `qwen3:4b` 2.5 GB, `llama3.2:3b`
-2.0 GB, `qwen2.5:7b-instruct` 4.7 GB. `qwen3:4b` is not recommended for anything and can be
-deleted.)*
+2.0 GB, `qwen2.5:7b-instruct` 4.7 GB — and, in the 2026-09-25 follow-up pass,
+`qwen3:4b-instruct-2507-q4_K_M` 2.5 GB and `granite4:micro` 2.1 GB. `qwen3:4b` is not recommended
+for anything and can be deleted.)*
+
+**The measurements above stand as the record of how D6's criteria were arrived at, and those
+criteria are unchanged. D6's *choice* is not what is recorded here any more** — see D6 itself, and
+`body-layer/research/2026-09-25-small-model-measurements.md`. The four findings that mattered
+(reasoning tokens rather than model size set latency; a closed answer collapses latency to
+nothing; small models silently guess on a genuinely ambiguous reference; and the verbatim-quote
+validator fixes that on every model tried) all survived the re-measurement intact.
 
 ---
 
@@ -285,9 +293,44 @@ Checked against each of the small-model constraints:
 - *Classification over generation* — ✅ throughout.
 - *No chain-of-thought dependency* — ✅ and enforced by model choice (D6).
 
-### D6 — Default `qwen2.5:7b-instruct`; fallback `llama3.2:3b`; both a config value, not a constant
+### D6 — Default `qwen3:4b-instruct-2507-q4_K_M`; fallback `granite4:micro`; both a config value, not a constant
 
-**Provenance:** measured on this machine (Measurements 2–4), not published benchmarks.
+**Provenance:** measured on this machine, not published benchmarks. **Revised 2026-09-25** — see
+`body-layer/research/2026-09-25-small-model-measurements.md`. The original pick
+(`qwen2.5:7b-instruct` / `llama3.2:3b`) came from measuring what happened to be on the disk; the
+user objected that qwen2.5 dates from September 2024 and asked for the current landscape to be
+surveyed by search before anything was pulled. Both replacements beat the incumbent pair outright.
+
+| | `qwen3:4b-instruct-2507-q4_K_M` (default) | `granite4:micro` (fallback) |
+|---|---|---|
+| Size | 2.5 GB | 2.1 GB (3.4B params) |
+| Warm latency, closed answer | **38–63 ms** | **30–49 ms** |
+| `<think>` trace observed | never, 0 of ~20 runs including adversarial | never |
+| Ambiguous reference ("that tank", two T-72s) | **ASK 5/5** | **ASK 5/5** |
+| Discriminating reference ("by the village") | PICK correct 4/4 | PICK correct 3/4, ASK 1/4 |
+
+**The margin is not marginal.** The incumbent's *best* behaviour — asking rather than guessing on a
+genuinely ambiguous reference — is what both replacements do by default, at **under a tenth of the
+latency and roughly half the disk**. `qwen3:4b-instruct-2507` is architecturally non-thinking: the
+`<think>` capability is absent from the weights, so there is no flag that can fail to suppress it,
+which is precisely how plain `qwen3:4b` reached 32.7 s.
+
+**Tag correction, found by measuring rather than reading:** bare `qwen3:4b-instruct-2507` does
+**not** resolve on Ollama — only quant-suffixed tags do, hence `-q4_K_M`. `granite4:micro` resolves
+directly, with no `ibm/` prefix.
+
+**The validator stays load-bearing, and this was confirmed rather than assumed.** Neither model has
+a hidden thinking budget, but **both fabricate a plausible, non-verbatim justification when the
+prompt invites deliberation or loses its tight one-line formatting instruction** — `qwen3` told to
+"think step by step" produced 575 tokens over 11 s and picked wrong; both models picked wrong when
+the formatting instruction was removed. D10's verbatim-quote check caught every one of those
+failures. So the production prompt's terseness is a load-bearing part of the design, not a style
+choice, and the validator is not redundant with a better model.
+
+#### Superseded, kept for the reasoning
+
+The original measurement that set D6's *criteria* — which stand unchanged, and which the new picks
+were judged against.
 
 | | `qwen2.5:7b-instruct` (default) | `llama3.2:3b` (fallback) |
 |---|---|---|
@@ -480,7 +523,7 @@ REPL without Ollama running.
 ### Stage 2 — the model decider
 
 `OllamaDecider` behind the same `Decider` protocol, the two prompts, and the D10 validator on the
-body side. `--brain-model`, defaulting to `qwen2.5:7b-instruct`. Warm-up generation at startup.
+body side. `--brain-model`, defaulting to `qwen3:4b-instruct-2507-q4_K_M` (D6, revised 2026-09-25). Warm-up generation at startup.
 
 Shippable: say-again and confirm work for real. Ask is rendered but its answer is not yet acted on.
 
@@ -566,13 +609,16 @@ resolved by correcting the question rather than by answering it.**
 
    Correct: qwen2.5 was released September 2024. The recommendation in D6 came from measuring what
    happened to be on the machine plus two quick pulls, not from surveying what exists. A
-   search-only survey is underway; its findings land in a dated research note and supersede D6's
-   *choice* without disturbing D6's *criteria*, which the measurements earned and which stand:
-   no mandatory thinking budget, reliable constrained output, footprint that coexists with
-   `qwen3:14b` and whisper, and sub-second on a short closed answer.
+   The survey and the measurement pass that followed it are both done
+   (`body-layer/research/2026-09-25-small-local-model-survey.md` and
+   `…-small-model-measurements.md`). **D6 is revised**: `qwen3:4b-instruct-2507-q4_K_M` default,
+   `granite4:micro` fallback. D6's *criteria* were untouched by this — they were earned by
+   measurement and the new candidates were judged against them.
 
-   **Stage 1 needs no model at all**, so this blocks nothing — implementation can start while the
-   survey finishes.
+   The user was right that this was worth checking. Both replacements match the incumbent's best
+   behaviour at under a tenth of the latency and half the disk, and the top pick is
+   *architecturally* non-thinking rather than thinking-with-a-flag — which is the exact failure
+   that made plain `qwen3:4b` twice as slow as a model three times its size.
 
 ---
 
