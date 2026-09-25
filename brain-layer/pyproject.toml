@@ -1,0 +1,28 @@
+[project]
+name = "dcs-brain-layer"
+version = "0.1.0"
+description = "Petrovich's second, slow, deliberative loop -- turns free-text speech body-layer could not parse into unable/confirm/ask, over HTTP, never blocking the 5 Hz perception loop"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src:tests"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff.lint.isort]
+# See audio-adapter/pyproject.toml (and world-model's/aircraft-layer's own
+# copies of this note) for why this is declared explicitly rather than left
+# to ruff's cwd-relative auto-detection: invoking `ruff check brain-layer/src
+# brain-layer/tests` from the repo root vs. cwd brain-layer/ changes whether
+# these local modules are classified as first-party or third-party, flipping
+# I001 findings depending on invocation cwd.
+known-first-party = [
+    "server",
+    "job",
+    "decider",
+]

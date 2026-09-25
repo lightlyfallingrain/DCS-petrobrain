@@ -30,7 +30,7 @@ from belief.crew_console import (
 )
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
-from belief.escalation import EscalationPayload
+from belief.escalation import BrainReply, EscalationPayload
 from belief.tasks import TaskStore
 from belief.voice_commands import ACT_FLOOR, CONFIRM_FLOOR, CONFIRM_WINDOW_S
 from perception import object_model
@@ -88,14 +88,25 @@ class FakeSpeechClient:
 
 
 class _CapturingBrainClient:
+    """`plans/brain-layer/plan.md` extends `BrainReply` with
+    `poll_replies()`; `replies_to_return` is test-controlled queue-less
+    override -- each `poll_replies()` call returns it once, then reverts
+    to `[]`, mirroring a real drain-on-poll client without needing an
+    actual FIFO for these tests' scripted single-reply scenarios."""
+
     def __init__(self) -> None:
         self.payloads: list[EscalationPayload] = []
+        self.replies_to_return: list[BrainReply] = []
 
     def handle(self, payload: EscalationPayload) -> None:
         self.payloads.append(payload)
 
     def awaiting_reply_id(self) -> str | None:
         return None
+
+    def poll_replies(self) -> list[BrainReply]:
+        replies, self.replies_to_return = self.replies_to_return, []
+        return replies
 
 
 def _ownship(x: float = 0.0, z: float = 0.0) -> OwnshipState:
@@ -274,6 +285,321 @@ def test_unresolvable_reference_escalates_and_speaks_nothing() -> None:
     assert lines == []
     assert len(brain_client.payloads) == 1
     assert brain_client.payloads[0].transcript == "should we go north of the ridge?"
+
+
+def _two_ambiguous_bmp_contacts() -> ContactStore:
+    """Two contacts both classified "bmp" but spatially far enough apart
+    that `ContactStore.ingest` keeps them distinct -- `belief.tools.
+    find_contact("bmp")` returns both, mirroring `test_utterance.py`'s own
+    `_store_with_two_far_apart_contacts` helper (kept as a local copy,
+    per this file's fixture convention)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            Observation(
+                id="OBS_1",
+                contact_id=None,
+                t_sim=0.0,
+                t_wall=0.0,
+                source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                classification_raw="BMP-1",
+                bearing_deg=0.0,
+                range_m=1000.0,
+                ownship_at_observation=_ownship(),
+                derived_world_position=DerivedWorldPosition(
+                    x=1000.0, z=0.0, confidence=0.9, method="bearing_range_terrain"
+                ),
+                provenance="test_fixture",
+                classification_level=2,
+            ),
+            Observation(
+                id="OBS_2",
+                contact_id=None,
+                t_sim=0.0,
+                t_wall=0.0,
+                source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+                classification_raw="BMP-2",
+                bearing_deg=180.0,
+                range_m=5000.0,
+                ownship_at_observation=_ownship(),
+                derived_world_position=DerivedWorldPosition(
+                    x=-5000.0, z=0.0, confidence=0.9, method="bearing_range_terrain"
+                ),
+                provenance="test_fixture",
+                classification_level=2,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    assert len(store.contacts) == 2
+    return store
+
+
+def test_drain_brain_speaks_stand_by_once_at_the_threshold() -> None:
+    """`plans/brain-layer/plan.md` D8, and the plan's own Stage 1
+    acceptance criterion: "stand by" is spoken once, not repeatedly, once
+    an escalation has been outstanding for `STAND_BY_AFTER_S`."""
+    from belief.crew_console import STAND_BY_AFTER_S
+
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    overlay = FakeOverlayClient()
+    console = CrewConsole(
+        store=store, brain_client=brain_client, overlay_client=overlay
+    )
+
+    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+
+    console.drain_brain(now_sim=STAND_BY_AFTER_S - 0.1)
+    assert "Stand by." not in overlay.pushed
+
+    console.drain_brain(now_sim=STAND_BY_AFTER_S)
+    assert overlay.pushed.count("Stand by.") == 1
+
+    # Still outstanding on a later poll -- must not speak it again.
+    console.drain_brain(now_sim=STAND_BY_AFTER_S + 5.0)
+    assert overlay.pushed.count("Stand by.") == 1
+
+
+def test_drain_brain_pick_contact_deleted_during_delay_yields_lost_him() -> None:
+    """`plans/brain-layer/plan.md` D4 and the plan's own Stage 1
+    acceptance criterion: "a contact deleted during the delay yields
+    'lost him' rather than an action on a stale id." A brain-decided
+    `PICK` naming a contact_id no longer present in the store must not
+    act on it."""
+    store = _two_ambiguous_bmp_contacts()
+    contact_id = store.contacts[0].id
+    brain_client = _CapturingBrainClient()
+    overlay = FakeOverlayClient()
+    console = CrewConsole(
+        store=store, brain_client=brain_client, overlay_client=overlay
+    )
+
+    console.handle_line("watch that bmp", now_sim=0.0)
+    assert len(brain_client.payloads) == 1
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    # The contact is lost (object-permanence prune, or simply gone from a
+    # fresh store in this test) before the brain's reply lands.
+    del store._contacts[contact_id]
+
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="pick",
+            t_sim=0.0,
+            contact_id=contact_id,
+            because="the one by the village",
+        )
+    ]
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert lines == ["Lost him."]
+    assert overlay.pushed == ["Lost him."]
+
+
+def test_drain_brain_pick_contact_present_acts_and_reads_back() -> None:
+    """D4: `PICK <id>`, contact still present -> act, and read back as
+    today. `matched_intent == "set_attention"` (the escalating utterance
+    was "watch that bmp") means the readback is `render_readback`'s
+    "Watching <id>."."""
+    store = _two_ambiguous_bmp_contacts()
+    contact_id = store.contacts[0].id
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    console.handle_line("watch that bmp", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="pick",
+            t_sim=0.0,
+            contact_id=contact_id,
+            because="the one by the village",
+        )
+    ]
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert lines == [f"Watching {contact_id}."]
+    assert store.contacts[0].attention == "watch"
+
+
+def test_drain_brain_ask_two_survivors_speaks_disambiguation() -> None:
+    """D4: `ASK`, >=2 candidates still present -> ask, using the
+    survivors."""
+    store = _two_ambiguous_bmp_contacts()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    console.handle_line("watch that bmp", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    brain_client.replies_to_return = [
+        BrainReply(utterance_id=utterance_id, kind="ask", t_sim=0.0)
+    ]
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert len(lines) == 1
+    assert lines[0].startswith("Which one -- ")
+
+
+def test_drain_brain_ask_zero_survivors_yields_lost_him() -> None:
+    """D4: `ASK`, 0 candidates still present -> "lost him"."""
+    store = _two_ambiguous_bmp_contacts()
+    ids = [contact.id for contact in store.contacts]
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    console.handle_line("watch that bmp", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    for contact_id in ids:
+        del store._contacts[contact_id]
+
+    brain_client.replies_to_return = [
+        BrainReply(utterance_id=utterance_id, kind="ask", t_sim=0.0)
+    ]
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert lines == ["Lost him."]
+
+
+def test_drain_brain_ask_one_survivor_confirms_rather_than_acts() -> None:
+    """D4: `ASK`, exactly 1 candidate still present -> confirm the
+    survivor rather than acting on it -- "only one left" is not the same
+    as "the pilot meant this one"."""
+    store = _two_ambiguous_bmp_contacts()
+    survivor_id = store.contacts[0].id
+    doomed_id = store.contacts[1].id
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    console.handle_line("watch that bmp", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    del store._contacts[doomed_id]
+
+    brain_client.replies_to_return = [
+        BrainReply(utterance_id=utterance_id, kind="ask", t_sim=0.0)
+    ]
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert len(lines) == 1
+    assert lines[0].endswith(", confirm?")
+    # Not yet acted on.
+    assert store.contacts[0].attention != "watch"
+
+    # Affirming now acts on the confirmed survivor.
+    affirm_lines = console.handle_transcript(
+        "affirm",
+        confidence=0.9,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=2.0,
+    )
+    assert affirm_lines == [f"Watching {survivor_id}."]
+
+
+def test_drain_brain_confirm_sets_pending_confirmation() -> None:
+    """D9: a `CONFIRM <token>` reply sets `_pending_confirmation`, reusing
+    the exact voice confirm-band mechanism."""
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    console.handle_line("scan somethinggarbled", now_sim=0.0)
+    assert len(brain_client.payloads) == 1
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id, kind="confirm", t_sim=0.0, token="report_all"
+        )
+    ]
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert lines == ["Report, confirm?"]
+    assert console._pending_confirmation is not None
+    assert console._pending_confirmation.token == "report_all"
+
+
+def test_drain_brain_unable_speaks_the_reason() -> None:
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id,
+            kind="unable",
+            t_sim=0.0,
+            reason="NO_SUCH_COMMAND",
+        )
+    ]
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert lines == ["Unable, no such command."]
+
+
+def test_drain_brain_discards_stale_reply() -> None:
+    """D4: a reply older than `BRAIN_REPLY_MAX_AGE_S` is discarded
+    silently."""
+    from belief.crew_console import BRAIN_REPLY_MAX_AGE_S
+
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    utterance_id = brain_client.payloads[0].utterance_id
+
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id=utterance_id, kind="unable", t_sim=0.0, reason="NO_MATCH"
+        )
+    ]
+    lines = console.drain_brain(now_sim=BRAIN_REPLY_MAX_AGE_S + 1.0)
+
+    assert lines == []
+
+
+def test_drain_brain_reply_for_untracked_utterance_is_discarded_silently() -> None:
+    """A reply for an id this session never escalated (or already handled)
+    must not raise or speak anything."""
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+    brain_client.replies_to_return = [
+        BrainReply(
+            utterance_id="U_UNKNOWN", kind="unable", t_sim=0.0, reason="NO_MATCH"
+        )
+    ]
+
+    lines = console.drain_brain(now_sim=1.0)
+
+    assert lines == []
+
+
+def test_drain_brain_poll_failure_is_logged_and_continues() -> None:
+    class _RaisingBrainClient:
+        def handle(self, payload: EscalationPayload) -> None:
+            return None
+
+        def awaiting_reply_id(self) -> str | None:
+            return None
+
+        def poll_replies(self) -> list[BrainReply]:
+            raise RuntimeError("simulated transport failure")
+
+    console = CrewConsole(store=ContactStore(), brain_client=_RaisingBrainClient())
+    assert console.drain_brain(now_sim=1.0) == []
 
 
 def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -> None:

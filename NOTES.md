@@ -413,3 +413,39 @@ two functions that must agree (2026-09-19).
   the reproduced code, and weigh a domain expert's structural diagnosis ("there's no gate for X")
   as seriously as a numerically-confirmed mechanism (`position-belief-runaway` debug report +
   review, 2026-09-25).
+
+## Model Selection & Local LLM Serving (brain-layer BR-1)
+
+- **A smaller reasoning model can be slower than a larger one — reasoning-token count dominates
+  latency, not parameter count.** Measured on the same prompt, warm: `qwen3:14b` answered in 16.0 s,
+  `qwen3:4b` took 32.7 s — nearly twice as long from the *smaller* model, because `/no_think` does
+  not reliably suppress `qwen3`'s reasoning trace and the reasoning trace itself is what costs the
+  seconds, independent of model size. Lesson: for a latency-sensitive local-model pick, measure the
+  actual wall time of the target model family under the target prompt shape before assuming smaller
+  = faster; a reasoning-capable model's thinking budget can dominate parameter-count effects
+  entirely (`plans/brain-layer/plan.md` Measurement 1, 2026-09-25).
+
+- **A model recommendation based on "what's already on disk" is a different claim from "the current
+  landscape was surveyed," and a reviewer without domain expertise can still catch the gap by
+  knowing a release date.** The architect's original D6 pick (`qwen2.5:7b-instruct`) came from
+  measuring two models that happened to already be pulled locally. The user's objection —
+  "qwen2.5 is old, 2 years at this time... do investigation... first by web search" — was correct
+  on a fact anyone could check (qwen2.5 released September 2024) without needing to know anything
+  about model internals. The resulting search-first survey (`body-layer/research/
+  2026-09-25-small-local-model-survey.md`) then vindicated the objection on the merits too: both
+  replacement candidates (`qwen3:4b-instruct-2507-q4_K_M`, `granite4:micro`) matched or beat the
+  incumbent's best behaviour at under a tenth of the latency and roughly half the disk footprint.
+  Lesson: "measured what was on hand" and "surveyed what exists" are different claims, and a plan
+  should say which one it's making — a recency check on a named model doesn't require domain
+  expertise, only checking a release date (`plans/brain-layer/plan.md` D6 revision, 2026-09-25).
+
+- **A plan's affected-files table naming a specific dependency is not itself a decision to use it.**
+  The brain-layer plan's own affected-files table named FastAPI for `server.py` in one line, but no
+  numbered Decision in the plan actually argued for that choice, and every other subproject in this
+  repo declares `dependencies = []`. The implementer built on stdlib `http.server.
+  ThreadingHTTPServer` instead — a structural copy of `audio-adapter/src/server.py`'s existing
+  shape — and documented the refusal in `server.py`'s own docstring. Lesson: a table listing a
+  dependency in passing does not carry the same weight as a reasoned Decision section, and per
+  root `CLAUDE.md`/`AGENTS.md` a new third-party dependency is escalation-worthy on its own — an
+  implementer should treat an unargued dependency mention as a candidate to challenge, not a
+  commitment to honor (`plans/brain-layer/implementation.md`, 2026-09-25).

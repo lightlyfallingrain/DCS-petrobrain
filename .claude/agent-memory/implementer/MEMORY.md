@@ -101,5 +101,6 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Revert-test scratch copy](feedback_revert_test_scratch_copy.md) — never `git checkout --` a file with unstaged work to undo a live-patch sanity check; use a scratch copy instead.
 - [Voice command completeness Stage 1-4](project_voice_command_completeness_stage1_4.md) — enrichment test fixture reports observer's own position not bearing/range-projected; plan named wrong audio-adapter test file.
 - [logger.py main() untested by design](project_logger_main_untested_by_design.md) — factor CLI decision logic into pure functions instead of testing main() directly.
+- [BR-1 Stage 1 brain-layer](project_br1_stage1_brain_layer.md) — stale worktree branch, stale feature-branch baseline (1111 not 1192), structural-vs-judgement decider split, stdlib-not-FastAPI.
 - [watch-reporting Stage 1-5](project_watch_reporting_stage1_5.md) — watched-only kind needs singleton grouping too; move-observer-not-target fixtures; slot resolvers must precede phrase table.
 - [position-belief hold-recovery fix](project_position_belief_hold_recovery_fix.md) — quadratic-under-inflation pattern in hold-and-decay branches; fix is two timestamps + always-fresh-from-base inflation.

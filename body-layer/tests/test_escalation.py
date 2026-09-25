@@ -103,6 +103,15 @@ def test_null_brain_client_produces_no_output_and_no_reply() -> None:
     store = ContactStore()
     handle_player_utterance(store, _utterance(), client)  # must not raise
     assert client.awaiting_reply_id() is None
+    assert client.poll_replies() == []
+
+
+def test_debug_print_brain_client_poll_replies_is_also_empty() -> None:
+    """`plans/brain-layer/plan.md` -- `poll_replies()` is a new protocol
+    method, but neither stand-in's documented "does nothing" behaviour
+    changes because of it."""
+    client = DebugPrintBrainClient()
+    assert client.poll_replies() == []
 
 
 def test_debug_print_brain_client_prints_to_its_stream() -> None:

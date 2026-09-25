@@ -46,6 +46,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from belief.utterance import PartialParse
+
 #: Stage 1's measured confidence distribution, recorded as data in
 #: `audio-adapter/research/2026-09-19-corpus-bench-results.md` (a reviewer
 #: caught this comment previously citing `2026-09-19-whisper-model-
@@ -184,12 +186,28 @@ class PendingConfirmation:
     without it, a `scan_bearing_deg`/`report_bearing_deg`/`follow` command
     that lands in the confirm band would lose its qualifiers the moment
     the player says "affirm", since `handle_command` is called again on
-    commit with no other way to recover them."""
+    commit with no other way to recover them.
 
-    token: str
+    `contact_pick` (`plans/brain-layer/plan.md` D4's "ASK, exactly 1
+    candidate still present -> confirm the survivor rather than act on
+    it") is a second, mutually-exclusive payload for a confirm question
+    that resolves a *contact reference*, not a command token -- D4's
+    stated reason is explicit that "only one left" must still be
+    confirmed, never silently acted on, since "only one left" is not the
+    same as "the pilot meant this one". `token` is meaningless when this
+    is set (`belief.crew_console.CrewConsole.handle_transcript`'s affirm
+    branch checks `contact_pick` first); kept as a plain `(contact_id,
+    belief.utterance.PartialParse)` tuple rather than a new dataclass --
+    the parse already carries the escalated intent (`set_attention`'s
+    `attention_level`, or `describe_contact`) to re-run once a single id
+    is confirmed, via `dataclasses.replace(parse,
+    referenced_contact_id=contact_id)`."""
+
+    token: str | None
     description: str
     pending_since_sim: float
     slots: dict[str, int | str] | None = None
+    contact_pick: tuple[str, PartialParse] | None = None
 
 
 Disposition = Literal["fallthrough", "confirm", "say_again", "act"]
