@@ -25,9 +25,13 @@ model-specific logic, rather than being reinvented per decider."""
 
 from __future__ import annotations
 
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
+
+from ollama_client import OllamaClient
+from prompts import render_classify_prompt, render_discriminate_prompt
 
 #: D11's closed set, minus `NO_LINE_OF_SIGHT` -- that reason needs a real
 #: world-model LOS call this module has no access to (the payload crossing
@@ -104,3 +108,129 @@ class StubDecider:
         if reason is not None:
             return {"kind": "unable", "reason": reason}
         return {"kind": "ask"}
+
+
+#: `num_ctx`, set explicitly rather than inherited from Ollama's own 32k
+#: default (D6: "the default costs 4.6GB of nothing" -- measured on this
+#: machine 2026-09-25, dropping to `num_ctx=2048` takes the default
+#: model's resident footprint from 7.5GB to 2.9GB). BR-1's own prompts
+#: measure ~155 tokens; 2048 is comfortable headroom, not a tight fit.
+DEFAULT_NUM_CTX = 2048
+
+#: Generous above the ~6-token closed-vocabulary answer D6 measured, to
+#: leave room for a `BECAUSE <words>` clause quoting several words of the
+#: transcript -- still small enough that a runaway generation (the
+#: fabricated-justification failure mode D6 also measured, "qwen3 told to
+#: 'think step by step' produced 575 tokens") is capped well short of
+#: that, not merely discouraged by the prompt's own wording.
+DEFAULT_NUM_PREDICT = 40
+
+#: `PICK <id> BECAUSE <words>` -- id is whatever token immediately follows
+#: "PICK" (no internal whitespace, matching how `partial_parse`'s
+#: candidate ids are always built body-side); `<words>` is everything
+#: after "BECAUSE", trimmed. Case-insensitive on the two keywords only,
+#: never on the id or the quoted words themselves.
+_PICK_BECAUSE_RE = re.compile(
+    r"^\s*PICK\s+(\S+)\s+BECAUSE\s+(.+?)\s*$", re.IGNORECASE | re.DOTALL
+)
+_ASK_RE = re.compile(r"^\s*ASK\s*$", re.IGNORECASE)
+_CONFIRM_RE = re.compile(r"^\s*CONFIRM\s+(\S+)\s*$", re.IGNORECASE)
+_UNABLE_RE = re.compile(r"^\s*UNABLE\s*$", re.IGNORECASE)
+
+
+def _parse_discriminate_reply(raw: str) -> dict[str, Any]:
+    """Parses a model's raw text answer to `prompts.DISCRIMINATE_PROMPT`
+    into a structured reply dict. **Never raises and never invents a
+    pick** -- anything that is not cleanly `PICK <id> BECAUSE <words>` or
+    `ASK` degrades to `{"kind": "ask"}`, the same "unparseable is not the
+    same as wrong, but it is never acted on directly" posture D10's
+    validator applies to a semantically-invalid reply (this function only
+    handles *syntactic* parsing; D10's own membership/verbatim-quote
+    checks run body-side, on the structured dict this function
+    produces)."""
+    pick_match = _PICK_BECAUSE_RE.match(raw)
+    if pick_match is not None:
+        contact_id, because = pick_match.groups()
+        return {"kind": "pick", "contact_id": contact_id, "because": because.strip()}
+    if _ASK_RE.match(raw) is not None:
+        return {"kind": "ask"}
+    return {"kind": "ask"}
+
+
+def _parse_classify_reply(raw: str) -> dict[str, Any]:
+    """Parses a model's raw text answer to `prompts.CLASSIFY_PROMPT` into
+    a structured reply dict. Anything that is not cleanly
+    `CONFIRM <command>` or `UNABLE` -- including outright unparseable
+    text -- degrades to `{"kind": "unable", "reason": _NO_SUCH_COMMAND}`,
+    the honest default for a call only ever reached because code already
+    found no verb match (module docstring)."""
+    confirm_match = _CONFIRM_RE.match(raw)
+    if confirm_match is not None:
+        return {"kind": "confirm", "token": confirm_match.group(1)}
+    return {"kind": "unable", "reason": _NO_SUCH_COMMAND}
+
+
+@dataclass
+class OllamaDecider:
+    """Stage 2's real `Decider` -- calls a local Ollama daemon through
+    `ollama_client.OllamaClient`, using D5's two prompt shapes
+    (`prompts.py`). Reuses `structural_unable_reason` exactly as
+    `StubDecider` does (module docstring), so the two code-decidable
+    `UNABLE` reasons never touch the model:
+
+    - `NO_MATCH` (matched intent, zero candidates) -- returned directly,
+      no model call. D11: "an empty candidate list *is* `NO_MATCH`... it
+      needs no asking."
+    - `NO_SUCH_COMMAND` (no matched intent at all) -- routed to the
+      **classify** prompt. This is the one case `structural_unable_reason`
+      surfaces without fully resolving: D11's scope also wants "plausibly
+      a command the deterministic grammar missed" to become `CONFIRM
+      <token>` rather than an automatic refusal, and only a model can make
+      that call.
+    - Neither reason (one or more candidates offered) -- routed to the
+      **discriminate** prompt (`PICK <id> BECAUSE <words>` or `ASK`).
+
+    `model`/`num_ctx`/`num_predict` are all plain fields, never hardcoded
+    constants -- D6: "the model is expected to be swapped... no model
+    name is compiled into any logic." `__main__.py`'s `--brain-model` is
+    this field's one caller."""
+
+    model: str
+    ollama_client: OllamaClient = field(default_factory=OllamaClient)
+    num_ctx: int = DEFAULT_NUM_CTX
+    num_predict: int = DEFAULT_NUM_PREDICT
+
+    def decide(self, payload: dict[str, Any]) -> dict[str, Any]:
+        reason = structural_unable_reason(payload)
+        if reason == _NO_MATCH:
+            return {"kind": "unable", "reason": reason}
+        transcript = payload.get("transcript")
+        transcript_text = transcript if isinstance(transcript, str) else ""
+        if reason == _NO_SUCH_COMMAND:
+            return self._classify(transcript_text)
+        return self._discriminate(transcript_text, payload)
+
+    def _classify(self, transcript: str) -> dict[str, Any]:
+        raw = self.ollama_client.generate(
+            model=self.model,
+            prompt=render_classify_prompt(transcript),
+            num_ctx=self.num_ctx,
+            num_predict=self.num_predict,
+        )
+        return _parse_classify_reply(raw)
+
+    def _discriminate(self, transcript: str, payload: dict[str, Any]) -> dict[str, Any]:
+        parse = payload.get("partial_parse") or {}
+        raw_candidates = parse.get("referenced_contact_candidates") or []
+        candidates: list[tuple[str, str]] = [
+            (str(candidate.get("id", "")), str(candidate.get("why", "")))
+            for candidate in raw_candidates
+            if isinstance(candidate, dict)
+        ]
+        raw = self.ollama_client.generate(
+            model=self.model,
+            prompt=render_discriminate_prompt(transcript, candidates),
+            num_ctx=self.num_ctx,
+            num_predict=self.num_predict,
+        )
+        return _parse_discriminate_reply(raw)

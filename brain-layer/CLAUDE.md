@@ -29,11 +29,26 @@ surface ever blocks a caller waiting for a `Decider` to finish -- that is
 the one invariant every other design choice here serves, per the user's
 own constraint: "the game world moves on."
 
-**Stage 1** (current) wires only `StubDecider` -- deterministic, no
-Ollama, an artificial `--stub-delay-s` standing in for real inference
-latency. `OllamaDecider` (Stage 2) is not built yet; `decider.py`'s
-`structural_unable_reason` is written so Stage 2 can reuse it rather than
-duplicating the two `UNABLE` reasons that never need a model at all.
+**Stage 2** (current) adds `OllamaDecider` -- a real local model behind
+the same `Decider` protocol, calling a local Ollama daemon over stdlib
+`urllib` (`src/ollama_client.py`). `decider.py`'s `structural_unable_reason`
+is reused, not duplicated: an empty candidate list is `UNABLE NO_MATCH`
+with no model call; no matched verb at all routes to the **classify**
+prompt (`CONFIRM <token>` or `UNABLE`); one or more candidates routes to
+the **discriminate** prompt (`PICK <id> BECAUSE <words>` or `ASK`,
+Measurement 4's exact wording, `src/prompts.py`). `--decider stub|ollama`
+(`__main__.py`, default `ollama`) selects between it and Stage 1's
+`StubDecider`.
+
+**`Decider.decide()` now runs under its own bounded timeout**
+(`server.py`'s `DEFAULT_DECIDE_TIMEOUT_S`, 12.0s) -- a pre-Stage-2
+prerequisite from `plans/brain-layer/performance-review.md`: nothing
+previously bounded how long a `decide()` call could take, which was
+invisible while `StubDecider` was always fast/boundedly-delayed but
+becomes a real leaked-thread risk once a call can genuinely hang
+(`OllamaDecider`'s own `urllib` timeout, `ollama_client.DEFAULT_TIMEOUT_S`,
+5.0s, is the actual fix; the server-side wrapper is a decider-agnostic
+backstop). See `server.py`'s own docstring.
 
 ## Tech stack
 
@@ -89,7 +104,28 @@ design ... is provable at the REPL without Ollama running").
 
 - `src/decider.py` -- the `Decider` protocol, `structural_unable_reason`
   (D11's two code-decidable `UNABLE` reasons, shared so `OllamaDecider`
-  can reuse it rather than duplicate it), and `StubDecider` (Stage 1).
+  can reuse it rather than duplicate it), `StubDecider` (Stage 1), and
+  `OllamaDecider` (Stage 2) -- calls `ollama_client.OllamaClient` with
+  `prompts.py`'s two prompt shapes, parses the model's raw text reply
+  with `_parse_discriminate_reply`/`_parse_classify_reply` (never raises;
+  unparseable text degrades to `ASK`/`UNABLE NO_SUCH_COMMAND`, the same
+  no-free-judgement posture `StubDecider` already has). `model`/
+  `num_ctx`/`num_predict` are plain fields, never hardcoded (D6: "the
+  model is expected to be swapped").
+- `src/prompts.py` -- the two prompt shapes as module constants,
+  `render_discriminate_prompt`/`render_classify_prompt`.
+  `DISCRIMINATE_PROMPT` is Measurement 4's fix reproduced verbatim.
+  `CLASSIFY_COMMAND_VOCABULARY` is a curated, no-slot-parameter subset of
+  `belief.crew_console.DISPATCHED_COMMAND_TOKENS`, duplicated here
+  (module independence) since this offers the classify call what to
+  choose from -- the body-side D10 validator (`belief.brain_reply`) is
+  the real authority on whether a returned token is legal.
+- `src/ollama_client.py` -- `OllamaClient`, stdlib `urllib` against
+  Ollama's `/api/generate` (`stream: false`, explicit `num_ctx`/
+  `num_predict`). Its own per-request timeout
+  (`DEFAULT_TIMEOUT_S`, 5.0s) is the actual fix for a hung Ollama daemon,
+  not `server.py`'s wrapper (see that module's own docstring).
+  `warm_up()` is D8's mitigation, called once at `__main__.py` startup.
 - `src/job.py` -- `JobSlot` (D3's single-in-flight-job, newest-wins
   policy, generation-counter based so a superseded job's late-arriving
   result is silently dropped rather than published) and `ReplyQueue` (a
@@ -99,7 +135,13 @@ design ... is provable at the REPL without Ollama running").
   fire-and-forget -- submits to `JobSlot`, starts a daemon worker thread,
   never waits on it), `GET /replies/poll` (drains `ReplyQueue`),
   `GET /health`. Structurally a copy of `audio-adapter/src/server.py`'s
-  `ThreadingHTTPServer` + handler-factory shape.
+  `ThreadingHTTPServer` + handler-factory shape. `_run_job` (the daemon
+  worker's body) now races `Decider.decide()` on a throwaway
+  `ThreadPoolExecutor` bounded by `DEFAULT_DECIDE_TIMEOUT_S` -- see the
+  module docstring for why this is a decider-agnostic backstop, not the
+  primary fix for a hung model call.
 - `src/brain_layer/__main__.py` -- `python -m brain_layer` entrypoint,
   untested by design (a live-process driver, same posture as every other
-  subproject's own `__main__.py`/`main()`).
+  subproject's own `__main__.py`/`main()`). `--decider stub|ollama`,
+  `--brain-model` (default `qwen3:4b-instruct-2507-q4_K_M`),
+  `--ollama-url`, `--decide-timeout-s`.

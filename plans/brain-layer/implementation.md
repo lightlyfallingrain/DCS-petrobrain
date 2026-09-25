@@ -229,3 +229,310 @@ templates (D5).
   running measurement is left as a live/DoD acceptance check rather
   than a subprocess-spawning integration test, per this project's
   existing split between automated and live acceptance testing.
+
+---
+
+### Implementation Summary — Stage 2
+
+The two pre-Stage-2 prerequisites (`plans/brain-layer/performance-review.md`),
+then `OllamaDecider` (D5/D6), the D10 body-side validator (`belief.brain_reply`),
+and D11's classify/discriminate split. Mid-task, the coordinator relayed a
+verbatim user direction — "Brain must not block any other functionality. If
+thinking takes time, other things happen meanwhile" — treated as a hard
+acceptance criterion, not a nice-to-have; see "Non-blocking verification"
+below for how each of its three points was addressed and tested.
+
+#### Prerequisite 1 — `poll_replies()` off the shared poll thread
+
+`belief.brain_client.BrainLayerClient.poll_replies()` no longer performs its
+own network call on the caller's thread. It now mirrors `handle()`'s own
+shape: a persistent background thread, started lazily on first call, loops
+forever doing the real `GET /replies/poll` round trip into an internal
+buffer (`_poll_buffer`, guarded by its own `_poll_lock`, separate from
+`handle()`'s `_lock`); `poll_replies()` itself only drains that buffer and
+returns, in microseconds, regardless of whether the far side is healthy,
+down, or wedged. A failed round trip (`BrainLayerError`, raised only inside
+the background loop now) is logged and retried after `_POLL_RETRY_BACKOFF_S`
+(1.0s); a successful round sleeps `_POLL_LOOP_INTERVAL_S` (0.2s) before
+polling again, to avoid hammering a healthy server. **This is a documented
+behaviour change**: `poll_replies()` never raises `BrainLayerError` to a
+synchronous caller any more (Stage 1's version did) — there is no
+synchronous caller left to raise to.
+
+#### Prerequisite 2 — `Decider.decide()`'s own bounded timeout
+
+`brain-layer/src/server.py`'s `_run_job` (the daemon worker thread's body,
+already off the HTTP request thread — `POST /escalate` responds `202`
+before this thread necessarily runs at all) now races `decider.decide(...)`
+on a throwaway single-worker `ThreadPoolExecutor`, bounded by
+`DEFAULT_DECIDE_TIMEOUT_S` (12.0s, a `BrainLayerServer` constructor
+parameter / `--decide-timeout-s` CLI flag). On timeout it logs, calls
+`executor.shutdown(wait=False)` (deliberately not `wait=True` — see below),
+and drops the job, the same documented behaviour any other `decide()`
+exception already gets. **This is a decider-agnostic backstop, not the
+primary fix**: Python cannot forcibly kill a blocked thread, so a truly
+hung `decide()` call still leaves one stuck executor-worker thread behind
+it; the real, effective fix is `OllamaDecider`'s own `urllib` call carrying
+a socket-level timeout (`ollama_client.DEFAULT_TIMEOUT_S`, 5.0s), so
+`decide()` itself reliably returns one way or another well inside the outer
+bound. Both layers are documented in `server.py`'s own docstring as
+deliberately redundant.
+
+#### `OllamaDecider` (D5/D6/D11)
+
+`brain-layer/src/decider.py` adds `OllamaDecider`, calling a local Ollama
+daemon through the new `ollama_client.OllamaClient` (stdlib `urllib`,
+`stream: false`, explicit `num_ctx`/`num_predict` — D6's "the default
+costs 4.6GB of nothing"). Routing, reusing `structural_unable_reason`
+exactly as instructed rather than duplicating it:
+
+- `NO_MATCH` (matched intent, zero candidates) — returned directly, no
+  model call.
+- `NO_SUCH_COMMAND` (no matched intent at all) — routed to the new
+  **classify** prompt (`prompts.CLASSIFY_PROMPT`): does the pilot's own
+  wording plausibly name one of a curated, no-slot-parameter subset of
+  `DISPATCHED_COMMAND_TOKENS` anyway? `CONFIRM <token>` or `UNABLE`. This
+  is the genuine-judgement half of `NO_SUCH_COMMAND` the plan's own scope
+  bullet 2 ("plausibly a command the deterministic grammar missed") names
+  — `structural_unable_reason`'s own docstring already says this reason
+  is "usually" (not always) code-decidable, and this is the residual case.
+- One or more candidates offered — routed to the **discriminate** prompt
+  (`prompts.DISCRIMINATE_PROMPT`, Measurement 4's fix reproduced verbatim):
+  `PICK <id> BECAUSE <words>` or `ASK`.
+
+`_parse_discriminate_reply`/`_parse_classify_reply` are pure, never-raising
+parsers from the model's raw text into a structured reply dict — anything
+unparseable degrades to `{"kind": "ask"}` / `{"kind": "unable", "reason":
+"NO_SUCH_COMMAND"}` respectively, the same no-free-judgement posture
+`StubDecider` already has. This is *syntactic* parsing only; D10's
+semantic checks run body-side.
+
+#### D10 validator — `body-layer/src/belief/brain_reply.py` (new)
+
+Pure functions, no I/O, as the plan specifies. `validate_brain_reply(reply,
+parse, transcript, dispatched_command_tokens)` dispatches on `reply.kind`:
+
+- `pick` — `contact_id` must be one of the candidates *this payload
+  offered*; `because` must appear literally (case-insensitively) in **both**
+  the original transcript **and** the chosen candidate's own `why` text,
+  and must **not** appear in any other candidate's `why` text. This last
+  pair of checks is the literal-substring reading of D10's "must not be
+  equally true of another candidate": the plan's own worked failure case
+  (`PICK CONTACT_7 BECAUSE "tank"`, both candidates T-72s) has "tank"
+  present in the transcript but absent from *both* candidates' own `why`
+  text (both say "T-72", not "tank") — so it fails the "must appear in
+  the chosen candidate's own why" half regardless of the "not in the
+  other's" half, and both readings converge on the same required
+  degrade-to-`ASK` outcome. `test_wrong_pick_because_tank_degrades_to_ask`
+  is the plan's required test, and it passes.
+- `confirm` — `token` must be in `DISPATCHED_COMMAND_TOKENS`.
+- `unable` — `reason` must be one of D11's three (`VALID_UNABLE_REASONS`).
+- `ask` — always passes through unchanged.
+- Any rejection degrades to `ask` (candidates were offered) or `unable
+  NO_MATCH` (none were), per D10 point 6.
+
+Point 1 ("the reply is one of the four allowed forms, or it is rejected")
+is already enforced upstream by `belief.brain_client._reply_from_dict`
+(never constructs a `BrainReply` outside the closed `kind` `Literal`), so
+`validate_brain_reply` dispatches exhaustively over the four rather than
+adding a redundant catch-all.
+
+Wired into `belief.crew_console.CrewConsole._handle_brain_reply`, which now
+runs every incoming reply through the validator *before* D4's own
+revalidation table. This needed one real (not cosmetic) extension:
+`_pending_escalations`'s tuple grew a third element, the original
+transcript (`dict[str, tuple[float, PartialParse, str]]`), since D10's
+`BECAUSE`-verbatim check needs the pilot's own words and nothing else on
+this class already kept them once escalation had posted.
+`_handle_brain_confirm`'s own inline `DISPATCHED_COMMAND_TOKENS` check
+(built in Stage 1, before this validator existed) is kept as a second,
+now-redundant line of defence rather than removed.
+
+#### Non-blocking verification (coordinator's mid-task direction)
+
+1. **No code path in body-layer waits on the brain.** Verified two ways:
+   `test_brain_client.py::test_poll_replies_tick_rate_unaffected_by_a_wedged_server`
+   (client level, a raw-`socket` TCP-accept-then-never-answer fake server)
+   and `test_crew_console.py::test_drain_brain_tick_rate_unaffected_by_a_wedged_brain`
+   (through the real `CrewConsole.drain_brain` entry point the crew-text
+   poll thread actually calls) — both run 20 ticks against a wedged
+   server in well under 1s total (the old design cost 5015ms *per call*).
+2. **`POST /escalate` still returns before any decision exists, and the
+   bounded `decide()` timeout is not implemented by joining a worker on
+   the request thread.** `_handle_escalate` (the HTTP request handler)
+   starts the daemon worker and responds `202` immediately, unchanged from
+   Stage 1 — it never waits on `_run_job` at all, so the
+   `ThreadPoolExecutor`/`future.result(timeout=...)` wait added for
+   prerequisite 2 happens entirely on the already-detached worker thread,
+   never on the thread handling the HTTP request. Proven end to end by
+   `test_server.py::test_decider_timeout_drops_the_job_without_blocking_new_escalations`
+   (a `_HangingDecider` that sleeps 100s; the first `/escalate` still
+   returns `202` immediately, and a *second* escalation posted after the
+   first has timed out is still accepted promptly, proving the worker
+   thread itself returned rather than piling up).
+3. **Other speech is never gated by an in-flight escalation.** Checked by
+   inspection (`CrewConsole._print`/`CalloutScheduler` read no escalation
+   state; `drain_events` calls `scheduler.tick` unconditionally) and pinned
+   with `test_crew_console.py::test_drain_events_not_gated_by_an_in_flight_escalation`:
+   with a real outstanding escalation (`_pending_escalations` non-empty,
+   no reply landed), a queued lifecycle event still speaks normally
+   through `drain_events`. **No gating code path was found to remove** —
+   this is a confirming test, not a bug fix.
+
+#### CLI / run-script
+
+`brain_layer/__main__.py` gains `--decider stub|ollama` (**default
+`stub`**, deliberately — see its own docstring: changing this default
+would silently change `run-scripts/run-brain.sh`'s existing meaning
+underneath it), `--brain-model` (default `qwen3:4b-instruct-2507-q4_K_M`),
+`--ollama-url`, `--decide-timeout-s`. `--decider ollama` triggers one
+throwaway warm-up generation at startup (`OllamaClient.warm_up`, D8's
+mitigation) — logged and swallowed on failure (Ollama may not be up yet),
+not fatal to startup. `run-scripts/run-brain.sh` itself is unchanged in
+behaviour (still passes `--stub-delay-s 0` with no `--decider`, so it still
+runs the stub); its comment now says how to pass `--decider ollama` through
+`$@`.
+
+### Files Changed — Stage 2
+
+**`brain-layer/`**
+- `src/decider.py` — `OllamaDecider`, `_parse_discriminate_reply`,
+  `_parse_classify_reply`, `DEFAULT_NUM_CTX`/`DEFAULT_NUM_PREDICT`.
+- `src/prompts.py` (new) — `CLASSIFY_PROMPT`/`DISCRIMINATE_PROMPT` and
+  their render functions, `CLASSIFY_COMMAND_VOCABULARY`.
+- `src/ollama_client.py` (new) — `OllamaClient`, `OllamaRequestError`.
+- `src/server.py` — `DEFAULT_DECIDE_TIMEOUT_S`, `_run_job`'s
+  `ThreadPoolExecutor`-bounded `decide()` call, `decide_timeout_s` threaded
+  through `BrainLayerServer`/`_make_handler`.
+- `src/brain_layer/__main__.py` — `--decider`/`--brain-model`/
+  `--ollama-url`/`--decide-timeout-s`, warm-up call.
+- `pyproject.toml` — `known-first-party` gains `ollama_client`/`prompts`.
+- `tests/test_decider.py`, `tests/test_server.py` (extended),
+  `tests/test_ollama_client.py` (new).
+
+**`body-layer/`**
+- `src/belief/brain_client.py` — `poll_replies()`'s background-thread
+  redesign (`_poll_loop`, `_poll_once`, `_poll_buffer`, `_poll_lock`).
+- `src/belief/brain_reply.py` (new) — D10's validator.
+- `src/belief/crew_console.py` — `_pending_escalations` gains a third
+  tuple element (transcript); `_handle_brain_reply` calls
+  `validate_brain_reply` first; `_speak_stand_by_if_due`'s unpack updated.
+- `tests/test_brain_client.py` — async-poll test rewrite, `_WedgedServer`,
+  the two new never-blocks/tick-rate tests.
+- `tests/test_brain_reply.py` (new).
+- `tests/test_crew_console.py` — two `PICK`-carrying Stage 1 tests fixed
+  to carry a D10-valid `BECAUSE` (see "Notable Discoveries"), plus the two
+  new non-blocking-verification tests and `_WedgedBrainServer`.
+- `body-layer/CLAUDE.md`/`brain-layer/CLAUDE.md` — Structure entries
+  updated for all of the above.
+
+**Other**
+- `run-scripts/run-brain.sh` — comment only, no behaviour change.
+
+### Tests Added — Stage 2
+
+**`brain-layer/tests/`** (14 new)
+- `test_decider.py` (+13) — `_parse_discriminate_reply`/
+  `_parse_classify_reply` (valid + malformed-degrades cases),
+  `OllamaDecider.decide`'s three routing branches against a fake
+  `OllamaClient` (no model call for `NO_MATCH`; classify/discriminate
+  prompts called with the right content; `num_ctx`/`num_predict` passed
+  through explicitly).
+- `test_server.py` (+1) — `test_decider_timeout_drops_the_job_without_blocking_new_escalations`.
+- `test_ollama_client.py` (new, 3) — a fake `/api/generate` loopback
+  server: request shape (`stream: false`, explicit options), unreachable
+  raises, `warm_up` sends `num_predict: 1`.
+
+**`body-layer/tests/`** (14 new)
+- `test_brain_client.py` (+3 net; 2 old sync tests rewritten as
+  poll-until, 1 replaced) — `test_poll_replies_never_blocks_or_raises_when_the_server_is_unreachable`,
+  `test_poll_replies_tick_rate_unaffected_by_a_wedged_server`.
+- `test_brain_reply.py` (new, 10) — the plan's required
+  `test_wrong_pick_because_tank_degrades_to_ask`, plus every other D10
+  branch (genuine discriminator passes, id-not-offered, fabricated quote,
+  no-candidates degrade target, confirm/unable membership checks, ask
+  passthrough).
+- `test_crew_console.py` (+2) — `test_drain_brain_tick_rate_unaffected_by_a_wedged_brain`,
+  `test_drain_events_not_gated_by_an_in_flight_escalation`.
+
+### Checks — Stage 2
+
+**brain-layer/**
+- `ruff format src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (run from `cd brain-layer`): pass, 9 source files
+- `pytest tests -q`: pass, 35 passed (was 20 at end of Stage 1)
+
+**body-layer/**
+- `ruff format src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (run from `cd body-layer`): pass, 52 source files
+- `pytest tests -q`: pass, 1288 passed, 4 xfailed (was 1139 passed, 4
+  xfailed at end of Stage 1)
+
+### Notable Discoveries — Stage 2
+
+- **Two Stage 1 `test_crew_console.py` tests broke on contact, not by
+  carelessness — their own fabricated `BECAUSE` text ("the one by the
+  village") was never grounded in either the fixture's transcript ("watch
+  that bmp") or its candidates' `why` text ("BMP-1, observed, currently
+  visible." / "BMP-2, ..."), which D10 now correctly rejects.** Root
+  cause: `belief.utterance._resolve_reference` matches the *entire*
+  filler-stripped reference as one substring against `find_contact`, so a
+  reference specific enough to discriminate (e.g. "BMP-1") would resolve
+  unambiguously through the deterministic grammar and never escalate at
+  all — there is no live-utterance phrasing that is *both* ambiguous
+  enough to reach the brain *and* literally names the distinguishing
+  word, for this fixture. Fixed by adding `_make_because_valid_for_d10`,
+  a small test helper that directly extends the pending escalation's
+  tracked transcript (a legitimate seam — these tests exercise `drain_
+  brain`'s D4 logic given an *already*-pending escalation, not `parse_
+  utterance`'s own grammar) to stand in for what a fuller live utterance
+  would have looked like, without re-running the parser.
+- **`OllamaDecider`'s classify-prompt routing resolves a real tension in
+  the plan's own text**, worth recording since it was not obvious from a
+  single read. D11 says both `NO_SUCH_COMMAND` and `NO_MATCH` are
+  "structural... neither needs asking," which taken literally would mean
+  no model call ever reaches the classify prompt at all — but the plan's
+  own scope bullet 2 ("plausibly a command the deterministic grammar
+  missed" -> `Confirm <command>?`) and Stage 2's acceptance line
+  ("confirm work[s] for real") both require a live model to be able to
+  produce a genuine `CONFIRM`. Resolution taken: `structural_unable_
+  reason`'s own docstring already hedges "usually can" rather than
+  "always can," so `NO_SUCH_COMMAND` is read as the one case where a
+  residual judgement call remains (routed to the classify prompt) while
+  `NO_MATCH` (empty candidate list — nothing to discuss regardless of
+  wording) stays fully structural, no model call. This reading is
+  internally consistent and satisfies both texts; it is a genuine
+  interpretive call, not a settled decision in the plan itself, and is
+  worth the user/architect confirming explicitly before BR-1 flies.
+- **`CLASSIFY_COMMAND_VOCABULARY` (`prompts.py`) is a curated, no-slot
+  subset of `DISPATCHED_COMMAND_TOKENS` (7 of ~30+ tokens), not the full
+  vocabulary.** Every excluded token needs a slot parameter the model
+  would also have to extract (a bearing in degrees, a clock hour), which
+  BR-1's single-line closed-vocabulary constraint (D5) is not built to
+  elicit reliably, and building that extraction was out of this stage's
+  named scope. The body-side D10 validator remains the real authority on
+  whether a returned token is legal at all, so this narrowing costs
+  accuracy (fewer commands `CONFIRM` can ever name), never safety —
+  worth widening in a later prompt-tuning pass (Stage 4) if the missing
+  tokens turn out to matter in practice.
+- **`executor.shutdown(wait=False)` in `server.py`'s `_run_job` is a
+  documented, accepted limitation, not a full fix.** Python cannot
+  forcibly terminate a blocked thread, so a `Decider.decide()` call that
+  is genuinely, permanently hung (ignoring its own timeout entirely)
+  still leaves one executor-worker thread stuck forever — the timeout
+  bounds *this method's own caller* (the per-request daemon thread), not
+  the underlying hung call. The real fix is `OllamaDecider`'s own
+  `urllib` timeout making `decide()` reliably return; the server-side
+  wrapper is deliberately kept as a decider-agnostic backstop rather than
+  removed, in case a future `Decider` implementation forgets its own
+  timeout.
+- **Live Ollama was not exercised in this session** — network access to
+  `127.0.0.1:11434` was denied by the sandbox even with the
+  dangerously-disable-sandbox override attempted once. Everything above
+  is verified against fake HTTP servers only, per `brain-layer/CLAUDE.md`'s
+  own testing rule (every unit testable with no live Ollama process); a
+  live-Ollama smoke test (`--decider ollama` against the real
+  `qwen3:4b-instruct-2507-q4_K_M`) is still worth doing before Stage 4's
+  live sortie, but was not done here.

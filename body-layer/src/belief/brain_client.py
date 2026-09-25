@@ -22,20 +22,39 @@ cheap, not a queue: D3 already establishes that the newest utterance is
 the one worth answering, and a client-side queue would just relocate the
 staleness problem D3 solves server-side to the network hop.
 
-**`poll_replies()` is a plain synchronous GET**, unlike `handle()` --
-called once per poll from `belief.crew_console.CrewConsole.drain_brain`,
-the same drain-on-poll shape `AudioAdapterClient.get_transcripts`/
-`AircraftLayerClient.get_f10_commands` already use. A slow poll here is
-bounded by `timeout_s` and, worst case, costs one poll's worth of
-latency -- unlike `handle()`, there is no reply to lose by waiting for
-this call, since the replies are already sitting in `brain-layer`'s own
-queue regardless of when body asks for them."""
+**`poll_replies()` no longer performs its own network call on the
+caller's thread** (`plans/brain-layer/plan.md`'s pre-Stage-2 prerequisite
+1, `plans/brain-layer/performance-review.md`). It used to be a plain
+synchronous GET, bounded only by `poll_timeout_s` (5.0s) -- fine against a
+down brain (a fast connection-refused, measured 13.4ms) but not against a
+*wedged* one (TCP-accepted, never answering): measured at exactly
+`poll_timeout_s`, every single poll, with no backoff, degrading the
+shared crew-text poll thread's cycle by ~83% at its 1s default interval
+and taking perception/F10/transcripts/gaze down with it -- because
+nothing else on that thread runs until this one 5s call returns.
+
+The fix mirrors `handle()`'s own shape exactly, per the user's own
+2026-09-25 direction ("brain must not block any other functionality...
+if thinking takes time, other things happen meanwhile"): a **persistent
+background thread**, started lazily on first `poll_replies()` call, loops
+forever doing the actual `GET /replies/poll` round trip and depositing
+whatever it receives into a small internal buffer. `poll_replies()`
+itself never touches the network at all -- it only drains that buffer
+under a lock and returns, in microseconds, regardless of whether the far
+side is healthy, down, or wedged. A wedged brain therefore degrades this
+client's own *reply latency* (replies simply stop arriving in the buffer
+until the background thread's in-flight call eventually times out and
+retries), never the crew-text poll thread's tick rate -- proven directly
+in `tests/test_crew_console.py`'s
+`test_drain_brain_tick_rate_unaffected_by_a_wedged_brain` and at this
+client's own level in `test_brain_client.py`."""
 
 from __future__ import annotations
 
 import json
 import logging
 import threading
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -53,16 +72,39 @@ logger = logging.getLogger(__name__)
 #: while a POST using it is still in flight).
 _ESCALATE_TIMEOUT_S = 0.5
 
-#: `poll_replies()` has no equivalent urgency constraint (module
-#: docstring) -- generous, matching every other client's own default.
+#: Per network round trip inside the background poll thread's own loop
+#: (module docstring) -- generous, matching every other client's own
+#: default. This is no longer a bound on anything the crew-text poll
+#: thread waits for; it only bounds how long one background-thread
+#: iteration can take before it gives up and retries.
 _POLL_TIMEOUT_S = 5.0
+
+#: How long the background poll thread sleeps between successful (or
+#: fast-failing, e.g. connection-refused) rounds -- keeps it from
+#: hammering a healthy `brain-layer` instance with back-to-back requests
+#: (measured at 0.306ms/call empty, per the performance review, so this
+#: is about network/CPU courtesy, not correctness).
+_POLL_LOOP_INTERVAL_S = 0.2
+
+#: After a failed round (a real wedge, or the process simply not running
+#: yet), back off before retrying rather than immediately re-attempting --
+#: avoids a tight retry loop against a down/wedged server. Independent of
+#: `_POLL_TIMEOUT_S`: a wedged call already costs up to that much time on
+#: its own before this backoff ever applies.
+_POLL_RETRY_BACKOFF_S = 1.0
 
 
 class BrainLayerError(RuntimeError):
-    """Raised by `poll_replies()` when `brain-layer` is unreachable, times
-    out, or returns a malformed response. `handle()` never raises -- see
-    its own docstring; any transport failure there is logged and
-    dropped, mirroring "the game world moves on"."""
+    """Raised internally, inside the background poll thread's own loop,
+    when one `GET /replies/poll` round trip fails (unreachable, timed
+    out, or a malformed response) -- caught there, logged, and retried
+    after `_POLL_RETRY_BACKOFF_S`. **`poll_replies()` itself never raises
+    this** (a behaviour change from Stage 1's synchronous version): a
+    background-thread failure has no synchronous caller to raise to, and
+    "the game world moves on" applies here exactly as it already does to
+    `handle()`. Kept as a public name since tests and callers may still
+    want to catch it around the rare case of constructing/using this
+    client incorrectly."""
 
 
 def _partial_parse_to_dict(parse: PartialParse) -> dict[str, Any]:
@@ -158,6 +200,17 @@ class BrainLayerClient:
     #: real field (not a hardcoded `None` return) so Stage 3 has
     #: somewhere to write it without changing this class's shape.
     _awaiting_reply_id: str | None = field(default=None, repr=False)
+    #: Guards `_poll_buffer` and `_poll_worker` -- separate from `_lock`
+    #: above (which guards the unrelated `handle()` slot) so a poll-thread
+    #: iteration and a `handle()` call never contend on the same lock.
+    _poll_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _poll_worker: threading.Thread | None = field(default=None, repr=False)
+    #: Replies the background poll thread has received but `poll_replies()`
+    #: has not yet drained. Almost always 0-1 items (mirrors
+    #: `brain-layer`'s own `ReplyQueue`, which is drained on every
+    #: successful background-thread round trip), never explicitly bounded
+    #: since it is drained at least once per `_POLL_LOOP_INTERVAL_S`.
+    _poll_buffer: list[BrainReply] = field(default_factory=list, repr=False)
 
     def handle(self, payload: EscalationPayload) -> None:
         """Hands `payload` to the single-slot background worker and
@@ -214,12 +267,50 @@ class BrainLayerClient:
         return self._awaiting_reply_id
 
     def poll_replies(self) -> list[BrainReply]:
-        """`GET /replies/poll` -> every reply decided since the last poll,
-        oldest first. Raises `BrainLayerError` on any transport/parse
-        failure -- `belief.crew_console.CrewConsole.drain_brain` is where
-        that failure is meant to be caught (log-and-continue, the same
-        division `_poll_f10_commands`/`_poll_transcripts` already draw
-        against their own clients)."""
+        """Starts the background poll thread on first call (lazily, like
+        `handle()`'s own worker), then drains and returns whatever it has
+        already received, oldest first. **Never touches the network and
+        never blocks or raises** -- see module docstring. Safe to call
+        from a hot 5Hz loop regardless of whether `brain-layer` is
+        healthy, down, or wedged."""
+        with self._poll_lock:
+            if self._poll_worker is None or not self._poll_worker.is_alive():
+                self._poll_worker = threading.Thread(
+                    target=self._poll_loop, daemon=True
+                )
+                self._poll_worker.start()
+            drained = self._poll_buffer
+            self._poll_buffer = []
+            return drained
+
+    def _poll_loop(self) -> None:
+        """Runs forever on the background poll thread (a daemon thread,
+        same posture as `handle()`'s worker -- never joined, exits only
+        when the process does): repeatedly perform the actual `GET
+        /replies/poll` round trip and append whatever it returns to
+        `_poll_buffer`. A failed round (unreachable or wedged) is logged
+        and retried after `_POLL_RETRY_BACKOFF_S` -- this thread is the
+        only place `BrainLayerError` is ever raised or caught in this
+        client."""
+        while True:
+            try:
+                replies = self._poll_once()
+            except BrainLayerError:
+                logger.warning(
+                    "background brain reply poll failed (retrying)", exc_info=True
+                )
+                time.sleep(_POLL_RETRY_BACKOFF_S)
+                continue
+            if replies:
+                with self._poll_lock:
+                    self._poll_buffer.extend(replies)
+            time.sleep(_POLL_LOOP_INTERVAL_S)
+
+    def _poll_once(self) -> list[BrainReply]:
+        """One `GET /replies/poll` round trip -> every reply decided
+        since the last poll, oldest first. Raises `BrainLayerError` on
+        any transport/parse failure -- only ever called from
+        `_poll_loop`, on the background thread."""
         url = f"{self.base_url}/replies/poll"
         try:
             with urllib.request.urlopen(url, timeout=self.poll_timeout_s) as response:
