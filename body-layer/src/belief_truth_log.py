@@ -263,6 +263,56 @@ class BeliefTruthLogWriter:
         self._polls_since_flush = 0
         self._stderr = stderr
 
+    def write_speech(
+        self,
+        *,
+        t_sim: float,
+        text: str,
+        urgent: bool,
+        gaze_label: str | None = None,
+        gaze_center_deg: float | None = None,
+        optic_name: str | None = None,
+    ) -> None:
+        """Write one `kind: "speech"` row -- what Petrovich actually said,
+        on the same timeline as the belief-versus-truth rows.
+
+        **Why it belongs in this file and not its own** (user, 2026-09-25):
+        *"we should also have ... what Petrovich says to that log also, then
+        all the information would be in one log file."* Correlating a
+        callout against the belief state that produced it is the whole
+        point, and two files with two clocks make that a join the reader has
+        to perform by hand.
+
+        `gaze_label`/`gaze_center_deg`/`optic_name` capture **where he was
+        looking at the moment he spoke**. That is what turns the defect this
+        was added for -- *"callouts like 'ground 10 o'clock, 2 km' even
+        though scan right has been commanded"* -- from two observations a
+        human has to correlate into one line that either shows the
+        contradiction or does not.
+
+        Rows carry `kind` so a reader can tell them apart. Belief-truth rows
+        written before this existed have no `kind` field, so **treat a
+        missing `kind` as `"belief_truth"`** rather than skipping the row --
+        there are already such files on the user's disk."""
+        row: dict[str, object] = {
+            "kind": "speech",
+            "t_sim": t_sim,
+            "text": text,
+            "urgent": urgent,
+        }
+        if gaze_label is not None:
+            row["gaze_label"] = gaze_label
+        if gaze_center_deg is not None:
+            row["gaze_center_deg"] = gaze_center_deg
+        if optic_name is not None:
+            row["optic_name"] = optic_name
+        self._file.write(json.dumps(row) + "\n")
+        # Speech is rare (a handful of lines a minute) and is the row most
+        # likely to be the last thing written before something goes wrong,
+        # so it flushes immediately rather than waiting for the poll
+        # buffer -- the same reasoning `--speech-log` already applies.
+        self._file.flush()
+
     def write_poll(
         self,
         collector: DetectionTraceCollector,

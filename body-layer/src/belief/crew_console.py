@@ -680,6 +680,22 @@ class CrewConsole:
     #: independent of `--overlay`'s own `AircraftLayerClient` wiring (a
     #: different process, a different URL).
     speech_client: AudioAdapterClient | None = None
+
+    #: Optional callback invoked for every line this console speaks, with
+    #: `(line, urgent)` -- `logger` wires it to `belief_truth_log.
+    #: BeliefTruthLogWriter.write_speech` so what Petrovich says lands on
+    #: the same timeline as the belief-versus-truth rows (user,
+    #: 2026-09-25: "then all the information would be in one log file").
+    #:
+    #: **A callback rather than the writer itself, deliberately.** This
+    #: module lives in `belief/` and `belief_truth_log` imports *from*
+    #: `belief/` -- holding the writer here would close that loop. The
+    #: callback keeps the dependency pointing one way, and matches the
+    #: optional-sink shape `output`/`overlay_client`/`speech_client`
+    #: already use. `logger` supplies a closure that can read the current
+    #: gaze and optic at call time, which is the part that makes these
+    #: rows answer "what was he looking at when he said that".
+    speech_log_sink: Callable[[str, bool], None] | None = None
     #: `plans/callout-scheduling/plan.md` -- the speech-time scheduler
     #: `drain_events` delegates to. One scheduler per `CrewConsole`
     #: (per-session occupancy state), mirroring every other optional-sink
@@ -1927,6 +1943,16 @@ class CrewConsole:
         for line in lines:
             if self.output is not None:
                 print(line, file=self.output)
+            if self.speech_log_sink is not None:
+                try:
+                    self.speech_log_sink(line, bypass_gate)
+                except Exception:
+                    # Deliberately broad: a debug log must never be the reason
+                    # Petrovich stops talking.
+                    logger.warning(
+                        "speech log sink failed for crew-text line (continuing)",
+                        exc_info=True,
+                    )
             if self.overlay_client is not None:
                 overlay_line = (
                     f"{_URGENT_OVERLAY_PREFIX}{line}" if bypass_gate else line
