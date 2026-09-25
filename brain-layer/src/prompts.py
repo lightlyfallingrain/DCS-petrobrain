@@ -52,13 +52,27 @@ CLASSIFY_COMMAND_VOCABULARY: tuple[str, ...] = (
     "stop_talking",
 )
 
-#: Measurement 4's fix (plan `## Measurement 4`), reproduced verbatim
-#: down to the imperative mood and the `PICK <id> BECAUSE <words>` / `ASK`
-#: reply forms -- this exact wording is what turned a 3B model's silent
-#: wrong guess into a caught, honest `ASK` on every model tried (D6).
+#: Measurement 4's fix (plan `## Measurement 4`), down to the imperative
+#: mood and the `PICK <id> BECAUSE <words>` / `ASK` reply forms -- this
+#: wording is what turned a 3B model's silent wrong guess into a caught,
+#: honest `ASK` on every model tried (D6). Two lines were added after the
+#: measurement, found by running a real model against a live server
+#: 2026-09-25 (not by the tests, which passed because they fed the parser
+#: evidence the real model does not produce): an opening "reply with
+#: EXACTLY ONE line" sentence, guarding the same runaway-deliberation
+#: failure D6 measured ("think step by step" -> 575 tokens, picked
+#: wrong); and a narrowed BECAUSE instruction -- the model otherwise
+#: mirrors this prompt's own `Pilot said: "..."` rendering and either
+#: wraps its evidence in quote characters (stripped by `decider._unquote`,
+#: the more common failure and the one that can never be worked around by
+#: prompt wording alone) or quotes the entire sentence (which can never be
+#: grounded in one candidate's own `why` text -- this is the one the
+#: prompt wording below actually prevents).
 #: `{candidates}` is a newline-joined `"<id>: <why>"` list; `{transcript}`
 #: is the pilot's own words, never anything derived or paraphrased.
-DISCRIMINATE_PROMPT = """The code has ALREADY established that the pilot's reference is ambiguous. Your ONLY job is to decide whether the pilot's own words contain something that singles out one candidate. You must quote those words verbatim.
+DISCRIMINATE_PROMPT = """Reply with EXACTLY ONE line, nothing else, no explanation.
+
+The code has ALREADY established that the pilot's reference is ambiguous. Your ONLY job is to decide whether the pilot's own words contain something that singles out one candidate. Quote ONLY the single distinguishing word or short phrase - a place, a landmark, a position. NEVER quote the whole sentence: the words you quote must appear in that candidate's description and not the other's.
 
 Pilot said: "{transcript}"
 
@@ -75,7 +89,9 @@ Use ASK unless the pilot's words clearly name something true of one candidate an
 #: sibling to `DISCRIMINATE_PROMPT`, for the `NO_SUCH_COMMAND` case
 #: (module docstring). `{commands}` is a newline-joined list of
 #: `CLASSIFY_COMMAND_VOCABULARY`; `{transcript}` is the pilot's own words.
-CLASSIFY_PROMPT = """The pilot said something that did not match any known command exactly. Decide whether it plausibly means one of the commands below anyway, or does not match any of them at all.
+CLASSIFY_PROMPT = """Reply with EXACTLY ONE line, nothing else, no explanation.
+
+The pilot said something that did not match any known command exactly. Decide whether it plausibly means one of the commands below anyway, or does not match any of them at all.
 
 Pilot said: "{transcript}"
 
