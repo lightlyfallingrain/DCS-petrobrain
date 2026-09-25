@@ -1510,9 +1510,28 @@ class CrewConsole:
                 Treating every merely-inert task as "active" would make one Cancel
                 Task press cancel a whole session's worth of stale scans, so this
                 groups active tasks by `kind` and keeps only each group's newest
-                (`_active_tasks_by_kind`) before acting -- exactly the selection
+                (`_active_tasks_by_kind`) -- exactly the selection
                 `logger._active_gaze` already uses for gaze, generalised to any
-                kind and to cancellation rather than gaze.
+                kind.
+
+                **That selection now decides only what the readback NAMES. What
+                gets cancelled is every active task of the selected kinds
+                (2026-09-25, user, after flying it).** Cancelling only each kind's
+                newest task *resurrected* the one it had superseded: an older
+                `scan_area` is inert precisely because a newer one outranks it in
+                `logger._active_gaze`'s "most recent wins" tie-break, so cancelling
+                the newer one promotes the older one straight back into governing
+                the gaze. He said "cancel", confirmed "cancel everything", heard
+                both current modes named -- and an earlier "scan south" was still
+                steering afterwards.
+
+                The original worry ("a whole session's worth of stale scans") had
+                it backwards: those stale tasks are exactly what resurrects, and
+                cancelling them is free because they were already inert. **Cancel
+                everything must really cancel everything** -- the user's own words.
+                The readback keeps naming only the governing tasks, because naming
+                every stale scan would be noise about things that were not doing
+                anything anyway.
 
                 **Cones 2C sortie fix, unchanged: "active" means `status !=
                 "cancelled"`, not `status == "pending"`.** A `scan_area` task is a
@@ -1539,17 +1558,24 @@ class CrewConsole:
         # when nothing was cancelled at all.
         if self.tasks is None:
             return [_NOTHING_TO_STOP]
-        active = _active_tasks_by_kind(self.tasks.tasks)
+        # Cancel EVERY active task of the selected kinds, not only each
+        # kind's newest -- see this method's "supersession is not
+        # cancellation" note above. The readback still names only the
+        # governing ones, so the wording is unchanged.
+        governing = _active_tasks_by_kind(self.tasks.tasks)
+        doomed = [task for task in self.tasks.tasks if task.status != "cancelled"]
         if kinds is not None:
-            active = [task for task in active if task.kind in kinds]
-        if not active:
+            governing = [task for task in governing if task.kind in kinds]
+            doomed = [task for task in doomed if task.kind in kinds]
+        if not doomed:
             return [_NOTHING_TO_STOP]
         descriptions: list[str] = []
-        for task in active:
+        for task in governing:
             description = self._describe_task_for_speech(task)
-            cancel_task(self.store, self.tasks, task.id)
             if description is not None:
                 descriptions.append(description)
+        for task in doomed:
+            cancel_task(self.store, self.tasks, task.id)
         return [render_cancel_readback(_join_task_descriptions(descriptions)).text]
 
     def _handle_stop_talking(self) -> None:
