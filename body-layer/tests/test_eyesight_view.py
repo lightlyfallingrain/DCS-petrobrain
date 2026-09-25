@@ -373,3 +373,78 @@ def test_binocular_optic_selects_blue_gaze_cone() -> None:
         color=True,
     )
     assert "\x1b[34m" in frame  # _BLUE
+
+
+def _many_distant_markers(count: int) -> list[BeliefMarker]:
+    """`count` believed contacts, all beyond a 5 km radius, spread in
+    bearing and increasing in range."""
+    return [
+        BeliefMarker(
+            label="AR",
+            bearing_deg=float(-120 + index * 6),
+            range_m=5200.0 + index * 180.0,
+        )
+        for index in range(count)
+    ]
+
+
+def _frame(markers: list[BeliefMarker], max_lines: int | None) -> list[str]:
+    return render_frame(
+        gaze=Gaze(center_azimuth_deg=-60.0, half_width_deg=15.0, label="11_oclock"),
+        optic_name="unaided",
+        rear_cutoff_deg=130.0,
+        believed=markers,
+        radius_m=5000.0,
+        color=False,
+        max_lines=max_lines,
+    ).splitlines()
+
+
+def test_frame_never_exceeds_its_line_budget() -> None:
+    """Found in use, not in testing (user, 2026-09-25): a long
+    beyond-radius list pushed the frame past the console's ~60 lines and
+    scrolled the canvas off the top — so the picture this tool exists to
+    show was the part that got lost. His workaround was raising the radius
+    to 10 km, which is backwards: it shrinks the list by making the view
+    coarser.
+
+    The list is capped rather than the canvas, because the canvas is the
+    instrument and the list is an overflow note about what it could not
+    draw."""
+    markers = _many_distant_markers(40)
+
+    assert len(_frame(markers, None)) > 60, "fixture must actually overflow"
+
+    for budget in (60, 40, 30):
+        lines = _frame(markers, budget)
+        assert len(lines) <= budget, f"budget {budget} exceeded: {len(lines)}"
+
+
+def test_a_truncated_list_says_so_and_keeps_the_nearest() -> None:
+    """Truncation must be visible and must keep the *nearest* entries — a
+    silently shortened list is the one way this could mislead, and the
+    near ones are the ones most likely to matter."""
+    lines = _frame(_many_distant_markers(40), 40)
+
+    assert lines[-1].strip().startswith("... and "), lines[-1]
+    assert "more" in lines[-1]
+
+    listed = [line for line in lines if line.startswith("  believed")]
+    ranges = [float(line.rsplit(" ", 1)[-1].removesuffix("km")) for line in listed]
+    assert ranges == sorted(ranges), "beyond-radius list is not nearest-first"
+    assert abs(ranges[0] - 5.2) < 0.05, ranges[:3]
+
+
+def test_beyond_radius_list_is_ordered_by_range_not_by_rendered_text() -> None:
+    """The original ordering sorted the rendered line alphabetically, so
+    'believed' sorted before 'truth' and then by label — a 9 km contact
+    could outrank a 5.1 km one. Nearest-first is what survives
+    truncation, so the ordering is load-bearing rather than cosmetic."""
+    markers = [
+        BeliefMarker(label="U", bearing_deg=10.0, range_m=9000.0),
+        BeliefMarker(label="AA", bearing_deg=-10.0, range_m=5100.0),
+    ]
+    listed = [line for line in _frame(markers, None) if line.startswith("  believed")]
+
+    assert "5.1km" in listed[0], listed
+    assert "9.0km" in listed[1], listed
