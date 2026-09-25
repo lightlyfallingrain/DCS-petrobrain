@@ -122,8 +122,10 @@ Each `poll()`:
     `_live_ids`/`_prune_stale`, never by dict membership alone.
 5. **Simultaneous-detection cap counts groups, not objects**
    (`NAKED_EYE_MAX_NEW_GROUPS_PER_POLL`, `plans/detection-cones-slice2/
-   plan.md`'s 2A.5 -- renamed from `NAKED_EYE_MAX_NEW_PER_POLL`, value
-   unchanged at 3). The model this replaces treated a dense group as harder
+   plan.md`'s 2A.5 -- renamed from `NAKED_EYE_MAX_NEW_PER_POLL`; **value
+   raised 3 -> 5 on 2026-09-25, user-affirmed, see that constant's own
+   comment for the subitizing grounding**). The model this replaces treated
+   a dense group as harder
    to take in than a sparse one, purely because it had more members to
    throttle one at a time -- backwards: a human looking straight at ten
    co-located trucks sees ten trucks at once, and it is a *spread-out* ten
@@ -243,13 +245,46 @@ from perception.visibility import VisibilityResult, check_visibility
 #: Caps newly-admitted *clusters* (groups) per poll tick, nearest-first --
 #: how many distinct things register in one fixation, not how many
 #: individual objects (`plans/detection-cones-slice2/plan.md`'s 2A.5;
-#: renamed from `NAKED_EYE_MAX_NEW_PER_POLL`, which counted objects; value
-#: unchanged at 3, deliberately, so the 2C sortie can attribute a later
-#: change in behaviour to the scan loop rather than to a value that moved
-#: at the same time as its unit). Originally plan Decision #2 -- proceeding
-#: on the stated recommendation (not explicitly affirmed by the user),
-#: flagged as cheap to change mid-implementation.
-NAKED_EYE_MAX_NEW_GROUPS_PER_POLL: Final[int] = 3
+#: renamed from `NAKED_EYE_MAX_NEW_PER_POLL`, which counted objects).
+#:
+#: **5, raised from 3 on 2026-09-25 -- and this is the first value the user
+#: has actually affirmed.** The 3 came from plan Decision #2's stated
+#: recommendation, which this constant's own comment recorded as "not
+#: explicitly affirmed by the user" and "cheap to change". His grounding,
+#: given while diagnosing an outpost that fragmented into 18 contacts:
+#:
+#:   *"Human eye could detect that there's many somethings or groups of
+#:   somethings easily. distinction up to 5 is trivial. 6 - 10 take a
+#:   couple of seconds, 10+ is more difficult and needs more sweeps."*
+#:
+#: That is the subitizing boundary, and 3 sat below it -- the cap was
+#: modelling a narrower glance than a human actually takes in.
+#:
+#: **The rest of his tiering then falls out of this one number, with no
+#: extra mechanism**, because the cap is per *poll* and the live poll
+#: interval is 1 s (`logger._DEFAULT_POLL_INTERVAL_S`):
+#:
+#: | groups present | polls to admit | elapsed | his description |
+#: |---|---|---|---|
+#: | up to 5 | 1 | ~1 s | "trivial" |
+#: | 6-10 | 2 | ~2 s | "a couple of seconds" |
+#: | 10+ | 3+ | 3 s+ | "needs more sweeps" |
+#:
+#: So no tiered or time-aware cap is needed: serial admission at 5 per
+#: second *is* the tiering. Worth stating because the obvious reading of
+#: his three tiers is three thresholds.
+#:
+#: **Second effect, and the reason it was raised now.** A group founded
+#: across many polls is what breaks object-permanence continuity
+#: (`plans/contact-fragmentation-at-range/debug.md`): continuity resolves
+#: by majority object overlap between successive polls, and a dense scene
+#: admitted three-at-a-time spreads one outpost's founding across ~10
+#: polls, during which cluster membership churns and the vote fails --
+#: dropping through to the association gate, where the ambiguity runaway
+#: waits. Fewer polls to admit the same scene means fewer chances to lose
+#: continuity. This attacks that trigger; it does not by itself change the
+#: ambiguity rule, which remains an open question in that note.
+NAKED_EYE_MAX_NEW_GROUPS_PER_POLL: Final[int] = 5
 
 #: How long an object_id stays "known" (previously visible/acquired) after
 #: it was last actually seen, before the acquisition dicts evict it (2C,
