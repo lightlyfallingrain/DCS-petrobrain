@@ -13,6 +13,12 @@ source ./petrobrain.env
 # omits the flag rather than the binary hardcoding loopback.
 # Relative, not $PETROBRAIN_PATH -- that variable holds the WSL/Windows path
 # (/mnt/d/...) and does not resolve on the Mac, where this service runs.
+#
+# `__main__.py`'s own `--decider` default is still `stub` (Stage 2,
+# `plans/brain-layer/plan.md`) precisely so this script's meaning does not
+# change silently underneath it -- pass `--decider ollama` (via $@ below) to
+# run the real model instead, e.g.:
+#   ./run-brain.sh --decider ollama
 pushd ../brain-layer/ && PYTHONPATH=src .venv/bin/python -m brain_layer \
     --stub-delay-s 0 \
     $@

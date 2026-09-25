@@ -830,21 +830,40 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   `poll_replies() -> list[BrainReply]` on the `BrainClient` protocol, the asynchronous-reply half
   D2's "the brain replies into its own queue" needs — both stand-ins above simply return `[]`,
   their documented behaviour unchanged.
-- `src/belief/brain_client.py` (`plans/brain-layer/plan.md` BR-1 Stage 1) — `BrainLayerClient`,
-  the first real (non-stand-in) `BrainClient`: an independent copy of `aircraft_client`/
-  `audio_client`'s stdlib-`urllib` shape (module independence — no import of `brain-layer/`),
-  except `handle()` never blocks the caller (D2) — it hands the payload to a single-slot
-  background worker thread and returns in microseconds; the worker does the actual `POST
-  /escalate`. A `handle()` call landing while the worker is mid-POST overwrites that slot (this
-  client's own local mirror of `brain-layer`'s server-side `job.JobSlot` newest-wins, D3) rather
-  than queuing — the worker, once free, only ever posts the most recently handed-over payload.
-  `poll_replies()` is a plain synchronous `GET /replies/poll`, called once per poll from
-  `CrewConsole.drain_brain` (there is no reply to lose by waiting on this call, unlike `handle()`
-  — raises `BrainLayerError` on transport/parse failure, same posture as `AudioAdapterClient`'s
-  own methods). `_reply_from_dict` is a defensive structural parse only (skip malformed items,
-  never raise) — **not** D10's semantic validator (a `PICK`'s id was actually offered, a
-  `BECAUSE` clause's words actually appear in the transcript), which is Stage 2's job once a real
-  model can produce a malformed answer at all; `StubDecider` never does.
+- `src/belief/brain_reply.py` (`plans/brain-layer/plan.md` BR-1 Stage 2, D10) — the deterministic,
+  body-side, pure-function validator every `BrainReply` passes through before
+  `CrewConsole._handle_brain_reply` acts on it: a `"pick"`'s id must be one of the candidates
+  *this payload offered*; its `BECAUSE` words must appear literally (case-insensitively) in both
+  the original transcript and the chosen candidate's own `why` text, and not in any other
+  candidate's `why` — the pure-substring reading of "must not be equally true of another
+  candidate" (a wrong `PICK CONTACT_7 BECAUSE "tank"` fails because "tank" names *neither*
+  candidate's own `why` text, both saying "T-72"; `"near Gemerek"` passes because it names one
+  `why` and not the other). A `"confirm"`'s token must be in `DISPATCHED_COMMAND_TOKENS`; an
+  `"unable"`'s reason must be one of D11's three. Any rejection degrades to `"ask"` if the payload
+  offered candidates, else `"unable" NO_MATCH` — never silence, never a guess. `"ask"` itself
+  always passes through unchanged (nothing to validate). `tests/test_brain_reply.py`'s
+  `test_wrong_pick_because_tank_degrades_to_ask` is the plan's own required test.
+- `src/belief/brain_client.py` (`plans/brain-layer/plan.md` BR-1) — `BrainLayerClient`, the first
+  real (non-stand-in) `BrainClient`: an independent copy of `aircraft_client`/`audio_client`'s
+  stdlib-`urllib` shape (module independence — no import of `brain-layer/`), except `handle()`
+  never blocks the caller (D2) — it hands the payload to a single-slot background worker thread
+  and returns in microseconds; the worker does the actual `POST /escalate`. A `handle()` call
+  landing while the worker is mid-POST overwrites that slot (this client's own local mirror of
+  `brain-layer`'s server-side `job.JobSlot` newest-wins, D3) rather than queuing — the worker,
+  once free, only ever posts the most recently handed-over payload.
+  **`poll_replies()` no longer performs its own network call on the caller's thread**
+  (a pre-Stage-2 prerequisite, `plans/brain-layer/performance-review.md`: a wedged-but-up brain
+  process used to cost the full `poll_timeout_s`, 5s, on *every* poll with no backoff — an ~83%
+  tick-rate loss on the shared crew-text poll thread at its 1s default interval). It now mirrors
+  `handle()`'s own shape: a persistent background thread, started lazily on first call, loops
+  forever doing the actual `GET /replies/poll` round trip into an internal buffer;
+  `poll_replies()` itself only drains that buffer and returns, in microseconds, regardless of
+  whether the far side is healthy, down, or wedged — **never raises** any more (a behaviour change
+  from Stage 1's synchronous version; `BrainLayerError` is now raised and caught only inside the
+  background thread's own loop, logged and retried after backoff). `_reply_from_dict` is a
+  defensive structural parse only (skip malformed items, never raise) — **not** D10's semantic
+  validator (`belief.brain_reply`, see its own entry below), which checks a `PICK`'s id was
+  actually offered and a `BECAUSE` clause's words actually appear in the transcript.
 - `src/belief/crew_console.py` (BL-5a) — `CrewConsole`, the typed-input/printed-output player-facing
   session, deliberately **not** an extension of `belief.console.Console` (that module is an explicit
   developer debug tool; `CrewConsole` runs typed sentences through `parse_utterance`'s grammar and
@@ -858,25 +877,29 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   call and an unrendered kind (`CONTACT_ATTENTION_CHANGED`) is harmlessly re-skipped every poll.
   `!inject-urgent <contact_id> <text>` is Stage 5's clearly-labelled test harness for the
   bypass-gate/urgent-call path — not a production intent or a real detector.
-  `drain_brain(now_sim)` (`plans/brain-layer/plan.md` BR-1 Stage 1, called from `logger.py`'s
+  `drain_brain(now_sim)` (`plans/brain-layer/plan.md` BR-1, called from `logger.py`'s
   `--crew-text` poll loop right after `drain_events`) drains `brain_client.poll_replies()`,
   speaks D8's deterministic "stand by" (`STAND_BY_AFTER_S`, once per outstanding escalation, via
-  `_speak_stand_by_if_due`) and applies D4's revalidation table per reply
-  (`_handle_brain_reply`): a reply older than `BRAIN_REPLY_MAX_AGE_S` is discarded silently; a
-  `"pick"` whose contact is gone, or an `"ask"` whose candidates have all vanished, speaks
-  `belief.speech.render_lost_contact` ("Lost him.") rather than acting on a stale id; an `"ask"`
-  narrowed to exactly one still-present candidate is **confirmed, not acted on** (D4: "only one
-  left" is not the same as "the pilot meant this one") via a new `PendingConfirmation.
-  contact_pick: tuple[str, PartialParse] | None` field (`belief.voice_commands`) — a
-  mutually-exclusive sibling of the existing `token` field for a confirm question that resolves a
-  *contact reference* rather than a command token, committed by `handle_transcript`'s existing
-  affirm branch via `dataclasses.replace(parse, referenced_contact_id=contact_id)` into `_act`. A
-  `"confirm"` reply reuses `PendingConfirmation`/`CONFIRM_WINDOW_S` exactly as the voice
-  confirm-band does — "there is not a second confirm mechanism" (D9) — with an inline
-  `DISPATCHED_COMMAND_TOKENS` membership check standing in for Stage 2's own D10 validator.
-  `_pending_escalations: dict[str, tuple[float, PartialParse]]` (keyed by `utterance_id`, written
-  by `_handle_utterance`) is what `_handle_brain_reply` revalidates against and what
-  `_speak_stand_by_if_due` reads for elapsed time.
+  `_speak_stand_by_if_due`), runs the reply through D10's validator
+  (`belief.brain_reply.validate_brain_reply`, see its own entry below), and applies D4's
+  revalidation table to whatever comes back (`_handle_brain_reply`): a reply older than
+  `BRAIN_REPLY_MAX_AGE_S` is discarded silently; a `"pick"` whose contact is gone, or an `"ask"`
+  whose candidates have all vanished, speaks `belief.speech.render_lost_contact` ("Lost him.")
+  rather than acting on a stale id; an `"ask"` narrowed to exactly one still-present candidate is
+  **confirmed, not acted on** (D4: "only one left" is not the same as "the pilot meant this one")
+  via a new `PendingConfirmation.contact_pick: tuple[str, PartialParse] | None` field
+  (`belief.voice_commands`) — a mutually-exclusive sibling of the existing `token` field for a
+  confirm question that resolves a *contact reference* rather than a command token, committed by
+  `handle_transcript`'s existing affirm branch via `dataclasses.replace(parse,
+  referenced_contact_id=contact_id)` into `_act`. A `"confirm"` reply reuses
+  `PendingConfirmation`/`CONFIRM_WINDOW_S` exactly as the voice confirm-band does — "there is not
+  a second confirm mechanism" (D9); its own inline `DISPATCHED_COMMAND_TOKENS` membership check
+  is now a second, redundant line of defence behind D10's validator, which already ran first.
+  `_pending_escalations: dict[str, tuple[float, PartialParse, str]]` (keyed by `utterance_id`,
+  written by `_handle_utterance`) is what `_handle_brain_reply` revalidates against and what
+  `_speak_stand_by_if_due` reads for elapsed time — the third tuple element (the original
+  transcript, added for Stage 2) is D10's own input, needed to check a `BECAUSE` clause's words
+  were actually said.
   `overlay_client: AircraftLayerClient | None` (`plans/overlay-speech-callouts/plan.md`) is a
   second, deliberately separate optional-sink field from `aircraft_client` above — `aircraft_client`
   is BL-6's reserved-for-a-different-purpose field (live search-trigger commands, no reader today),

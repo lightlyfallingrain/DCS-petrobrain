@@ -105,3 +105,6 @@ Write directly to this directory — it already exists, no need to create it or 
 - [watch-reporting Stage 1-5](project_watch_reporting_stage1_5.md) — watched-only kind needs singleton grouping too; move-observer-not-target fixtures; slot resolvers must precede phrase table.
 - [position-belief hold-recovery fix](project_position_belief_hold_recovery_fix.md) — quadratic-under-inflation pattern in hold-and-decay branches; fix is two timestamps + always-fresh-from-base inflation.
 - [Eyesight view + belief-truth-log](project_eyesight_view.md) — range-0 ray hides set_if_blank markers; legend text traps substring tests; PRESENCE_CLASS==DEFAULT_OP_CLASS.
+- [BR-1 offered-vocabulary asymmetry](project_br1_offered_vocabulary_asymmetry.md) — wire per-call-varying offered sets (PICK); duplicate a module constant when it's call-invariant (CONFIRM).
+- [BR-1 Stage 2 fold duplicate branch](project_br1_stage2_fold_duplicate_branch.md) — stale worktree branch (2 commits behind); module-independence blocks cross-boundary composition tests, split into two joined tests instead.
+- [BR-1 Stage 2 OllamaDecider](project_br1_stage2_ollama_decider.md) — poll_replies() to background thread not shorter timeout; D10 tank-test via literal why-substring; plan-text tension on NO_SUCH_COMMAND.

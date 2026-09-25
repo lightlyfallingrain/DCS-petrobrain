@@ -27,3 +27,17 @@ leaked/blocked threads eventually make the server's own accept/handler path unre
 `brain_client._POLL_TIMEOUT_S`, so a hung model produces a dropped job — already the documented,
 correct behaviour for any exception escaping `Decider.decide()` (`_run_job`'s bare `except
 Exception`) — rather than an unboundedly long-running thread.
+
+**Update, 2026-09-25 (Stage 2 review):** fixed and measured, not merely claimed. `ollama_client.py`
+carries a `urllib.request.urlopen(..., timeout=5.0)` socket-level timeout, and `server.py::_run_job`
+wraps `decide()` in a throwaway `ThreadPoolExecutor` bounded by `decide_timeout_s=12.0` as a
+decider-agnostic backstop. Measured directly against a real accept-then-never-answer TCP listener
+(not a mock): `OllamaClient.generate()` reliably returns (via `OllamaRequestError`) at ~5003 ms,
+single call and under 6-concurrent-escalation load alike; thread count peaks at +12 (2
+threads/in-flight job) during the wedge and returns to baseline exactly once every call times out —
+no leak observed. **Correction to my own prior assumption:** "Python cannot preempt a blocked
+thread" (true, and still the accepted residual risk for a call that somehow ignores its own socket
+timeout) does not mean a socket-level `timeout=` on `urlopen` fails to bound a hung read — it does,
+reliably, because the OS/TCP stack itself enforces the wall-clock bound via `select`/`poll`, not
+Python-level thread cancellation. Don't conflate "can't force-kill a thread" with "can't bound a
+blocking socket call" in a future review — they're different mechanisms with different guarantees.
