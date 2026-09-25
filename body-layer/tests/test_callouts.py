@@ -1173,7 +1173,11 @@ def test_watched_contact_speaks_a_range_crossing() -> None:
 
     scheduler = CalloutScheduler()
     spoken = scheduler.tick(store, now_sim=1.0)
-    assert spoken == ["BMP-2."]  # unenriched, classification_raw as-is
+    # "Getting closer" since km went 4 -> 3 (Decision 3 REVISED, 2026-09-25).
+    # Before that revision this asserted the bare "BMP-2.", which was also
+    # exactly what a fresh CONTACT_DETECTED rendered -- so this test could
+    # not have told the two apart. It can now.
+    assert spoken == ["Getting closer, BMP-2."]
 
 
 def test_scanned_but_unwatched_contact_never_speaks_a_range_crossing() -> None:
