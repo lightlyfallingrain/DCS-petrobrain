@@ -21,7 +21,15 @@ sits beside `logger.py`, not inside either package); `belief/` gains no
 import of this module or of `detection_trace.py` -- the no-omniscience
 invariant holds for Petrovich exactly as before. Deliberately kept a
 single, narrow, read-only file, since it is the one place this permission
-exists at all."""
+exists at all.
+
+`observation_id_to_contact_id` (public, `todo/todo.md`'s "belief vs ground
+truth" logging addition) is this module's own contact-id resolution,
+shared rather than duplicated: `belief_truth_log.py` needs the exact same
+observation-id -> contact-id join `write_poll` below already performs, and
+the user's own direction was "reuse rather than duplicate ... that pairing
+belongs in one place that both read.\"
+"""
 
 from __future__ import annotations
 
@@ -65,11 +73,11 @@ class DetectionTraceWriter:
         contacts, then clear `collector.records` so the next poll's
         `write_poll` call only sees that poll's own entries. Read-only
         against `store` -- never calls anything that mutates it."""
-        observation_id_to_contact_id = _observation_id_to_contact_id(store)
+        obs_to_contact_id = observation_id_to_contact_id(store)
         for entry in collector.records:
             contact_id = None
             if entry.observation_id is not None:
-                contact_id = observation_id_to_contact_id.get(entry.observation_id)
+                contact_id = obs_to_contact_id.get(entry.observation_id)
             self._file.write(json.dumps(_entry_to_dict(entry, contact_id)))
             self._file.write("\n")
         collector.records.clear()
@@ -87,7 +95,7 @@ class DetectionTraceWriter:
         self._file.close()
 
 
-def _observation_id_to_contact_id(store: ContactStore) -> dict[str, str]:
+def observation_id_to_contact_id(store: ContactStore) -> dict[str, str]:
     """Every observation id any current contact has ever contributed,
     mapped to that contact's id -- rebuilt fresh from `store.contacts` on
     every call (an accepted cost for a single-sortie debug artifact, not a
