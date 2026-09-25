@@ -59,8 +59,8 @@ attention is elsewhere will keep being broken. This one is structural instead.
 
 2. **Implementers also get a worktree**, with one extra handoff step. Git will not check the same
    branch out twice, so an implementer in a worktree commits to `worktree-agent-<id>`, and the main
-   loop fast-forwards that into the feature branch afterwards. **Trial this before relying on it**
-   (see "Status" below).
+   loop fast-forwards that into the feature branch afterwards. Trialled and **in force** — see
+   "Status" below for what the trial surfaced and what it cost.
 
 3. **The main checkout belongs to the main loop and the user.** This is the inversion: side quests
    no longer need a worktree, because nothing else is using the checkout.
@@ -121,6 +121,10 @@ Full per-role responsibilities, priorities, checklists, and output-style detail:
 
 ## Roles (one-liners)
 
+The roster is `.claude/agents/` — read that directory rather than trusting this list to be complete;
+it has been wrong before (`investigator` existed here, and in root `CLAUDE.md`, while this section
+listed seven).
+
 1. **Architect** — plan new features, module boundaries, design tradeoffs. Writes `plans/<featurename>.md`.
 2. **Implementer** — writes code for an approved plan, adds tests, straightforward refactors.
 3. **Reviewer** — reviews completed work against the plan and `CLAUDE.md` before handoff.
@@ -128,6 +132,10 @@ Full per-role responsibilities, priorities, checklists, and output-style detail:
 5. **Performance Reviewer** — runtime cost risk on hot paths / data-intensive changes.
 6. **Security** — plan review (after Architect) and deep analysis (after Reviewer, before DoD); on-demand full audits.
 7. **Definition of Done** — final gate: checks pass, acceptance testing with user, harvest NOTES.md.
+8. **Investigator** — this project's own role, not from the template: reconnaissance on unverified
+   DCS internals before a plan depends on them. Sits *before* Architect's plan is finalized, not in
+   the Implementer→Reviewer→DoD chain. Writes dated findings to the relevant module's `research/`;
+   never writes pipeline code. Root `CLAUDE.md`'s "Agents" section has the full remit.
 
 ---
 
@@ -163,10 +171,11 @@ skip past it — the same failure the Effort/Value check below guards against.
 
 ## Recommended Role Sequences
 
-Full sequences below include Security and Performance Reviewer. **Check the project's
-`CLAUDE.md` "Agents" section first — it may currently exempt one or both roles for this
-project phase; that exemption overrides the sequences shown here rather than being restated
-per-sequence.**
+Full sequences below include Security and Performance Reviewer. **Read root `CLAUDE.md`'s "Agents"
+section first for the cadence currently set for those two roles — an exemption, a once-per-feature
+pass, or something else — and let it override the sequences shown here rather than restating it
+per-sequence.** Do not assume the cadence you last saw still stands: it has changed, and the earlier
+blanket skip outlived its premise precisely because nothing forced it to be re-read.
 
 - **New feature**: *Explore (with the user)* → Architect → Security (plan review) → Implementer → Reviewer → Security (deep analysis) → **Definition of Done**
 - **Performance-sensitive feature**: Architect → Security (plan review) → Implementer → Performance Reviewer → Reviewer → Security (deep analysis) → **Definition of Done**
