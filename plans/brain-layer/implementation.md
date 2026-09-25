@@ -651,3 +651,93 @@ deciding factor, not code volume or timing.
 44 passed (was 35 before this fold — the composition/prompt/unquote tests above account for the
 +9); `body-layer/` 1289 passed, 4 xfailed (was 1288/4 — the one new composition test). Zero
 regressions either direction; ruff format/check and `mypy --strict` clean on both subprojects.
+
+---
+
+## Two change requests from the once-per-feature reviews, before DoD
+
+Both requested by the Stage 2 security deep analysis (`plans/brain-layer/security-review.md`) and
+performance review (`plans/brain-layer/performance-review.md`), user chose to take the RECOMMENDED
+security fix and the MONITOR-carried-forward performance instrument. Per `AGENTS.md`'s "a change
+request from Security or Performance Reviewer re-enters the loop" rule, both went through
+Implementer → (this entry) with Reviewer/DoD next in the loop, not applied directly.
+
+### 1. `_validate_confirm`'s CONFIRM asymmetry (security, RECOMMENDED)
+
+**The defect, as the security review found it:** `belief/brain_reply.py`'s `_validate_confirm`
+checked a `CONFIRM <token>` reply against `DISPATCHED_COMMAND_TOKENS` (~30 tokens, body's *entire*
+dispatchable set) rather than `prompts.CLASSIFY_COMMAND_VOCABULARY` (7 tokens, what the classify
+prompt actually shows the model). `_validate_pick` never had this asymmetry — it already only
+accepts an id *this payload offered* (`parse.referenced_contact_candidates`), never "any contact
+that exists somewhere." A hallucinated `CONFIRM scan_bearing_deg` — a slot-taking token never
+offered — passed validation. Failed safe (`_describe_token_for_confirm`'s `slots=None` fallback
+degrades gracefully to a bare-literal confirm prompt; `handle_command(token, slots=None)` degrades
+any slot-taking token to "say again" if affirmed — both already documented, neither touched by this
+fix), so this closes a defense-in-depth gap, not a live hole.
+
+**Where the offered vocabulary comes from — decided, not silently picked:** the task brief asked
+whether the honest shape is wiring the offered set through the payload, the way `PICK`'s candidate
+list already is. Considered and rejected for this stage: `PICK`'s candidate list is genuine
+per-escalation data — a different set of candidates every call, which is *why* it has to travel on
+the wire. The classify prompt's offered vocabulary is not — every classify call offers the
+identical, fixed 7 tokens `prompts.CLASSIFY_COMMAND_VOCABULARY` declares as a module constant, so
+serialising it onto every `EscalationPayload` would resend the same unchanging value every time for
+no correctness benefit. Instead, `belief/brain_reply.py` gained `OFFERED_CONFIRM_VOCABULARY`, a
+body-owned duplicate of that same 7-token set — the same shape brain-layer already uses in the
+other direction (`prompts.CLASSIFY_COMMAND_VOCABULARY` is itself "a curated subset of
+`DISPATCHED_COMMAND_TOKENS`, duplicated here... module independence"). `_validate_confirm` now
+checks membership in **both** `OFFERED_CONFIRM_VOCABULARY` and `dispatched_command_tokens` — the
+narrower check is the actual fix; the wider one is kept so a reply naming something outside body's
+real dispatch set is still caught, unchanged from before. Documented in the new constant's own
+docstring: there is no cross-import to keep the two lists in sync, so this needs a human to update
+both sides if `CLASSIFY_COMMAND_VOCABULARY` ever changes — and the failure direction if it drifts
+is named there too (a legitimate `CONFIRM` wrongly degrading to `ASK`, never an unsafe admission).
+
+**Tests added** (`body-layer/tests/test_brain_reply.py`):
+- `test_confirm_token_actually_offered_by_classify_prompt_passes_unchanged` — a `CONFIRM` for a
+  token that is both offered and dispatchable still validates, against a realistic wide
+  `dispatched_command_tokens` fixture (not the file's narrow `_TOKENS` constant), so this exercises
+  both membership checks together.
+- `test_confirm_of_a_real_but_unoffered_dispatch_token_is_rejected` — `scan_bearing_deg` is a real,
+  dispatchable token but was never in the classify vocabulary; must degrade even though it is
+  legal elsewhere in the system.
+- `test_confirm_of_a_hallucinated_unoffered_token_degrades_to_a_safe_confirm_prompt` — confirms
+  the existing safe-degradation path is untouched: the reply degrades to `ASK` *inside the
+  validator*, so `_handle_brain_confirm`'s `slots=None` fallback and `handle_command`'s "say again"
+  degrade are never even reached for a reply this stage's fix already rejects.
+
+### 2. `live_stage2_decider_check.py` can now show a chain-drop (performance, MONITOR carried forward)
+
+**The gap:** the tool fired one utterance at a time and waited for each reply before sending the
+next, so it could only ever show one slow/`None` result — never the chain-drop pattern Ollama's own
+serialised generation queue actually produces when a model deliberates against its prompt
+instructions (D6's measured `qwen3:4b`, 32.7s): the client abandons that call at its own 5s
+timeout, but Ollama keeps computing it, and every utterance arriving in that window queues behind
+it and is itself likely to time out too.
+
+**What was added:** scenario 5, `overlapping_utterances_scenario()` — fires four distinct
+utterances `_OVERLAP_FIRE_INTERVAL_S` (0.3s) apart with no wait between posts, drains
+`/replies/poll` for up to `_OVERLAP_DRAIN_TIMEOUT_S` (30s), then reports per utterance, in fire
+order: answered (with the reply and its kind), or unanswered with the best available verdict —
+**superseded** (a later-fired utterance did get answered, D3 newest-wins working as designed) vs.
+**no evidence either way** (no later utterance answered either — consistent with a chain-drop, or
+simply everything still in flight when the drain window ended). Stated honestly rather than
+guessed: the wire carries no reason code for a missing reply, so the tool cannot always tell a
+chain-drop from "still deciding," and says so in the verdict text itself rather than asserting one.
+Distinct transcripts per utterance (not five copies of one) so a human reading the output can also
+judge each *answer* independently, not just whether one arrived.
+
+Assertion-free, same posture as the rest of this file and `body-layer/tools/speak_samples.py` — no
+automated test exercises it (no live Ollama daemon reachable from any sandbox that has touched this
+feature), and none is expected to.
+
+**Verification after both fixes**, run directly against this worktree: `body-layer/` 1292 passed, 4
+xfailed (was 1289/4 — the three new `_validate_confirm` tests); `brain-layer/` 44 passed, unchanged
+(the tool has no automated test by design). `ruff format --check`/`ruff check`/`mypy --strict`
+clean on both subprojects (brain-layer's checks scoped to `src`/`tests` per its own `CLAUDE.md` —
+`tools/` is outside that scope, and a pre-existing, unrelated formatting drift in
+`live_cross_process_check.py` was left untouched as out of scope for this task). The three
+non-blocking-invariant tests named in the task brief
+(`test_poll_replies_tick_rate_unaffected_by_a_wedged_server`,
+`test_drain_brain_tick_rate_unaffected_by_a_wedged_brain`,
+`test_wrong_pick_because_tank_degrades_to_ask`) re-run individually and pass.

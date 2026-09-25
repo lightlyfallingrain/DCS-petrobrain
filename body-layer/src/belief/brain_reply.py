@@ -35,8 +35,26 @@ does not discriminate) must be converted to `ASK`.
    *and* fails to positively support the chosen one -- both readings
    converge on the same required outcome. `"near Gemerek"` does appear in
    one candidate's own `why` and not the other's, so it passes.
-4. `CONFIRM <token>` -- `<token>` must be in `dispatched_command_tokens`
-   (`_validate_confirm`).
+4. `CONFIRM <token>` -- `<token>` must be in `OFFERED_CONFIRM_VOCABULARY`
+   (what the classify prompt actually offered the model, see that
+   constant's own docstring) **and** in `dispatched_command_tokens`
+   (`_validate_confirm`). **Revised 2026-09-25** (security deep analysis,
+   `plans/brain-layer/security-review.md`'s Stage 2 section): this used
+   to check only `dispatched_command_tokens` -- body's *entire*
+   dispatchable set, ~30 tokens including slot-taking ones
+   (`scan_bearing_deg`, `report_bearing_deg`, `follow`) the classify
+   prompt never offers -- so a hallucinated `CONFIRM` naming one of those
+   validated even though the model was never given it as an option. This
+   is the same asymmetry `_validate_pick` never had: that check was
+   always against the candidate list *this payload offered*, never
+   "any contact that exists." The prior gap failed safe (an odd confirm
+   prompt via `_describe_token_for_confirm`'s slots=None fallback, then a
+   "say again" degrade in `handle_command` if the pilot affirmed --
+   `crew_console.py`'s own documented behaviour) rather than
+   misdispatching, so this is defense-in-depth consistency, not a fix for
+   a live hole -- and that graceful degradation is untouched by this
+   revision, only reached less often now that the validator itself
+   catches more.
 5. `UNABLE <reason>` -- `<reason>` must be one of D11's three tokens
    (`_validate_unable`).
 6. Any rejection degrades to `ASK` if the payload offered candidates,
@@ -58,6 +76,47 @@ from belief.utterance import PartialParse
 #: produced it.
 VALID_UNABLE_REASONS: frozenset[str] = frozenset(
     {"NO_SUCH_COMMAND", "NO_MATCH", "NO_LINE_OF_SIGHT"}
+)
+
+#: The classify prompt's own offered vocabulary
+#: (`brain-layer/src/prompts.py`'s `CLASSIFY_COMMAND_VOCABULARY`, 7
+#: no-slot tokens), duplicated here for the same module-independence
+#: reason brain-layer duplicates body's `DISPATCHED_COMMAND_TOKENS` in
+#: the first place -- this process never imports `brain-layer/` code, so
+#: there is no import to share instead. This is what closes the CONFIRM
+#: validator's asymmetry with `PICK`'s own candidate-membership check
+#: (`_validate_pick` already only accepts an id *this payload offered*,
+#: never "any contact that exists somewhere"): `_validate_confirm` used
+#: to accept any of body's ~30 dispatchable tokens, including
+#: slot-taking ones (`scan_bearing_deg`, `report_bearing_deg`, `follow`)
+#: the classify prompt never shows the model at all.
+#:
+#: `PICK`'s offered set is genuine per-escalation data (a different
+#: candidate list every call) and is correctly wired through the wire
+#: payload itself (`parse.referenced_contact_candidates`). This
+#: vocabulary is not: every classify call offers the identical, fixed
+#: 7 tokens `prompts.py` declares as a module constant, so serialising it
+#: onto every `EscalationPayload` would resend the same unchanging value
+#: every time for no correctness benefit -- a duplicated constant, kept
+#: manually in sync (there is no cross-import to enforce it, and no
+#: assertion in either test suite compares the two literals against each
+#: other, since module independence forbids the import that would let one
+#: side check the other directly), is the proportionate fix at this
+#: stage. If this ever drifts in practice, the failure direction is
+#: known: a legitimate `CONFIRM` for a newly-added classify token would
+#: be wrongly degraded to `ASK` here until this list catches up --
+#: annoying, never unsafe, since a stricter validator only ever refuses,
+#: it does not admit a token the model was never offered.
+OFFERED_CONFIRM_VOCABULARY: frozenset[str] = frozenset(
+    {
+        "watch_nearest",
+        "watch_nearest_air_defence",
+        "report_all",
+        "cancel_task",
+        "cancel_scan",
+        "cancel_watch",
+        "stop_talking",
+    }
 )
 
 
@@ -126,7 +185,11 @@ def _validate_pick(
 def _validate_confirm(
     reply: BrainReply, parse: PartialParse, dispatched_command_tokens: frozenset[str]
 ) -> BrainReply:
-    if reply.token is None or reply.token not in dispatched_command_tokens:
+    if (
+        reply.token is None
+        or reply.token not in OFFERED_CONFIRM_VOCABULARY
+        or reply.token not in dispatched_command_tokens
+    ):
         return _degrade(reply, parse)
     return reply
 
@@ -137,4 +200,8 @@ def _validate_unable(reply: BrainReply, parse: PartialParse) -> BrainReply:
     return reply
 
 
-__all__ = ["VALID_UNABLE_REASONS", "validate_brain_reply"]
+__all__ = [
+    "OFFERED_CONFIRM_VOCABULARY",
+    "VALID_UNABLE_REASONS",
+    "validate_brain_reply",
+]
