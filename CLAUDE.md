@@ -68,6 +68,29 @@ The previous rule ("skip both for now — an offline single-user local pipeline 
 4. Show that milestone and its subitems to the user.
 5. Ask what they want to work on.
 
+**Before starting work on a milestone — and this is not optional after a context clear — read the
+state, not only the account of it.** The roadmap says what is *next*; it does not say what is
+*already underway*, because a branch that exists is not a milestone that is done and nothing writes
+it down.
+
+- **`git branch -v --sort=-committerdate | head -20` and `git worktree list`, always.** A branch
+  whose name matches the milestone you are about to start means the work exists. Read its log and
+  diff before writing a line of your own.
+- **Read that milestone's own `plans/<feature>/` directory in full** — `plan.md`, and `explore-notes.md`
+  where one exists. The plan carries decisions with the user's own words attached, later milestones
+  that constrain this one, and measurements already taken. A cleared session that skips this
+  re-derives, re-decides, or contradicts them.
+- **Clearing context between tasks is the right habit** (it is what keeps long sessions affordable),
+  and it is safe *only* because this repo records its decisions. The cost of a clear is paid at
+  session start by reading, not avoided by remembering.
+
+**This step exists because it was skipped, 2026-09-25.** A cleared session was told "continue with
+brain layer work", read the roadmap, saw BR-1 Stage 2 as next, and built it — while
+`feature/br1-stage2` already held a near-identical implementation from earlier the same day, and
+`feature/d10-structured-candidates` held the follow-on. Two implementations of one milestone,
+~2000 lines each. The roadmap was not wrong and the user's instruction was not ambiguous; the state
+was simply never checked. `git branch` costs one second and would have caught it.
+
 ## Milestone Completion
 
 Before marking a milestone done in a subproject's `ROADMAP.md` (`world-model/ROADMAP.md`,
