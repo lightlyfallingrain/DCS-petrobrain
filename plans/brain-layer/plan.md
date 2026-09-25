@@ -107,8 +107,9 @@ deleted.)*
 ## Goal
 
 Give Petrovich a second, slow, deliberative loop that turns free-text speech he cannot parse into
-one of three honest responses — **"say again"**, **"confirm `<command>`?"**, and **"which one —
-A or B?"** — without ever blocking the 5 Hz perception loop and without ever inventing world state.
+one of three honest responses — **"unable, `<reason>`"**, **"confirm `<command>`?"**, and **"which
+one — A or B?"** — without ever blocking the 5 Hz perception loop and without ever inventing world
+state.
 
 ---
 
@@ -116,7 +117,7 @@ A or B?"** — without ever blocking the 5 Hz perception loop and without ever i
 
 **In scope — three behaviours, all riding one idle round trip, no new tools:**
 
-1. Heard clearly, maps to nothing Petrovich can do → **"say again"**.
+1. Heard clearly, maps to nothing Petrovich can do → **"unable, `<reason>`"** (D11).
 2. Heard clearly, plausibly a command the deterministic grammar missed → **"Confirm `<command>`?"**,
    committed or discarded by the existing yes/no mechanism.
 3. Heard clearly, refers to a contact but two or more fit → **"which one — the one by the village,
@@ -125,7 +126,10 @@ A or B?"** — without ever blocking the 5 Hz perception loop and without ever i
 **Explicitly not in scope** (named here so nobody designs them in; sequencing at the end):
 
 - Reference resolution as a general capability, conversational memory, mission relevance, the
-  mission briefing, attack run, refusal-with-reason, interrupt/resume, autonomous danger reporting.
+  mission briefing, attack run, interrupt/resume, autonomous danger reporting.
+- **The general `unable <reason>` vocabulary is still BR-6's.** BR-1 ships the three specific
+  reasons D11 names, which are free from state the code already holds — not a mechanism for
+  attaching a reason to arbitrary refusals.
 - **Any change to `belief/tools.py`.** The tool API is frozen at 15 tools since BL-6. BR-1 needs
   **zero** tool calls — all three behaviours are answerable from the `EscalationPayload` alone.
   If implementation finds it needs a sixteenth tool, that is an escalation to the user, not a
@@ -325,15 +329,15 @@ not entirely. Precisely:
 | case | behaviour | changed by BR-1? |
 |---|---|---|
 | Nothing heard — the adapter's signal gate rejected the clip | nothing reaches body at all | no |
-| Garbled, verb-anchored, below `CONFIRM_FLOOR` | deterministic "say again" | no — **already works, brain never sees it** |
+| Garbled, verb-anchored, below `CONFIRM_FLOOR` | deterministic **"say again"** — speech not understood | no — **already works, brain never sees it** |
 | Marginal, verb-anchored, confirm band | deterministic "Confirm X?" | no — **already works** |
 | Heard clearly, no verb anchor (`fallthrough`) | **silence today → one of the three behaviours** | **yes, this is BR-1** |
 | Brain unreachable, wedged, or timed out | silence, exactly as `NullBrainClient` | no |
 
 **Worth saying plainly, because the brief's framing invites the opposite conclusion: the classic
 "STT clearly failed → say again" case is already deterministic and does not reach the brain at
-all.** BR-1's "say again" is a different thing — fluent speech Petrovich has no answer for. See the
-open decision below on whether that should say "say again" or "unable".
+all.** What reaches the brain is a different failure — speech heard perfectly that maps to no
+available action — and it answers **"unable"**, never "say again". See D11.
 
 ### D8 — "Stand by" is decided by body, deterministically, and needs no model
 
@@ -384,12 +388,46 @@ Every reply passes a pure function before anything happens:
    transcript, **and** must not be equally true of another candidate. This is what turned the 3B's
    wrong `PICK CONTACT_7 BECAUSE "tank"` into a correct `ASK`.
 4. `CONFIRM <token>` — `<token>` must be in `DISPATCHED_COMMAND_TOKENS`. Rejected otherwise.
-5. **Any rejection degrades to `ASK` if there are candidates, else to "say again".** A rejection is
-   never an error the pilot hears about and never silence — it is Petrovich asking instead of
-   guessing, which is the correct behaviour anyway.
+5. `UNABLE <reason>` — `<reason>` must be one of D11's three tokens. Rejected otherwise.
+6. **Any rejection degrades to `ASK` if there are candidates, else to `UNABLE NO_MATCH`** (D11 —
+   previously "say again", corrected 2026-09-25: the speech was heard perfectly by construction, so
+   asking for it again is the wrong answer). A rejection is never an error the pilot hears about and
+   never silence — it is Petrovich asking, or saying plainly that he cannot, instead of guessing.
 
 Where the "equally true of another candidate" test gets its text: the candidate `why` strings the
 code already assembled. No new data, no geometry, no model involvement.
+
+### D11 — "Unable" carries a reason, from a closed set the code owns
+
+**Provenance:** user, 2026-09-25, resolving the first open decision above — *"'unable `<because>`'
+is of course most useful"*, and then, on whether BR-1 should carry it: *"since cheap, do it"*.
+
+BR-1's first behaviour is **"unable, `<reason>`"**, with the reason drawn from a closed set. The
+three that are free — knowable from state the code already holds at the moment of escalation, with
+no new mechanism, no tool call and no geometry:
+
+| reason | when | what the code already knows |
+|---|---|---|
+| `NO_SUCH_COMMAND` | verb-like, but nothing in the vocabulary is close | `partial_parse` resolved no verb; `DISPATCHED_COMMAND_TOKENS` is the whole vocabulary |
+| `NO_MATCH` | a command that needs a referent, and nothing fits | `parse_utterance` already ran `find_contact`; the payload's candidate list is empty |
+| `NO_LINE_OF_SIGHT` | a place-directed command, no LOS to it | the same world-model LOS the engagement block already calls |
+
+Spoken as *"unable, no such command"*, *"unable, I don't see it"*, *"unable, no line of sight"* —
+final wording is `speech.py`'s, per D5, and never the model's.
+
+**The code decides the reason wherever it can, and it usually can.** Two of the three are
+structural: an empty candidate list *is* `NO_MATCH`, and no resolved verb *is* `NO_SUCH_COMMAND`.
+Neither needs asking. The model is consulted only where genuine judgement remains — and in that
+case it returns a token from this closed set, validated body-side by D10 exactly like `CONFIRM` and
+`PICK`, with the same degrade-rather-than-guess posture.
+
+**Why this does not widen the slice.** The general `unable <reason>` vocabulary — arbitrary
+refusals with arbitrary explanations — stays BR-6's. What BR-1 adds is three specific reasons that
+already exist as facts in the payload, plus one more closed-vocabulary answer the validator
+already has the shape to check. D10's fallback changes accordingly: **a rejected reply degrades to
+`ASK` when there are candidates, and to `UNABLE NO_MATCH` when there are none** — which is more
+honest than the "say again" it previously degraded to, since by construction the speech was heard
+perfectly.
 
 ---
 
@@ -500,16 +538,41 @@ move exactly once after this, the way `inbound-speech`'s constants did.
 
 ## Decisions requiring user input
 
-1. **"Say again" vs "unable" for fluent speech with no mapping.** The explore notes say "say again"
-   for STT failure — but that case never reaches the brain (D7). BR-1's third response is for
-   speech that was heard perfectly and means nothing Petrovich can act on. "Say again" invites a
-   rephrase, which is the useful action, and it is the word the user actually used;
-   *"unable, I don't have that"* is more honest about what happened. **Recommendation: "say again"
-   for BR-1**, revisit once the `unable <reason>` vocabulary lands (explore notes §2).
-2. **Confirm whether a fourth model is worth pulling.** `qwen2.5:7b-instruct` is the measured
-   recommendation and it is good enough on all three cases. If the user would rather spend 5 GB on
-   trying `granite3.3:8b` first, that is a one-command comparison and this plan does not depend on
-   the answer.
+**Both resolved 2026-09-25. Kept here with their original framing, because the first one was
+resolved by correcting the question rather than by answering it.**
+
+1. **RESOLVED — it is "unable", and it carries a reason. See D11.** This decision was posed as
+   *"say again" vs "unable" for fluent speech with no mapping*, recommending "say again" on the
+   grounds that it invites a rephrase and is the user's own word. **The question was malformed.**
+   The user's correction:
+
+   > *"'say again' means speech not understood. 'unable' means action not available.
+   > 'unable `<because>`' is of course most useful."*
+
+   They are not two wordings of one response. They answer **two different failures**, and choosing
+   between them for a single case is a category error. "Say again" was indeed the user's word — for
+   the STT-failure case, which D7 shows never reaches the brain at all. Everything the brain
+   answers for is the other case.
+
+   On the follow-up question of whether BR-1 ships a bare "unable" or carries the reason: **it
+   carries the reason**, user direction, on the grounds that it is cheap. See D11 for the closed
+   set and why no new machinery is needed.
+
+2. **RESOLVED — do not settle on `qwen2.5:7b-instruct` yet.** The user's objection:
+
+   > *"qwen 2.5 is old, 2 years at this time. many small models have been released in last year.
+   > Do investigation on them (not by downloading, but first by web search to check their claimed
+   > capabilities)."*
+
+   Correct: qwen2.5 was released September 2024. The recommendation in D6 came from measuring what
+   happened to be on the machine plus two quick pulls, not from surveying what exists. A
+   search-only survey is underway; its findings land in a dated research note and supersede D6's
+   *choice* without disturbing D6's *criteria*, which the measurements earned and which stand:
+   no mandatory thinking budget, reliable constrained output, footprint that coexists with
+   `qwen3:14b` and whisper, and sub-second on a short closed answer.
+
+   **Stage 1 needs no model at all**, so this blocks nothing — implementation can start while the
+   survey finishes.
 
 ---
 
