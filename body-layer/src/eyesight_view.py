@@ -91,6 +91,22 @@ DEFAULT_RADIUS_M: Final[float] = 5000.0
 #: column ownship sits under.
 DEFAULT_WIDTH: Final[int] = 61
 
+#: Total lines one frame may occupy -- canvas, header, legend and the
+#: beyond-radius list together.
+#:
+#: **Found in use, not in testing** (user, 2026-09-25): with a long
+#: beyond-radius list the frame overflowed the console and the canvas
+#: scrolled off the top, so the picture the tool exists to show was the
+#: part that got lost. His workaround was raising the radius to 10 km,
+#: which is exactly backwards -- it shrinks the list by making the view
+#: coarser.
+#:
+#: Resolved by capping the list rather than the canvas: the canvas is the
+#: instrument, the list is an overflow note about things it could not
+#: draw. A truncated list says so on its last line and keeps the *nearest*
+#: entries, which are the ones most likely to matter.
+DEFAULT_MAX_LINES: Final[int] = 60
+
 #: How many concentric range rings to draw, evenly spaced from the centre
 #: out to `radius_m`.
 _RING_COUNT: Final[int] = 4
@@ -366,6 +382,7 @@ def render_frame(
     radius_m: float = DEFAULT_RADIUS_M,
     width: int = DEFAULT_WIDTH,
     color: bool = True,
+    max_lines: int | None = DEFAULT_MAX_LINES,
 ) -> str:
     """Render one frame: a top-down plan view, ownship near the bottom,
     forward up. See module docstring for the geometry/draw-order/off-edge
@@ -508,26 +525,53 @@ def render_frame(
         "(believed=bold, ground truth: . seen / x not seen)"
     )
 
-    beyond: list[str] = []
+    # (range, text) so the list can be ordered by what is nearest -- the
+    # previous ordering was alphabetical on the rendered line, which sorted
+    # "believed" before "truth" and then by label, so a 9 km contact could
+    # outrank a 5.1 km one. Nearest-first is what survives truncation.
+    beyond: list[tuple[float, str]] = []
     for belief_marker in believed:
         if belief_marker.range_m > radius_m:
             beyond.append(
-                f"  believed {belief_marker.label:<2} "
-                f"{belief_marker.bearing_deg:+04.0f} deg "
-                f"{belief_marker.range_m / 1000:.1f}km"
+                (
+                    belief_marker.range_m,
+                    (
+                        f"  believed {belief_marker.label:<2} "
+                        f"{belief_marker.bearing_deg:+04.0f} deg "
+                        f"{belief_marker.range_m / 1000:.1f}km"
+                    ),
+                )
             )
     for gt in ground_truth:
         if gt.range_m > radius_m:
             tag = "seen" if gt.visible else "not seen"
             beyond.append(
-                f"  truth    ({tag}) {gt.bearing_deg:+04.0f} deg "
-                f"{gt.range_m / 1000:.1f}km"
+                (
+                    gt.range_m,
+                    (
+                        f"  truth    ({tag}) {gt.bearing_deg:+04.0f} deg "
+                        f"{gt.range_m / 1000:.1f}km"
+                    ),
+                )
             )
+    beyond.sort(key=lambda entry: (entry[0], entry[1]))
 
     parts = [header, legend, *lines]
     if beyond:
-        parts.append(f"beyond {radius_m / 1000:.1f}km radius:")
-        parts.extend(sorted(beyond, key=lambda line: line))
+        heading = f"beyond {radius_m / 1000:.1f}km radius:"
+        entries = [text for _range_m, text in beyond]
+        if max_lines is not None:
+            # Budget: everything already committed, plus the heading, plus
+            # one line held back for the truncation note so that note can
+            # never itself be the thing that overflows.
+            room = max_lines - len(parts) - 1
+            if room < len(entries):
+                shown = max(room - 1, 0)
+                hidden = len(entries) - shown
+                entries = entries[:shown]
+                entries.append(f"  ... and {hidden} more, nearest shown first")
+        parts.append(heading)
+        parts.extend(entries)
     return "\n".join(parts)
 
 
