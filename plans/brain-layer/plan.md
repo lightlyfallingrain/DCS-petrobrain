@@ -533,9 +533,40 @@ REPL without Ollama running.
 ### Stage 2 — the model decider
 
 `OllamaDecider` behind the same `Decider` protocol, the two prompts, and the D10 validator on the
-body side. `--brain-model`, defaulting to `qwen3:4b-instruct-2507-q4_K_M` (D6, revised 2026-09-25). Warm-up generation at startup.
+body side. `--brain-model`, defaulting to `qwen3:4b-instruct-2507-q4_K_M` (D6, revised 2026-09-25).
+Warm-up generation at startup, and `num_ctx` set explicitly rather than inherited — D6 measured the
+default 32k context costing 4.6 GB of KV cache this layer never touches.
 
 Shippable: say-again and confirm work for real. Ask is rendered but its answer is not yet acted on.
+
+#### Two prerequisites, measured during Stage 1's performance pass — fix these *before* Stage 2, not after
+
+**Provenance:** `plans/brain-layer/performance-review.md`, 2026-09-25. Neither is a Stage 1 defect,
+and both are unreachable today because `StubDecider` cannot wedge. **Stage 2 is what makes them
+reachable**, and they are a linked pair: the second is the plausible real-world *cause* of the
+first, not a separate concern that happens to sit nearby.
+
+1. **`poll_replies()` must come off the poll thread, or lose its 5 s timeout.** Measured, not
+   reasoned: with the brain process *down* a poll costs 13.4 ms, which is fine and is the common
+   case. With the brain process *up but wedged* — TCP-accepted, never answering — a poll costs
+   **exactly 5015 ms, every poll, with no backoff.** At the 1 s default interval the shared thread's
+   cycle degrades to ~6 s, an ~83% tick-rate loss that takes perception, F10 commands, transcripts
+   and gaze down with it. A healthy server answers in well under a millisecond, so the 5 s budget
+   buys nothing on the happy path and costs everything on the bad one.
+
+   The `audio_client.py` precedent (same value, same shape) is real but **not equally risky**: the
+   brain is *expected* to be slow sometimes, which makes wedged-not-down the likely failure rather
+   than an exotic one.
+
+2. **`Decider.decide()` needs its own bounded timeout.** `server.py` spawns one unjoined daemon
+   thread per `/escalate` and nothing bounds the decide call itself. Safe while the stub is always
+   fast or boundedly-delayed; once a real model is behind it, a hung Ollama daemon leaks a thread
+   per utterance across a multi-hour sortie — and produces exactly the wedged-server condition that
+   makes (1) bite.
+
+**What Stage 1 got right here, and it is worth stating:** both are consequences of Stage 1's own
+design anticipating Stage 2 correctly, not of it cutting a corner. The interface is right; what it
+needs is a bound on the thing behind it.
 
 **Acceptance:** the four measured cases above reproduce through the real pipeline, including the
 3B's wrong `BECAUSE "tank"` being converted to `ASK` by the validator. That case is a required test
