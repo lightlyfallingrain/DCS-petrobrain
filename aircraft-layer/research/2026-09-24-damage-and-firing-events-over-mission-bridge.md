@@ -680,3 +680,58 @@ correlation.
 `target` is ownship, and it still wants the LOS/visual-range gate — a theatre-wide event feed would
 otherwise make Petrovich aware of every gun firing anywhere. What has changed is that the gate now
 works on a named target rather than a guess.
+
+### The visual-damage correlation, 2026-09-25 — it is FIRE, and it brackets to (0.69, 0.84]
+
+The user's observation, which closes Finding 5's last open question:
+
+> *"I hit something and it started burning. long truck like thing. So, fire instead of just smoke."*
+
+**First correction, and it matters for the callout vocabulary: the visible state is fire, not smoke.**
+This report and the plan both said "smoking" throughout, inherited from the forum-claim about
+health-correlated smoke. What a hit actually produces is a burning vehicle — which is *better* for a
+crew callout, because "it's burning" is unambiguous where "smoking" is a judgement call.
+
+**Second, the bracket.** Only two units in the sortie are plausibly a "long truck like thing", and
+they are the two lowest-life units in it:
+
+| unit | type | lowest fraction | burning? |
+|---|---|---|---|
+| `Unit #003` | **M 818** — long cargo truck | **0.680** | one of these is the burning one |
+| `Unit #009` | **MLRS** — long, truck chassis | **0.690** | " |
+| `Unit #013` | M1043 HMMWV Armament | 0.842 | not reported burning |
+| `Unit #012` | MLRS | 0.908 | not reported burning |
+| `Unit #001` | Hummer | 0.946 | not reported burning |
+
+So **fire is present at a life fraction ≤ 0.69 and absent at ≥ 0.84**. The threshold lies in
+**(0.69, 0.84]**. Which of the two lowest was the burning one cannot be resolved from the log — both
+match the description and both sit at essentially the same fraction — but the bracket holds either
+way, which is why it did not need resolving.
+
+**Third, and this reshapes the design: life is flat once damaged, not decaying.** `Unit #003` held
+`0.680` across **59 consecutive samples over 55 seconds** — every distinct fraction it ever reported
+was `[0.68]`. `Unit #013` likewise `[0.842]`, `Unit #012` `[0.908]`, `Unit #001` `[0.946]`. Only
+`Unit #009` moved at all, and only because it took a further hit (`0.939 → 0.690`).
+
+Consequences:
+
+- **"On fire" must be derived from the fraction, not from a rate of change.** There is no burn-down
+  to observe; a burning vehicle sits at a constant life value indefinitely. A design watching for
+  decreasing life would never fire.
+- **A single sample is sufficient.** No need to track a trajectory per contact to answer "is it
+  burning" — the current fraction answers it.
+- **Nothing died in 109 s** despite four damaged units, so destruction is a separate, harder state
+  than damage, and the disappearance fallback is the only signal for it so far.
+
+**What this leaves genuinely open**, and it is narrower than before: the exact threshold inside
+(0.69, 0.84], and whether it is a single global fraction or varies by type. `life0` already varies
+by type (M 818 2.0, MLRS 3.0, HMMWV 2.5), so a per-type threshold is plausible rather than
+paranoid. Resolving it needs a sortie that deliberately walks a single vehicle down through that
+band and notes where it lights up — not a probe change.
+
+**Good enough to build on now.** *"Is it dead yet"* is answerable from fraction plus disappearance,
+and *"no, it's burning"* is answerable from a fraction at or below about 0.69 — conservative, since
+the real threshold is somewhere above that and a conservative reading under-claims rather than
+over-claims. Erring that way is the right default: a crew member who says "burning" when it is
+merely damaged has lied, while one who says "hit, still up" about a burning vehicle has only been
+cautious.
