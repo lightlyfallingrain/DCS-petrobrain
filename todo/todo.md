@@ -294,12 +294,24 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   So the likely shape is a reader, not a new subsystem: a terminal view fed from the same per-poll
   state the trace writer already sees. Worth confirming that read before designing anything.
 
-  **Note the no-omniscience boundary applies to the *view*, not just the belief.** A debug view
-  that draws true positions is fine and useful — `detection_trace_writer.py` is already the one
-  module deliberately allowed to hold ground truth and belief at once, and it is read-only against
-  `ContactStore` for that reason. But if this view is ever on screen while flying, drawing what
-  Petrovich *cannot* see would make the pilot omniscient instead. Decide deliberately which it is:
-  a debrief instrument, or a cockpit aid.
+  **Settled by the user, 2026-09-25: this is a debug, testing and calibration tool, and it may show
+  ground truth.** His words: *"it's a debug and testing tool. Can break no-omniscience boundary
+  because the whole purpose is testing, debugging and calibration."* So it draws what is really
+  there alongside what Petrovich believes — that contrast *is* the instrument. A view restricted to
+  belief could not answer the question it exists to answer, which is why he could not see something
+  he should have.
+
+  **The invariant that still applies, and it is a different one: the view must be read-only and
+  one-directional.** No-omniscience constrains what *Petrovich* knows, not what the developer sees
+  — but nothing this view reads may flow back into belief. `detection_trace_writer.py` is the
+  precedent and the model: it is deliberately allowed to hold ground truth and belief at once, and
+  it never calls anything that mutates `ContactStore`, and no ground-truth field it touches is ever
+  passed into `ingest`/`Percept`/`Contact`. Build this the same way, and say so in its module
+  docstring, because the next reader will otherwise assume the boundary was simply forgotten.
+
+  Worth noting the same tension was already resolved this way once: `--detection-trace` holds both
+  and is trusted precisely because the direction of flow is enforced structurally rather than by
+  remembering.
 
 - [ ] **Per-module performance review, findings written to a document, and that document becomes a
   backlog item.** User, 2026-09-25. Each subproject reviewed in its own right —
