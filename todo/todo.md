@@ -296,6 +296,21 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   since 2026-09-13 (`petrobrain-f10-commands-hook.lua`, 1 Hz). This probe is about what the
   function answers and what it costs, not about reaching it.
 
+  **Two weather questions ride the same bridge and should be probed in the same session** (user,
+  2026-09-26, from the condition measurements):
+  - **Can meteorological visibility be read?** It is a *ceiling* on detection for every instrument,
+    not a per-optic multiplier — the user's own framing, and the measurements show it: in rain 2 the
+    9K113 wide and narrow fields both detect at exactly 3.7 km despite very different magnification.
+    `Export.lua` has no fog or weather getter (confirmed by reading the shipped file), so this
+    bridge is the only candidate. `world.weather.getFogThickness()` is the named target. ED's own
+    representation is a **time series** (`fog2.manual = {{time, visibility, thickness}, …}`), so
+    whatever is built samples rather than reads once.
+  - **Can *where* it rains be read?** *"Rain and clouds are not uniform in DCS. Moving will get you
+    in and out of rain."* Whether any API exposes the spatial distribution is open, and it is the
+    harder question: an ownship-local visibility figure is sampled in the right place but says
+    nothing about whether the target sits under a squall. If nothing exposes it, the fallback is an
+    ownship-local reading applied scene-wide, with the limitation stated rather than hidden.
+
   Investigator pass plus a probe on the Windows box. **Run it before the 9K113 slice is scoped, not
   during it** — if the answer is terrain-only, that slice's LOS design collapses and the
   statistical model has to cover every channel instead.
