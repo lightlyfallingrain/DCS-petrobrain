@@ -356,3 +356,121 @@ subprojects' `CLAUDE.md` "Commands" sections was re-run directly against the act
 inferred from reading. The one acknowledged gap is a live-Ollama smoke test, which no reviewer in
 this sandbox can perform (network access to a live Ollama daemon is denied here exactly as it was
 for the implementer) — flagged as an optional refinement, not silently skipped.
+## Stage 2 fold review
+
+Reviewed `e3fce0e` ("Fold br1-stage2 into brain-layer-stage2: fix the BECAUSE quoting defect") and
+`8253fba` (implementer memory), diffed against `dc0fa08` (the Stage 2 review this fold answers).
+This is a review of a change made in response to a review, per `AGENTS.md`'s rule that such fixes
+get the same reading as the code they patch.
+
+### Required Fixes
+
+None.
+
+### Findings (all check out)
+
+- **The required fix is fixed, and at the right layer.** `decider._unquote`/`_QUOTE_PAIRS` strip
+  exactly one matched surrounding quote pair (straight or typographic) from `PICK ... BECAUSE
+  <words>`'s evidence before it ever reaches `_parse_discriminate_reply`'s return dict — read in
+  full (`brain-layer/src/decider.py`). Checked for bypass and over-eager stripping directly against
+  `_PICK_BECAUSE_RE = r"^\s*PICK\s+(\S+)\s+BECAUSE\s+(.+?)\s*$"` (no `re.MULTILINE`, so a reply with
+  any leading/trailing prose outside the one line fails the match entirely and degrades to `ASK` —
+  consistent with the new "EXACTLY ONE line" prompt instruction, not a hole the fix has to cover).
+  Mismatched-type quoting (opens `"`, closes `'`) and unbalanced quoting are both deliberately left
+  unstripped for D10 to reject, per the function's own docstring and confirmed by
+  `test_unquote_leaves_an_unbalanced_quote_alone`/`test_unquote_leaves_a_mid_string_quote_alone` —
+  a quote genuinely part of the evidence (mid-string) is preserved. No reply shape found that
+  bypasses the fix while still reaching D10 as a `pick`.
+- **The composition-test split closes the gap, and does so by transitivity across three already-
+  covered links, not by two isolated assertions.** Traced the whole chain a real reply travels:
+  (1) `decider.decide()` (the actual entrypoint `server.py` calls, not a private helper) is asserted
+  end-to-end in `brain-layer/tests/test_decider.py::test_ollama_decider_candidates_present_calls_discriminate_prompt`
+  to return `because: "near Gemerek"` (unquoted) for a fake model reply of `BECAUSE "near Gemerek"`;
+  (2) the dict→JSON→`BrainLayerClient._reply_from_dict` passthrough is exercised, unmodified by this
+  fold, in `body-layer/tests/test_brain_client.py` (`because: "near Gemerek"` in, same value on the
+  resulting `BrainReply`); (3) the new
+  `test_pick_because_survives_the_exact_quoting_a_real_model_produces` proves that exact value
+  passes `validate_brain_reply`. Each link uses the real production function, not a re-implementation
+  standing in for it, so a future edit that reopens the seam (e.g. `decide()` stops calling
+  `_unquote`, or `_reply_from_dict` starts mangling the field) breaks one of these three tests rather
+  than passing silently. The one gap this doesn't close: no single automated test runs the full wire
+  path with an actual JSON-over-HTTP round trip through `server.py` for a quoted reply (only the
+  manual, assertion-free `live_stage2_decider_check.py` tool does that) — worth noting as an optional
+  refinement, not a blocker, since transitivity across three real-function tests already gives most
+  of the same guarantee module independence allows without a cross-subproject import.
+- **Prompt changes push in the safe direction, checked against D5 and D6.** `DISCRIMINATE_PROMPT`'s
+  narrowed BECAUSE instruction ("quote ONLY the single distinguishing word or short phrase... NEVER
+  quote the whole sentence") and the added "EXACTLY ONE line, nothing else, no explanation" sentence
+  on both prompts constrain the model further rather than inviting the deliberation D6 measured
+  (a "think step by step" instruction produced 575 tokens and a wrong pick). `test_prompts.py`'s
+  `test_render_discriminate_prompt_includes_transcript_and_candidates` explicitly asserts `"step by
+  step" not in prompt.lower()`. No conflict with D5 (model classifies against a closed set, never
+  writes what Petrovich says): traced `BrainReply.because` — it is consumed only inside
+  `belief/brain_reply.py`'s validator (`because = reply.because`), never rendered as crew speech;
+  nothing in this fold routes free model text to the player.
+- **The two deliberate fold omissions are correctly justified.** The older branch's poll-timeout
+  shortening (`3fc8dc1`, 5.0s → 0.5s on `BrainLayerClient.poll_replies()`) fixed a real risk in that
+  branch's architecture, where `poll_replies()` ran synchronously on the shared crew-text poll
+  thread. Read `body-layer/src/belief/brain_client.py` on this branch directly: `poll_replies()`
+  starts a lazy background `_poll_worker` thread on first call and the synchronous call only ever
+  drains an in-memory buffer — confirmed structurally different, and confirmed by
+  `test_poll_replies_tick_rate_unaffected_by_a_wedged_server` (20 calls against a real wedged raw
+  socket, `elapsed < 1.0`) that the crew-text thread never touches the wedge. This architecture
+  predates the fold commit (untouched by `dc0fa08..e3fce0e`), so "genuinely redundant" holds. The
+  wider `CLASSIFY_COMMAND_VOCABULARY` (older branch: ~30 scan/report-bearing tokens vs. this
+  branch's smaller set) is confirmed to be additional phrasing recognized for the same
+  `structural_unable_reason`/`CONFIRM` mechanics, not a new code path or a widened safety surface —
+  an accuracy-only scope decision, correctly left out per the commit message.
+- **The non-blocking invariant is untouched and re-verified against real listeners, not mocks.**
+  Reran both raw-socket wedge tests directly:
+  `body-layer/tests/test_brain_client.py::test_poll_replies_tick_rate_unaffected_by_a_wedged_server`
+  (client level, built on a hand-rolled `socket`-based `_WedgedServer` that accepts and never reads/
+  writes, explicitly *not* `http.server` "so no HTTP-level machinery can accidentally answer the
+  request") and
+  `body-layer/tests/test_crew_console.py::test_drain_brain_tick_rate_unaffected_by_a_wedged_brain`
+  (`CrewConsole.drain_brain` level) — both pass. `test_brain_reply.py::test_wrong_pick_because_tank_degrades_to_ask`
+  also passes, confirming D10's wrong-evidence rejection still works after the unquoting change (i.e.
+  the fix didn't also loosen the verbatim/specificity check itself, only removed the quote-character
+  false negative).
+- **No Stage 3 leakage.** Grepped `plans/brain-layer/implementation.md`'s new content — the only
+  `Stage 3`/`awaiting_reply` mention is a docstring cross-reference, no code. `git diff --stat
+  dc0fa08..e3fce0e` confirms `belief/tools.py`, `belief/tool_api.py`, and `perception/` are untouched.
+
+### Test counts and checks (re-run directly, not trusted from the commit message)
+
+Re-ran both subprojects' full command sets against a `git archive` snapshot of `e3fce0e` in a fresh
+scratch tree with fresh venvs (this worktree is `main`-based, not on `feature/brain-layer-stage2` —
+see the "worktree-main-based-pytest-pythonpath-trap" memory; ambient checkout state was not trusted):
+
+- brain-layer: `ruff format --check` clean, `ruff check` clean, `mypy src` (`cd brain-layer`) clean,
+  `pytest tests -q` → **44 passed**. Matches the claimed 35 → 44.
+- body-layer: `ruff format --check` clean, `ruff check` clean, `mypy src` clean, `pytest tests -q` →
+  **1289 passed, 4 xfailed**. Matches the claimed 1288 → 1289 / 4 xfailed unchanged.
+
+Both subprojects' numbers match the commit message's claims exactly; no discrepancy found.
+
+### Optional Refinements
+
+- No single automated test exercises the full JSON-over-HTTP wire path (`decider.decide()` →
+  `server.py` response → `BrainLayerClient` → `BrainReply` → `validate_brain_reply`) for a quoted
+  reply in one run — only the three-link transitive coverage above, plus the manual
+  `live_stage2_decider_check.py` tool. Given module independence forbids a cross-subproject test
+  import, this is likely as close as this project's conventions allow without a new mechanism (e.g.
+  a shared JSON fixture file both suites load) — not asking for one now, just naming the residual gap
+  for whoever next touches this seam.
+
+### Verdict
+
+APPROVED
+
+### Review Confidence
+
+Full read of the diff (`decider.py`, `prompts.py`, all four touched/added test files, the new
+`live_stage2_decider_check.py` tool's docstring, `implementation.md`'s new content) plus direct reads
+of `brain_client.py` and `crew_console.py`'s `drain_brain` to confirm the background-thread
+architecture claim. Both subprojects' full format/lint/type/test command sets re-run from scratch
+(fresh venvs, `git archive` snapshot of `e3fce0e`, not the ambient worktree checkout) and matched
+against the commit's claimed numbers exactly. The three wedge/regression tests named in the task
+brief re-run individually and confirmed passing against real sockets, not mocks. Not independently
+re-run: the older branch's own historical CI state (trusted via direct diff read against `bee408b`
+and `3fc8dc1` instead).
