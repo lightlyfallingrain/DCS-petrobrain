@@ -127,6 +127,68 @@ def test_confirm_token_not_in_vocabulary_degrades() -> None:
     assert result.kind == "ask"
 
 
+def test_confirm_token_actually_offered_by_classify_prompt_passes_unchanged() -> None:
+    """Security review, `plans/brain-layer/security-review.md`'s Stage 2
+    section: `_validate_confirm` must accept a token the classify prompt
+    genuinely offers, not just one that happens to be in body's full
+    dispatchable set. `dispatched_command_tokens` here is body's real,
+    wide token set (not the narrow `_TOKENS` fixture above) so this
+    exercises both membership checks, not just the offered-vocabulary
+    one."""
+    parse = _parse([])
+    reply = BrainReply(utterance_id="U1", kind="confirm", token="watch_nearest")
+    dispatched_command_tokens = frozenset(
+        {"watch_nearest", "scan_bearing_deg", "report_bearing_deg", "follow"}
+    )
+    result = validate_brain_reply(
+        reply, parse, "watch the closest one", dispatched_command_tokens
+    )
+    assert result == reply
+
+
+def test_confirm_of_a_real_but_unoffered_dispatch_token_is_rejected() -> None:
+    """The asymmetry this stage's fix closes: `scan_bearing_deg` is a
+    real, dispatchable command (`crew_console.DISPATCHED_COMMAND_TOKENS`)
+    but is never in `prompts.CLASSIFY_COMMAND_VOCABULARY` -- the classify
+    prompt never offers it, because it takes a slot (a bearing in
+    degrees) the model was never asked to extract. A `CONFIRM` naming it
+    must degrade even though `scan_bearing_deg` is, on its own, a
+    perfectly legal token elsewhere in the system."""
+    parse = _parse([("CONTACT_1", "a T-72")])
+    reply = BrainReply(utterance_id="U1", kind="confirm", token="scan_bearing_deg")
+    dispatched_command_tokens = frozenset(
+        {"watch_nearest", "scan_bearing_deg", "report_bearing_deg", "follow"}
+    )
+    result = validate_brain_reply(
+        reply, parse, "scan bearing three one seven", dispatched_command_tokens
+    )
+    assert result.kind == "ask"
+
+
+def test_confirm_of_a_hallucinated_unoffered_token_degrades_to_a_safe_confirm_prompt() -> (
+    None
+):
+    """Confirms the existing safe-degradation path this stage must not
+    weaken (task brief): even a `CONFIRM` naming a real, slot-taking
+    dispatch token that was never offered degrades to `ASK` here rather
+    than reaching `crew_console._handle_brain_confirm` at all -- the
+    validator is the gate, and `_describe_token_for_confirm`'s
+    slots=None graceful fallback / `handle_command`'s "say again" degrade
+    (`crew_console.py`) are never even exercised for a reply this
+    module already rejected. This is D10 point 6 (`_degrade`) applying
+    to the newly-tightened CONFIRM check exactly as it already does to
+    every other rejection reason."""
+    parse = _parse([("CONTACT_1", "a T-72")])
+    reply = BrainReply(utterance_id="U1", kind="confirm", token="follow")
+    dispatched_command_tokens = frozenset(
+        {"watch_nearest", "scan_bearing_deg", "report_bearing_deg", "follow"}
+    )
+    result = validate_brain_reply(
+        reply, parse, "follow that one", dispatched_command_tokens
+    )
+    assert result.kind == "ask"
+
+
 def test_unable_with_a_valid_reason_passes_unchanged() -> None:
     parse = _parse([])
     reply = BrainReply(utterance_id="U1", kind="unable", reason="NO_SUCH_COMMAND")
