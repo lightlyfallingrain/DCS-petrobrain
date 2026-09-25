@@ -1670,6 +1670,25 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
      two halves are an **LOS term and a background term**, they apply to different target classes,
      and only the first one touches ground units.
 
+     **First real condition measurements exist, 2026-09-26** — the user's own, in
+     `docs/concept/detection-in-non-perfect-conditions.md` (low light at three sun angles, two rain
+     presets, four instruments each), analysed in
+     `body-layer/research/2026-09-26-condition-factors-first-analysis.md`. **They do not support
+     the shape stated above.** Two findings, both structural rather than numerical: the condition
+     factor varies 0.04–0.25 *within one condition* depending on which instrument is looking, so a
+     scalar applied after the optic multiplier cannot express it; and the wide/narrow ordering
+     **reverses** between rain and darkness, because rain attacks the *windscreen* (which the eye
+     and binoculars look through and the sight does not) while darkness attacks *contrast* (where
+     magnification does not help and the sight's orange filter does). The term is therefore at
+     least `f(condition, optical path)`, needing a per-`Optic` property that does not exist today.
+     The tiers also compress rather than scaling together — type collapses to zero for the naked
+     eye in every measured rain and low-light row while class survives at short range. Also
+     measured, and it closes an open question in factor 2 below: **NVG is useless for detection**
+     in this aircraft. Do not re-derive the shape from this paragraph — read the analysis, which
+     carries the error bands, and note the user's own caution that measurement precision itself
+     degrades with the conditions being measured, which argues for a few coarse condition tiers
+     rather than a continuous curve.
+
      **Decision 2026-09-25 (user): the two channels get two different vegetation models, and the
      split is not a compromise — it is what each channel actually is.**
 
