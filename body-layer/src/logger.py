@@ -214,8 +214,16 @@ from belief.optic_policy import (
 )
 from belief.optic_policy import decide as decide_optic
 from belief.tasks import TaskStore
+from belief_truth_log import BeliefTruthLogWriter
 from detection_trace_writer import DetectionTraceWriter
-from perception.detection_trace import DetectionTraceCollector
+from eyesight_view import DEFAULT_RADIUS_M as EYESIGHT_DEFAULT_RADIUS_M
+from eyesight_view import (
+    believed_markers_from_contacts,
+    ground_truth_markers_from_trace,
+)
+from eyesight_view import render_frame as render_eyesight_frame
+from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT
+from perception.detection_trace import DetectionTrace, DetectionTraceCollector
 from perception.gaze import (
     FREE_SCAN_PLAN,
     SCAN_CYCLE_PERIOD_S,
@@ -794,6 +802,59 @@ def _push_gaze_line(
     return gaze.label
 
 
+def _render_eyesight_frame(
+    runner: ConsolePerceptionRunner,
+    trace_records: list[DetectionTrace],
+    radius_m: float,
+) -> str | None:
+    """One `--eyesight-view` frame for the poll that just ran (`todo/
+    todo.md`'s "Added 2026-09-25 (user)" entry) -- `None` before the first
+    successful poll (`runner.last_ownship_state`/`last_t_sim` still unset),
+    the same "nothing to show yet" guard `_push_gaze_line` already uses.
+
+    `trace_records` must be a snapshot taken *before* `--detection-trace`'s
+    own `DetectionTraceWriter.write_poll` clears the shared
+    `DetectionTraceCollector` this poll fed into `NakedEyePerceptionSource`
+    -- both poll loops call this ahead of that write, never after, so a
+    frame always reflects this poll's own ground truth, not an empty
+    collector. Only the naked-eye channel is traced at all (`--detection-
+    trace`'s own module docstring), so the ground-truth half of a frame is
+    naked-eye-only by the same limit; believed markers come from the full
+    `ContactStore`, not the trace, so a scope/hybrid contact still appears
+    there."""
+    if runner.last_ownship_state is None or runner.last_t_sim is None:
+        return None
+    ownship = runner.last_ownship_state
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    gaze = gaze_at(runner.last_t_sim, runner.scan_plan)
+    rear_cutoff_deg = COCKPIT_MASKS[STATION_CO_PILOT].rear_cutoff_deg
+    return render_eyesight_frame(
+        gaze=gaze,
+        optic_name=runner.optic.name,
+        rear_cutoff_deg=rear_cutoff_deg,
+        ground_truth=ground_truth_markers_from_trace(
+            trace_records, heading_true_deg=ownship.heading_true_deg
+        ),
+        believed=believed_markers_from_contacts(
+            runner.store.contacts, observer, ownship.heading_true_deg
+        ),
+        radius_m=radius_m,
+    )
+
+
+def _print_eyesight_frame(frame: str) -> None:
+    """Clears the terminal and prints one `--eyesight-view` frame -- the
+    one place this feature touches the terminal, kept separate from
+    `_render_eyesight_frame`'s pure string-building so the geometry stays
+    testable (`tests/test_eyesight_view.py`) and this side effect needs no
+    test of its own, the same live-process-entrypoint posture `main()`
+    itself already has."""
+    sys.stdout.write("\x1b[2J\x1b[H")
+    sys.stdout.write(frame)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
 def _build_sources(
     aircraft_client: AircraftLayerClient,
     theatre: str,
@@ -842,6 +903,9 @@ def _run_console_poll_loop(
     poll_interval_s: float,
     stop_event: threading.Event,
     detection_trace_path: Path | None = None,
+    eyesight_view: bool = False,
+    eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
+    belief_truth_log_path: Path | None = None,
 ) -> None:
     """Stage 4's background poll thread, fixed in Stage 6: opens
     `world_model_conn` and builds `runner.sources` here, on this thread, then
@@ -857,14 +921,37 @@ def _run_console_poll_loop(
     writes each poll's buffered records to `detection_trace_path` via
     `DetectionTraceWriter` immediately after `runner.run_once()` -- after
     `ingest`/`tick` have already run against this poll's `Observation`s, so
-    the write can never influence what was ingested."""
+    the write can never influence what was ingested.
+
+    `eyesight_view` (`--eyesight-view`, `todo/todo.md`'s "Added 2026-09-25
+    (user)" entry) and `belief_truth_log_path` (`--belief-truth-log`, that
+    same entry's 2026-09-26 follow-up) are the same additive-no-op-when-
+    unset shape: all three need the one `DetectionTraceCollector` this
+    function builds whenever *any* of them is set, each reads it in turn
+    (frame render, then the truth-log join, in that order -- neither
+    mutates it), and finally either `DetectionTraceWriter.write_poll`
+    clears it (when `--detection-trace` is also active) or this function
+    clears it itself (`trace_collector.records.clear()`) -- exactly one
+    clear per poll, always after every reader has had its turn, so no
+    reader ever sees a stale or already-cleared collector."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
-        DetectionTraceCollector() if detection_trace_path is not None else None
+        DetectionTraceCollector()
+        if (
+            detection_trace_path is not None
+            or eyesight_view
+            or belief_truth_log_path is not None
+        )
+        else None
     )
     trace_writer = (
         DetectionTraceWriter(detection_trace_path)
         if detection_trace_path is not None
+        else None
+    )
+    belief_truth_writer = (
+        BeliefTruthLogWriter(belief_truth_log_path)
+        if belief_truth_log_path is not None
         else None
     )
     try:
@@ -893,8 +980,26 @@ def _run_console_poll_loop(
             # distinction.
             try:
                 runner.run_once()
-                if trace_writer is not None and trace_collector is not None:
-                    trace_writer.write_poll(trace_collector, runner.store)
+                if trace_collector is not None:
+                    if eyesight_view:
+                        frame = _render_eyesight_frame(
+                            runner,
+                            list(trace_collector.records),
+                            eyesight_view_radius_m,
+                        )
+                        if frame is not None:
+                            _print_eyesight_frame(frame)
+                    if (
+                        belief_truth_writer is not None
+                        and runner.last_ownship_state is not None
+                    ):
+                        belief_truth_writer.write_poll(
+                            trace_collector, runner.store, runner.last_ownship_state
+                        )
+                    if trace_writer is not None:
+                        trace_writer.write_poll(trace_collector, runner.store)
+                    else:
+                        trace_collector.records.clear()
                 if runner.overlay_client is not None and runner.last_t_sim is not None:
                     last_gaze_label = _push_gaze_line(
                         runner.overlay_client,
@@ -908,6 +1013,8 @@ def _run_console_poll_loop(
     finally:
         if trace_writer is not None:
             trace_writer.close()
+        if belief_truth_writer is not None:
+            belief_truth_writer.close()
         world_model_conn.close()
 
 
@@ -1084,6 +1191,9 @@ def _run_crew_text_poll_loop(
     speech_client: AudioAdapterClient | None = None,
     speech_input_enabled: bool = False,
     detection_trace_path: Path | None = None,
+    eyesight_view: bool = False,
+    eyesight_view_radius_m: float = EYESIGHT_DEFAULT_RADIUS_M,
+    belief_truth_log_path: Path | None = None,
 ) -> None:
     """`--crew-text`'s background poll thread -- identical to
     `_run_console_poll_loop` (same reasons: thread-affine `sqlite3.
@@ -1101,15 +1211,28 @@ def _run_crew_text_poll_loop(
     `speech_input_enabled` is set (`main()`'s own wiring), but both are
     still checked so this function has no implicit dependency on how its
     caller constructs them. `detection_trace_path` (BL-9, `--detection-
-    trace`) mirrors `_run_console_poll_loop`'s own wiring exactly -- see
-    that function's docstring."""
+    trace`), `eyesight_view`/`eyesight_view_radius_m` (`--eyesight-view`),
+    and `belief_truth_log_path` (`--belief-truth-log`) mirror
+    `_run_console_poll_loop`'s own wiring exactly -- see that function's
+    docstring for all three."""
     world_model_conn = open_world_model(world_model_db)
     trace_collector = (
-        DetectionTraceCollector() if detection_trace_path is not None else None
+        DetectionTraceCollector()
+        if (
+            detection_trace_path is not None
+            or eyesight_view
+            or belief_truth_log_path is not None
+        )
+        else None
     )
     trace_writer = (
         DetectionTraceWriter(detection_trace_path)
         if detection_trace_path is not None
+        else None
+    )
+    belief_truth_writer = (
+        BeliefTruthLogWriter(belief_truth_log_path)
+        if belief_truth_log_path is not None
         else None
     )
     try:
@@ -1144,8 +1267,26 @@ def _run_crew_text_poll_loop(
             # by that branch.
             try:
                 runner.run_once()
-                if trace_writer is not None and trace_collector is not None:
-                    trace_writer.write_poll(trace_collector, runner.store)
+                if trace_collector is not None:
+                    if eyesight_view:
+                        frame = _render_eyesight_frame(
+                            runner,
+                            list(trace_collector.records),
+                            eyesight_view_radius_m,
+                        )
+                        if frame is not None:
+                            _print_eyesight_frame(frame)
+                    if (
+                        belief_truth_writer is not None
+                        and runner.last_ownship_state is not None
+                    ):
+                        belief_truth_writer.write_poll(
+                            trace_collector, runner.store, runner.last_ownship_state
+                        )
+                    if trace_writer is not None:
+                        trace_writer.write_poll(trace_collector, runner.store)
+                    else:
+                        trace_collector.records.clear()
                 if runner.last_t_sim is not None:
                     crew_console.enrichment = runner.enrichment
                     crew_console.drain_events(runner.last_t_sim)
@@ -1198,6 +1339,8 @@ def _run_crew_text_poll_loop(
     finally:
         if trace_writer is not None:
             trace_writer.close()
+        if belief_truth_writer is not None:
+            belief_truth_writer.close()
         world_model_conn.close()
 
 
@@ -1461,6 +1604,54 @@ def main() -> None:
             "when absent."
         ),
     )
+    parser.add_argument(
+        "--eyesight-view",
+        action="store_true",
+        help=(
+            "print a live top-down ASCII view of what Petrovich is looking "
+            "at and with what, redrawn every poll -- a debug/calibration "
+            "instrument (todo/todo.md's 'Added 2026-09-25 (user)' entry), "
+            "deliberately allowed to show ground truth alongside belief "
+            "(see eyesight_view.py's module docstring). Only meaningful "
+            "with --console or --crew-text; defaults off, a true no-op "
+            "when absent. Offline: body-layer/tools/eyesight_replay.py "
+            "replays a --detection-trace JSONL file with no live DCS "
+            "session at all."
+        ),
+    )
+    parser.add_argument(
+        "--eyesight-view-radius-m",
+        type=float,
+        default=EYESIGHT_DEFAULT_RADIUS_M,
+        help=(
+            "--eyesight-view's display radius in metres (default 5000m, "
+            "user direction -- a display-scale choice, not the naked-eye "
+            "channel's own 10000m detection cap). A contact beyond this "
+            "radius is never dropped: it is marked at the canvas rim and "
+            "listed in the frame's trailing legend with its exact bearing/"
+            "range."
+        ),
+    )
+    parser.add_argument(
+        "--belief-truth-log",
+        type=Path,
+        default=None,
+        help=(
+            "write a per-poll, per-contact ground-truth/belief consistency "
+            "log (JSONL) to this path -- catches drift between what "
+            "Petrovich believes and what is actually there (position, "
+            "cardinality, classification) automatically rather than "
+            "relying on a pilot noticing, which is how the 2026-09-24 "
+            "87.5km-callout defect went unnoticed for a whole sortie "
+            "(plans/position-belief-runaway/debug.md). Prints a loud "
+            "stderr tripwire line for the physically-impossible cases "
+            "(believed range beyond the naked-eye channel's own detection "
+            "cap, or a position error far beyond the contact's own stated "
+            "uncertainty) -- see belief_truth_log.py's module docstring. "
+            "Only meaningful with --console or --crew-text; defaults off, "
+            "a true no-op when absent."
+        ),
+    )
     args = parser.parse_args()
 
     if args.crew_text and args.console:
@@ -1478,6 +1669,10 @@ def main() -> None:
         )
     if args.detection_trace is not None and not (args.console or args.crew_text):
         parser.error("--detection-trace requires --console or --crew-text")
+    if args.eyesight_view and not (args.console or args.crew_text):
+        parser.error("--eyesight-view requires --console or --crew-text")
+    if args.belief_truth_log is not None and not (args.console or args.crew_text):
+        parser.error("--belief-truth-log requires --console or --crew-text")
     if args.brain_client == "http" and args.brain_url is None:
         parser.error("--brain-client http requires --brain-url")
 
@@ -1554,6 +1749,9 @@ def main() -> None:
                 audio_adapter_client if args.speech_input else None,
                 args.speech_input,
                 args.detection_trace,
+                args.eyesight_view,
+                args.eyesight_view_radius_m,
+                args.belief_truth_log,
             ),
             daemon=True,
         )
@@ -1586,6 +1784,9 @@ def main() -> None:
                 args.poll_interval_s,
                 stop_event,
                 args.detection_trace,
+                args.eyesight_view,
+                args.eyesight_view_radius_m,
+                args.belief_truth_log,
             ),
             daemon=True,
         )

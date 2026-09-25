@@ -268,7 +268,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 
 ### Added 2026-09-25 (user)
 
-- [ ] **A real-time ASCII view of what Petrovich is looking at, and with what.** User, 2026-09-25:
+- [x] **A real-time ASCII view of what Petrovich is looking at, and with what. Built 2026-09-25 (`feature/eyesight-view`) — `--eyesight-view`, plus `--belief-truth-log` below.** User, 2026-09-25:
   *"it'd help if I could visually see where Petrovich is looking and with what. A realtime ascii
   graphic would do just fine."* Shape, as he described it:
   - **Ownship at bottom centre**, because the rear hemisphere is not visible anyway — so the

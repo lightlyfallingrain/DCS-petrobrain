@@ -104,3 +104,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [BR-1 Stage 1 brain-layer](project_br1_stage1_brain_layer.md) — stale worktree branch, stale feature-branch baseline (1111 not 1192), structural-vs-judgement decider split, stdlib-not-FastAPI.
 - [watch-reporting Stage 1-5](project_watch_reporting_stage1_5.md) — watched-only kind needs singleton grouping too; move-observer-not-target fixtures; slot resolvers must precede phrase table.
 - [position-belief hold-recovery fix](project_position_belief_hold_recovery_fix.md) — quadratic-under-inflation pattern in hold-and-decay branches; fix is two timestamps + always-fresh-from-base inflation.
+- [Eyesight view + belief-truth-log](project_eyesight_view.md) — range-0 ray hides set_if_blank markers; legend text traps substring tests; PRESENCE_CLASS==DEFAULT_OP_CLASS.
