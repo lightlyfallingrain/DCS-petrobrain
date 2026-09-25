@@ -37,6 +37,7 @@ def _target(
     range_m: float = 1_000.0,
     object_type: str = "T-72",
     current_level: str = "presence",
+    watched: bool = False,
 ) -> LookTarget:
     return LookTarget(
         contact_id=contact_id,
@@ -45,6 +46,7 @@ def _target(
         range_m=range_m,
         object_type=object_type,
         current_level=current_level,
+        watched=watched,
     )
 
 
@@ -1080,3 +1082,56 @@ class TestSearchPhase:
         )
         assert state.phase is OpticPhase.SCANNING
         assert decision.optic is UNAIDED_OPTIC
+
+
+def test_choose_look_prefers_a_watched_contact_over_more_unwatched_ones() -> None:
+    """User, 2026-09-25: identify by glass "for all contacts, but even more
+    so watched contacts".
+
+    The prior rule was coverage alone -- point where the binocular field
+    covers the most unresolved contacts, since one look resolves all of
+    them. That still holds among equally-watched directions, but a contact
+    the pilot explicitly asked about now outranks raw count: he asked for a
+    reason, and spending the next look elsewhere answers a question nobody
+    posed."""
+    # One watched contact off to the left, alone in its field.
+    watched = _target("CONTACT_W", azimuth_deg=-40.0, range_m=2_000.0, watched=True)
+    # Three unwatched contacts clustered together to the right -- under the
+    # old coverage-only rule this direction wins 3 to 1.
+    cluster = [
+        _target("CONTACT_A", azimuth_deg=40.0, range_m=1_500.0),
+        _target("CONTACT_B", azimuth_deg=41.0, range_m=1_500.0),
+        _target("CONTACT_C", azimuth_deg=42.0, range_m=1_500.0),
+    ]
+
+    chosen = choose_look([watched, *cluster])
+
+    assert chosen is not None
+    assert chosen.contact_id == "CONTACT_W"
+
+
+def test_choose_look_still_prefers_coverage_among_equally_watched() -> None:
+    """The coverage rule is unchanged where watched-ness does not separate
+    the options -- this is an added tie-break, not a replacement."""
+    lone = _target("CONTACT_LONE", azimuth_deg=-40.0, range_m=1_500.0)
+    cluster = [
+        _target("CONTACT_A", azimuth_deg=40.0, range_m=2_000.0),
+        _target("CONTACT_B", azimuth_deg=41.0, range_m=2_000.0),
+    ]
+
+    chosen = choose_look([lone, *cluster])
+
+    assert chosen is not None
+    assert chosen.contact_id in {"CONTACT_A", "CONTACT_B"}
+
+
+def test_watched_ness_does_not_gate_whether_a_look_happens() -> None:
+    """Ordering only. An unwatched contact inside its improvement window is
+    still worth identifying -- otherwise "even more so watched" would have
+    quietly become "only watched"."""
+    only_unwatched = [_target("CONTACT_U", azimuth_deg=10.0, range_m=2_000.0)]
+
+    chosen = choose_look(only_unwatched)
+
+    assert chosen is not None
+    assert chosen.contact_id == "CONTACT_U"
