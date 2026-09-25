@@ -11,7 +11,9 @@ source ./petrobrain.env
 # so they can (user, 2026-09-25). If brain-layer ends up on a different box
 # from body-layer, pass `--host 0.0.0.0` explicitly -- which is why this script
 # omits the flag rather than the binary hardcoding loopback.
-pushd $PETROBRAIN_PATH/brain-layer/ && PYTHONPATH=src .venv/bin/python -m brain_layer \
+# Relative, not $PETROBRAIN_PATH -- that variable holds the WSL/Windows path
+# (/mnt/d/...) and does not resolve on the Mac, where this service runs.
+pushd ../brain-layer/ && PYTHONPATH=src .venv/bin/python -m brain_layer \
     --stub-delay-s 0 \
     $@
 popd

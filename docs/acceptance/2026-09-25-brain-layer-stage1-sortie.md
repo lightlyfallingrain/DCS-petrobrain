@@ -1,5 +1,7 @@
 # Brain layer, Stage 1 sortie
 
+> **SUPERSEDED, 2026-09-25**, by `2026-09-25-crew-behaviour-sortie.md` — fly that instead. Not stale, merely absorbed: it recommended its own short flight, and the user chose to fold the day's cards into one. Its content survives as that card's block 4, caveat intact — with `StubDecider` behind the wire, only the mechanical parts of the exchange are judgeable. Kept for the record.
+
 The first time a free-text utterance that used to produce silence produces a real spoken response,
 end to end, over HTTP — with no model involved at all. `StubDecider` (a configurable-delay stand-in)
 proves every hard part of the wire — non-blocking handoff, stand-by, staleness revalidation,
