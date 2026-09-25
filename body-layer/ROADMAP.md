@@ -1669,6 +1669,61 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
      against trees" as a contrast effect. That resolves the asymmetry this bullet anticipated: the
      two halves are an **LOS term and a background term**, they apply to different target classes,
      and only the first one touches ground units.
+
+     **Decision 2026-09-25 (user): the two channels get two different vegetation models, and the
+     split is not a compromise — it is what each channel actually is.**
+
+     - **Naked eye and binoculars: model forest statistically.** A per-landcover-class transmission
+       probability, not a geometric test. This is the honest description rather than an
+       approximation of one: a sweeping unaided gaze through woods *is* probabilistic — you catch
+       things through gaps, and whether you see a given vehicle depends on where you happened to be
+       looking as you swept. We hold landcover polygons, not trunks; a polygon cannot answer "is
+       there a tree on this exact ray", and pretending otherwise would invent geometry we do not
+       have.
+     - **The 9K113 sight: ask DCS for the real line of sight.** One narrow line to one target,
+       pointed deliberately, usually just before shooting — the case where precision is worth a
+       live call, and the only channel whose per-poll call count makes one affordable.
+
+     **Both the cost argument and the fidelity argument point the same way**, which is why this is
+     worth building rather than settling for one model everywhere: the channel that cannot afford
+     per-candidate DCS calls is exactly the one that does not need them, and the channel that needs
+     precision makes one call per poll.
+
+     **Three things to settle before it is built:**
+
+     1. **Flicker is the real failure mode, and it is not a smoothing problem.** An independent
+        random draw per poll makes a contact strobe in and out at 5 Hz — Petrovich repeatedly
+        reporting and losing the same thing. The draw must be **stable per contact-and-geometry**,
+        re-rolling only when something meaningful changes (ownship moves enough, the contact moves,
+        the gaze shifts). A seeded, deterministic draw is required rather than preferred:
+        everything in this subproject must be replayable with no live DCS session, which an
+        unseeded draw breaks.
+     2. **The two models will disagree, and that is correct.** Naked eye glimpses something the
+        sight finds blocked, or the reverse — both are real. What must never happen is one channel
+        contradicting *itself* between consecutive polls, which is (1) restated as an invariant.
+     3. **A live-DCS LOS call inside a perception gate fights the no-live-DCS testability rule.**
+        The shape that survives it: DCS LOS as an *additional* gate on the sight channel only,
+        layered over world-model's offline primitive rather than replacing it, with the offline
+        answer as the fallback when the bridge is unavailable and the recorded answer used on
+        replay. `query.line_of_sight` stays authoritative everywhere else, including Mission
+        Interpreter's own use of it.
+
+     **Prerequisite, gating only the second half: does `land.isVisible` actually test trees, or only
+     the terrain mesh?** Unverified — ED's *AI detection* sampling tree geometry
+     (`trees_LOS_test_T4`) is a different claim from the *scripting API* doing so, and this
+     project's rule is not to design against an unverified DCS-internals claim. `land.getIP` may be
+     the more useful call, since it returns where the ray was blocked and so distinguishes a ridge
+     from a treeline 200 m short of the target. The transport is not in question —
+     `net.dostring_in("scripting", …)` has been in production since 2026-09-13 — but per-call cost
+     at realistic candidate counts, and whether a result returns synchronously or needs a side
+     channel, are both open (the same two questions left unanswered when the mission-bridge probe
+     item was closed). **Needs an investigator pass plus a probe on the Windows box, run before the
+     9K113 slice is scoped rather than during it.** If the answer is terrain-only, the sight half
+     has nothing to call and the statistical model has to cover every channel.
+
+     Calibration cost is small and composes with the conditions campaign rather than adding to it:
+     one transmission number per landcover class, obtainable from a screenshot ladder rather than
+     from flying.
   2. **Light level — dawn, day, dusk, night.** The user: *"light/dark/dusk matters immensely."*
      Mission time and sun elevation are the inputs; the effect is large and non-linear, and dusk is
      the interesting case rather than full night, because full night is nearly a binary. Needs a
