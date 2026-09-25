@@ -1075,12 +1075,25 @@ def test_route_event_contact_motion_changed_auto_acknowledges() -> None:
 # --- CONTACT_RANGE_CROSSED speech (plans/watch-reporting/plan.md Stage 2) --
 
 
-def test_route_event_contact_range_crossed_speaks_with_no_affixes() -> None:
-    """Decision 3: no affixes at all -- the range is already in the body of
-    `_contact_report_text`'s own clock/range clause."""
+def test_route_event_contact_range_crossed_says_which_way_it_crossed() -> None:
+    """Decision 3 REVISED, 2026-09-25 (user, after flying it).
+
+    **This test previously asserted the bare form**, under the name
+    `..._speaks_with_no_affixes`, on Decision 3's original reasoning that
+    "the range is already in the body". Flown, that made a belief update
+    about a contact he was *not looking at* word-for-word identical to a
+    fresh sighting: he heard "ground, 10 o'clock, 2 km" while a commanded
+    `scan right` was in force and reasonably read it as a detection defect
+    (`plans/callout-outside-gaze/debug.md`).
+
+    The lead carries what the bare form threw away -- which direction. The
+    number alone cannot say it, because the pilot does not hold the
+    previous number in his head: "three kilometres" is only news if you
+    know it was four."""
     store, contact_id = _store_with_one_contact()
-    event = Event(
-        id="EVENT_RANGE",
+
+    closing = Event(
+        id="EVENT_RANGE_IN",
         contact_id=contact_id,
         kind="CONTACT_RANGE_CROSSED",
         t_sim=0.0,
@@ -1088,11 +1101,42 @@ def test_route_event_contact_range_crossed_speaks_with_no_affixes() -> None:
         previous_range_km=4,
         range_km=3,
     )
+    speech = route_event(store, closing, now_sim=0.0)
+    assert speech is not None
+    # No enrichment supplied -> no clock/range clause, same as any other
+    # unenriched report; the lead is the only thing this kind adds.
+    assert speech.text == "Getting closer, BMP-2."
+
+    opening = Event(
+        id="EVENT_RANGE_OUT",
+        contact_id=contact_id,
+        kind="CONTACT_RANGE_CROSSED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_range_km=3,
+        range_km=4,
+    )
+    speech = route_event(store, opening, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "Moving away, BMP-2."
+
+
+def test_route_event_contact_range_crossed_falls_back_without_both_bands() -> None:
+    """Defensive path only -- `belief.events`' range block never emits this
+    kind without both bands, since it compares them to decide the event
+    fires at all. Saying nothing about direction beats saying a direction
+    that is not supported by the event."""
+    store, contact_id = _store_with_one_contact()
+    event = Event(
+        id="EVENT_RANGE_PARTIAL",
+        contact_id=contact_id,
+        kind="CONTACT_RANGE_CROSSED",
+        t_sim=0.0,
+        certainty="observed",
+        range_km=3,
+    )
     speech = route_event(store, event, now_sim=0.0)
     assert speech is not None
-    # No enrichment supplied -> no clock/range clause at all, same as any
-    # other unenriched report -- confirming this kind adds no wording of
-    # its own beyond `_contact_report_text`'s normal shape.
     assert speech.text == "BMP-2."
 
 

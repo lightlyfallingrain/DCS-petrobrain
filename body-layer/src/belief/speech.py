@@ -1056,11 +1056,33 @@ def _render_lifecycle_text(result: ContactResult, event: Event) -> str | None:
             return None
         return _contact_report_text(result["facts"], event_clause=event.motion)
     if event.kind == CONTACT_RANGE_CROSSED:
-        # `plans/watch-reporting/plan.md` Decision 3 -- no affixes at all.
-        # The range *is* the news, and it is already in
-        # `_contact_report_text`'s own clock/range clause: "Armor, two
-        # o'clock, three kilometres." verbatim.
-        return _contact_report_text(result["facts"])
+        # `plans/watch-reporting/plan.md` Decision 3, REVISED 2026-09-25
+        # (user, after flying it). The original reading gave this kind no
+        # affixes, because "the range *is* the news, and it is already in
+        # the body". Flown, that made a *belief update about a contact he
+        # is not currently looking at* word-for-word indistinguishable
+        # from a fresh sighting: he heard "ground, 10 o'clock, 2 km" while
+        # a commanded `scan right` was in force and reasonably read it as
+        # a detection defect (`plans/callout-outside-gaze/debug.md`).
+        #
+        # His wording, and it beats merely tagging provenance: it carries
+        # the one thing the bare form threw away -- *which direction* the
+        # range crossed. The number alone cannot say, because the pilot
+        # does not hold the previous number in his head; "three
+        # kilometres" is only news if you know it was four a moment ago.
+        #
+        # The direction needs no new state: the event already snapshots
+        # the whole-kilometre band either side of the crossing, which is
+        # what `belief.contacts`' range block compared to decide the event
+        # fires at all.
+        if event.range_km is None or event.previous_range_km is None:
+            # Defensive only: `belief.events.range_crossing_event` never
+            # emits this kind without both bands. Falling back to the bare
+            # form is better than saying a direction we cannot support.
+            return _contact_report_text(result["facts"])
+        closing = event.range_km < event.previous_range_km
+        lead = "Getting closer, " if closing else "Moving away, "
+        return _contact_report_text(result["facts"], lead=lead)
     if event.kind == CONTACT_ENGAGEMENT_CHANGED:
         # Decision 3's two wordings, taken from `docs/concept/
         # STATE_TRANSITIONS.md`'s own "danger <unit> <where>"/"safe from
