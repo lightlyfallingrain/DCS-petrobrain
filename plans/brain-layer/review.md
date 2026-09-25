@@ -356,6 +356,9 @@ subprojects' `CLAUDE.md` "Commands" sections was re-run directly against the act
 inferred from reading. The one acknowledged gap is a live-Ollama smoke test, which no reviewer in
 this sandbox can perform (network access to a live Ollama daemon is denied here exactly as it was
 for the implementer) — flagged as an optional refinement, not silently skipped.
+
+---
+
 ## Stage 2 fold review
 
 Reviewed `e3fce0e` ("Fold br1-stage2 into brain-layer-stage2: fix the BECAUSE quoting defect") and
