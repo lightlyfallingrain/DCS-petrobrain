@@ -23,9 +23,13 @@ Full rationale: `docs/concept/PETROBRAIN_SYSTEM.md`. Per-layer draft designs (st
 ## Current priority
 
 Root `ROADMAP.md` is the entry point for what's done and what's next: it gives the cross-subproject
-status and links to each subproject's own `ROADMAP.md` (`world-model/ROADMAP.md`,
-`aircraft-layer/ROADMAP.md`, `body-layer/ROADMAP.md`), which is that subproject's source of truth
-for milestone status, decisions, and backlog — read those, don't infer status from this file.
+status and links to **every** subproject's own `ROADMAP.md`, which is that subproject's source of
+truth for milestone status, decisions, and backlog — read those, don't infer status from this file.
+**Take the list of subprojects from that status table, never from this file**: subprojects are added
+as the architecture grows (`git ls-files '*/pyproject.toml'` is the mechanical check), and a list
+written here goes stale silently while reading as an instruction. That already happened — three were
+named here long after six existed, and four skills inherited the same three and could report PASS
+while never looking at half the repo.
 `todo/todo.md` no longer duplicates milestone narrative; it only holds items not yet assigned to
 one subproject's roadmap (cross-cutting backlog, session-scoped notes) and User priority tasks.
 (Deliberately not restated here: two copies of the same fact drift out of sync as milestones
@@ -39,11 +43,11 @@ Each major component under this repo may carry its own `<subproject>/CLAUDE.md` 
 **Module independence**: each subproject should be able to run on its own, with its own venv/dependencies. **body-layer ↔ world-model is the sole exception** — body-layer imports world-model's `query`/`coordinates` packages in-process (not over HTTP), a deliberate coupling because the two are treated as a pair, at least for now (see `plans/body-layer/plan.md` "Seams" and `body-layer/CLAUDE.md` "Tech stack"). Do not introduce a similar in-process cross-subproject import elsewhere without the same explicit justification — the default is HTTP/JSON across a subproject boundary (as aircraft-layer ↔ body-layer already does), not a shared import.
 - `world-model/CLAUDE.md` (see also `world-model/docs/CONVENTIONS.md` for its working rules: DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access).
 - `aircraft-layer/CLAUDE.md` — live DCS I/O pipeline (Export.lua → Windows collector → LAN API). See also `aircraft-layer/WORKFLOW.md` for the cross-machine deploy/run workflow.
-- `body-layer/CLAUDE.md` — Petrovich's belief-state process (contacts, attention, perception ingestion, the brain-facing API). BL-x milestone status: see `todo/todo.md` "Current Focus", not this line — `plans/body-layer/plan.md` has the full milestone series.
+- `body-layer/CLAUDE.md` — Petrovich's belief-state process (contacts, attention, perception ingestion, the brain-facing API). BL-x milestone status: `body-layer/ROADMAP.md`, which is its source of truth — `plans/body-layer/plan.md` has the full milestone series.
 
 ## Agents
 
-8 agent roles live in `.claude/agents/`: the 7 template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus a project-specific `investigator`. All use `claude-sonnet-5`. **`dod` was raised from `claude-haiku-4-5-20251001` to sonnet on
+The agent roles are whatever `.claude/agents/` currently holds — read that directory rather than a count written here. They are the template roles (architect, implementer, reviewer, debugger, performance-reviewer, security, dod — see `AGENTS.md` for role sequences) plus this project's own `investigator`. Each role's model is declared in its own file's frontmatter, which is the only place it is true; most are `claude-sonnet-5`. **`dod` was raised from `claude-haiku-4-5-20251001` to sonnet on
 2026-09-20** (user direction) after a run of errors in its acceptance cards — commands that had
 never been executed, a card with no commands in it at all, and twice a fabricated example. The
 cheap-final-gate saving was not worth a gate that reports work as verified when it was not; its own
@@ -93,8 +97,8 @@ was simply never checked. `git branch` costs one second and would have caught it
 
 ## Milestone Completion
 
-Before marking a milestone done in a subproject's `ROADMAP.md` (`world-model/ROADMAP.md`,
-`aircraft-layer/ROADMAP.md`, `body-layer/ROADMAP.md`), answer one question in the DoD report or the
+Before marking a milestone done in a subproject's `ROADMAP.md` (whichever one owns it — root
+`ROADMAP.md`'s status table lists them all), answer one question in the DoD report or the
 roadmap update itself: does this milestone's completion change what the next milestone should be,
 or invalidate an assumption downstream milestones rely on? One line is enough — this is the
 project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than a calendar.
@@ -102,7 +106,11 @@ project's inspect-and-adapt checkpoint, tied to milestone boundaries rather than
 ## Knowledge graph
 
 A queryable graph over the current-state design documentation lives in `graphify-out/` (gitignored,
-built from the `graphify-corpus/` mirror). **Query it before concluding something is undocumented** —
+built from a corpus that is **a file list, not a directory** — `.claude/scripts/graph-corpus-files.sh`
+produces it). A copied `graphify-corpus/` mirror was tried and removed: it broke cache lookups keyed
+on mirror paths, and files at the mirror root were keyed `graphify_corpus_*`, leaking a staging
+directory into the graph's own vocabulary. **Do not reintroduce a mirror** — `/graph-refresh` carries
+the full reasoning. **Query it before concluding something is undocumented** —
 this project's recurring failure is not missing documentation but failing to find documentation that
 already exists, and occasionally finding a superseded version instead.
 
@@ -128,7 +136,7 @@ knowledge graph honest".
 
 ## Verification
 
-Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list (`world-model/CLAUDE.md`, `aircraft-layer/CLAUDE.md`, or `body-layer/CLAUDE.md`; each has its own equally-canonical list, ruff format/check + mypy --strict + pytest in each case). A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
+Run the active subproject's format/lint/type/test commands after every code change and always before a commit — see that subproject's own `CLAUDE.md` "Commands" section for the current list — every subproject has one, each equally canonical, ruff format/check + mypy --strict + pytest in each case, and the set of subprojects comes from root `ROADMAP.md`'s status table rather than from a list here. A change touching more than one subproject needs each touched subproject's own commands run, not just one. This is the same sequence `.claude/scripts/commit-quality-gate.sh` enforces mechanically per-subproject at commit time — stating it here prompts self-verification earlier, during implementation, instead of only at commit time.
 
 ## Talking to the user
 
@@ -192,6 +200,6 @@ earlier claim, or a disagreement with a request gets said plainly — in a sente
 
 `todo/todo.md` is the source of truth. States: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` decision needed · `[>]` deferred.
 
-- Read before starting work; prefer Current Focus tasks
+- Read before starting work; prefer the User priority tasks at the top of the file
 - Do not start `[?]` or `[>]` tasks without instruction
 - Update state as work progresses; do not delete tasks; do not exceed task scope
