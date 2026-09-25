@@ -303,7 +303,9 @@ surveyed by search before anything was pulled. Both replacements beat the incumb
 
 | | `qwen3:4b-instruct-2507-q4_K_M` (default) | `granite4:micro` (fallback) |
 |---|---|---|
-| Size | 2.5 GB | 2.1 GB (3.4B params) |
+| On disk | 2.5 GB | 2.1 GB (3.4B params) |
+| **Resident, Ollama default 32k ctx** | **7.5 GB** | **5.0 GB** |
+| **Resident, `num_ctx=2048`** | **2.9 GB** | **2.3 GB** |
 | Warm latency, closed answer | **38–63 ms** | **30–49 ms** |
 | `<think>` trace observed | never, 0 of ~20 runs including adversarial | never |
 | Ambiguous reference ("that tank", two T-72s) | **ASK 5/5** | **ASK 5/5** |
@@ -314,6 +316,14 @@ genuinely ambiguous reference — is what both replacements do by default, at **
 latency and roughly half the disk**. `qwen3:4b-instruct-2507` is architecturally non-thinking: the
 `<think>` capability is absent from the weights, so there is no flag that can fail to suppress it,
 which is precisely how plain `qwen3:4b` reached 32.7 s.
+
+**Set `num_ctx` explicitly — the default costs 4.6 GB of nothing.** Resident footprint is about
+three times disk size at Ollama's default 32768 context, and almost all of that gap is KV cache.
+BR-1's prompts are **~155 tokens**. Measured on this machine 2026-09-25: dropping to
+`num_ctx=2048` takes the default model from 7.5 GB to **2.9 GB** and the fallback from 5.0 GB to
+**2.3 GB**. Earlier drafts of this decision argued footprint from *disk* size, which understated
+the real cost by 3x and would have made the two-tier budget below look impossible. Stage 2 sets
+`num_ctx` explicitly rather than inheriting the default.
 
 **Tag correction, found by measuring rather than reading:** bare `qwen3:4b-instruct-2507` does
 **not** resolve on Ollama — only quant-suffixed tags do, hence `-q4_K_M`. `granite4:micro` resolves
@@ -651,6 +661,74 @@ Sketched from the explore notes; not designed here.
 | **BR-5** | Attack run — target resolution (one brain call) plus deterministic boresight-relative guidance at a high callout rate. **Gated on the damage probe** (`aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md`); miss detection deferred by the user. | probe, BR-2 |
 | **BR-6** | Refusal with reason (`unable <reason>`), interrupt/resume as a stack on `threat.py`. | BR-4 |
 | **BR-7** | The mission briefing — on the ground, on the **capable** model (`qwen3:14b`), before the swap. Natural consumer of MI-5. | BR-4 |
+| **BR-8** | **The second, thinking tier** — see below. | BR-4 |
 
 Deferred by the user and not scheduled: LOS-deferred tasks, unrequested advisory, chattiness when
 nothing is happening.
+
+---
+
+## BR-8 — a second, thinking tier for questions where delay is acceptable
+
+**Provenance:** the user, 2026-09-25, unprompted — *"Could also keep a thinking model locally for
+complex questions where delay is ok?"* Recorded now, built later. Nothing in BR-1 depends on it.
+
+### Why it is worth doing, and it is not the obvious reason
+
+The obvious reading is "a smarter model answers harder questions". The more valuable effect is the
+opposite direction: **a slow tier removes the pressure on the fast tier to be good enough for
+everything.** Much of this plan's discipline — closed vocabularies, the D10 validator, one narrow
+decision per call — exists partly because a 4B model is all there is. With a second tier available,
+the fast tier can stay deliberately narrow on purpose rather than by necessity. This *strengthens*
+the constraint rather than relaxing it.
+
+### The memory budget, measured
+
+Measured on this machine 2026-09-25 (see D6). On 32 GB unified memory, with DCS on the Windows box
+so nothing here competes with the sim:
+
+| | resident |
+|---|---|
+| fast tier, `num_ctx=2048` | 2.9 GB |
+| thinking tier (`qwen3:14b`, q4, 8k ctx) | **~11–13 GB, estimated, not measured** |
+| whisper `small.en` | ~0.5 GB |
+| **total** | **≈15 GB of 32 GB** |
+
+The thinking-tier figure is an **estimate scaled from the 4B measurements, not a measurement** —
+that one run was not performed. Measure it before the budget is relied on.
+
+### The user's own constraint, and why it is the load-bearing one
+
+> *"thinking model must be kept warm for duration of mission, it's useless otherwise. need a
+> trigger from DCS when mission starts and ends."*
+
+This is the requirement that shapes the design, not the model choice. A 12 GB model that is not
+resident pays a cold load of meaningful seconds on first use, which turns "delay is acceptable"
+into "delay is unpredictable" — and an unpredictable pause is exactly what a crew member must not
+have. So residency is not an optimisation here; it is the feature.
+
+Ollama's `keep_alive` is the mechanism. What it needs is a mission lifecycle signal to bracket.
+
+### The trigger already exists — this is a forwarding job, not a new mechanism
+
+*Checked rather than assumed, 2026-09-25.* `onSimulationStart` and `onSimulationStop` are already
+live in three shipped Hook scripts (`petrobrain-f10-commands-hook.lua`,
+`petrobrain-mission-telemetry-hook.lua`, `petrobrain-f10-probe-hook.lua`). Today they set a local
+flag and write a line to `dcs.log`; **nothing forwards them off the Windows box.**
+
+So what is missing is the forwarding and the seam, not the DCS-side detection: a small addition to
+an existing Hook's callback, a collector endpoint, and a body-layer read — the same shape as the
+F10-command and unit-velocity channels already in production. Worth knowing before this is scoped
+as a research problem.
+
+A mission lifecycle signal is also independently useful beyond this: it is the honest boundary for
+the model swap the user's compute-topology note already assumes, and the natural reset point for
+per-sortie state.
+
+### Two things to settle when this is designed, not now
+
+1. **Routing must be deterministic.** Which tier answers a question cannot itself be a model
+   decision — that puts a model call in front of every model call. Code routes by question class:
+   closed-vocabulary picks to the fast tier, open questions to the slow one.
+2. **"Stand by" (D8) is what makes the slow tier tolerable**, and this is its first real consumer.
+   Today it fires against a stub delay.
