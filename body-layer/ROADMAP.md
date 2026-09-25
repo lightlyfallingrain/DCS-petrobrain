@@ -1167,8 +1167,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Petrovich answer at all (instead of silence) feels right. This entry flips to `[x]`/merged on
   merge, per the roadmap-discipline rule below.
 
-- [ ] **BR-1 Stage 2 — `OllamaDecider`, a real local model behind the wire. DoD gate passed
-  2026-09-25 on `feature/brain-layer-stage2` (tip `39bb752`) — not yet merged.** Replaces Stage 1's
+- [x] **BR-1 Stage 2 — `OllamaDecider`, a real local model behind the wire. DoD PASSED and
+  merged 2026-09-25 (`4bc0df9`, from `feature/brain-layer-stage2`); unflown.** Replaces Stage 1's
   `StubDecider` with a real `qwen3:4b-instruct-2507-q4_K_M` call over `brain-layer/src/
   ollama_client.py`, the classify/discriminate prompt pair (`brain-layer/src/prompts.py`), and a
   new body-side D10 trust boundary (`body-layer/src/belief/brain_reply.py`) that re-validates every

@@ -1,5 +1,13 @@
 # Brain layer Stage 2 — the real model, for the first time
 
+> **SUPERSEDED 2026-09-25 — folded into `2026-09-25-crew-behaviour-sortie.md` as block 4, whole.**
+> Written while Stage 2 was still on a branch, so its setup block and "Branch:" line describe a
+> checkout that no longer exists: Stage 2 merged as `4bc0df9` and everything here is on `main`.
+> Its four tests moved across unchanged in substance (4a say-again, 4b paraphrase, 4c ambiguous
+> reference, 4d the chain-drop MONITOR case), along with the Ollama setup and the caveats.
+> **Do not fly this card — fly the crew-behaviour one.** Kept for the record, and because the
+> reasoning in its own "why this flight matters" section is not repeated there.
+
 **Branch: `feature/brain-layer-stage2`** — not yet merged.
 
 ```sh
