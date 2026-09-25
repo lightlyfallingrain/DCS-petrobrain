@@ -47,9 +47,10 @@ multiplier has already been applied.
 
 This is the finding that decides the model's shape, and it is not a matter of degree:
 
-- **In rain**, the 9K113 **wide** field is the most robust instrument measured (0.19–0.25) and the
-  **narrow** field the least (0.04–0.05) — despite narrow having roughly twice wide's clear-weather
-  multiplier at every tier.
+- **In rain**, the 9K113 **wide** field is the most robust instrument measured at class and type
+  (0.19–0.25) while the **narrow** field is the weakest (0.04–0.05) — despite narrow having roughly
+  twice wide's clear-weather multiplier at every tier. **The detection column is a different story
+  and is corrected below.**
 - **In low light**, that ordering **inverts**: narrow is best (0.12–0.22), wide behind it, and the
   unaided eye and binoculars collapse to near-zero.
 
@@ -69,6 +70,38 @@ things**, and each instrument is exposed to them differently:
 to be at least `f(condition, optical path)` — where "optical path" distinguishes *through the
 windscreen* from *not*, which is a new per-`Optic` property that does not exist today. A single
 scalar would have to be wrong for one of rain or darkness no matter which value it took.
+
+### Correction (user, 2026-09-26): the narrow sight's rain *detection* limit is not an instrument property
+
+*"It's not the sight, it's the atmospheric condition, no optic can see through haze/fog/rain beyond
+a certain limit. That is the meteorological visibility that e.g. METAR mentions."*
+
+This is right, and the measurements carry its fingerprint: in rain 2, the 9K113 **wide and narrow
+fields both detect at exactly 3.7 km**. Two instruments whose clear-weather presence multipliers
+differ by a factor of 1.6 landing on the identical number is not a coincidence about the sight — it
+is both of them hitting the same wall. Above that range there is nothing to magnify.
+
+So the detection tier needs a different *kind* of term from the other two:
+
+```
+detection_range = min(instrument capability, meteorological visibility)
+```
+
+A **ceiling**, not a multiplier — and one that applies to every instrument equally, since it is a
+property of the air rather than of the glass. The windscreen-blur term from finding 2 remains a
+multiplier, and applies only to the instruments that look through the canopy. The two compose:
+rain degrades the eye and binoculars twice over (blur *and* ceiling) and the sight once (ceiling
+only), which is exactly the ordering measured.
+
+**What this does not explain, and it stays open:** why narrow classifies and types *worse* than
+wide in rain (1.1 vs 2.8 km class) when both targets sit well inside the 3.7 km ceiling. That is an
+instrument-level effect — contrast loss under magnification, a harder-to-hold narrow field, or
+something else — and it is not resolved by the ceiling. Do not fold it into the ceiling term.
+
+ED's own model agrees on the shape, which is mild corroboration rather than proof: its legacy fog
+density maps directly onto a **visibility distance in metres** (10000 down to 10), and it carries a
+separate altitude-dependent visibility ceiling that our flat `NAKED_EYE_RANGE_CAP_M` approximates
+badly (`aircraft-layer/research/2026-09-20-dcs-install-detection-deep-read.md`, findings 7 and 9).
 
 ## Finding 3 — the tiers compress, they do not scale together
 
@@ -148,14 +181,31 @@ the shape of the model should match the precision of the data that will calibrat
 0. **Where a cell was soft, is `barely` the only marker, or would a range band be easy to record?**
    Given the precision point above, a cell written as "3.5–5.0, called it at 4" is worth more than a
    point value, and costs nothing extra to write down while flying.
-1. **What does `-` mean in the tables — "never achievable at any range", or "not measured"?** The
-   analysis above reads it as never-achievable, which is how the user's prose describes the low-light
-   type case, but for the rain rows it changes the factor from 0 to unknown.
+1. ~~**What does `-` mean in the tables?**~~ **Answered (user, 2026-09-26): never achievable at any
+   range.** So the zeros in the factor table are real zeros — in rain and in low light the naked eye
+   never reaches type identification at all, at any range. That is a floor effect, not a short
+   range, and a multiplicative model cannot produce it from a non-zero baseline: the tier has to be
+   switchable off entirely.
 2. **Was the windscreen in the same state across the rain runs?** If finding 2's mechanism is right,
    windscreen wetting *is* the rain variable for two of the four instruments, and wipers (untested,
    and the user notes they cover only a small segment at boresight) would be a third state rather
    than a refinement.
 3. **Rain 3 vs rain 2** — see finding 4.
-4. **Terrain and vegetation are still unmeasured**, and they are the factor the statistical
+4. **Can meteorological visibility be read out of DCS at all, and can *where it rains* be?**
+   (User, 2026-09-26.) Two separate unknowns, both feeding this model and both landing on the same
+   bridge as the LOS probe:
+   - **The visibility value.** `Export.lua` carries no fog or weather getter — confirmed by reading
+     the shipped file — so the mission-sandbox bridge is the only candidate route, unprobed.
+     `world.weather.getFogThickness()` is the named candidate; ED's own fog representation is
+     `fog2.manual = {{time, visibility, thickness}, …}`, a **time series**, so anything built here
+     must sample rather than read once.
+   - **Where it rains.** *"Rain and clouds are not uniform in DCS. Moving will get you in and out of
+     rain."* Whether any API exposes the spatial distribution is genuinely open, and it is the harder
+     of the two: a single ownship-local visibility figure would at least be sampled at the right
+     place, but it says nothing about whether the *target* sits under a squall. If nothing exposes
+     it, the honest fallback is an ownship-local reading applied to the whole scene, with the
+     limitation stated rather than hidden.
+
+5. **Terrain and vegetation are still unmeasured**, and they are the factor the statistical
    transmission model (`body-layer/ROADMAP.md`, the 2026-09-25 vegetation decision) needs a number
    for. These condition measurements do not feed that model; they are a separate axis.
