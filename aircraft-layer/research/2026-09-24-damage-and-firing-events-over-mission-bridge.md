@@ -580,3 +580,103 @@ changed. What *has* changed is that the gate now has something better than a pos
 the event names `target_object_id`, so "is this being shot *at us*" is a direct comparison rather
 than an inference. And `weapon` is populated, which may let a gun burst be distinguished from a
 missile launch without guessing from the initiator's type.
+
+---
+
+## HOOK PROBE RESULTS, 2026-09-25 — every remaining question answered
+
+`win-mac-sync/from-windows/dcs.log`, 105 `PetrobrainDamageProbe` lines from a real sortie. Both
+questions this report was written to answer are now closed, and the design is unblocked.
+
+### Fact 2 — the bridge can subscribe. Finding 15 answered.
+
+```
+11:39:20.756  register: ok=true result=registered
+```
+
+`world.addEventHandler`, registered from inside the `"scripting"` state via
+`net.dostring_in`, works. That was inferred by analogy to `coalition`/`missionCommands`/`env` and
+never probed; it is now measured. Events then flowed for the whole sortie.
+
+Event kinds actually delivered: `S_EVENT_SHOOTING_START` (45), `S_EVENT_SHOOTING_END` (45),
+`S_EVENT_HIT` (37), plus `SIMULATION_UNFREEZE`, `GROUP_CHANGE_OPTION`, `BDA`, `HUMAN_FAILURE` (3),
+`PILOT_DEAD`, `UNIT_LOST`, `CRASH`, `SIMULATION_FREEZE`.
+
+### "We are being shot at" is directly readable — no inference
+
+This is the finding the whole tracer idea rests on, and it is cleaner than hoped:
+
+```
+t= 60.319  S_EVENT_SHOOTING_START  init=Unit #013  target=Pilot #001
+t= 63.059  S_EVENT_SHOOTING_START  init=Unit #013  target=Pilot #001
+t= 70.059  S_EVENT_SHOOTING_START  init=Unit #013  target=Pilot #001
+t= 73.979  S_EVENT_SHOOTING_START  init=Unit #013  target=Pilot #001
+t= 78.179  S_EVENT_SHOOTING_START  init=Unit #013  target=Pilot #001
+t= 82.019  S_EVENT_SHOOTING_START  init=Unit #013  target=Pilot #001
+t= 85.859  S_EVENT_SHOOTING_START  init=Unit #013  target=Pilot #001
+```
+
+`Unit #013` is the `M1043 HMMWV Armament` — a ground, gun-armed vehicle. Every one of its
+`SHOOTING_START` events **names the player as the target**. So the engagement channel does not have
+to infer "is this aimed at us" from geometry: the event says so.
+
+**`target` is populated on `SHOOTING_START` only.** All 7 of that unit's `SHOOTING_END` events carry
+`target='-'`, as do all of the player's own outgoing shooting events. So pair a START with its END
+by *initiator*, and read the target off the START. Of 90 shooting events, 83 had no target — all
+either `SHOOTING_END` or the player's own fire.
+
+**Duplicates are a weapon property, not a handler bug.** `Pilot #001`'s own events arrive in
+identical pairs (twin-cannon), while `Unit #013`'s arrive singly — 7 STARTs, 7 ENDs, no repeats.
+Registration happened exactly once (`PB_PROBE_HANDLER_REGISTERED` held). Still worth deduping on
+`(kind, t, initiator)` rather than assuming one event per trigger pull.
+
+### Fact 1 — `getLife()`/`getLife0()` work, with real numbers
+
+65 `DAMAGED` lines, shape as designed:
+
+```
+DAMAGED t=51.47 units=15 name:type:life:life0:fraction ->
+  Unit #012:MLRS:2.724:3.000:0.908;Unit #013:M1043 HMMWV Armament:2.106:2.500:0.842
+```
+
+So damage is readable per unit, absolute and as a fraction, over the bridge that already runs at
+1 Hz for velocity. `life0` differs by type (MLRS 3.0, HMMWV 2.5, M 818 2.0, Hummer 2.5), which is
+why the *fraction* rather than the raw number is the comparable quantity.
+
+Lowest fraction reached per unit this sortie:
+
+| unit | type | life0 | lowest fraction |
+|---|---|---|---|
+| `Unit #003` | M 818 | 2.0 | **0.680** |
+| `Unit #009` | MLRS | 3.0 | **0.690** |
+| `Unit #013` | M1043 HMMWV Armament | 2.5 | 0.842 |
+| `Unit #012` | MLRS | 3.0 | 0.908 |
+| `Unit #001` | Hummer | 2.5 | 0.946 |
+
+### The one thing still unanswered, and only the user can answer it
+
+**Whether any of those units visibly smoked, and at what fraction.** Nothing here went below
+**0.68**, so if the smoke threshold is lower than that, this sortie never crossed it. The
+probe records the number; it cannot record what the screen looked like. Finding 5's
+smoke-correlation question therefore stands, narrowed to: *did anything smoke, and was it the M 818
+or the MLRS at ~0.68?*
+
+Worth noting the practical consequence either way: "is it dead yet" is answerable **now** from the
+fraction plus disappearance, and *"no, but smoking"* is the only part still waiting on the
+correlation.
+
+### Status
+
+| question | status |
+|---|---|
+| Engine raises shooting events for ground guns | **confirmed** (debrief.log, and now live) |
+| Live handler in the `"scripting"` state receives them | **confirmed** — `register: ok=true` |
+| Can we tell we are the target | **confirmed** — `target` on `SHOOTING_START` |
+| `getLife()`/`getLife0()` over the bridge | **confirmed**, real numbers, per unit |
+| Tracers as objects in `LoGetWorldObjects` | **no** for guns (rockets yes) — see previous section |
+| Life fraction at which smoke appears | **still open** — needs the user's eye, not a probe |
+
+**The design is unblocked.** The engagement channel is `SHOOTING_START` filtered to events whose
+`target` is ownship, and it still wants the LOS/visual-range gate — a theatre-wide event feed would
+otherwise make Petrovich aware of every gun firing anywhere. What has changed is that the gate now
+works on a named target rather than a guess.
