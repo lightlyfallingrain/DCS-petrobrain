@@ -1675,3 +1675,76 @@ def test_console_poll_loop_survives_a_raising_poll_and_keeps_going(
     assert len(calls) >= 2
     assert runner.last_t_sim == 200.0
     assert len(runner.store.observations) == 1
+
+
+# --- the three trace consumers must all see the same poll's records --------
+
+
+def test_all_three_trace_consumers_see_one_polls_records(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--detection-trace`, `--eyesight-view` and `--belief-truth-log` share
+    one `DetectionTraceCollector`, and exactly one consumer clears it. That
+    ordering is the sharp edge of this wiring: reorder the branches so the
+    clear runs first and the other two silently see nothing — no exception,
+    no empty-file error, just two instruments that quietly stop reporting.
+
+    Which is precisely the failure these instruments exist to catch. The
+    87.5 km position defect they were built for had been in the trace data
+    every poll for a whole sortie while nobody could see it.
+
+    The module-level tests cover each consumer against fakes. This drives
+    the real `_run_console_poll_loop` on a real thread with all three
+    enabled at once and asserts each one actually received the poll — the
+    only arrangement that fails if the branches are reordered."""
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    trace_path = tmp_path / "trace.jsonl"
+    belief_truth_path = tmp_path / "belief_truth.jsonl"
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": [_t72_world_object()]}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+    stop_event = threading.Event()
+
+    poll_thread = threading.Thread(
+        target=_run_console_poll_loop,
+        args=(runner, aircraft_client, "Syria", db_path, 10.0, stop_event),
+        kwargs={
+            "detection_trace_path": trace_path,
+            "eyesight_view": True,
+            "belief_truth_log_path": belief_truth_path,
+        },
+    )
+    poll_thread.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while runner.last_t_sim is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    assert runner.last_t_sim == 200.0
+
+    # 1. the detection trace, which is also the consumer that clears.
+    assert trace_path.exists(), "detection trace never written"
+    assert trace_path.read_text().strip(), "detection trace written but empty"
+
+    # 2. the belief-truth log, which reads before the clear.
+    assert belief_truth_path.exists(), "belief-truth log never written"
+    assert belief_truth_path.read_text().strip(), (
+        "belief-truth log written but empty -- it read after the collector "
+        "was cleared, which is the reorder this test exists to catch"
+    )
+
+    # 3. the eyesight view, which renders to stdout from a copy.
+    printed = capsys.readouterr().out
+    assert printed.strip(), (
+        "eyesight view printed nothing -- it rendered after the collector "
+        "was cleared, which is the reorder this test exists to catch"
+    )
