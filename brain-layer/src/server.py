@@ -30,10 +30,40 @@ finish its own `decide()` call harmlessly rather than being killed, since
 there is no cooperative-cancellation mechanism for a blocking model call;
 it only must never have its answer *delivered*). This is D3's "abandoned
 job's reply is discarded... when it lands," implemented at the one point
-that matters."""
+that matters.
+
+**`Decider.decide()` runs under its own bounded timeout**
+(`plans/brain-layer/plan.md`'s pre-Stage-2 prerequisite 2,
+`plans/brain-layer/performance-review.md`): `_handle_escalate`'s daemon
+worker thread is already unjoined and never awaited by the HTTP request
+thread (the module docstring above -- `POST /escalate` has already
+responded `202` before this thread necessarily runs at all), but nothing
+previously bounded how long `decide()` itself could take. Stage 1's
+`StubDecider` is always fast or boundedly-delayed, so this was invisible;
+Stage 2's `OllamaDecider` calls a real model over HTTP, and a hung Ollama
+daemon (model-load stall, OOM, daemon wedge) would otherwise leak one
+permanently-blocked thread per escalated utterance across a multi-hour
+sortie -- and produce exactly the wedged-server condition the client-side
+fix above exists to survive.
+
+`_run_job` now races `decide()` on a throwaway single-worker
+`ThreadPoolExecutor`, bounded by `_DECIDE_TIMEOUT_S`, and **does not wait
+for that executor to shut down** (`shutdown(wait=False)`) -- this is a
+bound on `_run_job`'s own daemon thread (already off the HTTP request
+thread, so nothing here ever blocks a caller), not a claim that a
+genuinely-hung network call can be forcibly killed: Python cannot
+preempt a blocked thread. The real, effective fix for an unbounded hang
+is `OllamaDecider`'s own `urllib` call carrying a socket-level timeout
+(so `decide()` itself reliably returns, one way or another, well inside
+`_DECIDE_TIMEOUT_S`); this wrapper is the decider-agnostic backstop that
+still holds even if a future `Decider` implementation forgets its own
+timeout -- a timed-out `decide()` degrades to a dropped job, the same
+documented behaviour `_run_job`'s `except Exception` already gives any
+other decider failure."""
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import threading
@@ -59,6 +89,16 @@ _ESCALATE_PATH = "/escalate"
 _REPLIES_POLL_PATH = "/replies/poll"
 _HEALTH_PATH = "/health"
 
+#: Bounds one `Decider.decide()` call (module docstring's "`Decider.decide()`
+#: runs under its own bounded timeout"). Generous relative to `OllamaDecider`'s
+#: own per-request `urllib` timeout (`ollama_client.DEFAULT_TIMEOUT_S`,
+#: 5.0s) times at most two sequential model calls (D5's classify/discriminate
+#: split) plus overhead -- bounded, not tuned; Stage 4 is where real-sortie
+#: numbers replace every constant like this one. Public (not `_`-prefixed)
+#: since `brain_layer/__main__.py`'s `--decide-timeout-s` reads it as its
+#: own default.
+DEFAULT_DECIDE_TIMEOUT_S = 12.0
+
 
 def _run_job(
     decider: Decider,
@@ -66,17 +106,36 @@ def _run_job(
     generation: int,
     job_slot: JobSlot,
     reply_queue: ReplyQueue,
+    decide_timeout_s: float,
 ) -> None:
-    """The worker thread body for one job: decide, then publish only if
-    still current (module docstring). Any exception from `Decider.decide`
-    is logged and the job is dropped -- no reply is worse than a crashed
-    server, and body-layer's own timeout/staleness handling (D4) already
-    treats "no reply arrived" as a normal, honestly-handled case."""
+    """The worker thread body for one job: decide (under `decide_timeout_s`,
+    module docstring), then publish only if still current. Any exception
+    from `Decider.decide` -- including a timeout -- is logged and the job
+    is dropped -- no reply is worse than a crashed server, and
+    body-layer's own timeout/staleness handling (D4) already treats "no
+    reply arrived" as a normal, honestly-handled case."""
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(decider.decide, job.payload)
     try:
-        result = decider.decide(job.payload)
+        result = future.result(timeout=decide_timeout_s)
+    except concurrent.futures.TimeoutError:
+        logger.warning(
+            "decider timed out after %.1fs for utterance %s (dropping job)",
+            decide_timeout_s,
+            job.utterance_id,
+        )
+        # Deliberately not `wait=True` -- see module docstring: a
+        # genuinely-hung `decide()` call cannot be forced to stop, and
+        # waiting for it here would reintroduce the exact unbounded block
+        # this timeout exists to avoid. The executor's own worker thread
+        # is abandoned, not this method's caller.
+        executor.shutdown(wait=False)
+        return
     except Exception:
         logger.exception("decider failed for utterance %s", job.utterance_id)
+        executor.shutdown(wait=False)
         return
+    executor.shutdown(wait=False)
     if not job_slot.is_current(generation):
         logger.info("discarding reply for superseded utterance %s", job.utterance_id)
         return
@@ -87,7 +146,10 @@ def _run_job(
 
 
 def _make_handler(
-    decider: Decider, job_slot: JobSlot, reply_queue: ReplyQueue
+    decider: Decider,
+    job_slot: JobSlot,
+    reply_queue: ReplyQueue,
+    decide_timeout_s: float,
 ) -> type[BaseHTTPRequestHandler]:
     class BrainRequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -130,7 +192,14 @@ def _make_handler(
             generation = job_slot.submit(job)
             worker = threading.Thread(
                 target=_run_job,
-                args=(decider, job, generation, job_slot, reply_queue),
+                args=(
+                    decider,
+                    job,
+                    generation,
+                    job_slot,
+                    reply_queue,
+                    decide_timeout_s,
+                ),
                 daemon=True,
             )
             worker.start()
@@ -164,12 +233,14 @@ class BrainLayerServer:
         port: int = DEFAULT_PORT,
         job_slot: JobSlot | None = None,
         reply_queue: ReplyQueue | None = None,
+        decide_timeout_s: float = DEFAULT_DECIDE_TIMEOUT_S,
     ) -> None:
         self._decider = decider
         self._host = host
         self._port = port
         self._job_slot = job_slot if job_slot is not None else JobSlot()
         self._reply_queue = reply_queue if reply_queue is not None else ReplyQueue()
+        self._decide_timeout_s = decide_timeout_s
         self._httpd: ThreadingHTTPServer | None = None
 
     def __enter__(self) -> Self:
@@ -195,7 +266,12 @@ class BrainLayerServer:
         """Bind and start listening. Does not block."""
         self._httpd = ThreadingHTTPServer(
             (self._host, self._port),
-            _make_handler(self._decider, self._job_slot, self._reply_queue),
+            _make_handler(
+                self._decider,
+                self._job_slot,
+                self._reply_queue,
+                self._decide_timeout_s,
+            ),
         )
         logger.info("brain-layer listening on %s:%d", self._host, self.port)
 

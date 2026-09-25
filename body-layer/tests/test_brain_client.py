@@ -11,6 +11,7 @@ project's other HTTP clients."""
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -19,7 +20,7 @@ from typing import Self
 
 import pytest
 
-from belief.brain_client import BrainLayerClient, BrainLayerError
+from belief.brain_client import BrainLayerClient
 from belief.escalation import EscalationPayload
 from belief.utterance import PartialParse, ReferenceCandidate
 
@@ -92,6 +93,57 @@ class _FakeBrainServer:
         return f"http://127.0.0.1:{self._httpd.server_address[1]}"
 
 
+class _WedgedServer:
+    """A TCP listener that accepts every connection and then never reads
+    from or writes to it -- the "up but wedged" case
+    `plans/brain-layer/performance-review.md` actually measured (5015ms
+    per `poll_replies()` call, every call, no backoff), as opposed to a
+    refused connection (nothing listening, fails fast) or a healthy 404.
+    Built on raw `socket` rather than `http.server` so no HTTP-level
+    machinery can accidentally answer the request."""
+
+    def __init__(self) -> None:
+        self._sock: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._accepted: list[socket.socket] = []
+
+    def __enter__(self) -> Self:
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(5)
+        self._sock.settimeout(0.2)
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def _accept_loop(self) -> None:
+        assert self._sock is not None
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._sock.accept()
+            except (TimeoutError, OSError):
+                continue
+            # Accepted and kept open -- deliberately never read from or
+            # written to, so the client's request sits waiting forever.
+            self._accepted.append(conn)
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        assert self._thread is not None
+        self._thread.join(timeout=2)
+        for conn in self._accepted:
+            conn.close()
+        assert self._sock is not None
+        self._sock.close()
+
+    @property
+    def base_url(self) -> str:
+        assert self._sock is not None
+        port = self._sock.getsockname()[1]
+        return f"http://127.0.0.1:{port}"
+
+
 @pytest.fixture
 def fake_server() -> Iterator[_FakeBrainServer]:
     with _FakeBrainServer() as server:
@@ -158,6 +210,22 @@ def test_handle_never_raises_when_the_server_is_unreachable() -> None:
     time.sleep(0.2)
 
 
+def _poll_until(client: BrainLayerClient, deadline_s: float = 2.0) -> list[object]:
+    """Repeatedly calls `poll_replies()` (each call is instant and never
+    blocks, per its own docstring) until it returns something non-empty
+    or `deadline_s` elapses -- the background poll thread needs at least
+    one `_POLL_LOOP_INTERVAL_S`-scale iteration to have actually reached
+    the fake server, mirroring `test_handle_posts_the_payload`'s own
+    wait-loop pattern for `handle()`'s background worker."""
+    deadline = time.monotonic() + deadline_s
+    while time.monotonic() < deadline:
+        replies = client.poll_replies()
+        if replies:
+            return list(replies)
+        time.sleep(0.01)
+    return []
+
+
 def test_poll_replies_parses_a_valid_reply(fake_server: _FakeBrainServer) -> None:
     fake_server.replies = [
         {
@@ -170,7 +238,7 @@ def test_poll_replies_parses_a_valid_reply(fake_server: _FakeBrainServer) -> Non
     ]
     client = BrainLayerClient(base_url=fake_server.base_url)
 
-    replies = client.poll_replies()
+    replies = _poll_until(client)
 
     assert len(replies) == 1
     assert replies[0].utterance_id == "U1"
@@ -183,6 +251,11 @@ def test_poll_replies_empty_when_nothing_pending(fake_server: _FakeBrainServer) 
     assert fake_server.replies == []
     client = BrainLayerClient(base_url=fake_server.base_url)
     assert client.poll_replies() == []
+    # Give the background worker a moment to actually poll the (empty)
+    # server, so this exercises the real round trip, not just the
+    # immediate-return guarantee.
+    time.sleep(0.1)
+    assert client.poll_replies() == []
 
 
 def test_poll_replies_skips_malformed_items(fake_server: _FakeBrainServer) -> None:
@@ -194,16 +267,45 @@ def test_poll_replies_skips_malformed_items(fake_server: _FakeBrainServer) -> No
     ]
     client = BrainLayerClient(base_url=fake_server.base_url)
 
-    replies = client.poll_replies()
+    replies = _poll_until(client)
 
     assert len(replies) == 1
-    assert replies[0].utterance_id == "U1"
+    assert replies[0].utterance_id == "U1"  # type: ignore[attr-defined]
 
 
-def test_poll_replies_raises_on_unreachable_server() -> None:
-    client = BrainLayerClient(base_url="http://127.0.0.1:1")
-    with pytest.raises(BrainLayerError):
-        client.poll_replies()
+def test_poll_replies_never_blocks_or_raises_when_the_server_is_unreachable() -> None:
+    """The Stage 2 prerequisite this client exists to satisfy
+    (`plans/brain-layer/performance-review.md`, user direction 2026-09-25:
+    "brain must not block any other functionality") -- `poll_replies()`
+    must return immediately and never raise, however unreachable the far
+    side is, since it is called every tick from the shared crew-text poll
+    thread."""
+    client = BrainLayerClient(base_url="http://127.0.0.1:1")  # nothing listening
+    start = time.monotonic()
+    replies = client.poll_replies()
+    elapsed = time.monotonic() - start
+    assert replies == []
+    assert elapsed < 0.2
+
+
+def test_poll_replies_tick_rate_unaffected_by_a_wedged_server() -> None:
+    """The exact failure mode the performance review measured: a
+    TCP-accepted server that never answers `/replies/poll` used to cost
+    `poll_timeout_s` (5s) on *every single call* on whatever thread called
+    it. Proves many consecutive `poll_replies()` calls stay fast even
+    while the background thread's own in-flight round trip is stuck
+    inside that wedge."""
+    with _WedgedServer() as server:
+        client = BrainLayerClient(base_url=server.base_url, poll_timeout_s=5.0)
+        start = time.monotonic()
+        for _ in range(20):
+            replies = client.poll_replies()
+            assert replies == []
+        elapsed = time.monotonic() - start
+        # 20 calls at well under the per-call 5s wedge timeout -- each
+        # `poll_replies()` call only ever drains a local buffer, it never
+        # itself performs the network round trip.
+        assert elapsed < 1.0
 
 
 def test_awaiting_reply_id_is_none_in_stage_1(fake_server: _FakeBrainServer) -> None:

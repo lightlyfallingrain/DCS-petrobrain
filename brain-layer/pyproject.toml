@@ -25,4 +25,6 @@ known-first-party = [
     "server",
     "job",
     "decider",
+    "ollama_client",
+    "prompts",
 ]

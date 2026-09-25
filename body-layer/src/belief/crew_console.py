@@ -77,6 +77,7 @@ from typing import Final, TextIO
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import _SECTOR_CENTER_DEG, SECTORS, RelativeSector, Sector
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
+from belief.brain_reply import validate_brain_reply
 from belief.callouts import CalloutScheduler, group_facts, report_priority
 from belief.classification import parent_class_of
 from belief.contacts import ContactStore
@@ -713,17 +714,22 @@ class CrewConsole:
     _pending_confirmation: PendingConfirmation | None = field(default=None, repr=False)
     #: `plans/brain-layer/plan.md` -- every escalation currently awaiting a
     #: brain reply, keyed by `utterance_id`: `(t_sim it was escalated at,
-    #: the belief.utterance.PartialParse that was escalated)`. `_handle_
-    #: brain_reply` pops its entry once a reply lands (or is aged out);
-    #: `_speak_stand_by_if_due` reads it every poll to decide whether D8's
-    #: "stand by" is due. `brain-layer` itself only ever holds one job in
-    #: flight (D3), but body-side this stays a dict rather than a single
-    #: optional slot -- a reply can arrive for an id no longer of
-    #: interest (raced by a newer escalation client-side, `belief.
-    #: brain_client.BrainLayerClient`'s own newest-wins slot), and `.pop`
-    #: on a dict degrades to `None` cleanly rather than needing a separate
-    #: "does this match what I'm tracking" branch.
-    _pending_escalations: dict[str, tuple[float, PartialParse]] = field(
+    #: the belief.utterance.PartialParse that was escalated, the original
+    #: transcript)`. `_handle_brain_reply` pops its entry once a reply
+    #: lands (or is aged out); `_speak_stand_by_if_due` reads it every
+    #: poll to decide whether D8's "stand by" is due. **The transcript is
+    #: Stage 2's own addition** -- D10's validator (`belief.brain_reply`)
+    #: needs the pilot's own original words to check a `PICK ... BECAUSE
+    #: <words>` reply's quote is genuine, and nothing else on this class
+    #: already keeps it once escalation has posted. `brain-layer` itself
+    #: only ever holds one job in flight (D3), but body-side this stays a
+    #: dict rather than a single optional slot -- a reply can arrive for
+    #: an id no longer of interest (raced by a newer escalation
+    #: client-side, `belief.brain_client.BrainLayerClient`'s own
+    #: newest-wins slot), and `.pop` on a dict degrades to `None` cleanly
+    #: rather than needing a separate "does this match what I'm tracking"
+    #: branch.
+    _pending_escalations: dict[str, tuple[float, PartialParse, str]] = field(
         default_factory=dict, repr=False
     )
     #: Which `_pending_escalations` keys D8's "stand by" has already been
@@ -791,7 +797,11 @@ class CrewConsole:
         outstanding for at least `STAND_BY_AFTER_S` and has not already
         had it spoken. No model involvement -- body already knows how
         long it has been waiting."""
-        for utterance_id, (started_sim, _parse) in self._pending_escalations.items():
+        for utterance_id, (
+            started_sim,
+            _parse,
+            _transcript,
+        ) in self._pending_escalations.items():
             if utterance_id in self._stand_by_spoken_for:
                 continue
             if now_sim - started_sim >= STAND_BY_AFTER_S:
@@ -799,10 +809,19 @@ class CrewConsole:
                 self._print([render_stand_by().text], now_sim)
 
     def _handle_brain_reply(self, reply: BrainReply, now_sim: float) -> list[str]:
-        """D4's revalidation table, in full. `pending` is popped
-        unconditionally -- whether or not the reply turns out to be
-        actionable, this utterance is no longer outstanding once a reply
-        for it has landed."""
+        """D4's revalidation table, in full -- plus D10's validator
+        (`belief.brain_reply.validate_brain_reply`), run first: a reply
+        this class did not itself ask for a valid answer to (a `PICK` of
+        an unoffered id, an ungrounded `BECAUSE` quote, an unknown
+        `CONFIRM` token, an unrecognised `UNABLE` reason) is degraded to
+        `ASK`/`UNABLE NO_MATCH` *before* any of D4's own table applies --
+        D4 revalidates a reply against *current* belief, D10 validates
+        that it was ever a legal reply at all; the two are independent
+        checks in sequence, not alternatives.
+
+        `pending` is popped unconditionally -- whether or not the reply
+        turns out to be actionable, this utterance is no longer
+        outstanding once a reply for it has landed."""
         pending = self._pending_escalations.pop(reply.utterance_id, None)
         self._stand_by_spoken_for.discard(reply.utterance_id)
         if pending is None:
@@ -811,7 +830,10 @@ class CrewConsole:
             # Nothing to revalidate against; discard silently, same
             # honest-silence posture `NullBrainClient` already documents.
             return []
-        _started_sim, parse = pending
+        _started_sim, parse, transcript = pending
+        reply = validate_brain_reply(
+            reply, parse, transcript, DISPATCHED_COMMAND_TOKENS
+        )
 
         if reply.t_sim is not None and now_sim - reply.t_sim > BRAIN_REPLY_MAX_AGE_S:
             logger.info(
@@ -837,11 +859,14 @@ class CrewConsole:
         """D9: a `CONFIRM <token>` reply sets `_pending_confirmation`,
         reusing the exact mechanism the voice confirm-band already built
         -- "there is not a second confirm mechanism." D10's membership
-        check (`token` must be in `DISPATCHED_COMMAND_TOKENS`) is applied
-        inline here rather than in a separate validator module (Stage 2's
-        own job, see `belief.brain_client`'s docstring) -- a cheap,
-        one-line safety net against a reply naming a token this class has
-        no dispatch behaviour for at all."""
+        check (`token` must be in `DISPATCHED_COMMAND_TOKENS`) is now
+        `belief.brain_reply.validate_brain_reply`'s job, run by
+        `_handle_brain_reply` before this method is ever called -- a
+        `reply.kind` that reaches here as `"confirm"` has already had its
+        token validated. The inline check below is kept as a second,
+        cheap line of defence rather than removed, in case a future
+        caller ever reaches this method without going through the
+        validator first."""
         token = reply.token
         if token is None or token not in DISPATCHED_COMMAND_TOKENS:
             return [render_unable("NO_SUCH_COMMAND").text]
@@ -1879,7 +1904,7 @@ class CrewConsole:
         # artificial `delay_s=0` stub, say), and a reply for an
         # utterance_id not yet in `_pending_escalations` would otherwise
         # be silently dropped as untracked.
-        self._pending_escalations[utterance.id] = (now_sim, parse)
+        self._pending_escalations[utterance.id] = (now_sim, parse, transcript)
         handle_player_utterance(
             self.store, utterance, self.brain_client, self.enrichment
         )
