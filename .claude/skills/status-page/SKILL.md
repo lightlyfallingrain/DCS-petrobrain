@@ -7,13 +7,28 @@ type: user-invocable
 Regenerate `docs/status/petrobrain-status.html` from the roadmap files and republish it to its
 existing artifact URL. Usage: `/status-page`.
 
-**The page is a view, never a source of truth.** Every fact on it is derived from the `ROADMAP.md`
-files (root, `world-model/`, `aircraft-layer/`, `body-layer/`, `mission-interpreter/`,
-`audio-adapter/`) plus `todo/todo.md`. If the page and a roadmap disagree, **the page is wrong** —
-fix the page, never the roadmap. `docs/status/README.md` states this contract; do not weaken it.
+**The page is a view, never a source of truth.** Every fact on it is derived from the roadmap files
+plus `todo/todo.md`. If the page and a roadmap disagree, **the page is wrong** — fix the page, never
+the roadmap. `docs/status/README.md` states this contract; do not weaken it.
+
+**Get the list of roadmaps from root `ROADMAP.md`'s status table, not from memory and not from this
+file.** It names every subproject and links its roadmap, so it stays correct as subprojects are
+added or retired — a hardcoded list here would silently omit a new subproject, which is exactly the
+failure the page exists to prevent. A subproject with no roadmap file of its own is tracked
+alongside another's; the table says which, and the page still needs a card for it.
 
 **Regenerating is optional, and must stay that way.** A stale page is cosmetic; a stale roadmap is
 a correctness problem. Never let this become a step that blocks or slows a merge.
+
+**This file states method, never project state** (user direction, 2026-09-25). No milestone status,
+no component inventory, no "X does not exist yet", no counts of subprojects or graphs — every one of
+those is read from the sources at regeneration time. The reason is specific to a skill: unlike a
+roadmap, nothing forces this file to be revisited when the project moves, so a fact written here
+goes stale silently and is then *believed*, because it arrives as an instruction rather than as a
+claim. That already happened once — this file told the regenerator to draw the brain layer as an
+absent `hold` node, written when that was true, and it would have re-erased a shipped subproject at
+the next run. A design rule ("five hues, one per class") is method and belongs here; "there are
+three graphs" is state and does not.
 
 ## Before touching anything
 
@@ -28,7 +43,7 @@ a correctness problem. Never let this become a step that blocks or slows a merge
 
 | Page element | Source |
 |---|---|
-| The five counters (`.count`) | Count `- [x]` / `- [~]` / `- [ ]` / `- [>]` across every roadmap. "Await hardware" is hand-identified: items explicitly blocked on the user's Windows box or a sortie. |
+| The five counters (`.count`) | Count `- [x]` / `- [~]` / `- [ ]` / `- [>]` across every roadmap. "Await hardware" is hand-identified: items a roadmap explicitly blocks on the user's own hardware or on a sortie. |
 | Subsystem cards (`.sys`, one per subproject) | That subproject's `ROADMAP.md` — its status line, its next actionable item, and a progress fraction that is a judgement call, not a computed ratio. |
 | The Mermaid dependency map (`#graph-deps`) | The gating relationships stated in the roadmaps ("gated on", "needs a sortie", "deliberately last"). Node classes are `done`/`active`/`open`/`hold`/`block`. Shows *how the project got here* — it includes done work. |
 | The forward-only map (`#graph-upcoming`) | Every `- [ ]` / `- [~]` / `- [>]` across all roadmaps plus `todo/todo.md`. **Nothing done appears.** See "The forward-only map" below. |
@@ -42,7 +57,6 @@ sides when adding or removing anything.
 
 ## The forward-only map
 
-Added 2026-09-20 on user request ("all upcoming work as a graph with dependencies"), then kept.
 It answers a different question from the map above it: not *how did we get here* but *what is in
 front of us, and what has to happen first*.
 
@@ -50,9 +64,10 @@ front of us, and what has to happen first*.
 roadmap plus `todo/todo.md`. A done item appearing here is a bug — the whole point is that the eye
 is not asked to filter.
 
-**Group into subgraphs by chain.** Today: Perception, Speech, Reporting — chosen because they
-genuinely barely touch, so the grouping carries information rather than tidying. If a future state
-has different natural chains, regroup; do not preserve these three out of habit.
+**Group into subgraphs by chain.** Read the current page for the groups it last used, then ask
+whether they still hold — a grouping earns its place only when the chains genuinely barely touch,
+so that it carries information rather than tidying. Regroup whenever the work has moved; never
+preserve a grouping out of habit.
 
 **Bound the node count at roughly 20.** This is the constraint that keeps it useful. The roadmaps
 already hold everything; a graph that holds everything is a worse roadmap. Collapse siblings into
@@ -63,10 +78,10 @@ coarse.
 flights". These are where the real sequencing lives and they are exactly what a list cannot say.
 
 **Write the closing note from what the drawing revealed.** Not a summary of the graph — something
-the roadmap lists do not show. The first version's note came from two things only visible once
-drawn: a single sortie sitting upstream of four branches, and the reporting chain being almost
-entirely gated behind terrain control that does not exist. If a regeneration reveals nothing new,
-say less rather than padding.
+the roadmap lists do not show. The shape worth writing about is structural: one item sitting
+upstream of several branches, a whole chain gated behind something that does not exist yet, a group
+whose membership stayed the same while its meaning changed. Those are only visible once drawn. If a
+regeneration reveals nothing new, say less rather than padding.
 
 ## Rules for the content
 
@@ -92,7 +107,7 @@ The page was designed once; regeneration is a content update, not a redesign.
   light green, grey and light blue could not be told apart (user, 2026-09-20). Mermaid nodes are
   small, adjacent and carry no other cue — a category colour there must survive being seen at
   thumbnail size next to its neighbours, which a page-chrome tint does not have to. Current
-  `classDef` fills, shared by **both** graphs:
+  `classDef` fills, shared by **every** graph on the page:
 
   | Class | Fill | Stroke | Text |
   |---|---|---|---|
@@ -102,7 +117,7 @@ The page was designed once; regeneration is a content update, not a redesign.
   | `hold` | `#5E6673` slate, dashed | `#3A404A` | white |
   | `block` | `#B03A2E` red | `#72211A` | white |
 
-  Five distinct hues, all legible on either theme's ground. **Keep the two graphs' `classDef` blocks
+  Five distinct hues, all legible on either theme's ground. **Keep every graph's `classDef` block
   identical** — a class that means one thing in one map and looks different in the other is worse
   than no colour at all.
 - **Typography**: Barlow Semi Condensed (display), IBM Plex Sans (body), IBM Plex Mono (data).
@@ -110,50 +125,53 @@ The page was designed once; regeneration is a content update, not a redesign.
   its tab and its gallery entry.
 - Wide content scrolls inside its own container; the body never scrolls sideways.
 
-## The architecture diagram (third graph, at the foot of the page)
+## The architecture diagram (at the foot of the page)
 
-Added 2026-09-24 on user request. It answers the question neither other graph does: **what are the
-pieces, where does each one run, and what flows between them.** The two milestone graphs are about
-*time* — how we got here, what is next. This one is about *shape*, and it is the only part of the
-page that stays useful when every milestone is done.
+It answers the question neither other graph does: **what are the pieces, where does each one run,
+and what flows between them.** The milestone graphs are about *time* — how we got here, what is
+next. This one is about *shape*, and it is the only part of the page that stays useful when every
+milestone is done.
 
 **Derive it from the architecture that exists, not from the roadmaps.** Root `CLAUDE.md`'s
 "Architecture" section and each subproject's own `CLAUDE.md` "What this is" are the sources. If the
 diagram and the code disagree, the diagram is wrong — same contract as the rest of the page.
 
-**What it must show**, because these are the facts a newcomer gets wrong:
+**The questions it must answer** — these are the things a newcomer gets wrong, and every answer is
+read from the sources above, never from this file:
 
-- **Which machine each process runs on.** The Windows/Mac split is not incidental — it is why the
-  aircraft layer exists as a separate subproject and why the seams are HTTP.
-- **The two seam kinds, distinguished visually.** `body-layer ↔ world-model` is an **in-process
-  Python import**, the sole sanctioned exception to module independence; everything else is
-  **HTTP/JSON** across a subproject boundary. Drawing those the same way loses the single most
-  important architectural rule in the repo.
-- **Direction of flow.** DCS is read *and* written (telemetry and world objects out; text overlay,
-  commands and audio in). An arrow that only points outward is wrong.
-- **What is offline versus in the loop.** The Mission Interpreter runs pre-mission and produces an
-  artifact; it is not a runtime participant.
-- **The brain layer, and its two edge directions.** Written when the brain layer did not exist and
-  was drawn as a `hold` node to make its absence visible; **it exists as of 2026-09-25** (BR-1
-  Stage 1 merged) and is now a real node. What matters about it in this diagram is the direction of
-  its two edges: body hands an escalation over and **does not wait** — the reply comes back on a
-  separate poll. A diagram that draws that as one synchronous round trip states the opposite of the
-  layer's founding constraint.
+- **Which machine each process runs on**, and which are pinned there rather than merely deployed
+  there. A machine split is never incidental: it is what forces a seam to be HTTP, and a process
+  that *could* move should not be drawn as though it could not.
+- **Which seams are which kind, distinguished visually.** Root `CLAUDE.md` names the default seam
+  and the exceptions to it. Drawing every boundary the same way loses the single most important
+  architectural rule in the repo, so read which exceptions currently stand rather than assuming
+  the set is unchanged.
+- **Direction of flow, including where it goes both ways.** An edge to a component that is read
+  *and* written must show both; an arrow that only points outward is wrong.
+- **What is offline versus in the runtime loop.** A component that produces an artifact before a
+  sortie and takes no part in the loop must not be drawn as a participant in it.
+- **Where a seam is deliberately asynchronous.** Where a layer hands work over and does not wait,
+  the reply arrives on its own path — two edges, not one round trip. Drawing it as synchronous
+  states the opposite of that layer's founding constraint, so check each seam's own design doc for
+  which it is.
+- **Anything that exists only as a plan.** Draw it with the `hold` class so its absence is visible
+  rather than implied — and re-check each regeneration, because a component drawn as absent after
+  it ships is the same error in the other direction.
 
 **Keep it structural.** No milestone status, no percentages, no "next" markers — those belong to
 the graphs above. If a reader cannot tell this diagram from the dependency map at a glance, it has
 drifted into restating them.
 
-Same `classDef` block as the other two graphs, an `id`, and an expand button carrying
+Same `classDef` block as every other graph, an `id`, and an expand button carrying
 `data-graph="#<id>"` — see the lightbox note immediately below, which is exactly the trap a third
 graph walks into.
 
 ## Line breaks in Mermaid labels must be escaped — `&lt;br/&gt;`, never `<br/>`
 
-**Found 2026-09-25 by the user, from the rendered page.** Every multi-line node label on the page
-had lost its break *and* the space where the break had been, so labels rendered as
-`"BR-1 Stage 1async wire, stub decider"`, `"Group contactsstages 0–4a"`, and — worst, because it
-reads as a number — `"FLOWN 2026-09-258 defects, not a pass"`. Sixty labels across all three graphs.
+**Found 2026-09-25 by the user, from the rendered page**, affecting every multi-line node label in
+every graph at once. Each had lost its break *and* the space where the break had been, welding two
+lines into one word — worst where a label ended in a date and the next line began with a digit, so
+the join read as a single number.
 
 **Why it happens:** the graphs live in `<pre class="mermaid">`, so the browser parses their contents
 as HTML *before* Mermaid ever sees them. A literal `<br/>` becomes a real DOM element, and Mermaid
