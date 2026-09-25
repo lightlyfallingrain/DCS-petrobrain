@@ -76,9 +76,15 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     `~/Library/Logs/petrobrain-status-page.log`. The unproven part is whether a headless
     `claude -p` can republish the artifact to the existing URL; everything else is guarded and was
     verified firing.
-  - **The sortie.** Five separate entries now clear on one flight — see the list below plus Stage 4b
+  - ~~**The sortie.** Five separate entries clear on one flight — see the list below plus Stage 4b
     speech and the contact-report wording. Flight card:
-    `docs/acceptance/2026-09-18-stage6-sortie.md`.
+    `docs/acceptance/2026-09-18-stage6-sortie.md`.~~ **Closed 2026-09-25 (user direction) without
+    being flown**: all five blocks were answered piecemeal by later sorties. Detection ranges pass
+    ("close enough for current stage"); voice, F10 scan vocabulary and attention/events were covered
+    by other flights; contact separation moved to
+    `docs/acceptance/2026-09-25-crew-behaviour-sortie.md`. The card carries the per-block verdicts
+    and is marked do-not-fly — it had gone stale (it still names `srs-adapter`) before it could be
+    flown, which is why the 2026-09-25 cards were folded into one instead of batched the same way.
 
 - [x] **BL-4's attention/events tools — CLOSED 2026-09-21 as tested and good enough** (user
   direction). `set_attention`/`watch_area`/`get_attention_state`/`list_events`/`acknowledge_event`.

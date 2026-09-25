@@ -1,5 +1,34 @@
 # Stage 6 acceptance sortie — flight card
 
+> **CLOSED 2026-09-25 by user direction — never flown as written, answered block by block by later
+> sorties.** Not a pass and not a skip: every question on this card was eventually answered, but by
+> five different flights rather than the one this card planned. The verdicts, in the user's own
+> terms:
+>
+> | # | Block | Verdict |
+> |---|---|---|
+> | 1 | Voice quality and latency | **Stale.** Tested by other flights and cards; results already recorded. |
+> | 2 | Detection ranges | **Pass** — "close enough for current stage". |
+> | 3 | Contact separation | **Closed here, moved.** The last flight produced observations; `docs/acceptance/2026-09-25-crew-behaviour-sortie.md` is where this is now answered. |
+> | 4 | F10 scan vocabulary | **Tested, adjusted and fixed** by other test flights. |
+> | 5 | Attention events and tools | **Answered** by the last test flight. |
+>
+> **The lesson is about card lifetime, not about any block.** This card was written 2026-09-18 to
+> clear five debts in one flight. It went stale before it could be flown — its own setup block still
+> names `srs-adapter`, renamed to `audio-adapter` on 2026-09-20 — and in the week it sat unflown the
+> debts were cleared piecemeal by sorties aimed at whatever had just merged. That is the same failure
+> `2026-09-24-watch-reporting-sortie.md` hit, and the same reason the 2026-09-25 cards were folded
+> into one: **a batched card decays at the rate of the fastest-moving thing in it.** A card that
+> batches five debts is only cheaper than five cards if it is flown soon.
+>
+> Block 2's "pass" is the one verdict worth reading narrowly. It clears the calibration for *this*
+> stage, not absolutely — the range-by-range numbers this card called "the most valuable data from
+> the flight" were never brought back as numbers, so the calibration remains validated against
+> screenshots plus one felt judgement in the air, not against measured in-flight arrival ranges.
+>
+> Everything below is the card as originally written, kept for the record. **Do not fly it.**
+
+
 **One flight clears five separate debts.** Stage 6 is nominally the TTS slice's acceptance test,
 but four other things have been waiting on a real sortie, and one of them — the vision range
 calibration — changed perception behaviour substantially and has never been flown at all. Doing
