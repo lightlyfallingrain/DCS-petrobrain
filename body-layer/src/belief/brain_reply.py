@@ -102,11 +102,29 @@ VALID_UNABLE_REASONS: frozenset[str] = frozenset(
 #: assertion in either test suite compares the two literals against each
 #: other, since module independence forbids the import that would let one
 #: side check the other directly), is the proportionate fix at this
-#: stage. If this ever drifts in practice, the failure direction is
-#: known: a legitimate `CONFIRM` for a newly-added classify token would
-#: be wrongly degraded to `ASK` here until this list catches up --
-#: annoying, never unsafe, since a stricter validator only ever refuses,
-#: it does not admit a token the model was never offered.
+#: stage. **Drift is unsafe in one of its two directions, and the
+#: earlier wording here claimed otherwise** (found by the review of
+#: `d51a25b`, 2026-09-25):
+#:
+#: - *Brain widens, body lags* -- a token added to
+#:   `CLASSIFY_COMMAND_VOCABULARY` but not here. Fails safe: a legitimate
+#:   `CONFIRM` is degraded to `ASK` until this list catches up. Annoying,
+#:   never unsafe, because a stricter validator only refuses.
+#: - *Brain narrows, body lags* -- a token **removed** from
+#:   `CLASSIFY_COMMAND_VOCABULARY` but still listed here. This is the
+#:   unsafe one, and it is the likely shape: retiring a token from what
+#:   the model is *offered* does not retire the command itself, so it
+#:   stays in `dispatched_command_tokens` and `_validate_confirm`'s
+#:   and-of-both-checks still passes it. That reopens exactly the
+#:   asymmetry this constant was added to close, scoped to the removed
+#:   token.
+#:
+#: So the sync is not left to this comment:
+#: `brain-layer/tests/test_prompts.py::test_offered_confirm_vocabulary_matches_body_layers_mirror`
+#: compares the two literals by reading body-layer's source as text
+#: (module independence forbids the import; reading a file is not one).
+#: **If you edit either list, edit both** -- that test is what will tell
+#: you, and it is the only thing that will.
 OFFERED_CONFIRM_VOCABULARY: frozenset[str] = frozenset(
     {
         "watch_nearest",

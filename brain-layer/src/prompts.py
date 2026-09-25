@@ -40,8 +40,19 @@ from __future__ import annotations
 #: single-line closed-vocabulary constraint (D5) is not built to elicit
 #: reliably. The body-side D10 validator is the real authority on
 #: whether a returned token is legal at all (`belief.brain_reply`); this
-#: list only shapes what the model is offered to choose from, so a
-#: mismatch here costs accuracy, never safety.
+#: list only shapes what the model is offered to choose from.
+#:
+#: **"A mismatch here costs accuracy, never safety" was true when it was
+#: written and is not any more** (revised 2026-09-25, review of
+#: `d51a25b`). Since the security pass, body-layer validates a `CONFIRM`
+#: against its own mirror of this list, `OFFERED_CONFIRM_VOCABULARY`. So
+#: *widening* this list still only costs accuracy, but **removing** a
+#: token from it without the matching edit on the body side is unsafe:
+#: the command usually stays dispatchable, body's stale mirror still
+#: lists it, and the validator admits a token the model is no longer
+#: offered. `test_offered_confirm_vocabulary_matches_body_layers_mirror`
+#: (this subproject's `tests/test_prompts.py`) is what enforces the pair;
+#: edit both lists together.
 CLASSIFY_COMMAND_VOCABULARY: tuple[str, ...] = (
     "watch_nearest",
     "watch_nearest_air_defence",
