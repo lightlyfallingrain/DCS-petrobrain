@@ -21,11 +21,13 @@ Steps:
    git commit -m "$(cat <<'EOF'
    <one-line summary of why, not what — the diff already shows what>
 
-   Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
-   Claude-Session: https://claude.ai/code/session_01R1dLa33YJwq7ewi97vsue4
+   <the attribution trailers for THIS session, verbatim>
    EOF
    )"
    ```
+   **Take the trailers from the attribution guidance in force for the current session**, not from
+   an example — the co-author model and the session URL differ every session, so a pair copied
+   into this file would credit the wrong model and link to a dead session.
 6. `git status --short` — confirm the working tree reflects only what's expected to remain dirty
    (nothing this commit was supposed to include).
 

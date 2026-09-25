@@ -47,10 +47,12 @@ compare the statements word-for-word in intent, not just topic:
 - Agent role definitions (`.claude/agents/*.md`) vs their one-liners in `AGENTS.md` vs
   their descriptions in the agent listing — do responsibilities, tool access, and
   invocation triggers actually match across all three?
-- Root `CLAUDE.md`'s explicit exceptions (e.g. "skip performance-reviewer and security for
-  now") vs `AGENTS.md`'s "Recommended Role Sequences" (which may still list them
-  unconditionally) — an exception stated once and not threaded through every place the
-  general rule appears is exactly the kind of drift this audit exists to catch.
+- Root `CLAUDE.md`'s explicit exceptions to a general rule (read the current ones there —
+  which roles or steps are narrowed or exempted changes by user direction) vs `AGENTS.md`'s
+  "Recommended Role Sequences" and anywhere else the general rule appears unconditionally.
+  An exception stated once and not threaded through every place the general rule appears is
+  exactly the kind of drift this audit exists to catch — and so is an exception whose premise
+  has lapsed while its wording stands.
 
 ## Phase 2 — Staleness against actual project state
 

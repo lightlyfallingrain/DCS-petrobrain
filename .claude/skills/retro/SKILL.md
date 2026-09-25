@@ -1,14 +1,16 @@
 ---
 name: retro
-description: Multi-agent retrospective — every workflow role (architect, implementer, reviewer, debugger, performance-reviewer, security, dod, investigator) inspects its own persistent memory for a time window, and the orchestrator inspects its own session transcript, each reporting what worked, what failed, and what to learn; findings are synthesized and turned into concrete config/workflow proposals. Use when the user asks for a retro, a process review, or "what have we learned" across the agent workflow.
+description: Multi-agent retrospective — every workflow role defined in `.claude/agents/` inspects its own persistent memory for a time window, and the orchestrator inspects its own session transcript, each reporting what worked, what failed, and what to learn; findings are synthesized and turned into concrete config/workflow proposals. Use when the user asks for a retro, a process review, or "what have we learned" across the agent workflow.
 type: user-invocable
 ---
 
 Multi-agent retrospective. Usage: `/retro` (defaults to the window since the last retro) or
 `/retro <window>` (e.g. `/retro this week`, `/retro since 2026-09-08`) as an explicit override.
 
-This is a meta-process review of *how the agents worked* — the 8 workflow roles and the
-orchestrator (you, running this skill) — not of the product. Each participant reads only its own
+This is a meta-process review of *how the agents worked* — every workflow role plus the
+orchestrator (you, running this skill) — not of the product. **Get the role list from
+`.claude/agents/` at run time** (one file per role), not from this file: roles are added and
+retired, and a retro that silently omits one loses exactly the record it exists to inspect. Each participant reads only its own
 record of its own reasoning — role agents their `agent-memory/`, the orchestrator its own session
 transcript — never re-derives conclusions by reading the underlying code fresh. That's the whole
 point: it measures whether the memory/transcript record and the role process are actually paying
@@ -50,11 +52,10 @@ looking at the right ref (`git log <branch> ...`, not just `git log ...` on what
 out) before concluding nothing happened. "I see nothing [from where I'm looking]" and "nothing
 happened" are different claims — only report the latter after ruling out the former.
 
-## Step 2 — Spawn all 8 roles in parallel
+## Step 2 — Spawn every role in parallel
 
-One message, one `Agent` call per role, `subagent_type` set to the role name (`architect`,
-`implementer`, `reviewer`, `debugger`, `performance-reviewer`, `security`, `dod`,
-`investigator`) — never `fork` here, each role must reason only from its own memory, not from
+One message, one `Agent` call per role in `.claude/agents/`, `subagent_type` set to that role's
+name — never `fork` here, each role must reason only from its own memory, not from
 this conversation's context. Each prompt must be self-contained (fresh agent, no shared
 context) and state:
 
@@ -75,9 +76,10 @@ context) and state:
     often land there even when `agent-memory/dod/` itself wasn't updated.
   - `investigator`: also check for `*/research/<date>-*.md` files in the window — dated findings
     are its other primary output format.
-  - `performance-reviewer` / `security`: these may show zero activity in a given window if the
-    project's `CLAUDE.md` currently exempts them from the default role sequence — that's a valid,
-    expected finding, not a gap to paper over.
+  - A role may legitimately show zero activity in a window because of the scope currently set for
+    it in root `CLAUDE.md`'s "Agents" section — an exemption, or a once-per-feature rather than
+    per-stage cadence. **Read that section to find out which applies before judging the silence**;
+    a role that was never meant to run is a valid, expected finding, not a gap to paper over.
 - Answer exactly three questions, grounded only in what was found: (1) what worked well and
   brought value, (2) what failure modes occurred or didn't bring value, (3) what to learn — any
   pattern worth changing. Cite actual file names/content, not generic process platitudes. If
@@ -86,7 +88,7 @@ context) and state:
 
 ## Step 2b — Orchestrator self-assessment
 
-While the 8 role agents run, do the same exercise for yourself, from this conversation's own
+While the role agents run, do the same exercise for yourself, from this conversation's own
 transcript (and, if the window extends before this session, any prior sessions on this project
 you have transcript access to — `ListAgents` surfaces other sessions on this machine; note
 plainly if an earlier part of the window is out of reach rather than guessing at it). Same three
@@ -102,14 +104,14 @@ structurally can't self-report:
 - Whether your own synthesis/reporting back to the user was accurate, complete, and appropriately
   concise — not just whether the underlying work was correct.
 
-This becomes a 9th input to Step 3's synthesis, held to the same bar as the role reports — a real
+This becomes one more input to Step 3's synthesis, held to the same bar as the role reports — a real
 finding with a citation, not a rubber stamp.
 
-## Step 3 — Wait for all 8 roles, then synthesize with your own self-assessment
+## Step 3 — Wait for every role, then synthesize with your own self-assessment
 
 Do not fabricate or predict role results while waiting — each agent's finding arrives as a real
-notification. Once all 8 are back, don't just concatenate their reports (plus your own from Step
-2b). Read across all 9 for cross-cutting themes: a failure mode named by 2+ participants
+notification. Once all of them are back, don't just concatenate their reports (plus your own from
+Step 2b). Read across every participant for cross-cutting themes: a failure mode named by 2+ participants
 independently is a stronger signal than one participant's one-off. Group the synthesis into:
 
 - **Value delivered** — what's working, with the strongest cross-role evidence first.

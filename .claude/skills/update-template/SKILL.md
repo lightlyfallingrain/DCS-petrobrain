@@ -17,11 +17,12 @@ specific change.** This is a separate git repo other projects depend on.
 ## Steps
 
 1. **Locate template repo.** Default `/Users/sg/Code/claude-template`. Confirm it exists and is a
-   git repo (`git -C <path> status`). If this project has `.claude/template.lock`, read it for the
-   last-synced SHA — but note this repo currently has no symlinks and no `template.lock`
-   (config was copied, not adopted via the symlink flow in `claude-template/todo/use-template.md`),
-   so a clean SHA-diff isn't available. Treat this as a **structural** comparison (file-by-file),
-   not a SHA-range diff.
+   git repo (`git -C <path> status`). Then check whether this project has `.claude/template.lock`
+   and say which case you are in — step 6 can create it, so the answer changes over time. With a
+   lock, read the last-synced SHA and diff by range. Without one, a clean SHA-diff isn't available
+   (the config was copied rather than adopted via the symlink flow in
+   `claude-template/todo/use-template.md`), so treat it as a **structural** comparison
+   (file-by-file).
 
 2. **Inventory both sides.**
    - Template: `.claude/agents/*.md`, `.claude/skills/**`, `.claude/docs/*.md`,
@@ -40,10 +41,12 @@ specific change.** This is a separate git repo other projects depend on.
      Claude config for drift — applicable anywhere), `nudge-agent.md`, `stage-commit.md`, structural
      fixes to agent role sequencing, a hook improvement, a clearer phrasing of an existing
      convention.
-   - **Project-specific — do not propose**: anything naming DCS, Petrobrain, world-model,
-     body-layer, aircraft-layer, or encoding this project's own milestone/subproject structure
-     (e.g. `investigator` agent, `dcs-log-recon`, subproject-CLAUDE.md conventions, the
-     `[?]`/`[>]` todo-state scheme if the template already has its own).
+   - **Project-specific — do not propose**: anything naming DCS or Petrobrain, naming one of this
+     repo's subprojects (root `ROADMAP.md`'s status table is the current list — read it rather than
+     working from remembered names, since a subproject added later is just as project-specific), or
+     encoding this project's own milestone structure — a role the template does not have, a
+     DCS-specific recon skill, subproject-`CLAUDE.md` conventions, this project's todo-state scheme
+     where the template already has its own.
    - **Ambiguous**: could go either way — flag explicitly for the user to decide, don't silently
      bucket it.
    Placeholder-strip generic content mentally as you classify: a project-specific value inside an
@@ -87,8 +90,8 @@ specific change.** This is a separate git repo other projects depend on.
 
 - This is a one-way push (project → template). The companion skill `pull-from-template` handles
   the reverse direction.
-- Because this project didn't adopt the template via symlinks, "port to template" here always
-  means write/adapt a new or edited file in the template repo — never means "the project's file IS
+- Unless step 1 finds this project adopted the template via symlinks, "port to template" means
+  write/adapt a new or edited file in the template repo — it never means "the project's file IS
   already the template's file."
 - Bias toward small, reviewable proposals over one giant sync — propose per-file or per-skill,
   not as a single monolithic patch, so the user can approve some and reject others.

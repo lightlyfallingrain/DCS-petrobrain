@@ -17,12 +17,13 @@ directory?**
   routing through a second checkout just to land back where `git checkout main` would put you
   directly adds a step for no benefit. (User decision, 2026-09-10.)
 - **No — merging some other branch while the main working directory is on a different branch (or
-  might have a background agent active in it).** Use the disposable-worktree path below.
-  **Why a worktree in this case, not `git checkout main` in the current directory:** this project
-  runs background Architect/Implementer/Reviewer/DoD agents in the same working directory (no
-  `isolation: "worktree"` on those Agent calls). Switching branches in-place would race any agent
-  still running there, or disturb whatever branch the session is mid-task on. A disposable
-  worktree lets the merge happen without touching the current checkout at all.
+  something else may be active in it).** Use the disposable-worktree path below.
+  **Why a worktree in this case, not `git checkout main` in the current directory:** switching
+  branches in-place would disturb whatever branch the session is mid-task on, and would race
+  anything else operating in that checkout. A disposable worktree lets the merge happen without
+  touching the current checkout at all. `AGENTS.md`'s "Where work happens" section states who owns
+  the main checkout and where agents run — read it there, because that division has been inverted
+  once already and the reasoning here depends on it.
 
 ## In-place merge (active branch == branch being merged)
 
@@ -38,9 +39,10 @@ directory?**
 5. Run the affected subproject(s)' full verification suite (format, lint, type check, test — see
    that subproject's CLAUDE.md) before finalizing, even if the branch passed its own checks before
    merging — the merge itself can introduce breakage neither branch's own tests would catch.
-6. **Update the roadmap before pushing.** The merged branch's subproject `ROADMAP.md`
-   (`world-model/ROADMAP.md`, `aircraft-layer/ROADMAP.md`, or `body-layer/ROADMAP.md`) is the
-   source of truth for milestone status — mark the milestone done/merged (status, branch, merge
+6. **Update the roadmap before pushing.** The merged branch's subproject `ROADMAP.md` is the
+   source of truth for milestone status; root `ROADMAP.md`'s status table names every subproject
+   and links its roadmap, so read which file that is from there rather than from a list here —
+   mark the milestone done/merged (status, branch, merge
    commit hash), fix any stale entry the merge makes wrong (e.g. a sibling item that said "pending
    merge" or a blocked item this merge unblocks), and update root `ROADMAP.md`'s status table if
    the subproject's overall phase status changed. Only touch `todo/todo.md` if the branch also
