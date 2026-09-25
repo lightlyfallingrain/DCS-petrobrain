@@ -43,9 +43,11 @@ from belief.callouts import (
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
-from belief.events import CONTACT_MOTION_CHANGED, Event
+from belief.events import CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, Event
 from belief.speech import render_group_report
-from belief.tools import set_attention
+from belief.tasks import TaskStore
+from belief.tools import scan_area, set_attention
+from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
 
@@ -1010,6 +1012,48 @@ def _store_with_a_moving_watched_contact() -> tuple[ContactStore, str]:
     return store, contact_id
 
 
+def _store_with_a_moving_scanned_contact() -> tuple[ContactStore, str]:
+    """`_store_with_a_moving_watched_contact`'s sibling, but attention comes
+    from a `tools.scan_area`-registered `AttentionArea` covering the
+    contact's position instead of a direct `set_attention(..., "watch")`
+    mark -- `plans/scan-is-not-watch/debug.md`'s regression guard. A scan is
+    an instruction to look, not a deliberate watch: a contact merely caught
+    inside a scanned area must not enter the watched-only reporting family
+    (`belief.callouts._WATCHED_ONLY_KINDS`)."""
+    store, contact_id = _store_with_a_founded_contact_that_then_starts_moving()
+    tasks = TaskStore()
+    # `_observation`'s default `bearing_deg=0.0`/`range_m=1000.0` (not its
+    # `dwp_x`/`dwp_z`, which only feed enrichment) is what actually drives
+    # `Contact.last_position` here -- ~`(1000.0, 0.0)`, see `belief.percept`.
+    scan_area(
+        store,
+        tasks,
+        center=GeoPosition(x=1000.0, z=0.0, alt_m=0.0),
+        radius_m=500.0,
+        reason="check",
+        now_sim=0.0,
+    )
+    _start_moving(store, t_sim=1.0)
+    return store, contact_id
+
+
+def test_scanned_but_unwatched_contact_never_speaks_a_motion_change() -> None:
+    """`plans/scan-is-not-watch/debug.md`: a scanned area confers only
+    `"normal"` attention (`tools.scan_area`), never `"watch"` -- a contact
+    caught inside one must not speak a `CONTACT_MOTION_CHANGED` callout any
+    more than a never-marked contact would (`test_unwatched_contact_never_
+    speaks_a_motion_change` above)."""
+    store, _ = _store_with_a_moving_scanned_contact()
+    motion_event = next(e for e in store.events if e.kind == CONTACT_MOTION_CHANGED)
+    assert motion_event in store.unacknowledged_events
+
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=1.0) == []
+    # Not consumed -- would still be picked up if the contact were actually
+    # (directly) watched.
+    assert motion_event in store.unacknowledged_events
+
+
 def test_unwatched_contact_never_speaks_a_motion_change() -> None:
     """`_WATCHED_ONLY_KINDS` -- an unwatched contact's `CONTACT_MOTION_
     CHANGED` event is real (see `belief.events`) but never spoken."""
@@ -1042,6 +1086,28 @@ def test_watching_after_the_event_fired_still_speaks_it() -> None:
     scheduler = CalloutScheduler()
     spoken = scheduler.tick(store, now_sim=1.0)
     assert spoken == ["BMP-2, moving."]
+
+
+def test_watched_contact_motion_stays_silent_while_out_of_sight() -> None:
+    """`plans/scan-is-not-watch/debug.md` Defect 2: `CONTACT_MOTION_CHANGED`
+    can only ever be derived from a fresh naked-eye percept (`belief.motion.
+    fold_motion` runs only from `Contact.record` during `ingest`, never from
+    `ContactStore.tick` alone -- see that module's own docstring). Ticking a
+    genuinely watched contact forward with no further observations, well
+    past the point its certainty has decayed to `"lost"`, must never
+    manufacture a second motion event: nothing here changed `Contact.
+    motion.state`, so there is nothing new to compare against, and the one
+    real event already spoken stays the only one in the log."""
+    store, _ = _store_with_a_moving_watched_contact()
+    scheduler = CalloutScheduler()
+    spoken = scheduler.tick(store, now_sim=1.0)
+    assert spoken == ["BMP-2, moving."]
+
+    for t in (10.0, 60.0, 120.0, 300.0):
+        store.tick(now_sim=t)
+    motion_events = [e for e in store.events if e.kind == CONTACT_MOTION_CHANGED]
+    assert len(motion_events) == 1
+    assert scheduler.tick(store, now_sim=300.0) == []
 
 
 def test_watch_report_min_gap_suppresses_a_second_watched_only_callout() -> None:
@@ -1108,6 +1174,58 @@ def test_watched_contact_speaks_a_range_crossing() -> None:
     scheduler = CalloutScheduler()
     spoken = scheduler.tick(store, now_sim=1.0)
     assert spoken == ["BMP-2."]  # unenriched, classification_raw as-is
+
+
+def test_scanned_but_unwatched_contact_never_speaks_a_range_crossing() -> None:
+    """`plans/scan-is-not-watch/debug.md`'s regression guard, applied to
+    `CONTACT_RANGE_CROSSED`: identical geometry to `test_watched_contact_
+    speaks_a_range_crossing` above (its `dwp_x`/`dwp_z` are enrichment-only
+    -- `belief.percept.percept_of` strips `derived_world_position`, so the
+    contact's actual `last_position` comes from the observation's `bearing_
+    deg`/`range_m` against `ownship_at_observation`, i.e. `_observation`'s
+    defaults, ~`(1000.0, 0.0)`), but attention comes from `tools.scan_area`
+    instead of a direct watch mark. Unlike `CONTACT_MOTION_CHANGED`,
+    `CONTACT_RANGE_CROSSED` is gated (and its own bookkeeping kept) at
+    *emission* (`ContactStore.tick`'s sixth block, `belief.events.
+    CONTACT_RANGE_CROSSED`'s own docstring) -- an unwatched contact never
+    gets the event appended to the log at all, not merely left unspoken."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="BMP-2",
+                classification_level=3,
+                ownship_x=0.0,
+                ownship_z=0.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    tasks = TaskStore()
+    scan_area(
+        store,
+        tasks,
+        center=GeoPosition(x=1000.0, z=0.0, alt_m=0.0),
+        radius_m=500.0,
+        reason="check",
+        now_sim=0.0,
+    )
+    store.tick(
+        now_sim=0.0, ownship=_ownship()
+    )  # silent seed; also fires CONTACT_DETECTED
+    CalloutScheduler().tick(
+        store, now_sim=0.0
+    )  # drain CONTACT_DETECTED (spoken regardless)
+    store.tick(
+        now_sim=1.0, ownship=_ownship(x=1500.0)
+    )  # range=500 -> would cross if watched
+
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+    scheduler = CalloutScheduler()
+    assert scheduler.tick(store, now_sim=1.0) == []
 
 
 # --- watched-only speech: CONTACT_ENGAGEMENT_CHANGED (plans/watch-reporting/

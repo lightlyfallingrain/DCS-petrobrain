@@ -839,7 +839,10 @@ def _render_eyesight_frame(
             trace_records, heading_true_deg=ownship.heading_true_deg
         ),
         believed=believed_markers_from_contacts(
-            runner.store.contacts, observer, ownship.heading_true_deg
+            runner.store.contacts,
+            observer,
+            ownship.heading_true_deg,
+            areas=runner.store.areas,
         ),
         radius_m=radius_m,
         max_lines=_eyesight_max_lines(),
