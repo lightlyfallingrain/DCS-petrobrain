@@ -177,8 +177,15 @@ group of units at same location -> treat as a single threat, do not report indiv
 scan pattern rather than with the attention flags built in BL-4 — attention currently changes what
 he *says*, and this makes it change where he *looks*.
 
-The **engagement envelope with a 1.5 factor** is a concept nothing in the codebase has: no unit
-threat envelopes exist. "Danger" and "safe from" callouts are likewise unbuilt.
+**Built** (`plans/watch-reporting/plan.md` Stage 4): `belief/threat.py` (`envelope_for`, keyed
+strictly on believed classification, never ground truth) plus `ContactStore.tick`'s seventh block
+implement the engagement envelope with the 1.5x factor as a Schmitt trigger (enter at 1.0x max
+range, leave at 1.5x) — the data is `body-layer/data/threat_envelopes.json`, a community-wiki
+transcription (provisional, not DCS ground truth). "Danger"/"safe from" callouts are built and
+speak through `_contact_report_text`'s `lead` affix. "Nearing" the envelope and "unit engaging us"
+(a distinct, narrower state than merely being inside the envelope) remain unbuilt, as does
+"when unit damaged/destroyed" and "unit no longer in DCS unit list" — the store never learns a
+contact no longer exists in DCS, only that it stops being observed.
 
 The group rule agrees with the built clustering — one report per group, not per unit — but adds a
 threat-based selection rule for *which* member sets the reporting, which clustering does not do (it

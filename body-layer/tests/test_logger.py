@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import pathlib
 import sqlite3
 import sys
 import threading
@@ -1267,13 +1268,13 @@ def test_poll_transcripts_skips_malformed_items() -> None:
 
 class _RecordingCrewConsole:
     """Stands in for `CrewConsole` in `_poll_transcripts` -- records the
-    exact arguments `handle_transcript` was called with, so a bearing
-    round trip through this function can be asserted without standing up a
-    real `EnrichmentContext`/`TaskStore` (that belongs to `test_crew_
-    console.py`'s own, deeper `handle_command`/`_handle_scan` tests)."""
+    exact arguments `handle_transcript` was called with, so a slots round
+    trip through this function can be asserted without standing up a real
+    `EnrichmentContext`/`TaskStore` (that belongs to `test_crew_console.
+    py`'s own, deeper `handle_command`/`_handle_scan` tests)."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str | None, int | None]] = []
+        self.calls: list[tuple[str, str | None, dict[str, int | str] | None]] = []
 
     def handle_transcript(
         self,
@@ -1284,16 +1285,18 @@ class _RecordingCrewConsole:
         verb_anchored: bool,
         ambiguous: bool,
         now_sim: float,
-        bearing_degrees: int | None = None,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
-        self.calls.append((transcript, token, bearing_degrees))
+        self.calls.append((transcript, token, slots))
         return []
 
 
-def test_poll_transcripts_threads_bearing_degrees_into_handle_transcript() -> None:
+def test_poll_transcripts_threads_slots_into_handle_transcript() -> None:
     """`plans/voice-command-completeness/plan.md` Stage 3's own regression
-    guard: `bearing_degrees` used to be dropped at the `TranscriptEvent`
-    wire and never reached `handle_transcript` at all."""
+    guard, extended by `plans/watch-reporting/plan.md` Decision 2b-i's
+    `bearing_degrees` -> `slots` migration: a parsed slot used to be
+    dropped at the `TranscriptEvent` wire and never reached
+    `handle_transcript` at all."""
     console = _RecordingCrewConsole()
     client = FakeSpeechInputClient(
         transcripts=[
@@ -1305,15 +1308,17 @@ def test_poll_transcripts_threads_bearing_degrees_into_handle_transcript() -> No
                 "verb_anchored": True,
                 "ambiguous": False,
                 "t_wall": 100.0,
-                "bearing_degrees": 320,
+                "slots": {"bearing_degrees": 320},
             }
         ]
     )
     _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
-    assert console.calls == [("scan bearing three two zero", "scan_bearing_deg", 320)]
+    assert console.calls == [
+        ("scan bearing three two zero", "scan_bearing_deg", {"bearing_degrees": 320})
+    ]
 
 
-def test_poll_transcripts_skips_items_with_a_malformed_bearing_degrees() -> None:
+def test_poll_transcripts_skips_items_with_slots_that_are_not_a_dict() -> None:
     console = _RecordingCrewConsole()
     client = FakeSpeechInputClient(
         transcripts=[
@@ -1325,7 +1330,31 @@ def test_poll_transcripts_skips_items_with_a_malformed_bearing_degrees() -> None
                 "verb_anchored": True,
                 "ambiguous": False,
                 "t_wall": 100.0,
-                "bearing_degrees": "320",  # wrong type, must be skipped
+                "slots": "not-a-dict",  # wrong shape, must be skipped
+            }
+        ]
+    )
+    _poll_transcripts(client, console, now_sim=0.0)  # type: ignore[arg-type]
+    assert console.calls == []
+
+
+def test_poll_transcripts_skips_items_with_a_malformed_slot_value() -> None:
+    """A `slots` value must be `int | str` -- a `bool` (a `int` subtype in
+    Python) or any other type must be rejected the same way every other
+    field's `isinstance` check already excludes `bool` from `int`/`float`
+    above."""
+    console = _RecordingCrewConsole()
+    client = FakeSpeechInputClient(
+        transcripts=[
+            {
+                "transcript": "scan bearing three two zero",
+                "confidence": 0.9,
+                "token": "scan_bearing_deg",
+                "match_ratio": 1.0,
+                "verb_anchored": True,
+                "ambiguous": False,
+                "t_wall": 100.0,
+                "slots": {"bearing_degrees": True},
             }
         ]
     )
@@ -1571,3 +1600,78 @@ def test_say_again_disposition_reaches_the_speech_log_file_end_to_end(
     assert row["disposition"] == "say_again"
     assert row["acted_token"] is None
     assert "t_wall" in row
+
+
+# --- the poll thread must survive a raising dispatch -----------------------
+
+
+def test_console_poll_loop_survives_a_raising_poll_and_keeps_going(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The poll loop runs on a *daemon* thread, so an exception escaping it
+    kills the thread without killing the process: the REPL keeps accepting
+    input, the overlay holds its last frame, and perception/belief/speech
+    are dead for the rest of the sortie with only a stderr traceback to say
+    so. Nothing in the cockpit reports it.
+
+    That cost -- a whole flight, silently -- is why the guard catches
+    everything rather than an enumerated set. A skipped poll costs one
+    cycle at 5 Hz and the next one recovers.
+
+    Found by the security pass on `plans/watch-reporting/`
+    (`security-review.md`); pre-existing rather than introduced there, and
+    unreachable through today's narrow wire path, which is exactly why no
+    existing test covered it.
+
+    Drives the real `_run_console_poll_loop` on a real thread, with a
+    `run_once` that raises on its first call and succeeds afterwards, and
+    asserts the second poll actually happened -- not merely that the thread
+    is still alive, which a loop that had exited cleanly would also
+    satisfy.
+    """
+    db_path = tmp_path / "region.sqlite"
+    conn = open_for_build(db_path)
+    conn.close()
+
+    aircraft_client = FakeConsoleAircraftClient(
+        _console_telemetry_dict(), {"objects": [_t72_world_object()]}
+    )
+    runner = ConsolePerceptionRunner(aircraft_client=aircraft_client)  # type: ignore[arg-type]
+
+    real_run_once = runner.run_once
+    calls: list[int] = []
+    # Signalled by the *second* poll, so the test waits on the thing it is
+    # asserting rather than on a deadline -- this runs a real thread, and a
+    # poll-count spin loop is exactly the shape that goes flaky under load.
+    recovered = threading.Event()
+
+    def flaky_run_once() -> None:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise RuntimeError("simulated dispatch failure inside the poll body")
+        real_run_once()
+        recovered.set()
+
+    runner.run_once = flaky_run_once  # type: ignore[method-assign]
+    stop_event = threading.Event()
+
+    poll_thread = threading.Thread(
+        target=_run_console_poll_loop,
+        args=(runner, aircraft_client, "Syria", db_path, 0.01, stop_event),
+    )
+    poll_thread.start()
+    try:
+        assert recovered.wait(timeout=10.0), (
+            "the poll loop did not run a second cycle after the first raised "
+            "-- the guard is missing and the thread died silently"
+        )
+    finally:
+        stop_event.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not poll_thread.is_alive()
+    # The first poll raised; the loop kept going and the second one ran to
+    # completion, ingesting normally.
+    assert len(calls) >= 2
+    assert runner.last_t_sim == 200.0
+    assert len(runner.store.observations) == 1

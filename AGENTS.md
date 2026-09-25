@@ -177,11 +177,37 @@ per-sequence.**
 *Explore* precedes Architect on consequential work only — see "Explore Before Deciding" above. It is
 a conversation with the user, not a role, and cannot run as a subagent.
 
+### A change request from Security or Performance Reviewer re-enters the loop
+
+**Added 2026-09-24 (user direction).** When either review asks for a change, that change is
+implementation work and takes the implementation path:
+
+> **Security / Performance Reviewer change request → Implementer → Reviewer (review of the fix) →
+> Definition of Done.**
+
+It does **not** go straight to DoD, and the main loop does not simply apply it itself. The reason is
+the same one that put Reviewer after Implementer in the first place: a fix written in response to a
+review is ordinary new code, arriving late, usually under time pressure, and touching a path the
+original author had already stopped thinking about. It deserves the same reading as the code it
+patches.
+
+The failure this prevents is specific and was demonstrated on `feature/watch-reporting` the day this
+rule was written. The performance review asked for one short-circuit; applying it also skipped a
+piece of masking bookkeeping the review had not mentioned, which would have made a contact read as
+line-of-sight-masked on its first tick back in range with no masked sample ever taken there. The
+fix was correct in the end, but *the review that requested it was not the review that would have
+caught that* — it had already reported and finished.
+
+This applies however small the request looks. "Reorder two lines" is exactly the shape of change
+that gets applied without a second reading.
+
 ---
 
 ## Auto-Advance
 
 Once a role sequence starts, move to the next stage automatically — do not stop to ask "should I proceed?" between stages. Reviewer → Implementer is a loop: if Reviewer finds required fixes, hand back to Implementer and continue the loop until Reviewer approves, then proceed to DoD without asking.
+
+A Security or Performance Reviewer change request re-enters that same loop rather than ending it — Implementer, then Reviewer on the fix, then DoD (see "A change request from Security or Performance Reviewer re-enters the loop" above). Auto-advance applies to that re-entry too: it does not need the user's go-ahead, only their decision on anything the Escalation Rules actually cover.
 
 Only stop and hand control to the user mid-sequence when one of the Escalation Rules below applies, or a step genuinely needs the user's own input, verification, or perception (e.g. live DCS acceptance testing, a judgment call only the user can make). Otherwise keep going through Architect → Implementer → Reviewer → (loop) → DoD in one continuous run.
 

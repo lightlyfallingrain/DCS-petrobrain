@@ -38,17 +38,23 @@ deterministic tools since BL-6. Every free-text utterance already arrives correc
 `NullBrainClient` and is dropped. So this is not an integration project; it is a model loop plugged
 into an interface that has been waiting for it.
 
+**`watch-reporting` is done, merged 2026-09-24** (`feature/watch-reporting`, all five stages) —
+`plans/watch-reporting/plan.md`/`implementation.md`, `body-layer/ROADMAP.md`'s Status entry. Adds
+`belief/threat.py` (the module BL-8's Stages 3/5 sit underneath) and threat.py's provenance data
+is now committed. **Unflown**, same "merge before flying" posture as the three milestones above —
+add it to the next acceptance card.
+
 **Recommended next move: `/explore` the brain layer with the user before any architect pass.**
 This project's repeated pattern is that the decisive constraint arrives *after* implementation
-starts and reverses it. The alternative, lower-risk move is to build `watch-reporting` (plan ready,
-Decision 5a amended) — it sits underneath BL-8's Stages 3 and 5 and produces `threat.py`.
-`plans/bl8-memory/plan.md` is also ready, decisions resolved.
+starts and reverses it. `plans/bl8-memory/plan.md` is also ready, decisions resolved, and is now
+unblocked on `threat.py` existing.
 
-**Gated on the merge that just happened:** re-enable `performance-reviewer` and `security`, running
+**Done 2026-09-24, no longer gated:** re-enabled `performance-reviewer` and `security`, running
 **once per whole feature, before DoD, not mid-feature** (user, 2026-09-24). Scoping in the user's
 own terms: single-user, LAN-only, under active development; deeper effort once brain and memory are
-done. This needs a root `CLAUDE.md` "Agents" edit — see the deferred entry in the cross-cutting
-backlog below for why the exemption's premise is already false.
+done. The root `CLAUDE.md` "Agents" edit is made; it also records why the old blanket skip outlived
+its premise (no lapse condition, while the project grew a live 5 Hz DCS pipeline, a LAN HTTP
+surface and inbound speech capture).
 
 
 - [x] Route crew-text speech callouts ("tank, 12 o'clock, 3 km" style contact reports, from
@@ -73,8 +79,11 @@ backlog below for why the exemption's premise is already false.
   merge time. Fix applied at the process level, not just the data level: `.claude/skills/merge/SKILL.md`
   and `.claude/agents/dod.md` now both require the relevant `ROADMAP.md` to be updated *in the
   same push* as any merge — see root `ROADMAP.md`'s "Keeping this current" note.
-- [ ] **Enable `performance-reviewer` and `security` in the default role sequence, once per whole
-  feature before DoD (not mid-feature)** — but only **after `feature/binocular-optic` merges**.
+- [x] **Enable `performance-reviewer` and `security` in the default role sequence, once per whole
+  feature before DoD (not mid-feature). DONE 2026-09-24** — gate cleared when
+  `feature/binocular-optic` merged (`c398675`); root `CLAUDE.md`'s "Agents" section now states the
+  once-per-feature-before-DoD rule, the user's scoping, and why the old blanket skip outlived its
+  premise. Original text follows.
   User decision from the 2026-09-22→2026-09-25 retro (retro finding 1). Scoping, as the user
   stated it: this is for now a single-user, LAN-only project under active development; deeper
   security and performance effort comes once the important milestones (brain and memory) are
@@ -105,6 +114,18 @@ backlog below for why the exemption's premise is already false.
     outer — so "Observ off" means the sight genuinely cannot see, not merely that it is unselected).
   - **Depends on mode selection**, which is cones slice 2. An optic nothing can select is table data
     nothing reads — the reason the 9K113 entries were cut from slice 1 in the first place.
+  - **`plans/watch-reporting/plan.md` Stage 4 (merged 2026-09-24) makes the strongest case yet for
+    revisiting this deferral, and it is a different argument than the one that shelved it.** The
+    9K113 was deferred as *more detail* — a third optic when two already worked. The case now is
+    *identify the thing before it can shoot you*: class-level recognition (`recognition_extent_m /
+    MEDRES_ANGULAR_RADIUS_RAD × optic.class_range_mult`) against a ZSU-23-4's own 2 NM (3,704 m)
+    envelope resolves at 500 m unaided (13% of the way in) and 1,750 m through binoculars (47% in
+    — already inside engagement range either way), but **3,500 m through the 9K113 wide field** —
+    the envelope's own edge. It is the only optic in the table whose class-range multiplier
+    reaches a SHORAD envelope's edge rather than deep inside it, and its multipliers (wide
+    3.55/7.00/6.50) are already measured and sitting in `perception/optics.py`'s module docstring,
+    waiting for a slice that wires them. Full arithmetic: `plans/watch-reporting/plan.md` Decision
+    4d.
   - Also recorded there and relevant: the operator commands an angular **rate**, not a position, so
     pointing the sight costs time proportional to angular distance; the gyro-stabilised head needs
     **~3 minutes** from power-on before it is ready; and launch entry requires the sight line within

@@ -95,6 +95,9 @@ from vocabulary import (
     normalize_for_match,
     normalized_phrase_index,
     parse_bearing,
+    parse_clock,
+    parse_descriptor,
+    parse_range_km,
 )
 
 #: The floor `_phrase_match_ratio`'s word-sequence score must clear for a
@@ -267,6 +270,12 @@ _BEARING_TOKEN_VERBS: dict[str, str] = {
     "report_bearing_deg": "report",
 }
 
+#: `follow`'s own canonical verb, for the same fuzzy-match reasoning
+#: `_bearing_verb_token` uses -- `verb` is already a possibly-misheard
+#: first word, so an exact `"follow"` equality check would reject the
+#: mishearings the whole point of `VERB_FLOOR` is to admit.
+_FOLLOW_VERB = "follow"
+
 
 @dataclass(frozen=True)
 class MatchResult:
@@ -300,16 +309,23 @@ class MatchResult:
       candidate; the caller combines `match_ratio` with its own STT
       confidence to choose act/confirm/say-again.
 
-    `bearing_degrees` is populated only for a resolved bearing-slot match
-    (`token` is `"scan_bearing_deg"`/`"report_bearing_deg"`) -- the actual
-    parsed value, since `token` alone names the family, not the heading.
-    """
+    `slots` (`plans/watch-reporting/plan.md` Decision 2b-i) replaces the
+    single-purpose `bearing_degrees` field this dataclass used to carry --
+    a bare numeric bearing was the one precedent for a parsed value
+    attached to a token rather than enumerated as a phrase, and `follow`'s
+    three qualifiers (descriptor/clock/range) are three more of the same
+    shape. Rather than grow a fourth mutually-exclusive optional field,
+    every parsed slot lives in one dict: `"bearing_degrees"` for
+    `scan_bearing_deg`/`report_bearing_deg` (the value unchanged from the
+    old field, only the container changed), `"descriptor"`/`"clock"`/
+    `"range_km"` for `follow`. `None` (the default) means no slots were
+    parsed -- the common case, every token besides these four."""
 
     token: str | None
     match_ratio: float
     verb_anchored: bool
     ambiguous: bool = False
-    bearing_degrees: int | None = None
+    slots: dict[str, int | str] | None = None
 
 
 def _verb_anchor_ratio(verb: str) -> float:
@@ -405,6 +421,27 @@ def _phrase_match_ratio(
     return score / max(len(heard_words), len(phrase_words))
 
 
+def _parse_follow_slots(text: str) -> dict[str, int | str] | None:
+    """`follow`'s three optional slots, all parsed against the *raw*
+    `text` (each parser normalises its own copy) rather than the
+    filler-stripped `heard_words` `match_transcript` already computed --
+    `strip_filler` drops nothing any of the three parsers look for, so
+    this is just avoiding a second normalisation pass, not a behaviour
+    difference. Returns `None` when none of the three resolves -- Decision
+    2b-iii: "at least one must be present," never an empty slot dict."""
+    slots: dict[str, int | str] = {}
+    descriptor = parse_descriptor(text)
+    if descriptor is not None:
+        slots["descriptor"] = descriptor
+    clock = parse_clock(text)
+    if clock is not None:
+        slots["clock"] = clock
+    range_km = parse_range_km(text)
+    if range_km is not None:
+        slots["range_km"] = range_km
+    return slots if slots else None
+
+
 def match_transcript(text: str) -> MatchResult:
     """Normalise -> verb anchor -> (bearing slot | phrase match) ->
     separation check. See module and `MatchResult` docstrings for the
@@ -431,13 +468,30 @@ def match_transcript(text: str) -> MatchResult:
                         token=bearing_token,
                         match_ratio=1.0,
                         verb_anchored=True,
-                        bearing_degrees=bearing.degrees,
+                        slots={"bearing_degrees": bearing.degrees},
                     )
             # Heard digits after "bearing" that either do not name a legal
             # bearing, or a verb that fits no bearing-taking token -- a
             # *detected* recognition error, not a silent one. See module
             # docstring.
             return MatchResult(token=None, match_ratio=0.0, verb_anchored=True)
+
+    # `follow`'s slot resolution (`plans/watch-reporting/plan.md` Decision
+    # 2b-i), tried **before** the generic phrase table below, not as a
+    # fallback after it -- a clock-only "follow two o'clock" otherwise
+    # collides with "report two o'clock"/"scan two o'clock" (the
+    # word-sequence score only differs on the verb, and "follow"/"report"
+    # both anchor, so it can clear `MATCH_FLOOR` against the wrong
+    # family). "follow nearest"/"follow nearest air defence" (Decision
+    # 2a's synonym phrasings) and the bare "follow" phrase parse to zero
+    # slots here (no descriptor/clock/range word present) and fall through
+    # to the ordinary phrase table unchanged.
+    if difflib.SequenceMatcher(None, verb, _FOLLOW_VERB).ratio() >= VERB_FLOOR:
+        follow_slots = _parse_follow_slots(text)
+        if follow_slots is not None:
+            return MatchResult(
+                token="follow", match_ratio=1.0, verb_anchored=True, slots=follow_slots
+            )
 
     heard_words = tuple(words)
     best_phrase: str | None = None

@@ -377,4 +377,39 @@ two functions that must agree (2026-09-19).
 
 - **Interrupt-only responses require a separate communication path from speech output.** `stop_talking` initially rode the speech channel via `push_speech(..., urgent=True)` which worked end-to-end but produced "Copy." as a side effect — the interrupt was the delivery mechanism and speech was incidental. Removing the speech requires a separate interrupt-only path: `POST /audio/stop` → `AudioSink.interrupt()` → clear queue and stop in-flight playback, with zero speech output. This required explicit routing across all three subprojects (aircraft-layer new endpoint, audio-adapter new route, body-layer `stop()` call instead of `_print`). Lesson: when a feature requires "do X without any output," it is a separate semantic layer from "do X and speak about it"; design for interrupt-only paths explicitly rather than trying to compose them from the output channel (Inbound Speech Stage 3 follow-up, Decision 5 REVISED, 2026-09-20).
 
+- **A structurally-complete trigger can still have near-zero practical value, and the arithmetic
+  that shows it is cheap to run before shipping.** Watch-reporting's engagement-envelope warning is
+  gated on believed classification (correct, no-omniscience-safe design), but doing the actual
+  recognition-range-vs-weapon-range arithmetic for a SHORAD threat (the case it targets) showed the
+  naked-eye/binocular optics available today only recognise the class at 13–47% of the way into a
+  Shilka-class envelope — so the warning was going to fire from deep inside the danger zone, not at
+  its edge, regardless of how correct the trigger logic was. The design was still worth shipping
+  (accepted by the user with the caveat recorded), but the caveat only exists because someone ran
+  the numbers instead of assuming "the trigger is correct" meant "the trigger is useful." Lesson:
+  when a feature's value depends on a second, separately-tunable quantity (here: optic
+  magnification), compute the actual margin against realistic inputs before or during design, not
+  after a sortie reveals it — a few lines of arithmetic against already-known constants is far
+  cheaper than a live-flight surprise (watch-reporting plan Decision 4d, 2026-09-24).
+
 - **A plan's internal contradiction sits at the seam between sections, not inside one.** Twice in the detection-cones slice-2 series (2B, 2C), the literal wording of an Implementation Plan step said one thing while an earlier "hard part" section in the *same document* had already established the opposite: 2B's step 9 called `FULL_GAZE` a no-op while hard part 3 (and the real 130° cockpit envelope) made that false for the 90–130° band; 2C's step 12 read as a static commanded wedge while hard parts 1 and 2a required a commanded sector to itself sub-cycle. Both were caught only because the implementer cross-referenced sections rather than executing the literal step — a single-section read of either plan would have shipped the contradiction. Lesson: a plan review (self- or Reviewer-driven) should explicitly check the Implementation Plan's steps against the earlier discussion sections' own stated constraints, not just against CLAUDE.md invariants — the defect class this project keeps finding lives in that gap, not in either section read alone.
+
+## Debugging & Root-Cause Diagnosis
+
+- **A confident, code-derived reproduction can be a real defect on an unreachable path, while the
+  user's own one-line diagnosis names the path that actually fires.** The `position-belief-runaway`
+  debug session's own hypothesis (ill-conditioned triangulation — near-parallel disagreeing looks
+  intersecting far outside either input) reproduced the reported numbers exactly, and was fixed.
+  But the pre-existing association gate in `association_over_time.passes_gate` already rejects
+  that large a single-poll disagreement before it ever reaches fusion in production — a fact
+  established only by tracing `ContactStore.ingest`'s call path, not by the reproduction script
+  itself. The mechanism that actually produced the live 87.5 km callout was a slow directional
+  drift (many small, individually-plausible steps, each passing every existing gate), which is
+  exactly what the user's own diagnosis named: *"position uncertainty needs a gate, cannot be
+  further than detection range."* That one line pointed at a missing invariant (nothing checked a
+  fused position against physical detection range at all), not at a numerically fragile formula.
+  Lesson: when a live defect prompts a debugging session, a hypothesis that reproduces the
+  reported numbers under direct construction is not yet shown to be the *production* path — trace
+  whether the gates the real pipeline runs the input through would actually let that input reach
+  the reproduced code, and weigh a domain expert's structural diagnosis ("there's no gate for X")
+  as seriously as a numerically-confirmed mechanism (`position-belief-runaway` debug report +
+  review, 2026-09-25).

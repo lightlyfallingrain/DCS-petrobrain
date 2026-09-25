@@ -10,6 +10,7 @@ explicitly."""
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from dataclasses import dataclass
 
@@ -21,6 +22,7 @@ from belief.audio_client import AudioAdapterError
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import (
+    _AIR_DEFENCE_OP_CLASSES,
     DISPATCHED_COMMAND_TOKENS,
     CrewConsole,
     _describe_token_for_confirm,
@@ -31,6 +33,7 @@ from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.tasks import TaskStore
 from belief.voice_commands import ACT_FLOOR, CONFIRM_FLOOR, CONFIRM_WINDOW_S
+from perception import object_model
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import DerivedWorldPosition, Observation, OwnshipState
@@ -1320,6 +1323,79 @@ def test_watch_nearest_air_defence_skips_a_closer_non_air_defence_contact(
     assert tank.attention == "normal"
 
 
+def test_watch_nearest_air_defence_selects_a_long_range_sam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression, 2026-09-24: `OP_LRSAM` was absent from
+    `_AIR_DEFENCE_OP_CLASSES`, so an S-300 -- long-range SAM, unambiguously
+    air defence -- could never be selected by "watch nearest air defence".
+
+    This is the worst contact to have missed. The vision calibration found
+    the S-300's tracking-radar mast detectable out to 8.89 km, further than
+    anything else in the profile table, so it is both the most dangerous
+    thing the command can be asked about and the one most likely to be the
+    only air-defence contact held at all."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_with_ownship_x(
+                obs_id="OBS_S300",
+                t_sim=0.0,
+                classification_raw="S-300PS 40B6M tr",
+                ownship_x=4000.0,
+            ),
+            _observation_with_ownship_x(
+                obs_id="OBS_TANK", t_sim=0.0, classification_raw="T-72", ownship_x=500.0
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    s300 = next(c for c in store.contacts if "S-300" in c.classification.value)
+    tank = next(c for c in store.contacts if c.classification.value == "T-72")
+
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command("watch_nearest_air_defence", now_sim=0.0)
+
+    assert s300.attention == "watch"
+    assert lines and "no air defence contact" not in lines[0]
+    assert tank.attention == "normal"
+
+
+def test_air_defence_classes_cover_every_air_defence_class_in_the_object_model() -> (
+    None
+):
+    """Guards the drift that caused the `OP_LRSAM` omission above, rather
+    than only the one instance of it.
+
+    `_AIR_DEFENCE_OP_CLASSES` is enumerated by hand against
+    `perception.object_model`'s profile table, and nothing connects the two:
+    when that table gained a long-range SAM entry, this set had no way to
+    notice. `object_model` carries no structural air-defence marker to
+    derive the set from (an `ObjectTypeProfile` is a size and an `op_class`,
+    nothing more), so this test matches on the `OP_*` naming instead -- any
+    class whose name says SAM or names a gun system must be covered.
+
+    If a future profile entry introduces an air-defence class this pattern
+    does not catch, that is a signal to give `object_model` a real marker,
+    not to loosen the assertion."""
+    profiled_classes = {
+        profile.op_class
+        for _keyword, profile in (
+            *object_model._KEYWORD_PROFILES,
+            *object_model._REPORTING_NAME_KEYWORD_PROFILES,
+        )
+    }
+    air_defence_by_name = {
+        op_class
+        for op_class in profiled_classes
+        if op_class.endswith("SAM") or op_class in {"OP_SPAAG", "OP_ZU23"}
+    }
+
+    assert air_defence_by_name, "naming heuristic matched nothing -- it has gone stale"
+    assert air_defence_by_name <= _AIR_DEFENCE_OP_CLASSES
+
+
 def test_watch_nearest_air_defence_reports_none_when_no_contact_is_air_defence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2326,7 +2402,7 @@ def test_report_bearing_deg_quantises_onto_the_nearest_sector(
         store=ContactStore(), enrichment=_enrichment_context(monkeypatch)
     )
     lines = console.handle_command(
-        "report_bearing_deg", now_sim=0.0, bearing_degrees=185
+        "report_bearing_deg", now_sim=0.0, slots={"bearing_degrees": 185}
     )
     assert lines == ["Can't see south."]
 
@@ -2419,7 +2495,9 @@ def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(
         store=store, tasks=tasks, enrichment=_enrichment_context(monkeypatch)
     )
 
-    lines = console.handle_command("scan_bearing_deg", now_sim=0.0, bearing_degrees=317)
+    lines = console.handle_command(
+        "scan_bearing_deg", now_sim=0.0, slots={"bearing_degrees": 317}
+    )
 
     assert lines == ["Scanning northwest."]
     assert len(tasks.tasks) == 1
@@ -2439,8 +2517,14 @@ def test_describe_token_for_confirm_names_the_quantised_sector_not_the_number() 
     misunderstanding, and repeating the raw number while the dispatch
     itself acts on a coarser bucket would hide the only discrepancy worth
     hearing."""
-    assert _describe_token_for_confirm("scan_bearing_deg", 317) == "scan northwest"
-    assert _describe_token_for_confirm("report_bearing_deg", 5) == "report north"
+    assert (
+        _describe_token_for_confirm("scan_bearing_deg", {"bearing_degrees": 317})
+        == "scan northwest"
+    )
+    assert (
+        _describe_token_for_confirm("report_bearing_deg", {"bearing_degrees": 5})
+        == "report north"
+    )
     assert _describe_token_for_confirm("report_clock_3") == "report three o'clock"
     assert _describe_token_for_confirm("report_bearing_n") == "report north"
     assert _describe_token_for_confirm("report_all") == "report"
@@ -2450,11 +2534,11 @@ def test_describe_token_for_confirm_names_the_quantised_sector_not_the_number() 
 def test_a_confirm_band_bearing_survives_the_affirm_round_trip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Without `PendingConfirmation.bearing_degrees`, a bearing command
-    that lands in the confirm band loses its number the moment the player
-    says "affirm" -- `handle_command` is called again on commit with no
-    other way to recover it. This is the test that would fail if that
-    field were removed."""
+    """Without `PendingConfirmation.slots`, a bearing command that lands
+    in the confirm band loses its number the moment the player says
+    "affirm" -- `handle_command` is called again on commit with no other
+    way to recover it. This is the test that would fail if that field were
+    removed."""
     store = ContactStore()
     tasks = TaskStore()
     console = CrewConsole(
@@ -2470,7 +2554,7 @@ def test_a_confirm_band_bearing_survives_the_affirm_round_trip(
         verb_anchored=True,
         ambiguous=False,
         now_sim=0.0,
-        bearing_degrees=317,
+        slots={"bearing_degrees": 317},
     )
     assert lines == ["Scan northwest, confirm?"]
 
@@ -2504,3 +2588,293 @@ def test_a_reply_extends_the_callout_scheduler_occupancy(
     console.handle_command("report_all", now_sim=10.0)
 
     assert console.scheduler.busy_until_sim > 10.0
+
+
+# --- follow (plans/watch-reporting/plan.md Decision 2b) --------------------
+
+
+def _xz_for_clock(clock: int, range_m: float) -> tuple[float, float]:
+    """The `(x, z)` offset from the origin that renders as `clock` o'clock
+    at `range_m`, given ownship at the origin facing north -- mirrors
+    `test_callouts.py`'s own helper of the same name."""
+    bearing = math.radians((clock % 12) * 30.0)
+    return range_m * math.cos(bearing), range_m * math.sin(bearing)
+
+
+def _observation_for_follow(
+    *,
+    obs_id: str,
+    t_sim: float,
+    classification_raw: str,
+    classification_level: int,
+    clock: int,
+    range_m: float,
+) -> Observation:
+    """Places a contact at a controlled clock/range from `_enrichment_
+    context`'s fixed origin ownship, with a caller-controlled
+    classification -- `_observation_at`'s shape, extended with
+    `classification_level` for `follow`'s descriptor-matching tests."""
+    x, z = _xz_for_clock(clock, range_m)
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=t_sim,
+        t_wall=t_sim,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=0.0,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(x=x, z=z),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+        classification_level=classification_level,
+    )
+
+
+def test_follow_with_descriptor_only_picks_the_matching_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
+    assert "armor" in lines[0].lower()
+    armor_id = next(c.id for c in store.contacts if c.last_class_raw == "OP_ARMORED")
+    assert (
+        store.contacts[[c.id for c in store.contacts].index(armor_id)].attention
+        == "watch"
+    )
+
+
+def test_follow_with_clock_only_picks_the_nearest_matching_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_NEAR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=1000.0,
+            ),
+            _observation_for_follow(
+                obs_id="OBS_FAR",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=9,
+                range_m=1000.0,
+            ),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command("follow", now_sim=0.0, slots={"clock": 2})
+    assert "armor" in lines[0].lower()
+
+
+def test_follow_with_no_qualifiers_says_again() -> None:
+    console = CrewConsole(store=ContactStore())
+    lines = console.handle_command("follow", now_sim=0.0)
+    assert lines == ["say again -- follow needs at least one of what/where/how far"]
+
+
+def test_follow_beyond_the_match_floor_watches_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A far-off descriptor/clock mismatch must not watch the least-bad
+    candidate -- Decision 2b-iii's own "watching the least-bad contact is
+    worse than admitting no match" reasoning."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=9,
+                range_m=5000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command(
+        "follow", now_sim=0.0, slots={"descriptor": "armor", "clock": 2}
+    )
+    assert lines == ["Nothing like that."]
+    assert store.contacts[0].attention == "normal"
+
+
+def test_follow_with_only_a_clock_names_the_clock_when_nothing_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_TRUCK",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+                clock=8,  # the maximal clock delta from 2 (6 hours)
+                range_m=5000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command("follow", now_sim=0.0, slots={"clock": 2})
+    assert lines == ["Nothing at two o'clock."]
+
+
+def test_follow_with_no_contacts_at_all() -> None:
+    console = CrewConsole(store=ContactStore(), enrichment=None)
+    lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
+    assert lines == ["no world-model connection configured"]
+
+
+def test_follow_unclassified_contact_matches_a_descriptor_softly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 2b-iii: "he is pointing at a thing he *believes* is
+    armour -- matching it is right." A presence-level dot at the named
+    clock, with no competing classified contact, must still be picked."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_DOT",
+                t_sim=0.0,
+                classification_raw="ground",
+                classification_level=0,
+                clock=2,
+                range_m=2000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command(
+        "follow", now_sim=0.0, slots={"descriptor": "armor", "clock": 2}
+    )
+    assert store.contacts[0].attention == "watch"
+    assert lines[0] != "Nothing like that."
+
+
+def test_follow_group_descriptor_matches_a_plural_cardinality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_GROUP",
+                t_sim=0.0,
+                classification_raw="OP_INFANTRY",
+                classification_level=2,
+                clock=2,
+                range_m=2000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    # Force a plural cardinality directly -- fabricating a real clustered
+    # naked-eye observation is out of scope for this test's own focus.
+    from belief.cardinality import cardinality_belief_from_bucket_name
+
+    contact.cardinality = cardinality_belief_from_bucket_name(
+        "OP_TO5UNITS", established_sim=0.0
+    )
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    lines = console.handle_command("follow", now_sim=0.0, slots={"descriptor": "group"})
+    assert store.contacts[0].attention == "watch"
+    assert lines[0] != "Nothing like that."
+
+
+def test_describe_token_for_confirm_names_the_follow_slots() -> None:
+    assert (
+        _describe_token_for_confirm(
+            "follow", {"descriptor": "armor", "clock": 2, "range_km": 3}
+        )
+        == "follow armor two o'clock 3 km"
+    )
+    assert _describe_token_for_confirm("follow", None) == "follow"
+
+
+def test_follow_readback_survives_the_confirm_round_trip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    confirm_confidence = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+
+    lines = console.handle_transcript(
+        transcript="follow armor",
+        confidence=confirm_confidence,
+        token="follow",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+        slots={"descriptor": "armor"},
+    )
+    assert lines == ["Follow armor, confirm?"]
+
+    lines = console.handle_transcript(
+        transcript="affirm",
+        confidence=1.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=1.0,
+    )
+    assert store.contacts[0].attention == "watch"
