@@ -62,6 +62,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
+from belief.attention import AttentionArea, effective_attention
 from belief.classification import SpecificityLevel, parent_class_of
 from belief.contacts import Contact
 from perception.detection_trace import DetectionTrace, GateOutcome
@@ -124,6 +125,12 @@ _BLUE: Final[str] = "\x1b[34m"
 _GRAY: Final[str] = "\x1b[90m"
 _YELLOW: Final[str] = "\x1b[33m"
 
+#: Watched contacts (user, 2026-09-25). 256-colour orange rather than one of
+#: the eight basic codes, because the basic set has no orange and the nearest
+#: -- bright yellow -- is too close to `_YELLOW` to distinguish a watched
+#: contact from an ordinary one at a glance, which is the entire point.
+_ORANGE: Final[str] = "\x1b[38;5;208m"
+
 
 def _wrap(text: str, *codes: str, color: bool) -> str:
     """Apply ANSI `codes` to `text`, or return it unchanged when `color` is
@@ -164,6 +171,17 @@ class BeliefMarker:
     label: str
     bearing_deg: float
     range_m: float
+
+    #: Drawn in orange rather than yellow (user, 2026-09-25). Read from
+    #: `belief.attention.effective_attention`, i.e. the *derived* level --
+    #: a contact inside a `watch`-level `AttentionArea` counts as watched
+    #: even with an unmarked direct attention, which is the same definition
+    #: every watched-only callout uses. Keeping the two in step matters:
+    #: the reason to see watched-ness on the plan is to understand why a
+    #: contact is producing unprompted reports, and a view using a
+    #: different definition than the callouts would answer the wrong
+    #: question.
+    watched: bool = False
 
 
 def contact_label(contact: Contact) -> str:
@@ -232,7 +250,10 @@ def _object_type_label(object_type: str) -> str:
 
 
 def believed_markers_from_contacts(
-    contacts: Iterable[Contact], observer: GeoPosition, heading_true_deg: float
+    contacts: Iterable[Contact],
+    observer: GeoPosition,
+    heading_true_deg: float,
+    areas: Sequence[AttentionArea] | None = None,
 ) -> list[BeliefMarker]:
     """`BeliefMarker`s for a live `belief.contacts.ContactStore.contacts`
     snapshot -- the real-time path (`logger.py`'s poll loop), which always
@@ -240,14 +261,19 @@ def believed_markers_from_contacts(
     to read, so this is the accurate source; the offline replay path
     (`believed_markers_from_trace_rows`) is a documented approximation of
     this."""
+    area_list = list(areas or ())
     markers = []
     for contact in contacts:
         true_bearing = bearing_deg(observer, contact.last_position)
+        level, _area_id = effective_attention(
+            contact.attention, contact.last_position, area_list
+        )
         markers.append(
             BeliefMarker(
                 label=contact_label(contact),
                 bearing_deg=relative_bearing_deg(true_bearing, heading_true_deg),
                 range_m=range_m(observer, contact.last_position),
+                watched=level in ("watch", "priority"),
             )
         )
     return markers
@@ -509,9 +535,10 @@ def render_frame(
             continue
         row, col = cell
         label = belief_marker.label[:2]
-        canvas.set(row, col, label[0], _BOLD, _YELLOW)
+        marker_color = _ORANGE if belief_marker.watched else _YELLOW
+        canvas.set(row, col, label[0], _BOLD, marker_color)
         if len(label) > 1:
-            canvas.set(row, min(col + 1, cols - 1), label[1], _BOLD, _YELLOW)
+            canvas.set(row, min(col + 1, cols - 1), label[1], _BOLD, marker_color)
 
     lines = canvas.render(color=color)
 
@@ -522,7 +549,7 @@ def render_frame(
     )
     legend = (
         "AA air defence  AR armour  TR truck  G group  U unknown   "
-        "(believed=bold, ground truth: . seen / x not seen)"
+        "(believed=bold, watched=orange, ground truth: . seen / x not seen)"
     )
 
     # (range, text) so the list can be ordered by what is nearest -- the

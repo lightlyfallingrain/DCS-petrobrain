@@ -10,7 +10,7 @@ import math
 
 from belief.cardinality import OP_1UNIT, CardinalityBelief, new_cardinality_belief
 from belief.classification import SpecificityLevel, new_classification_belief
-from belief.contacts import Contact
+from belief.contacts import Contact, ContactStore
 from belief.position_belief import Covariance2D, PositionEstimate
 from eyesight_view import (
     BeliefMarker,
@@ -25,6 +25,11 @@ from eyesight_view import (
 from perception.detection_trace import DetectionTrace, GateOutcome
 from perception.gaze import Gaze
 from perception.geometry import GeoPosition
+from perception.source import (
+    SOURCE_NAKED_EYE_VISUAL_FILTERED,
+    Observation,
+    OwnshipState,
+)
 
 _ZERO_COV = Covariance2D(xx=0.0, zz=0.0, xz=0.0)
 
@@ -448,3 +453,76 @@ def test_beyond_radius_list_is_ordered_by_range_not_by_rendered_text() -> None:
 
     assert "5.1km" in listed[0], listed
     assert "9.0km" in listed[1], listed
+
+
+def test_watched_contacts_draw_orange_and_unwatched_yellow() -> None:
+    """User, 2026-09-25: watched units in orange. The point is telling at a
+    glance which contacts are producing unprompted reports, so the colour
+    keys off `effective_attention`'s *derived* level — the same definition
+    the watched-only callouts use. A view with its own definition would
+    answer a different question than the one being asked of it."""
+    markers = [
+        BeliefMarker(label="AR", bearing_deg=25.0, range_m=2000.0, watched=True),
+        BeliefMarker(label="TR", bearing_deg=-40.0, range_m=3000.0, watched=False),
+    ]
+    out = render_frame(
+        gaze=Gaze(center_azimuth_deg=30.0, half_width_deg=15.0, label="1_oclock"),
+        optic_name="unaided",
+        rear_cutoff_deg=130.0,
+        believed=markers,
+        radius_m=5000.0,
+    )
+
+    assert "\x1b[38;5;208m" in out, "watched marker is not orange"
+    assert "\x1b[33m" in out, "unwatched marker is not yellow"
+    assert "watched=orange" in out, "legend does not explain the colour"
+
+
+def test_watched_flag_comes_from_derived_attention_not_the_direct_mark() -> None:
+    """A contact inside a `watch`-level `AttentionArea` is watched even
+    with an unmarked direct attention — that is what `effective_attention`
+    means, and it is why a scanned contact currently shows as watched. If
+    that ever stops being true of the callouts it must stop being true
+    here in the same change, or the instrument and the behaviour diverge."""
+    store = ContactStore()
+    store.ingest([_contact_observation(range_m=2000.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    contact = store.contacts[0]
+    assert contact.attention == "normal", "fixture must have no direct mark"
+
+    observer = GeoPosition(x=0.0, z=0.0, alt_m=100.0)
+
+    unwatched = believed_markers_from_contacts([contact], observer, 0.0, areas=())
+    assert unwatched[0].watched is False
+
+    store.add_area(
+        center=contact.last_position,
+        radius_m=1000.0,
+        level="watch",
+        source="watch_area",
+    )
+    watched = believed_markers_from_contacts(
+        [contact], observer, 0.0, areas=store.areas
+    )
+    assert watched[0].watched is True
+
+
+def _contact_observation(*, range_m: float) -> Observation:
+    """One naked-eye observation, enough to found a contact with no direct
+    attention mark -- the fixture the derived-attention test needs."""
+    return Observation(
+        id="OBS_EYE_1",
+        contact_id=None,
+        t_sim=0.0,
+        t_wall=0.0,
+        source=SOURCE_NAKED_EYE_VISUAL_FILTERED,
+        classification_raw="T-72",
+        bearing_deg=25.0,
+        range_m=range_m,
+        ownship_at_observation=OwnshipState(
+            t_sim=0.0, x=0.0, z=0.0, alt_m=100.0, heading_true_deg=0.0, alt_agl_m=100.0
+        ),
+        derived_world_position=None,
+        provenance="test_fixture",
+        classification_level=2,
+    )
