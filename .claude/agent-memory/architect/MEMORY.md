@@ -55,3 +55,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Voice command completeness](project_voice_command_completeness.md) — absolute-vs-relative frame rule for direction vocabulary; rename what survives, not what's retired; _print owns speech occupancy.
 - [BL-8 kneeboard design](project_bl8_kneeboard_design.md) — append-only note store beside ContactStore; the fold door is deliberately shut; import-direction is the real invariant.
 - [Amend plans when the ground shifts](feedback_amend_plans_when_ground_shifts.md) — amend unimplemented plans in place, say what forced it, reuse the branch's existing damper patterns.
+- [BR-1 brain layer design](project_br1_brain_layer_design.md) — measured: reasoning tokens not model size set latency; code owns ambiguity, model must quote its evidence; BrainClient was already async.

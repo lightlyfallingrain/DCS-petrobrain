@@ -33,18 +33,68 @@ brain yet, every escalation "times out" immediately under `NullBrainClient`
 `DebugPrintBrainClient` additionally prints the payload labelled
 `"[escalated - no brain yet]"` for session visibility while testing this
 milestone; it still produces no spoken output, and is a debug aid, not the
-default a live SRS session would use once a real brain exists."""
+default a live SRS session would use once a real brain exists.
+
+**`poll_replies` (`plans/brain-layer/plan.md` D2) is this protocol's first
+outbound-reply method.** §3.5's `handle` was already fire-and-forget
+(`-> None`); this is the other half the plan's user constraint ("Brain
+cannot be synchronous... it cannot block anything") requires -- a real
+brain (`belief.brain_client.BrainLayerClient`, BR-1) answers
+asynchronously into its own queue, and `poll_replies()` is how
+`belief.crew_console.CrewConsole.drain_brain` drains it once per poll,
+alongside `drain_events`/`_poll_f10_commands`/`_poll_transcripts`. Both
+stand-ins below return `[]` -- their documented "does nothing" behaviour is
+unchanged by this addition."""
 
 from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import Protocol, TextIO
+from typing import Literal, Protocol, TextIO
 
 from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.tools import _estimated_units_lower_bound
 from belief.utterance import PartialParse, PlayerUtterance
+
+#: `plans/brain-layer/plan.md` D5/D10/D11's closed reply vocabulary,
+#: minus `SAYAGAIN` (retired by D11's 2026-09-25 revision -- see
+#: `belief.brain_reply`'s eventual D10 validator, Stage 2; Stage 1's wire
+#: shape is already the four-form set the validator will enforce).
+BrainReplyKind = Literal["pick", "ask", "confirm", "unable"]
+
+
+@dataclass(frozen=True, slots=True)
+class BrainReply:
+    """One decided reply, as `belief.brain_client.BrainLayerClient.
+    poll_replies` returns it -- a structured decoding of whatever JSON
+    `GET /replies/poll` (`brain-layer/src/server.py`) handed back, not raw
+    model text (that text-vs-structure distinction is `brain-layer/src/
+    decider.py`'s own docstring's point: the "one line drawn from a closed
+    vocabulary" constraint is about what a *model* internally produces,
+    Stage 2's concern, not this wire's shape).
+
+    `utterance_id` is what `belief.crew_console.CrewConsole.
+    _handle_brain_reply` uses to look up the `belief.utterance.
+    PartialParse` that was escalated (so `kind == "pick"`/`"ask"` know
+    *what* to act on -- `belief.tools.find_contact`'s original candidate
+    list, or the intent to re-run once a single id resolves). `t_sim` is
+    the original escalation's own `EscalationPayload.t_sim`, carried back
+    unchanged -- `plans/brain-layer/plan.md` D4's staleness check
+    (`now_sim - t_sim > BRAIN_REPLY_MAX_AGE_S`) reads it directly, "the
+    question's age for free" rather than a separately-tracked clock.
+
+    Only the fields `kind` actually uses are populated by a real decider;
+    the others default to `None` and are simply ignored by
+    `_handle_brain_reply`'s branch for a different `kind`."""
+
+    utterance_id: str
+    kind: BrainReplyKind
+    t_sim: float | None = None
+    contact_id: str | None = None
+    because: str | None = None
+    token: str | None = None
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +123,8 @@ class BrainClient(Protocol):
 
     def awaiting_reply_id(self) -> str | None: ...
 
+    def poll_replies(self) -> list[BrainReply]: ...
+
 
 class NullBrainClient:
     """See module docstring. Does nothing -- the honest "no brain yet"
@@ -83,6 +135,9 @@ class NullBrainClient:
 
     def awaiting_reply_id(self) -> str | None:
         return None
+
+    def poll_replies(self) -> list[BrainReply]:
+        return []
 
 
 @dataclass
@@ -97,6 +152,9 @@ class DebugPrintBrainClient:
 
     def awaiting_reply_id(self) -> str | None:
         return None
+
+    def poll_replies(self) -> list[BrainReply]:
+        return []
 
 
 def _situational_header(
