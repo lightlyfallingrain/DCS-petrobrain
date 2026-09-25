@@ -183,6 +183,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sqlite3
 import sys
 import threading
@@ -216,6 +217,7 @@ from belief.optic_policy import decide as decide_optic
 from belief.tasks import TaskStore
 from belief_truth_log import BeliefTruthLogWriter
 from detection_trace_writer import DetectionTraceWriter
+from eyesight_view import DEFAULT_MAX_LINES as EYESIGHT_DEFAULT_MAX_LINES
 from eyesight_view import DEFAULT_RADIUS_M as EYESIGHT_DEFAULT_RADIUS_M
 from eyesight_view import (
     believed_markers_from_contacts,
@@ -839,7 +841,22 @@ def _render_eyesight_frame(
             runner.store.contacts, observer, ownship.heading_true_deg
         ),
         radius_m=radius_m,
+        max_lines=_eyesight_max_lines(),
     )
+
+
+def _eyesight_max_lines() -> int:
+    """Lines one eyesight frame may occupy, read from the real terminal so
+    the canvas is never scrolled off the top by a long beyond-radius list
+    (user, 2026-09-25 -- found in use, with a raised radius as the
+    workaround, which trades away resolution to shrink the list).
+
+    Falls back to `eyesight_view.DEFAULT_MAX_LINES` when there is no tty,
+    which is the redirected-output and test case."""
+    try:
+        return max(shutil.get_terminal_size().lines - 1, 12)
+    except OSError:  # pragma: no cover - no tty, platform-dependent
+        return EYESIGHT_DEFAULT_MAX_LINES
 
 
 def _print_eyesight_frame(frame: str) -> None:
