@@ -635,37 +635,37 @@ flowchart LR
   classDef hold   fill:#5E6673,stroke:#3A404A,stroke-width:1px,color:#FFFFFF,stroke-dasharray:4 3;
   classDef block  fill:#B03A2E,stroke:#72211A,stroke-width:1.5px,color:#FFFFFF;
 
-  WM["World Model<br/>M0–M10"]:::done
-  AL["Aircraft Layer<br/>DCS I/O + audio + PTT"]:::done
-  MI["Mission Interpreter<br/>MI-0–MI-6, tested"]:::done
+  WM["World Model&lt;br/&gt;M0–M10"]:::done
+  AL["Aircraft Layer&lt;br/&gt;DCS I/O + audio + PTT"]:::done
+  MI["Mission Interpreter&lt;br/&gt;MI-0–MI-6, tested"]:::done
 
-  BL27["BL-2 … BL-7<br/>contacts → mission phase"]:::done
-  BL5a["BL-5a<br/>text crew interaction"]:::done
-  BL7I["BL-7 reaches nothing<br/>in a sortie"]:::hold
+  BL27["BL-2 … BL-7&lt;br/&gt;contacts → mission phase"]:::done
+  BL5a["BL-5a&lt;br/&gt;text crew interaction"]:::done
+  BL7I["BL-7 reaches nothing&lt;br/&gt;in a sortie"]:::hold
 
-  GC["Group contacts<br/>stages 0–4a"]:::done
-  GC4B["Stage 4b<br/>counts, spoken"]:::open
-  GC5["Stage 5<br/>composition"]:::hold
+  GC["Group contacts&lt;br/&gt;stages 0–4a"]:::done
+  GC4B["Stage 4b&lt;br/&gt;counts, spoken"]:::open
+  GC5["Stage 5&lt;br/&gt;composition"]:::hold
 
-  S1["Slice 1<br/>voice out, stages 1–5"]:::done
-  S6["Stage 6<br/>live sortie"]:::block
-  ST15["Speech in 1–5<br/>gate → capture → real PTT"]:::done
-  CKPT["Cockpit audio state<br/>intercom + volume"]:::hold
-  CONES["Cones 1 · 2A–2C<br/>optics, gaze, scan loop"]:::done
-  CALL["Callouts + groups<br/>+ movement"]:::done
-  SORT5["Five-fix sortie<br/>PASSED 2026-09-23"]:::done
-  NEW3["Binoculars + voice commands<br/>+ precise position"]:::done
-  EVS["Eyes-and-voice sortie<br/>FLOWN 2026-09-25<br/>8 defects, not a pass"]:::done
-  FIX8["8 fixes + position-belief gate<br/>merged"]:::done
-  FRAG["Outpost fragments<br/>into 18 contacts"]:::open
-  CBS["Crew-behaviour sortie<br/>unflown"]:::block
+  S1["Slice 1&lt;br/&gt;voice out, stages 1–5"]:::done
+  S6["Stage 6&lt;br/&gt;live sortie"]:::block
+  ST15["Speech in 1–5&lt;br/&gt;gate → capture → real PTT"]:::done
+  CKPT["Cockpit audio state&lt;br/&gt;intercom + volume"]:::hold
+  CONES["Cones 1 · 2A–2C&lt;br/&gt;optics, gaze, scan loop"]:::done
+  CALL["Callouts + groups&lt;br/&gt;+ movement"]:::done
+  SORT5["Five-fix sortie&lt;br/&gt;PASSED 2026-09-23"]:::done
+  NEW3["Binoculars + voice commands&lt;br/&gt;+ precise position"]:::done
+  EVS["Eyes-and-voice sortie&lt;br/&gt;FLOWN 2026-09-25&lt;br/&gt;8 defects, not a pass"]:::done
+  FIX8["8 fixes + position-belief gate&lt;br/&gt;merged"]:::done
+  FRAG["Outpost fragments&lt;br/&gt;into 18 contacts"]:::open
+  CBS["Crew-behaviour sortie&lt;br/&gt;unflown"]:::block
 
-  PROBE["Damage + firing probes<br/>FLOWN, answered"]:::done
-  DMG["Damage + fire reporting<br/>unblocked, unbuilt"]:::open
+  PROBE["Damage + firing probes&lt;br/&gt;FLOWN, answered"]:::done
+  DMG["Damage + fire reporting&lt;br/&gt;unblocked, unbuilt"]:::open
 
-  BL8["BL-8<br/>memory interfaces"]:::open
-  BR1["BR-1 Stage 1<br/>async wire, stub decider"]:::done
-  BRAIN["Brain layer<br/>Stage 2: the real model"]:::active
+  BL8["BL-8&lt;br/&gt;memory interfaces"]:::open
+  BR1["BR-1 Stage 1&lt;br/&gt;async wire, stub decider"]:::done
+  BRAIN["Brain layer&lt;br/&gt;Stage 2: the real model"]:::active
 
   WM --> BL27
   AL --> BL27
@@ -722,44 +722,44 @@ flowchart LR
 
   subgraph PERC ["Perception"]
     direction LR
-    CBS["Crew-behaviour sortie<br/>unflown, 2026-09-25"]:::block
-    FRAG["Outpost fragments<br/>into 18 contacts"]:::open
-    RECAL["LOWRES recalibration<br/>held on purpose"]:::hold
-    CAP["Attention capture<br/>peripheral has no triggers"]:::open
-    COND["Conditions<br/>vegetation, light, weather"]:::open
+    CBS["Crew-behaviour sortie&lt;br/&gt;unflown, 2026-09-25"]:::block
+    FRAG["Outpost fragments&lt;br/&gt;into 18 contacts"]:::open
+    RECAL["LOWRES recalibration&lt;br/&gt;held on purpose"]:::hold
+    CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
+    COND["Conditions&lt;br/&gt;vegetation, light, weather"]:::open
     K9["9K113 as an optic"]:::hold
   end
 
   subgraph SPEECH ["Speech"]
     direction LR
-    S6["Stage 6<br/>voice-quality sortie"]:::block
-    LAT["Press-to-readback<br/>~3s, next real problem"]:::open
-    VOICE["Voice character<br/>accent + prosody"]:::hold
-    SPU8["Cockpit audio state<br/>intercom + SPU-8"]:::hold
+    S6["Stage 6&lt;br/&gt;voice-quality sortie"]:::block
+    LAT["Press-to-readback&lt;br/&gt;~3s, next real problem"]:::open
+    VOICE["Voice character&lt;br/&gt;accent + prosody"]:::hold
+    SPU8["Cockpit audio state&lt;br/&gt;intercom + SPU-8"]:::hold
   end
 
   subgraph REPORT ["Reporting"]
     direction LR
-    REP["Repetition reopened<br/>2026-09-23"]:::open
-    DMG["Damage + fire reporting<br/>probes answered it"]:::open
-    BEH["Behaviour channel<br/>tracking / engaging"]:::open
-    TERR["Terrain control<br/>world-model"]:::hold
-    IFF["Coalition / IFF<br/>inferred, never truth"]:::hold
+    REP["Repetition reopened&lt;br/&gt;2026-09-23"]:::open
+    DMG["Damage + fire reporting&lt;br/&gt;probes answered it"]:::open
+    BEH["Behaviour channel&lt;br/&gt;tracking / engaging"]:::open
+    TERR["Terrain control&lt;br/&gt;world-model"]:::hold
+    IFF["Coalition / IFF&lt;br/&gt;inferred, never truth"]:::hold
     THR["Threat banding"]:::hold
-    GC5["Group stage 5<br/>composition"]:::hold
+    GC5["Group stage 5&lt;br/&gt;composition"]:::hold
   end
 
   subgraph BRAINCHAIN ["The brain layer, now that it exists"]
     direction LR
-    BR2["BR-1 Stage 2<br/>the real decider"]:::active
-    D10["Structured candidates<br/>follow still cannot pick"]:::open
-    BR3["Stage 3<br/>the A/B answer leg"]:::open
-    BR8["BR-8 thinking tier<br/>kept warm per mission"]:::hold
-    PHASE["Mission-phase relevance<br/>built, unreachable"]:::hold
+    BR2["BR-1 Stage 2&lt;br/&gt;the real decider"]:::active
+    D10["Structured candidates&lt;br/&gt;follow still cannot pick"]:::open
+    BR3["Stage 3&lt;br/&gt;the A/B answer leg"]:::open
+    BR8["BR-8 thinking tier&lt;br/&gt;kept warm per mission"]:::hold
+    PHASE["Mission-phase relevance&lt;br/&gt;built, unreachable"]:::hold
     MI5Q["MI-5 question refinement"]:::hold
   end
 
-  BL8["BL-8 memory interfaces<br/>+ kneeboard, 4 tokens unbenched"]:::open
+  BL8["BL-8 memory interfaces&lt;br/&gt;+ kneeboard, 4 tokens unbenched"]:::open
 
   CBS --> FRAG
   CBS --> RECAL --> K9
@@ -1058,31 +1058,31 @@ flowchart TB
 
   subgraph WIN ["Windows — the DCS box"]
     direction TB
-    DCS["DCS World<br/>Mi-24P / Petrovich cockpit"]:::done
-    AL["Aircraft Layer<br/>Export.lua + collector"]:::done
+    DCS["DCS World&lt;br/&gt;Mi-24P / Petrovich cockpit"]:::done
+    AL["Aircraft Layer&lt;br/&gt;Export.lua + collector"]:::done
   end
 
   subgraph MAC ["Mac — everything else"]
     direction TB
-    WM["World Model<br/>offline-built theatre store"]:::done
-    BL["Body Layer<br/>Petrovich's belief state"]:::done
-    AA["Audio Adapter<br/>TTS + speech recognition"]:::done
-    BRAIN["Brain Layer<br/>async decider, own process"]:::active
-    OLL["Ollama<br/>local model runtime"]:::open
+    WM["World Model&lt;br/&gt;offline-built theatre store"]:::done
+    BL["Body Layer&lt;br/&gt;Petrovich's belief state"]:::done
+    AA["Audio Adapter&lt;br/&gt;TTS + speech recognition"]:::done
+    BRAIN["Brain Layer&lt;br/&gt;async decider, own process"]:::active
+    OLL["Ollama&lt;br/&gt;local model runtime"]:::open
   end
 
-  MI["Mission Interpreter<br/>offline, pre-mission"]:::done
+  MI["Mission Interpreter&lt;br/&gt;offline, pre-mission"]:::done
 
-  DCS ==>|"telemetry, world objects,<br/>HelperAI indication"| AL
-  AL ==>|"text overlay, F10/voice<br/>commands, audio playback"| DCS
+  DCS ==>|"telemetry, world objects,&lt;br/&gt;HelperAI indication"| AL
+  AL ==>|"text overlay, F10/voice&lt;br/&gt;commands, audio playback"| DCS
   AL -->|"HTTP/JSON"| BL
-  BL ---|"in-process Python import<br/>(the sole sanctioned exception)"| WM
+  BL ---|"in-process Python import&lt;br/&gt;(the sole sanctioned exception)"| WM
   BL -->|"HTTP/JSON"| AA
   AA -->|"HTTP/JSON"| AL
   MI -.->|"HTTP/JSON, offline query"| WM
   MI -.->|"compact artifact, read at startup"| BL
-  BL -->|"HTTP/JSON, fire and forget<br/>POST /escalate"| BRAIN
-  BRAIN -->|"HTTP/JSON, drained in<br/>the poll loop"| BL
+  BL -->|"HTTP/JSON, fire and forget&lt;br/&gt;POST /escalate"| BRAIN
+  BRAIN -->|"HTTP/JSON, drained in&lt;br/&gt;the poll loop"| BL
   BRAIN -.->|"Stage 2, not wired yet"| OLL
   MI -.->|"same model, kept warm"| OLL
 </pre>
