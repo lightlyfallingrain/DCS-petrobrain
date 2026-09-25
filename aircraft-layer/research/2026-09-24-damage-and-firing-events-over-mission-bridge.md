@@ -735,3 +735,50 @@ the real threshold is somewhere above that and a conservative reading under-clai
 over-claims. Erring that way is the right default: a crew member who says "burning" when it is
 merely damaged has lied, while one who says "hit, still up" about a burning vehicle has only been
 cautious.
+
+#### Correction, same day: fire is terminal, and two of my readings above were wrong
+
+The user, on the model the previous section got incomplete:
+
+> *"it might have exploded later, DCS does that. smoke = damaged, fire -> give it time -> explodes ->
+> dead. I just flew baddly and crashed to a tree before that"*
+
+**So there are two visual states, not one, and they mean different things:**
+
+| visual | meaning | life fraction |
+|---|---|---|
+| **smoke** | damaged, and may well stay that way | below 1.0 |
+| **fire** | **doomed** — it will explode and die, given time | ≤ ~0.69 (bracket above) |
+
+That makes fire **predictive rather than descriptive**, which is the tactically useful part: a
+burning vehicle is already finished. *"It's burning"* therefore means **stop shooting it** — the
+single most useful thing a gunner can say about a target you are deciding whether to hit again.
+
+**Two things I got wrong, both worth correcting explicitly rather than quietly editing.**
+
+1. **"Nothing died in 109 s" was false.** The probe's own `units=` total shows two units leaving the
+   world: `15 → 14` at t=87.6, and `14 → 13` at t=98.7 — the latter immediately after
+   `S_EVENT_HUMAN_FAILURE` at t=98.24, which is the tree. Alongside `S_EVENT_CRASH`,
+   `S_EVENT_PILOT_DEAD` and `S_EVENT_UNIT_LOST` in the same sortie, that corroborates the user's
+   account of how the flight ended. **Death by disappearance from the unit enumeration is confirmed
+   twice over**, not merely inferred.
+
+2. **But neither of the dead was the burning one**, which is what makes the user's timing point
+   land: `Unit #003` was still present in the damaged list at `0.680` at the final sample, t=109.4 —
+   having been at that exact fraction since t=54.5. It burned for **55 seconds without exploding**,
+   and the sortie ended first. So the earlier note's "destruction is a separate, harder state than
+   damage" was reading a truncated recording as a property of the game.
+
+**Consequences for the design, and they are simplifying:**
+
+- **`is it dead yet` is answerable by disappearance**, now confirmed rather than assumed.
+- **`no, it's burning` is answerable from the fraction**, and it additionally licenses *"stop
+  shooting it"* — a stronger and more useful statement than reporting damage.
+- **The flat-life finding still holds and now makes sense.** A burning vehicle's life does not tick
+  down toward zero; it sits constant until DCS decides it explodes. So the death transition is
+  discrete, not gradual, and nothing is gained by watching for a downward trend. A design that
+  waited for life to reach zero would wait forever and then miss the moment entirely, because the
+  unit vanishes rather than reaching 0.
+- **Expect a delay of tens of seconds between fire and death.** 55 s observed and still counting, so
+  a callout that says "burning" must not be retracted or re-reported just because the thing is still
+  there a minute later.
