@@ -690,12 +690,38 @@ so nothing here competes with the sim:
 | | resident |
 |---|---|
 | fast tier, `num_ctx=2048` | 2.9 GB |
-| thinking tier (`qwen3:14b`, q4, 8k ctx) | **~11–13 GB, estimated, not measured** |
+| thinking tier (`qwen3:14b`, q4, default 32k ctx) | **14 GB, measured 2026-09-25** |
 | whisper `small.en` | ~0.5 GB |
-| **total** | **≈15 GB of 32 GB** |
+| **total** | **≈17.4 GB of 32 GB** |
 
-The thinking-tier figure is an **estimate scaled from the 4B measurements, not a measurement** —
-that one run was not performed. Measure it before the budget is relied on.
+All three measured on this machine. An earlier draft estimated the thinking tier at 11–13 GB by
+scaling from the 4B figures; the measured value at default context is higher. A reduced `num_ctx`
+would bring it down, as it does for the fast tier, but a thinking tier plausibly wants real context
+to think with — so the 32k figure is the honest one to budget against rather than the flattering
+one.
+
+### The Mission Interpreter should share this model, and that removes a constraint
+
+**Provenance:** the user, 2026-09-25 — *"Since we're going to have a thinking model for in-flight,
+MI probably should use the same model."*
+
+He is right, and the consequence is larger than saving disk. The Mission Interpreter already runs
+`qwen3:14b` (MI-4, merged 2026-09-12) for offline synthesis between sorties. If the in-flight
+thinking tier is the *same* model, then it is **one model serving both**, loaded once — and the
+memory budget above is the whole story rather than one half of it.
+
+**It also softens the model-swap constraint the compute-topology note assumes.** That note has the
+model swapping only at briefing or on the ground, precisely because a swap mid-sortie is
+impossible. If briefing and in-flight deliberation share weights, there is less to swap: the
+briefing model *is* the thinking tier, already warm, already resident — which is exactly what the
+user's keep-warm requirement asks for, arrived at from the other direction.
+
+**One thing to check when this is designed**, because it is where the idea could fail: Ollama holds
+a loaded model with one set of options, so MI's offline use and the in-flight tier must agree on
+`num_ctx` — or Ollama will hold two instances and the budget doubles. MI's synthesis plausibly
+wants more context than an in-flight question does. Settle on a single context size that serves
+both, or accept that they are genuinely two residents and re-budget. Do not assume they share for
+free.
 
 ### The user's own constraint, and why it is the load-bearing one
 
