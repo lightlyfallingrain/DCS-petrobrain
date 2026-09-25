@@ -924,7 +924,12 @@ def test_poll_events_matches_list_events_unacknowledged_only() -> None:
 # --- BL-6: scan_area/get_task_status/cancel_task -------------------------
 
 
-def test_scan_area_registers_a_watch_area_and_a_pending_task() -> None:
+def test_scan_area_registers_a_normal_level_area_and_a_pending_task() -> None:
+    # `plans/scan-is-not-watch/debug.md`: a scan is an instruction to look,
+    # not a deliberate watch mark -- a scanned-but-unwatched contact must
+    # not become eligible for `belief.callouts._WATCHED_ONLY_KINDS`
+    # reporting. `watch_area`'s own default (`level="watch"`) is untouched;
+    # this function no longer shares it.
     store = ContactStore()
     tasks = TaskStore()
     center = GeoPosition(x=0.0, z=0.0, alt_m=0.0)
@@ -934,7 +939,7 @@ def test_scan_area_registers_a_watch_area_and_a_pending_task() -> None:
     assert task.reason == "check"
     assert task.deadline_sim == DEFAULT_SCAN_DEADLINE_S
     assert list_areas(store) == [task.area]
-    assert task.area.level == "watch"
+    assert task.area.level == "normal"
     assert task.area.center == center
 
 

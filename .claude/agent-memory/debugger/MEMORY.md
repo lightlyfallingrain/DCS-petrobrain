@@ -17,3 +17,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Covariance2D determinant floor scale](project_covariance2d_determinant_floor_scale.md) — an absolute determinant floor is wrong for a function inverting matrices at two different scales; use `RATIO * trace**2` instead (scale-invariant under `.inverse()`).
 - [Watch-report sounds like live sighting](project_watch_report_sounds_live.md) — CONTACT_RANGE_CROSSED has no gaze/freshness marker; a watched-contact update can sound like a fresh off-gaze sighting, by design.
 - [Naked-eye gaze gate is correct](project_naked_eye_gaze_gate_is_correct.md) — verified 2026-09-25: Gate 0 + o'clock legs correctly restrict detection to the commanded cone; not the source of an off-gaze callout.
+- [scan_area/watch conflation](project_scan_area_watch_conflation.md) — scan_area used to register a "watch"-level AttentionArea; fixed to "normal". Check `.level` consumers before touching either.
+- [test_callouts dwp docstring stale](project_test_callouts_dwp_docstring_stale.md) — `_observation`'s dwp_x/dwp_z do NOT drive Contact.last_position (percept_of strips it); use bearing_deg/range_m.

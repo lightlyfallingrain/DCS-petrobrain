@@ -902,16 +902,33 @@ def scan_area(
 ) -> PendingIntent:
     """Ask Petrovich to search, and register what "found something relevant"
     would mean for that ask -- BL-6 (`plans/bl6-commands-inspect-adapt/
-    plan.md`). Registers a `"watch"`-level `AttentionArea` (`store.add_area`,
-    the same call `watch_area` makes) and a `belief.tasks.PendingIntent`
-    over that same area (`tasks.create`), whose `deadline_sim` is
-    `now_sim + deadline_s`. `now_sim` -- unlike `watch_area`'s signature --
-    is required here because `PendingIntent.created_sim`/`deadline_sim` are
-    sim-time, never wall clock, the same replay-determinism requirement
-    every other `belief.*` timestamp in this codebase carries; `center` is
-    an already-resolved `GeoPosition`, same division of responsibility as
-    `watch_area`'s own docstring (bearing/range resolution is the caller's
-    job, `console.py`'s `scan-area` handler).
+    plan.md`). Registers a `"normal"`-level `AttentionArea` (`store.
+    add_area`) and a `belief.tasks.PendingIntent` over that same area
+    (`tasks.create`), whose `deadline_sim` is `now_sim + deadline_s`.
+    `now_sim` -- unlike `watch_area`'s signature -- is required here because
+    `PendingIntent.created_sim`/`deadline_sim` are sim-time, never wall
+    clock, the same replay-determinism requirement every other `belief.*`
+    timestamp in this codebase carries; `center` is an already-resolved
+    `GeoPosition`, same division of responsibility as `watch_area`'s own
+    docstring (bearing/range resolution is the caller's job, `console.py`'s
+    `scan-area` handler).
+
+    **`level="normal"`, not `"watch"`** (`plans/scan-is-not-watch/debug.md`,
+    fixing a live defect reported 2026-09-25: a commanded scan was silently
+    enrolling every contact it found into the watched-only callout family --
+    unprompted `CONTACT_MOTION_CHANGED`/`CONTACT_RANGE_CROSSED`/
+    `CONTACT_ENGAGEMENT_CHANGED` reports, per `belief.callouts._WATCHED_
+    ONLY_KINDS`'s gate on `belief.attention.effective_attention`). A scan is
+    an instruction to *look*, not a deliberate "keep telling me about this"
+    mark -- that distinction is `watch_area`'s (default `level="watch"`) to
+    make, not this function's. Neither `belief.tasks.TaskStore` (task
+    completion checks `area_contains` only, never `.level`) nor `logger.
+    _active_gaze` (reads `relative_sector`/`relative_clock_hour`/`sector`
+    only, never `.level`) care what level a `scan_area`-registered
+    `AttentionArea` carries, so this is a pure narrowing with no effect on
+    scan task success or gaze steering -- `watch_contact`/`watch_area`/
+    `watch nearest`/`follow` are untouched, since none of them go through
+    this function.
 
     **Does not trigger a live search.** This function is pure/DCS-I/O free
     (see this module's own docstring) -- the console command handler that
@@ -923,7 +940,7 @@ def scan_area(
     area = store.add_area(
         center=center,
         radius_m=radius_m,
-        level="watch",
+        level="normal",
         source="scan_area",
         sector=sector,
         relative_sector=relative_sector,
