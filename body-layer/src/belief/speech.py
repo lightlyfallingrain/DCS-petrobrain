@@ -194,6 +194,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -209,6 +210,7 @@ from belief.events import (
     Event,
 )
 from belief.tools import ContactResult, acknowledge_event, describe_contact
+from belief.utterance import ReferenceCandidate
 
 Template = Literal["readback", "contact_report", "lifecycle_event", "threat_reaction"]
 Urgency = Literal["normal", "critical"]
@@ -334,6 +336,68 @@ def render_confirm_request(description: str) -> OutgoingSpeech:
     mirroring `render_scan_readback`'s division of labour."""
     capitalized = description[:1].upper() + description[1:] if description else ""
     return OutgoingSpeech(text=f"{capitalized}, confirm?", template="readback")
+
+
+#: D11's closed set, spoken plainly -- `speech.py` owns the wording (D5:
+#: "the model classifies against a closed set; it never writes what
+#: Petrovich says"), the decider only ever names the reason token.
+_UNABLE_TEMPLATES: dict[str, str] = {
+    "NO_SUCH_COMMAND": "Unable, no such command.",
+    "NO_MATCH": "Unable, I don't see it.",
+    "NO_LINE_OF_SIGHT": "Unable, no line of sight.",
+}
+
+
+def render_unable(reason: str) -> OutgoingSpeech:
+    """`plans/brain-layer/plan.md` D11's "unable, `<reason>`" -- one of the
+    three closed tokens the code (or, where genuine judgement remains, the
+    decider) named. An unrecognised `reason` (defensive -- `StubDecider`
+    never emits one) still speaks a plain "unable" rather than raising,
+    the same degrade-rather-than-crash posture `belief.crew_console`'s
+    other optional-input paths already take."""
+    return OutgoingSpeech(
+        text=_UNABLE_TEMPLATES.get(reason, "Unable."), template="readback"
+    )
+
+
+def render_lost_contact() -> OutgoingSpeech:
+    """`plans/brain-layer/plan.md` D4's "lost him" -- spoken when a brain
+    reply names (or, for `ASK`, narrows to zero) a contact that is no
+    longer in the store by the time the reply is drained. Not silence:
+    the pilot asked for something and deserves to know why nothing
+    happened (D4's own wording)."""
+    return OutgoingSpeech(text="Lost him.", template="readback")
+
+
+def render_stand_by() -> OutgoingSpeech:
+    """`plans/brain-layer/plan.md` D8 -- spoken once, deterministically by
+    body (no model involvement), when a brain reply has not landed within
+    `belief.crew_console.STAND_BY_AFTER_S` of the escalation that is
+    still outstanding."""
+    return OutgoingSpeech(text="Stand by.", template="readback")
+
+
+def render_disambiguation(candidates: Sequence[ReferenceCandidate]) -> OutgoingSpeech:
+    """`plans/brain-layer/plan.md` D9's A/B question -- "which one --
+    the one by the village, or the one on the road?" -- built entirely
+    from `candidates`' own `why` strings (`belief.tools.find_contact`'s
+    summaries), never from a model-written sentence (D5). No id is spoken
+    (this module's existing "no id spoken anywhere" convention, see
+    `_contact_report_text`'s docstring).
+
+    Caps at the first three candidates for the spoken phrase -- more than
+    that is unreadable as a spoken list and D9's mechanism only exists to
+    narrow, not enumerate, every survivor; the full candidate list is
+    still what `belief.crew_console` revalidates the pilot's answer
+    against, this function only decides what gets *said*."""
+    phrases = [candidate.why for candidate in candidates[:3]]
+    if not phrases:
+        return OutgoingSpeech(text="Which one?", template="readback")
+    if len(phrases) == 1:
+        joined = phrases[0]
+    else:
+        joined = ", or ".join(phrases)
+    return OutgoingSpeech(text=f"Which one -- {joined}?", template="readback")
 
 
 def render_clear(direction_label: str | None) -> OutgoingSpeech:

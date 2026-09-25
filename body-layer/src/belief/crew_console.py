@@ -71,7 +71,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final, TextIO
 
 from aircraft_client import AircraftLayerClient, AircraftLayerError
@@ -83,6 +83,7 @@ from belief.contacts import ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.escalation import (
     BrainClient,
+    BrainReply,
     DebugPrintBrainClient,
     handle_player_utterance,
 )
@@ -93,17 +94,22 @@ from belief.speech import (
     render_clear,
     render_confirm_request,
     render_contact_report,
+    render_disambiguation,
     render_group_report,
+    render_lost_contact,
     render_no_view,
     render_readback,
     render_report,
     render_say_again,
     render_scan_readback,
+    render_stand_by,
+    render_unable,
     render_watch_nearest_readback,
     route_event,
 )
 from belief.tasks import PendingIntent, TaskKind, TaskStore
 from belief.tools import (
+    _find_contact,
     cancel_task,
     describe_contact,
     get_contacts,
@@ -111,7 +117,12 @@ from belief.tools import (
     set_attention,
     watch_contact_task,
 )
-from belief.utterance import PartialParse, PlayerUtterance, parse_utterance
+from belief.utterance import (
+    PartialParse,
+    PlayerUtterance,
+    ReferenceCandidate,
+    parse_utterance,
+)
 from belief.voice_commands import (
     CONFIRM_WINDOW_S,
     BandDecision,
@@ -450,6 +461,21 @@ def _join_task_descriptions(descriptions: list[str]) -> str | None:
 logger = logging.getLogger(__name__)
 
 
+#: `plans/brain-layer/plan.md` D8 -- how long an outstanding escalation
+#: waits for a brain reply before Petrovich speaks "stand by" once, purely
+#: deterministically (no model involvement). **Unmeasured**, same debt
+#: class as `CONFIRM_WINDOW_S`/`DEFAULT_SCAN_DEADLINE_S` before it -- a
+#: round guess at human patience, pending Stage 4's live-sortie tuning.
+STAND_BY_AFTER_S: Final[float] = 2.0
+
+#: `plans/brain-layer/plan.md` D4 -- a brain reply older than this (by
+#: `EscalationPayload.t_sim`, carried back unchanged on `BrainReply.
+#: t_sim`) is discarded silently rather than acted on or spoken, since the
+#: game world has moved on in the time the brain took to answer.
+#: **Unmeasured**, same debt class as `STAND_BY_AFTER_S` above.
+BRAIN_REPLY_MAX_AGE_S: Final[float] = 20.0
+
+
 @dataclass
 class CrewConsole:
     """Holds the `ContactStore` every command reads/mutates through
@@ -550,6 +576,25 @@ class CrewConsole:
     #: answered, discarded, or expired (`CONFIRM_WINDOW_S`). `None` means
     #: no question is currently open.
     _pending_confirmation: PendingConfirmation | None = field(default=None, repr=False)
+    #: `plans/brain-layer/plan.md` -- every escalation currently awaiting a
+    #: brain reply, keyed by `utterance_id`: `(t_sim it was escalated at,
+    #: the belief.utterance.PartialParse that was escalated)`. `_handle_
+    #: brain_reply` pops its entry once a reply lands (or is aged out);
+    #: `_speak_stand_by_if_due` reads it every poll to decide whether D8's
+    #: "stand by" is due. `brain-layer` itself only ever holds one job in
+    #: flight (D3), but body-side this stays a dict rather than a single
+    #: optional slot -- a reply can arrive for an id no longer of
+    #: interest (raced by a newer escalation client-side, `belief.
+    #: brain_client.BrainLayerClient`'s own newest-wins slot), and `.pop`
+    #: on a dict degrades to `None` cleanly rather than needing a separate
+    #: "does this match what I'm tracking" branch.
+    _pending_escalations: dict[str, tuple[float, PartialParse]] = field(
+        default_factory=dict, repr=False
+    )
+    #: Which `_pending_escalations` keys D8's "stand by" has already been
+    #: spoken for -- so it fires **once** per question, not once per poll
+    #: while the question remains outstanding.
+    _stand_by_spoken_for: set[str] = field(default_factory=set, repr=False)
 
     def handle_line(self, line: str, now_sim: float) -> list[str]:
         stripped = line.strip()
@@ -577,6 +622,137 @@ class CrewConsole:
         # `!inject-urgent` branch, does) -- see `_print`'s docstring.
         self._print(spoken, now_sim, bypass_gate=False)
         return spoken
+
+    def drain_brain(self, now_sim: float) -> list[str]:
+        """`plans/brain-layer/plan.md` -- drains `self.brain_client.
+        poll_replies()`, revalidates each reply against *current* belief
+        (D4) and speaks the result, and, first, speaks D8's deterministic
+        "stand by" for any escalation that has been outstanding too long.
+        Called once per poll from `logger.py`'s `--crew-text` loop,
+        alongside `drain_events`/`_poll_f10_commands`/`_poll_transcripts`
+        -- the established pattern for pulling asynchronous input into
+        this loop without ever blocking it (`belief.brain_client.
+        BrainLayerClient.handle`'s own docstring is where the
+        never-blocks guarantee actually lives; this method is a plain
+        synchronous poll, like the other three)."""
+        self._speak_stand_by_if_due(now_sim)
+        try:
+            replies = self.brain_client.poll_replies()
+        except Exception:
+            # division: a poll failure here degrades to log-and-continue,
+            # the same per-call isolation `_poll_f10_commands`/
+            # `_poll_transcripts` (logger.py) already give their own
+            # clients, applied here to the one client owned by this class
+            # instead of by the poll-loop function.
+            logger.warning("brain reply poll failed (continuing)", exc_info=True)
+            return []
+        lines: list[str] = []
+        for reply in replies:
+            lines.extend(self._handle_brain_reply(reply, now_sim))
+        return lines
+
+    def _speak_stand_by_if_due(self, now_sim: float) -> None:
+        """D8: speak "stand by" **once** for any escalation that has been
+        outstanding for at least `STAND_BY_AFTER_S` and has not already
+        had it spoken. No model involvement -- body already knows how
+        long it has been waiting."""
+        for utterance_id, (started_sim, _parse) in self._pending_escalations.items():
+            if utterance_id in self._stand_by_spoken_for:
+                continue
+            if now_sim - started_sim >= STAND_BY_AFTER_S:
+                self._stand_by_spoken_for.add(utterance_id)
+                self._print([render_stand_by().text], now_sim)
+
+    def _handle_brain_reply(self, reply: BrainReply, now_sim: float) -> list[str]:
+        """D4's revalidation table, in full. `pending` is popped
+        unconditionally -- whether or not the reply turns out to be
+        actionable, this utterance is no longer outstanding once a reply
+        for it has landed."""
+        pending = self._pending_escalations.pop(reply.utterance_id, None)
+        self._stand_by_spoken_for.discard(reply.utterance_id)
+        if pending is None:
+            # A reply for an utterance this session is no longer
+            # tracking -- superseded client-side, or a duplicate poll.
+            # Nothing to revalidate against; discard silently, same
+            # honest-silence posture `NullBrainClient` already documents.
+            return []
+        _started_sim, parse = pending
+
+        if reply.t_sim is not None and now_sim - reply.t_sim > BRAIN_REPLY_MAX_AGE_S:
+            logger.info(
+                "discarding stale brain reply for %s (age %.1fs)",
+                reply.utterance_id,
+                now_sim - reply.t_sim,
+            )
+            return []
+
+        if reply.kind == "unable":
+            lines = [render_unable(reply.reason or "").text]
+        elif reply.kind == "confirm":
+            lines = self._handle_brain_confirm(reply, now_sim)
+        elif reply.kind == "pick":
+            lines = self._handle_brain_pick(reply, parse, now_sim)
+        else:  # "ask"
+            lines = self._handle_brain_ask(parse, now_sim)
+
+        self._print(lines, now_sim)
+        return lines
+
+    def _handle_brain_confirm(self, reply: BrainReply, now_sim: float) -> list[str]:
+        """D9: a `CONFIRM <token>` reply sets `_pending_confirmation`,
+        reusing the exact mechanism the voice confirm-band already built
+        -- "there is not a second confirm mechanism." D10's membership
+        check (`token` must be in `DISPATCHED_COMMAND_TOKENS`) is applied
+        inline here rather than in a separate validator module (Stage 2's
+        own job, see `belief.brain_client`'s docstring) -- a cheap,
+        one-line safety net against a reply naming a token this class has
+        no dispatch behaviour for at all."""
+        token = reply.token
+        if token is None or token not in DISPATCHED_COMMAND_TOKENS:
+            return [render_unable("NO_SUCH_COMMAND").text]
+        description = _describe_token_for_confirm(token)
+        self._pending_confirmation = PendingConfirmation(
+            token=token, description=description, pending_since_sim=now_sim
+        )
+        return [render_confirm_request(description).text]
+
+    def _handle_brain_pick(
+        self, reply: BrainReply, parse: PartialParse, now_sim: float
+    ) -> list[str]:
+        """D4: `PICK <id>`, contact still present -> act and read back as
+        today; contact gone -> "lost him"."""
+        contact_id = reply.contact_id
+        if contact_id is None or _find_contact(self.store, contact_id) is None:
+            return [render_lost_contact().text]
+        return self._act(replace(parse, referenced_contact_id=contact_id), now_sim)
+
+    def _handle_brain_ask(self, parse: PartialParse, now_sim: float) -> list[str]:
+        """D4: `ASK` revalidates against *current* survivors among the
+        candidates originally offered (`parse.
+        referenced_contact_candidates`), not whatever the reply itself
+        might claim -- the reply's whole point is "ask the pilot," it
+        carries no new candidate list of its own. >=2 survivors -> ask,
+        using them; exactly 1 -> confirm it rather than acting (see
+        `PendingConfirmation.contact_pick`'s own docstring for why); 0 ->
+        "lost him"."""
+        survivors: list[ReferenceCandidate] = [
+            candidate
+            for candidate in parse.referenced_contact_candidates
+            if _find_contact(self.store, candidate.id) is not None
+        ]
+        if len(survivors) >= 2:
+            return [render_disambiguation(survivors).text]
+        if len(survivors) == 1:
+            candidate = survivors[0]
+            description = candidate.why
+            self._pending_confirmation = PendingConfirmation(
+                token=None,
+                description=description,
+                pending_since_sim=now_sim,
+                contact_pick=(candidate.id, parse),
+            )
+            return [render_confirm_request(description).text]
+        return [render_lost_contact().text]
 
     def _note_player_command(self) -> None:
         """Record that the player asked for something. See
@@ -1151,6 +1327,17 @@ class CrewConsole:
                 answer = classify_yes_no(transcript)
                 self._pending_confirmation = None
                 if answer == "affirm":
+                    if pending.contact_pick is not None:
+                        # `plans/brain-layer/plan.md` D4's "confirm the
+                        # survivor" branch -- committing acts on the
+                        # single candidate that survived revalidation,
+                        # re-running the originally-escalated intent
+                        # (`set_attention`/`describe_contact`) against it.
+                        contact_id, parse = pending.contact_pick
+                        return self._act(
+                            replace(parse, referenced_contact_id=contact_id), now_sim
+                        )
+                    assert pending.token is not None
                     return self.handle_command(
                         pending.token, now_sim, bearing_degrees=pending.bearing_degrees
                     )
@@ -1313,6 +1500,16 @@ class CrewConsole:
         )
         if parse.disposition == "handled":
             return self._act(parse, now_sim)
+        # `plans/brain-layer/plan.md` -- tracked so `_handle_brain_reply`
+        # knows what to act on if/when a reply lands (D4's table), and so
+        # `_speak_stand_by_if_due` knows this question is outstanding
+        # (D8). Recorded before `handle_player_utterance` posts, not
+        # after -- the brain-layer client's own worker thread can in
+        # principle complete faster than this method returns (an
+        # artificial `delay_s=0` stub, say), and a reply for an
+        # utterance_id not yet in `_pending_escalations` would otherwise
+        # be silently dropped as untracked.
+        self._pending_escalations[utterance.id] = (now_sim, parse)
         handle_player_utterance(
             self.store, utterance, self.brain_client, self.enrichment
         )

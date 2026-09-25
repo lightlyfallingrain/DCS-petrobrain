@@ -125,17 +125,21 @@ runs `belief.crew_console.CrewConsole` -- the player-facing text channel --
 instead of `--console`'s developer debug REPL. Reuses the exact same
 `ConsolePerceptionRunner` poll-loop machinery Stage 4/6 already built
 (`_run_crew_text_poll_loop` mirrors `_run_console_poll_loop` byte-for-byte
-except for one extra call: after each `runner.run_once()`, it calls
+except for two extra calls: after each `runner.run_once()`, it calls
 `crew_console.drain_events(runner.last_t_sim)` so newly ticked lifecycle
 events get spoken through `belief.speech.route_event`, the same hook point
-`--console --overlay` uses for its own mirroring). **Mutually exclusive
+`--console --overlay` uses for its own mirroring, and (`plans/brain-layer/
+plan.md`) `crew_console.drain_brain(runner.last_t_sim)` right after it, so
+whatever the brain has decided since the last poll gets drained,
+revalidated against current belief (D4), and spoken. **Mutually exclusive
 with `--console` only** (`--overlay` is valid alongside either) -- running
 the debug console and the crew session against the same `ContactStore`
-concurrently is not a validated interaction. `--brain-client debug|null`
-selects which `belief.escalation.BrainClient` stand-in handles escalated
-utterances (`debug`, the default, prints escalations to stderr for session
-visibility; `null` is silent) -- neither produces spoken output, since no
-real brain exists yet.
+concurrently is not a validated interaction. `--brain-client http|debug|
+null` selects which `belief.escalation.BrainClient` handles escalated
+utterances -- `http` (`plans/brain-layer/plan.md`, requires `--brain-url`)
+talks to a real `brain-layer` instance and speaks its replies; `debug`,
+the default, prints escalations to stderr for session visibility; `null`
+is silent. `debug`/`null` never produce spoken output.
 
 **Gaze steers the naked-eye channel (slice 2B, `plans/
 detection-cones-slice2/plan.md`; the o'clock scan loop added by 2C)**:
@@ -191,6 +195,7 @@ from typing import Literal, TextIO
 from aircraft_client import AircraftLayerClient, AircraftLayerError
 from belief.attention import _SECTOR_CENTER_DEG, _SECTOR_HALF_WIDTH_DEG
 from belief.audio_client import AudioAdapterClient, AudioAdapterError
+from belief.brain_client import BrainLayerClient
 from belief.console import HELP_TEXT, Console, format_event_for_overlay
 from belief.contacts import ContactStore
 from belief.crew_console import HELP_TEXT as CREW_TEXT_HELP_TEXT
@@ -1095,6 +1100,11 @@ def _run_crew_text_poll_loop(
             if runner.last_t_sim is not None:
                 crew_console.enrichment = runner.enrichment
                 crew_console.drain_events(runner.last_t_sim)
+                # `plans/brain-layer/plan.md` -- drains whatever
+                # brain_client.poll_replies() has decided since the last
+                # poll (D2's async round trip); a true no-op for
+                # NullBrainClient/DebugPrintBrainClient (both return []).
+                crew_console.drain_brain(runner.last_t_sim)
                 commands_before = crew_console.commands_handled
                 if f10_commands_enabled:
                     _poll_f10_commands(aircraft_client, crew_console, runner.last_t_sim)
@@ -1291,13 +1301,23 @@ def main() -> None:
     )
     parser.add_argument(
         "--brain-client",
-        choices=("debug", "null"),
+        choices=("http", "debug", "null"),
         default="debug",
         help=(
-            "which belief.escalation.BrainClient stand-in handles escalated "
-            "utterances under --crew-text -- 'debug' (default) prints "
-            "escalations to stderr, 'null' is silent. Neither speaks, since "
-            "no real brain exists yet."
+            "which belief.escalation.BrainClient handles escalated "
+            "utterances under --crew-text -- 'http' (plans/brain-layer/"
+            "plan.md) talks to a running brain-layer instance over "
+            "--brain-url and speaks real replies; 'debug' (default) "
+            "prints escalations to stderr and never speaks; 'null' is "
+            "silent. 'http' requires --brain-url."
+        ),
+    )
+    parser.add_argument(
+        "--brain-url",
+        default=None,
+        help=(
+            "brain-layer base URL, e.g. http://127.0.0.1:7796 -- required "
+            "together with --brain-client http, unused otherwise"
         ),
     )
     parser.add_argument(
@@ -1391,6 +1411,8 @@ def main() -> None:
         )
     if args.detection_trace is not None and not (args.console or args.crew_text):
         parser.error("--detection-trace requires --console or --crew-text")
+    if args.brain_client == "http" and args.brain_url is None:
+        parser.error("--brain-client http requires --brain-url")
 
     args.speech_log = _resolve_speech_log_path(
         speech_log=args.speech_log,
@@ -1412,11 +1434,13 @@ def main() -> None:
         mission_phase_tracker = MissionPhaseTracker(data=mission_data)
 
     if args.crew_text:
-        brain_client: BrainClient = (
-            DebugPrintBrainClient()
-            if args.brain_client == "debug"
-            else NullBrainClient()
-        )
+        brain_client: BrainClient
+        if args.brain_client == "http":
+            brain_client = BrainLayerClient(base_url=args.brain_url)
+        elif args.brain_client == "debug":
+            brain_client = DebugPrintBrainClient()
+        else:
+            brain_client = NullBrainClient()
         crew_runner = ConsolePerceptionRunner(
             aircraft_client=aircraft_client,
             output=None,

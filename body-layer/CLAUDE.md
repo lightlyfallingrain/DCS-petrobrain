@@ -13,8 +13,9 @@ of.
 ## What this is
 
 The deterministic process that owns Petrovich's belief state — contacts, attention, mission
-phase, events, spatial semantics — sitting between the brain (LLM, not built yet) and the
-aircraft layer (DCS I/O). BL-0/BL-1 built the tier-independent perception scaffolding
+phase, events, spatial semantics — sitting between the brain (`brain-layer/`, an HTTP peer as
+of `plans/brain-layer/plan.md`'s BR-1 Stage 1) and the aircraft layer (DCS I/O). BL-0/BL-1
+built the tier-independent perception scaffolding
 (`PerceptionSource` interface, bearing/range/LOS geometry, a replay harness, an aircraft-layer
 HTTP client, a text-only logger) plus its one concrete `PerceptionSource`,
 `HybridPerceptionSource` — a live-DCS spike (`plans/pb1-perception-logger/plan.md` stage 1,
@@ -636,12 +637,16 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   must degrade to "no overlay line for this event," never stop the poll loop or skip the rest of
   the batch. `PerceptionLogger`'s plain per-`Observation` stream does not get this wiring
   (line-noise vs. signal tradeoff). BL-5a adds `--crew-text` (mutually exclusive with
-  `--console`; `--overlay` combines with either, see below) and `--brain-client debug|null`:
+  `--console`; `--overlay` combines with either, see below) and `--brain-client http|debug|null`
+  (`http` added `plans/brain-layer/plan.md` BR-1, requires `--brain-url`; talks to a real
+  `brain-layer` instance and speaks real replies — `debug`/`null` are the pre-BR-1 stand-ins,
+  never speaking anything):
   `_run_crew_text_poll_loop`/
   `_run_crew_text_repl` mirror `_run_console_poll_loop`/`_run_console_repl` exactly, reusing the same
   `ConsolePerceptionRunner`, except the poll loop also calls `belief.crew_console.CrewConsole.
-  drain_events` after each `run_once()` — the same post-`tick()` hook point `--overlay` uses — and
-  the REPL dispatches into `CrewConsole.handle_line` instead of `belief.console.Console.handle_line`.
+  drain_events` after each `run_once()` — the same post-`tick()` hook point `--overlay` uses — and,
+  right after it, `belief.crew_console.CrewConsole.drain_brain` (`plans/brain-layer/plan.md`) —
+  and the REPL dispatches into `CrewConsole.handle_line` instead of `belief.console.Console.handle_line`.
   `--f10-commands` (`plans/f10-crew-commands/plan.md`, only meaningful with `--crew-text`, same
   additive-no-op-when-absent posture as `--overlay`) adds a `_poll_f10_commands` call to
   `_run_crew_text_poll_loop` right after `drain_events`, draining `aircraft_client.
@@ -801,6 +806,13 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   unacknowledged, since body never actually spoke it. `UrgentCall` is a separate small type rather
   than a `bypass_gate` field grafted onto the shared BL-4 `Event` dataclass — `events.py` is out of
   this milestone's Affected Modules.
+  `plans/brain-layer/plan.md` BR-1 Stage 1 adds four small templates, all body-written per D5 (the
+  decider only ever names a reason/token, never phrasing): `render_unable(reason)` (D11's closed
+  `NO_SUCH_COMMAND`/`NO_MATCH`/`NO_LINE_OF_SIGHT` set, an unrecognised reason degrading to a bare
+  "Unable." rather than raising), `render_lost_contact()` ("Lost him.", D4's "not silence" case),
+  `render_stand_by()` ("Stand by.", D8), and `render_disambiguation(candidates)` (D9's A/B
+  question, built only from `ReferenceCandidate.why` strings — no id spoken, this module's
+  existing convention — capped at the first three candidates for the spoken phrase).
 - `src/belief/escalation.py` (BL-5a) — `handle_player_utterance` (§3.5), the one body→brain entry
   point: builds `EscalationPayload` (transcript + `belief.utterance.PartialParse`, never the bare
   transcript alone — the brain disambiguates, it never parses from scratch) and hands it to a
@@ -813,6 +825,26 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   bare-int shape unchanged. `NullBrainClient` does nothing (the honest "no
   brain yet" behaviour — §3.5: "if the brain does nothing, body says nothing"); `DebugPrintBrainClient`
   additionally prints the payload to stderr for session visibility, still producing no spoken output.
+  `plans/brain-layer/plan.md` BR-1 Stage 1 adds `BrainReply` (`utterance_id`/`kind` — `"pick"`/
+  `"ask"`/`"confirm"`/`"unable"` — plus the fields only the matching `kind` populates) and
+  `poll_replies() -> list[BrainReply]` on the `BrainClient` protocol, the asynchronous-reply half
+  D2's "the brain replies into its own queue" needs — both stand-ins above simply return `[]`,
+  their documented behaviour unchanged.
+- `src/belief/brain_client.py` (`plans/brain-layer/plan.md` BR-1 Stage 1) — `BrainLayerClient`,
+  the first real (non-stand-in) `BrainClient`: an independent copy of `aircraft_client`/
+  `audio_client`'s stdlib-`urllib` shape (module independence — no import of `brain-layer/`),
+  except `handle()` never blocks the caller (D2) — it hands the payload to a single-slot
+  background worker thread and returns in microseconds; the worker does the actual `POST
+  /escalate`. A `handle()` call landing while the worker is mid-POST overwrites that slot (this
+  client's own local mirror of `brain-layer`'s server-side `job.JobSlot` newest-wins, D3) rather
+  than queuing — the worker, once free, only ever posts the most recently handed-over payload.
+  `poll_replies()` is a plain synchronous `GET /replies/poll`, called once per poll from
+  `CrewConsole.drain_brain` (there is no reply to lose by waiting on this call, unlike `handle()`
+  — raises `BrainLayerError` on transport/parse failure, same posture as `AudioAdapterClient`'s
+  own methods). `_reply_from_dict` is a defensive structural parse only (skip malformed items,
+  never raise) — **not** D10's semantic validator (a `PICK`'s id was actually offered, a
+  `BECAUSE` clause's words actually appear in the transcript), which is Stage 2's job once a real
+  model can produce a malformed answer at all; `StubDecider` never does.
 - `src/belief/crew_console.py` (BL-5a) — `CrewConsole`, the typed-input/printed-output player-facing
   session, deliberately **not** an extension of `belief.console.Console` (that module is an explicit
   developer debug tool; `CrewConsole` runs typed sentences through `parse_utterance`'s grammar and
@@ -826,6 +858,25 @@ deliberately allowed to hold both ground truth and belief at once, and is read-o
   call and an unrendered kind (`CONTACT_ATTENTION_CHANGED`) is harmlessly re-skipped every poll.
   `!inject-urgent <contact_id> <text>` is Stage 5's clearly-labelled test harness for the
   bypass-gate/urgent-call path — not a production intent or a real detector.
+  `drain_brain(now_sim)` (`plans/brain-layer/plan.md` BR-1 Stage 1, called from `logger.py`'s
+  `--crew-text` poll loop right after `drain_events`) drains `brain_client.poll_replies()`,
+  speaks D8's deterministic "stand by" (`STAND_BY_AFTER_S`, once per outstanding escalation, via
+  `_speak_stand_by_if_due`) and applies D4's revalidation table per reply
+  (`_handle_brain_reply`): a reply older than `BRAIN_REPLY_MAX_AGE_S` is discarded silently; a
+  `"pick"` whose contact is gone, or an `"ask"` whose candidates have all vanished, speaks
+  `belief.speech.render_lost_contact` ("Lost him.") rather than acting on a stale id; an `"ask"`
+  narrowed to exactly one still-present candidate is **confirmed, not acted on** (D4: "only one
+  left" is not the same as "the pilot meant this one") via a new `PendingConfirmation.
+  contact_pick: tuple[str, PartialParse] | None` field (`belief.voice_commands`) — a
+  mutually-exclusive sibling of the existing `token` field for a confirm question that resolves a
+  *contact reference* rather than a command token, committed by `handle_transcript`'s existing
+  affirm branch via `dataclasses.replace(parse, referenced_contact_id=contact_id)` into `_act`. A
+  `"confirm"` reply reuses `PendingConfirmation`/`CONFIRM_WINDOW_S` exactly as the voice
+  confirm-band does — "there is not a second confirm mechanism" (D9) — with an inline
+  `DISPATCHED_COMMAND_TOKENS` membership check standing in for Stage 2's own D10 validator.
+  `_pending_escalations: dict[str, tuple[float, PartialParse]]` (keyed by `utterance_id`, written
+  by `_handle_utterance`) is what `_handle_brain_reply` revalidates against and what
+  `_speak_stand_by_if_due` reads for elapsed time.
   `overlay_client: AircraftLayerClient | None` (`plans/overlay-speech-callouts/plan.md`) is a
   second, deliberately separate optional-sink field from `aircraft_client` above — `aircraft_client`
   is BL-6's reserved-for-a-different-purpose field (live search-trigger commands, no reader today),
