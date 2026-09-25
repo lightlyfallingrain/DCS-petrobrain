@@ -4,12 +4,16 @@ description: Run the project test command with filtered output (failures and sum
 type: user-invocable
 ---
 
-Usage: `/test [world-model|aircraft-layer|body-layer]`
+Usage: `/test [<subproject>]`
 
 Run from the repo root. If a subproject arg is given, test only that one.
-Otherwise auto-detect from `git status --porcelain` which of `world-model/`, `aircraft-layer/`,
-`body-layer/` have modified/untracked files and test each detected one; if none are touched,
-default to `world-model` (preserves prior single-subproject behavior).
+Otherwise auto-detect from `git status --porcelain` which subprojects have modified/untracked
+files and test each detected one; if none are touched, ask which subproject to test rather than
+guessing at one.
+
+**Get the subproject list from root `ROADMAP.md`'s status table, not from this file** — equivalently,
+the repo-root directories that carry their own `pyproject.toml`. A list written here would silently
+skip a subproject added later, and a test run that skips a subproject still reports PASS.
 
 ```
 pytest <subproject>/tests -q 2>&1 \

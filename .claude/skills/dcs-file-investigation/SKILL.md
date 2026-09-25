@@ -18,13 +18,14 @@ on the reading machine, max 20 pages/call — `brew install poppler` on Mac).
 
 Useful for cross-checking live-probe conclusions about real systems (e.g. the 9K113 Raduga-Sh
 guidance device/ПН, ASP-17 sight, PTUR designation procedure) against how the actual aircraft's
-systems are meant to work, not just how DCS happens to expose them. A first mining pass for BL-6
-is `aircraft-layer/research/` (dated 2026-09-11 or later, RU-manual-sourced note) — check there
-before re-reading the whole PDF from scratch.
+systems are meant to work, not just how DCS happens to expose them. **Check the relevant
+`research/` directory for an existing RU-manual-sourced note before re-reading the PDF from
+scratch** — earlier mining passes are written up there, and re-deriving one costs a lot of pages.
 
-Most of the World Model Builder and body-layer work depends on unverified DCS internals, so the
-`investigator` role re-derives "where does this live, is it readable" every session. This skill
-is that answer, verified against the install (`2.9.29.27278`, 2026-09-09).
+The `investigator` role otherwise re-derives "where does this live, is it readable" every session,
+because so much of this project rests on unverified DCS internals. This skill is that answer, and
+it was verified against one install — `2.9.29.27278`, 2026-09-09. Treat every layout claim below as
+dated to that version: DCS updates move things, so re-check rather than trust it after an update.
 
 ## Precondition: are you on the DCS machine?
 
@@ -81,7 +82,8 @@ $DCS_INSTALL_PATH/
                               -- the closest thing to official export API docs
   Doc/                        PDFs (user manual, beacon lists), Charts/
   Mods/aircraft/<Module>/     per-module tree, see below
-  Mods/terrains/<Theatre>/    Afghanistan Caucasus Kola MarianaIslands Syria
+  Mods/terrains/<Theatre>/    one directory per installed theatre -- `ls` it, or read the module
+                              list out of autoupdate.cfg, rather than assuming which are present
                               RasterCharts/ clipmaps/ map/ beacons.lua entry.lua
   CoreMods/                   aircraft/ tech/ services/ characters/ 'WWII Units'
   autoupdate.cfg              install version + installed module list (JSON)

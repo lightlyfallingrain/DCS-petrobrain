@@ -17,22 +17,35 @@ the plan, not a generic checklist. Read before writing anything:
 
 ## What to determine before writing the instructions
 
-**1. Which layers were touched, and what that means for restarting:**
+**1. Which layers were touched, and what that means for restarting.** Work out the restart set from
+the diff, against the subproject list in root `ROADMAP.md`'s status table — not from a list written
+here, which would quietly omit a subproject added since and tell the user nothing needs restarting
+when something does. For each touched subproject, its own `CLAUDE.md` says what process runs it and
+how it is launched; that is where the current answer lives.
 
-- `world-model/src/**` changed → no running service to restart; `body-layer`/`aircraft-layer` processes import world-model fresh on each launch. Only note a restart if the change requires a *rebuilt region `.sqlite`* (rare — say so explicitly if a rebuild command is needed).
-- `aircraft-layer/dcs-export/Export.lua` or Hook scripts (`*.dlg`, `Hooks/*.lua`) changed → **DCS itself must be restarted** (Hook scripts load once at DCS application startup, not per-mission) and the files must be redeployed to `Saved Games\DCS\Scripts\...` per `aircraft-layer/WORKFLOW.md` first.
-- `aircraft-layer/src/**` (collector) changed → **the Windows collector process must be restarted** (`python -m collector`); Export.lua/DCS itself does not need restarting unless Export.lua also changed.
-- `body-layer/src/**` changed → **no separate restart step** — the user just (re)launches `python -m logger` fresh, which is what they'd do to start a test session anyway. Say this explicitly ("no restart needed beyond relaunching the logger") so the user doesn't waste time restarting DCS or the collector unnecessarily.
-- If nothing outside `body-layer/` changed (the common case for belief-layer bug fixes and most BL-x milestones), state plainly: **"Aircraft layer / DCS unaffected — no restart needed there."**
+The rules that are *not* derivable from the diff, and are the ones worth stating explicitly:
+
+- **A library imported in-process needs no restart of its own** — whatever imports it picks up the
+  change on its next launch. Only call for a restart or rebuild if the change invalidates a *built
+  artifact* (e.g. a region `.sqlite` that must be regenerated); say so explicitly, with the rebuild
+  command, when it does.
+- **A change to a deployed DCS-side script means DCS itself must be restarted**, not just the
+  mission — Hook scripts load once at DCS application startup. Those files also have to be
+  redeployed into `Saved Games\DCS\Scripts\...` first, per `aircraft-layer/WORKFLOW.md`.
+- **A change to a long-running process means that process restarts, and only that one.** Do not
+  escalate to restarting DCS unless a DCS-side file changed too.
+- **Say what does *not* need restarting, explicitly.** "Aircraft layer / DCS unaffected — no restart
+  needed there" saves the user real time; leaving it unsaid costs them a DCS restart they did not
+  need. Naming the unaffected layers is as much the point of this section as naming the affected ones.
 
 **2. The exact run command, as ONE copy-pasteable line — never multi-line with backslash
-continuation.** Base it on `body-layer/CLAUDE.md`'s "Running the live logger" section for the
-correct flags (`PYTHONPATH`, `--aircraft-layer-url`, `--theatre`, `--world-model-db`,
-`--console`/`--overlay`/`--crew-text`/`--brain-client` as relevant to what's being tested — check
-which flags this specific feature needs, don't include ones it doesn't). Use a placeholder only
-for the one value the user must fill in themselves (`<windows-box-ip>`); everything else should be
-a real, ready-to-paste value already known from this project's conventions (e.g.
-`../world-model/data/world-model/syria-full.sqlite`, `--theatre Syria`).
+continuation.** **Read the flags off the subproject's own `CLAUDE.md` run section at the time you
+write the card** (for the live logger, `body-layer/CLAUDE.md`'s "Running the live logger") — flags
+get added, renamed and defaulted, so a flag list copied into this file would be wrong at the moment
+it matters most. Include only the flags this specific feature needs, not every flag available.
+Use a placeholder for the one value the user must supply themselves (`<windows-box-ip>`);
+everything else should be a real, ready-to-paste value, taken from that run section and the
+theatre/database the test actually uses rather than from an example.
 
 **3. Test cases specific to what changed** — pull from the plan's acceptance criteria and any
 Decisions the user made, not generic boilerplate. Each test case: one line for the scenario/action,

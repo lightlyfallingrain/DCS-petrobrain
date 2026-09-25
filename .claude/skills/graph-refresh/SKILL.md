@@ -127,6 +127,7 @@ The graph says **where** to look, not what the text says — edge annotations qu
 fragment can lose its tense. `gq.sh` is the documented query path precisely because it ends every
 answer with the sources to read; a `PreToolUse` hook blocks raw `graphify query` for that reason.
 
-And the graph only carries supersession edges where a marker exists. **43 plans have never been
-checked for contradictions against what was actually built** — not because they are clean, but
-because nobody has looked. That is real work, independent of any rebuild.
+And the graph only carries supersession edges where a marker exists. Most of `plans/` has never been
+checked for contradictions against what was actually built — not because those plans are clean, but
+because nobody has looked. A rebuild does not touch that; it is separate work, and the count of
+unchecked plans is whatever `plans/` currently holds rather than a number worth writing down here.

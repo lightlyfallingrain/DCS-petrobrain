@@ -4,11 +4,13 @@ description: Run all mechanical Definition of Done checks and output a structure
 type: user-invocable
 ---
 
-Usage: `/dod-check <feature-name> [world-model|aircraft-layer|body-layer]`
+Usage: `/dod-check <feature-name> [<subproject>]`
 
 Example: `/dod-check star-rendering` or `/dod-check pb2-contact-memory body-layer`
 
-Runs every mechanical DoD check — quality gates, code violation scans, file size limits, staging status, security sign-off — for the given subproject and outputs a structured markdown report. If no subproject arg is given, auto-detect from `git status --porcelain` which of `world-model/`, `aircraft-layer/`, `body-layer/` have modified/untracked files; if exactly one is touched, use it; if none or multiple are touched, default to `world-model` and note the ambiguity in the report header. The DoD agent reads the report and decides agent responsibility; it does not run these checks itself.
+Runs every mechanical DoD check — quality gates, code violation scans, file size limits, staging status, security sign-off — for the given subproject and outputs a structured markdown report. The DoD agent reads the report and decides agent responsibility; it does not run these checks itself.
+
+**The subproject list is discovered, not written here** — the script derives it from the repo-root directories that carry their own `pyproject.toml`, so a subproject added or retired later needs no edit to this file. If no subproject arg is given it auto-detects from `git status --porcelain` which of those are touched; if exactly one is, it uses it; otherwise it falls back to the first discovered subproject and says so in the report header, which is the cue to re-run with an explicit argument.
 
 ```bash
 #!/usr/bin/env bash
@@ -20,14 +22,19 @@ PASS="✓ PASS"
 FAIL="✗ FAIL"
 OVERALL=0
 
+# Discover the subprojects rather than hardcoding them: a repo-root directory with its own
+# pyproject.toml is a subproject (root CLAUDE.md "Module independence" — each runs standalone).
+SUBPROJECTS=$(git ls-files '*/pyproject.toml' | awk -F/ 'NF==2 {print $1}' | sort -u)
+
 if [ -z "$SUBPROJECT" ]; then
-  TOUCHED=$(git status --porcelain | awk '{print $2}' | grep -oE '^(world-model|aircraft-layer|body-layer)/' | sort -u | tr -d '/')
+  ALT=$(echo "$SUBPROJECTS" | paste -sd'|' -)
+  TOUCHED=$(git status --porcelain | awk '{print $2}' | grep -oE "^($ALT)/" | sort -u | tr -d '/')
   COUNT=$(echo "$TOUCHED" | grep -c . || true)
   if [ "$COUNT" = "1" ]; then
     SUBPROJECT="$TOUCHED"
   else
-    SUBPROJECT="world-model"
-    AMBIGUOUS_NOTE=" (auto-detect found $COUNT subproject(s) touched — defaulted to world-model, pass a subproject arg explicitly if wrong)"
+    SUBPROJECT=$(echo "$SUBPROJECTS" | head -1)
+    AMBIGUOUS_NOTE=" (auto-detect found $COUNT subproject(s) touched — fell back to $SUBPROJECT, pass a subproject arg explicitly if wrong)"
   fi
 fi
 
@@ -260,6 +267,9 @@ else
 fi
 ```
 
-Note: `CLAUDE.md`'s "Skip `performance-reviewer` and `security` for now" exception (see its
-"Agents" section) may make the Security Sign-off section not applicable — check there before
-treating a missing `security-review.md`/`security-plan-review.md` as a real FAIL.
+Note: **before treating a missing `security-review.md`/`security-plan-review.md` as a real FAIL,
+read root `CLAUDE.md`'s "Agents" section** for the scope currently set for `security` and
+`performance-reviewer` — whether they run per feature, per stage, or are exempt for this project
+phase, and when in the sequence. That scope has been changed by user direction more than once, so
+it is read at check time, never quoted here. If the current scope means no security document was
+ever owed for this feature, the sign-off rows are not applicable rather than failing.

@@ -4,17 +4,22 @@ description: Run a fast compilation/syntax check without a full build
 type: user-invocable
 ---
 
-Usage: `/check [world-model|aircraft-layer|body-layer]`
+Usage: `/check [<subproject>]`
 
 Run from the repo root. If a subproject arg is given, check only that one.
-Otherwise auto-detect from `git status --porcelain` which of `world-model/`, `aircraft-layer/`,
-`body-layer/` have modified/untracked files and check each detected one; if none are touched,
-default to `world-model` (preserves prior single-subproject behavior).
+Otherwise auto-detect from `git status --porcelain` which subprojects have modified/untracked
+files and check each detected one; if none are touched, ask which subproject to check rather than
+guessing at one.
 
-- `world-model`: `mypy world-model/src`
-- `aircraft-layer`: `mypy aircraft-layer/src`
-- `body-layer`: `cd body-layer && mypy src` (mypy config discovery is CWD-only for this
-  subproject — see `body-layer/CLAUDE.md` — `mypy --config-file` alone does not fix it)
+**Get the subproject list from root `ROADMAP.md`'s status table, not from this file** — equivalently,
+the repo-root directories that carry their own `pyproject.toml`. A list written here would silently
+skip a subproject added later, and a type check that skips a subproject still reports PASS.
+
+The default invocation is `mypy <subproject>/src` from the repo root. **Confirm against the
+subproject's own `CLAUDE.md` "Commands" section** — each one is equally canonical and may deviate.
+One deviation to expect, because it is not guessable: `body-layer` must be invoked from inside its
+own directory (`cd body-layer && mypy src`), since mypy's config discovery there is CWD-only and
+`mypy --config-file` alone does not fix it (see `body-layer/CLAUDE.md`).
 
 **Tool resolution:** if the bare `mypy` command isn't found on PATH, fall back to
 `<subproject>/.venv/bin/mypy` (e.g. `body-layer/.venv/bin/mypy`) before concluding the check
