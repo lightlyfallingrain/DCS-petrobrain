@@ -327,3 +327,66 @@ def test_write_poll_no_tripwire_line_for_ordinary_row(tmp_path: Path) -> None:
     writer.close()
 
     assert stderr.getvalue() == ""
+
+
+def test_write_speech_rows_carry_gaze_at_the_moment_of_speech(
+    tmp_path: Path,
+) -> None:
+    """What Petrovich says lands on the same timeline as the
+    belief-versus-truth rows (user, 2026-09-25: "then all the information
+    would be in one log file").
+
+    The gaze fields are the point, not decoration. The defect this was
+    added for is a callout naming 10 o'clock while a commanded `scan
+    right` is in force — two observations a human otherwise has to
+    correlate across two files and two clocks. Recorded together, the
+    contradiction is visible on one line."""
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path)
+
+    writer.write_speech(
+        t_sim=58.6,
+        text="ground 10 o'clock, 2 km",
+        urgent=False,
+        gaze_label="right",
+        gaze_center_deg=60.0,
+        optic_name="unaided",
+    )
+
+    row = json.loads(path.read_text().strip())
+    assert row == {
+        "kind": "speech",
+        "t_sim": 58.6,
+        "text": "ground 10 o'clock, 2 km",
+        "urgent": False,
+        "gaze_label": "right",
+        "gaze_center_deg": 60.0,
+        "optic_name": "unaided",
+    }
+
+
+def test_write_speech_flushes_immediately(tmp_path: Path) -> None:
+    """Speech is a handful of lines a minute, and the line most worth
+    having is the one written immediately before something went wrong —
+    which a buffer would still be holding when the process is killed to
+    investigate. Same reasoning `--speech-log` already applies."""
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path)
+
+    writer.write_speech(t_sim=1.0, text="Scanning right.", urgent=False)
+
+    # Readable without closing the writer.
+    assert json.loads(path.read_text().strip())["text"] == "Scanning right."
+
+
+def test_write_speech_omits_gaze_fields_when_unknown(tmp_path: Path) -> None:
+    """Absent rather than null, matching this project's own
+    absent-not-null convention — a reader can tell "no gaze recorded"
+    from "gaze recorded as zero"."""
+    path = tmp_path / "belief_truth.jsonl"
+    writer = BeliefTruthLogWriter(path)
+
+    writer.write_speech(t_sim=1.0, text="Copy.", urgent=True)
+
+    row = json.loads(path.read_text().strip())
+    assert row == {"kind": "speech", "t_sim": 1.0, "text": "Copy.", "urgent": True}

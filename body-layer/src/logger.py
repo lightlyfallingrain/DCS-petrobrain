@@ -189,6 +189,7 @@ import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TextIO
@@ -845,6 +846,40 @@ def _render_eyesight_frame(
     )
 
 
+def _speech_log_sink(
+    writer: BeliefTruthLogWriter, runner: ConsolePerceptionRunner
+) -> Callable[[str, bool], None]:
+    """Build `CrewConsole.speech_log_sink` -- every spoken line becomes a
+    `kind: "speech"` row in the belief-truth log, carrying the gaze and
+    optic **as they are at the moment of speech**.
+
+    That timing is the point. The defect this was added for is a callout
+    naming 10 o'clock while a commanded `scan right` is in force, and the
+    only way to see it in a log is to record where he was looking when the
+    words came out, not where he was looking when the poll started.
+
+    Reads `runner` live rather than capturing values, for the same reason:
+    `scan_plan`/`optic` are reassigned every poll, and a closure over the
+    runner sees the current ones. Failures are swallowed by the caller --
+    a debug log must never be why Petrovich stops talking."""
+
+    def sink(line: str, urgent: bool) -> None:
+        now_sim = runner.last_t_sim
+        if now_sim is None:
+            return
+        gaze = gaze_at(now_sim, runner.scan_plan)
+        writer.write_speech(
+            t_sim=now_sim,
+            text=line,
+            urgent=urgent,
+            gaze_label=gaze.label,
+            gaze_center_deg=gaze.center_azimuth_deg,
+            optic_name=runner.optic.name,
+        )
+
+    return sink
+
+
 def _eyesight_max_lines() -> int:
     """Lines one eyesight frame may occupy, read from the real terminal so
     the canvas is never scrolled off the top by a long beyond-radius list
@@ -1252,6 +1287,8 @@ def _run_crew_text_poll_loop(
         if belief_truth_log_path is not None
         else None
     )
+    if belief_truth_writer is not None:
+        crew_console.speech_log_sink = _speech_log_sink(belief_truth_writer, runner)
     try:
         runner.sources = _build_sources(
             aircraft_client,
