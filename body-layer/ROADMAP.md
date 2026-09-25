@@ -46,15 +46,28 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   hold-recovery timing (~7-10 s predicted) matches a real sortie, are both harder to judge and the
   card says so explicitly. Clears when a real flight exercises it post-merge.
 
-- [ ] **BR-1 Stage 1 (brain layer's first working slice) — DoD-passed 2026-09-25,
-  `feature/brain-layer`, unflown once merged.** With `StubDecider` standing in for a model, there
-  is no intelligence to evaluate — every judgeable thing is mechanical: does the cockpit stay
-  responsive while an escalation is outstanding, does "stand by" land at a sane moment, and does
-  hearing Petrovich answer at all (instead of silence) feel right. Card: `docs/acceptance/
-  2026-09-25-brain-layer-stage1-sortie.md` — recommends its own short flight (5-10 minutes) rather
-  than folding into one of the longer belief-correctness sorties below, since a new process
-  (`run-scripts/run-brain.sh`) and new flags need to be confirmed working before anything else is
-  worth judging. Clears when a real flight exercises it post-merge.
+- [ ] **Everything merged 2026-09-24/25 that has not been heard in the air — one card,
+  `docs/acceptance/2026-09-25-crew-behaviour-sortie.md`** (user direction, 2026-09-25: *"fold into
+  single"*). Covers watch reporting (`9b16c3b`), scan-is-not-watch, cancel-everything, the
+  range-crossing direction words, the subitizing cap at 5, glass-watched-first, the orange watched
+  marker and the console-fit eyesight view, and BR-1 Stage 1. Two earlier cards were folded into it
+  and are marked superseded in place: `2026-09-24-watch-reporting-sortie.md` (never flown, and
+  **stale before it could be** — written while a commanded `scan` still conferred watched-ness, so
+  its watch blocks would have tested the wrong thing) and
+  `2026-09-25-brain-layer-stage1-sortie.md` (not stale, absorbed).
+
+  **The reason this is one card rather than nine.** Most of what it checks came out of the
+  eyes-and-voice sortie, which produced eight fixes rather than a pass. So the thing worth a flight
+  is not "do these features exist" but "are the fixes right", and that is one continuous listening
+  exercise: the card's block 1, whether commanded scans are still noisy, is the single item worth
+  most.
+
+  Two things it explicitly cannot judge, said on the card so no flight time is spent on them: with
+  `StubDecider` behind the wire there is no intelligence to evaluate (only responsiveness,
+  stand-by timing, and hearing a reply at all), and `follow <descriptor>` still cannot pick the
+  right contact — the D10 validator wants the model's evidence to be a literal substring of the
+  candidate's own description, which the structured-candidate revision fixes. Clears when the
+  sortie is flown and its "Bring back" items are answered.
 
 - [ ] **Two things waiting on the user's own machines, added 2026-09-19.** Neither blocks work.
   - **The daily status-page launchd job** (`.claude/scripts/com.petrobrain.status-page.plist`) is
@@ -1002,15 +1015,19 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 - [x] **Watch reporting — Stages 1 through 5, merged 2026-09-24 (merge `9b16c3b`,
   `feature/watch-reporting`). Merged before flying, deliberately, so any correction the sortie
   produces lands on `main` rather than a branch — live acceptance is still outstanding
-  (`docs/acceptance/2026-09-24-watch-reporting-sortie.md`).** A watched contact now reports itself unprompted on three new
+  (`docs/acceptance/2026-09-25-crew-behaviour-sortie.md`, which superseded the
+  `2026-09-24-watch-reporting-sortie.md` written for this stage).** A watched contact now reports itself unprompted on three new
   triggers, plus `follow` becomes both a `watch` synonym and a new best-match way to *name* which
   contact to watch. Correctness review APPROVED (full read), performance review flagged a real
   finding (LOS called before the range/altitude gate) which was fixed and the fix re-reviewed
   APPROVED, security review APPROVED with three non-blocking hardening recommendations carried to
   backlog below. DoD gate run 2026-09-24: format/lint/type/test all green in both touched
   subprojects (body-layer 1177 passed/4 xfailed, audio-adapter 198 passed/1 skipped). **Live
-  acceptance outstanding** — this entry stays `[~]` until a real sortie exercises it; card at
-  `docs/acceptance/2026-09-24-watch-reporting-sortie.md`.
+  acceptance outstanding** — a real sortie has still not exercised it; card at
+  `docs/acceptance/2026-09-25-crew-behaviour-sortie.md`, which **superseded** this stage's own
+  `2026-09-24-watch-reporting-sortie.md`. That card went stale before it could be flown: it was
+  written while a commanded `scan` still conferred watched-ness, so its watch blocks would have
+  tested the wrong thing.
 
   **Stage 1 — movement.** `CONTACT_MOTION_CHANGED` has fired since `movement-detection` and was
   never spoken; `belief.callouts._WATCHED_ONLY_KINDS` gates it at the speech layer (not at
@@ -1136,7 +1153,9 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   default poll interval), and `Decider.decide()` having no bounded timeout (one unjoined daemon
   thread per `/escalate`). D10's semantic reply validator is deliberately absent — Stage 1's wire
   is structured JSON from plain code, so there is nothing yet for a validator to guard against.
-  **Live acceptance outstanding** — card at `docs/acceptance/2026-09-25-brain-layer-stage1-sortie.md`;
+  **Live acceptance outstanding** — card at `docs/acceptance/2026-09-25-crew-behaviour-sortie.md`
+  block 4 (the Stage-1-only card it superseded is
+  `docs/acceptance/2026-09-25-brain-layer-stage1-sortie.md`);
   with no real model behind the wire, the only judgeable things are whether the cockpit stays
   responsive while the brain "thinks," whether stand-by timing lands right, and whether hearing
   Petrovich answer at all (instead of silence) feels right. This entry flips to `[x]`/merged on

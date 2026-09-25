@@ -1,5 +1,7 @@
 # Watch reporting sortie
 
+> **SUPERSEDED, 2026-09-25**, by `2026-09-25-crew-behaviour-sortie.md` — fly that instead. This card was never flown, and it went stale before it could be: it was written while a commanded `scan` still conferred watched-ness (fixed the next day, so its watch blocks would have tested the wrong thing), its range-crossing wording has since changed to "getting closer"/"moving away", and its engagement-envelope caveat predates that day's fixes. Kept for the record.
+
 A watched contact now talks back: it reports its own movement, whole-kilometre range crossings, and
 believed weapon-envelope entry/exit, unprompted. `follow` becomes both a synonym for `watch` and a
 new way to *name* which contact to watch by descriptor/clock/range.
