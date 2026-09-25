@@ -321,13 +321,50 @@ a motion callout reads *"armor, two o'clock, three kilometres, moving, moving."*
 
 | kind | rendered |
 |---|---|
-| `CONTACT_RANGE_CROSSED` | no affixes at all — `"Armor, two o'clock, three kilometres."` The range *is* the news, and it is already in the body. This is the user's example verbatim. |
+| `CONTACT_RANGE_CROSSED` | **REVISED 2026-09-25 — see below.** ~~no affixes at all~~ → `lead="Getting closer"` / `"Moving away"` |
 | `CONTACT_MOTION_CHANGED` | `event_clause="moving"` / `"stopped"` |
 | `CONTACT_ENGAGEMENT_CHANGED`, entering | `lead="Danger"` → `"Danger, SAM, one o'clock, four kilometres."` |
 | `CONTACT_ENGAGEMENT_CHANGED`, leaving | `lead="Safe from"` → `"Safe from SAM, four o'clock, eleven kilometres."` |
 
 The two engagement wordings are `STATE_TRANSITIONS.md`'s own `"danger <unit> <where>"` /
 `"safe from <unit> <where>"` — taken from the spec rather than invented.
+
+#### REVISION, 2026-09-25 — `CONTACT_RANGE_CROSSED` gets a lead after all
+
+**Provenance: the user, after flying it.** This decision originally gave the range-crossing callout
+no affixes, on the reasoning that "the range *is* the news, and it is already in the body", and
+because the bare form was his own example verbatim. Flying it showed the cost of that: a range
+crossing is a *belief update about a contact he is not currently looking at*, and with no lead it
+is **word-for-word indistinguishable from a fresh sighting**. He heard `"ground 10 o'clock, 2 km"`
+while a commanded `scan right` was in force and reasonably read it as a detection defect; it took
+an investigation (`plans/callout-outside-gaze/debug.md`) to establish that perception was working
+correctly and the wording was what misled.
+
+His wording:
+
+> *"getting closer, ..." / "moving away, ..."*
+
+| kind | rendered |
+|---|---|
+| `CONTACT_RANGE_CROSSED`, closing | `lead="Getting closer"` → `"Getting closer, armor, two o'clock, three kilometres."` |
+| `CONTACT_RANGE_CROSSED`, opening | `lead="Moving away"` → `"Moving away, armor, two o'clock, four kilometres."` |
+
+**Better than merely tagging provenance**, which is what a lead like "Still tracking," would have
+done. These carry the one thing the bare form threw away: *which direction the range crossed*. The
+number alone cannot say, because the pilot does not hold the previous number in his head — "three
+kilometres" is only news if you know it was four a moment ago.
+
+Which direction crossed is already known at emission: `contacts.py`'s range block compares the
+current range against `last_announced_range_km` to decide the event fires at all, so the sign is in
+hand and needs no new state.
+
+**Two things this touches.** It reverses this decision's own "no affixes" row, and it requires
+rewriting `tests/test_speech.py::test_route_event_contact_range_crossed_speaks_with_no_affixes` —
+which pins the old behaviour by name. That test is not wrong; it faithfully pinned a decision the
+user has now changed after hearing it, which is the system working rather than failing.
+
+**Not yet implemented.** Recorded here first because `fix/scan-is-not-watch` is in flight against
+the same callout family, and that branch was told explicitly not to touch wording.
 
 **What stops it becoming noise.** Four mechanisms already exist and three of them suffice:
 
