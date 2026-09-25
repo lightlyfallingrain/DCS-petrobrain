@@ -268,6 +268,38 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 
 ### Added 2026-09-25 (user)
 
+- [ ] **Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**
+  User direction, 2026-09-25, arising from the vegetation-model decision recorded in
+  `body-layer/ROADMAP.md` ("Detection under real world conditions", factor 1). **Gates the 9K113
+  half of that decision and nothing else** — the statistical model for naked eye and binoculars
+  does not depend on the answer, so this probe blocks one channel, not the work.
+
+  **The question, precisely.** `Scripts/AI/Detection.lua` sets `trees_LOS_test_T4 = true` and every
+  installed theatre is Terrain-4, so **ED's AI detection** samples tree geometry for line of sight.
+  That is *not* the same claim as **the scripting API** doing so. Our own
+  `query.line_of_sight.line_of_sight_clear` samples the bare terrain mesh, which makes us strictly
+  more permissive through forest than the engine — so if `isVisible` does see trees, it closes a
+  known gap for the one channel that can afford to call it.
+
+  **Deliverables:**
+  - Does `land.isVisible(from, to)` account for trees, or terrain only? A vehicle in dense forest,
+    ray passing through canopy, is the discriminating case.
+  - Does `land.getIP` return the blocking point, and is it more useful? It distinguishes "a ridge"
+    from "the treeline 200 m short of the target", which the sight channel would want to *say*, not
+    merely know.
+  - Per-call cost, at realistic candidate counts.
+  - Can a result return synchronously, or must it come back through a side channel? **This one was
+    left open when the mission-bridge probe item was closed** — it was never the blocker there
+    (velocity is a push), and it is the blocker here (LOS is a question).
+
+  **The transport is not in question.** `net.dostring_in("scripting", …)` has been in production
+  since 2026-09-13 (`petrobrain-f10-commands-hook.lua`, 1 Hz). This probe is about what the
+  function answers and what it costs, not about reaching it.
+
+  Investigator pass plus a probe on the Windows box. **Run it before the 9K113 slice is scoped, not
+  during it** — if the answer is terrain-only, that slice's LOS design collapses and the
+  statistical model has to cover every channel instead.
+
 - [ ] **Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** User direction, 2026-09-25. The config is treated as prose nobody reviews, while it is
   in fact the thing that decides how every agent behaves — and a defect in it is executed rather
