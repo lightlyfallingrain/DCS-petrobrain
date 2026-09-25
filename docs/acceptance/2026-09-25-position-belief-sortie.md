@@ -1,5 +1,7 @@
 # Position-belief-runaway sortie
 
+> **FLOWN AND CLOSED, 2026-09-25** (user direction). The headline check passed — no range beyond the detection cap came back. The `--belief-truth-log` added for this card is what then exposed contact fragmentation at range, which is its own item. Kept for the record; do not re-fly it.
+
 Fixes a live defect: Petrovich reported `"couple contacts, 4 o'clock, 87.5 kilometres"` against a
 10 km detection cap. Four distinct defects were found and fixed under this one report, plus one
 unrelated speech bug caught along the way.

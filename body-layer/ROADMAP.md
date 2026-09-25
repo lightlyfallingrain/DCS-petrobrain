@@ -15,8 +15,14 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
-- [ ] **Binocular optic, voice command completeness, and precise position belief — merged to `main`
-  2026-09-24 (`c398675`), still unflown.** All three passed DoD on fixtures/console only. **Merged
+- [x] **Binocular optic, voice command completeness, and precise position belief — FLOWN AND
+  CLOSED 2026-09-25** (user direction). `docs/acceptance/2026-09-23-eyes-and-voice-sortie.md` is
+  closed. **This sortie is where most of 2026-09-25's fixes came from** — the callout heard while
+  scanning the other way (`plans/callout-outside-gaze/`, then `plans/scan-is-not-watch/`), cancel
+  resurrecting a superseded scan, range crossings sounding like fresh sightings, and the outpost
+  fragmenting into 18 contacts (`plans/contact-fragmentation-at-range/`). Original entry follows.
+
+  ~~merged to `main` 2026-09-24 (`c398675`), still unflown.~~ All three passed DoD on fixtures/console only. **Merged
   before the sortie by user decision (2026-09-24)** — so any correction the flight produces now
   lands on `main` rather than on the branch. Precise position belief joined this list at merge:
   belief now carries a fused 2×2 covariance instead of quantised buckets, which changes what the
@@ -29,7 +35,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   below** — the version merged here had the range-runaway defect the fix branch corrects; do not
   fly this card's position-belief items until that fix has merged. **It merged 2026-09-25 (`bfbcf8d`), so they are now judgeable.**
 
-- [ ] **Position-belief-runaway fix — merged 2026-09-25 (`bfbcf8d`), unflown**
+- [x] **Position-belief-runaway fix — FLOWN AND CLOSED 2026-09-25** (user direction).
+  `docs/acceptance/2026-09-25-position-belief-sortie.md` is closed. No range beyond the cap was
+  reported back; the belief-truth log from the same sortie is what exposed the separate
+  fragmentation defect instead. Merged 2026-09-25 (`bfbcf8d`).**
   (`fix/position-belief-runaway`, 2026-09-25). Corrects the range-runaway defect above (see the
   Status entry for the four fixes). Card: `docs/acceptance/2026-09-25-position-belief-sortie.md`
   — its own headline check (no naked-eye range beyond 10 km) is checkable by ear in one flight;
@@ -574,7 +583,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   stronger than legibility: it multiplies what a single sortie is worth.
 
   Detection-range calibration has never been flown, and the loop above means the next sortie has to
-  serve calibration, the five outstanding acceptance debts, and BL-8's "run for real" gate at once.
+  serve calibration, the outstanding acceptance debts, and BL-8's "run for real" gate at once.
   Without this, calibration data is a pilot's recollection of roughly when a callout happened. With
   it, it is what Petrovich believed next to what was actually there. Same flight, very different
   evidence.

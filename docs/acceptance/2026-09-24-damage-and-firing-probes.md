@@ -1,5 +1,7 @@
 # Damage and firing probes
 
+> **FLOWN AND CLOSED, 2026-09-25** (user direction), and it answered every question it was written for. Results and their corrections are in `aircraft-layer/research/2026-09-24-damage-and-firing-events-over-mission-bridge.md`: the bridge can subscribe to `world.addEventHandler`; a ground gun unit's `SHOOTING_START` names the player as its target, so "we are being shot at" needs no inference; `getLife()`/`getLife0()` work per unit; gun rounds are *not* objects in `LoGetWorldObjects` (rockets are), so the tracer channel has to be the event; and the visible state is **fire, not smoke** — fire meaning doomed-with-a-delay, bracketed to a life fraction of (0.69, 0.84]. Kept for the record; do not re-fly it. One narrow follow-up remains: the exact fire threshold inside that band, and whether it is global or per-type.
+
 Not a sortie card. **Three reconnaissance steps, cheapest first**, answering two questions that
 gate how Petrovich can ever perceive being shot at, and whether he can answer *"is it dead yet?"*.
 

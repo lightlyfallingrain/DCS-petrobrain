@@ -1,5 +1,7 @@
 # Eyes and voice sortie
 
+> **FLOWN AND CLOSED, 2026-09-25** (user direction). This sortie produced most of that day's fixes rather than a clean pass: the callout heard while scanning the other way, cancel resurrecting a superseded scan, range crossings indistinguishable from fresh sightings, and the outpost fragmenting into 18 contacts. All merged to `main`. Kept for the record; do not re-fly it.
+
 Two milestones, flown together because they are one loop in the cockpit: **he looks, he tells you
 what he sees, you tell him where to look.**
 
