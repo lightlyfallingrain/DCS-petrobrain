@@ -449,3 +449,27 @@ two functions that must agree (2026-09-19).
   root `CLAUDE.md`/`AGENTS.md` a new third-party dependency is escalation-worthy on its own — an
   implementer should treat an unargued dependency mention as a candidate to challenge, not a
   commitment to honor (`plans/brain-layer/implementation.md`, 2026-09-25).
+
+- **A thread-pool timeout wrapped around a blocking call bounds the caller, not the call.**
+  `brain-layer/server.py`'s `_run_job` races `Decider.decide()` on a `ThreadPoolExecutor` and gives
+  up after `decide_timeout_s`, but `shutdown(wait=False)` does not — cannot — stop the underlying
+  call: Python has no mechanism to preempt a blocked thread. A genuinely hung call (not just a slow
+  one) leaks its worker thread permanently; the timeout only lets the *caller* move on. The actual
+  fix has to live one layer down, in whatever can make the blocking call itself return — here,
+  `OllamaClient`'s own socket-level `urllib` timeout. A server-side wrapper timeout is worth keeping
+  anyway as a decider-agnostic backstop, but it must be understood as bounding the symptom, not the
+  cause (BR-1 Stage 2 performance review prerequisite 2, `plans/brain-layer/performance-review.md`).
+
+- **A safety claim that holds in one drift direction is not thereby safe in the other, and adding a
+  second trust boundary nearby can flip a previously-true claim false.** `brain-layer`'s
+  `CLASSIFY_COMMAND_VOCABULARY` and body-layer's mirrored `OFFERED_CONFIRM_VOCABULARY` were
+  documented as safe to let drift ("a mismatch here costs accuracy, never safety") when only the
+  wider `DISPATCHED_COMMAND_TOKENS` check existed. Once a stricter membership check was added
+  specifically against the offered vocabulary, the claim became true in only one direction (the
+  list widening) and false in the other (a token *removed* from what's offered but not from the
+  mirror re-admits exactly the gap the new check was built to close). The bug was in the docstring,
+  not the code — caught only because Reviewer traced both drift directions explicitly rather than
+  accepting the existing comment. Lesson: when a new check is added near an existing "safe to
+  drift" claim, re-derive the claim rather than trusting it still holds — the claim's truth can
+  depend on what else reads the same data, not just on the data itself (BR-1 Stage 2
+  Security/Performance fold review, `d51a25b`, 2026-09-25).

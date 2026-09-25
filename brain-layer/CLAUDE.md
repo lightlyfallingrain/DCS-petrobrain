@@ -37,7 +37,10 @@ with no model call; no matched verb at all routes to the **classify**
 prompt (`CONFIRM <token>` or `UNABLE`); one or more candidates routes to
 the **discriminate** prompt (`PICK <id> BECAUSE <words>` or `ASK`,
 Measurement 4's exact wording, `src/prompts.py`). `--decider stub|ollama`
-(`__main__.py`, default `ollama`) selects between it and Stage 1's
+(`__main__.py`, **default still `stub`**, deliberately -- preserving
+`run-scripts/run-brain.sh`'s existing meaning unchanged rather than
+switching what that script runs out from under it; pass `--decider ollama`
+explicitly to run the real model) selects between it and Stage 1's
 `StubDecider`.
 
 **`Decider.decide()` now runs under its own bounded timeout**
