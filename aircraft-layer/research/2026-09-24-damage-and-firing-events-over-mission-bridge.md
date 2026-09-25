@@ -486,3 +486,97 @@ together.
 A negative result from step 3 is a real result and should be written up rather than retried — it
 would reverse Finding 12 and leave the naked-eye/LOS tracer channel as the only route to perceiving
 that we are being engaged.
+
+---
+
+## PROBE RESULTS, 2026-09-25 — flown by the user, and the two halves point opposite ways
+
+Two artefacts came back in `win-mac-sync/from-windows/`:
+`aircraft_layer_probe_weapons.log` (Probe A's object-feed half, run for 103 s) and `debrief.log`
+from the same sortie. **The Hook probe (`petrobrain-damage-events-probe-hook.lua`) was not run** —
+no `PetrobrainDamageProbe` lines anywhere — so `getLife()` and the live event handler remain
+unmeasured. Everything below comes from the two files that did come back.
+
+### Finding 12 is ANSWERED, affirmatively, with initiator and target
+
+`debrief.log` carries **16 `"start shooting"` events and 16 `"end shooting"`**, every one of them
+initiated by a **ground gun vehicle** and aimed at the player:
+
+```
+initiatorPilotName   = "M1043 HMMWV Armament"
+initiator_unit_type  = "M1043 HMMWV Armament"
+initiator_object_id  = 16780800
+type                 = "start shooting"
+target               = "Mi-8MT"
+targetPilotName      = "sg"
+target_object_id     = 16781056
+t                    = 52.109
+```
+
+So the engine **does** raise a shooting event for a ground, gun-armed unit, and the event names
+*who* is shooting, *what they are shooting at*, and **both object ids** — which is exactly the join
+a perception gate would need against `LoGetWorldObjects`. The survey's Finding 12 (recorded as
+"inferred, moderate confidence, the single most important unresolved point") is confirmed from the
+user's own machine. Evidence class: **read from a real post-mission log**, not documentation.
+
+Full field set available on a start-shooting event: `event_id`, `t`, `type`, `initiatorPilotName`,
+`initiator_unit_type`, `initiator_object_id`, `initiator_coalition`, `initiator_ws_type1`,
+`target`, `targetPilotName`, `target_unit_type`, `target_object_id`, `target_coalition`,
+`target_ws_type1`, `weapon`, `linked_event_id`, `initiatorMissionID`, `targetMissionID`.
+
+### But the cheap route does NOT work for guns — and this is the load-bearing negative
+
+The second addendum hoped `LoGetWorldObjects()` might return in-flight weapon objects, which would
+have made the whole event channel unnecessary: a tracer would be an ordinary object the naked-eye
+path already gates on FOV, angular size and LOS. **Half true, and the useful half is false.**
+
+**Rockets are objects.** The player's own S-8s appear immediately and unmistakably:
+
+| debrief `shot` events (S-8KOM HEAT) | `aircraft_layer_probe_weapons.log` |
+|---|---|
+| 33.10, 33.16 | `[33.14] count=15 → 17  NEW: C_8` |
+| 36.89 | `[37.16] count=20` |
+| 48.70 – 49.40 (eight rockets) | `[49.20] 23`, `[50.21] 27`, `[51.21] 23`, `[52.22] 21` |
+
+`C_8` is the S-8's own object name, first-seen at the exact poll the first pair was fired, and the
+count tracks rockets in flight and settles back.
+
+**Gun rounds are not.** Across all sixteen start-shooting events from that HMMWV — 58.1, 62.2,
+64.8, 67.8, 69.2, 71.4, 72.1, 75.0, 78.7, 82.5, 82.7, 86.0, 86.6, 89.3 s — the object count sits
+**flat at 14 on every single poll**. No new names, no spikes. A vehicle firing its gun at the player
+for half a minute adds nothing to the object feed.
+
+That is consistent with `S_EVENT_SHOT`'s own documented exclusion of machine-gun and autocannon
+fire: gun rounds are not weapon *objects* in DCS, which is why they are neither in `SHOT` nor in
+`LoGetWorldObjects`. **So the tracer channel cannot be built from the object feed. It has to be the
+event.**
+
+### Destroyed units do vanish from the feed — confirmed incidentally
+
+The baseline object count steps down permanently, 15 → 14 at `[57.23]`, after the player's rockets
+scored hits on an `M 818` and an `M978 HEMTT Tanker` at 37.0–37.2 s and an `M1043 HMMWV Armament`
+at 50.97 s. `debrief.log` carries 27 `bda`/`dead` events. So Finding 6's coarse
+destroyed-unit-disappearance fallback is real, at a lag of seconds rather than polls — though note
+the step is smaller than the number of kills, so a wreck may persist for some types. Still not a
+substitute for `getLife()`, which remains unmeasured.
+
+### What this changes, and what is still open
+
+| question | status after this sortie |
+|---|---|
+| Does the engine raise a shooting event for ground guns? | **Yes** — confirmed, with initiator, target and object ids |
+| Can tracers be read from `LoGetWorldObjects`? | **No** for guns. Yes for rockets, which is not the case that mattered |
+| Does a `world.addEventHandler` in the `"scripting"` state receive those events? | **Still unmeasured** — the Hook probe did not run |
+| `Unit.getLife()` and the smoke correlation | **Still unmeasured** — same reason |
+
+**The remaining probe is now the only one worth running**, and its scope has narrowed: the question
+is no longer *whether* the event exists but whether the bridge can subscribe to it live.
+`petrobrain-damage-events-probe-hook.lua` answers that and the damage half together, and its
+`register: ok=...` line answers the reachability question before any event has to arrive.
+
+**Design note for whoever builds the tracer channel.** The event is theatre-wide and knows no line
+of sight, so it still needs the LOS + visual-range gate the naked-eye channel applies — that has not
+changed. What *has* changed is that the gate now has something better than a position to work with:
+the event names `target_object_id`, so "is this being shot *at us*" is a direct comparison rather
+than an inference. And `weapon` is populated, which may let a gun burst be distinguished from a
+missile launch without guessing from the initiator's type.
