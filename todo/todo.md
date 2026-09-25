@@ -266,6 +266,67 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 
 ## Cross-cutting / unscoped backlog
 
+### Added 2026-09-25 (user)
+
+- [ ] **A real-time ASCII view of what Petrovich is looking at, and with what.** User, 2026-09-25:
+  *"it'd help if I could visually see where Petrovich is looking and with what. A realtime ascii
+  graphic would do just fine."* Shape, as he described it:
+  - **Ownship at bottom centre**, because the rear hemisphere is not visible anyway — so the
+    drawing is a forward arc, not a full circle.
+  - **A cone or line drawn where he is looking**, coloured by optic: **green = naked eye, blue =
+    binocular**.
+  - **A one- or two-letter id per contact**: `AA` air defence, `AR` armour, `TR` truck, `G` group,
+    `U` unknown.
+
+  **What already exists, so this is not built from nothing** — and checking this first is the
+  point of writing it down here:
+  - `perception.gaze.gaze_at(t_sim, plan)` is **pure**, so the current gaze is a read, not new
+    state. The cones 2C sortie already added an overlay *line* naming the gaze o'clock
+    (`logger._push_gaze_line`) for exactly this need — the user's own words then were *"very
+    difficult to judge when I don't visually see where Petrovich is looking"*. This item is the
+    spatial version of that same complaint.
+  - `--detection-trace` (BL-9) already records, per poll and per candidate, which visibility gate
+    decided its fate, at what true range and bearing, plus the optic and the contact it folded
+    into. `body-layer/tools/summarize_detection_trace.py` reduces it after a flight. **The data
+    this view needs is already being written** — what is missing is a live rendering of it.
+  - `perception.optics` carries the optic in use, so green/blue needs no new state either.
+
+  So the likely shape is a reader, not a new subsystem: a terminal view fed from the same per-poll
+  state the trace writer already sees. Worth confirming that read before designing anything.
+
+  **Note the no-omniscience boundary applies to the *view*, not just the belief.** A debug view
+  that draws true positions is fine and useful — `detection_trace_writer.py` is already the one
+  module deliberately allowed to hold ground truth and belief at once, and it is read-only against
+  `ContactStore` for that reason. But if this view is ever on screen while flying, drawing what
+  Petrovich *cannot* see would make the pilot omniscient instead. Decide deliberately which it is:
+  a debrief instrument, or a cockpit aid.
+
+- [ ] **Per-module performance review, findings written to a document, and that document becomes a
+  backlog item.** User, 2026-09-25. Each subproject reviewed in its own right —
+  `world-model/`, `aircraft-layer/`, `body-layer/`, `audio-adapter/`, `brain-layer/`,
+  `mission-interpreter/` — rather than only the per-feature passes that have run since
+  2026-09-24. Those per-feature passes found real things (LOS sampled before the range gate; a
+  wedged-brain poll costing 5015 ms every cycle), but they only ever look at what one branch
+  touched.
+
+- [ ] **Per-module security review, same shape: findings to a document, document becomes a backlog
+  item.** User, 2026-09-25. Same reasoning and same module list. Note the standing scoping the
+  user set when re-enabling the role: single-user, LAN-only, under active development — so this is
+  a survey for real exposure, not a hardening audit. The per-feature pass has already found one
+  genuine item this way (a service binding all interfaces for no benefit), which is the argument
+  for doing it systematically.
+
+- [ ] **End-to-end latency measurement: where the time actually goes, and what would buy the most.**
+  User, 2026-09-25: *"what are the latencies what are the bottle necks, what would bring greatest
+  improvements?"* The whole chain, not one hop — PTT to recognised transcript, transcript to
+  dispatched command, perception poll to spoken callout, escalation to brain reply. **This has
+  never been measured end to end**; what exists is scattered and single-hop (whisper's own bench,
+  the brain-layer model measurements, `describe_position`'s p99, the 5 Hz poll budget).
+
+  The deliverable the user asked for is specifically the *ranking* — not a table of numbers but
+  which single change would buy the most. Worth stating because a measurement pass that produces
+  only numbers answers a different question than the one asked.
+
 - [ ] **The knowledge graph was rebuilt under the OLD graphify node-ID format — the next rebuild
   needs `graphify extract --force`.** Added 2026-09-24, and this will fail silently if missed.
   The `/graph-refresh` on 2026-09-24 (3287 nodes, 5829 edges) used the extraction spec's
