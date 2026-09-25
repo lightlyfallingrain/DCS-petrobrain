@@ -11,14 +11,19 @@ explicitly."""
 from __future__ import annotations
 
 import math
+import socket
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass
+from typing import Self
 
 import pytest
 
 from aircraft_client import AircraftLayerError
 from belief import enrichment as enrichment_module
 from belief.audio_client import AudioAdapterError
+from belief.brain_client import BrainLayerClient
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
 from belief.crew_console import (
@@ -335,6 +340,30 @@ def _two_ambiguous_bmp_contacts() -> ContactStore:
     return store
 
 
+def _make_because_valid_for_d10(
+    console: CrewConsole, utterance_id: str, because: str
+) -> None:
+    """`belief.brain_reply.validate_brain_reply` (D10) requires a `PICK`
+    reply's `BECAUSE` words to appear both in the escalated transcript
+    and in the chosen candidate's own `why` text. "watch that bmp" (the
+    deterministic grammar's own ambiguity trigger for
+    `_two_ambiguous_bmp_contacts`) carries no word that discriminates
+    `BMP-1` from `BMP-2` by construction -- `belief.utterance.
+    _resolve_reference` matches the *entire* filler-stripped reference as
+    one substring, so a reference specific enough to discriminate (e.g.
+    "BMP-1") would resolve unambiguously and never escalate at all.
+    Stands in for what a live pilot utterance naming the specific vehicle
+    would have looked like, without re-running `parse_utterance` (which
+    would collapse the ambiguity), by directly extending this console's
+    own tracked transcript for the already-pending escalation."""
+    started_sim, parse, _transcript = console._pending_escalations[utterance_id]
+    console._pending_escalations[utterance_id] = (
+        started_sim,
+        parse,
+        f"watch that bmp, the {because}",
+    )
+
+
 def test_drain_brain_speaks_stand_by_once_at_the_threshold() -> None:
     """`plans/brain-layer/plan.md` D8, and the plan's own Stage 1
     acceptance criterion: "stand by" is spoken once, not repeatedly, once
@@ -379,6 +408,8 @@ def test_drain_brain_pick_contact_deleted_during_delay_yields_lost_him() -> None
     assert len(brain_client.payloads) == 1
     utterance_id = brain_client.payloads[0].utterance_id
 
+    _make_because_valid_for_d10(console, utterance_id, "BMP-1")
+
     # The contact is lost (object-permanence prune, or simply gone from a
     # fresh store in this test) before the brain's reply lands.
     del store._contacts[contact_id]
@@ -389,7 +420,7 @@ def test_drain_brain_pick_contact_deleted_during_delay_yields_lost_him() -> None
             kind="pick",
             t_sim=0.0,
             contact_id=contact_id,
-            because="the one by the village",
+            because="BMP-1",
         )
     ]
     lines = console.drain_brain(now_sim=1.0)
@@ -410,6 +441,7 @@ def test_drain_brain_pick_contact_present_acts_and_reads_back() -> None:
 
     console.handle_line("watch that bmp", now_sim=0.0)
     utterance_id = brain_client.payloads[0].utterance_id
+    _make_because_valid_for_d10(console, utterance_id, "BMP-1")
 
     brain_client.replies_to_return = [
         BrainReply(
@@ -417,7 +449,7 @@ def test_drain_brain_pick_contact_present_acts_and_reads_back() -> None:
             kind="pick",
             t_sim=0.0,
             contact_id=contact_id,
-            because="the one by the village",
+            because="BMP-1",
         )
     ]
     lines = console.drain_brain(now_sim=1.0)
@@ -600,6 +632,111 @@ def test_drain_brain_poll_failure_is_logged_and_continues() -> None:
 
     console = CrewConsole(store=ContactStore(), brain_client=_RaisingBrainClient())
     assert console.drain_brain(now_sim=1.0) == []
+
+
+class _WedgedBrainServer:
+    """A TCP listener that accepts every connection and never answers it
+    -- the "up but wedged" brain process
+    `plans/brain-layer/performance-review.md` measured (5015ms per
+    `poll_replies()` call, every call, no backoff, ~83% tick-rate loss on
+    the shared crew-text poll thread). Own copy of `test_brain_client.
+    _WedgedServer` (test files in this project are self-contained, no
+    shared `conftest.py` helper for this yet) -- raw `socket`, not
+    `http.server`, so nothing can accidentally answer the request."""
+
+    def __init__(self) -> None:
+        self._sock: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._accepted: list[socket.socket] = []
+
+    def __enter__(self) -> Self:
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(5)
+        self._sock.settimeout(0.2)
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+        return self
+
+    def _accept_loop(self) -> None:
+        assert self._sock is not None
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._sock.accept()
+            except (TimeoutError, OSError):
+                continue
+            self._accepted.append(conn)  # kept open, never read or written
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        assert self._thread is not None
+        self._thread.join(timeout=2)
+        for conn in self._accepted:
+            conn.close()
+        assert self._sock is not None
+        self._sock.close()
+
+    @property
+    def base_url(self) -> str:
+        assert self._sock is not None
+        port = self._sock.getsockname()[1]
+        return f"http://127.0.0.1:{port}"
+
+
+def test_drain_brain_tick_rate_unaffected_by_a_wedged_brain() -> None:
+    """User direction, 2026-09-25: "brain must not block any other
+    functionality... if thinking takes time, other things happen
+    meanwhile." Proves the actual acceptance criterion end to end through
+    `CrewConsole.drain_brain` against a real (if fake) HTTP-level wedge --
+    not just `BrainLayerClient.poll_replies()`'s own unit-level guarantee
+    (`test_brain_client.py`) -- since `drain_brain` is what the shared
+    crew-text poll thread actually calls once per tick alongside
+    `drain_events`/`_poll_f10_commands`/`_poll_transcripts`. Before the
+    fix, this exact scenario cost 5015ms per call, every call."""
+    with _WedgedBrainServer() as server:
+        brain_client = BrainLayerClient(base_url=server.base_url, poll_timeout_s=5.0)
+        console = CrewConsole(store=ContactStore(), brain_client=brain_client)
+
+        start = time.monotonic()
+        for i in range(20):
+            assert console.drain_brain(now_sim=float(i)) == []
+        elapsed = time.monotonic() - start
+
+        # 20 ticks against a wedged brain, well under one old-design
+        # single-call timeout (5s) -- each `drain_brain` call only ever
+        # drains a local buffer, it never itself waits on the network.
+        assert elapsed < 1.0
+
+
+def test_drain_events_not_gated_by_an_in_flight_escalation() -> None:
+    """User direction, 2026-09-25: "while the model is thinking, everything
+    else must keep running and keep being spoken -- contact reports, watch
+    reporting, callouts. The brain being mid-decision must never gate
+    speech." Proves it directly: with a real escalation outstanding
+    (`_pending_escalations` non-empty, no reply has landed yet), a queued
+    lifecycle event still speaks normally through `drain_events` -- nothing
+    in `_print`/`CalloutScheduler` reads escalation state at all (confirmed
+    by inspection), pinned here as a regression guard rather than left
+    implicit."""
+    store = ContactStore()
+    brain_client = _CapturingBrainClient()
+    console = CrewConsole(store=store, brain_client=brain_client)
+
+    # An outstanding escalation the brain has not yet answered.
+    console.handle_line("should we go north of the ridge?", now_sim=0.0)
+    assert len(brain_client.payloads) == 1
+    assert console._pending_escalations  # genuinely still outstanding
+
+    # A contact is detected while that escalation is still pending.
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, classification_raw="BMP-2")],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+
+    spoken = console.drain_events(now_sim=0.0)
+    assert spoken == ["BMP-2."]
 
 
 def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -> None:

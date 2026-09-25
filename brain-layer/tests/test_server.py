@@ -142,6 +142,60 @@ def test_escalate_returns_202_immediately_even_with_a_slow_decider() -> None:
         thread.join(timeout=5)
 
 
+class _HangingDecider:
+    """A `Decider` that never returns -- stands in for a wedged Ollama
+    daemon (`plans/brain-layer/performance-review.md`'s second finding)
+    without an actual model dependency. `time.sleep` rather than a real
+    blocking network call, but the effect on `_run_job` is identical:
+    `decide()` simply never comes back on its own."""
+
+    def decide(self, payload: dict[str, Any]) -> dict[str, Any]:
+        time.sleep(100.0)
+        return {"kind": "ask"}  # pragma: no cover -- never reached
+
+
+def test_decider_timeout_drops_the_job_without_blocking_new_escalations() -> None:
+    """The pre-Stage-2 prerequisite this bounds: a `Decider.decide()` call
+    that never returns must not leak an unbounded per-utterance wait.
+    `decide_timeout_s` is set far below the decider's own (simulated)
+    hang, so the job is dropped (no reply ever reaches `/replies/poll`)
+    and, critically, a *later* escalation is still handled promptly --
+    proving the timed-out worker's own daemon thread actually returned
+    rather than piling up behind the hang."""
+    server = BrainLayerServer(
+        _HangingDecider(), host="127.0.0.1", port=0, decide_timeout_s=0.2
+    )
+    server.open()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _body = _post(
+            server,
+            "/escalate",
+            {"utterance_id": "U1", "t_sim": 100.0, "partial_parse": {}},
+        )
+        assert status == 202
+
+        time.sleep(0.6)  # well past decide_timeout_s
+        _status, replies = _get(server, "/replies/poll")
+        assert replies == []  # dropped, never published
+
+        # A second escalation, posted after the first has already timed
+        # out, must still be accepted promptly.
+        start = time.monotonic()
+        status2, _body2 = _post(
+            server,
+            "/escalate",
+            {"utterance_id": "U2", "t_sim": 101.0, "partial_parse": {}},
+        )
+        elapsed = time.monotonic() - start
+        assert status2 == 202
+        assert elapsed < 0.5
+    finally:
+        server.close()
+        thread.join(timeout=5)
+
+
 def test_superseded_job_reply_is_discarded_not_delivered() -> None:
     """D3: 'the abandoned job's reply is discarded ... when it lands.'
     U1's decider call is still sleeping when U2 supersedes it; once both
