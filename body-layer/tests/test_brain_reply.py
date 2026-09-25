@@ -141,6 +141,38 @@ def test_unable_with_an_unrecognised_reason_degrades() -> None:
     assert result.kind == "ask"
 
 
+def test_pick_because_survives_the_exact_quoting_a_real_model_produces() -> None:
+    """The composition regression test neither this file nor
+    `brain-layer/tests/test_decider.py` had on its own (found by the
+    Stage 2 review, `plans/brain-layer/review.md`): each side only ever
+    fed `validate_brain_reply` hand-typed, already-unquoted evidence, and
+    `decider.py`'s own tests asserted the *quoted* output as correct --
+    so nobody ever checked what a real model's natural completion habit
+    (mirroring this prompt's own `Pilot said: "..."` rendering) does to
+    this validator.
+
+    `because` here is exactly `decider._unquote`'s fixed output for the
+    model's real reply `PICK CONTACT_7 BECAUSE "near Gemerek"` --
+    unquoted *before* it ever reaches this module, per D10's own module
+    docstring ("the wire format between this process and body-layer" is
+    already-structured JSON, not free model text). Before that upstream
+    fix, this exact `because` value arrived as `'"near Gemerek"'` and
+    degraded a genuinely correct `PICK` to a spurious `ASK`, since the
+    quote characters are not a substring of the transcript."""
+    parse = _parse(_TWO_T72_CANDIDATES)
+    reply = BrainReply(
+        utterance_id="U1",
+        kind="pick",
+        t_sim=100.0,
+        contact_id="CONTACT_7",
+        because="near Gemerek",
+    )
+    result = validate_brain_reply(
+        reply, parse, "keep an eye on the tank near Gemerek", _TOKENS
+    )
+    assert result == reply
+
+
 def test_ask_always_passes_unchanged() -> None:
     parse = _parse(_TWO_T72_CANDIDATES)
     reply = BrainReply(utterance_id="U1", kind="ask", t_sim=100.0)

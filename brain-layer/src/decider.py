@@ -137,6 +137,49 @@ _ASK_RE = re.compile(r"^\s*ASK\s*$", re.IGNORECASE)
 _CONFIRM_RE = re.compile(r"^\s*CONFIRM\s+(\S+)\s*$", re.IGNORECASE)
 _UNABLE_RE = re.compile(r"^\s*UNABLE\s*$", re.IGNORECASE)
 
+#: Quote characters the model wraps its `BECAUSE` evidence in, stripped by
+#: `_unquote` below. Straight and typographic pairs both appear -- a model
+#: that has read prose produces the latter.
+_QUOTE_PAIRS: tuple[tuple[str, str], ...] = (
+    ('"', '"'),
+    ("'", "'"),
+    ("“", "”"),
+    ("‘", "’"),
+)
+
+
+def _unquote(words: str) -> str:
+    """Strip one matched pair of surrounding quotes from a `PICK ...
+    BECAUSE <words>` reply's evidence.
+
+    **Not cosmetic -- without this, no `PICK` can ever pass D10's
+    verbatim-quote check, whatever the model says.**
+    `prompts.DISCRIMINATE_PROMPT` renders the transcript as `Pilot said:
+    "..."`, so the model mirrors that quoting and answers `PICK CONTACT_7
+    BECAUSE "near Gemerek"`. `belief.brain_reply`'s first rule then tests
+    whether the evidence appears verbatim in the transcript -- and the
+    transcript contains `near Gemerek`, never `"near Gemerek"`. The quote
+    characters alone reject it, independently of whether the model chose
+    a genuinely discriminating word (found live, reviewer session
+    2026-09-25 -- reproduced directly against the installed code, not
+    merely read).
+
+    Deliberately strips only *one matched pair*, and only when the string
+    both starts and ends with it: evidence that legitimately contains a
+    quote mid-string is left alone, and an unbalanced quote is left for
+    D10 to reject rather than silently repaired here -- repairing it
+    would be this parser guessing at intent, which is exactly what the
+    "structural parse only" rule forbids."""
+    stripped = words.strip()
+    for opening, closing in _QUOTE_PAIRS:
+        if (
+            len(stripped) >= 2
+            and stripped.startswith(opening)
+            and stripped.endswith(closing)
+        ):
+            return stripped[1:-1].strip()
+    return stripped
+
 
 def _parse_discriminate_reply(raw: str) -> dict[str, Any]:
     """Parses a model's raw text answer to `prompts.DISCRIMINATE_PROMPT`
@@ -147,11 +190,12 @@ def _parse_discriminate_reply(raw: str) -> dict[str, Any]:
     validator applies to a semantically-invalid reply (this function only
     handles *syntactic* parsing; D10's own membership/verbatim-quote
     checks run body-side, on the structured dict this function
-    produces)."""
+    produces). `because` is passed through `_unquote` -- see that
+    function's own docstring for why this is required, not optional."""
     pick_match = _PICK_BECAUSE_RE.match(raw)
     if pick_match is not None:
         contact_id, because = pick_match.groups()
-        return {"kind": "pick", "contact_id": contact_id, "because": because.strip()}
+        return {"kind": "pick", "contact_id": contact_id, "because": _unquote(because)}
     if _ASK_RE.match(raw) is not None:
         return {"kind": "ask"}
     return {"kind": "ask"}

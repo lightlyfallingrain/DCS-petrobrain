@@ -536,3 +536,118 @@ runs the stub); its comment now says how to pass `--decider ollama` through
   live-Ollama smoke test (`--decider ollama` against the real
   `qwen3:4b-instruct-2507-q4_K_M`) is still worth doing before Stage 4's
   live sortie, but was not done here.
+
+---
+
+## Folding in the duplicate branch
+
+**2026-09-25, user direction.** BR-1 Stage 2 was implemented twice, independently, by two sessions
+that did not know about each other: this branch (`feature/brain-layer-stage2`, commits `35e6de0` +
+`dc0fa08`'s review) and an older one, `feature/br1-stage2` (commits `3fc8dc1`, `0f2f33c`, `fb30dfe`,
+`bee408b`). The user's direction was explicit: **keep this branch as base, fold the older branch's
+real work into it, then retire the older branch.** Worth recording here, not just in a commit
+message, because "one milestone, two implementations" is exactly the kind of drift the next person
+should be able to find without archaeology.
+
+**Why this branch stayed base, not the other one.** The two took different approaches to the pair
+of non-blocking prerequisites `performance-review.md` raised before Stage 2 could safely run a real
+model. `feature/br1-stage2`'s `3fc8dc1` ("Shorten brain-layer poll timeout") took the *shorter-timeout*
+fix — its own commit message concedes it is "the simpler fix" over the review's stated full fix. This
+branch instead moved `poll_replies()` onto a persistent background thread (mirroring `handle()`'s
+own shape) and bounded `Decider.decide()` with a `ThreadPoolExecutor` + `shutdown(wait=False)` off
+the HTTP request thread — the *structural* fix, verified by re-running the wedge tests against real
+raw-socket listeners (`plans/brain-layer/review.md`'s Stage 2 review, section 1). That was the
+deciding factor, not code volume or timing.
+
+**What was taken from `feature/br1-stage2`, and what was not:**
+
+1. **The Reviewer's required fix — BECAUSE-quote handling (`bee408b`, "Unquote the model's BECAUSE
+   evidence, and stop it quoting whole sentences").** Both halves still applied and were ported:
+   - **Unquoting.** `bee408b` put `_unquote`/`parse_discriminate_reply` in `brain-layer/src/
+     prompts.py`, because that branch's structure parses model replies in `prompts.py`. This
+     branch's structure differs — parsing lives in `brain-layer/src/decider.py`
+     (`_parse_discriminate_reply`), with `prompts.py` holding only the two prompt templates and
+     their `render_*` builders. Ported the *logic* (the same `_QUOTE_PAIRS`/`_unquote`
+     matched-single-pair-only, leave-unbalanced-alone behaviour, docstring included) into
+     `decider.py` rather than copying the file wholesale, to match this branch's own module
+     boundary rather than importing the other branch's.
+   - **Narrower BECAUSE instruction.** `bee408b`'s prompt wording change (stop the model quoting
+     the *entire* sentence; ask for the single distinguishing word/phrase instead) was ported into
+     this branch's `DISCRIMINATE_PROMPT` almost verbatim — the two branches' prompt wording
+     differed only in surrounding structure (`Pilot said: "..."` vs. `PILOT SAID: "..."`,
+     `Candidates:` vs. `CANDIDATES:`), not in the substance of this instruction, so this counts as
+     "the same fix," not a design choice.
+   - Also added, from `bee408b`'s own second contribution not explicitly named in the task but the
+     same D6-guarding class of fix: the "Reply with EXACTLY ONE line, nothing else, no explanation"
+     sharpening sentence at the top of both prompts — present in the older branch's prompts from
+     the start (its own module docstring: "terseness is load-bearing design... do not 'improve'
+     either prompt"), absent from this branch's. This is exactly the kind of formatting-tightness
+     D6 measured as load-bearing, so it was folded in as a genuine improvement, not left out as
+     out-of-scope.
+   - Two existing tests in this branch's `test_decider.py` (`test_parse_discriminate_reply_pick_
+     because`, `test_ollama_decider_candidates_present_calls_discriminate_prompt`) were asserting
+     the **buggy quoted output** as correct — exactly the failure mode `bee408b`'s own commit
+     message describes on the other branch ("two existing tests asserted the buggy output... they
+     were encoding the defect"). Fixed in place to assert the corrected unquoted value, not left
+     to rot alongside a passing suite that no longer matched reality.
+   - Added dedicated `_unquote` unit tests (matched straight/typographic pairs, mid-string quote
+     left alone, unbalanced quote left alone, no-op on unquoted text) — the older branch had these
+     in `test_prompts.py`; ported as their own tests in `test_decider.py` since that is where
+     `_unquote` now lives on this branch.
+   - **The composition regression test the task specifically asked for** — one neither branch had,
+     since each side only ever fed its own half hand-typed, already-correct evidence. Added
+     `test_pick_because_survives_the_exact_quoting_a_real_model_produces` to `body-layer/tests/
+     test_brain_reply.py`: it reproduces the reviewer's own trace (`plans/brain-layer/review.md`,
+     Stage 2 review §2) using the *fixed* `because` value `decider._unquote` now produces, and
+     asserts `validate_brain_reply` passes it through unchanged rather than degrading to `ASK`.
+     This does **not** import `brain-layer/` from `body-layer/tests/` — module independence
+     (`CLAUDE.md`'s "Module independence" rule; `body-layer/tests/test_brain_client.py`'s own
+     docstring already states body-layer's tests deliberately avoid importing `brain-layer/`, using
+     a fake stand-in server instead) forbids it, and no exception is warranted here. Instead the
+     composition is covered by two joined tests: `brain-layer/tests/test_decider.py`'s existing
+     (now-corrected) tests prove `OllamaDecider`'s real parse path produces the unquoted wire value
+     for a model reply that quotes its evidence; this new body-layer test proves *that exact value*
+     validates correctly. Together they are the composition that previously went unchecked — each
+     side's own tests independently, silently agreed on a value the other side had never actually
+     produced.
+
+2. **`brain-layer/tools/live_stage2_decider_check.py`** — ported, with source-path/URL details
+   adjusted to this branch's own conventions (`DEFAULT_PORT` 7796, matching `server.py`, rather than
+   the older branch's own port choice; header comment trimmed of the older branch's own measured-
+   numbers section, since those numbers were taken against that branch's own pre-fix prompt wording
+   and would be misleading carried over verbatim). This remains the one instrument for the
+   verification gap neither branch's implementer nor this folding pass could close: no sandbox here
+   has network access to a live Ollama daemon (`Notable Discoveries — Stage 2` above, and the Stage
+   2 review's own "on the live-Ollama gap" note), so nothing has actually run a real model against
+   these prompts. Recommended before Stage 4's live sortie, same as both branches already said.
+
+3. **`brain-layer/tests/test_prompts.py`** — this branch had none. Not a straight port: the older
+   branch's version tests `parse_discriminate_reply`/`parse_classify_reply`, which live in
+   `prompts.py` on that branch but in `decider.py` on this one (already covered by `test_decider.py`
+   there). Wrote a version scoped to what actually lives in this branch's `prompts.py` — the two
+   `render_*` builders and the module constants — including a dedicated assertion that the rendered
+   discriminate prompt actually carries the "NEVER quote the whole sentence" instruction (item 1
+   above), since that is the one property this file exists to guard against regressing silently.
+
+4. **`prompts.py` diff, more broadly** — the older branch's version is materially larger (~250 vs.
+   ~113 lines before this fold), almost entirely because of a much wider `CLASSIFY_COMMAND_VOCABULARY`
+   (43 tokens with a token->phrase mapping, covering every scan/report bearing and clock-hour token)
+   against this branch's curated 7-token, no-slot subset (`Notable Discoveries — Stage 2` above
+   explains why this branch deliberately narrowed it). **Judged as a scope difference, not a style
+   difference, and left alone** — task guidance was to keep this branch's structure wherever the two
+   "merely differ in style," and a 6x larger vocabulary the model can be offered is a real accuracy/
+   scope decision (more commands `CONFIRM` can ever name), not a wording choice. Revisit in a later
+   prompt-tuning pass (Stage 4) if the narrower vocabulary turns out to under-serve real sorties —
+   the body-side D10 validator being the real authority on legality either way means widening it
+   later costs nothing structurally.
+
+5. **Everything else in the older branch's diff** (`brain_client.py`'s poll-timeout shortening,
+   its own from-scratch `ollama_client.py`/`__main__.py`) — **not** taken, per the task's explicit
+   instruction and the reasoning in "Why this branch stayed base" above: this branch already solved
+   the same underlying problem structurally, and reverting to a timeout-only fix would be a
+   regression, not a merge.
+
+**Verification after folding**, run directly against this worktree, not inferred: `brain-layer/`
+44 passed (was 35 before this fold — the composition/prompt/unquote tests above account for the
++9); `body-layer/` 1289 passed, 4 xfailed (was 1288/4 — the one new composition test). Zero
+regressions either direction; ruff format/check and `mypy --strict` clean on both subprojects.

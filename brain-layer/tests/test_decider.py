@@ -9,6 +9,7 @@ from decider import (
     StubDecider,
     _parse_classify_reply,
     _parse_discriminate_reply,
+    _unquote,
     structural_unable_reason,
 )
 
@@ -79,15 +80,50 @@ def test_stub_decider_reply_override_wins_regardless_of_payload() -> None:
     assert result is not forced
 
 
+# --- _unquote ------------------------------------------------------------
+
+
+def test_unquote_strips_a_matched_straight_quote_pair() -> None:
+    assert _unquote('"village"') == "village"
+    assert _unquote("'village'") == "village"
+
+
+def test_unquote_strips_a_matched_typographic_quote_pair() -> None:
+    # A model that has read prose produces these -- not just straight
+    # ASCII quotes.
+    assert _unquote("“village”") == "village"
+    assert _unquote("‘village’") == "village"
+
+
+def test_unquote_leaves_a_mid_string_quote_alone() -> None:
+    # Only one *matched surrounding* pair is stripped -- evidence that
+    # legitimately contains a quote keeps it.
+    assert _unquote('the "big" one') == 'the "big" one'
+
+
+def test_unquote_leaves_an_unbalanced_quote_alone() -> None:
+    # Left for D10 to reject rather than silently repaired here --
+    # repairing it would be this parser guessing at intent.
+    assert _unquote('"unbalanced') == '"unbalanced'
+
+
+def test_unquote_no_quotes_is_a_no_op() -> None:
+    assert _unquote("near the village") == "near the village"
+
+
 # --- _parse_discriminate_reply / _parse_classify_reply -----------------
 
 
 def test_parse_discriminate_reply_pick_because() -> None:
+    """`because` is unquoted by `decider._unquote`: the discriminate
+    prompt renders the transcript as `Pilot said: "..."`, so the model
+    mirrors that quoting and D10 (body-side) compares the evidence
+    against a transcript that contains no quote characters at all."""
     result = _parse_discriminate_reply('PICK CONTACT_7 BECAUSE "near the village"')
     assert result == {
         "kind": "pick",
         "contact_id": "CONTACT_7",
-        "because": '"near the village"',
+        "because": "near the village",
     }
 
 
@@ -190,10 +226,12 @@ def test_ollama_decider_candidates_present_calls_discriminate_prompt() -> None:
     payload = _payload("set_attention", candidates)
     payload["transcript"] = "keep an eye on that tank near Gemerek"
     result = decider.decide(payload)
+    # `because` is unquoted by `decider._unquote` -- see
+    # `test_parse_discriminate_reply_pick_because`'s own docstring.
     assert result == {
         "kind": "pick",
         "contact_id": "CONTACT_7",
-        "because": '"near Gemerek"',
+        "because": "near Gemerek",
     }
     assert len(fake.calls) == 1
     prompt = fake.calls[0]["prompt"]
