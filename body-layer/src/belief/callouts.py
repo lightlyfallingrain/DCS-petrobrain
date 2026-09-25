@@ -71,6 +71,9 @@ from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_CLASSIFICATION_CHANGED,
     CONTACT_DETECTED,
+    CONTACT_ENGAGEMENT_CHANGED,
+    CONTACT_MOTION_CHANGED,
+    CONTACT_RANGE_CROSSED,
     CONTACT_REACQUIRED,
     Event,
     EventKind,
@@ -90,8 +93,43 @@ from belief.tools import acknowledge_event, describe_contact
 #: pre-scheduler `drain_events`, which round-tripped every kind through
 #: `route_event` regardless.
 _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
-    {CONTACT_DETECTED, CONTACT_REACQUIRED, CONTACT_CLASSIFICATION_CHANGED}
+    {
+        CONTACT_DETECTED,
+        CONTACT_REACQUIRED,
+        CONTACT_CLASSIFICATION_CHANGED,
+        CONTACT_MOTION_CHANGED,
+        CONTACT_RANGE_CROSSED,
+        CONTACT_ENGAGEMENT_CHANGED,
+    }
 )
+
+#: `plans/watch-reporting/plan.md` Decision 1 -- report kinds that only ever
+#: speak for a *watched* contact (`belief.attention.effective_attention` in
+#: `("watch", "priority")`), gated here at the speech layer rather than at
+#: emission: the underlying event fires and is logged for every contact
+#: regardless (see `belief.events`'s own docstring for `CONTACT_MOTION_
+#: CHANGED`), and whether it is ever *spoken* depends on attention at the
+#: moment `tick` considers it -- so a contact watched after its event fired
+#: still gets the callout. Also forced to always be a singleton group in
+#: `group_candidates` below, alongside `CONTACT_CLASSIFICATION_CHANGED` --
+#: these kinds render through `_contact_report_text`'s `event_clause`/`lead`
+#: affixes (`belief.speech`), which `render_group_report` has no concept of,
+#: so merging one into a multi-contact group would silently drop the very
+#: fact the event exists to report.
+_WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
+    {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, CONTACT_ENGAGEMENT_CHANGED}
+)
+
+#: Suppresses **all** watched-only speech about one contact, across kinds --
+#: `belief.events.EVENT_COOLDOWN_S`'s sibling but a different mechanism (see
+#: `plans/watch-reporting/plan.md` Decision 3's three-way comparison against
+#: `EVENT_COOLDOWN_S`/`CLASSIFICATION_CONTRADICTION_LOCKOUT_S`, which this
+#: docstring restates so the distinction lives next to the code, not only in
+#: the plan). A watched-only event that loses to this gate is added to
+#: `_consumed` and left unacknowledged -- **lost, not deferred**, the same
+#: cost `CALLOUT_MAX_AGE_S` expiry already accepts for every other kind.
+#: Uncalibrated placeholder, same debt class as `SPEECH_RATE_WPS` below.
+WATCH_REPORT_MIN_GAP_S: Final[float] = 8.0
 
 #: Shorter than both `EVENT_COOLDOWN_S` (15, `belief/events.py`) and
 #: `SCAN_CYCLE_PERIOD_S` (16, `perception/gaze.py`) -- so an expired
@@ -366,15 +404,20 @@ def group_candidates(
     `group_facts` cannot see either, since it only ever receives facts).
 
     `CONTACT_CLASSIFICATION_CHANGED` events are always singleton groups
-    (never aggregated). An event whose contact has since vanished is also
-    always a singleton group -- `CalloutScheduler.tick` discovers a
+    (never aggregated), as is any kind in `_WATCHED_ONLY_KINDS` (see that
+    constant's own docstring -- their `event_clause`/`lead` affixes have no
+    group-report equivalent). An event whose contact has since vanished is
+    also always a singleton group -- `CalloutScheduler.tick` discovers a
     vanished contact itself when it tries to render, this function only
     needs facts to bucket."""
     singles: list[Event] = []
     remaining: list[tuple[Event, dict[str, object]]] = []
 
     for event in events:
-        if event.kind == CONTACT_CLASSIFICATION_CHANGED:
+        if (
+            event.kind == CONTACT_CLASSIFICATION_CHANGED
+            or event.kind in _WATCHED_ONLY_KINDS
+        ):
             singles.append(event)
             continue
         result = describe_contact(
@@ -407,6 +450,12 @@ class CalloutScheduler:
 
     busy_until_sim: float = 0.0
     _consumed: set[str] = field(default_factory=set, repr=False)
+    #: `plans/watch-reporting/plan.md` Decision 3's fifth suppression
+    #: mechanism -- per-contact sim time a watched-only kind (`_WATCHED_
+    #: ONLY_KINDS`) was last actually spoken, keyed by `contact_id`, read
+    #: against `WATCH_REPORT_MIN_GAP_S` in `tick` below. Absent-not-null:
+    #: no entry means "never spoken yet."
+    _last_spoken_sim: dict[str, float] = field(default_factory=dict, repr=False)
 
     def note_urgent(self, now_sim: float, text: str) -> None:
         """An urgent (`bypass_gate=True`) line just went out through a path
@@ -490,6 +539,25 @@ class CalloutScheduler:
         for event in store.unacknowledged_events:
             if event.kind not in _TEMPLATED_KINDS or event.id in self._consumed:
                 continue
+            if event.kind in _WATCHED_ONLY_KINDS:
+                result = describe_contact(
+                    store, event.contact_id, now_sim, enrichment=enrichment
+                )
+                if result is None or result["facts"].get("attention") not in (
+                    "watch",
+                    "priority",
+                ):
+                    # Not watched (yet) -- skip without consuming, so a
+                    # contact watched later still gets this callout (see
+                    # `_WATCHED_ONLY_KINDS`'s own docstring).
+                    continue
+                last_spoken = self._last_spoken_sim.get(event.contact_id)
+                if (
+                    last_spoken is not None
+                    and now_sim - last_spoken < WATCH_REPORT_MIN_GAP_S
+                ):
+                    self._consumed.add(event.id)
+                    continue
             if now_sim - event.t_sim > CALLOUT_MAX_AGE_S:
                 self._consumed.add(event.id)
                 continue
@@ -529,6 +597,9 @@ class CalloutScheduler:
             self.busy_until_sim = (
                 now_sim + estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S
             )
+            for event in group:
+                if event.kind in _WATCHED_ONLY_KINDS:
+                    self._last_spoken_sim[event.contact_id] = now_sim
             return [text]
 
         return []

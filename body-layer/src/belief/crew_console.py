@@ -97,6 +97,7 @@ from belief.speech import (
     render_disambiguation,
     render_group_report,
     render_lost_contact,
+    render_no_contact,
     render_no_view,
     render_readback,
     render_report,
@@ -208,8 +209,18 @@ _RELATIVE_SCAN_LABELS: dict[RelativeSector, str] = {
 #: `object_model` because "which classes a *crew command* treats as air
 #: defence" is a command-vocabulary question, not a property of the object
 #: model -- a future `watch armour` would add its own set the same way.
+#:
+#: **`OP_LRSAM` was missing here until 2026-09-24**, so "watch nearest air
+#: defence" silently could not select an S-300 -- the one emitter the vision
+#: calibration found visible out to 8.89 km, i.e. the single contact this
+#: command most needed to return. The omission was drift, not a decision:
+#: this set was written when `object_model`'s profile table genuinely had no
+#: long-range SAM entry, and the comment above ("exactly the air-defence
+#: entries in `perception.object_model`") stayed true only until that table
+#: gained one. A set enumerated by hand against another module's contents
+#: has no mechanism to notice when that module grows.
 _AIR_DEFENCE_OP_CLASSES: frozenset[str] = frozenset(
-    {"OP_SPAAG", "OP_ZU23", "OP_SRSAM", "OP_MRSAM"}
+    {"OP_SPAAG", "OP_ZU23", "OP_SRSAM", "OP_MRSAM", "OP_LRSAM"}
 )
 
 #: The classification lattice levels at which an air-defence claim is
@@ -217,6 +228,89 @@ _AIR_DEFENCE_OP_CLASSES: frozenset[str] = frozenset(
 #: SpecificityLevel`'s `CLASS` and `TYPE`, lowercased as
 #: `tools._classification_facts` reports them.
 _KNOWN_CLASS_LEVELS: frozenset[str] = frozenset({"class", "type"})
+
+#: `_resolve_follow_target`'s descriptor -> `OP_*` class map (`plans/
+#: watch-reporting/plan.md` Decision 2b-ii) -- `audio_adapter.vocabulary.
+#: DESCRIPTOR_WORDS`'s hand-synced mirror on this side of the seam
+#: (module independence -- body-layer cannot import `audio-adapter`).
+#: `"sam"` maps to all three tiers deliberately: the descriptor vocabulary
+#: is deliberately coarser than `speech._OP_CLASS_DISPLAY`'s three spoken
+#: SAM words (Decision 4c's own finding that the `OP_SRSAM` bucket alone
+#: spans a 4x range), since a pilot saying "follow SAM" has not yet
+#: resolved which tier it is -- that is exactly what `follow` is for.
+#: `"group"` is deliberately absent here -- it is not a classification
+#: match at all, see `_descriptor_score`'s own `"group"` branch.
+_FOLLOW_DESCRIPTOR_OP_CLASSES: dict[str, frozenset[str]] = {
+    "armor": frozenset({"OP_ARMORED"}),
+    "truck": frozenset({"OP_TRUCK"}),
+    "infantry": frozenset({"OP_INFANTRY"}),
+    "sam": frozenset({"OP_SRSAM", "OP_MRSAM", "OP_LRSAM"}),
+    "aaa": frozenset({"OP_SPAAG", "OP_ZU23"}),
+    "ship": frozenset({"OP_SHIP"}),
+}
+
+#: **Every weight and both thresholds below are guesses, uncalibrated in
+#: the same way `callouts.SPEECH_RATE_WPS` is** (`plans/watch-reporting/
+#: plan.md` Decision 2b-iii's own framing). `_resolve_follow_target` is a
+#: stopgap for a brain-layer capability the user named explicitly -- when
+#: free-text targeting arrives, delete the resolver and these constants
+#: with it; do not tune them as if they modelled anything real.
+W_FOLLOW_DESC_UNKNOWN: Final[float] = 1.0
+W_FOLLOW_DESC_WRONG: Final[float] = 10.0
+W_FOLLOW_CLOCK: Final[float] = 0.6
+W_FOLLOW_RANGE: Final[float] = 0.3
+#: Sized so a *maximal* single-qualifier miss can clear it on its own --
+#: `W_FOLLOW_CLOCK`'s worst case (opposite clock, delta 6) is `3.6`, just
+#: over this floor, so "follow two o'clock" against a contact sitting at
+#: eight o'clock alone is refused rather than matched on a coin flip. A
+#: `W_FOLLOW_DESC_WRONG` mismatch (10.0) always refuses alone, by a wide
+#: margin -- deliberately, since a known-wrong class is a hard signal,
+#: unlike an uncertain clock estimate (Decision 2b-iii's own "a pilot's
+#: eyeball estimate of which hour it sits in is routinely an hour out").
+FOLLOW_MATCH_FLOOR: Final[float] = 3.0
+FOLLOW_SEPARATION: Final[float] = 0.5
+
+#: `_parse_follow_slots_for_harness`'s own small word tables -- a
+#: dev-aid-only mirror of `audio_adapter.vocabulary`'s real
+#: `_CLOCK_WORDS`/`_RANGE_NUMBER_WORDS`/unit-word set, narrower and
+#: unexported: this harness exists to tune `_resolve_follow_target`'s
+#: weights without a redeploy, not to reproduce recognition-grade parsing.
+_FOLLOW_HARNESS_CLOCK_WORDS: dict[str, int] = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+}
+_FOLLOW_HARNESS_RANGE_WORDS: dict[str, int] = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+_FOLLOW_HARNESS_RANGE_UNIT_WORDS: frozenset[str] = frozenset(
+    {"km", "kilometre", "kilometres", "kilometer", "kilometers", "klick", "klicks"}
+)
 
 
 _BEARING_SCAN_TOKENS: dict[str, Sector] = {
@@ -313,6 +407,16 @@ _BEARING_REPORT_TOKENS: dict[str, Sector] = {
 REPORT_MAX_GROUPS: Final[int] = 3
 
 
+def _clock_delta(a: int, b: int) -> int:
+    """Circular distance between two 1-12 clock positions, e.g.
+    `_clock_delta(12, 1) == 1`, `_clock_delta(3, 9) == 6` --
+    `belief.callouts._clock_diff`'s twin (that one is module-private to
+    `callouts.py`), used by `_resolve_follow_target`'s clock scoring
+    term."""
+    diff = abs(a - b) % 12
+    return min(diff, 12 - diff)
+
+
 def _nearest_sector(degrees: int) -> Sector:
     """Quantises an absolute bearing onto the nearest of the eight
     compass `Sector`s (`plans/voice-command-completeness/plan.md` Decision
@@ -348,7 +452,9 @@ _TOKEN_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) -> str:
+def _describe_token_for_confirm(
+    token: str, slots: dict[str, int | str] | None = None
+) -> str:
     """A plain human phrase for `token`, for `belief.speech.
     render_confirm_request`'s `description` argument (Stage 2,
     `plans/inbound-speech/plan.md`, extended by `plans/
@@ -366,8 +472,8 @@ def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) 
     expose a misunderstanding, and repeating the raw number while the
     dispatch itself acts on a coarser bucket would hide the only
     discrepancy worth hearing, the same reasoning `render_scan_readback`'s
-    own call site already follows. `bearing_degrees` is only consulted for
-    those two tokens; every other token ignores it."""
+    own call site already follows. `slots["bearing_degrees"]` is only
+    consulted for those two tokens; every other token ignores it."""
     if token in _RELATIVE_SCAN_TOKENS:
         return f"scan {_RELATIVE_SCAN_LABELS[_RELATIVE_SCAN_TOKENS[token]]}"
     if token in _BEARING_SCAN_TOKENS:
@@ -380,9 +486,21 @@ def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) 
     if token in _CLOCK_SCAN_TOKENS:
         clock = _CLOCK_SCAN_TOKENS[token]
         return f"scan {_CLOCK_REPORT_LABELS[clock]} o'clock"
-    if (
-        token in ("scan_bearing_deg", "report_bearing_deg")
-        and bearing_degrees is not None
+    if token == "follow":
+        parts: list[str] = []
+        follow_descriptor = slots.get("descriptor") if slots is not None else None
+        follow_clock = slots.get("clock") if slots is not None else None
+        follow_range_km = slots.get("range_km") if slots is not None else None
+        if isinstance(follow_descriptor, str):
+            parts.append(follow_descriptor)
+        if isinstance(follow_clock, int):
+            parts.append(f"{_CLOCK_REPORT_LABELS[follow_clock]} o'clock")
+        if isinstance(follow_range_km, int):
+            parts.append(f"{follow_range_km} km")
+        return f"follow {' '.join(parts)}" if parts else "follow"
+    bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
+    if token in ("scan_bearing_deg", "report_bearing_deg") and isinstance(
+        bearing_degrees, int
     ):
         sector = _nearest_sector(bearing_degrees)
         verb = "scan" if token == "scan_bearing_deg" else "report"
@@ -397,7 +515,7 @@ def _describe_token_for_confirm(token: str, bearing_degrees: int | None = None) 
 #: `cancel_nevermind`/`say_again` (handled above `handle_command` entirely,
 #: per the module docstring -- this method never even sees those three
 #: tokens) and `scan_bearing_deg`/`report_bearing_deg` are included even
-#: though a missing `bearing_degrees` argument degrades them to a "say
+#: though a missing `slots["bearing_degrees"]` degrades them to a "say
 #: again" line rather than raising, matching every other graceful-
 #: degradation branch in this class. `test_crew_console.py` asserts every
 #: member of this set returns a non-empty result from `handle_command`.
@@ -413,6 +531,7 @@ DISPATCHED_COMMAND_TOKENS: frozenset[str] = frozenset(
         "report_all",
         "watch_nearest",
         "watch_nearest_air_defence",
+        "follow",
         "cancel_task",
         "cancel_scan",
         "cancel_watch",
@@ -760,7 +879,10 @@ class CrewConsole:
         self.commands_handled += 1
 
     def handle_command(
-        self, token: str, now_sim: float, bearing_degrees: int | None = None
+        self,
+        token: str,
+        now_sim: float,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
         """Dispatches one player-issued command token -- originally F10
         radio-menu selections only (`plans/f10-crew-commands/plan.md`),
@@ -785,6 +907,9 @@ class CrewConsole:
         nothing was indistinguishable, from the cockpit, from not having
         been heard at all."""
         self._note_player_command()
+        bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
+        if not isinstance(bearing_degrees, int):
+            bearing_degrees = None
         if token in _RELATIVE_SCAN_TOKENS:
             relative_sector = _RELATIVE_SCAN_TOKENS[token]
             lines = self._handle_scan(
@@ -816,6 +941,8 @@ class CrewConsole:
             lines = self._handle_watch_nearest(now_sim)
         elif token == "watch_nearest_air_defence":
             lines = self._handle_watch_nearest(now_sim, air_defence_only=True)
+        elif token == "follow":
+            lines = self._handle_follow(now_sim, slots)
         elif token == "cancel_task":
             lines = self._handle_cancel_task()
         elif token == "cancel_scan":
@@ -948,6 +1075,171 @@ class CrewConsole:
                 if air_defence_only
                 else "no contact to watch"
             ]
+        if self.tasks is not None:
+            task = watch_contact_task(
+                self.store, self.tasks, contact_id, now_sim, source="player"
+            )
+            found = task is not None
+        else:
+            found = set_attention(self.store, contact_id, "watch", source="player")
+        result = describe_contact(
+            self.store, contact_id, now_sim, enrichment=self.enrichment
+        )
+        if not found or result is None:
+            return [f"no such contact: {contact_id}"]
+        return [render_watch_nearest_readback(result["facts"]).text]
+
+    def _descriptor_score(self, descriptor: str, facts: dict[str, object]) -> float:
+        """The descriptor term of `_resolve_follow_target`'s score --
+        `"group"` reads `facts["cardinality"]` (the user's own example
+        word, `cardinality.lo > 1`), every other descriptor reads the
+        classification lattice through `_FOLLOW_DESCRIPTOR_OP_CLASSES`.
+        `0.0` on an exact match, `W_FOLLOW_DESC_UNKNOWN` when the contact
+        is presence-level/unclassified (Decision 2b-iii: "he is pointing
+        at a thing he *believes* is armour -- matching it is right"),
+        `W_FOLLOW_DESC_WRONG` when it is a *different*, known class."""
+        if descriptor == "group":
+            cardinality = facts.get("cardinality")
+            if isinstance(cardinality, dict):
+                lo = cardinality.get("lo")
+                if isinstance(lo, int) and lo > 1:
+                    return 0.0
+            return W_FOLLOW_DESC_WRONG
+        classification = facts.get("classification")
+        if not isinstance(classification, dict):
+            return W_FOLLOW_DESC_UNKNOWN
+        level = classification.get("level")
+        if not isinstance(level, str) or level not in _KNOWN_CLASS_LEVELS:
+            return W_FOLLOW_DESC_UNKNOWN
+        value = classification.get("value")
+        if not isinstance(value, str):
+            return W_FOLLOW_DESC_UNKNOWN
+        if parent_class_of(value) in _FOLLOW_DESCRIPTOR_OP_CLASSES.get(
+            descriptor, frozenset()
+        ):
+            return 0.0
+        return W_FOLLOW_DESC_WRONG
+
+    def _resolve_follow_target(
+        self,
+        now_sim: float,
+        descriptor: str | None,
+        clock: int | None,
+        range_km: int | None,
+    ) -> tuple[str | None, list[str]]:
+        """`plans/watch-reporting/plan.md` Decision 2b-iii's scoring
+        resolver -- **a stopgap for the brain layer, not a model of
+        anything** (the user's own framing, 2026-09-24: "this really
+        needs the brain so I can freetext tell which contact to
+        follow"). Delete this, do not extend it, once free-text
+        targeting exists; its weights are guesses standing in for
+        comprehension.
+
+        Candidate set is `_handle_report`'s own (`belief.tools.
+        get_contacts`, drop `certainty == "lost"`, drop anything with no
+        `relative_now`). Score is `(descriptor, clock, range)`, all
+        optional and additive, lower is better -- ties within
+        `FOLLOW_SEPARATION` are broken by nearer range rather than asked
+        about (a confirm round trip costs seconds while the pilot is
+        pointing at something *now*; `cancel watch` + re-issue is one
+        utterance if the pick is wrong). Returns `(contact_id, [])` on a
+        win, or `(None, [<line to speak>])` when nothing clears
+        `FOLLOW_MATCH_FLOOR` or no candidate exists at all."""
+        assert self.enrichment is not None
+        candidates: list[dict[str, object]] = []
+        for result in get_contacts(self.store, now_sim, enrichment=self.enrichment):
+            facts = result["facts"]
+            if facts.get("certainty") == "lost":
+                continue
+            if not isinstance(facts.get("relative_now"), dict):
+                continue
+            candidates.append(facts)
+
+        if not candidates:
+            return None, ["no contact to watch"]
+
+        def _score(facts: dict[str, object]) -> float:
+            total = 0.0
+            relative_now = facts.get("relative_now")
+            assert isinstance(relative_now, dict)
+            if descriptor is not None:
+                total += self._descriptor_score(descriptor, facts)
+            if clock is not None:
+                actual_clock = relative_now["clock_position"]
+                assert isinstance(actual_clock, int)
+                total += _clock_delta(clock, actual_clock) * W_FOLLOW_CLOCK
+            if range_km is not None:
+                actual_range_m = relative_now["range_m"]
+                assert isinstance(actual_range_m, float)
+                total += abs(range_km - actual_range_m / 1000.0) * W_FOLLOW_RANGE
+            return total
+
+        scored = sorted(
+            ((_score(facts), facts) for facts in candidates), key=lambda item: item[0]
+        )
+        best_score, best_facts = scored[0]
+        if best_score > FOLLOW_MATCH_FLOOR:
+            only_clock = descriptor is None and range_km is None and clock is not None
+            if only_clock:
+                assert clock is not None
+                label = f"{_CLOCK_REPORT_LABELS[clock]} o'clock"
+                return None, [render_no_contact(label).text]
+            return None, [render_no_contact().text]
+
+        winner = best_facts
+        tied = [
+            facts for score, facts in scored if score - best_score < FOLLOW_SEPARATION
+        ]
+        if len(tied) > 1:
+            # Decision 2b-iii: ties prefer the nearer contact, never ask.
+            def _range_m(facts: dict[str, object]) -> float:
+                relative_now = facts.get("relative_now")
+                assert isinstance(relative_now, dict)
+                range_m = relative_now["range_m"]
+                assert isinstance(range_m, float)
+                return range_m
+
+            winner = min(tied, key=_range_m)
+
+        contact_id = winner["id"]
+        assert isinstance(contact_id, str)
+        return contact_id, []
+
+    def _handle_follow(
+        self, now_sim: float, slots: dict[str, int | str] | None
+    ) -> list[str]:
+        """`follow [<descriptor>] [<clock> o'clock] [<n> km]` -- resolves
+        via `_resolve_follow_target` and, on a win, watches exactly the
+        same way `_handle_watch_nearest` does (a cancellable task when
+        `self.tasks` is configured, a bare `set_attention` otherwise),
+        with the identical readback (`render_watch_nearest_readback`) --
+        the player named no id either way, so the two commands describe
+        their winner identically."""
+        descriptor = slots.get("descriptor") if slots is not None else None
+        clock = slots.get("clock") if slots is not None else None
+        range_km = slots.get("range_km") if slots is not None else None
+        if not isinstance(descriptor, str):
+            descriptor = None
+        if not isinstance(clock, int):
+            clock = None
+        if not isinstance(range_km, int):
+            range_km = None
+        if descriptor is None and clock is None and range_km is None:
+            # A malformed/empty-slots call -- unreachable from a real
+            # `follow` match (the matcher never returns `token="follow"`
+            # with `slots=None`), but a defensive, request-shape check
+            # that comes before the environment check below, since "you
+            # asked for nothing" is true regardless of what is configured.
+            return ["say again -- follow needs at least one of what/where/how far"]
+        if self.enrichment is None:
+            return ["no world-model connection configured"]
+
+        contact_id, no_match_lines = self._resolve_follow_target(
+            now_sim, descriptor, clock, range_km
+        )
+        if contact_id is None:
+            return no_match_lines
+
         if self.tasks is not None:
             task = watch_contact_task(
                 self.store, self.tasks, contact_id, now_sim, source="player"
@@ -1293,7 +1585,7 @@ class CrewConsole:
         verb_anchored: bool,
         ambiguous: bool,
         now_sim: float,
-        bearing_degrees: int | None = None,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
         """`plans/inbound-speech/plan.md` Stage 2's voice-command entry
         point -- a sibling of `handle_line`/`handle_command`, per the
@@ -1301,10 +1593,12 @@ class CrewConsole:
         with the fields `audio_adapter.command_matcher.MatchResult` already
         resolved (Stage 3 wires the real HTTP poll; this stage is driven
         by tests and the `!voice` REPL harness, see `_handle_voice_test_
-        command`). `bearing_degrees` (`plans/voice-command-completeness/
-        plan.md` Stage 3) is `MatchResult.bearing_degrees` carried through
-        unchanged -- populated only when `token` is `"scan_bearing_deg"`/
-        `"report_bearing_deg"`.
+        command`). `slots` (`plans/watch-reporting/plan.md` Decision 2b-i,
+        replacing the earlier single-purpose `bearing_degrees` parameter)
+        is `MatchResult.slots` carried through unchanged -- populated only
+        for tokens that take a parsed slot (`scan_bearing_deg`/
+        `report_bearing_deg`'s `"bearing_degrees"`, `follow`'s
+        `"descriptor"`/`"clock"`/`"range_km"`).
 
         **A pending confirm-band question, if any, is checked first** --
         `classify_yes_no` decides whether this transcript commits, discards,
@@ -1316,11 +1610,11 @@ class CrewConsole:
         are valid only inside this branch, i.e. only while a confirmation
         is pending -- outside it the same words are ordinary text and reach
         `belief.voice_commands.classify_response` like anything else.
-        Committing (`affirm`) passes `pending.bearing_degrees` through to
-        `handle_command`, not this call's own `bearing_degrees` -- the
-        number belongs to whichever transcript originally proposed the
-        pending command, not to the (typically bearing-less) "affirm" reply
-        that commits it."""
+        Committing (`affirm`) passes `pending.slots` through to
+        `handle_command`, not this call's own `slots` -- the qualifiers
+        belong to whichever transcript originally proposed the pending
+        command, not to the (typically slot-less) "affirm" reply that
+        commits it."""
         if self._pending_confirmation is not None:
             pending = self._pending_confirmation
             if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:
@@ -1339,7 +1633,7 @@ class CrewConsole:
                         )
                     assert pending.token is not None
                     return self.handle_command(
-                        pending.token, now_sim, bearing_degrees=pending.bearing_degrees
+                        pending.token, now_sim, slots=pending.slots
                     )
                 if answer == "negative":
                     return []
@@ -1362,9 +1656,7 @@ class CrewConsole:
             disposition=decision.disposition,
             acted_token=decision.token,
         )
-        return self._act_on_voice_decision(
-            decision, transcript, now_sim, bearing_degrees
-        )
+        return self._act_on_voice_decision(decision, transcript, now_sim, slots)
 
     def _log_transcript(self, **row: object) -> None:
         """Write one row to `transcript_log`, if configured.
@@ -1383,7 +1675,7 @@ class CrewConsole:
         decision: BandDecision,
         transcript: str,
         now_sim: float,
-        bearing_degrees: int | None = None,
+        slots: dict[str, int | str] | None = None,
     ) -> list[str]:
         if decision.disposition == "fallthrough":
             # `handle_line` re-strips/re-checks the `!`-prefixed harness
@@ -1393,23 +1685,55 @@ class CrewConsole:
             return self.handle_line(transcript, now_sim)
         if decision.disposition == "act":
             assert decision.token is not None
-            return self.handle_command(
-                decision.token, now_sim, bearing_degrees=bearing_degrees
-            )
+            return self.handle_command(decision.token, now_sim, slots=slots)
         if decision.disposition == "confirm":
             assert decision.token is not None
-            description = _describe_token_for_confirm(decision.token, bearing_degrees)
+            description = _describe_token_for_confirm(decision.token, slots)
             self._pending_confirmation = PendingConfirmation(
                 token=decision.token,
                 description=description,
                 pending_since_sim=now_sim,
-                bearing_degrees=bearing_degrees,
+                slots=slots,
             )
             lines = [render_confirm_request(description).text]
         else:  # "say_again"
             lines = [render_say_again().text]
         self._print(lines, now_sim)
         return lines
+
+    def _parse_follow_slots_for_harness(
+        self, transcript: str
+    ) -> dict[str, int | str] | None:
+        """A deliberately small, harness-only re-parse of `follow`'s three
+        slots straight out of typed transcript text -- `!voice`'s own
+        posture (module independence: body-layer cannot import
+        `audio-adapter`'s real `parse_clock`/`parse_range_km`/
+        `parse_descriptor`), extended to this one token so the resolver's
+        weights can be tuned from the REPL without a redeploy (`plans/
+        watch-reporting/plan.md` Decision 2b-iii: "exercisable from the
+        `!voice` harness and the typed console before any redeploy").
+        Narrower than the real parsers on purpose -- a dev aid, not a
+        second production implementation."""
+        words = transcript.lower().replace("'", "").replace("-", " ").split()
+        slots: dict[str, int | str] = {}
+        for word in words:
+            if word in _FOLLOW_DESCRIPTOR_OP_CLASSES or word == "group":
+                slots.setdefault("descriptor", word)
+        for index, word in enumerate(words):
+            if word in ("oclock", "o'clock") and index > 0:
+                hour = _FOLLOW_HARNESS_CLOCK_WORDS.get(words[index - 1])
+                if hour is not None:
+                    slots["clock"] = hour
+            if word in _FOLLOW_HARNESS_RANGE_UNIT_WORDS and index > 0:
+                previous = words[index - 1]
+                value = (
+                    int(previous)
+                    if previous.isdigit()
+                    else _FOLLOW_HARNESS_RANGE_WORDS.get(previous)
+                )
+                if value is not None and 1 <= value <= 20:
+                    slots["range_km"] = value
+        return slots if slots else None
 
     def _handle_voice_test_command(self, line: str, now_sim: float) -> list[str]:
         """`!voice` -- a manually-typed test harness for `handle_transcript`,
@@ -1427,14 +1751,15 @@ class CrewConsole:
         <ambiguous:0|1> <transcript...>` -- `-` for `token` means "no
         match" (`None`). `<transcript...>` accepts an **optional trailing
         degrees argument** (`plans/voice-command-completeness/plan.md`
-        Stage 3, decision 3 item 6): if the transcript's last word is a
-        bare integer, it is peeled off as `bearing_degrees` and the
-        remaining words are the transcript, mirroring `MatchResult.
-        bearing_degrees`'s real shape (a number attached to, but distinct
-        from, the transcript text) without adding a new fixed positional
-        argument that would break every existing `!voice` invocation.
-        `!voice scan_bearing_deg 1.0 1.0 1 0 scan bearing three two zero
-        320` sets `bearing_degrees=320`; a transcript with no trailing
+        Stage 3, decision 3 item 6, now populating `slots["bearing_
+        degrees"]` -- `plans/watch-reporting/plan.md` Decision 2b-i): if
+        the transcript's last word is a bare integer, it is peeled off and
+        the remaining words are the transcript, mirroring `MatchResult.
+        slots`'s real shape (a parsed value attached to, but distinct from,
+        the transcript text) without adding a new fixed positional argument
+        that would break every existing `!voice` invocation. `!voice
+        scan_bearing_deg 1.0 1.0 1 0 scan bearing three two zero 320` sets
+        `slots={"bearing_degrees": 320}`; a transcript with no trailing
         integer (every pre-existing test/harness use) is unaffected."""
         usage = [
             (
@@ -1459,11 +1784,14 @@ class CrewConsole:
             self._print(usage, now_sim)
             return usage
         token = None if token_arg == "-" else token_arg
-        bearing_degrees: int | None = None
-        split_transcript = transcript.rsplit(maxsplit=1)
-        if len(split_transcript) == 2 and split_transcript[1].lstrip("-").isdigit():
-            transcript, degrees_word = split_transcript
-            bearing_degrees = int(degrees_word)
+        slots: dict[str, int | str] | None = None
+        if token == "follow":
+            slots = self._parse_follow_slots_for_harness(transcript)
+        else:
+            split_transcript = transcript.rsplit(maxsplit=1)
+            if len(split_transcript) == 2 and split_transcript[1].lstrip("-").isdigit():
+                transcript, degrees_word = split_transcript
+                slots = {"bearing_degrees": int(degrees_word)}
         return self.handle_transcript(
             transcript,
             confidence,
@@ -1472,7 +1800,7 @@ class CrewConsole:
             verb_arg == "1",
             ambiguous_arg == "1",
             now_sim,
-            bearing_degrees=bearing_degrees,
+            slots=slots,
         )
 
     def _new_utterance_id(self) -> str:

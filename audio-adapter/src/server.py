@@ -232,7 +232,7 @@ def _make_handler(
                     verb_anchored=match.verb_anchored,
                     ambiguous=match.ambiguous,
                     t_wall=time.time(),
-                    bearing_degrees=match.bearing_degrees,
+                    slots=match.slots,
                 )
             )
             self._respond_json(200, {"ok": True})

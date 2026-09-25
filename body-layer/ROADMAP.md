@@ -25,7 +25,17 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   loop (look, report, be told where to look): `docs/acceptance/2026-09-23-eyes-and-voice-sortie.md`.
   Clears when that sortie is flown and the card's "Bring back" items are answered — the nine
   unbenched `scan <clock>` tokens' recognition accuracy in particular has no measurement of any
-  kind yet, benched or live.
+  kind yet, benched or live. **Precise position belief's own debt item is superseded by the entry
+  below** — the version merged here had the range-runaway defect the fix branch corrects; do not
+  fly this card's position-belief items until that fix has merged. **It merged 2026-09-25 (`bfbcf8d`), so they are now judgeable.**
+
+- [ ] **Position-belief-runaway fix — merged 2026-09-25 (`bfbcf8d`), unflown**
+  (`fix/position-belief-runaway`, 2026-09-25). Corrects the range-runaway defect above (see the
+  Status entry for the four fixes). Card: `docs/acceptance/2026-09-25-position-belief-sortie.md`
+  — its own headline check (no naked-eye range beyond 10 km) is checkable by ear in one flight;
+  whether the underlying believed position is now *correct*, not just *bounded*, and whether
+  hold-recovery timing (~7-10 s predicted) matches a real sortie, are both harder to judge and the
+  card says so explicitly. Clears when a real flight exercises it post-merge.
 
 - [ ] **Two things waiting on the user's own machines, added 2026-09-19.** Neither blocks work.
   - **The daily status-page launchd job** (`.claude/scripts/com.petrobrain.status-page.plist`) is
@@ -970,7 +980,206 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   **unbenched** tokens (no recordings in this corpus), the same cost class as `cancel_scan`/
   `cancel_watch` before 2026-09-23 -- next corpus recording's job. **Unflown as of merge.**
 
+- [x] **Watch reporting — Stages 1 through 5, merged 2026-09-24 (merge `9b16c3b`,
+  `feature/watch-reporting`). Merged before flying, deliberately, so any correction the sortie
+  produces lands on `main` rather than a branch — live acceptance is still outstanding
+  (`docs/acceptance/2026-09-24-watch-reporting-sortie.md`).** A watched contact now reports itself unprompted on three new
+  triggers, plus `follow` becomes both a `watch` synonym and a new best-match way to *name* which
+  contact to watch. Correctness review APPROVED (full read), performance review flagged a real
+  finding (LOS called before the range/altitude gate) which was fixed and the fix re-reviewed
+  APPROVED, security review APPROVED with three non-blocking hardening recommendations carried to
+  backlog below. DoD gate run 2026-09-24: format/lint/type/test all green in both touched
+  subprojects (body-layer 1177 passed/4 xfailed, audio-adapter 198 passed/1 skipped). **Live
+  acceptance outstanding** — this entry stays `[~]` until a real sortie exercises it; card at
+  `docs/acceptance/2026-09-24-watch-reporting-sortie.md`.
+
+  **Stage 1 — movement.** `CONTACT_MOTION_CHANGED` has fired since `movement-detection` and was
+  never spoken; `belief.callouts._WATCHED_ONLY_KINDS` gates it at the speech layer (not at
+  emission), so a contact watched *after* its motion event already fired still gets the callout.
+  `_contact_report_text` gained `lead`/`event_clause` affixes reused by every later stage.
+  `WATCH_REPORT_MIN_GAP_S` bounds how often one contact can interrupt with watched-only speech,
+  independent of `EVENT_COOLDOWN_S`.
+
+  **Stage 2 — kilometre range crossings.** `CONTACT_RANGE_CROSSED`, gated and bookkept *at
+  emission* in `ContactStore.tick`'s new sixth block (the opposite placement from Stage 1's
+  events, since the bookkeeping — `Contact.last_announced_range_km` — only means anything for a
+  watched contact). Seeds silently on first watch. Gated on `certainty_of` so a decayed position
+  never manufactures a crossing nobody observed. The trigger's deadband is derived from
+  `PositionEstimate.range_uncertainty_m` (new, `bearing_uncertainty_deg`'s down-range mirror) —
+  floored/ceilinged rather than a bare tuned constant, forced by `precise-position-belief`
+  landing underneath this plan mid-design and turning the input from a step function into a
+  continuous, noisy one.
+
+  **Stage 3 — `follow`.** 3a: `follow nearest`/`follow nearest air defence`/`stop following`/
+  `cancel follow` as free phrasings on the existing `watch_nearest`/`watch_nearest_air_defence`/
+  `cancel_watch` tokens (`audio-adapter`, zero body-layer change). 3b: `MatchResult`/
+  `TranscriptEvent`/`PendingConfirmation`/`handle_command`/`handle_transcript` all migrate their
+  single-purpose `bearing_degrees` field to a generic `slots: dict[str, int | str] | None` — a
+  breaking wire change between `audio-adapter` and `body-layer`, cheap because both are Mac-local
+  processes restarted together, done while there was exactly one slot in flight rather than
+  after `follow` added three more. 3c: `follow [<descriptor>] [<clock> o'clock] [<n> km]` — a new
+  `follow` token whose three qualifiers are parsed slots, not enumerated phrases (the
+  cross-product is in the hundreds); resolved by `_resolve_follow_target`, a scored best-match
+  over the qualifiers, explicitly framed in its own docstring as a stopgap for the brain layer
+  (user's own words) to be deleted, not extended, once free-text targeting exists.
+
+  **Stage 4 — engagement envelopes.** `belief/threat.py` (new module) reads
+  `body-layer/data/threat_envelopes.json` (28 Hoggit-derived entries, committed with its saved
+  source page as provenance) and exposes `envelope_for(ClassificationBelief)` — the structural
+  no-omniscience guard, since the signature cannot accept the type that would carry ground
+  truth. Class-level envelopes are *derived* at import by joining the table through
+  `perception.object_model.profile_for`, not hand-written (though the join rate against this
+  particular table turned out low — see Notable Discoveries in `plans/watch-reporting/
+  implementation.md`). `ContactStore.tick`'s seventh block ANDs three independent ways to be
+  safe (out of range / under the altitude floor / behind a ridge), a 1.5x Schmitt trigger on the
+  leaving side, and a fail-open, uncertainty-swept LOS term with an asymmetric dwell
+  (`LOS_MASK_CONFIRM_S`) — a masked verdict needs to hold before it clears a danger call; a clear
+  verdict takes effect immediately. Engagement is the one watched-only kind that does **not**
+  silently seed: a contact recognised already inside its envelope fires immediately, since that
+  is exactly the late-recognition warning this trigger exists for. Speech: `"Danger, <unit>..."`/
+  `"Safe from <unit>..."` via `_contact_report_text`'s `lead` affix, `STATE_TRANSITIONS.md`'s own
+  wording. **The practical value of this trigger is gated on an optic that does not exist yet**
+  (the 9K113) — see the deferred-9K113 backlog entry below, un-deferred in reasoning but not in
+  scope by this plan.
+
+  Full design and every measured/decided number: `plans/watch-reporting/plan.md`,
+  `plans/watch-reporting/implementation.md`.
+
+- [x] **Position-belief-runaway fix — merged 2026-09-25 (merge `bfbcf8d`,
+  `fix/position-belief-runaway`). Merged before flying, deliberately, so any correction the sortie
+  produces lands on `main`; live acceptance remains outstanding.**
+  (branch head was `0465290` at the DoD gate; plan/review paper trail:
+  `plans/position-belief-runaway/`). Corrects a live defect the sortie the day after
+  `precise-position-belief` merged actually found: `"couple contacts, 4 o'clock, 87.5
+  kilometres"` against a 10 km naked-eye cap. Four distinct fixes under one report:
+
+  1. **`FUSION_SANITY_SIGMA` residual guard in `fold_position`** — the root-cause fix for
+     ill-conditioned triangulation (near-parallel disagreeing looks intersecting arbitrarily far
+     from either input). Rejects a fused mean unless it sits within 5 sigma of at least one input's
+     own covariance; holds the prior (inflated for elapsed motion) otherwise.
+  2. **`clamp_to_detection_envelope`, a new function** — the gate that was entirely missing:
+     nothing previously checked a fused position against what a channel could physically detect.
+     This is the mechanism that actually caught the reported live defect (a slow directional drift,
+     individually plausible at every step) — the ill-conditioning guard above addresses a real but
+     separately-unreachable mechanism, since the pre-existing association gate already rejects a
+     single large-residual jump before it reaches fusion. **This distinction — the user's own
+     one-line diagnosis ("position uncertainty needs a gate, cannot be further than detection
+     range") named the reachable path; the orchestrator's own ill-conditioning hypothesis, though
+     real, did not** — see `NOTES.md`.
+  3. **A scale-relative determinant floor** (`Covariance2D.inverse()`'s `_MIN_DETERMINANT_RATIO`,
+     replacing an absolute `1e-9`) — found by Reviewer, not planned: the absolute floor was
+     calibrated for covariance-scale determinants but silently corrupted the fused *mean* (not
+     just reported uncertainty) for any same-bearing repeated naked-eye look beyond ~2.7 km, and
+     made the new guard itself misfire on a legitimate residual. Required fix, re-reviewed
+     APPROVED.
+  4. **Hold-recovery timing decoupled from poll interval** (`PositionEstimate.fused_at_sim`/
+     `fused_covariance`, new) — found by Security, not planned: a held position's elapsed-time
+     inflation was compounding once per poll rather than once per real gap, so recovery time
+     scaled as `O(1/poll_interval_s)` — ~47 s at the project's own 1.0 s default poll interval,
+     not the ~20 s the merged review's approval had rested on (measured for a single-gap
+     re-acquisition, not continuous disagreeing-look polling). Fixed by tracking "last genuinely
+     fused" time separately from "last poll" time. Required fix, re-reviewed APPROVED.
+
+  Also fixed: the doubled unit-type callout (`"truck ... is KrAZ truck"`, `belief/speech.py`'s
+  `_identification_lead` stutter guard, an exact-string match that missed a class word appearing
+  inside a longer type name) — an independent speech defect reported alongside the position bug,
+  unrelated in mechanism.
+
+  DoD gate run 2026-09-25: format/lint/type/test all green (1192 passed / 4 xfailed, +15 over
+  main's 1177/4 — verified against an isolated `git archive` of the branch tip, not the working
+  checkout, per the standing pytest/PYTHONPATH trap memory). Reviewer and Security both APPROVED
+  after their respective required fixes were applied and re-reviewed. **Live acceptance
+  outstanding** — card at `docs/acceptance/2026-09-25-position-belief-sortie.md`. This entry
+  flips to `[x]`/merged on merge, per the roadmap-discipline rule below.
+
 ## Backlog (body-layer)
+
+- [ ] **Threat-database follow-on extraction: search/track radar + acquire time — raised
+  `plans/watch-reporting/plan.md` Decision 4f-iii, 2026-09-24.** The Hoggit source page (saved
+  beside `body-layer/data/threat_envelopes.json` for exactly this) carries `Track RADAR`/`Search
+  RADAR` columns with HARM codes and an acquire-time column; none of it is in the extracted
+  payload. Both are worth a *later* pass, not the one that just landed:
+  - **Search/track radar is detection range, a different and longer claim than weapon range** —
+    being tracked at 12 NM by a gun that reaches 2 NM is information, not a threat. Natural home of
+    a future "he's looking at us" warning (a slewed dish is *observable*, not an omniscience
+    problem) — needs a behaviour-change channel that does not exist yet, so the data would sit
+    unused if extracted now.
+  - **Acquire time** would decide whether a fast crossing pass actually gets engaged — needs a
+    time-in-envelope model nothing in this codebase has.
+  Re-extract from the already-saved HTML; no re-fetch needed.
+
+- [ ] **`OP_SRSAM`'s ~4x-7x internal range spread makes its class-level danger call early and
+  often badly wrong in magnitude — recorded, not fixed, `plans/watch-reporting/plan.md` Decision
+  4c, 2026-09-24.** `belief.threat._CLASS_ENVELOPES`'s derived rollup for `OP_SRSAM` is driven by
+  whichever member has the longest reach in the extracted table (S-125/SA-3 at 25.0 km,
+  `body-layer/data/threat_envelopes.json`) while the bucket also holds SA-8/SA-9/SA-13/SA-15, some
+  under 6 km — a pilot told "danger" at 25 km for what turns out to be an SA-13 is being warned
+  roughly 4-7x earlier than the real threat. Tightens automatically once type-level recognition
+  resolves which member it actually is; this is a property of this project's own `op_class`
+  buckets grouping systems with a wide range spread, not a defect in the belief-keyed lookup
+  design, and should be recorded against the buckets (a future `object_model.py`/classification
+  pass) rather than patched in `threat.py`.
+
+- [ ] **`belief.threat`'s class-level rollup only actually joined 3 of ~19 SAM/AAA threat rows into
+  a class bucket on the real table — found during `watch-reporting` implementation, 2026-09-24.**
+  `_derive_class_envelopes` joins `body-layer/data/threat_envelopes.json`'s `threat` names through
+  `perception.object_model.profile_for` by design (Decision 4c: computed, not hand-written), but
+  `object_model`'s keyword table was authored against DCS unit names, not Hoggit's wiki names, and
+  most rows (Kub, Tor, Tunguska, Rapier, Roland, Chaparral, Hawk, Patriot, NASAMS, S-75, S-300, …)
+  do not share a matching substring with any `_KEYWORD_PROFILES` entry, so `envelope_for` at
+  `CLASS` level currently only resolves for `OP_ZU23`/`OP_SPAAG`/`OP_SRSAM` (the last via S-125
+  alone) — every other SAM tier's class-level warning is silently absent until either
+  `object_model.py`'s keyword table gains matching entries or `TYPE`-level recognition supplies the
+  specific row directly (which already works correctly for every row, independent of this gap).
+  Not a defect in the join mechanism itself (a hand-authored patch here is exactly what Decision 4c
+  warns against) — the fix belongs in `object_model.py`'s own keyword coverage.
+
+- [ ] **`alt_ok` has no hysteresis counterpart to `range_ok`'s `ENGAGEMENT_LEAVING_HYSTERESIS` —
+  found during the watch-reporting performance-review fix, 2026-09-24.** The short-circuit that
+  skips `line_of_sight_clear` when `range_ok and alt_ok` is already `False` (performance fix,
+  `contacts.py`) means any tick where ownship altitude oscillates right at `envelope.alt_min_m`
+  now discards an in-progress LOS mask dwell (`los_masked_since_sim = None` on the skip path),
+  which didn't happen before (LOS ran unconditionally every tick pre-fix). Traced as fail-safe,
+  not a correctness bug: resetting the dwell only pushes `masked_for_s` back toward 0, which keeps
+  `los_ok` (and `current_engaged`) `True` longer, never shorter — it can delay a warning clearing,
+  never drop or falsely clear one. Fix (not done in `watch-reporting`, deliberately, per the fix
+  review): a matching hysteresis margin on `alt_min_m` for symmetry with the range side.
+
+- [ ] **Two non-blocking hardening items from `watch-reporting`'s security deep review, deferred
+  to backlog by user direction, 2026-09-24.** Both are unreachable through the code that exists
+  today; recorded because the two processes that make them unreachable restart independently.
+  - `body-layer/src/belief/crew_console.py:486,1009` (and the token-keyed siblings at
+    `:474,477,762`) — `_CLOCK_REPORT_LABELS[clock]` is a plain dict index on a value that arrives
+    over the audio-adapter -> body-layer wire. `logger._poll_transcripts` validates only that a
+    `slots` value is `int | str`, not that a `clock` value is one of the nine legal forward hours.
+    Change to `_CLOCK_REPORT_LABELS.get(clock, str(clock))` so an out-of-range value degrades to a
+    plain number instead of raising.
+  - `body-layer/src/logger.py`'s `_poll_transcripts` slot validation — add a membership check for
+    `slots["clock"]` against the same forward-hour set `audio-adapter`'s `vocabulary.
+    FORWARD_CLOCK_POSITIONS` names, hand-mirrored the same way `crew_console.
+    _FOLLOW_DESCRIPTOR_OP_CLASSES` already is, so a wire violation is dropped at the boundary
+    rather than reaching the dict index above three calls later.
+
+- [x] **`OP_LRSAM` folded into the air-defence command classes — merged 2026-09-24
+  (`fix/lrsam-air-defence`).** "Watch nearest air defence" could not select an S-300:
+  `crew_console._AIR_DEFENCE_OP_CLASSES` held the two gun systems and the short/medium SAM tiers
+  and nothing else. The excluded contact was the worst possible one to miss — at the calibrated
+  8.89 km detection range the S-300's tracking-radar mast is the furthest-detectable thing in the
+  profile table, so it is both the most dangerous thing the command exists to find and the one
+  most likely to be the *only* air-defence contact held at all.
+
+  **Drift, not a decision.** The set was enumerated by hand against `perception.object_model`'s
+  profile table when that table genuinely had no long-range SAM entry, and its own comment
+  ("exactly the air-defence entries in `object_model`") stayed true only until the table gained
+  one. Nothing connected the two. So the fix ships a guard test that recomputes the air-defence
+  classes present in the profile table and asserts the command set covers them — verified to fail
+  against the pre-fix set rather than assumed to — alongside the S-300 regression itself.
+  `object_model` carries no structural air-defence marker to derive the set from, so the guard
+  matches on `OP_*` naming and says in its own docstring that a class escaping that pattern is a
+  signal to give `object_model` a real marker, not to loosen the assertion.
+
+  Found while reading `plans/watch-reporting/plan.md`, which flagged it and deliberately left it
+  unfixed; fixed on user direction ("it is air defence"). Merged as a small fix, no DoD pass.
 
 - [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
   `eacc45c`, `feature/f10-crew-commands`).** The player's preferred in-cockpit command UI: the
@@ -1000,7 +1209,8 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   **Bearing** items (absolute), **Watch** → Nearest/Nearest Air Defence, **Cancel Task**;
   `scan_forward` was *replaced* by `scan_ahead`, not kept as a synonym. **Watch → Nearest Air
   Defence** (D6) filters on the *believed* classification -- `class`/`type` level resolving into
-  the four air-defence `OP_*` buckets -- so a `presence`-level contact is never matched even when
+  the air-defence `OP_*` buckets (four of them at this merge — `OP_LRSAM` was missing and was
+  folded in 2026-09-24, see the entry below) -- so a `presence`-level contact is never matched even when
   the object really is a SAM; it will honestly report nothing rather than name an unidentified
   blob as air defence. New ownship-relative `AttentionArea` kind
   (`belief/attention.py`'s `RelativeSector`/`wedge_deg`/`project_relative_area`) that re-projects

@@ -58,6 +58,8 @@ def _contact_with_cardinality(
             z=0.0,
             covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
             as_of_sim=last_seen_sim,
+            fused_at_sim=last_seen_sim,
+            fused_covariance=Covariance2D(xx=0.0, zz=0.0, xz=0.0),
         ),
         last_alt_m=0.0,
         last_class_raw="OP_TRUCK",

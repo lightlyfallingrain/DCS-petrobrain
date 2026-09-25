@@ -37,19 +37,21 @@ class TranscriptEvent:
     names, extended by `plans/voice-command-completeness/plan.md` Stage 3 --
     text and match metadata only, **never** audio bytes, a WAV path, or
     which engine ran (the plan's "body-layer never sees audio" invariant).
-    `token`/`match_ratio`/`verb_anchored`/`ambiguous`/`bearing_degrees` are
+    `token`/`match_ratio`/`verb_anchored`/`ambiguous`/`slots` are
     `command_matcher.MatchResult`'s own fields, carried through unchanged
     -- see that dataclass's docstring for why `token`/`match_ratio`/
     `verb_anchored`/`ambiguous` are all required rather than `token`/
     `match_ratio` alone: `token=None` cannot by itself distinguish "not a
     command attempt" from "verb-anchored but unresolved" from "ambiguous",
-    three behaviourally distinct outcomes. `bearing_degrees` was
-    previously computed by `command_matcher.match_transcript` and then
-    dropped at this exact wire -- `TranscriptEvent` carried only seven
-    fields, so a perfectly recognised "scan bearing three two zero" arrived
-    at body-layer as a bare token with no number; this field is the fix.
-    `t_wall` is `time.time()` at the moment `POST /transcribe` recognised
-    the clip, not when body-layer eventually polls it."""
+    three behaviourally distinct outcomes. `slots` (`plans/
+    watch-reporting/plan.md` Decision 2b-i) **replaces the earlier
+    `bearing_degrees` field** -- a breaking wire change, cheap because both
+    ends of this wire are Mac-local processes restarted together, not a
+    migration: a single dict generalises to every future parsed slot
+    (`follow`'s descriptor/clock/range) instead of adding a fourth
+    mutually-exclusive optional field per slot type. `t_wall` is
+    `time.time()` at the moment `POST /transcribe` recognised the clip,
+    not when body-layer eventually polls it."""
 
     transcript: str
     confidence: float
@@ -58,7 +60,7 @@ class TranscriptEvent:
     verb_anchored: bool
     ambiguous: bool
     t_wall: float
-    bearing_degrees: int | None = None
+    slots: dict[str, int | str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,7 +71,7 @@ class TranscriptEvent:
             "verb_anchored": self.verb_anchored,
             "ambiguous": self.ambiguous,
             "t_wall": self.t_wall,
-            "bearing_degrees": self.bearing_degrees,
+            "slots": self.slots,
         }
 
 

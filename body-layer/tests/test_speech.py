@@ -23,6 +23,7 @@ from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_ATTENTION_CHANGED,
     CONTACT_CLASSIFICATION_CHANGED,
+    CONTACT_MOTION_CHANGED,
     Event,
 )
 from belief.speech import (
@@ -497,6 +498,56 @@ def test_route_event_classification_changed_speaks_position_and_new_type(
     assert speech.text.endswith(" is T-72.")
 
 
+def test_route_event_classification_changed_does_not_double_the_unit_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real live callout (`plans/position-belief-runaway/debug.md`):
+    *"truck 5 o'clock, 79.5 kilometres is KrAZ truck"* -- the class word
+    ("truck") repeated as the leading noun and again inside the type
+    string ("KrAZ truck"). `_identification_lead`'s stutter guard used to
+    check for an exact string match only, which a type name that merely
+    *contains* the class word as one of its own words does not trigger.
+    The lead must fall back to "unit" here, exactly as it already does for
+    the plain "truck ... is truck" case."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_2",
+                t_sim=1.0,
+                classification_raw="KrAZ truck",
+                classification_level=3,
+            )
+        ],
+        now_sim=1.0,
+    )
+    store.tick(now_sim=1.0)
+    changed = store.events[-1]
+    assert changed.kind == "CONTACT_CLASSIFICATION_CHANGED"
+
+    speech = route_event(
+        store, changed, now_sim=1.0, enrichment=_enrichment_context(monkeypatch)
+    )
+
+    assert speech is not None
+    assert speech.text.startswith("unit ")
+    assert speech.text.endswith(" is KrAZ truck.")
+    # The regression this guards: "truck" must not appear twice.
+    assert speech.text.lower().count("truck") == 1
+
+
 def test_route_event_classification_changed_omits_range_when_not_enriched() -> None:
     """No `relative_now` on the contact's facts (no `EnrichmentContext`
     supplied) drops the position clause entirely, same absent-not-null
@@ -945,3 +996,167 @@ class TestSpokenVocabularyIsSayable:
         assert speech_module._format_range_km(1000.0) == "1 kilometre"
         assert speech_module._format_range_km(1500.0) == "1.5 kilometres"
         assert speech_module._format_range_km(500.0) == "0.5 kilometres"
+
+
+# --- _contact_report_text: lead/event_clause affixes (watch-reporting) -----
+
+
+def test_contact_report_text_event_clause_replaces_the_automatic_moving_clause() -> (
+    None
+):
+    """`plans/watch-reporting/plan.md` Decision 3: `event_clause` is spoken
+    instead of, never alongside, the automatic ", moving" clause -- a motion
+    callout must not read "..., moving, moving."."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=True)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    result = describe_contact(store, store.contacts[0].id, now_sim=0.0)
+    assert result is not None
+    text = _contact_report_text(result["facts"], event_clause="stopped")
+    assert text == "BMP-2, stopped."
+    assert text.count("moving") == 0
+
+
+def test_contact_report_text_lead_prefixes_with_its_own_punctuation() -> None:
+    """`lead` carries its own trailing punctuation/spacing -- see the
+    function's own docstring for why "Danger, " and "Safe from " join
+    differently and a shared separator would get one of them wrong."""
+    store, contact_id = _store_with_one_contact()
+    result = describe_contact(store, contact_id, now_sim=0.0)
+    assert result is not None
+    assert _contact_report_text(result["facts"], lead="Danger, ") == "Danger, BMP-2."
+    assert (
+        _contact_report_text(result["facts"], lead="Safe from ") == "Safe from BMP-2."
+    )
+
+
+def test_contact_report_text_lead_and_event_clause_combine() -> None:
+    store = ContactStore()
+    store.ingest([_observation(obs_id="OBS_1", t_sim=0.0)], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    result = describe_contact(store, store.contacts[0].id, now_sim=0.0)
+    assert result is not None
+    text = _contact_report_text(
+        result["facts"], lead="Danger, ", event_clause="entering range"
+    )
+    assert text == "Danger, BMP-2, entering range."
+
+
+# --- CONTACT_MOTION_CHANGED speech (plans/watch-reporting/plan.md Stage 1) --
+
+
+def test_route_event_contact_motion_changed_speaks_moving_or_stopped() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=True)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    motion_event = next(e for e in store.events if e.kind == CONTACT_MOTION_CHANGED)
+    assert motion_event.motion == "moving"
+    speech = route_event(store, motion_event, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "BMP-2, moving."
+
+
+def test_route_event_contact_motion_changed_auto_acknowledges() -> None:
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, apparent_motion=True)], now_sim=0.0
+    )
+    store.tick(now_sim=0.0)
+    motion_event = next(e for e in store.events if e.kind == CONTACT_MOTION_CHANGED)
+    assert motion_event in store.unacknowledged_events
+    route_event(store, motion_event, now_sim=0.0)
+    assert motion_event not in store.unacknowledged_events
+
+
+# --- CONTACT_RANGE_CROSSED speech (plans/watch-reporting/plan.md Stage 2) --
+
+
+def test_route_event_contact_range_crossed_speaks_with_no_affixes() -> None:
+    """Decision 3: no affixes at all -- the range is already in the body of
+    `_contact_report_text`'s own clock/range clause."""
+    store, contact_id = _store_with_one_contact()
+    event = Event(
+        id="EVENT_RANGE",
+        contact_id=contact_id,
+        kind="CONTACT_RANGE_CROSSED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_range_km=4,
+        range_km=3,
+    )
+    speech = route_event(store, event, now_sim=0.0)
+    assert speech is not None
+    # No enrichment supplied -> no clock/range clause at all, same as any
+    # other unenriched report -- confirming this kind adds no wording of
+    # its own beyond `_contact_report_text`'s normal shape.
+    assert speech.text == "BMP-2."
+
+
+def test_route_event_contact_range_crossed_returns_none_for_unknown_contact() -> None:
+    store = ContactStore()
+    event = Event(
+        id="EVENT_RANGE",
+        contact_id="CONTACT_999",
+        kind="CONTACT_RANGE_CROSSED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_range_km=4,
+        range_km=3,
+    )
+    assert route_event(store, event, now_sim=0.0) is None
+
+
+# --- CONTACT_ENGAGEMENT_CHANGED speech (plans/watch-reporting/plan.md
+# Stage 4) --------------------------------------------------------------
+
+
+def test_route_event_contact_engagement_changed_entering_says_danger() -> None:
+    store, contact_id = _store_with_one_contact()
+    event = Event(
+        id="EVENT_ENGAGE",
+        contact_id=contact_id,
+        kind="CONTACT_ENGAGEMENT_CHANGED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_engaged=False,
+        engaged=True,
+    )
+    speech = route_event(store, event, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "Danger, BMP-2."
+
+
+def test_route_event_contact_engagement_changed_leaving_says_safe_from() -> None:
+    store, contact_id = _store_with_one_contact()
+    event = Event(
+        id="EVENT_ENGAGE",
+        contact_id=contact_id,
+        kind="CONTACT_ENGAGEMENT_CHANGED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_engaged=True,
+        engaged=False,
+    )
+    speech = route_event(store, event, now_sim=0.0)
+    assert speech is not None
+    assert speech.text == "Safe from BMP-2."
+
+
+def test_route_event_contact_engagement_changed_returns_none_for_unknown_contact() -> (
+    None
+):
+    store = ContactStore()
+    event = Event(
+        id="EVENT_ENGAGE",
+        contact_id="CONTACT_999",
+        kind="CONTACT_ENGAGEMENT_CHANGED",
+        t_sim=0.0,
+        certainty="observed",
+        previous_engaged=False,
+        engaged=True,
+    )
+    assert route_event(store, event, now_sim=0.0) is None
