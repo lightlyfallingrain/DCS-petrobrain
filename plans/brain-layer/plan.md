@@ -273,6 +273,11 @@ The model's entire output is one line drawn from a closed vocabulary — `PICK <
 `belief/speech.py` from body-owned templates and the candidates' own `why` strings.** The model
 never phrases anything.
 
+*Unchanged by D10's 2026-09-25 revision, and worth saying explicitly: `why` keeps its job as the
+**spoken** text. What the revision adds is a second, structured representation of the same candidate
+for the validator to match and for the prompt to project from — see D10a. Two jobs, two
+representations.*
+
 This is stricter than *"code owns truth, models own interpretation and language"* — it takes
 language away from the model too. That is deliberate for BR-1: it is the only way to keep the
 round trip sub-second, it makes the output trivially validatable, and Measurement 1 showed the free-
@@ -419,7 +424,9 @@ An `ASK` reply cannot use that mechanism, because the answer is not yes/no. It i
 round trip the seam was built for and has never exercised:
 
 1. Brain returns `ASK`; body renders *"which one — the one by the village, or the one on the road?"*
-   from the candidates' `why` strings and records the question id.
+   from the candidates' `why` strings and records the question id. **This does not work as built —
+   real `why` strings carry no place text and are normally identical across candidates. See D10's
+   2026-09-25 revision, "What forced the change"; Stage 2a fixes it.**
 2. `BrainClient.awaiting_reply_id()` now returns non-`None` **for the first time in this codebase.**
 3. The pilot's next utterance is escalated with `awaiting_reply_to` set to that id.
 4. The brain runs the *same* discriminate prompt, now against the answer text ("the road one"),
@@ -440,6 +447,8 @@ Every reply passes a pure function before anything happens:
 3. `PICK … BECAUSE <words>` — `<words>` must appear literally (case-insensitively) in the
    transcript, **and** must not be equally true of another candidate. This is what turned the 3B's
    wrong `PICK CONTACT_7 BECAUSE "tank"` into a correct `ASK`.
+   **REVISED 2026-09-25 — see "REVISION" below.** Substring-over-`why` is replaced by token overlap
+   over *structured* candidate fields; rule 3 as written here made `PICK` unreachable in practice.
 4. `CONFIRM <token>` — `<token>` must be in `DISPATCHED_COMMAND_TOKENS`. Rejected otherwise.
 5. `UNABLE <reason>` — `<reason>` must be one of D11's three tokens. Rejected otherwise.
 6. **Any rejection degrades to `ASK` if there are candidates, else to `UNABLE NO_MATCH`** (D11 —
@@ -449,6 +458,357 @@ Every reply passes a pure function before anything happens:
 
 Where the "equally true of another candidate" test gets its text: the candidate `why` strings the
 code already assembled. No new data, no geometry, no model involvement.
+
+#### REVISION, 2026-09-25 — the evidence test becomes token overlap over *structured* candidate fields
+
+**Provenance: two user decisions, 2026-09-25, plus two findings from reading the code.** The
+original D10 above is unchanged as the record of how the validator was arrived at; rules 1, 2, 4, 5
+and 6 stand exactly as written. **Only rule 3 is replaced**, and the data it runs against changes
+shape. Sub-decisions are numbered **D10a–D10g** below so a later reader can cite one without
+re-litigating the whole decision.
+
+##### What forced the change
+
+Stage 2's implementer found rules (a)+(c) as written pass **vacuously** on D6's own worked example:
+`PICK CONTACT_7 BECAUSE "tank"` passes "not equally true of another candidate" because neither
+candidate's `why` string literally contains "tank" — they say "T-72". He added rule **(b)**, that
+the words must also appear in the *picked* candidate's own `why` text. (b) is right in intent and
+closes that hole. But `why` is rendered enrichment prose, worded unlike speech, so it made `PICK`
+effectively unreachable. Measured against the real validator:
+
+```
+transcript:     "keep an eye on that tank near the village"
+CONTACT_7 why:  "T-72, 2.1 km, near Gemerek village"
+CONTACT_12 why: "T-72, 3.4 km, on the road"
+
+evidence "near the village" -> INVALID (not a substring of "near Gemerek village")
+evidence "the village"      -> INVALID
+evidence "village"          -> valid  (the only token literally in both)
+```
+
+Live, the real model answers "near the village" — sensible and genuinely discriminating — and is
+rejected. Petrovich therefore always asks and the discrimination half of D9 never fires: safe,
+never clever.
+
+**Finding from the code, and it is the bigger of the two: those `why` strings do not exist.** The
+example above (and D6's measured table) was hand-written. `belief.utterance._resolve_reference`
+calls `find_contact(store, ref, now_sim)` with **no `enrichment` argument**, and `parse_utterance`
+has no `enrichment` parameter to give it — even though `CrewConsole.enrichment` is right there and
+*is* already passed to `handle_player_utterance`. So a real candidate's `why` is
+`_contact_summary`'s unenriched form, `"T-72, observed, currently visible."`, with no clock, no
+range and **no place text whatsoever**. Worse, `_contact_summary` never renders `facts["semantic"]`
+even *with* enrichment — it appends only clock and range. Two consequences:
+
+- No token-level or substring test over `why` can ever discriminate by place, because place is not
+  in there. Token overlap on its own (the user's decision 1) is therefore **not sufficient**; it is
+  necessary but inert until the place data arrives.
+- **D9's A/B question is currently degenerate.** `render_disambiguation` joins the candidates' `why`
+  strings, and two candidates found by the same `find_contact` needle normally have *identical*
+  `why` text — so the question Petrovich would ask today is *"Which one — T-72, observed, currently
+  visible., or T-72, observed, currently visible.?"*. That is a defect in already-merged Stage 1
+  work, surfaced here rather than in a sortie.
+
+**And the structural point that decides where discrimination has to come from:** the candidates are
+produced by `find_contact`, a substring match on `Contact.classification.value`. Every candidate in
+a discriminate call therefore *already agrees* with the pilot's class word — that is why there are
+two of them. Class and type can occasionally still separate two candidates, but **location is the
+channel that actually discriminates**, and the classification fields exist mostly to make
+*non*-discrimination provable (rejecting "tank"; the user's C1/C2 case below).
+
+##### D10a — the candidate shape: structured fields for the validator, `why` kept for the readback
+
+**Provenance: user decision 2** — *"add contact classification info as context… In same fashion
+location can be name, type (village, landmark, lake, etc), world position"*.
+
+`ReferenceCandidate` (`belief/utterance.py`) gains structured fields and **keeps `why`**:
+
+```python
+@dataclass(frozen=True, slots=True)
+class PlaceRef:
+    kind: str                # "settlement" | "inside_settlement" | "road" | "water"
+                             # | "ridge" | "valley" | "landcover" | "coastline"
+    subtype: str | None      # "village"/"town"/"city"/"built_up", "river"/"lake"/…, or None
+    name: str | None         # "Gemerek", or None for an unnamed/nameless feature
+    words: tuple[str, ...]   # the spoken vocabulary this place may be referred to by
+    confidence: float        # SemanticFact.confidence, unchanged (already folds position decay)
+
+@dataclass(frozen=True, slots=True)
+class ReferenceCandidate:
+    id: str
+    why: str                     # unchanged in role: D5's readback text, spoken by speech.py
+    class_level: str             # "unknown" | "presence" | "class" | "type" — the epistemic field
+    class_word: str | None       # spoken class word, None below CLASS level
+    type_word: str | None        # the TYPE-level value verbatim ("T-72"), None below TYPE level
+    places: tuple[PlaceRef, ...]
+```
+
+- **`why` is what Petrovich *says*** — `speech.render_disambiguation` and the `PICK` readback keep
+  reading it, per D5 ("the spoken line is rendered by `belief/speech.py` … from the candidates' own
+  `why` strings"). D5 is unchanged. Two jobs, two representations, and conflating them is what
+  rule 3 originally did wrong.
+- **The structured fields are what the *validator* matches**, and a deliberately reduced projection
+  of them is what the *model* sees (D10f).
+- **`class_level` is the field that makes "unknown" expressible** rather than a gap, which is what
+  the user's C1 `{class: tank, type: unknown}` example needs. It is
+  `Contact.classification.level.name.lower()`, already in `facts["classification"]["level"]`.
+
+**`why` also gets fixed as a side effect**, because it has to: with enrichment threaded through
+(D10d) it regains clock and range, and `_contact_summary` gains the highest-confidence semantic
+fragment so two candidates stop sounding identical. That is the minimum for D9 to ask a question a
+pilot can answer, and it is not optional scope.
+
+##### D10b — what is matchable from speech, and what is context only
+
+| field | matchable? | why |
+|---|---|---|
+| `class_word` | **yes** | `speech._OP_CLASS_DISPLAY`'s existing spoken vocabulary (`"armor"`, `"truck"`, `"AAA"`, `"ship"`, `"infantry"`, …). Already exists; no new table. |
+| `type_word` | **yes** | the pilot can and does say "the T-72". |
+| `PlaceRef.name` | **yes** | "Gemerek". |
+| `PlaceRef.words` | **yes** | "village", "road", "river", "ridge", "forest" — the location *type*, exactly as the user framed it. |
+| `class_level` | no — a **guard** | it is not vocabulary; it decides whether a *mismatch* on another candidate is decidable (D10c). |
+| `PlaceRef.confidence` | no — a **gate** | admits or rejects a place fact as matchable at all (D10c). |
+| range, clock, certainty, recency | no | they are in `why` for speech only. A range is a number the pilot says loosely ("about two clicks"); matching on it would be the arithmetic/ranking D5 forbids. |
+| **world position (x, z)** | **not carried at all** | see below. |
+
+**World position is deliberately dropped from the candidate rather than carried as context.** The
+user named it as context, and it *is* — but none of D10c's rules need it, D5 forbids the model doing
+geometry, and `crew_console` already holds the `ContactStore` and can look any position up by id if
+a later slice needs one. Putting coordinates on the wire to a model buys nothing here and creates a
+new way to be wrong (a model quoting a coordinate back as evidence). **This narrows the user's
+input, on the architect's judgement, and is cheaply reversible** — one field on a dataclass and one
+line in the serialiser — so it is flagged rather than escalated.
+
+**Spoken vocabulary for a place kind** is one small new table in `belief/utterance.py`, derived from
+what `describe_position` already returns:
+
+| kind | words |
+|---|---|
+| `settlement` / `inside_settlement`, `subtype` in `village`/`town`/`city` | that subtype word, plus `settlement` |
+| `settlement` / `inside_settlement`, `subtype` `built_up` or `None` | `village`, `town`, `settlement`, `built-up` |
+| `road` | `road`, plus the `subtype` word when it is a road class (`highway`, `track`, …) |
+| `water`, per `enrichment._WATER_SUBTYPE_LABELS` | `river` \| `lake` \| `reservoir`, plus `water` |
+| `ridge` | `ridge`, `ridgeline` |
+| `valley` | `valley` |
+| `landcover`, per `enrichment._LANDCOVER_CLASS_TEXTS` | `forest` \| `orchard`/`orchards` \| `scrub`/`scrubland` \| `field`/`fields` \| `barren` |
+| `coastline` | `coast`, `coastline`, `shore` |
+
+**Deliberately absent: "tank".** `_OP_CLASS_DISPLAY["OP_ARMORED"]` is `"armor"`, and `OP_ARMORED`
+covers BMP and BTR as well as T-72 — so a synonym mapping `tank → OP_ARMORED` would make "that tank"
+legitimately match a BTR, which is a classification-fidelity error, not a wording one. BR-1
+therefore does **not** add one: "tank" matches no field, so it cannot be used as evidence, which is
+exactly the behaviour the user asked for ("`tank` matches neither's type → still rejected"). A
+per-*type* spoken-synonym layer (T-72/T-80/T-90 are tanks; BTR is not) is real future work and
+belongs with the wider reference-resolution vocabulary in **BR-2**, not here. Note the related
+consequence: `find_contact`'s own substring search also cannot find a contact from the word "tank"
+(it matches `"OP_TRUCK"` from "truck" and `"OP_ARMORED"` from "armor" only by the accident of how
+those tokens are spelled), so "that tank" currently escalates with **zero** candidates and answers
+`UNABLE NO_MATCH` rather than reaching a discriminate call at all.
+
+##### D10c — the matching rule
+
+Replaces rule 3 entirely. Pure functions in `belief/brain_reply.py`; no I/O, no geometry.
+
+**Tokenisation.** Lowercase; take maximal `[a-z0-9-]+` runs (so `"T-72"` is the single token
+`t-72`); drop a short stopword set (`the a an that this these those one ones it him them there and
+or of to`). The stopword set stays short on purpose: candidate field words come from our own curated
+vocabulary and contain no prepositions, so nothing else can match spuriously.
+
+1. **Evidence comes from the pilot.** Every token of `because` must appear in the transcript's token
+   set (this replaces the substring test and is what lets "near the village" through). At least one
+   content token, at most `EVIDENCE_MAX_TOKENS = 4` — the prompt already asks for a short phrase,
+   and the cap is what stops a whole-sentence quote passing token-wise.
+2. **Evidence must be grounded in the picked candidate** — (b)'s protection, now at token level.
+   Let `M` = evidence tokens that appear in the picked candidate's matchable tokens. `M` empty →
+   reject. A place fact contributes tokens only when its `confidence ≥ PLACE_FACT_MATCH_MIN_CONFIDENCE`
+   (**0.3, unmeasured**, Stage 4 tuning like `STAND_BY_AFTER_S`).
+3. **Evidence must discriminate.** `PICK` is valid iff **some token `t ∈ M` rules out every other
+   candidate**, where `t` rules out candidate `c` iff *both*:
+   - `t` is absent from **all** of `c`'s matchable tokens (the negative test is over the whole
+     token set, not just the field `t` matched on — stricter and simpler), **and**
+   - every field of the picked candidate that `t` matched on is **decidable** on `c`:
+
+   | field `t` matched on | decidable on `c` when | not decidable → |
+   |---|---|---|
+   | `type_word` | `c.class_level == "type"` | `ASK` |
+   | `class_word` | `c.class_level` is `"class"` or `"type"` | `ASK` |
+   | a place field | the call was enriched (see below) | `ASK` |
+
+**"Unknown is not a mismatch" — the asymmetry, and which way it falls.** The user flagged this and
+it is settled here: **an unknown blocks the pick.** If C1 is `{class_level: "class", class_word:
+"armor", type_word: None}` and C2 is `{class_level: "type", type_word: "T-72"}`, then "the T-72"
+matches C2's `type_word`, but C1 holds no type claim at all — the code cannot rule C1 out, so the
+answer is `ASK`. Treating the absence of a claim as a mismatch would be Petrovich acting as if he
+knew C1 *was not* a T-72, which is precisely the no-omniscience violation this project exists to
+avoid. `SpecificityLevel` is the field that makes this checkable rather than guessed.
+
+**Place absence, by contrast, is a genuine negative — and that is a code-grounded distinction, not
+an exception carved out for convenience.** Both `belief/tools.py` and `belief/enrichment.py`
+document the absent-not-null contract in as many words: *"a consumer must be able to tell 'BL-2/BL-3
+doesn't know this yet' from 'checked and found nothing'"*, and *"Absent facts stay absent — a `None`
+field on `PositionDescription` simply does not produce a `SemanticFact`"*. Every candidate in one
+`find_contact` call is enriched through the same `EnrichmentContext`, the same `describe_position`
+query and the same `NEAR_FACT_RADIUS_M` radii, so "C12 has no settlement fact" means the world model
+was asked and there is no settlement within 1 km — a real negative. If the call was **unenriched**,
+no candidate has any place fields, the place branch never arises, and location simply cannot
+discriminate (Petrovich asks). Both states are honest; neither is a guess.
+
+**Decay was checked rather than assumed** (`belief/decay.py`): `class_level` is sticky and never
+decays by design, while `classification_confidence_at` falls over `IDENTITY_HALF_LIFE_S` (600 s).
+Class/type matching is gated on **level only, not on that decayed confidence** — the level is the
+statement "a type claim exists", and gating on a continuously falling number would make
+discrimination flicker with elapsed time in a way the pilot cannot predict. Place facts *are* gated
+on confidence, because `SemanticFact.confidence` folds `position_confidence`
+(`POSITION_HALF_LIFE_S`, 30 s) and a wrong *position* produces a wrong *place* — a qualitatively
+different error from a merely stale identity. No new half-life or expiry constant is introduced.
+
+**Worked cases** — the first three are the brief's own, the last two the user's:
+
+| transcript / evidence | candidates | outcome |
+|---|---|---|
+| "…that tank near the village" / `near the village` | C7 `{type, armor, T-72, [settlement Gemerek → village/town/settlement]}`, C12 `{type, armor, T-72, [road → road]}` | `village` ∈ C7; absent from C12, place decidable → **PICK C7** ✅ (rejected today) |
+| same / `village` | as above | **PICK C7** ✅ |
+| same / `tank` | as above | `tank` matches no field of C7 → `M` empty → **ASK** ✅ ((b) preserved) |
+| "follow that tank" / `tank` | C1 `{class, armor, —}`, C2 `{type, armor, T-72}` | matches nothing → **ASK** ✅ (the user's case) |
+| "follow the T-72" / `T-72` | as above | matches C2's `type_word`; C1's level is `class` < `type` → not decidable → **ASK** ✅ |
+| "the truck" / `truck` | C1 `{class, truck}`, C2 `{type, armor, T-72}` | `truck` ∈ C1; C2's level ≥ `class` and `truck` absent → **PICK C1** ✅ |
+| D9's answer leg: "the road one" | as row 1 | `road` ∈ C12's place words, absent from C7 → **PICK C12** ✅ |
+
+##### D10d — where the data comes from: almost all of it already exists
+
+Checked before proposing plumbing. Three of four sources need no new query work at all.
+
+| datum | already exists as | change needed |
+|---|---|---|
+| `class_level`, `type_word` | `facts["classification"]["level"]` / `["value"]` (`tools._classification_facts`) | none |
+| `class_word` | `speech._OP_CLASS_DISPLAY[op_class]`, with `classification.parent_class_of` resolving a TYPE value to its class | none but the call |
+| place `name` / `kind` / `subtype` | **computed and then discarded.** `enrichment.semantic_facts_for` has `SettlementInfo.name`/`.subtype`, `WaterInfo.subtype` etc. in hand and flattens them into `SemanticFact.text` prose; `feature_id` keeps a `f"{kind}:{name}"` string | **extend `SemanticFact` with `kind: str`, `subtype: str \| None`, `name: str \| None`** |
+| enrichment reaching the candidates at all | `CrewConsole.enrichment` exists and reaches `handle_player_utterance` | **thread it into `parse_utterance` → `_resolve_reference` → `find_contact`** |
+
+**Do not parse `feature_id`.** It is a fallback display string (`enrichment.py`'s own docstring says
+so), ridge/valley variants embed a rounded distance rather than a name, and a real place name could
+contain a colon. Explicit `kind`/`subtype`/`name` fields are the right fix and are strictly additive
+— `facts["semantic"]` consumers read `["text"]` only (`console.py`, `speech.py`, and the tests,
+checked), so two extra keys break nothing.
+
+##### D10e — the wire shape, and module independence
+
+`belief/brain_client.py`'s `_partial_parse_to_dict` currently serialises
+`{"id": …, "why": …}` per candidate. It gains the structured fields:
+
+```json
+{"id": "CONTACT_7", "why": "T-72, observed, 10 o'clock, 2.1 km, near Gemerek village.",
+ "class_level": "type", "class_word": "armor", "type_word": "T-72",
+ "places": [{"kind": "settlement", "subtype": "town", "name": "Gemerek",
+             "words": ["town", "settlement", "village"], "confidence": 0.72}]}
+```
+
+`brain-layer` **does not import `body-layer`** — it hand-mirrors this shape in
+`brain-layer/src/prompts.py` (or a small `candidates.py`), exactly as
+`prompts.CLASSIFY_COMMAND_VOCABULARY` already hand-mirrors body's command tokens and
+`crew_console._FOLLOW_DESCRIPTOR_OP_CLASSES` mirrors `audio_adapter.vocabulary`. The mirror must
+**tolerate unknown extra keys and missing optional ones** and fall back to `why` if the structured
+fields are absent, so an older body and a newer brain (or the reverse) degrade to today's behaviour
+rather than crashing. The validator is body-side and unaffected by drift — the same
+degrades-gracefully-never-unsafely argument `CLASSIFY_COMMAND_VOCABULARY`'s docstring already makes.
+
+Nothing here touches `belief/tools.py`. `find_contact`'s signature already accepts `enrichment`; the
+15-tool API is unchanged.
+
+##### D10f — what the prompt shows the model: less text, not more
+
+**This is the item most at risk of re-opening D6's measured failure**, and the design makes the
+prompt *shorter*, not longer.
+
+**The candidate line shows only what the validator can match**, as an explicit allowlist — never a
+dump of the dataclass, and never the JSON:
+
+```
+CANDIDATES:
+  CONTACT_7 = armor, T-72, near Gemerek village
+  CONTACT_12 = armor, T-72, near a road
+```
+
+- One canonical word per place (`village`), while the validator accepts the whole synonym set. The
+  model does not need the synonyms; showing them is noise.
+- **No range, no clock, no certainty, no recency** — today's `why`-derived line carries prose the
+  model can quote and the validator can never ground. Removing it is both shorter and safer.
+- Caps: `CANDIDATE_MAX_PLACES = 3` places per line, `DISCRIMINATE_MAX_CANDIDATES = 4` candidates
+  shown. **The validator still checks the pick against *all* candidates**, not just the shown four —
+  so with many candidates `PICK` gets harder and Petrovich asks, which is the right direction to
+  fail. (`render_disambiguation` already caps the *spoken* list at three on the same reasoning.)
+- The instruction text above `CANDIDATES:` is **byte-identical** to the measured prompt. No
+  deliberation step, no examples of reasoning, no looser output format.
+
+**But `probe-prompt.txt` must be regenerated and the measurement re-run** — the candidate lines
+change, and D6's table was measured against the old ones. This is a **gate on Stage 2c, not a
+follow-up**: re-run the five documented cases (ambiguous → ASK 5/5, discriminating → PICK correct,
+and the two adversarial prompt-pressure cases) on both `qwen3:4b-instruct-2507-q4_K_M` and
+`granite4:micro`, the same one-liner D6 already documents. Not a new bench — a re-run of the
+existing one. If ASK-on-ambiguous regresses below 5/5 on the default model, stop and report rather
+than tuning the prompt toward the answer.
+
+##### D10g — staging
+
+Slots into the existing plan between Stage 2 and Stage 3. **The order matters: token overlap alone
+is inert, because there is no place text for it to match** (see "What forced the change").
+
+- **Stage 2a — structured candidates.** Extend `SemanticFact` (`kind`/`subtype`/`name`); thread
+  `enrichment` through `parse_utterance`/`_resolve_reference`; build the structured
+  `ReferenceCandidate`; add the place-word table; make `_contact_summary` include the
+  highest-confidence semantic fragment so `why` stops being identical across candidates; serialise
+  the new fields. **Shippable alone and worth shipping alone:** it fixes D9's currently-degenerate
+  A/B question, which is an already-merged defect, with the validator still on its old rule.
+- **Stage 2b — the new matching rule.** `brain_reply.py`'s tokeniser, the three rules, the
+  decidability table, the two constants. Pure functions; the heaviest test file in the slice gets
+  heavier, and every row of D10c's worked-cases table is a required test.
+- **Stage 2c — the prompt projection and the re-measurement gate** (D10f). Regenerate
+  `probe-prompt.txt`; re-run the five cases; record the result in
+  `body-layer/research/2026-09-25-small-model-measurements.md` alongside the existing table.
+
+Stage 3 (the A/B answer leg) is unchanged and now has something to work with: "the road one"
+resolves through exactly the same rule.
+
+##### Provenance, so a later reader does not "correct" a user constraint back to a code-shaped default
+
+| came from | what |
+|---|---|
+| **user, 2026-09-25** | token overlap instead of substring (decision 1); candidates must carry structured classification and location context rather than a rendered string (decision 2); location decomposes into name / type / world position; world position is *context*, never something the pilot will say |
+| **user, flagged for settling** | the unknown-vs-mismatch asymmetry — settled here as "unknown blocks the pick" (D10c) |
+| **architect, from the code** | the `why` strings the measurements assumed do not exist (no enrichment reaches `parse_utterance`); D9's question is degenerate today; location is the only channel that can discriminate, because `find_contact` selected on class; `_OP_CLASS_DISPLAY` says "armor", not "tank", and adding "tank" would mis-name a BTR; extend `SemanticFact` rather than parse `feature_id`; place absence is a decided negative while an unknown class level is not; drop world position from the wire |
+
+##### Risks this revision adds
+
+- **`PLACE_FACT_MATCH_MIN_CONFIDENCE` (0.3) is a guess**, like `STAND_BY_AFTER_S` before it. Too
+  high and place discrimination stops working for anything not freshly seen (`POSITION_HALF_LIFE_S`
+  is 30 s, so a 60-second-old contact is already at ~0.25 before the feature's own confidence is
+  folded in — the floor may bite sooner than it looks). Stage 4 tunes it; Stage 2b should log the
+  rejected-by-floor case so the sortie produces evidence.
+- **A wrong believed position now produces a *confidently wrong* place match**, not just
+  wrong-sounding prose. The confidence floor is the only defence, and `fix/position-belief-runaway`
+  is the reason to care. Same risk the original plan already names for the `why` ranges, one step
+  worse in consequence.
+- **Every candidate now costs a `describe_position` call** via enrichment, where reference
+  resolution previously cost none. `find_contact` is not on the 5 Hz path — it runs once per
+  escalated utterance — and `enrichment.cache` memoises per contact, so this should be
+  unmeasurable. Stated because it is a real new cost on a path that had none.
+- **The place-word table is a second speech vocabulary** alongside `_OP_CLASS_DISPLAY` and
+  `audio_adapter.vocabulary`. It will drift from `describe_position`'s subtypes when world-model
+  adds one. Failure mode is a place that cannot be referred to → Petrovich asks. Degrades safely,
+  like `CLASSIFY_COMMAND_VOCABULARY`.
+- **Extending `SemanticFact` widens `facts["semantic"]`** for every consumer of every contact-facing
+  tool, not just candidates. Checked as additive-only, but it is a shared structure and the reviewer
+  should confirm no consumer round-trips it.
+
+##### Second-order effect
+
+**Unblocks BR-2 more than it unblocks BR-1.** BR-2 is reference resolution as a capability
+("where is the T-72?" → *"10 o'clock, 2 km, north of V, between road and hill"*), and it needs
+exactly this structured place data on the *outbound* side. Structuring it here means BR-2 inherits
+it rather than building it. It also **narrows** BR-2 usefully: the place-word table becomes the
+project's vocabulary for talking about terrain, so BR-2 either reuses it or explains why not.
+**Complicates** one thing honestly: the per-type spoken-synonym layer D10b defers ("tank" → T-72
+but not BTR) is now a named, visible gap that someone will want closed, and closing it correctly
+means touching `perception/object_model.py`'s type table — not a change to make casually.
 
 ### D11 — "Unable" carries a reason, from a closed set the code owns
 
@@ -513,6 +873,12 @@ perfectly.
 **Not changed:** `belief/tools.py`, `belief/tool_api.py`, `belief/voice_commands.py`,
 `belief/callouts.py`, `belief/threat.py`, anything under `perception/`.
 
+**D10's 2026-09-25 revision adds three files to the changed list** (`belief/utterance.py` — the
+structured `ReferenceCandidate`, `PlaceRef` and the place-word table; `belief/enrichment.py` —
+`SemanticFact` gains `kind`/`subtype`/`name`; `brain-layer/src/prompts.py` — the candidate-line
+projection) and extends `belief/brain_reply.py`, `belief/brain_client.py` and `belief/speech.py`. It
+still changes **nothing** under `belief/tools.py` or `perception/`. See D10g for the staging.
+
 ---
 
 ## Implementation plan
@@ -572,6 +938,14 @@ needs is a bound on the thing behind it.
 3B's wrong `BECAUSE "tank"` being converted to `ASK` by the validator. That case is a required test
 — it is the safety net's only proof.
 
+### Stage 2a/2b/2c — structured candidates and the revised evidence test
+
+**Added 2026-09-25.** See D10's revision, D10g, for the three sub-stages and what each ships. Stage
+2a (structured candidates + enrichment threaded into `parse_utterance`) is shippable on its own and
+fixes D9's currently-degenerate A/B question; 2b replaces rule 3's substring test with token overlap
+over structured fields; 2c regenerates `probe-prompt.txt` and **re-runs D6's five measured cases as
+a gate**.
+
 ### Stage 3 — the A/B answer leg
 
 `awaiting_reply_id`/`awaiting_reply_to` wired through; the pilot's answer re-enters the discriminate
@@ -600,7 +974,8 @@ move exactly once after this, the way `inbound-speech`'s constants did.
   an architect who knew the answer. The prompt will meet accents, clipped radio phrasing, and
   STT noise, and the `BECAUSE` substring test is stricter against a garbled transcript than against
   a clean one — it may push Petrovich toward asking more often than intended. That fails safe, but
-  it may fail *annoying*.
+  it may fail *annoying*. **Confirmed worse than stated, and fixed: measured 2026-09-25, the
+  substring test rejected the real model's correct answer outright. See D10's revision.**
 - **A third process to start.** Each one is another thing that can be down mid-sortie. Body degrades
   to today's silence, which is a documented acceptable state, but the user now has three services
   to launch.
