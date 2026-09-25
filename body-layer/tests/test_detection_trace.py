@@ -22,7 +22,7 @@ import pytest
 
 from belief.contacts import ContactStore
 from detection_trace_writer import DetectionTraceWriter
-from perception import association, visibility
+from perception import association, naked_eye_source, visibility
 from perception.association import WorldObjectCandidate
 from perception.detection_trace import (
     DetectionTrace,
@@ -274,8 +274,18 @@ def test_gate_rejected_candidates_are_never_annotated() -> None:
     assert entry.observation_id is None
 
 
-def test_admitted_but_throttled_candidate_stays_unannotated() -> None:
-    # NAKED_EYE_MAX_NEW_GROUPS_PER_POLL is 3 -- and the cross-offsets below
+def test_admitted_but_throttled_candidate_stays_unannotated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The cap is pinned to 3 for this test rather than read from the module
+    # (2026-09-25): it was raised to 5 on the user's subitizing grounding,
+    # and this test is about the *mechanism* -- a gate-admitted but
+    # emission-throttled candidate stays unannotated -- not about the
+    # value. Hardcoding four candidates against a live constant made the
+    # test silently stop exercising throttling the moment the cap moved
+    # past four, which is exactly what happened.
+    monkeypatch.setattr(naked_eye_source, "NAKED_EYE_MAX_NEW_GROUPS_PER_POLL", 3)
+    # With the cap at 3 -- and the cross-offsets below
     # keep every candidate angularly separable, so four admissions are four
     # *groups*, not one. The fourth (furthest) is therefore gate-admitted
     # but emission-throttled this poll, so its trace entry stays ADMITTED
