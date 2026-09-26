@@ -105,3 +105,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Eyesight view review approved](project_eyesight_view_review_approved.md) — feature/eyesight-view APPROVED; shared-collector...
 - [BR-1 Stage 2 BECAUSE quote bug](project_br1_stage2_because_quote_bug.md) — APPROVED WITH MINOR FIXES; found by composing two test suites' own expected values, not by reading alone.
 - [BR-1 Stage 2 fold review](project_br1_stage2_fold_review.md) — APPROVED; split composition test closes seam via transitivity; verify "structurally redundant" claims by reading code.
+- [Aircraft hardening accept race required fix](project_aircraft_hardening_accept_race_required_fix.md) — NEEDS REVISION then APPROVED W/ MINOR FIXES; flag fix verified by 300-run reproduction; a "correct 3 docs" fix can still leave 2 of N passages in one doc uncorrected.
