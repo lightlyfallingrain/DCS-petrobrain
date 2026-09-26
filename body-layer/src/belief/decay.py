@@ -116,9 +116,23 @@ LOS_MASK_CONFIRM_S: Final[float] = 5.0
 #: window over which a spontaneous callout (`belief.contacts.ContactStore.
 #: tick`'s sixth block, `CONTACT_RANGE_CROSSED`, and the fifth block,
 #: `CONTACT_MOTION_CHANGED`) may still fire for a contact that is currently
-#: unobservable (behind the cockpit mask from every gaze direction), based
-#: on `Contact.unobservable_since_sim` tracking how long the mask check has
-#: failed *continuously*. This is **a starting value to tune against a
+#: unobservable (behind the cockpit mask from every gaze direction),
+#: measured from `Contact.last_observable_sim` -- the sim time he was last
+#: *confirmed* observable, `None` meaning never.
+#:
+#: **That direction is deliberate and the opposite of `LOS_MASK_CONFIRM_S`'s
+#: shape above.** The plan originally specified an `unobservable_since_sim`
+#: mirroring it -- elapsed time since the mask check *started* failing --
+#: and that formula is broken for this purpose: a contact masked
+#: continuously since it was founded has an elapsed-since-first-failure of
+#: 0, so it would be granted a full grace window on its very first tick and
+#: spoken about despite never once having been seen. Measuring from the last
+#: confirmed sighting instead denies grace unconditionally to a contact that
+#: was never observed, while still granting it to one seen and then briefly
+#: occluded. (Found during implementation and confirmed by the reviewer, who
+#: patched the rejected formula back in and watched the defect test fail.)
+#:
+#: The value itself is **a starting value to tune against a
 #: flown sortie, not a measurement** -- proposed as roughly `OBSERVED_
 #: WINDOW_S / 1.6`: short enough that a sustained rear-hemisphere leg of an
 #: orbit does go quiet, long enough to cover "slid behind the doorframe for
