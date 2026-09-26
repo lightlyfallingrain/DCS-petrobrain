@@ -124,25 +124,47 @@ def test_unexpected_accept_error_is_logged_loudly_and_the_loop_recovers(
         server._socket = None
 
 
-def test_close_during_a_blocked_accept_ends_the_loop_cleanly() -> None:
+def test_close_during_a_blocked_accept_ends_the_loop_cleanly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """The existing, already-relied-upon shutdown path: a plain `OSError`
     from `accept()` (this codebase's own shape for "the listening socket
     was just closed") ends the loop without logging it as a failure --
-    since `self._socket` is already `None` by the time `serve_forever`'s
-    `except` clause runs, exactly like `F10CommandReceiver.serve_forever`'s
-    own close()-during-recvfrom shutdown path."""
-    server = CollectorServer(
-        TelemetryCache(),
-        WorldObjectsCache(),
-        PetrovichIndicationCache(),
-        PetrovichWheelCache(),
-    )
-    server.open()
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    time.sleep(0.1)
+    `close()` sets `self._shutting_down` before it closes the socket, so
+    `serve_forever`'s `except` clause classifies this as intended shutdown
+    rather than an unexpected failure, exactly like
+    `F10CommandReceiver.serve_forever`'s own close()-during-recvfrom
+    shutdown path.
 
-    server.close()
-    thread.join(timeout=5)
+    Run several times in a row with fresh server instances rather than
+    once: an earlier version of this guard classified shutdown correctly
+    only when `self._socket` happened to already be `None` by the time the
+    `except` block ran, which is a race, not a guarantee -- it logged the
+    false failure on 161/~230 real runs outside pytest. A single pass here
+    would have had a good chance of landing in the lucky ~30% and shipping
+    anyway; repeating it makes a reintroduced race show up reliably instead
+    of intermittently.
+    """
+    for _ in range(20):
+        server = CollectorServer(
+            TelemetryCache(),
+            WorldObjectsCache(),
+            PetrovichIndicationCache(),
+            PetrovichWheelCache(),
+        )
+        server.open()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        with caplog.at_level(logging.ERROR, logger="collector.server"):
+            thread.start()
+            time.sleep(0.02)
 
-    assert not thread.is_alive()
+            server.close()
+            thread.join(timeout=5)
+
+            assert not thread.is_alive()
+            error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+            assert not error_records, (
+                "clean shutdown must not be logged as an accept() failure: "
+                f"{[r.getMessage() for r in error_records]}"
+            )
+        caplog.clear()
