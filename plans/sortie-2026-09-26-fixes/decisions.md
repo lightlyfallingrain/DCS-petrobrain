@@ -162,6 +162,27 @@ knowledge to phrase "beyond the hill at 2 o'clock" (world-model ridges). **So De
 here as a constraint on Fix A's design, not as work in this change set.** What Fix A must do now is
 avoid foreclosing it — do not build a gate that cannot later admit a pull-only answering path.
 
+## Decision 4 — the three sizing answers (2026-09-26)
+
+Answers to the plan's "Decisions Requiring User Input", in the user's own words: *"1 - follow on / 2 -
+include / 3 - fine"*.
+
+1. **Sector coverage (Decision 2a) is a follow-on**, not part of this branch. It gets its own plan and,
+   per the architect's recommendation, an `/explore` pass with the user before it is designed — it is a
+   `choose_look` selection-fairness redesign with open starvation-bound and give-up-condition
+   questions, not an extension of the per-contact eligibility fix. **Do not partially implement it
+   here**: a half-coverage rule would be harder to reason about than the current honest gap, and the
+   explore pass is what the open questions need.
+2. **`CONTACT_MOTION_CHANGED` is included in Fix A.** It carries the identical structural gap — no
+   visibility check at all on a spontaneous-callout path — and the user chose to fix both together
+   rather than leave a known instance of the same defect in place. Note the wider blast radius the
+   plan flagged: it fires for unwatched contacts too, so the observability gate affects more callouts
+   here than on the crossing path. That is the point, not a side effect, but it does mean the stage
+   needs test coverage for the unwatched case specifically, not only the watched one.
+3. **The two seeded constants stand as proposed** — `CALLOUT_OBSERVABILITY_GRACE_S = 10.0` and
+   `OPTIC_RETRY_INTERVAL_S ~= 64s`. They are starting values to be tuned against a sortie, not
+   measurements, and both must say so where they are defined.
+
 ## What is in scope for the fix
 
 - Observability gate on the crossing-callout path, with a grace window for brief occlusion (D1).
