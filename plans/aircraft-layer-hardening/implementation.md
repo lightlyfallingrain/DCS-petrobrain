@@ -5,6 +5,28 @@ Two small, local hardening fixes in `aircraft-layer/`, both RECOMMENDED items fr
 task -- it was scoped directly by the user from the two review documents, not through
 Architect, per the task brief.
 
+**Follow-up pass (this entry), fixing a required Reviewer finding on `6e821c9`:** the
+first version of the `accept()` guard (described below, and originally claimed correct
+in this same file) classified a clean `close()`-driven shutdown by re-reading
+`self._socket` inside the `except OSError` block and checking whether it was `None`.
+That is a genuine race, not just an imprecision: `close()` does `self._socket.close()`
+then `self._socket = None` as two separate statements, so a blocked `accept()` can raise
+from the `close()` call itself while `self._socket` still holds the old (now-closed)
+object. The Reviewer reproduced this outside pytest -- 161 false "accept() failed
+unexpectedly" ERROR logs across ~230 real shutdown runs, i.e. the *common* case on this
+platform, not a rare theoretical race -- which defeated the whole point of the guard
+(an ERROR line that fires on most ordinary shutdowns trains an operator to ignore it).
+Fixed by adding an explicit `self._shutting_down` flag, set as the first statement of
+`close()` (before the socket is actually closed), and checked in the `except` block
+instead of `self._socket is None`. Because the flag write happens-before the `close()`
+syscall that can raise, this removes the race deterministically rather than narrowing
+it. `server.py`'s docstring and comments are corrected to describe this mechanism
+instead of the "capture into a local once, never re-read" claim that was never true of
+the `except` block (only the top-of-loop `None` check ever did that).
+`test_close_during_a_blocked_accept_ends_the_loop_cleanly` now asserts no ERROR record
+is logged, run 20 times with fresh server instances per run so a reintroduced race
+cannot pass by landing in the lucky ~30%.
+
 ### Files Changed
 
 - `aircraft-layer/src/collector/audio_sender.py` -- bounded `AudioPlaybackSender`'s

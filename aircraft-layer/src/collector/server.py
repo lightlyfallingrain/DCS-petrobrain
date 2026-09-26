@@ -127,6 +127,10 @@ class CollectorServer:
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
+        # Set as the *first* statement of close(), before the socket is
+        # actually closed -- see close()'s own comment for why the ordering
+        # matters.
+        self._shutting_down = False
 
     def __enter__(self) -> Self:
         self.open()
@@ -150,6 +154,13 @@ class CollectorServer:
         logger.info("collector listening on %s:%d", self._host, self._port)
 
     def close(self) -> None:
+        # Set *before* the socket is actually closed -- a blocked accept()
+        # on another thread can only observe this closure after the
+        # syscall below runs, so the flag write happens-before the OSError
+        # it is meant to explain. See serve_forever()'s docstring for why
+        # inferring shutdown from self._socket's value instead (the
+        # previous approach) is not safe here.
+        self._shutting_down = True
         if self._socket is not None:
             self._socket.close()
             self._socket = None
@@ -178,14 +189,24 @@ class CollectorServer:
 
         `close()` from another thread also unblocks a pending `accept()`
         with an `OSError` -- that is the intended shutdown path, not a
-        failure, and is distinguished from a real failure by `self._socket`
-        having been set back to `None` by `close()` (see that method). The
-        socket used for each `accept()` call is captured into a local
-        (`sock`) at the top of the loop rather than read as `self._socket`
-        a second time inside the `except` block: `close()` runs on another
-        thread and can flip `self._socket` to `None` at any point, so
-        re-reading the attribute after the exception fires would risk
-        calling `.accept()` on `None` on the very next iteration.
+        failure, and is distinguished from a real failure by the explicit
+        `self._shutting_down` flag, **not** by inferring intent from
+        `self._socket`'s value. `close()` does `self._socket.close()` then
+        `self._socket = None` as two separate statements; a blocked
+        `accept()` can raise from the `close()` call while `self._socket`
+        still holds the (now-closed) old socket object, so checking
+        `self._socket is None` in the `except` block below races that
+        second statement -- confirmed live (not theoretical) to
+        misclassify a clean shutdown as a failure on most runs. `close()`
+        sets `self._shutting_down = True` as its *first* statement, before
+        the socket is actually closed, so that flag's write always
+        happens-before the `OSError` it is checked against. The socket
+        used for each `accept()` call is still captured into a local
+        (`sock`) at the top of the loop -- `close()` can flip `self._socket`
+        to `None` on another thread at any point, so re-reading that
+        attribute (as opposed to the separate `_shutting_down` flag) after
+        the exception fires would risk calling `.accept()` on `None` on the
+        very next iteration.
         """
         if self._socket is None:
             raise RuntimeError("call open() before serve_forever()")
@@ -198,7 +219,7 @@ class CollectorServer:
             try:
                 conn, addr = sock.accept()
             except OSError:
-                if self._socket is None:
+                if self._shutting_down:
                     # close() ran on another thread -- intended shutdown,
                     # not a failure.
                     return
