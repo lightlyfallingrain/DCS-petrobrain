@@ -47,14 +47,27 @@ None.
    `handle_error` catches it (logs a traceback to stderr, closes that one connection) — this is
    **not** a server crash or a multi-request DoS, `ThreadingHTTPServer` isolates it to the one
    connection — but it is a needless traceback for a trivially malformed request that should be a
-   clean `400`, and (compounding #1) a *negative* `Content-Length` makes `self.rfile.read(length)`
-   read with a negative count, which for a socket-backed file object reads until EOF rather than a
-   bounded amount — on a keep-alive connection with no EOF forthcoming, that thread blocks
-   indefinitely. Not a full-server DoS (each blocked thread is one `ThreadingHTTPServer` thread,
-   unbounded thread creation is its own pre-existing, accepted characteristic of using
-   `ThreadingHTTPServer` at all — same tradeoff `aircraft-layer`'s stdlib-based servers already
-   carry), but cheap to close: parse the header defensively and reject non-numeric/negative values
-   with `400` before calling `read()`.
+   clean `400`. Cheap to close regardless: parse the header defensively and reject a non-numeric
+   value with `400` before calling `read()`.
+   **Correction (Reviewer, `plans/audio-adapter-review-findings/review.md`, 2026-09-26):** the
+   negative-`Content-Length` half of this finding, as originally written below, does not hold for
+   this code path. Original text: *"(compounding #1) a negative `Content-Length` makes
+   `self.rfile.read(length)` read with a negative count, which for a socket-backed file object
+   reads until EOF rather than a bounded amount — on a keep-alive connection with no EOF
+   forthcoming, that thread blocks indefinitely."* That mechanism does not occur here: the code at
+   this line already reads `raw_body = self.rfile.read(length) if length > 0 else b""` — a negative
+   `length` fails `length > 0` and takes the `else b""` branch, so `rfile.read()` is never called
+   with a negative count at all. The resulting empty body then fails `json.loads("")` on its own,
+   landing on a clean `400` through the pre-existing JSON-validation path — no hang, no traceback.
+   This was confirmed empirically, not just by re-reading: the Reviewer reverted `server.py` to the
+   pre-fix commit (`2802c4f`) and re-ran the fix's own negative-`Content-Length` regression test
+   directly against it, and it passed unmodified (the real defect this finding correctly caught was
+   the unhandled `ValueError` on a *non-numeric* value, which the same revert-and-run did
+   reproduce as a genuine traceback). The header-guard fix built for this finding is still worth
+   keeping — explicit rejection before any body-reading logic is clearer than relying on an
+   incidental `length > 0` guard staying in place forever — but the hang mechanism described above
+   was never real on this code path, and the RECOMMENDED #2 / row-111 cross-references below should
+   be read with that correction in mind.
 
 3. **`say`/`afplay`/`whisper-cli`/`sox` argv construction is safe from shell injection, but text
    passed to `say` as a single trailing argv token could theoretically be read by `say`'s own
@@ -107,8 +120,10 @@ checked and answer `400`. Unknown paths answer `404`. Error response bodies echo
 temp-file path or subprocess stderr text — a minor internal-details leak, appropriate severity for
 a LAN-only debug-adjacent tool, not treated as a finding. No request can wedge the server as a
 *whole* (`ThreadingHTTPServer` isolates each connection to its own thread and `BaseServer`'s own
-`handle_error` catches unhandled exceptions per-request) — the only per-request wedge risk is the
-negative-`Content-Length` case above (RECOMMENDED #2), which blocks one thread, not the process.
+`handle_error` catches unhandled exceptions per-request) — the per-request wedge risk named here as
+the negative-`Content-Length` case (RECOMMENDED #2) does not actually occur, per that finding's
+correction above: the pre-fix code's own `length > 0` guard already kept a negative length from
+ever reaching `rfile.read()`.
 
 **2. Outbound clients (`aircraft_client.py`, `transcribe_client.py`, and `ptt_source.py`'s
 `DcsPTT._read`).** All three `urllib.request.urlopen` call sites carry explicit timeouts (5s for

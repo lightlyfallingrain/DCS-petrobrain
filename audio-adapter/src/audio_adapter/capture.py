@@ -51,13 +51,26 @@ from audio_capture import (
     sox_available,
 )
 from capture_loop import CaptureLoop
-from ptt_source import DcsPTT, JoystickPTT, KeyTogglePTT, PTTError, PTTSource
+from ptt_source import (
+    DEFAULT_DCS_POLL_HZ,
+    DcsPTT,
+    JoystickPTT,
+    KeyTogglePTT,
+    PTTError,
+    PTTSource,
+)
 from transcribe_client import TranscribeClient
 
 DEFAULT_ADAPTER_URL = "http://127.0.0.1:7795"
 #: The collector's own LAN API, on this same box when --ptt dcs is used.
 DEFAULT_COLLECTOR_URL = "http://127.0.0.1:7791"
-DEFAULT_POLL_HZ = 60.0
+#: Default poll rate for the local PTT sources (`key`/`joystick`) -- a local
+#: read with no network hop, so there is no cost tradeoff to make. `--ptt dcs`
+#: gets its own, slower default (`ptt_source.DEFAULT_DCS_POLL_HZ`) because it
+#: is an HTTP round trip to a collector sharing a box with DCS; see that
+#: constant's docstring for why 30 Hz was chosen there. An explicit
+#: `--poll-hz` from the user always overrides whichever default applies.
+DEFAULT_LOCAL_POLL_HZ = 60.0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -112,8 +125,30 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-clip-s", type=float, default=DEFAULT_MAX_CLIP_S)
     parser.add_argument("--min-clip-s", type=float, default=DEFAULT_MIN_CLIP_S)
     parser.add_argument("--min-peak", type=float, default=DEFAULT_MIN_PEAK)
-    parser.add_argument("--poll-hz", type=float, default=DEFAULT_POLL_HZ)
+    parser.add_argument(
+        "--poll-hz",
+        type=float,
+        default=None,
+        help=(
+            "talk-control poll rate; default depends on --ptt: "
+            f"{DEFAULT_DCS_POLL_HZ:g} Hz for dcs (an HTTP round trip to a collector "
+            f"sharing a box with DCS), {DEFAULT_LOCAL_POLL_HZ:g} Hz for key/joystick "
+            "(a local read, no network hop)"
+        ),
+    )
     return parser
+
+
+def _resolve_poll_hz(ptt: str, poll_hz: float | None) -> float:
+    """The default poll rate depends on the PTT source; an explicit
+    `--poll-hz` always wins. `--ptt dcs` is an HTTP round trip to a
+    collector sharing a box with DCS, so it defaults to the slower,
+    deliberately-chosen `DEFAULT_DCS_POLL_HZ` rather than the local sources'
+    flat default.
+    """
+    if poll_hz is not None:
+        return poll_hz
+    return DEFAULT_DCS_POLL_HZ if ptt == "dcs" else DEFAULT_LOCAL_POLL_HZ
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         tail_s=args.tail_s,
         discard_if=discard_if,
     )
-    interval = 1.0 / args.poll_hz if args.poll_hz > 0 else 0.0
+    poll_hz = _resolve_poll_hz(args.ptt, args.poll_hz)
+    interval = 1.0 / poll_hz if poll_hz > 0 else 0.0
 
     try:
         if key_ptt is not None:
