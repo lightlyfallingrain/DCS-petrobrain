@@ -67,6 +67,44 @@ that does not, does not.** The `follow <target>` case is specified by the user d
 glassing that target, continue; if glassing something else, lower, re-point at the target, and then
 re-judge whether binoculars are warranted for it (rather than assuming they are).
 
+### Decision 2a — coverage, not a watched-contact special case
+
+The user corrected an earlier framing of this (which had described time-based re-eligibility as the
+thing that "unlocks the watched one"):
+
+> *"not just the watched. If I'm orbiting a group of units and command scan left (units on left) I
+> expect all of them to get the necessary attention. It's important to know *what* is out there."*
+
+So the requirement is **coverage of an attended sector**, not a carve-out for watched contacts. If the
+player commands `scan left` and there are ten units to the left, the expectation is that all ten
+eventually get the attention needed to say what they are — because identifying what is out there is
+the point of asking.
+
+**This is a different shape of requirement from a retry budget, and the plan must treat it as such.**
+The current model is per-contact and one-shot: each contact gets a single attempt, with re-eligibility
+only once it has closed by `RETRY_RANGE_FRACTION`. Ten units in a scanned sector therefore yield ten
+attempts and then silence, regardless of how long the aircraft loiters there — which matches what the
+sortie showed (44 of 52 contacts spent time inside the 500-1750 m classification window, several for
+200-1200+ seconds, and several never advanced past PRESENCE).
+
+What this implies, for the plan to work out rather than assume:
+
+- Time-based re-eligibility is necessary but probably not sufficient on its own. Something has to
+  ensure the *unclassified* contacts in an attended sector get looked at, rather than attention
+  returning to whichever contact is nearest or was most recently eventful.
+- That suggests a selection rule with some notion of fairness across the sector's contacts — round
+  robin, or preferring the least-known — rather than only a per-contact eligibility test. The
+  distinction matters: eligibility says *may* he look again, coverage says *whom* he looks at next.
+- It should not become an obligation to classify everything before anything else happens. A sector
+  with thirty units must not starve the rest of his behaviour, and a contact that genuinely cannot be
+  resolved (too far, too obscured) must not be retried forever. Say how that is bounded.
+
+**Effort note:** this makes Fix B materially larger than the "interrupted look does not burn the
+attempt" change it started as — that part is a small correction, this part is a change to how look
+targets are chosen. If the plan finds the coverage half is better as its own staged piece of work,
+say so and stage it separately rather than folding it in silently; the user's direction is clear about
+the intent, not about the size.
+
 ### This supersedes D5's "not a timer"
 
 D5 chose range-based retry with an explicit rationale: *"a contact at constant range has not become
@@ -128,7 +166,9 @@ avoid foreclosing it — do not build a gate that cannot later admit a pull-only
 
 - Observability gate on the crossing-callout path, with a grace window for brief occlusion (D1).
 - An interrupted look no longer marks the target attempted (D2).
-- Time-based re-eligibility alongside the existing range-based retry (D2).
+- Time-based re-eligibility alongside the existing range-based retry (D2), **and coverage of an
+  attended sector** so every contact in it eventually gets the attention needed to say what it is
+  (D2a) — not a watched-contact carve-out.
 - Command-dependent lowering: unrecognised speech does not interrupt; `follow <target>` continues if
   already glassing that target, otherwise re-points and re-judges (D2).
 
