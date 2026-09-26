@@ -1429,6 +1429,78 @@ def test_a_player_command_lowers_the_binoculars() -> None:
     assert optic_state.look_azimuth_deg is None
 
 
+def test_follow_already_on_target_does_not_lower_the_binoculars() -> None:
+    """`plans/sortie-2026-09-26-fixes/decisions.md` Decision 2's one
+    carve-out to the rule above: `follow <target>` naming the contact
+    already being glassed is a request to continue, not to stop --
+    lowering and immediately re-pointing at the same target would be
+    strictly worse than doing nothing. Reproduces `_run_crew_text_poll_
+    loop`'s exact conditional (mirroring `test_a_player_command_lowers_
+    the_binoculars`'s own reproduction above), extended with the carve-out
+    this fix adds, rather than checking `already_on_target`'s arithmetic
+    and `lower_binoculars` as two unrelated facts."""
+    from belief.optic_policy import OpticPhase, OpticState, lower_binoculars
+
+    console = CrewConsole(store=ContactStore())
+    optic_state = OpticState(
+        phase=OpticPhase.GLASSING,
+        phase_started_sim=0.0,
+        look_azimuth_deg=30.0,
+        look_elevation_deg=-5.0,
+        look_contact_id="CONTACT_1",
+    )
+
+    commands_before = console.commands_handled
+    console.commands_handled += 1  # simulate a dispatched "follow CONTACT_1"
+    console.last_command_target_contact_id = "CONTACT_1"
+
+    if console.commands_handled != commands_before:
+        already_on_target = (
+            console.last_command_target_contact_id is not None
+            and optic_state.phase is OpticPhase.GLASSING
+            and optic_state.look_contact_id == console.last_command_target_contact_id
+        )
+        if not already_on_target:
+            optic_state = lower_binoculars(optic_state, now_sim=1.0)
+
+    assert optic_state.phase is OpticPhase.GLASSING
+    assert optic_state.look_azimuth_deg == 30.0
+
+
+def test_follow_off_target_still_lowers_the_binoculars() -> None:
+    """The other half of Decision 2's `follow` spec: naming a contact
+    *other* than the one currently being glassed lowers the binoculars (so
+    the scan can re-point at the named target), just like every other
+    dispatched command -- the carve-out is narrow, not a blanket exemption
+    for `follow`."""
+    from belief.optic_policy import OpticPhase, OpticState, lower_binoculars
+
+    console = CrewConsole(store=ContactStore())
+    optic_state = OpticState(
+        phase=OpticPhase.GLASSING,
+        phase_started_sim=0.0,
+        look_azimuth_deg=30.0,
+        look_elevation_deg=-5.0,
+        look_contact_id="CONTACT_1",
+    )
+
+    commands_before = console.commands_handled
+    console.commands_handled += 1  # simulate a dispatched "follow CONTACT_2"
+    console.last_command_target_contact_id = "CONTACT_2"
+
+    if console.commands_handled != commands_before:
+        already_on_target = (
+            console.last_command_target_contact_id is not None
+            and optic_state.phase is OpticPhase.GLASSING
+            and optic_state.look_contact_id == console.last_command_target_contact_id
+        )
+        if not already_on_target:
+            optic_state = lower_binoculars(optic_state, now_sim=1.0)
+
+    assert optic_state.phase is OpticPhase.SCANNING
+    assert optic_state.look_azimuth_deg is None
+
+
 def test_an_unknown_contact_sizes_its_window_from_a_default_profile() -> None:
     """The no-omniscience property of the binocular trigger: a
     presence-level contact has no believed type, so the window is sized

@@ -24,6 +24,7 @@ def _observation(
     obs_id: str,
     t_sim: float,
     apparent_motion: bool | None = None,
+    bearing_deg: float = 0.0,
 ) -> Observation:
     return Observation(
         id=obs_id,
@@ -32,7 +33,7 @@ def _observation(
         t_wall=t_sim,
         source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
         classification_raw="Ural truck",
-        bearing_deg=0.0,
+        bearing_deg=bearing_deg,
         range_m=1000.0,
         ownship_at_observation=_ownship(t_sim),
         derived_world_position=DerivedWorldPosition(
@@ -106,6 +107,39 @@ def test_tick_emits_contact_motion_changed_after_promotion() -> None:
     change_event = store.events[-1]
     assert change_event.previous_motion is None
     assert change_event.motion == "moving"
+
+
+def test_motion_changed_does_not_fire_for_an_unwatched_contact_behind_the_cockpit_mask() -> (
+    None
+):
+    """`plans/sortie-2026-09-26-fixes/decisions.md` Decision 4.2: `CONTACT_
+    MOTION_CHANGED` carries the identical structural gap as `CONTACT_RANGE_
+    CROSSED` (no visibility check of any kind), but a *wider* blast radius
+    -- it fires for every contact, watched or not, unlike the crossing
+    callout's watch-only gate. This contact is founded at bearing 180
+    (dead astern of a level-heading ownship, past the cockpit mask's rear
+    cutoff) and never watched at all -- the unwatched case Decision 4.2
+    specifically calls out needing its own coverage, not just the watched
+    one `test_range_crossing_does_not_fire_for_a_contact_behind_the_cockpit_
+    mask` in `test_contacts.py` already covers."""
+    store = ContactStore()
+    obs1 = _observation(
+        obs_id="OBS_1", t_sim=0.0, apparent_motion=None, bearing_deg=180.0
+    )
+    store.ingest([obs1], now_sim=0.0)
+    store.tick(now_sim=0.0, ownship=_ownship())
+    assert [event.kind for event in store.events] == [CONTACT_DETECTED]
+
+    obs2 = _observation(
+        obs_id="OBS_2", t_sim=1.0, apparent_motion=True, bearing_deg=180.0
+    )
+    store.ingest([obs2], now_sim=1.0)
+    store.tick(now_sim=1.0, ownship=_ownship(1.0))
+
+    # The motion state genuinely changed (None -> moving), and this contact
+    # is never watched at all -- but it has never once been confirmed
+    # observable, so no CONTACT_MOTION_CHANGED callout fires.
+    assert not any(e.kind == CONTACT_MOTION_CHANGED for e in store.events)
 
 
 def test_event_cooldown_suppresses_emission_without_losing_the_transition() -> None:
