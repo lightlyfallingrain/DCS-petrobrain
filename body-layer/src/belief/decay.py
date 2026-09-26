@@ -112,6 +112,22 @@ MOTION_STOP_CONFIRM_S: Final[float] = 5.0
 #: since_sim`'s direct twin in shape.
 LOS_MASK_CONFIRM_S: Final[float] = 5.0
 
+#: `plans/sortie-2026-09-26-fixes/decisions.md` Decision 1 -- the grace
+#: window over which a spontaneous callout (`belief.contacts.ContactStore.
+#: tick`'s sixth block, `CONTACT_RANGE_CROSSED`, and the fifth block,
+#: `CONTACT_MOTION_CHANGED`) may still fire for a contact that is currently
+#: unobservable (behind the cockpit mask from every gaze direction), based
+#: on `Contact.unobservable_since_sim` tracking how long the mask check has
+#: failed *continuously*. This is **a starting value to tune against a
+#: flown sortie, not a measurement** -- proposed as roughly `OBSERVED_
+#: WINDOW_S / 1.6`: short enough that a sustained rear-hemisphere leg of an
+#: orbit does go quiet, long enough to cover "slid behind the doorframe for
+#: a few seconds" (the user's own wording) without treating a brief
+#: occlusion as silence. See Decision 1's "the general rule is the
+#: no-omniscience invariant, applied to callouts" for why this is a grace
+#: window on unobservability rather than a bare gaze-cone gate.
+CALLOUT_OBSERVABILITY_GRACE_S: Final[float] = 10.0
+
 #: Medium/slow decay: the general area, independent of the exact point.
 #: Slower than motion -- "somewhere near that village" stays true long after
 #: "moving north at that exact spot" has gone stale. Not yet consumed (no
