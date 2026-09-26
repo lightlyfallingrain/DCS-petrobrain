@@ -60,9 +60,10 @@ body-side view and the slice numbering both files share.
       line now cuts a routine one off mid-word. The change stayed inside `_WinsoundPlayer` — no
       queue logic moved, which is the plan's decision to isolate the interrupt mechanism in one
       named function paying off exactly as intended.
-    - **Still unobserved:** whether the audio ducks or competes against other sound on the box.
-      Deferred rather than chased, because the SPU-8 volume argument below makes it largely an
-      SRS-path question anyway.
+    - ~~**Still unobserved:** whether the audio ducks or competes against other sound on the
+      box.~~ **ANSWERED 2026-09-26 (user): it behaves well — "no, this is good."** Judged in the
+      air, not on a bench, which is the only place the question was ever answerable. No work
+      follows, and the Stage 6 card need not carry it.
 
   - [ ] **Stage 6 — live sortie acceptance (needs DCS).** Full `--crew-text --speech-audio` during
     a real flight. Judges what only a human can: whether ~0.6-0.8 s synthesis latency reads as

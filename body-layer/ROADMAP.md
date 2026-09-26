@@ -1629,12 +1629,16 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   different uncertainty models), not a quick patch — revisit once real sortie data shows it actually
   degrading perceived contact quality.
 
-- [ ] **BL-2.5 overlay clips its last line at 420×200.** Root cause: the dynamic-sizing fix was
-  bundled with a since-reverted restyle commit and reverted with it. Candidate fix: re-implement
-  dynamic sizing as an independent commit, separate from any cosmetic change.
+- [x] **BL-2.5 overlay clips its last line at 420×200 — REJECTED 2026-09-26 (user), not fixed.**
+  Closed as won't-fix rather than done: the clipping is real and the candidate fix still stands
+  (re-implement dynamic sizing as its own commit, separate from any cosmetic change — the fix was
+  bundled with a since-reverted restyle and went back with it). The user judged it not worth
+  spending on. Reopen only if a future overlay change makes it cheap or makes the clipping worse.
 
-- [ ] **BL-2.5 overlay has no dismiss affordance.** Moot while the titled window (with its close
-  button) is in effect. Would matter again if the borderless restyle is ever revisited.
+- [x] **BL-2.5 overlay has no dismiss affordance — REJECTED 2026-09-26 (user), not fixed.** It was
+  already moot while the titled window keeps its close button; the user closed it outright. It
+  would only return if the borderless restyle is ever revisited, and that restyle is itself
+  rejected.
 
 - **Detection under real world conditions — weather, light, vegetation.** Raised by the user
   2026-09-19, not started, no milestone assigned. **The framing matters more than the list:** every
