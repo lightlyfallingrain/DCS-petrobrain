@@ -311,6 +311,18 @@ def test_speak_non_numeric_content_length_returns_400(
 def test_speak_negative_content_length_returns_400(
     running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
 ) -> None:
+    """A negative `Content-Length` must be rejected by `_read_body`'s own
+    header guard, not fall through to the pre-existing JSON-validation
+    path. Both paths happen to answer `400`, so asserting the status alone
+    does not distinguish them -- the pre-fix code (`2802c4f`) already
+    guarded the *read* with `self.rfile.read(length) if length > 0 else
+    b""`, so a negative length there took the `else b""` branch and failed
+    `json.loads("")` instead, answering `400` with `"body must be valid
+    JSON"`. That passes this assertion's old status-only check but proves
+    nothing about the header guard. Asserting the guard's own error message
+    (`"invalid Content-Length: ..."`) instead fails against the pre-fix
+    code -- confirmed empirically by reverting `server.py` to `2802c4f` and
+    re-running this test."""
     server, engine, sink = running_server
     body = json.dumps({"text": "hello"}).encode("utf-8")
     status, resp_body = _post_raw_content_length(
@@ -318,7 +330,7 @@ def test_speak_negative_content_length_returns_400(
     )
     assert status == 400
     assert isinstance(resp_body, dict)
-    assert "error" in resp_body
+    assert resp_body == {"error": "invalid Content-Length: '-1'"}
     assert engine.requested_text == []
     assert sink.delivered == []
 
