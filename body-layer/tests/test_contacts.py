@@ -1413,6 +1413,47 @@ def test_tick_without_ownship_is_a_no_op_for_range_crossing() -> None:
     assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
 
 
+def test_range_crossing_does_not_fire_for_a_contact_behind_the_cockpit_mask() -> None:
+    """`plans/sortie-2026-09-26-fixes/diagnosis.md` (Defect 1). Sortie
+    finding, 2026-09-26: *"Crossings say which way -> yes, but also says
+    it for contacts outside FOV also contacts masked by cockpit."* Also
+    reproduced directly from that sortie's own belief-truth log: e.g.
+    `t_sim=354.448`, gaze `12_oclock`, spoken text `"Moving away, armor,
+    6 o'clock, 1 kilometre."` -- a contact reported dead astern while
+    Petrovich was looking forward.
+
+    The sixth block of `ContactStore.tick` (whole-kilometre range
+    crossings) gates only on watch attention, deadband, sigma, and
+    time-decayed freshness (`certainty_of`) -- never on whether the
+    contact's *current* bearing is even physically visible. This test
+    places the watched contact at 180 degrees relative to ownship heading
+    -- well past `perception.cockpit_mask`'s own `rear_cutoff_deg`
+    (130 degrees, `_CO_PILOT_MASK`), i.e. structurally invisible to the
+    naked eye regardless of gaze direction -- and still gets a crossing
+    event. This is not the already-fixed `los_masked_since_sim` bookkeeping
+    bug (`AGENTS.md`'s "Security / Performance Reviewer change request"
+    example, which concerns `CONTACT_ENGAGEMENT_CHANGED`'s own terrain-LOS
+    check resetting correctly): this block has no visibility check of any
+    kind to have a bookkeeping bug in.
+
+    Currently fails: no FOV/cockpit-mask/LOS gate exists on this path at
+    all, so the event fires exactly as if the contact were dead ahead."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=180.0, range_m=4500.0)],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    store.tick(now_sim=0.0, ownship=_ownship())  # silent seed at km=4, still astern
+    # Ownship closes on the (stationary) contact while never turning to
+    # face it -- heading stays 0, contact stays at 180 degrees relative,
+    # past the 130-degree rear cutoff the whole time. Moving toward
+    # negative x closes the range on a contact placed behind (bearing 180).
+    store.tick(now_sim=1.0, ownship=_ownship(x=-1500.0))
+    assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
+
+
 # --- believed engagement (plans/watch-reporting/plan.md Stage 4) -----------
 
 _AAA_TYPE = "ZU-23-3 Sergey"  # range_min_m=0, range_max_m=2408, alt_min_m=0

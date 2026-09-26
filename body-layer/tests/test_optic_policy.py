@@ -1135,3 +1135,66 @@ def test_watched_ness_does_not_gate_whether_a_look_happens() -> None:
 
     assert chosen is not None
     assert chosen.contact_id == "CONTACT_U"
+
+
+def test_a_command_interrupted_look_is_not_permanently_burned() -> None:
+    """`plans/sortie-2026-09-26-fixes/diagnosis.md` (Defect 2). `decide`
+    marks every contact a look covers as attempted the moment the look
+    *starts* (`is_worth_a_look`'s own docstring: "they all get its
+    benefit, so they all bear the retry rule") -- correct for a look that
+    runs to a natural end (`look_is_finished`), but `lower_binoculars` can
+    also end a look early, on every single player command
+    (`CrewConsole.lower_binoculars`'s own docstring: "new command from
+    player lowers binoculars... not per command type"). An early-ended
+    look delivered less than a full look's worth of dwell, yet it burns
+    the same `RETRY_RANGE_FRACTION` (0.8) budget as a completed one.
+
+    A watched contact under real observation (not being closed on -- an
+    orbit, a stand-off watch) may never close 20% further for the rest of
+    the encounter, so one command landing during the very first look
+    permanently forecloses ever raising binoculars on that contact again.
+    This reproduces the flown finding ("binoculars... not even for
+    watched") against the belief-truth log's own measured dwell times --
+    several contacts sat inside `improvement_window_m`'s presence->class
+    band (500-1750 m) for 200-1200+ simulated seconds and never advanced
+    past PRESENCE.
+
+    Currently fails: the interrupted look is never retried, for any number
+    of further completed scan cycles, because the range never closes."""
+    target = _target(range_m=1_700.0)  # inside the presence -> class window
+    state, _decision = decide(
+        OpticState(phase_started_sim=0.0),
+        now_sim=_CYCLE_S,
+        scan_cycle_period_s=_CYCLE_S,
+        targets=[target],
+        steady=True,
+    )
+    assert state.phase is OpticPhase.GLASSING  # the look started
+
+    # One second later, an ordinary player command (not a deliberate
+    # cancellation of the look) lowers the binoculars, well before
+    # `look_is_finished` would ever end this look on its own.
+    state = lower_binoculars(state, now_sim=_CYCLE_S + 1.0)
+    assert state.phase is OpticPhase.SCANNING
+
+    # The contact is being watched/orbited, not closed on: its range never
+    # drops by RETRY_RANGE_FRACTION (0.8) for the rest of a long encounter.
+    stalled_target = _target(range_m=1_700.0)
+    ever_glassed_again = False
+    for cycle in range(1, 40):  # ~640 s of further completed scan cycles
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + 1.0 + cycle * _CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[stalled_target],
+            steady=True,
+        )
+        if decision.optic is BINOCULAR_OPTIC:
+            ever_glassed_again = True
+            break
+
+    assert ever_glassed_again, (
+        "an interrupted (not naturally concluded) look should not "
+        "permanently exhaust the retry budget for a contact that never "
+        "closes further"
+    )
