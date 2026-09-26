@@ -22,6 +22,15 @@ enqueued -- "missile launch, break right" must not wait behind a routine
 contact report (plan Decision 3's `bypass_gate` framing on the body-layer
 side).
 
+**The queue is bounded (`_MAX_QUEUE_LEN`), dropping the oldest queued line
+on overflow** (2026-09-26 performance review) -- added as parity with
+`collector.cache.F10CommandQueue`, this codebase's other queue of the same
+risk class, which was already bounded with the same reasoning: a producer
+bug or a long, dense-traffic sortie must not grow this queue (and its
+backing temp `.wav` files on disk) without limit. Oldest-dropped, not
+newest-rejected, because a stale queued callout is worth less than a fresh
+one -- see `_enqueue`.
+
 **`winsound` is Windows-only stdlib -- the first Windows-only import this
 codebase has needed.** Guarded with a static `sys.platform == "win32"`
 check (not a runtime `try`/`except ImportError`): mypy specially recognizes
@@ -76,6 +85,15 @@ class WavPlayer(Protocol):
         simply no-op."""
         ...
 
+
+#: Bounded so a producer bug (or simply a long, dense-traffic sortie) cannot
+#: grow this queue -- and its backing temp `.wav` files on disk -- without
+#: limit (2026-09-26 performance review, "Audio playback queue has no upper
+#: bound, unlike its F10 sibling"). Mirrors `collector.cache.F10CommandQueue`'s
+#: `_MAX_QUEUE_LEN` reasoning and value: generous relative to any plausible
+#: callout rate (seconds of speech per line), so this is insurance against a
+#: bug, not a limit ever expected to bind in normal use.
+_MAX_QUEUE_LEN = 64
 
 #: Added to a WAV's own computed duration before the worker gives up
 #: waiting on asynchronous playback, covering device start-up latency and
@@ -174,7 +192,7 @@ class AudioPlaybackSender:
 
     def __init__(self, player: WavPlayer | None = None) -> None:
         self._player: WavPlayer = player if player is not None else _WinsoundPlayer()
-        self._queue: queue.Queue[str | None] = queue.Queue()
+        self._queue: queue.Queue[str | None] = queue.Queue(maxsize=_MAX_QUEUE_LEN)
         self._worker: threading.Thread | None = None
 
     def open(self) -> None:
@@ -210,7 +228,35 @@ class AudioPlaybackSender:
         if urgent:
             self.interrupt()
 
-        self._queue.put(path)
+        self._enqueue(path)
+
+    def _enqueue(self, path: str) -> None:
+        """Put `path` on the playback queue, dropping the **oldest** queued
+        (not-yet-playing) file if the queue is already at `_MAX_QUEUE_LEN`
+        -- a stale queued callout is worth less than a fresh one, and the
+        alternative (a blocking `put`) would stall whatever called
+        `play_audio` (the HTTP request thread, in practice), violating this
+        method's own never-raises/never-hangs posture. `urgent=True`
+        already clears the whole queue via `interrupt()` above before
+        reaching here, so this bound is only ever exercised by a flood of
+        routine lines outpacing playback -- mirrors
+        `collector.cache.F10CommandQueue`'s oldest-dropped overflow policy
+        and its reasoning."""
+        while True:
+            try:
+                self._queue.put_nowait(path)
+                return
+            except queue.Full:
+                try:
+                    stale_path = self._queue.get_nowait()
+                except queue.Empty:
+                    continue
+                logger.warning(
+                    "audio queue full (%d) -- dropping oldest queued line",
+                    _MAX_QUEUE_LEN,
+                )
+                if stale_path is not None:
+                    self._cleanup(stale_path)
 
     def interrupt(self) -> None:
         """Stop whatever is currently playing and drop everything queued,

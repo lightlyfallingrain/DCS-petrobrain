@@ -266,6 +266,31 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 
 ## Cross-cutting / unscoped backlog
 
+### Added 2026-09-26
+
+- [ ] **Make an unhandled thread exception fail the test suite, not just warn it.**
+  `pyproject.toml` declares no `filterwarnings`, so `PytestUnhandledThreadExceptionWarning`
+  warns and the run still reports "178 passed". Raised by the reviewer on
+  `feature/aircraft-layer-hardening`, twice, and it is worth doing because **that warning is
+  the mechanism that caught the original bug** on that branch: a background thread died with
+  an `AttributeError`, every assertion in the test still passed, and only the warning said
+  otherwise. A dead daemon thread that leaves a green suite is exactly the failure this
+  project keeps meeting in the air. Affects every subproject's test config, not one file —
+  which is why it is here rather than on a branch.
+
+- [ ] **`CollectorServer.open()` never resets `self._shutting_down` to `False`.** Latent, not
+  live: `__main__.py` opens once and closes once at exit, and no test reuses an instance
+  across a cycle, so nothing exercises it today. But if an instance is ever reopened it would
+  **permanently swallow real `accept()` failures** — turning the loud-failure guard back into
+  the silent death it was built to prevent. One line in `open()`. Flagged non-blocking by the
+  reviewer on 2026-09-26; worth taking the next time that file is touched.
+
+- [ ] **`test_unexpected_accept_error_is_logged_loudly_and_the_loop_recovers` simulates
+  shutdown by poking `server._socket = None` rather than calling `close()`**, so it never
+  sets `_shutting_down` and its simulated-shutdown branch now exercises a dead code path.
+  Harmless today (the assertion is `any(...)`, not an exact count) and purely cosmetic drift —
+  worth fixing only if that test is edited for another reason.
+
 ### Added 2026-09-25 (user)
 
 - [ ] **Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**

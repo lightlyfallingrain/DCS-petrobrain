@@ -93,6 +93,14 @@ EXPECTED_EXPORT_VERSION = "2026-09-23b"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7790
 
+#: Sleep before retrying `accept()` after an unexpected `OSError` (see
+#: `serve_forever`'s own docstring) -- a persistent failure then degrades to
+#: a slow retry loop instead of a hot CPU spin, and this is deliberately
+#: coarser than any latency budget in this pipeline: the point is to stop
+#: burning CPU on a channel that isn't recovering, not to bound recovery
+#: time tightly.
+_ACCEPT_ERROR_BACKOFF_S = 1.0
+
 
 class CollectorServer:
     """Accepts a single local Export.lua connection and feeds a cache."""
@@ -119,6 +127,10 @@ class CollectorServer:
         self._host = host
         self._port = port
         self._socket: socket.socket | None = None
+        # Set as the *first* statement of close(), before the socket is
+        # actually closed -- see close()'s own comment for why the ordering
+        # matters.
+        self._shutting_down = False
 
     def __enter__(self) -> Self:
         self.open()
@@ -142,6 +154,13 @@ class CollectorServer:
         logger.info("collector listening on %s:%d", self._host, self._port)
 
     def close(self) -> None:
+        # Set *before* the socket is actually closed -- a blocked accept()
+        # on another thread can only observe this closure after the
+        # syscall below runs, so the flag write happens-before the OSError
+        # it is meant to explain. See serve_forever()'s docstring for why
+        # inferring shutdown from self._socket's value instead (the
+        # previous approach) is not safe here.
+        self._shutting_down = True
         if self._socket is not None:
             self._socket.close()
             self._socket = None
@@ -152,11 +171,66 @@ class CollectorServer:
         Export.lua connects once per mission (it reconnects in
         `LuaExportStart`/`LuaExportStop`), so this loop re-accepts after each
         disconnect rather than exiting.
+
+        **`accept()` itself is guarded, not just `_handle_connection`.**
+        Before this, an `OSError` from `accept()` (as opposed to from a
+        connection already in hand) was unguarded -- structurally the same
+        gap as the silent daemon-thread death found in the watch-reporting
+        review, and named as latent hardening in the 2026-09-26 security
+        review (no live trigger found, but the same shape cost a whole
+        sortie once already on this project). A caught error that just
+        loops back to `accept()` immediately would trade a dead thread for
+        a hot CPU spin with no operator-visible signal, which is not
+        obviously better -- so this logs at `ERROR` (visible in a default,
+        non-`--debug` run, unlike every other line this module logs) and
+        backs off `_ACCEPT_ERROR_BACKOFF_S` before retrying, so a persistent
+        failure shows up in the collector's own log as a repeating `ERROR`
+        line instead of either silence or a busy loop.
+
+        `close()` from another thread also unblocks a pending `accept()`
+        with an `OSError` -- that is the intended shutdown path, not a
+        failure, and is distinguished from a real failure by the explicit
+        `self._shutting_down` flag, **not** by inferring intent from
+        `self._socket`'s value. `close()` does `self._socket.close()` then
+        `self._socket = None` as two separate statements; a blocked
+        `accept()` can raise from the `close()` call while `self._socket`
+        still holds the (now-closed) old socket object, so checking
+        `self._socket is None` in the `except` block below races that
+        second statement -- confirmed live (not theoretical) to
+        misclassify a clean shutdown as a failure on most runs. `close()`
+        sets `self._shutting_down = True` as its *first* statement, before
+        the socket is actually closed, so that flag's write always
+        happens-before the `OSError` it is checked against. The socket
+        used for each `accept()` call is still captured into a local
+        (`sock`) at the top of the loop -- `close()` can flip `self._socket`
+        to `None` on another thread at any point, so re-reading that
+        attribute (as opposed to the separate `_shutting_down` flag) after
+        the exception fires would risk calling `.accept()` on `None` on the
+        very next iteration.
         """
         if self._socket is None:
             raise RuntimeError("call open() before serve_forever()")
         while True:
-            conn, addr = self._socket.accept()
+            sock = self._socket
+            if sock is None:
+                # close() ran on another thread since the previous
+                # iteration -- intended shutdown, not a failure.
+                return
+            try:
+                conn, addr = sock.accept()
+            except OSError:
+                if self._shutting_down:
+                    # close() ran on another thread -- intended shutdown,
+                    # not a failure.
+                    return
+                logger.exception(
+                    "collector accept() failed unexpectedly -- Export.lua "
+                    "ingest is stalled until this recovers; retrying in "
+                    "%.1fs",
+                    _ACCEPT_ERROR_BACKOFF_S,
+                )
+                time.sleep(_ACCEPT_ERROR_BACKOFF_S)
+                continue
             logger.info("Export.lua connected from %s", addr)
             try:
                 self._handle_connection(conn)
