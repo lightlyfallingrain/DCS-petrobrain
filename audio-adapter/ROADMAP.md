@@ -85,6 +85,25 @@ body-side view and the slice numbering both files share.
     Acceptance, not a correctness gate — stage 5 already proved the pipeline, and nothing here
     changed that.
 
+- [x] **Hardening: per-source `--poll-hz` default + `Content-Length` guard — done 2026-09-26**
+  (`fix/audio-adapter-review-findings`, no `plan.md` — scoped directly from the 2026-09-26
+  whole-subproject performance and security reviews, `docs/reviews/`). `--ptt dcs` now defaults to
+  30 Hz (`ptt_source.DEFAULT_DCS_POLL_HZ`, which the perf review found defined but wired to
+  nothing) instead of the undifferentiated 60 Hz; `/speak` and `/transcribe` reject a
+  missing/non-numeric/negative `Content-Length` with a clean 400 before any body read.
+
+  Two review rounds, and the second one is the part worth remembering: round 1's negative-length
+  regression tests passed against the pre-fix code too, because a pre-existing
+  `read(length) if length > 0 else b""` already prevented the hang the security audit claimed —
+  so they proved nothing. Round 2 asserted the specific rejection-path error message instead, and
+  the wrong claim was corrected in place in `docs/reviews/security-audit-audio-adapter.md` rather
+  than deleted. The real defect was the unhandled `ValueError` on a non-numeric value.
+
+  **Live-acceptance debt:** the poll-rate halving has no in-cockpit observable and no CPU or
+  frame-time measurement was ever taken, so nothing was gated on a sortie. Optional confirmation
+  whenever the collector next runs with `--debug`: count `GET /ptt/state` lines over a fixed
+  window, expect ~30/s rather than ~60/s.
+
 - [>] **Slice 2 — cockpit state drives the audio. DEFERRED 2026-09-20** (user: *"Defer the SPU-8
   for now, let's come back to it later."*). Replaces the original SRS ICS injection, which is
   cancelled with the SRS dependency itself.
@@ -427,8 +446,10 @@ body-side view and the slice numbering both files share.
   `logger.py` and aircraft-layer's collector, with no auto-start or health check — the same
   informal, manually-launched posture the other two already have. Worth revisiting once three
   processes become tedious to start by hand, not before.
-- [ ] **`POST /audio/play` has no request-size cap** and, like every other endpoint on that LAN
-  API, no auth. Same severity class as the existing overlay-text and search-trigger endpoints
+- [ ] **`POST /audio/play` has no request-size cap** (and neither do audio-adapter's own
+  `/speak`/`/transcribe`/`/stop`, per the 2026-09-26 security audit's RECOMMENDED #1 — the same
+  standing exemption covers them explicitly rather than by assumption) and, like every other
+  endpoint on that LAN API, no auth. Same severity class as the existing overlay-text and search-trigger endpoints
   rather than a new category of exposure — recorded because the phase's security exemption may be
   revisited, not because anything here is newly wrong.
 
