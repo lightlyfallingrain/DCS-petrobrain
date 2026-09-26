@@ -12,3 +12,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Stale worktree check first](feedback_stale_worktree_check_first.md) — an assigned worktree's HEAD can predate the task's named branch tip; verify with merge-base before trusting git log/diff.
 - [Ollama deliberation chained drops](project_ollama_deliberation_chained_drops.md) — per-call timeout bounds one client's cost, not Ollama's own serialized queue; a deliberating model can chain-drop several utterances.
 - [Aircraft-layer hotspots](project_aircraft_layer_hotspots.md) — Export.lua runs on DCS's thread; LoGetWorldObjects/list_indication cost unmeasured; audio queue unbounded unlike F10's.
+- [Audio-adapter hotspots](project_audio_adapter_hotspots.md) — DcsPTT polls collector at 60Hz not documented 30Hz (dead constant); queues bounded correctly; readback caching already tracked in ROADMAP.
