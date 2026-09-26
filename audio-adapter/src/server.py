@@ -147,16 +147,15 @@ def _make_handler(
             with a negative `n` reads until EOF rather than a bounded
             amount, so on a connection with no EOF forthcoming that
             handler thread blocks indefinitely on a single bad request.
+            Non-numeric and negative share one rejection branch below (same
+            message, same `400`) since neither ever reaches `rfile.read`.
             Returns `None` (having already sent the `400`) when the header
             cannot be trusted."""
             raw_header = self.headers.get("Content-Length", "0") or "0"
             try:
                 length = int(raw_header)
             except ValueError:
-                self._respond_json(
-                    400, {"error": f"invalid Content-Length: {raw_header!r}"}
-                )
-                return None
+                length = -1
             if length < 0:
                 self._respond_json(
                     400, {"error": f"invalid Content-Length: {raw_header!r}"}

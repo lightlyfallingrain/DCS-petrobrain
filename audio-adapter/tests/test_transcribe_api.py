@@ -354,6 +354,13 @@ def test_transcribe_non_numeric_content_length_returns_400(
 def test_transcribe_negative_content_length_returns_400(
     running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
 ) -> None:
+    """See `test_server.test_speak_negative_content_length_returns_400`'s
+    docstring: the status-only assertion this test used to make also
+    passes against the pre-fix `server.py` (`2802c4f`), for the same
+    reason -- the pre-fix `length > 0` read guard already kept a negative
+    length from ever reaching `rfile.read`, landing on `400` via the
+    JSON-validation path instead of a header guard. Asserting the guard's
+    own error message distinguishes the two, confirmed empirically."""
     server, engine = running_server_with_stt
     body = json.dumps({"wav_b64": _wav_b64()}).encode("utf-8")
     status, resp_body = _post_raw_content_length(
@@ -361,7 +368,7 @@ def test_transcribe_negative_content_length_returns_400(
     )
     assert status == 400
     assert isinstance(resp_body, dict)
-    assert "error" in resp_body
+    assert resp_body == {"error": "invalid Content-Length: '-1'"}
     assert engine.requested_wav == []
 
 
