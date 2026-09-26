@@ -91,3 +91,106 @@ it directly — 3/4 passed unmodified) rather than by inspection alone. `ruff fo
 check`, `mypy --strict` (`mypy src`), and `pytest -q` all run independently in a fresh
 `audio-adapter/.venv` created for this review: format clean (29 files), lint clean, mypy clean (15
 source files), tests **212 passed, 1 skipped** — matching the implementer's reported numbers.
+
+---
+
+## Round 2: Re-review of `1b2e337` (fix for the round-1 required fix)
+
+Diffed `1b2e337` against `64e9d37`. This is the round-1 required fix landing.
+
+### On the rejected mechanism
+
+Round 1 suggested spying/mocking `rfile.read` and asserting it is never called with a
+negative/unbounded count. The implementer rejected that mechanism and reports it would not have
+distinguished pre-fix from post-fix for this specific case, since `2802c4f`'s own
+`self.rfile.read(length) if length > 0 else b""` ternary already keeps a negative `length` from
+ever reaching `rfile.read()` in **either** version — verified independently against `2802c4f`'s
+literal source (`git show 2802c4f:audio-adapter/src/server.py`, lines 138/190): both `_handle_speak`
+and `_handle_transcribe` use exactly that ternary, with no shared `_read_body` helper at all pre-fix
+(each handler inlines its own `int(...)` + ternary). **The implementer's reasoning is correct, and
+the round-1 suggestion would not have worked** — this is the review process functioning as intended,
+not a defect in the fix.
+
+The substitute mechanism — asserting the response body equals the exact
+`{"error": "invalid Content-Length: '-1'"}` — is the right call given that constraint: with `rfile.
+read` never called differently between the two versions, the HTTP-visible response body is the only
+remaining discriminator. It does trade in some brittleness (a future reword of either message breaks
+the test on cosmetics, not behavior), which is an acceptable cost here given the test's clear
+docstring explaining exactly why the exact match matters — a future maintainer rewording the message
+will not be confused about why the test broke. Optional refinement below softens this without
+losing the discrimination.
+
+### Empirical reproduction (independent)
+
+Extracted `1b2e337`'s `audio-adapter/` via `git archive` into a scratch copy (this worktree's own
+checkout was on an unrelated branch, `bd28563` — the `fix/audio-adapter-review-findings` branch is
+checked out in the main working copy, so it could not be checked out here too). Ran the two
+strengthened tests against the genuine pre-fix `server.py` (`git show 2802c4f:...`, byte-for-byte,
+not reconstructed from memory):
+
+```
+tests/test_server.py::test_speak_negative_content_length_returns_400 FAILED
+tests/test_transcribe_api.py::test_transcribe_negative_content_length_returns_400 FAILED
+```
+Both failed with the predicted mismatch — `{'error': 'body must be valid JSON'}` vs. the expected
+`{'error': "invalid Content-Length: '-1'"}`. (Also ran the two non-numeric tests against the same
+pre-fix file for completeness: both failed too, one with an assertion mismatch and one with the raw
+`ValueError`/`RemoteDisconnected` the original security finding described — confirming that half of
+the finding was and remains real.) Restored the post-fix `server.py` and re-ran both strengthened
+tests: both passed. This independently confirms the implementer's claim — not accepted on the
+report.
+
+### Collapsed `_read_body` branch
+
+Confirmed no behavioral change for either input class. Non-numeric now sets `length = -1` in the
+`except ValueError` clause and falls into the same `if length < 0` branch as a literal negative
+value; the response message is still built from `raw_header` (the original string), not the
+coerced `-1`, so `"invalid Content-Length: 'not-a-number'"` and `"invalid Content-Length: '-1'"` are
+both still accurate to what was actually sent.
+
+### Security-report correction
+
+Confirmed the original wrong claim (negative-length → unbounded `rfile.read` → thread hang) is
+annotated in place, not deleted — the correction quotes the original text verbatim, explains the
+actual pre-fix mechanism, and cites this review's empirical check by name. The downstream
+cross-reference in "Focus-area findings" §1 (the "only per-request wedge risk" sentence,
+originally at row 111) is also annotated consistently with the correction above it — read both, they
+agree with each other and with what I reproduced. No half-corrected claim left in the document.
+
+### Scope
+
+No body-size cap added (still out of scope, per the task). `--poll-hz` validation untouched
+(`capture.py` unchanged in this diff, grepped to confirm). No drift.
+
+### Verification (independent)
+
+Ran against the same `1b2e337` extraction, using the existing `audio-adapter/.venv`:
+- `ruff format --check src tests`: pass (29 files already formatted)
+- `ruff check src tests`: pass
+- `mypy --strict src`: pass, no issues in 15 source files
+- `pytest tests -q`: **212 passed, 1 skipped** — matches the implementer's report, unchanged from
+  round 1.
+
+### Round 2 Required Fixes
+
+None.
+
+### Round 2 Optional Refinements
+
+- The exact-match assertion (`resp_body == {"error": "invalid Content-Length: '-1'"}`) is slightly
+  more brittle than necessary — asserting the message via `resp_body["error"].startswith("invalid
+  Content-Length")` would still discriminate from the JSON-validation path's `"body must be valid
+  JSON"` while surviving a cosmetic reword of the quoted value's repr. Not required: the docstring
+  already explains the exact-match choice, and the two tests changed are small and isolated (optional).
+
+### Round 2 Verdict
+
+APPROVED
+
+### Round 2 Review Confidence
+
+Full read. Diff read in full against round-1 review and `implementation.md`'s Round 2 log;
+`2802c4f`'s literal source read directly to verify the rejected-mechanism claim rather than taking
+it on the report; pre-fix/post-fix behavior reproduced independently in a scratch extraction (not
+the implementer's own scratch files); format/lint/mypy/test commands run independently and matched
+the reported counts.
