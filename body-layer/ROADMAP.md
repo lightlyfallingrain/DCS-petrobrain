@@ -15,6 +15,22 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
+- [ ] **`sortie-2026-09-26-fixes` (Fix A/B1/B2/C) — merged, DoD PASSED on fixtures/console only,
+  not yet flown.** All three fixes have real in-cockpit observables and this is deliberately
+  *deferred*, not waived — the plan and DoD gate both treat a flown sortie as needed, not optional
+  (unlike e.g. BL-3, waived by its own plan). Card: see the acceptance card DoD published for this
+  branch. What it should clear: (1) crossing/motion callouts stop for contacts behind the cockpit
+  mask or briefly occluded beyond the grace window, without regressing the already-fixed
+  "sounds like a fresh sighting" wording; (2) binoculars actually get used on a watched/orbited
+  contact held at constant range, not just a closing one; (3) an unrecognised utterance no longer
+  interrupts an in-progress look, and `follow <target>` on the already-glassed target does not
+  lower and re-raise. Sector coverage (Decision 2a, see Backlog below) is explicitly **not** in
+  this branch — "all ten units to my left get identified" is still expected to fail and must not
+  be read as a regression of this fix. `CALLOUT_OBSERVABILITY_GRACE_S` (10.0s) and
+  `OPTIC_RETRY_INTERVAL_S` (~64s) are both starting values pending this sortie's feedback, not
+  measurements — the card's own commands were run and their output verified before publishing, not
+  written from reading the code (DoD role requirement).
+
 - [x] **Binocular optic, voice command completeness, and precise position belief — FLOWN AND
   CLOSED 2026-09-25** (user direction). `docs/acceptance/2026-09-23-eyes-and-voice-sortie.md` is
   closed. **This sortie is where most of 2026-09-25's fixes came from** — the callout heard while
@@ -1274,6 +1290,47 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     FORWARD_CLOCK_POSITIONS` names, hand-mirrored the same way `crew_console.
     _FOLLOW_DESCRIPTOR_OP_CLASSES` already is, so a wire violation is dropped at the boundary
     rather than reaching the dict index above three calls later.
+
+- [ ] **Sector coverage — Decision 2a of `plans/sortie-2026-09-26-fixes/decisions.md`, staged out
+  as a follow-on, 2026-09-26.** The user's requirement: if a scanned/watched sector holds several
+  contacts, all of them should eventually get the attention needed to say what they are — not just
+  re-eligibility for whichever one `choose_look` happens to land on. This is a `choose_look`
+  selection-fairness redesign (least-known-first or round-robin among worth-a-look candidates), a
+  different mechanism from the per-contact eligibility fix `sortie-2026-09-26-fixes` shipped
+  (Stages 2/3, time-based retry). **Needs its own `/explore` pass with the user before Architect**
+  (per `AGENTS.md`'s "Explore Before Deciding") — the starvation bound (what stops a 30-unit sector
+  from crowding out search/react-to-threat/other watched contacts) and the give-up condition (what
+  happens to a contact that genuinely cannot be resolved) are both open and need the user's
+  cockpit-feel judgment, not a derived answer. Proposed plan location:
+  `plans/optic-sector-coverage/plan.md` (not created yet).
+
+- [ ] **More frequent glances at a watched contact — Decision 1's third point,
+  `plans/sortie-2026-09-26-fixes/decisions.md`, 2026-09-26.** The user's own framing: the durable
+  fix for a watched contact staying observable is Petrovich looking at it often enough to keep the
+  knowledge fresh (and learn more about it), not a longer grace window — `CALLOUT_OBSERVABILITY_
+  GRACE_S` (`sortie-2026-09-26-fixes` Fix A) only covers a brief occlusion, deliberately, and must
+  not be tuned as a substitute for this. The user places this under **attention-grabbing
+  behaviour, which does not exist yet** in this codebase — no plan or milestone currently owns it.
+  Once it exists, revisit whether `CALLOUT_OBSERVABILITY_GRACE_S` still needs to be as long as it
+  is, since attention-grabbing is what is meant to make the grace window rarely matter in practice.
+
+- [ ] **Pull-only briefing-derived belief (Decision 3, `plans/sortie-2026-09-26-fixes/
+  decisions.md`, 2026-09-26) — a real exception to the no-omniscience callout gate, not built.**
+  The user's spec: a unit believed to be at a location per the mission briefing is legitimate
+  knowledge (a crew briefing is something Petrovich perceived, before the flight), but it may
+  *only* be spoken in answer to a direct player question ("where are the trucks?" -> "beyond the
+  hill at 2 o'clock"), never volunteered, and only position ("roughly where"), never state
+  ("doing what"). `sortie-2026-09-26-fixes`' Fix A deliberately placed its observability gate only
+  on the spontaneous path (`ContactStore.tick`/`route_event`) so this can be added later as a
+  separate query path through the existing `describe_contact`/`render_contact_report` machinery,
+  without needing to touch or work around the gate. **Three prerequisites, none built yet**:
+  briefing-derived contacts reaching belief at all (Mission Interpreter output reaching
+  body-layer — see BL-7's own still-open "phase data is unreachable in a sortie" entry below for
+  the sibling MI-integration gap), free-text questions (today "where are the trucks?" is a
+  `fallthrough` to the brain layer, not a parsed command), and terrain knowledge to phrase "beyond
+  the hill at 2 o'clock" (world-model ridge/relief query). Not actionable until at least the first
+  two exist; recorded here so the constraint on Fix A's design isn't lost before this becomes
+  buildable.
 
 - [x] **`OP_LRSAM` folded into the air-defence command classes — merged 2026-09-24
   (`fix/lrsam-air-defence`).** "Watch nearest air defence" could not select an S-300:
