@@ -65,11 +65,25 @@ body-side view and the slice numbering both files share.
       air, not on a bench, which is the only place the question was ever answerable. No work
       follows, and the Stage 6 card need not carry it.
 
-  - [ ] **Stage 6 — live sortie acceptance (needs DCS).** Full `--crew-text --speech-audio` during
-    a real flight. Judges what only a human can: whether ~0.6-0.8 s synthesis latency reads as
-    crew-like rather than laggy, whether several callouts arriving in one poll queue acceptably,
-    and whether the voice is tolerable. Acceptance, not a correctness gate — stage 5 already
-    proves the pipeline.
+  - [x] **Stage 6 — live sortie acceptance. ANSWERED 2026-09-26 (user), never flown as a
+    dedicated flight.** All three questions it existed to ask were settled across the sorties that
+    were actually flown, which is why no Stage 6 card was ever completed — see also
+    `docs/acceptance/2026-09-18-stage6-sortie.md`, closed the same way.
+
+    - **Synthesis latency: not laggy.** *"< 1s is not laggy."* The lag a pilot actually feels is
+      upstream, in speech-to-text, and it has its own entry (press-to-readback ~3 s) — so the
+      number this stage was written to judge turned out not to be the number that matters.
+    - **Several callouts in one poll: fine now.** Not because the queue was judged acceptable as
+      built, but because flight feedback changed it — callouts are decided at speech time rather
+      than queued ahead, and repetitive ones aggregate (`plans/callout-scheduling/`). The
+      behaviour this stage would have graded no longer exists.
+    - **Voice: survives, but monotonous.** *"Fine for now."* The monotony is real and already
+      carried by the voice-character entry below (accent and prosody), where the finding is that
+      prosody probably matters more than accent.
+    - **Ducking against other sound on the box:** answered the same day, behaves well (above).
+
+    Acceptance, not a correctness gate — stage 5 already proved the pipeline, and nothing here
+    changed that.
 
 - [>] **Slice 2 — cockpit state drives the audio. DEFERRED 2026-09-20** (user: *"Defer the SPU-8
   for now, let's come back to it later."*). Replaces the original SRS ICS injection, which is
@@ -357,7 +371,8 @@ body-side view and the slice numbering both files share.
     `small.en`'s none. Trading that for latency would buy speed with the one failure the pilot
     cannot catch.
 
-  - [ ] Stage 6 — live sortie acceptance.
+  - [x] Stage 6 — live sortie acceptance. **Answered 2026-09-26 without a dedicated flight** — see
+    the Slice 1 entry above for what each of its three questions turned out to be.
 
   **Settled before design (user, 2026-09-19):**
 
