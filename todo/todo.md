@@ -34,11 +34,16 @@ Four findings, in the user's own words plus what each implies:
   `body-layer/src/belief/speech.py`) emits "<X>, confirm?", but the vocabulary has no affirmative
   token at all — so the confirm band is unreachable by design, not mis-tuned. Needs an affirmative
   (and presumably a negative) token plus whatever holds the pending command between turns.
-- [ ] **"full scan" vs "scan full".** *"I noticed myself saying 'full scan', but the recognized
-  format is 'scan full'. Both would be good."* Note: `audio-adapter/src/vocabulary.py:259` already
-  lists `("scan full", "full scan", "scan all around")`, so the phrasing is present and something
-  downstream did not honour it — the F10 menu label, the matcher, or STT. Investigate before
-  changing the vocabulary; do not add a phrasing that is already there.
+- [x] **"full scan" vs "scan full" — no defect, closed 2026-09-26.** *"I noticed myself saying
+  'full scan', but the recognized format is 'scan full'. Both would be good."* Both already work.
+  Ran the matcher directly: `"full scan"`, `"scan full"` and `"scan all around"` each resolve to
+  `scan_full` at `match_ratio=1.0`, verb-anchored (`full` is in `VERB_ANCHOR_WORDS`, derived from
+  `PHRASES` rather than hand-listed, which is why it came for free). The impression comes from the
+  **F10 menu's own shape** — `petrobrain-f10-commands-hook.lua:156` nests it as Scan → "Full", and
+  `crew_console.py:183` labels the token `"full"` — so the menu reads as "scan full" and nothing
+  else advertises the alternatives. Nothing to change in the recogniser; if anything is worth doing
+  it is making the spoken phrasings discoverable somewhere, which belongs with BL-10/SRS free
+  speech, not here.
 
 ### State of play — end of 2026-09-24 (read this first after a context clear)
 
