@@ -77,6 +77,53 @@ constant range can never satisfy `RETRY_RANGE_FRACTION`, so under D5 alone it is
 permanently. Time-based re-eligibility is what unlocks it; range-based retry stays for the closing
 case.
 
+## Decision 3 — briefing-derived belief is knowledge, but it is pull-only
+
+> *"exception to not reporting what is not seen: units believed to be at location based on mission
+> briefing. Then belief is the state from mission briefing. Direct observation is impossible. Only
+> report about such contacts if the player asks about them. Like 'target unit near <place> can we see
+> them yet?' -> '<answer>'. Or 'where are <something>' -> 'beyond the hill at 2 o'clock'."*
+>
+> *"cannot answer state of units that are not visible, but can know where they are supposed to be,
+> roughly. But only report if asked."*
+
+This is an exception to Decision 1, and it is a **provenance** distinction rather than a visibility
+one. The no-omniscience invariant bounds knowledge by what Petrovich *could perceive* — and a crew
+briefing is something he perceived, before the flight. So briefing-derived belief is legitimate
+knowledge he genuinely holds; it is simply knowledge of a different kind, and it comes with different
+rules about when he may speak.
+
+**Three constraints, all load-bearing:**
+
+1. **Pull-only, never volunteered.** A briefing-derived contact must never produce a spontaneous
+   callout — no crossing report, no sighting, nothing. It may only ever appear in an *answer* to
+   something the player asked.
+2. **Position roughly, state never.** He can say where a unit is *supposed* to be. He cannot say what
+   it is doing, what condition it is in, or anything else that would require having looked at it.
+   "Beyond the hill at 2 o'clock" is in bounds; "three trucks, stationary" is not, unless it was
+   observed.
+3. **The briefing is the state.** Its contents are the belief — not a prior to be refined by
+   imagination. If the briefing is wrong or stale, he is wrong in exactly the way a real crewman
+   briefed on bad intelligence would be, and that is correct behaviour, not a defect.
+
+### What this changes about Fix A's design
+
+**The observability gate belongs on the volunteering path, not on the answering path.** A gate that
+simply suppresses every mention of an unobservable contact would also silence the legitimate answer
+to "where are the trucks?", which is the opposite of what the user wants. So the two paths must be
+distinguishable at the point the gate is applied — spontaneous callout versus response to a query.
+Whichever placement the plan chooses for the gate has to preserve that distinction; a gate low enough
+to catch both is the wrong gate.
+
+### Scope note — most of this is not buildable yet
+
+The pull-only answering behaviour needs three things this change set does not have: briefing-derived
+contacts in belief at all (Mission Interpreter output reaching the body layer), free-text questions
+("where are the trucks?" is not in the command vocabulary and is a `fallthrough` today), and terrain
+knowledge to phrase "beyond the hill at 2 o'clock" (world-model ridges). **So Decision 3 is recorded
+here as a constraint on Fix A's design, not as work in this change set.** What Fix A must do now is
+avoid foreclosing it — do not build a gate that cannot later admit a pull-only answering path.
+
 ## What is in scope for the fix
 
 - Observability gate on the crossing-callout path, with a grace window for brief occlusion (D1).
