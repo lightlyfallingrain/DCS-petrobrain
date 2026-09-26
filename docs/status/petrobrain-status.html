@@ -513,26 +513,26 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   <header class="masthead">
     <div class="eyebrow">
       <span><span class="dot"></span> DCS Mi-24P · Petrovich crew cognition</span>
-      <span>Derived from ROADMAP.md · 25 Sep 2026</span>
+      <span>Derived from ROADMAP.md · 26 Sep 2026</span>
       <span>Select any card or row for detail</span>
     </div>
     <h1>Petrobrain Milestones</h1>
-    <p class="lede">Six subsystems now, one hundred and fifty-six tracked items &mdash; because
-      <strong>the brain layer exists</strong>. It was the only component with no plan file and four
-      finished milestones queued behind it; a day later it is a running process with a plan, a chosen
-      model, and a first slice merged: free text that used to be silently dropped now comes back as
-      speech. Three sorties flew and closed &mdash; eyes-and-voice, position belief, and the
-      damage/firing probes &mdash; and eyes-and-voice is the one worth reading about, because it came
-      back with eight defects rather than a pass. The probes settled how damage will be seen: a hit
-      shows as <em>fire</em>, not smoke, and fire is terminal &mdash; damaged, then burning, then
-      gone &mdash; so "it&rsquo;s burning" is a report about something already dead, not
-      something to re-attack.</p>
+    <p class="lede">Six subsystems, one hundred and fifty-nine tracked items &mdash; and
+      <strong>the brain layer now has a real model behind it</strong>, merged yesterday after going
+      round the review loop three times. Nothing in it has ever spoken to that model: every agent that
+      built and reviewed it ran with no route to Ollama, so the first real-model run is the pilot's.
+      The other change is a measurement that invalidated a plan rather than confirming one &mdash;
+      the first detection figures from rain and low light show that <strong>a single condition
+      multiplier cannot work</strong>, because rain attacks the windscreen while darkness attacks
+      contrast, and the two instruments swap places between them. Outbound audio closed the same day
+      without ever flying its own card: every question it existed to ask had been answered by the
+      sorties that actually happened.</p>
   </header>
 
   <div class="counts">
-    <div class="count is-done"><b>102</b><span>Done</span></div>
+    <div class="count is-done"><b>107</b><span>Done</span></div>
     <div class="count is-active"><b>5</b><span>In progress</span></div>
-    <div class="count is-open"><b>38</b><span>Open</span></div>
+    <div class="count is-open"><b>36</b><span>Open</span></div>
     <div class="count is-hold"><b>11</b><span>Deferred</span></div>
     <div class="count is-block"><b>2</b><span>Await you</span></div>
   </div>
@@ -580,24 +580,24 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Body Layer</h3>
         <span class="path">body-layer/</span>
         <div class="bar"><i style="width:93%"></i></div>
-        <span class="chip active">Eyes-and-voice flown &mdash; and it returned eight defects</span>
-        <p class="next">The eyes-and-voice sortie flew and closed 2026-09-25, having produced eight
-          fixes rather than a pass: a commanded scan was enrolling everything it found into unprompted
-          reporting, &ldquo;cancel everything&rdquo; left a superseded scan running, and an outpost
-          fragmented into eighteen contacts. All fixed and merged except the last.
-          <b>Next:</b> one consolidated sortie covering all of it, then contact fragmentation.</p>
+        <span class="chip active">Nine merged behaviours, none yet heard in the air</span>
+        <p class="next">Everything merged 2026-09-24/25 is waiting on one flight &mdash; the fixes
+          the last sortie's eight defects produced, plus watch reporting and the brain's two slices.
+          The outpost that fragmented into eighteen contacts is the one defect still open, diagnosed
+          rather than fixed. <b>Next:</b> fly the consolidated card, then contact fragmentation.</p>
         <span class="more">Details</span>
       </article>
 
       <article class="sys" role="button" tabindex="0" data-detail="brain">
         <h3>Brain Layer</h3>
         <span class="path">brain-layer/</span>
-        <div class="bar"><i style="width:15%"></i></div>
-        <span class="chip active">Exists as of 2026-09-25 &mdash; stub, no model wired</span>
-        <p class="next">New subproject. BR-1 Stage 1 merged: an utterance that used to produce silence
-          now produces a spoken reply over HTTP, asynchronously, with <code>StubDecider</code> proving
-          every hard part of the wire at zero model risk. <b>Next:</b> Stage 2, the real decider
-          &mdash; <code>qwen3:4b-instruct-2507-q4_K_M</code>, chosen by measurement, not by size.</p>
+        <div class="bar"><i style="width:34%"></i></div>
+        <span class="chip active">Stage 2 merged &mdash; a real model, never yet run against one</span>
+        <p class="next">Stage 1 proved the async wire with a stub; Stage 2 put
+          <code>qwen3:4b-instruct-2507-q4_K_M</code> behind it, with a body-side validator standing
+          between the model and anything Petrovich acts on. <b>Next:</b> the pilot's own first
+          real-model run &mdash; then structured candidates, so <code>follow that tank</code> can
+          resolve at all.</p>
         <span class="more">Details</span>
       </article>
 
@@ -605,11 +605,12 @@ footer code { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
         <h3>Audio Adapter</h3>
         <span class="path">audio-adapter/</span>
         <div class="bar"><i style="width:88%"></i></div>
-        <span class="chip active">Voice out done · speech in flown &amp; accepted</span>
-        <p class="next">Capture and the real intercom trigger both flew and passed 2026-09-23 &mdash;
-          he is audible and he listens. <b>Next:</b> unchanged &mdash; live acceptance for
-          voice quality itself (stage 6), and press-to-readback latency, measured at ~3&nbsp;s. The
-          brain layer adds a second thing that has to answer inside that budget.</p>
+        <span class="chip done">Voice out accepted · speech in flown &amp; accepted</span>
+        <p class="next">Outbound audio closed 2026-09-26 without its own flight: latency under a
+          second does not read as laggy, callout queueing was fixed by flight feedback rather than
+          graded, and a generic voice survives a loud cockpit while staying monotonous.
+          <b>Next:</b> press-to-readback latency, measured at ~3&nbsp;s &mdash; the lag a pilot
+          actually feels, and it is upstream in speech-to-text.</p>
         <span class="more">Details</span>
       </article>
 
@@ -648,7 +649,7 @@ flowchart LR
   GC5["Stage 5&lt;br/&gt;composition"]:::hold
 
   S1["Slice 1&lt;br/&gt;voice out, stages 1–5"]:::done
-  S6["Stage 6&lt;br/&gt;live sortie"]:::block
+  S6["Stage 6&lt;br/&gt;answered, not flown"]:::done
   ST15["Speech in 1–5&lt;br/&gt;gate → capture → real PTT"]:::done
   CKPT["Cockpit audio state&lt;br/&gt;intercom + volume"]:::hold
   CONES["Cones 1 · 2A–2C&lt;br/&gt;optics, gaze, scan loop"]:::done
@@ -665,7 +666,8 @@ flowchart LR
 
   BL8["BL-8&lt;br/&gt;memory interfaces"]:::open
   BR1["BR-1 Stage 1&lt;br/&gt;async wire, stub decider"]:::done
-  BRAIN["Brain layer&lt;br/&gt;Stage 2: the real model"]:::active
+  BR2["BR-1 Stage 2&lt;br/&gt;the real model, unflown"]:::done
+  BRAIN["Brain layer&lt;br/&gt;Stage 3 + structured candidates"]:::active
 
   WM --> BL27
   AL --> BL27
@@ -682,7 +684,7 @@ flowchart LR
   SORT5 --> NEW3 --> EVS --> FIX8 --> CBS
   EVS --> FRAG
   AL --> PROBE --> DMG
-  BR1 --> BRAIN
+  BR1 --> BR2 --> BRAIN
   CBS -.->|"tunes"| BRAIN
   BL27 -.->|"needs real flights"| BL8 -.-> BRAIN
   EVS -.->|"judge after flying"| GC5
@@ -726,13 +728,14 @@ flowchart LR
     FRAG["Outpost fragments&lt;br/&gt;into 18 contacts"]:::open
     RECAL["LOWRES recalibration&lt;br/&gt;held on purpose"]:::hold
     CAP["Attention capture&lt;br/&gt;peripheral has no triggers"]:::open
-    COND["Conditions&lt;br/&gt;vegetation, light, weather"]:::open
+    COND["Conditions&lt;br/&gt;one multiplier cannot work"]:::open
+    MET["Met visibility&lt;br/&gt;a ceiling, not a penalty"]:::open
+    PROBE2["Probe: isVisible,&lt;br/&gt;trees, weather"]:::block
     K9["9K113 as an optic"]:::hold
   end
 
   subgraph SPEECH ["Speech"]
     direction LR
-    S6["Stage 6&lt;br/&gt;voice-quality sortie"]:::block
     LAT["Press-to-readback&lt;br/&gt;~3s, next real problem"]:::open
     VOICE["Voice character&lt;br/&gt;accent + prosody"]:::hold
     SPU8["Cockpit audio state&lt;br/&gt;intercom + SPU-8"]:::hold
@@ -751,7 +754,7 @@ flowchart LR
 
   subgraph BRAINCHAIN ["The brain layer, now that it exists"]
     direction LR
-    BR2["BR-1 Stage 2&lt;br/&gt;the real decider"]:::active
+    BR2["BR-1 Stage 2&lt;br/&gt;merged, unflown"]:::done
     D10["Structured candidates&lt;br/&gt;follow still cannot pick"]:::open
     BR3["Stage 3&lt;br/&gt;the A/B answer leg"]:::open
     BR8["BR-8 thinking tier&lt;br/&gt;kept warm per mission"]:::hold
@@ -763,15 +766,19 @@ flowchart LR
 
   CBS --> FRAG
   CBS --> RECAL --> K9
+  PROBE2 --> K9
   CBS --> CAP
   CBS -.->|"judge after flying"| COND
+  COND --> MET
+  PROBE2 -.->|"gates the sight half only"| COND
+  PROBE2 --> MET
   CBS -.->|"judge after flying"| GC5
   CBS --> BEH --> THR
   DMG --> BEH
   TERR --> IFF --> THR
-  CBS --> S6 --> VOICE
+  CBS --> VOICE
   CBS --> LAT
-  S6 --> SPU8
+  CBS --> SPU8
   CBS -.->|"needs many flights"| BL8
   BR2 --> D10 --> BR3
   BR2 -.->|"same model, kept warm"| BR8
@@ -820,10 +827,10 @@ flowchart LR
   <section>
     <div class="callout">
       <h3>Waiting on you, not on code</h3>
-      <p>Two, same count as last cycle &mdash; but the first one is now carrying a whole day of
-        fixes rather than a whole day of features, and the difference matters to how you fly it.
-        Last time you were checking whether things worked; this time you are checking whether the
-        fixes to what <em>did not</em> work are right.</p>
+      <p>Still two, but they are different in kind now. One is a flight carrying two days of fixes
+        and the brain's first real model; the other is twenty minutes at the Windows box that decides
+        the shape of the vegetation model. The sortie answers "are the fixes right"; the probe answers
+        "is the design even possible".</p>
       <ul class="blockers">
         <li class="bl" role="button" tabindex="0" data-detail="crewsortie">
           <span class="chip block">Sortie</span>
@@ -838,13 +845,15 @@ flowchart LR
               folded into it and marked superseded.</p>
           </div>
         </li>
-        <li class="bl" role="button" tabindex="0" data-detail="stage6">
-          <span class="chip block">Sortie</span>
+        <li class="bl" role="button" tabindex="0" data-detail="probe2">
+          <span class="chip block">Windows box</span>
           <div>
-            <b>Hear it in the air</b>
-            <p>Whether 0.6&ndash;0.8 s of synthesis latency reads as crew-like or laggy, whether callouts queue
-              acceptably under load, and whether a generic voice is tolerable in a loud cockpit. No test
-              can answer any of it — stage 5 already proved the pipeline works.</p>
+            <b>Probe whether DCS will do line-of-sight for us</b>
+            <p>Does <code>land.isVisible</code> actually test trees, or only the terrain mesh? Our own
+              line of sight samples the bare mesh, so Petrovich currently sees through woods the engine
+              would block. Same session answers two weather questions riding the same bridge: whether
+              meteorological visibility can be read at all, and whether <em>where</em> it rains can.
+              Run it before the 9K113 sight is scoped, not during.</p>
           </div>
         </li>
       </ul>
@@ -858,17 +867,31 @@ flowchart LR
 
     <div class="work">
 
+      <div class="row s-open" role="button" tabindex="0" data-detail="cond">
+        <span class="who">body-layer</span>
+        <div class="what">
+          <b>Conditions: the planned model cannot work, and the measurements say why</b>
+          <p>The first real figures from rain and low light break the shape the roadmap assumed. Within
+            one condition the factor ranges <b>0.04&ndash;0.25</b> depending on which instrument looks,
+            and the wide/narrow ordering <em>reverses</em> between rain and darkness &mdash; rain
+            attacks the windscreen, which the eye and binoculars look through and the sight does not;
+            darkness attacks contrast, where magnification does not help. Detection also needs a
+            <em>ceiling</em>, not a multiplier: in rain both sight fields stop at the same 3.7 km.</p>
+        </div>
+        <span class="chip open">Reshaped</span>
+      </div>
+
       <div class="row s-active" role="button" tabindex="0" data-detail="br2">
         <span class="who">brain-layer</span>
         <div class="what">
-          <b>BR-1 Stage 2 &mdash; put a real model behind the wire</b>
-          <p>Stage 1 proved the whole asynchronous round trip with a stub. Stage 2 swaps in
-            <code>qwen3:4b-instruct-2507-q4_K_M</code>, picked by measurement rather than size: plain
-            <code>qwen3:4b</code> took <b>32.7 s</b> and echoed the transcript back, while the
-            <b>14B</b> answered correctly in 16 s. The reasoning trace, not the parameter count, is
-            what costs the latency &mdash; so the pick is an architecturally non-thinking 4B.</p>
+          <b>BR-1 Stage 2 merged &mdash; and has never met a real model</b>
+          <p>The model is wired, the validator stands between it and anything acted on, and both
+            non-blocking prerequisites are measured discharged: a wedged brain cost 5015&nbsp;ms per
+            poll before, and 0.088&nbsp;ms after. But every agent that built and reviewed it had no
+            route to <code>127.0.0.1:11434</code>, so all of it is proven against fake servers. The
+            first real-model run is the pilot's.</p>
         </div>
-        <span class="chip active">In progress</span>
+        <span class="chip active">Unflown</span>
       </div>
 
       <div class="row s-open" role="button" tabindex="0" data-detail="d10">
@@ -911,11 +934,11 @@ flowchart LR
         <span class="who">body-layer</span>
         <div class="what">
           <b>Detection under real conditions</b>
-          <p>Every detection test so far was flown in near-perfect visibility, which makes the current
-            calibration a <em>ceiling</em> rather than an average. Weather, light and vegetation multiply
-            down from it. No longer blocked: ED's own detection model was read on the Windows box, and it
-            decomposes the problem better than our sketch did — including sampling tree geometry for line
-            of sight, which we do not. Still gated on a sortie, now the consolidated one.</p>
+          <p>Two models now, not one, and the split is what each channel actually is: the naked eye and
+            binoculars get a <b>statistical</b> per-landcover transmission probability, because a sweeping
+            gaze through woods genuinely is probabilistic and we hold polygons, not trunks; the 9K113
+            sight asks <b>DCS</b> for the real line of sight, one narrow ray to one target. Cost and
+            fidelity point the same way. Flicker is the failure mode to design against.</p>
         </div>
         <span class="chip open">Unblocked</span>
       </div>
@@ -1217,35 +1240,66 @@ const DETAIL = {
       { h: "sox rather than a second audio binary", p: "The plan called for <code>ffmpeg -f dshow</code>, and part of the stage's stated job was discovering the dshow device name for the pilot's headset. That work already existed in another currency: 252 corpus clips were recorded through that exact headset with sox, so the driver name, argument order, buffer size and truncation repair were all settled against the hardware that matters. Every one of those is a scar \u2014 the 1024-byte buffer exists because the default silently discarded a quarter-second off the end of every clip, and the bench read the truncations as an accent problem." },
       { h: "Capture and real PTT -- FLOWN AND ACCEPTED, 2026-09-23", p: "Both the ~0.14 s device-open gap and the two-stage mechanical trigger (a full press transits the intercom stop for 19-32 ms on its way to radio) were resolved live rather than guessed at. The gap: <em>\"is the natural, normal way how aviation radios work\"</em> -- not felt, nothing built to fix it. The trigger: works, and a radio call stays out of it." },
       { h: "The new problem: press-to-readback is ~3 s", p: "Measured the same sortie. A crew member answers in well under a second, so this -- not recognition accuracy -- is what will keep Petrovich feeling like a machine. One component is certain rather than estimated: the logger polls transcripts once a second, so half a second is spent purely waiting to be noticed. Not a candidate fix: a smaller whisper model -- <code>small.en</code> was chosen on wrong-command count, and trading it for speed would buy latency with the one failure the pilot cannot catch." },
-      { h: "Next", p: "Stage 6, live sortie acceptance for voice quality and latency-feel itself -- stage 5 already proved the pipeline works. Cockpit audio state stays deferred at the user's direction, though its prerequisite is already gone: the device argument numbers were read off the install." }
+      { h: "Stage 6 closed 2026-09-26 without ever being flown", p: "All three questions it existed to ask were answered across the sorties that actually happened. Latency under a second does not read as laggy - and the number it was written to judge turned out not to be the number that matters, since the lag a pilot feels is upstream in speech-to-text. Callouts arriving together are fine now, but not because the queue was graded acceptable: flight feedback changed the mechanism, so callouts are decided at speech time rather than queued ahead, and the behaviour Stage 6 would have judged no longer exists. The voice survives a loud cockpit and is monotonous - \"fine for now\". Ducking against other sound was answered the same day: it behaves well." },
+      { h: "Next", p: "Press-to-readback latency, measured at ~3 s - the lag that actually reads as machine-like. Cockpit audio state stays deferred at the user's direction, though its prerequisite is already gone: the device argument numbers were read off the install." }
     ],
     src: "audio-adapter/ROADMAP.md, docs/acceptance/2026-09-23-voice-command-sortie.md"
   },
 
   brain: {
-    kicker: "brain-layer/", title: "Brain Layer", chip: ["active", "Exists as of 2026-09-25"],
-    facts: [["Scope", "Interpretation and language; never truth"], ["Seam", "HTTP/JSON, fire and forget"], ["Model (Stage 2)", "qwen3:4b-instruct-2507-q4_K_M"], ["Tests", "41 passing"]],
+    kicker: "brain-layer/", title: "Brain Layer", chip: ["active", "Stage 2 merged, unflown"],
+    facts: [["Scope", "Interpretation and language; never truth"], ["Seam", "HTTP/JSON, fire and forget"], ["Model", "qwen3:4b-instruct-2507-q4_K_M"], ["Tests", "45 passing"]],
     sections: [
       { h: "Why this is the entry that changed most", p: "A day ago this was the only component in the project with no plan file, and four already-finished milestones were waiting on it. It is now a running process with a plan grounded in four measurements taken on this machine, a model chosen by measurement, and a first slice merged. An utterance that used to produce silence now produces a spoken reply." },
       { h: "The constraint the design is built around", p: "The user's words: <em>\"Brain cannot be synchronous. It may be able to process only one thing at a time, but it cannot block anything, the game world moves on.\"</em> So <code>handle()</code> returns immediately, replies are drained in the ordinary poll loop, one job is in flight at a time, and the newest utterance wins. A reply is re-validated against <em>current</em> belief before it is spoken -- by the time the model answers, the world has moved." },
       { h: "The measurement that chose the model", p: "Counter-intuitively, size was not the variable. <code>qwen3:4b</code> took <b>32.7 s</b> and echoed the transcript back as its answer; <code>qwen3:14b</code> answered <em>correctly in 16 s</em>. The reasoning trace dominates the latency, so the pick is <code>qwen3:4b-instruct-2507-q4_K_M</code> -- architecturally non-thinking -- with <code>granite4:micro</code> as fallback. A tag correction found by measuring rather than reading: bare <code>qwen3:4b-instruct-2507</code> does not resolve on Ollama; only quant-suffixed tags do." },
       { h: "The one thing this project forbids, and small models do anyway", p: "Small models silently guess. That is incompatible with the no-omniscience invariant, so the model never writes what Petrovich says: it classifies against a closed set and the code owns the language. \"Unable\" carries a reason from a closed set -- <code>NO_SUCH_COMMAND</code>, <code>NO_MATCH</code>, <code>NO_LINE_OF_SIGHT</code> -- because the user's read was that <em>\"unable &lt;because&gt; is of course most useful\"</em>." },
       { h: "Stage 1 shipped with a stub on purpose", p: "<code>StubDecider</code> has a configurable delay and no model behind it, which proved every hard part of the wire -- non-blocking handoff, stand-by after timeout, staleness revalidation, newest-wins -- at zero model risk. It is also why the live acceptance is honest about being nearly unjudgeable: with no intelligence behind the wire, only responsiveness and timing can be assessed." },
-      { h: "What's next", p: "Stage 2, the real decider. Then structured candidates, so <code>follow that tank</code> can resolve at all. A thinking tier (BR-8) is planned for questions where delay is acceptable, kept warm for the mission's duration -- which needs a mission-start and mission-end trigger from DCS, and should share its model with the Mission Interpreter." }
+      { h: "Stage 2 merged 2026-09-25, and the gap it leaves is the interesting part", p: "The real model is wired, with a body-side validator standing between it and anything acted on. Reviewer approved three times across the loop, Security and Performance both approved. But <strong>no agent that built or reviewed it could reach a real Ollama</strong>, so every proof is against a fake server - the first real-model run belongs to the pilot." },
+      { h: "What's next", p: "Structured candidates, so <code>follow that tank</code> can resolve at all: the validator's rule is right and currently unsatisfiable, because candidate summaries carry no place names or class/type structure for the pilot's words to match. Then Stage 3's answer leg. A thinking tier (BR-8) is planned for questions where delay is acceptable, kept warm for the mission's duration - which needs a mission-start and mission-end trigger from DCS (already firing in three shipped Hook scripts, just never forwarded), and should share its model with the Mission Interpreter." }
     ],
     items: [["done","BR-1 Stage 1 - the async round trip"],["done","D1-D11 decided, model chosen by measurement"],["active","Stage 2 - the real decider"],["open","Structured candidates (D10 revision)"],["open","Stage 3 - the A/B answer leg"],["hold","BR-8 thinking tier, kept warm per mission"]],
     src: "plans/brain-layer/plan.md, body-layer/ROADMAP.md"
   },
 
+  cond: {
+    kicker: "body-layer/", title: "Conditions: one multiplier cannot work", chip: ["open", "Reshaped by measurement"],
+    facts: [["Measured", "2026-09-25/26, the user's own"], ["Conditions", "3 sun angles, 2 rain presets"], ["Instruments", "eye, binocular, 9K113 wide + narrow"]],
+    sections: [
+      { h: "What the roadmap assumed", p: "\"Optics multiply apparent size up, conditions multiply detectability down, and the three calibrated angular thresholds stay fixed in the middle.\" Clean, and the first real figures do not support it." },
+      { h: "Why a scalar cannot express this", p: "Within a single condition the factor runs <b>0.04 to 0.25</b> depending on which instrument is looking. A scalar applied after the optic multiplier cannot produce that spread, because the optic multiplier has already been applied." },
+      { h: "The finding that decides the model's shape", p: "The wide/narrow ordering <em>reverses</em>. In rain the 9K113 wide field is the most robust instrument measured and narrow the weakest, despite narrow having twice its clear-weather multiplier; in low light that inverts and narrow wins while the eye and binoculars collapse. <strong>Rain and darkness attack different things</strong> - rain attacks the windscreen, which the eye and binoculars look through and the sight does not; darkness attacks contrast, where magnification does not help and the sight's orange filter does. So the term is at least f(condition, optical path), and optical path is a per-Optic property that does not exist yet." },
+      { h: "Detection needs a ceiling, not a multiplier", p: "The user's correction, and the data carries its fingerprint: in rain 2 the wide and narrow fields both detect at <b>exactly 3.7 km</b> despite very different magnification. That is meteorological visibility - a property of the air, applying to every instrument equally. Detection is min(instrument capability, met visibility); the windscreen term stays a multiplier on what looks through glass. What that does not explain, and stays open: narrow still classifies worse than wide well inside the ceiling." },
+      { h: "Precision degrades with the conditions", p: "The user's own caution, and it changes what can be fitted: in rain or near-darkness a target fades rather than disappearing, so where you call it is soft. The differences worth modelling are the order-of-magnitude ones and the reversal, not the hundredths - which argues for a few coarse condition tiers rather than a continuous curve fitted to the noise floor." }
+    ],
+    items: [["done","First measurements, 3 sun angles + 2 rain presets"],["done","NVG measured useless for detection"],["open","Re-measure rain 2 vs rain 3 (inversion inside the error band)"],["open","Terrain and vegetation, still unmeasured"],["open","Model shape: f(condition, optical path) + a ceiling"]],
+    src: "docs/concept/detection-in-non-perfect-conditions.md, body-layer/research/2026-09-26-condition-factors-first-analysis.md"
+  },
+
+  probe2: {
+    kicker: "Waiting on you", title: "Will DCS do line-of-sight for us?", chip: ["block", "Windows box"],
+    facts: [["Gates", "the 9K113 half of the vegetation model"], ["Does not gate", "the statistical model"], ["Transport", "already in production since 2026-09-13"]],
+    sections: [
+      { h: "The question, precisely", p: "<code>Scripts/AI/Detection.lua</code> sets <code>trees_LOS_test_T4 = true</code> and every installed theatre is Terrain-4, so <strong>ED's AI detection</strong> samples tree geometry for line of sight. That is not the same claim as <strong>the scripting API</strong> doing it. Our own line of sight samples the bare terrain mesh, so we are strictly more permissive through forest than the engine - Petrovich sees through woods DCS would block." },
+      { h: "Why it gates only half the work", p: "The vegetation decision splits the channels: naked eye and binoculars get a statistical transmission probability (a sweeping gaze through woods genuinely is probabilistic, and we hold landcover polygons, not trunks), while the 9K113 sight - one narrow ray to one target, pointed deliberately - asks DCS for the real answer. If <code>isVisible</code> turns out to be terrain-only, the sight half has nothing to call and the statistical model has to cover everything." },
+      { h: "Two weather questions ride the same bridge", p: "Whether meteorological visibility can be read at all - it is a ceiling on detection for every instrument, and <code>Export.lua</code> has no weather getter, so this bridge is the only candidate. And whether <em>where</em> it rains can be read: rain is not uniform, so an ownship-local figure says nothing about whether the target sits under a squall. ED's own fog is a time series, so whatever reads it must sample rather than read once." },
+      { h: "What is not in question", p: "The transport. <code>net.dostring_in(\"scripting\", ...)</code> has been in production since 2026-09-13 at 1 Hz. This probe is about what the function answers and what it costs, not about reaching it. Still open from when the earlier bridge probe closed: whether a result can return synchronously - which was never the blocker for velocity, a push, and is the blocker for line of sight, a question." }
+    ],
+    items: [["open","Does isVisible test trees, or terrain only?"],["open","Is getIP more useful - it names the blocker"],["open","Per-call cost at realistic candidate counts"],["open","Can a result return synchronously?"]],
+    src: "todo/todo.md, body-layer/ROADMAP.md (conditions, factor 1)"
+  },
+
   br2: {
-    kicker: "brain-layer/", title: "Stage 2 - the real decider", chip: ["active", "In progress"],
+    kicker: "brain-layer/", title: "Stage 2 - merged, never run against a real model", chip: ["active", "Unflown"],
     facts: [["Default model", "qwen3:4b-instruct-2507-q4_K_M"], ["Fallback", "granite4:micro"], ["Prompt size", "~155 tokens"]],
     sections: [
       { h: "What it replaces", p: "<code>StubDecider</code> answers every escalation with the same canned structural reply. Stage 2 puts a real model behind the same wire -- which is the whole reason Stage 1 shipped with a stub: the asynchronous plumbing is already proven, so a model failing now can only be a model failure." },
       { h: "Chosen by measurement, not by size", p: "<code>qwen3:4b</code>: <b>32.7 s</b>, and its answer text was a verbatim echo of the transcript. <code>qwen3:14b</code>: <b>16.0 s</b>, correct, well-formed JSON. The reasoning trace is what costs the time, so the pick is an architecturally non-thinking 4B. A prompt that invites deliberation, or loses its tight one-line formatting instruction, reintroduces the 32-second behaviour -- that is a live fragility, not a solved problem." },
-      { h: "Two prerequisites already measured and deliberately not fixed", p: "Both were found during Stage 1's performance pass and are unreachable under the stub: <code>poll_replies()</code> has no timeout (a wedged brain would cost ~83% tick loss at the 1 s default poll interval), and <code>Decider.decide()</code> has no bounded timeout, leaving one unjoined daemon thread per <code>/escalate</code>. Recording them rather than fixing them was the right call at Stage 1 and is not at Stage 2." }
+      { h: "Both prerequisites are discharged, and measured rather than argued", p: "Stage 1's performance pass found a wedged-but-up brain costing <b>5015 ms per poll with no backoff</b> - an ~83% tick-rate loss taking perception, F10 commands and gaze with it - and an unbounded decide call leaking a thread per utterance. Both are fixed structurally rather than by tuning, per the user's own constraint (\"brain must not block any other functionality\"): the poll moved to a background thread, now <b>0.088 ms</b>, and the decide call is bounded off the request thread, with threads returning to baseline under repeated escalations. Re-measured against real wedged sockets, not mocks." },
+      { h: "Two defects found by composition, not by reading", p: "The model wraps its BECAUSE evidence in quote marks that are not in the transcript, so a <em>correct</em> pick degraded to a spurious ask - found by piping one test suite's own fixture value through the other's validator, a composition neither suite did. And CONFIRM validated against every dispatchable token rather than the seven the model was shown, the same asymmetry PICK never had. The second arrived with a docstring claiming drift between the two vocabularies was never unsafe; true in one direction only, so a test now parses the sibling's source and compares the literals." },
+      { h: "The gap that remains, and it is the pilot's", p: "<strong>Nothing in either stage has ever talked to a real model.</strong> Every agent that built and reviewed it ran with no route to <code>127.0.0.1:11434</code>, so all of it - including the fold and all three review passes - is verified against fake HTTP servers. One MONITOR rides with it: Ollama serialises generation, so one slow reply can chain-drop several <em>later</em> utterances, reasoned from transport measurements and a 32.7 s worst case, never observed." }
     ],
-    items: [["active","Wire OllamaDecider"],["open","Re-measure D6's five cases"],["open","Poll-thread timeout"],["open","Bounded decide timeout"]],
+    items: [["done","OllamaDecider wired, merged 4bc0df9"],["done","Poll-thread fix: 5015ms to 0.088ms"],["done","Bounded decide timeout, no thread leak"],["done","CONFIRM offered-vocabulary asymmetry closed"],["open","First real-model run - the pilot's"],["open","Structured candidates (D10 revision)"]],
     src: "plans/brain-layer/plan.md, Stage 2"
   },
 
@@ -1341,15 +1395,6 @@ const DETAIL = {
       { h: "Still to decide", p: "Whether reproducible builds justify containerising the three that can be, and startup ordering -- body-layer needs a built world-model database, and the audio adapter is useless without the aircraft layer reachable." }
     ],
     src: "todo/todo.md"
-  },
-  stage6: {
-    kicker: "audio-adapter/ - blocked", title: "Stage 6 - live sortie acceptance", chip: ["block", "Needs a flight"],
-    facts: [["Needs", "DCS, a real sortie"], ["Type", "Acceptance, not a correctness gate"]],
-    sections: [
-      { h: "What only a human can judge", p: "Whether 0.6-0.8 s of synthesis latency reads as crew-like or laggy. Whether several callouts arriving in one poll queue acceptably or feel like a backlog. And whether a generic English voice is tolerable in the cockpit, or whether the missing Russian accent breaks the illusion badly enough to promote that backlog item." },
-      { h: "Why it isn't a gate", p: "Stage 5 already proves the pipeline works \u2014 it flew and was accepted 2026-09-23. This measures whether it <em>feels</em> right, which is a different question and one no test can answer." }
-    ],
-    src: "audio-adapter/ROADMAP.md"
   },
   repetition: {
     kicker: "body-layer/", title: "Repetition is better but not gone", chip: ["open", "Reopened 2026-09-23"],
