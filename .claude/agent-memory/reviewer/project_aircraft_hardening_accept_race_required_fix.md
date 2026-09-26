@@ -47,3 +47,23 @@ Correct fix (recommended, not yet applied as of this review): a shutdown flag se
 statement of `close()`, before `self._socket.close()` — flag-write happens-before the syscall that
 can trigger the exception, in the same thread, which removes the race deterministically rather
 than narrowing it.
+
+**Update 2026-09-26, re-review of `ac0bff9` (the fix for the above): the flag fix is right and
+verified by reproduction (300 runs, zero-delay `close()`, 0 false ERRORs) — APPROVED WITH MINOR
+FIXES, not another loop.** Two things worth carrying forward:
+
+1. **"Update the docstring/implementation.md/agent-memory to match" is not one action, it's N
+   passages.** The implementer corrected `server.py`'s docstring fully and the agent-memory file
+   fully, but `implementation.md` got a new, correctly-appended "Follow-up pass" paragraph at the
+   top while two *other* pre-existing passages further down the same file ("Files Changed" and
+   "Notable Discoveries") still stated the disproven `self._socket is None` mechanism as current,
+   unqualified fact. A single doc can be half-corrected: check every passage that describes the
+   mechanism, not just the newest one, when a required fix says "correct the false claim in
+   `implementation.md`" — a docstring, an implementation log, and a memory file are usually not
+   each a single paragraph.
+2. **This session's worktree was 5 commits behind the feature branch at task start (third time
+   this session per the task brief) — reading `server.py` before fast-forwarding showed no accept()
+   guard at all**, which is what caught it immediately (the guard is unmistakably absent, not subtly
+   wrong). `git log -1 --oneline` compared against the branch tip named in the task, before reading
+   any file, is now the first move on every re-review — see [[project_bl4_effective_attention_and_worktree_recon]]
+   for the general pattern this is an instance of.
