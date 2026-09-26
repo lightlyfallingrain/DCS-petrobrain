@@ -10,6 +10,36 @@ the relevant roadmap to be updated in the same push as any merge.
 ## User priority tasks
 Prioritize any open task here over any other task in this file or roadmap files.
 
+### Sortie 2026-09-26 — crew behaviour findings (user-flown, unfixed)
+
+Flown on `main` after the audio-adapter hardening merge (`1a8795d`). **Passed:** scan-is-not-watch,
+cancel-means-cancel, orange-means-watched. **Not testable:** free speech — the decider is still a
+stub, so there is nothing that could answer; untestable before LLM wiring, not a defect.
+
+Four findings, in the user's own words plus what each implies:
+
+- [ ] **Crossings are announced for contacts he cannot see.** *"Crossings say which way -> yes, but
+  also says it for contacts outside FOV also contacts masked by cockpit."* This is a
+  **no-omniscience violation**, the project's core invariant, not a wording bug: the direction-of-
+  crossing callout fires off belief state without re-checking that the contact is currently visible
+  (in FOV and not cockpit-masked). Highest priority of the four.
+- [ ] **Binoculars are barely used.** *"Mostly using naked eyesight, even when should pick
+  binoculars (automatically) to classify and identify contacts. Not even for watched. I did see the
+  blue binocular cone in the debug tool a couple of times, but generally it was not used."* The
+  binocular optic merged 2026-09-24 (`c398675`) and this is its first flown verdict: **fail**. The
+  optic exists and is occasionally selected, so this is a policy/trigger defect rather than a
+  missing capability.
+- [ ] **The confirm band asks a question nothing can answer.** *me "cancel" -> P "cancel everything,
+  confirm?" -> me "yes"/"confirm" -> P "no such command".* `render_confirm_request` (
+  `body-layer/src/belief/speech.py`) emits "<X>, confirm?", but the vocabulary has no affirmative
+  token at all — so the confirm band is unreachable by design, not mis-tuned. Needs an affirmative
+  (and presumably a negative) token plus whatever holds the pending command between turns.
+- [ ] **"full scan" vs "scan full".** *"I noticed myself saying 'full scan', but the recognized
+  format is 'scan full'. Both would be good."* Note: `audio-adapter/src/vocabulary.py:259` already
+  lists `("scan full", "full scan", "scan all around")`, so the phrasing is present and something
+  downstream did not honour it — the F10 menu label, the matcher, or STT. Investigate before
+  changing the vocabulary; do not add a phrasing that is already there.
+
 ### State of play — end of 2026-09-24 (read this first after a context clear)
 
 `main` is at `c912478`, clean and pushed. `feature/binocular-optic` merged today (`c398675`) and
