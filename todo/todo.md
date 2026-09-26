@@ -18,17 +18,25 @@ stub, so there is nothing that could answer; untestable before LLM wiring, not a
 
 Four findings, in the user's own words plus what each implies:
 
-- [ ] **Crossings are announced for contacts he cannot see.** *"Crossings say which way -> yes, but
+- [~] **Crossings are announced for contacts he cannot see.** *"Crossings say which way -> yes, but
   also says it for contacts outside FOV also contacts masked by cockpit."* This is a
   **no-omniscience violation**, the project's core invariant, not a wording bug: the direction-of-
   crossing callout fires off belief state without re-checking that the contact is currently visible
-  (in FOV and not cockpit-masked). Highest priority of the four.
-- [ ] **Binoculars are barely used.** *"Mostly using naked eyesight, even when should pick
+  (in FOV and not cockpit-masked). Highest priority of the four. **Fix merged (`fix/sortie-2026-
+  09-26`, Fix A) — an observability gate with a grace window, DoD PASSED on fixtures/console.
+  Awaiting the sortie that clears it**, tracked on `body-layer/ROADMAP.md`'s live-acceptance-debt
+  list; leave this checkbox open until that flight confirms it.
+- [~] **Binoculars are barely used.** *"Mostly using naked eyesight, even when should pick
   binoculars (automatically) to classify and identify contacts. Not even for watched. I did see the
   blue binocular cone in the debug tool a couple of times, but generally it was not used."* The
   binocular optic merged 2026-09-24 (`c398675`) and this is its first flown verdict: **fail**. The
   optic exists and is occasionally selected, so this is a policy/trigger defect rather than a
-  missing capability.
+  missing capability. **Fix merged (`fix/sortie-2026-09-26`, Fix B1/B2) — an interrupted look no
+  longer burns the retry budget, and time-based re-eligibility unlocks a watched/orbited contact
+  held at constant range. DoD PASSED on fixtures/console; awaiting the sortie**, same
+  live-acceptance-debt entry as above. **Sector coverage (all contacts in a scanned sector
+  eventually get looked at, Decision 2a) is explicitly not part of this fix** — staged out as its
+  own follow-on needing an `/explore` pass, see `body-layer/ROADMAP.md` Backlog.
 - [ ] **The confirm band asks a question nothing can answer.** *me "cancel" -> P "cancel everything,
   confirm?" -> me "yes"/"confirm" -> P "no such command".* `render_confirm_request` (
   `body-layer/src/belief/speech.py`) emits "<X>, confirm?", but the vocabulary has no affirmative
