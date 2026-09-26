@@ -93,6 +93,14 @@ EXPECTED_EXPORT_VERSION = "2026-09-23b"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 7790
 
+#: Sleep before retrying `accept()` after an unexpected `OSError` (see
+#: `serve_forever`'s own docstring) -- a persistent failure then degrades to
+#: a slow retry loop instead of a hot CPU spin, and this is deliberately
+#: coarser than any latency budget in this pipeline: the point is to stop
+#: burning CPU on a channel that isn't recovering, not to bound recovery
+#: time tightly.
+_ACCEPT_ERROR_BACKOFF_S = 1.0
+
 
 class CollectorServer:
     """Accepts a single local Export.lua connection and feeds a cache."""
@@ -152,11 +160,56 @@ class CollectorServer:
         Export.lua connects once per mission (it reconnects in
         `LuaExportStart`/`LuaExportStop`), so this loop re-accepts after each
         disconnect rather than exiting.
+
+        **`accept()` itself is guarded, not just `_handle_connection`.**
+        Before this, an `OSError` from `accept()` (as opposed to from a
+        connection already in hand) was unguarded -- structurally the same
+        gap as the silent daemon-thread death found in the watch-reporting
+        review, and named as latent hardening in the 2026-09-26 security
+        review (no live trigger found, but the same shape cost a whole
+        sortie once already on this project). A caught error that just
+        loops back to `accept()` immediately would trade a dead thread for
+        a hot CPU spin with no operator-visible signal, which is not
+        obviously better -- so this logs at `ERROR` (visible in a default,
+        non-`--debug` run, unlike every other line this module logs) and
+        backs off `_ACCEPT_ERROR_BACKOFF_S` before retrying, so a persistent
+        failure shows up in the collector's own log as a repeating `ERROR`
+        line instead of either silence or a busy loop.
+
+        `close()` from another thread also unblocks a pending `accept()`
+        with an `OSError` -- that is the intended shutdown path, not a
+        failure, and is distinguished from a real failure by `self._socket`
+        having been set back to `None` by `close()` (see that method). The
+        socket used for each `accept()` call is captured into a local
+        (`sock`) at the top of the loop rather than read as `self._socket`
+        a second time inside the `except` block: `close()` runs on another
+        thread and can flip `self._socket` to `None` at any point, so
+        re-reading the attribute after the exception fires would risk
+        calling `.accept()` on `None` on the very next iteration.
         """
         if self._socket is None:
             raise RuntimeError("call open() before serve_forever()")
         while True:
-            conn, addr = self._socket.accept()
+            sock = self._socket
+            if sock is None:
+                # close() ran on another thread since the previous
+                # iteration -- intended shutdown, not a failure.
+                return
+            try:
+                conn, addr = sock.accept()
+            except OSError:
+                if self._socket is None:
+                    # close() ran on another thread -- intended shutdown,
+                    # not a failure.
+                    return
+                logger.exception(
+                    "collector accept() failed unexpectedly -- Export.lua "
+                    "ingest is stalled until this recovers; retrying in "
+                    "%.1fs",
+                    _ACCEPT_ERROR_BACKOFF_S,
+                )
+                time.sleep(_ACCEPT_ERROR_BACKOFF_S)
+                continue
             logger.info("Export.lua connected from %s", addr)
             try:
                 self._handle_connection(conn)

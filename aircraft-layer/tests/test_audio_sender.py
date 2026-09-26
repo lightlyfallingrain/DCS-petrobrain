@@ -13,7 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from collector.audio_sender import AudioPlaybackSender, WavPlayer, wav_duration_s
+from collector.audio_sender import (
+    _MAX_QUEUE_LEN,
+    AudioPlaybackSender,
+    WavPlayer,
+    wav_duration_s,
+)
 
 
 class _FakePlayer:
@@ -142,6 +147,47 @@ def test_urgent_preempted_lines_are_never_played() -> None:
     # FIRST (already in flight when preempted) finishes, then URGENT plays
     # -- SECOND/THIRD were dropped entirely, never reaching the player.
     assert player.played == ["FIRST", "URGENT"]
+
+
+# --- queue bound (2026-09-26 performance review) ----------------------------
+#
+# Parity with collector.cache.F10CommandQueue: a producer bug (or just a
+# long, dense-traffic sortie) must not grow this queue -- and its backing
+# temp .wav files -- without limit.
+
+
+def test_queue_is_bounded_and_drops_the_oldest_queued_line() -> None:
+    player = _FakePlayer()
+    player.play_gate = threading.Event()
+    sender = AudioPlaybackSender(player=player)
+    sender.open()
+    try:
+        # FIRST starts playing and blocks the worker on the gate, so every
+        # subsequent push queues up behind it instead of draining
+        # immediately (same synchronization technique as the
+        # urgent-preemption test above).
+        sender.play_audio(b"FIRST", urgent=False)
+        time.sleep(0.1)
+
+        # Queue more routine lines than the bound allows.
+        total = _MAX_QUEUE_LEN + 5
+        for i in range(total):
+            sender.play_audio(f"L{i:03d}".encode("ascii"), urgent=False)
+
+        # Release FIRST so the worker drains everything that survived.
+        player.play_gate.set()
+        assert _wait_until(
+            lambda: len(player.played) == 1 + _MAX_QUEUE_LEN, timeout=5.0
+        )
+    finally:
+        sender.close()
+
+    # FIRST (already in flight, never subject to the bound) plays, then
+    # exactly _MAX_QUEUE_LEN routine lines -- the *oldest* 5 of the `total`
+    # queued were dropped to stay within the bound, not the newest, so the
+    # survivors are the last _MAX_QUEUE_LEN lines pushed, in FIFO order.
+    expected_survivors = [f"L{i:03d}" for i in range(total - _MAX_QUEUE_LEN, total)]
+    assert player.played == ["FIRST"] + expected_survivors
 
 
 def test_playback_failure_does_not_stop_the_worker_loop() -> None:
