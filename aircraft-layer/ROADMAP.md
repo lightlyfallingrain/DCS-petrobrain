@@ -45,7 +45,7 @@ details and `WORKFLOW.md` for the cross-machine deploy/run workflow. Full design
   `net.allow_dostring_in = { "scripting" }` opt-in as the F10 channel. Self-measures its own cost
   (`unit_count`/`bridge_call_ms`, logged to `dcs.log` every poll) since the in-state `O(N)`
   `getVelocity()` loop's per-call cost cannot be measured off a live DCS session.
-- [x] **Hardening: bounded audio queue + guarded collector `accept()` -- done 2026-09-26**
+- [x] **Hardening: bounded audio queue + guarded collector `accept()` -- done 2026-09-26, merged `a63a86f`**
   (`feature/aircraft-layer-hardening`, no plan.md -- scoped directly from the two 2026-09-26
   whole-subproject reviews, `aircraft-layer/research/2026-09-26-security-review.md` and
   `-performance-review.md`). `AudioPlaybackSender`'s queue is now bounded at 64 (mirroring
