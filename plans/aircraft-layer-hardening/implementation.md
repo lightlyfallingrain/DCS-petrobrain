@@ -47,9 +47,12 @@ cannot pass by landing in the lucky ~30%.
   `_ACCEPT_ERROR_BACKOFF_S = 1.0` sleep, rather than either dying silently or hot-spinning
   CPU with no operator signal. Distinguished from the *intended* shutdown path (`close()`
   called from another thread, which also unblocks a pending `accept()` with `OSError`) by
-  checking whether `self._socket` has been set back to `None`. That check has to be
-  careful about a real race: `close()` runs on another thread and can flip `self._socket`
-  to `None` between the exception firing and the retry's next loop iteration, so each
+  checking whether `self._socket` has been set back to `None`. **SUPERSEDED by the
+  follow-up pass above — this mechanism was wrong and is no longer what the code does.**
+  Reading `self._socket` a second time to classify the error raced with `close()`'s own
+  two statements, and the reviewer measured the resulting false ERROR on 161 of ~230 real
+  shutdowns. Shutdown is now signalled by an explicit `self._shutting_down` flag set as
+  the first statement of `close()`. The original text, kept for the record: each
   iteration captures `self._socket` into a local (`sock`) once at the top of the loop and
   calls `.accept()` on that local, rather than re-reading `self._socket` a second time
   inside the `except` block (which surfaced as a real `AttributeError: 'NoneType' object
@@ -106,9 +109,13 @@ box or live DCS session reachable from here, per this subproject's own testing p
   `OSError` the code was written to expect. `pytest`'s
   `PytestUnhandledThreadExceptionWarning` surfaced this on the very first full test run
   even though every individual assertion in that test passed (the exception was thrown on
-  a *different* test's thread that happened to still be finishing). Fixed by capturing
-  `self._socket` into a local once per loop iteration and never reading the attribute a
-  second time after the exception fires. This is exactly the class of thing the task
+  a *different* test's thread that happened to still be finishing). Fixed — **incompletely, see the follow-up pass above** — by capturing
+  `self._socket` into a local once per loop iteration. The claim that the attribute is
+  "never read a second time after the exception fires" was **false as written**: the
+  `except` block still re-read it to classify the error, which is the defect the reviewer
+  caught and measured. The `.accept()`-on-`None` crash this paragraph describes was
+  genuinely fixed here; only the *classification* remained racy, and that is what the
+  `_shutting_down` flag now settles deterministically. This is exactly the class of thing the task
   brief's "the important half of fix 2 is not the try/except" was warning about --
   the try/except alone was not sufficient, and the loud-failure design added its own new
   failure mode that had to be closed off deliberately.
