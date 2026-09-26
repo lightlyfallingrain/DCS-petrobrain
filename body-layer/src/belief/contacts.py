@@ -71,6 +71,7 @@ from belief.classification import (
     new_classification_belief,
 )
 from belief.decay import (
+    CALLOUT_OBSERVABILITY_GRACE_S,
     LOS_MASK_CONFIRM_S,
     Certainty,
     certainty_of,
@@ -101,7 +102,13 @@ from belief.position_belief import (
 )
 from belief.threat import envelope_for
 from perception.association import RANGE_CAP_M as _HYBRID_RANGE_CAP_M
-from perception.geometry import GeoPosition, bearing_deg, range_m
+from perception.cockpit_mask import COCKPIT_MASKS, STATION_CO_PILOT, is_visible
+from perception.geometry import (
+    GeoPosition,
+    bearing_deg,
+    body_relative_direction,
+    range_m,
+)
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
 from perception.source import (
     SOURCE_NAKED_EYE_VISUAL_FILTERED,
@@ -209,6 +216,59 @@ def _threat_has_los(
         if los_clear(observer, sample):
             return True
     return False
+
+
+def _callout_may_speak(contact: Contact, ownship: OwnshipState, now_sim: float) -> bool:
+    """`plans/sortie-2026-09-26-fixes/plan.md` Stage 1 (Fix A). Updates
+    `contact.last_observable_sim`'s bookkeeping against the contact's
+    *current true* bearing (the same primitive `perception.visibility`
+    already uses at detection time -- `perception.cockpit_mask.is_visible`
+    against `perception.geometry.body_relative_direction`, not the
+    narrower gaze cone: Decision 1 is explicit that a contact merely out of
+    current gaze must still get its tracking update, only a *physically
+    unseeable from any gaze direction* one may not) and returns whether a
+    spontaneous callout (`ContactStore.tick`'s fifth and sixth blocks) may
+    still speak about it right now.
+
+    **Requires having been genuinely observable at least once, not merely
+    "not yet unobservable for too long."** The grace window (`belief.decay.
+    CALLOUT_OBSERVABILITY_GRACE_S`) is Decision 1's memory of a *recent*
+    sighting -- "a contact sliding behind the doorframe for a few seconds
+    is still tracked" -- which presupposes there was something to remember.
+    A contact whose bearing has been behind the cockpit mask continuously
+    since it was founded (e.g. a percept from a non-naked-eye channel that
+    was never actually glimpsed) has no such memory to draw on: granting it
+    a fresh `CALLOUT_OBSERVABILITY_GRACE_S` window on its very first
+    evaluated tick would let a permanently astern contact speak for the
+    whole grace period regardless, which is exactly the "outside FOV/
+    cockpit-masked" defect this fix exists to close. So the gate is "is it
+    observable now, or was it observable within the last `CALLOUT_
+    OBSERVABILITY_GRACE_S` seconds" -- never "how long has it merely been
+    failing," which trivially starts at zero on a contact's first failing
+    check and would let *any* permanently-masked contact through for one
+    full grace window.
+
+    Only ever called with `ownship` non-`None` -- `tick`'s two calling
+    blocks are both already gated on that."""
+    observer = GeoPosition(x=ownship.x, z=ownship.z, alt_m=ownship.alt_m)
+    body_direction = body_relative_direction(
+        observer,
+        contact.last_position,
+        heading_true_deg=ownship.heading_true_deg,
+        pitch_deg=ownship.pitch_deg,
+        bank_deg=ownship.bank_deg,
+    )
+    co_pilot_mask = COCKPIT_MASKS[STATION_CO_PILOT]
+    observable = is_visible(
+        co_pilot_mask, body_direction.azimuth_deg, body_direction.elevation_deg
+    )
+    if observable:
+        contact.last_observable_sim = now_sim
+        return True
+
+    if contact.last_observable_sim is None:
+        return False
+    return now_sim - contact.last_observable_sim < CALLOUT_OBSERVABILITY_GRACE_S
 
 
 @dataclass
@@ -414,6 +474,20 @@ class Contact:
     #: holding continuously, reset to `None` the instant any sample comes
     #: back clear. `None` means "not currently in a masked run."
     los_masked_since_sim: float | None = None
+    #: `plans/sortie-2026-09-26-fixes/plan.md` Stage 1 (Fix A) -- the sim
+    #: time this contact's current true bearing was last confirmed to clear
+    #: `perception.cockpit_mask.is_visible`, updated every tick it does.
+    #: `None` means "never confirmed observable" -- a contact founded from a
+    #: non-naked-eye percept that has been behind the mask since it came
+    #: into existence, with no sighting memory to draw on. This tracks
+    #: whether Petrovich could physically see this bearing *at all* right
+    #: now (any gaze direction), not whether a threat's terrain LOS to us is
+    #: masked (`los_masked_since_sim`'s own concern). Drives the grace
+    #: window (`belief.decay.CALLOUT_OBSERVABILITY_GRACE_S`) on `ContactStore.
+    #: tick`'s fifth and sixth blocks' spontaneous callouts, via `_callout_
+    #: may_speak` -- see that function's own docstring for why this is "last
+    #: confirmed observable" rather than "how long has it been failing."
+    last_observable_sim: float | None = None
 
     @property
     def last_position(self) -> GeoPosition:
@@ -1011,12 +1085,30 @@ class ContactStore:
                 contact.last_event_emitted_sim[CONTACT_CARDINALITY_CHANGED] = now_sim
             contact.last_emitted_cardinality = current_cardinality
 
+            # `plans/sortie-2026-09-26-fixes/plan.md` Stage 1 (Fix A):
+            # computed once per contact per tick (when `ownship` is given)
+            # and reused by both this block and the sixth block below --
+            # both are spontaneous-callout paths with the identical
+            # structural gap (no visibility check of any kind), per
+            # Decision 4.2's choice to fix `CONTACT_MOTION_CHANGED`
+            # alongside `CONTACT_RANGE_CROSSED`. `ownship is None` (every
+            # pre-existing caller that omits it) leaves this `True` -- a
+            # true no-op, matching this block's pre-fix behaviour exactly,
+            # since there is no bearing to check without ownship.
+            observable_or_grace = (
+                _callout_may_speak(contact, ownship, now_sim)
+                if ownship is not None
+                else True
+            )
+
             current_motion: MotionState | None = (
                 contact.motion.state if contact.motion is not None else None
             )
             motion_kind = motion_event_kind(contact.last_emitted_motion, current_motion)
-            if motion_kind is not None and self._cooldown_elapsed(
-                contact, CONTACT_MOTION_CHANGED, now_sim
+            if (
+                motion_kind is not None
+                and observable_or_grace
+                and self._cooldown_elapsed(contact, CONTACT_MOTION_CHANGED, now_sim)
             ):
                 self._events.append(
                     Event(
@@ -1119,7 +1211,15 @@ class ContactStore:
                                 "observed",
                                 "tracked",
                             )
-                            if past_deadband and fresh:
+                            # Fix A (Stage 1): the observability gate
+                            # governs both the event and the `last_
+                            # announced_range_km` update, matching `fresh`'s
+                            # own shape immediately above -- a contact that
+                            # has been unobservable past the grace window
+                            # must not silently adopt a new baseline either,
+                            # the same "nobody observed it" reasoning as the
+                            # freshness gate.
+                            if past_deadband and fresh and observable_or_grace:
                                 if self._cooldown_elapsed(
                                     contact, CONTACT_RANGE_CROSSED, now_sim
                                 ):

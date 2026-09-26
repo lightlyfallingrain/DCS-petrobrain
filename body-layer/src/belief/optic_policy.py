@@ -42,6 +42,7 @@ from typing import Final
 
 from belief.enrichment import CLOCK_BUCKET_DEG
 from belief.position_belief import PositionEstimate
+from perception.gaze import SCAN_CYCLE_PERIOD_S
 from perception.geometry import GeoPosition, bearing_deg, range_m
 from perception.object_model import apparent_extent_m, distinctiveness_of, profile_for
 
@@ -95,6 +96,19 @@ STEADY_RATE_LIMIT_DEG_S: Final[float] = 12.0
 #: re-asks a question already answered and spends the look that another
 #: contact could have used.
 RETRY_RANGE_FRACTION: Final[float] = 0.8
+
+#: `plans/sortie-2026-09-26-fixes/decisions.md` Decision 2/2a -- alongside
+#: `RETRY_RANGE_FRACTION` above (which stays, for the *closing-on* case),
+#: a time-based re-eligibility for the *watched-or-orbited* case: a contact
+#: held at roughly constant range (a stand-off, an orbit) can never satisfy
+#: `RETRY_RANGE_FRACTION` and would otherwise be locked out of binoculars
+#: for the rest of the encounter after a single attempt. **This is a
+#: starting value to tune against a flown sortie, not a measurement** --
+#: proposed as `4 * SCAN_CYCLE_PERIOD_S`, long enough that re-looks don't
+#: dominate "identification takes priority over search" every completed
+#: scan cycle, short enough that a stalled contact gets retried well inside
+#: a typical encounter rather than after hundreds of seconds.
+OPTIC_RETRY_INTERVAL_S: Final[float] = 4.0 * SCAN_CYCLE_PERIOD_S
 
 #: The widest sector a binocular *search* will sweep (user: *"cap binocular
 #: scan at 30 deg azimuth, there's no wide area binocular scan"*). A wider
@@ -215,11 +229,51 @@ class OpticState:
     #: which has its own end condition and never reads these).
     look_envelope_azimuth_deg: float | None = None
     look_envelope_half_width_deg: float | None = None
-    #: Range at the last attempt, per contact -- `RETRY_RANGE_FRACTION`'s
-    #: input. Contacts are never removed: the map is bounded by how many
-    #: distinct contacts one sortie produces, and forgetting an attempt
-    #: would let a contact be re-glassed forever at the same range.
+    #: Range at the last *committed* attempt, per contact --
+    #: `RETRY_RANGE_FRACTION`'s input. Contacts are never removed: the map
+    #: is bounded by how many distinct contacts one sortie produces, and
+    #: forgetting an attempt would let a contact be re-glassed forever at
+    #: the same range. **Committed** means the look that covered this
+    #: contact reached its own natural end (`look_is_finished`) -- see
+    #: `pending_attempted_at_range_m` below for the look-in-progress twin
+    #: this is merged from.
     attempted_at_range_m: dict[str, float] = field(default_factory=dict)
+    #: `plans/sortie-2026-09-26-fixes/plan.md` Stage 2 (Fix B1) -- the
+    #: attempt marks a look-in-progress has covered but not yet delivered.
+    #: Populated at the SCANNING -> GLASSING transition exactly where
+    #: `attempted_at_range_m` used to be populated directly; merged into
+    #: `attempted_at_range_m`/`attempted_at_time_sim` only when the current
+    #: look reaches its own natural end (`look_is_finished` true while
+    #: still steady) -- an interruption (`not steady`, or `lower_binoculars`
+    #: called from outside) drops this map instead, via `_back_to_scanning`,
+    #: without ever committing it. This is the fix for the diagnosed
+    #: defect: a look cut short by a player command delivered less than a
+    #: full look's worth of dwell and must not burn the same retry budget
+    #: as a completed one. Empty outside `GLASSING`.
+    pending_attempted_at_range_m: dict[str, float] = field(default_factory=dict)
+    #: `plans/sortie-2026-09-26-fixes/plan.md` Stage 3 (Fix B2) --
+    #: `attempted_at_range_m`'s time-of-attempt twin, committed at the same
+    #: point (value: `now_sim` at commit). Drives `is_worth_a_look`'s
+    #: time-based re-eligibility branch (`belief.optic_policy.
+    #: OPTIC_RETRY_INTERVAL_S`) alongside the existing range-based one --
+    #: see that constant's own docstring for why a watched-or-orbited
+    #: contact held at roughly constant range needs a time basis, not only
+    #: a range one.
+    attempted_at_time_sim: dict[str, float] = field(default_factory=dict)
+    #: `plans/sortie-2026-09-26-fixes/plan.md` Stage 4 (Fix C) -- the
+    #: `contact_id` of the *primary* (chosen/centred) target of the current
+    #: look, set at the same SCANNING -> GLASSING transition site as
+    #: `pending_attempted_at_range_m`/`attempted_at_time_sim` above, cleared
+    #: by `_back_to_scanning`. Names only the look's chosen centre, not
+    #: every contact its field of view happens to also cover -- a look
+    #: centred on contact A that incidentally covers contact B still counts
+    #: as "not on B" for `follow <target>`'s continuation check
+    #: (`decisions.md` Decision 2: "if binoculars were in use AND looking at
+    #: <target> continue"), matching the user's own fallback ("if...NOT
+    #: looking at target, lower...re-point at the target") rather than
+    #: requiring full envelope-overlap testing. `None` while `SCANNING` or
+    #: `SEARCHING`.
+    look_contact_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -465,15 +519,43 @@ def can_still_improve(target: LookTarget) -> bool:
     return lower_m < target.range_m <= upper_m
 
 
-def is_worth_a_look(target: LookTarget, state: OpticState) -> bool:
-    """Whether this contact would gain anything from a *new* look now."""
+def is_worth_a_look(
+    target: LookTarget, state: OpticState, now_sim: float = 0.0
+) -> bool:
+    """Whether this contact would gain anything from a *new* look now.
+
+    `now_sim` defaults to `0.0` so every pre-existing call site that never
+    supplied one keeps compiling and behaving identically -- `state.
+    attempted_at_time_sim` is empty for those (no committed attempt has a
+    time recorded), so the time-based branch below never fires for them
+    regardless of the default's value."""
     if not can_still_improve(target):
+        return False
+    if target.contact_id in state.pending_attempted_at_range_m:
+        # A look already in progress is covering this contact right now --
+        # not yet committed, but plainly not worth *starting a second* look
+        # over. `decide` never actually reaches this branch mid-`GLASSING`
+        # (its own stop condition is `look_is_finished`, not this
+        # function), but this keeps the invariant true regardless of
+        # caller: starting a look and continuing one are different
+        # questions about the same contact, in both directions.
         return False
     attempted_at = state.attempted_at_range_m.get(target.contact_id)
     if attempted_at is None:
         return True
-    # Tried before: only worth repeating once it has genuinely closed.
-    return target.range_m <= attempted_at * RETRY_RANGE_FRACTION
+    # Tried before: worth repeating once it has genuinely closed
+    # (`RETRY_RANGE_FRACTION`, the closing-on case) -- **or** once enough
+    # time has passed regardless of range (`OPTIC_RETRY_INTERVAL_S`, the
+    # watched-or-orbited case D5 didn't cover: a contact held at roughly
+    # constant range can never satisfy the range test alone). Either
+    # condition suffices.
+    closed_enough = target.range_m <= attempted_at * RETRY_RANGE_FRACTION
+    attempted_at_time = state.attempted_at_time_sim.get(target.contact_id)
+    time_elapsed_enough = (
+        attempted_at_time is not None
+        and now_sim - attempted_at_time >= OPTIC_RETRY_INTERVAL_S
+    )
+    return closed_enough or time_elapsed_enough
 
 
 def choose_look(targets: Sequence[LookTarget]) -> LookTarget | None:
@@ -599,7 +681,19 @@ def _target_in_current_look(state: OpticState, target: LookTarget) -> bool:
 def _back_to_scanning(
     state: OpticState, now_sim: float
 ) -> tuple[OpticState, OpticDecision]:
-    """End whatever the binoculars were doing and hand back to the scan."""
+    """End whatever the binoculars were doing and hand back to the scan.
+
+    **Also drops `pending_attempted_at_range_m`** (Stage 2, Fix B1): any
+    attempt marks a look-in-progress had not yet committed are discarded
+    here, never carried into the next look -- this is what makes an
+    interruption (`not steady`, or `lower_binoculars`, both of which reach
+    this function without ever committing the pending map first) leave the
+    interrupted contact immediately eligible again, instead of burning the
+    retry budget for dwell it never delivered. `attempted_at_range_m`/
+    `attempted_at_time_sim` (the *committed* marks) are untouched -- not
+    named in `replace` below, so they carry through from `state` exactly as
+    a natural look-end's caller already merged them in before calling this
+    function."""
     return (
         replace(
             state,
@@ -611,6 +705,8 @@ def _back_to_scanning(
             search_step_index=0,
             look_envelope_azimuth_deg=None,
             look_envelope_half_width_deg=None,
+            pending_attempted_at_range_m={},
+            look_contact_id=None,
         ),
         OpticDecision(optic=UNAIDED_OPTIC),
     )
@@ -676,20 +772,36 @@ def decide(
             ),
         )
     if state.phase is OpticPhase.GLASSING:
-        if not steady or look_is_finished(state, now_sim, targets):
-            return (
+        if not steady:
+            # Interrupted (manoeuvring, or `lower_binoculars` reaching here
+            # from outside `decide` entirely): the look did not run to its
+            # own natural end, so it never delivered the benefit the
+            # attempted-marking rule presupposes. `_back_to_scanning` drops
+            # `pending_attempted_at_range_m` without ever merging it into
+            # the committed map (Stage 2, Fix B1) -- the interrupted
+            # contact is immediately eligible for a new look again.
+            return _back_to_scanning(state, now_sim)
+        if look_is_finished(state, now_sim, targets):
+            # Natural end (recognition succeeded, nothing left to learn, or
+            # MAX_LOOK_S expired): the look ran and delivered its benefit,
+            # so its pending marks are committed -- merged into the
+            # *committed* maps first, then handed to `_back_to_scanning`,
+            # which only ever drops the *pending* one.
+            committed_range = dict(state.attempted_at_range_m)
+            committed_time = dict(state.attempted_at_time_sim)
+            for (
+                contact_id,
+                attempted_range_m,
+            ) in state.pending_attempted_at_range_m.items():
+                committed_range[contact_id] = attempted_range_m
+                committed_time[contact_id] = now_sim
+            return _back_to_scanning(
                 replace(
                     state,
-                    phase=OpticPhase.SCANNING,
-                    phase_started_sim=now_sim,
-                    look_azimuth_deg=None,
-                    look_elevation_deg=None,
-                    search_pattern_steps=(),
-                    search_step_index=0,
-                    look_envelope_azimuth_deg=None,
-                    look_envelope_half_width_deg=None,
+                    attempted_at_range_m=committed_range,
+                    attempted_at_time_sim=committed_time,
                 ),
-                OpticDecision(optic=UNAIDED_OPTIC),
+                now_sim,
             )
         # Step-indexed exactly as `SEARCHING` above: `step_s` is derived
         # from the sweep's own step count rather than a new constant
@@ -726,7 +838,9 @@ def decide(
     if not scan_complete or not steady:
         return state, OpticDecision(optic=UNAIDED_OPTIC)
 
-    worth_looking = [target for target in targets if is_worth_a_look(target, state)]
+    worth_looking = [
+        target for target in targets if is_worth_a_look(target, state, now_sim)
+    ]
     chosen = choose_look(worth_looking)
     if chosen is None:
         if search:
@@ -739,6 +853,7 @@ def decide(
                     phase_started_sim=now_sim,
                     search_pattern_steps=tuple(search),
                     attempted_at_range_m=dict(state.attempted_at_range_m),
+                    attempted_at_time_sim=dict(state.attempted_at_time_sim),
                 ),
                 OpticDecision(
                     optic=BINOCULAR_OPTIC,
@@ -769,13 +884,18 @@ def decide(
     )
     envelope_half_width = max(chosen.bearing_uncertainty_deg, 0.0)
 
-    attempted = dict(state.attempted_at_range_m)
+    # Stage 2 (Fix B1): every contact this look covers goes into the
+    # *pending* map, not the committed one -- the look has not yet
+    # delivered any benefit, only started. `decide`'s own GLASSING branch
+    # above is what commits (on `look_is_finished`) or drops (on `not
+    # steady`) these marks; `lower_binoculars` reaches the same drop path.
+    pending = dict(state.pending_attempted_at_range_m)
     for target in worth_looking:
         if _angular_separation_deg(chosen, target) <= envelope_half_width:
             # Every contact this look covers counts as attempted, not just
             # the one it was centred on -- they all get the benefit, so
             # they all bear the retry rule.
-            attempted[target.contact_id] = target.range_m
+            pending[target.contact_id] = target.range_m
 
     first_azimuth, first_elevation = sweep[0]
     return (
@@ -788,7 +908,10 @@ def decide(
             search_step_index=0,
             look_envelope_azimuth_deg=chosen.azimuth_deg,
             look_envelope_half_width_deg=envelope_half_width,
-            attempted_at_range_m=attempted,
+            attempted_at_range_m=dict(state.attempted_at_range_m),
+            pending_attempted_at_range_m=pending,
+            attempted_at_time_sim=dict(state.attempted_at_time_sim),
+            look_contact_id=chosen.contact_id,
         ),
         OpticDecision(
             optic=BINOCULAR_OPTIC,
