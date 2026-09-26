@@ -85,7 +85,7 @@ body-side view and the slice numbering both files share.
     Acceptance, not a correctness gate — stage 5 already proved the pipeline, and nothing here
     changed that.
 
-- [x] **Hardening: per-source `--poll-hz` default + `Content-Length` guard — done 2026-09-26**
+- [x] **Hardening: per-source `--poll-hz` default + `Content-Length` guard — done 2026-09-26, merged `1a8795d`**
   (`fix/audio-adapter-review-findings`, no `plan.md` — scoped directly from the 2026-09-26
   whole-subproject performance and security reviews, `docs/reviews/`). `--ptt dcs` now defaults to
   30 Hz (`ptt_source.DEFAULT_DCS_POLL_HZ`, which the perf review found defined but wired to
