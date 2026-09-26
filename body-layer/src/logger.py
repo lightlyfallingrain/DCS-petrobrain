@@ -212,6 +212,7 @@ from belief.mission_phase import MissionPhaseTracker, load_mission_understanding
 from belief.optic_policy import (
     LookTarget,
     OpticDecision,
+    OpticPhase,
     OpticState,
     is_steady,
     look_target_for,
@@ -1391,9 +1392,25 @@ def _run_crew_text_poll_loop(
                         # block under the new guard reflowed the word to
                         # the line start and mypy reported a syntax error
                         # CPython's own parser accepts happily.)
-                        runner.optic_state = lower_binoculars(
-                            runner.optic_state, runner.last_t_sim
+                        #
+                        # `plans/sortie-2026-09-26-fixes/decisions.md`
+                        # Decision 2's one carve-out: `follow <target>`
+                        # naming the contact already being glassed is a
+                        # request to continue, not to stop -- lowering and
+                        # immediately re-pointing at the same target would
+                        # be strictly worse than doing nothing. Every other
+                        # dispatched command keeps the unconditional-lower
+                        # default above.
+                        already_on_target = (
+                            crew_console.last_command_target_contact_id is not None
+                            and runner.optic_state.phase is OpticPhase.GLASSING
+                            and runner.optic_state.look_contact_id
+                            == crew_console.last_command_target_contact_id
                         )
+                        if not already_on_target:
+                            runner.optic_state = lower_binoculars(
+                                runner.optic_state, runner.last_t_sim
+                            )
                     if crew_console.overlay_client is not None:
                         last_gaze_label = _push_gaze_line(
                             crew_console.overlay_client,

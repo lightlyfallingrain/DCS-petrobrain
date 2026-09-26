@@ -1454,6 +1454,47 @@ def test_range_crossing_does_not_fire_for_a_contact_behind_the_cockpit_mask() ->
     assert not any(e.kind == CONTACT_RANGE_CROSSED for e in store.events)
 
 
+def test_range_crossing_still_fires_within_the_observability_grace_window() -> None:
+    """The companion to the test above -- Decision 1's own carve-out: a
+    contact briefly unobservable (masked for less than `belief.decay.
+    CALLOUT_OBSERVABILITY_GRACE_S`) must still get its crossing callout,
+    unlike a contact that has *never* been confirmed observable (the test
+    above). This contact is first seen dead ahead (bearing 0 relative to
+    heading 0) -- clearing the cockpit mask and establishing `Contact.
+    last_observable_sim` -- then ownship turns tail-on to it (heading 180,
+    putting the contact dead astern) for the single tick that also crosses
+    the whole-kilometre boundary, one second later -- well inside the
+    10-second grace window. A contact sliding behind the doorframe for a
+    moment is still tracked, and this crossing is correct crew behaviour
+    from memory, per Decision 1."""
+    store = ContactStore()
+    store.ingest(
+        [_observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=4500.0)],
+        now_sim=0.0,
+    )
+    contact_id = store.contacts[0].id
+    set_attention(store, contact_id, "watch")
+    # First tick: dead ahead, clears the cockpit mask -- establishes
+    # last_observable_sim=0.0. Silent seed at km=4.
+    store.tick(now_sim=0.0, ownship=_ownship())
+
+    # Ownship turns to face directly away from the (stationary) contact,
+    # putting it dead astern -- unobservable -- while also closing range
+    # past the 4/3 km boundary. Only one second has passed since it was
+    # last confirmed observable, well inside CALLOUT_OBSERVABILITY_GRACE_S
+    # (10.0).
+    store.tick(
+        now_sim=1.0,
+        ownship=OwnshipState(
+            t_sim=1.0, x=1500.0, z=0.0, alt_m=500.0, heading_true_deg=180.0
+        ),
+    )
+    crossed = [e for e in store.events if e.kind == CONTACT_RANGE_CROSSED]
+    assert len(crossed) == 1
+    assert crossed[0].previous_range_km == 4
+    assert crossed[0].range_km == 3
+
+
 # --- believed engagement (plans/watch-reporting/plan.md Stage 4) -----------
 
 _AAA_TYPE = "ZU-23-3 Sergey"  # range_min_m=0, range_max_m=2408, alt_min_m=0

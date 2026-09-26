@@ -218,7 +218,7 @@ def _threat_has_los(
     return False
 
 
-def _callout_may_speak(contact: "Contact", ownship: OwnshipState, now_sim: float) -> bool:
+def _callout_may_speak(contact: Contact, ownship: OwnshipState, now_sim: float) -> bool:
     """`plans/sortie-2026-09-26-fixes/plan.md` Stage 1 (Fix A). Updates
     `contact.last_observable_sim`'s bookkeeping against the contact's
     *current true* bearing (the same primitive `perception.visibility`
