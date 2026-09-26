@@ -6,6 +6,7 @@ a real loopback HTTP server, a recording double standing in for the real
 
 from __future__ import annotations
 
+import http.client
 import json
 import threading
 import urllib.error
@@ -82,6 +83,29 @@ def _post(server: TTSAdapterServer, path: str, body: object) -> tuple[int, objec
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read())
+
+
+def _post_raw_content_length(
+    server: TTSAdapterServer,
+    path: str,
+    body: bytes,
+    content_length: str | None,
+) -> tuple[int, object]:
+    """POST with a hand-set (possibly malformed) `Content-Length` header --
+    `urllib.request.Request` always computes a correct one from `data`, so
+    reaching the header-parsing guard in `server._read_body` needs a
+    lower-level client. `content_length=None` omits the header entirely."""
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    try:
+        conn.putrequest("POST", path)
+        if content_length is not None:
+            conn.putheader("Content-Length", content_length)
+        conn.endheaders()
+        conn.send(body)
+        resp = conn.getresponse()
+        return resp.status, json.loads(resp.read())
+    finally:
+        conn.close()
 
 
 def test_speak_valid_synthesizes_and_delivers(
@@ -238,3 +262,78 @@ def test_stop_interrupt_failure_returns_500() -> None:
     finally:
         server.close()
         thread.join(timeout=5)
+
+
+# -- Content-Length guard (security review, 2026-09-26) --------------------
+#
+# A non-numeric header used to raise ValueError straight out of do_POST
+# (ThreadingHTTPServer isolates that to a stray traceback on one connection,
+# not a crash, but it should be a clean 400). A negative header is worse:
+# self.rfile.read(n) with a negative n reads until EOF rather than a
+# bounded amount, so it can block a handler thread indefinitely rather than
+# just misbehaving. Both must now get a clean 400 before rfile.read is
+# ever called.
+
+
+def test_speak_missing_content_length_returns_400(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, engine, sink = running_server
+    body = json.dumps({"text": "hello"}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        server, "/speak", body, content_length=None
+    )
+    # No Content-Length reads as an empty body (same as before this fix) --
+    # empty is not valid JSON, so this still ends in a 400, just via the
+    # existing JSON-validation path rather than the header guard.
+    assert status == 400
+    assert isinstance(resp_body, dict)
+    assert "error" in resp_body
+    assert engine.requested_text == []
+    assert sink.delivered == []
+
+
+def test_speak_non_numeric_content_length_returns_400(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, engine, sink = running_server
+    body = json.dumps({"text": "hello"}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        server, "/speak", body, content_length="not-a-number"
+    )
+    assert status == 400
+    assert isinstance(resp_body, dict)
+    assert "error" in resp_body
+    assert engine.requested_text == []
+    assert sink.delivered == []
+
+
+def test_speak_negative_content_length_returns_400(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, engine, sink = running_server
+    body = json.dumps({"text": "hello"}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        server, "/speak", body, content_length="-1"
+    )
+    assert status == 400
+    assert isinstance(resp_body, dict)
+    assert "error" in resp_body
+    assert engine.requested_text == []
+    assert sink.delivered == []
+
+
+def test_speak_valid_content_length_still_succeeds(
+    running_server: tuple[TTSAdapterServer, _FakeEngine, _RecordingSink],
+) -> None:
+    server, engine, sink = running_server
+    body = json.dumps({"text": "Watching Charlie one seven.", "urgent": False}).encode(
+        "utf-8"
+    )
+    status, resp_body = _post_raw_content_length(
+        server, "/speak", body, content_length=str(len(body))
+    )
+    assert status == 200
+    assert resp_body == {"ok": True}
+    assert engine.requested_text == ["Watching Charlie one seven."]
+    assert sink.delivered == [(b"FAKE-WAV-BYTES", False)]

@@ -134,9 +134,40 @@ def _make_handler(
                 return
             self._respond_json(404, {"error": f"not found: {path}"})
 
+        def _read_body(self) -> bytes | None:
+            """Read the request body per `Content-Length`, guarding the
+            header itself before touching `rfile`.
+
+            A missing header reads as zero bytes, same as before. A
+            non-numeric value used to raise `ValueError` straight out of
+            `do_POST` -- `ThreadingHTTPServer` isolates that to a stray
+            traceback on one connection rather than a crash, but a
+            malformed request should get a clean `400`, not a traceback. A
+            *negative* value is worse than cosmetic: `self.rfile.read(n)`
+            with a negative `n` reads until EOF rather than a bounded
+            amount, so on a connection with no EOF forthcoming that
+            handler thread blocks indefinitely on a single bad request.
+            Returns `None` (having already sent the `400`) when the header
+            cannot be trusted."""
+            raw_header = self.headers.get("Content-Length", "0") or "0"
+            try:
+                length = int(raw_header)
+            except ValueError:
+                self._respond_json(
+                    400, {"error": f"invalid Content-Length: {raw_header!r}"}
+                )
+                return None
+            if length < 0:
+                self._respond_json(
+                    400, {"error": f"invalid Content-Length: {raw_header!r}"}
+                )
+                return None
+            return self.rfile.read(length) if length > 0 else b""
+
         def _handle_speak(self) -> None:
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            raw_body = self.rfile.read(length) if length > 0 else b""
+            raw_body = self._read_body()
+            if raw_body is None:
+                return
             try:
                 data = json.loads(raw_body.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -187,8 +218,9 @@ def _make_handler(
                 self._respond_json(503, {"error": "speech recognition not configured"})
                 return
 
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            raw_body = self.rfile.read(length) if length > 0 else b""
+            raw_body = self._read_body()
+            if raw_body is None:
+                return
             try:
                 data = json.loads(raw_body.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
