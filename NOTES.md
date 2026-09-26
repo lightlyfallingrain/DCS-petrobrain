@@ -492,3 +492,19 @@ two functions that must agree (2026-09-19).
   actual race (run the real shutdown path repeatedly) before trusting it, and prefer an explicit
   flag written before the racy event over inferring intent from a value another thread also mutates
   (`plans/aircraft-layer-hardening/review.md`, `ac0bff9`, 2026-09-26).
+
+- **A regression test that only asserts final outward status can pass for a reason unrelated to the
+  bug it claims to guard against — and a reviewer's own suggested fix mechanism can share the same
+  blind spot.** `audio-adapter-review-findings`'s negative-`Content-Length` tests asserted only
+  `status == 400`, which passed against both the pre-fix and post-fix `server.py` — the pre-fix code
+  already had an incidental `self.rfile.read(length) if length > 0 else b""` guard that took a
+  different rejection path (JSON-parse failure on an empty body) to the same status code, so the
+  hang the security review described was never actually reachable through this test. The reviewer's
+  first suggested fix (spy on `rfile.read`, assert it's never called with a negative count) would
+  *also* have passed on both versions, for the identical reason — the pre-fix ternary keeps that
+  call from ever happening either way. What actually distinguished the two versions was the response
+  body's specific error message, visible only once someone read both code paths' literal source
+  rather than reasoning about them. Lesson: a review's suggested test mechanism is a hypothesis, not
+  a verified fact — before writing the assertion, revert to the pre-fix code and run the candidate
+  test against it; if it passes, the mechanism doesn't discriminate, no matter how plausible it reads
+  (`plans/audio-adapter-review-findings/review.md` round 2, `1b2e337`, 2026-09-26).
