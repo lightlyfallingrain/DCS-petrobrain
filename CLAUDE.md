@@ -12,6 +12,26 @@ Petrobrain: make DCS World Mi-24P/Petrovich operations feel like a real crew, no
 
 **Scope: single-player only.** Everything multiplayer (group/coalition scoping, server hosting, other clients) is out of scope until the user says otherwise — don't plan for it, list it as an open question, or add code paths for it. (User direction, 2026-09-13.)
 
+### Whose job is whose — the test every plan and analysis has to pass
+
+**Petrovich simulates the copilot** (for now), and his main responsibility is **contact detection and
+identification**. The **pilot** — the player, for now — owns **flying, navigation and weapon
+deployment**. Petrovich helps the pilot **evade dangerous units and align for attack runs**, and tells
+the pilot about important observations so they can evade or attack as needed. **Transport operations
+are out of current scope.** (User direction, 2026-09-26.)
+
+**So when planning or analysing user input, the guiding question is: what would make sense and bring
+value from the player's perspective — the pilot's — and from the crew interaction between them?** Not
+what is elegant, not what the data model makes easy, not what is technically interesting. A feature
+that does not help the pilot evade, attack, or understand what is out there is not earning its place,
+however well it is built.
+
+This is written down because the failure it prevents is silent and has happened: work that is
+internally coherent and correct, aimed at nothing the pilot would notice or use. Two of this project's
+own corrections were exactly that — a planned transport removed once mission frequency was considered,
+and an F10 contact-list menu dropped because the player would still have to click through it. Both
+were caught by asking this question, and the cost of asking it is one paragraph in a plan.
+
 Three-layer architecture, each a separate component with explicit interfaces:
 
 1. **DCS World Model** (`world-model/`) — persistent geographic knowledge of a DCS theatre (roads, settlements, terrain, ridges/valleys), built offline from DCS-derived data + OSM/DEM augmentation. DCS geometry is always authoritative; external GIS augments, never overrides.
