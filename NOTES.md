@@ -473,3 +473,22 @@ two functions that must agree (2026-09-19).
   drift" claim, re-derive the claim rather than trusting it still holds — the claim's truth can
   depend on what else reads the same data, not just on the data itself (BR-1 Stage 2
   Security/Performance fold review, `d51a25b`, 2026-09-25).
+
+- **A fix that makes a silent failure loud can introduce a new silent failure of its own — and a
+  docstring claiming the mechanism is safe is not evidence that it is.** `aircraft-layer-hardening`'s
+  first `CollectorServer.serve_forever` `accept()` guard classified a clean shutdown by re-reading
+  `self._socket` inside the `except OSError` block, and the implementer's own docstring,
+  `implementation.md`, and agent-memory file all stated this was safe because the attribute was
+  "never re-read after the exception fires." That claim was false: `close()` sets `self._socket.close()`
+  then `self._socket = None` as two separate statements, and a blocked `accept()` could raise from the
+  `close()` call itself while `self._socket` still held the old object — misclassified as a real
+  failure on 161 of ~230 real shutdowns (measured, not theoretical), teaching an operator to ignore
+  the very ERROR line the fix existed to raise. The correct fix was an explicit flag
+  (`self._shutting_down`) set as the first statement of `close()`, before the socket is actually
+  closed, so the flag-write happens-before the syscall that can trigger the exception — inference
+  from a mutated value replaced by an explicit signal set before the mutation. Lesson: when a fix's
+  whole justification is "condition A is distinguished from condition B by reading attribute X, and
+  that's safe because X is never re-read," don't accept that from the docstring — reproduce the
+  actual race (run the real shutdown path repeatedly) before trusting it, and prefer an explicit
+  flag written before the racy event over inferring intent from a value another thread also mutates
+  (`plans/aircraft-layer-hardening/review.md`, `ac0bff9`, 2026-09-26).
