@@ -8,6 +8,7 @@ standing in for the real whisper-cli binary -- this file never shells out."""
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import threading
 import urllib.error
@@ -106,6 +107,26 @@ def _get(server: TTSAdapterServer, path: str) -> tuple[int, object]:
 
 def _wav_b64(payload: bytes = b"FAKE-CLIP-BYTES") -> str:
     return base64.b64encode(payload).decode("ascii")
+
+
+def _post_raw_content_length(
+    server: TTSAdapterServer, path: str, body: bytes, content_length: str
+) -> tuple[int, object]:
+    """POST with a hand-set, possibly malformed `Content-Length` header --
+    `urllib.request.Request` always computes a correct one from `data`, so
+    reaching `server._read_body`'s header guard needs a lower-level client
+    (see `test_server.py`'s twin helper for the `/speak` side of this same
+    guard)."""
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    try:
+        conn.putrequest("POST", path)
+        conn.putheader("Content-Length", content_length)
+        conn.endheaders()
+        conn.send(body)
+        resp = conn.getresponse()
+        return resp.status, json.loads(resp.read())
+    finally:
+        conn.close()
 
 
 def test_transcribe_then_poll_round_trips_a_matched_command(
@@ -311,3 +332,47 @@ def test_speak_still_works_alongside_transcribe(
     status, body = _post(server, "/speak", {"text": "hello", "urgent": False})
     assert status == 200
     assert body == {"ok": True}
+
+
+# -- Content-Length guard (security review, 2026-09-26) --------------------
+
+
+def test_transcribe_non_numeric_content_length_returns_400(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, engine = running_server_with_stt
+    body = json.dumps({"wav_b64": _wav_b64()}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        server, "/transcribe", body, content_length="not-a-number"
+    )
+    assert status == 400
+    assert isinstance(resp_body, dict)
+    assert "error" in resp_body
+    assert engine.requested_wav == []
+
+
+def test_transcribe_negative_content_length_returns_400(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, engine = running_server_with_stt
+    body = json.dumps({"wav_b64": _wav_b64()}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        server, "/transcribe", body, content_length="-1"
+    )
+    assert status == 400
+    assert isinstance(resp_body, dict)
+    assert "error" in resp_body
+    assert engine.requested_wav == []
+
+
+def test_transcribe_valid_content_length_still_succeeds(
+    running_server_with_stt: tuple[TTSAdapterServer, _FakeSTTEngine],
+) -> None:
+    server, engine = running_server_with_stt
+    body = json.dumps({"wav_b64": _wav_b64()}).encode("utf-8")
+    status, resp_body = _post_raw_content_length(
+        server, "/transcribe", body, content_length=str(len(body))
+    )
+    assert status == 200
+    assert resp_body == {"ok": True}
+    assert engine.requested_wav == [b"FAKE-CLIP-BYTES"]
