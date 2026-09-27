@@ -223,3 +223,34 @@ earlier claim, or a disagreement with a request gets said plainly — in a sente
 - Read before starting work; prefer the User priority tasks at the top of the file
 - Do not start `[?]` or `[>]` tasks without instruction
 - Update state as work progresses; do not delete tasks; do not exceed task scope
+
+### Backlog items carry IDs, like milestones do
+
+**Every item in a Backlog section has a stable ID** (user direction, 2026-09-27), so one can be named
+in conversation, a commit, or a plan without quoting its first sentence. The form is
+`<prefix>-B<n>`, where the prefix is the subproject's own and `B` distinguishes a backlog item from a
+milestone — `BL-4` is a body-layer milestone, `BL-B4` a body-layer backlog item.
+
+| prefix | where |
+|---|---|
+| `BL-B<n>` | `body-layer/ROADMAP.md` |
+| `AC-B<n>` | `aircraft-layer/ROADMAP.md` |
+| `AA-B<n>` | `audio-adapter/ROADMAP.md` |
+| `WM-B<n>` | `world-model/ROADMAP.md` |
+| `X-B<n>` | `todo/todo.md`, cross-cutting / unscoped |
+
+`MI-B<n>` and `BR-B<n>` are reserved for mission-interpreter and brain-layer, neither of which has a
+Backlog section yet.
+
+**Two rules, and the second is the one that makes IDs worth having:**
+
+- **A new item takes the next unused number in its file.** Read the highest existing one rather than
+  counting items — the two differ as soon as anything is removed.
+- **Numbers are never reused and never renumbered**, including for items that are `[x]` done or
+  rejected. An ID that silently comes to mean a different item is worse than no ID, because a commit
+  message or plan citing the old meaning now reads as evidence for the new one. Done items keep their
+  IDs in place for exactly this reason.
+
+An item that moves from a subproject's backlog to `todo/todo.md` (or the reverse) takes a **new** ID
+in its destination and the old entry says where it went — the same reason: an ID belongs to one file's
+sequence, so carrying one across files would make two files' numbering collide.

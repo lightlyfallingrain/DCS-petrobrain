@@ -301,9 +301,12 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 
 ## Cross-cutting / unscoped backlog
 
+Items here are `X-B<n>`. A new one takes the next unused number; numbers are never reused or
+renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
+
 ### Added 2026-09-26
 
-- [ ] **Make an unhandled thread exception fail the test suite, not just warn it.**
+- [ ] **X-B1 — Make an unhandled thread exception fail the test suite, not just warn it.**
   `pyproject.toml` declares no `filterwarnings`, so `PytestUnhandledThreadExceptionWarning`
   warns and the run still reports "178 passed". Raised by the reviewer on
   `feature/aircraft-layer-hardening`, twice, and it is worth doing because **that warning is
@@ -313,14 +316,14 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   project keeps meeting in the air. Affects every subproject's test config, not one file —
   which is why it is here rather than on a branch.
 
-- [ ] **`CollectorServer.open()` never resets `self._shutting_down` to `False`.** Latent, not
+- [ ] **X-B2 — `CollectorServer.open()` never resets `self._shutting_down` to `False`.** Latent, not
   live: `__main__.py` opens once and closes once at exit, and no test reuses an instance
   across a cycle, so nothing exercises it today. But if an instance is ever reopened it would
   **permanently swallow real `accept()` failures** — turning the loud-failure guard back into
   the silent death it was built to prevent. One line in `open()`. Flagged non-blocking by the
   reviewer on 2026-09-26; worth taking the next time that file is touched.
 
-- [ ] **`test_unexpected_accept_error_is_logged_loudly_and_the_loop_recovers` simulates
+- [ ] **X-B3 — `test_unexpected_accept_error_is_logged_loudly_and_the_loop_recovers` simulates
   shutdown by poking `server._socket = None` rather than calling `close()`**, so it never
   sets `_shutting_down` and its simulated-shutdown branch now exercises a dead code path.
   Harmless today (the assertion is `any(...)`, not an exact count) and purely cosmetic drift —
@@ -328,7 +331,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
 
 ### Added 2026-09-25 (user)
 
-- [ ] **Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**
+- [ ] **X-B4 — Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**
   User direction, 2026-09-25, arising from the vegetation-model decision recorded in
   `body-layer/ROADMAP.md` ("Detection under real world conditions", factor 1). **Gates the 9K113
   half of that decision and nothing else** — the statistical model for naked eye and binoculars
@@ -375,7 +378,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   during it** — if the answer is terrain-only, that slice's LOS design collapses and the
   statistical model has to cover every channel instead.
 
-- [ ] **Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
+- [ ] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** User direction, 2026-09-25. The config is treated as prose nobody reviews, while it is
   in fact the thing that decides how every agent behaves — and a defect in it is executed rather
   than read.
@@ -418,7 +421,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   `integrity-audit` is deliberately diagnostic-only and this should keep that posture — report,
   then apply with the user in the loop.
 
-- [ ] **An outpost fragments into 18 contacts at range — diagnosed, not fixed.** Found in a real
+- [ ] **X-B6 — An outpost fragments into 18 contacts at range — diagnosed, not fixed.** Found in a real
   sortie 2026-09-25 from `--belief-truth-log`; full analysis in
   `plans/contact-fragmentation-at-range/debug.md`. The user heard the same callout four times
   (*"ground, 11 o'clock, 1 kilometre."*) and asked why they did not collapse into a group.
@@ -442,7 +445,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   the join re-resolving, or it measures itself.
 
 
-- [x] **A real-time ASCII view of what Petrovich is looking at, and with what. Built 2026-09-25 (`feature/eyesight-view`) — `--eyesight-view`, plus `--belief-truth-log` below.** User, 2026-09-25:
+- [x] **X-B7 — A real-time ASCII view of what Petrovich is looking at, and with what. Built 2026-09-25 (`feature/eyesight-view`) — `--eyesight-view`, plus `--belief-truth-log` below.** User, 2026-09-25:
   *"it'd help if I could visually see where Petrovich is looking and with what. A realtime ascii
   graphic would do just fine."* Shape, as he described it:
   - **Ownship at bottom centre**, because the rear hemisphere is not visible anyway — so the
@@ -487,7 +490,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   and is trusted precisely because the direction of flow is enforced structurally rather than by
   remembering.
 
-- [ ] **Per-module performance review, findings written to a document, and that document becomes a
+- [ ] **X-B8 — Per-module performance review, findings written to a document, and that document becomes a
   backlog item.** User, 2026-09-25. Each subproject reviewed in its own right —
   `world-model/`, `aircraft-layer/`, `body-layer/`, `audio-adapter/`, `brain-layer/`,
   `mission-interpreter/` — rather than only the per-feature passes that have run since
@@ -495,14 +498,14 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   wedged-brain poll costing 5015 ms every cycle), but they only ever look at what one branch
   touched.
 
-- [ ] **Per-module security review, same shape: findings to a document, document becomes a backlog
+- [ ] **X-B9 — Per-module security review, same shape: findings to a document, document becomes a backlog
   item.** User, 2026-09-25. Same reasoning and same module list. Note the standing scoping the
   user set when re-enabling the role: single-user, LAN-only, under active development — so this is
   a survey for real exposure, not a hardening audit. The per-feature pass has already found one
   genuine item this way (a service binding all interfaces for no benefit), which is the argument
   for doing it systematically.
 
-- [ ] **End-to-end latency measurement: where the time actually goes, and what would buy the most.**
+- [ ] **X-B10 — End-to-end latency measurement: where the time actually goes, and what would buy the most.**
   User, 2026-09-25: *"what are the latencies what are the bottle necks, what would bring greatest
   improvements?"* The whole chain, not one hop — PTT to recognised transcript, transcript to
   dispatched command, perception poll to spoken callout, escalation to brain reply. **This has
@@ -513,7 +516,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   which single change would buy the most. Worth stating because a measurement pass that produces
   only numbers answers a different question than the one asked.
 
-- [ ] **The knowledge graph was rebuilt under the OLD graphify node-ID format — the next rebuild
+- [ ] **X-B11 — The knowledge graph was rebuilt under the OLD graphify node-ID format — the next rebuild
   needs `graphify extract --force`.** Added 2026-09-24, and this will fail silently if missed.
   The `/graph-refresh` on 2026-09-24 (3287 nodes, 5829 edges) used the extraction spec's
   *immediate-parent* ID format (`auth_session_validatetoken`). The installed skill's
@@ -531,7 +534,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   change — worth updating in the same pass.
 
 
-- [>] **Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
+- [>] **X-B12 — Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
   shipped while they were exempt. Deferred until Stage 4b of the group contact model is done**
   (user, 2026-09-19) — not because the finding is weak, but because interrupting the current run
   to re-audit would cost more than the risk carries today.
@@ -568,7 +571,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   in four roles' memory files.
 
 
-- [ ] **`console.py`'s typed `scan-area` still drives the 9K113.** Found by review 2026-09-17,
+- [ ] **X-B13 — `console.py`'s typed `scan-area` still drives the 9K113.** Found by review 2026-09-17,
   while checking the F10-path fix (`89b8b1d`). `body-layer/src/belief/console.py:548` calls
   `aircraft_client.trigger_petrovich_search("forward")` under the name "Scan" — the identical
   semantic mismatch just removed from `crew_console._handle_scan`, where *Scan* is naked-eye
@@ -586,7 +589,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   the kind of contradictory precedent a future reader would follow in the wrong direction.
 
 
-- [x] **Scan commands should drive naked-eye perception.** Raised 2026-09-16 from the first live
+- [x] **X-B14 — Scan commands should drive naked-eye perception.** Raised 2026-09-16 from the first live
   F10 test of `f10-command-vocabulary`; narrowed 2026-09-17 once `cockpit-visibility` shipped.
   **Closed 2026-09-21 by cones slice 2B** (`plans/detection-cones-slice2/plan.md`): a pending
   `scan_area` task's relative sector now resolves to a `perception.gaze.Gaze` each poll
@@ -636,7 +639,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   the new `perception.gaze.legs_within_wedge`, using that poll's own ownship heading — `scan north`
   now steers `NakedEyePerceptionSource`, not just an `AttentionArea`. **Unflown as of merge.**
 
-- [x] **Ownship-relative o'clock scan tokens — deferred to Stage 5 of `plans/
+- [x] **X-B15 — Ownship-relative o'clock scan tokens — deferred to Stage 5 of `plans/
   voice-command-completeness/plan.md`, user direction 2026-09-23.** The command vocabulary has two
   frames and only one has fine granularity: absolute (`north`/`315 degrees`, coarse and fine both)
   vs. ownship-relative (`left`/`right`/`ahead`/`full`, coarse only — `left` spans a 90° wedge, three
@@ -657,7 +660,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   tokens are unbenched, as flagged above — next corpus recording's job. **Unflown as of merge.**
 
 
-- [ ] **Stage 5 road junctions: pathological single-chunk stalls — CONFIRMED DATA-DEPENDENT.** Raised
+- [ ] **X-B16 — Stage 5 road junctions: pathological single-chunk stalls — CONFIRMED DATA-DEPENDENT.** Raised
   2026-09-16 from the `syria-full` build log validating `osm-landcover-optimization`. Stage 5 took
   2885 s, and a large share of that sat in a handful of chunks: chunk 13867→13868 took 331 s and
   chunk 14017→14018 took 337 s (one chunk each), with two further ~330-350 s near-stalls around
@@ -685,13 +688,13 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   `time.monotonic()`, which on macOS does not tick during system sleep. Wall-clock timestamps and
   logged elapsed disagree by design there.
 
-- [ ] **`syria-full` pipeline logs only 6 of 8 stages.** Raised 2026-09-16 from the same build log.
+- [ ] **X-B17 — `syria-full` pipeline logs only 6 of 8 stages.** Raised 2026-09-16 from the same build log.
   Output goes `[6/8] SRTM elevation grid: done` straight to `Built ...` — `[7/8]` and `[8/8]` never
   appear. `probe: skipped (probe_output_path not given or not found)` accounts for at most one of
   them. Either the remaining stages are silent (no `starting`/`done` lines, unlike stages 1-6) or
   `_TOTAL_STAGES` overcounts. Cosmetic but misleading during a ~1 h build. `world-model`.
 
-- [ ] **SRTM: 131 tiles staged, `tiles_used=79`; 7.4% of points void-or-uncovered.** Raised
+- [ ] **X-B18 — SRTM: 131 tiles staged, `tiles_used=79`; 7.4% of points void-or-uncovered.** Raised
   2026-09-16 from the same build log. The pipeline header reports `SRTM elevation grid (131
   tile(s))` but `SrtmIngestStats` reports `tiles_used=79` — 52 staged tiles contributed nothing.
   Separately `points_void_or_uncovered=47484` of `points_expected=639216` (7.4%). The M7 entry
@@ -700,7 +703,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   unused tiles are outside the region bbox that is fine and the header should say so; if they
   overlap it, coverage is being lost. `world-model`.
 
-- [ ] **Pin `CLASSIFIER_VERSION` bump discipline with a test.** Raised 2026-09-16. The comment
+- [ ] **X-B19 — Pin `CLASSIFIER_VERSION` bump discipline with a test.** Raised 2026-09-16. The comment
   above `CLASSIFIER_VERSION` (`world-model/src/build/ingest_osm.py`) lists the conditions that
   force a bump; `638239a` met two of them and landed without one, and was caught only by reading a
   build log weeks later. Nothing mechanically enforces the rule. Options: hash the relevant
@@ -710,7 +713,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   key's shape. `world-model`.
 
 
-- [ ] **Landmark references must be LOS- and knowledge-gated, not ground-truth.** Raised
+- [ ] **X-B20 — Landmark references must be LOS- and knowledge-gated, not ground-truth.** Raised
   2026-09-13, while scoping world-model tactical-landmark enrichment (ridges/valleys,
   settlements, road intersections, other aerial landmarks — see
   `plans/world-model-tactical-landmarks/plan.md` once it lands). World-model can compute
@@ -733,7 +736,7 @@ First flight of the o'clock scan loop. Six findings; two share a root cause.
   `belief/` concern parallel to `percept.py`'s existing DCS-truth-stripping boundary). Revisit
   once world-model's landmark enrichment and a first Mission Understanding schema both exist.
 
-- [>] **"Wingman brain" — a much later, far-future direction.** Raised 2026-09-13, deliberately
+- [>] **X-B21 — "Wingman brain" — a much later, far-future direction.** Raised 2026-09-13, deliberately
   deferred, not scoped. Combines observation + flight control + world perception from a
   *non-player-position* aircraft — i.e. an AI-controlled wingman with its own Petrobrain-style
   cognition, not just Petrovich riding along in the player's own cockpit. A materially different
