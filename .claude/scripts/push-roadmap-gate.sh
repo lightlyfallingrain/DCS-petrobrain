@@ -23,11 +23,31 @@ fi
 merge_commits=$(git log --merges --format=%H "$range" 2>/dev/null) || exit 0
 [ -z "$merge_commits" ] && exit 0
 
+# Which paths mark a merge as "looks like a feature merge"? DISCOVERED, NOT
+# ENUMERATED (fixed 2026-09-27). This was hardcoded to
+# world-model|aircraft-layer|body-layer, so a merge touching only brain-layer/src/,
+# audio-adapter/src/ or mission-interpreter/src/ never tripped the gate and could
+# land with no ROADMAP.md update and nothing saying so. It is the third recurrence
+# of the same defect: commit-quality-gate.sh was hardcoded to one subproject, then
+# fixed by hardcoding three, then rewritten to discover them -- and its own comment
+# records the 2026-09-21 audit finding two subprojects running zero checks. This
+# file sat next to that fix and did not inherit it.
+subproject_src_pattern=""
+for sub in */; do
+    sub=${sub%/}
+    [ -d "$sub/src" ] && [ -d "$sub/tests" ] || continue
+    subproject_src_pattern="${subproject_src_pattern}|^${sub}/src/"
+done
+subproject_src_pattern="${subproject_src_pattern#|}"
+# No discoverable subproject: fail open rather than guess (this is a safety net).
+[ -z "$subproject_src_pattern" ] && exit 0
+feature_merge_pattern="${subproject_src_pattern}|^plans/[^/]+/dod-check\.md$"
+
 needs_roadmap=0
 for m in $merge_commits; do
     parent1=$(git rev-parse "${m}^1" 2>/dev/null) || continue
     touched=$(git diff --name-only "$parent1" "$m" 2>/dev/null) || continue
-    if printf '%s\n' "$touched" | grep -qE '^(world-model|aircraft-layer|body-layer)/src/|^plans/[^/]+/dod-check\.md$'; then
+    if printf '%s\n' "$touched" | grep -qE "$feature_merge_pattern"; then
         needs_roadmap=1
         break
     fi

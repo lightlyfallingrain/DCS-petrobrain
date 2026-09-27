@@ -58,12 +58,15 @@ time.)
 
 ## Subprojects
 
-Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory. Currently:
+Each major component under this repo may carry its own `<subproject>/CLAUDE.md` with stack/testing/structure specifics that augment (and, where stated, override) this file — Claude Code loads nested `CLAUDE.md` files automatically when working inside that directory.
+
+**Take the list from root `ROADMAP.md`'s status table, or mechanically from `git ls-files '*/CLAUDE.md'`. It is deliberately not written out here**, and that is the same rule "Current priority" states above, applied to this section. It used to be a bulleted list of three subprojects, which stayed here unnoticed long after six existed — the exact failure the file warns about 40 lines earlier, in the section a reader may not have reached yet. A list in this file has now gone stale twice; the mechanical check costs one command and cannot.
+
+A few subproject-specific pointers worth having by name, because they are not derivable from a directory listing: `world-model/docs/CONVENTIONS.md` (DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access), `aircraft-layer/WORKFLOW.md` (cross-machine deploy/run), and `plans/body-layer/plan.md` (the full BL milestone series, whose status lives in `body-layer/ROADMAP.md`).
 
 **Module independence**: each subproject should be able to run on its own, with its own venv/dependencies. **body-layer ↔ world-model is the sole exception** — body-layer imports world-model's `query`/`coordinates` packages in-process (not over HTTP), a deliberate coupling because the two are treated as a pair, at least for now (see `plans/body-layer/plan.md` "Seams" and `body-layer/CLAUDE.md` "Tech stack"). Do not introduce a similar in-process cross-subproject import elsewhere without the same explicit justification — the default is HTTP/JSON across a subproject boundary (as aircraft-layer ↔ body-layer already does), not a shared import.
-- `world-model/CLAUDE.md` (see also `world-model/docs/CONVENTIONS.md` for its working rules: DCS reconnaissance, provenance/confidence, cross-machine workflow, read-only DCS access).
-- `aircraft-layer/CLAUDE.md` — live DCS I/O pipeline (Export.lua → Windows collector → LAN API). See also `aircraft-layer/WORKFLOW.md` for the cross-machine deploy/run workflow.
-- `body-layer/CLAUDE.md` — Petrovich's belief-state process (contacts, attention, perception ingestion, the brain-facing API). BL-x milestone status: `body-layer/ROADMAP.md`, which is its source of truth — `plans/body-layer/plan.md` has the full milestone series.
+
+Each subproject keeps its **own `.venv`**, and `ruff`/`mypy`/`pytest` are generally **not on `PATH`** — resolve `<subproject>/.venv/bin/<tool>` before concluding a check cannot run. `mypy`'s config discovery is **CWD-only**: run it from inside the subproject (`cd <subproject> && .venv/bin/mypy src`), never as `mypy <subproject>/src` from the repo root, which silently drops `strict` and the subproject's `mypy_path` and reports phantom import errors.
 
 ## Agents
 
