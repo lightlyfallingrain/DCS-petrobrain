@@ -210,7 +210,16 @@ page. Passing `url` unconditionally costs nothing and removes the whole class of
 path stability means remembering a precondition that is invisible at the moment it matters.
 - Keep the `description` and `favicon` unchanged; pass a short `label` describing the update.
 
-## Automatic daily refresh — available, NOT currently installed
+## Automatic daily refresh — REJECTED, and regeneration stays manual
+
+**The user rejected installing the scheduled job, 2026-09-27 (X-B24).** Regenerating the page is a
+manual `/status-page` run, by design. The plist below stays in the repo as an unused template — do
+not offer to install it again.
+
+The rest of this section is kept because it records what was wrong and why the shape of the script
+is what it is.
+
+### What the claim used to be
 
 **Corrected 2026-09-27.** This section used to state as fact that "a launchd agent runs … at 05:00
 local, daily". It does not: `launchctl list | grep petrobrain` is empty and
@@ -220,26 +229,25 @@ regenerated 2026-09-26 while the sentence claimed a daily job.
 
 The page is explicitly derived-not-authoritative, so staleness is not a correctness hazard — but
 "it regenerates daily" is exactly the kind of claim that decides how much anyone trusts it, and a
-mechanism nobody installed cannot earn that. **Either install it (the plist carries its own
-`launchctl bootstrap` line) or treat regeneration as manual. Until it is installed, it is manual.**
+mechanism nobody installed cannot earn that. The decision that followed: **manual, permanently** (user, X-B24). A derived page that is never
+authoritative did not earn a background job on the user's machine.
 
-If it is installed later, say so here with the date — and check `launchctl` rather than the plist's
-existence, which is what made this wrong.
+The transferable lesson is the verification move, not the outcome: the claim was checked against
+`launchctl`, not against the plist's existence. A committed template reads exactly like an installed
+mechanism, and that is what made the sentence wrong for as long as it stood.
 
-The rest of this section describes what the script does when it *is* run, by hand or by launchd.
+The rest of this section describes what the script does when it is run by hand.
 
 The script does nothing unless there is something to do, and logs which guard stopped it so a quiet
 morning is distinguishable from a broken one: no commits in 24 hours, a dirty working tree or a
 non-main branch (someone is mid-task — never run an agent in a checkout in use), or a missing
 `claude` binary. Output lands in `~/Library/Logs/petrobrain-status-page.log`.
 
-**launchd, not the cloud-routine mechanism**, for three reasons worth keeping: `StartCalendarInterval`
-is local wall-clock, so 05:00 survives DST without intervention where a UTC cron would have drifted
-an hour in October; a job missed while the Mac slept fires on wake; and it runs as the user, which
-is what allows republishing the artifact to the existing URL at all.
-
-Running by hand is still the normal path during a working session — the scheduled job is for days
-nobody regenerates it.
+**If scheduling is ever revisited, launchd was the right host and the reasoning still holds** —
+`StartCalendarInterval` is local wall-clock, so 05:00 survives DST where a UTC cron drifts an hour in
+October; a job missed while the Mac slept fires on wake; and it runs as the user, which is what
+allows republishing the artifact to its existing URL at all. Recorded so the analysis is not redone;
+**not** an invitation to install it. That was decided and declined.
 
 ## Finishing
 
