@@ -47,8 +47,25 @@ ACTIVE_PLAN="${GRAPH_ACTIVE_PLAN:-plans/inbound-speech}"
     # Backlog
     find todo -name '*.md' 2>/dev/null
 
-    # Every subproject's own contract and roadmap
-    ls -1 */ROADMAP.md */CLAUDE.md 2>/dev/null
+    # Every subproject's own contract, roadmap and backlog.
+    #
+    # BACKLOG.md is listed explicitly because it is not implied by the other
+    # two: body-layer's backlog was split out of its ROADMAP.md on 2026-09-27
+    # and, until this line existed, the split silently dropped 8,200 words of
+    # open items out of the corpus. A file moving out of the graph produces no
+    # error -- only an answer that no longer mentions it.
+    # Scoped to real subprojects (the ones with a pyproject.toml, which is the
+    # mechanical definition root CLAUDE.md uses) rather than a bare */ glob.
+    # On a case-insensitive filesystem -- macOS, i.e. this machine -- */BACKLOG.md
+    # also matches todo/backlog.md and lists it a second time under a spelling
+    # that does not exist on disk. Two corpus entries for one file is precisely
+    # the path-keyed cache mismatch the graphify-corpus/ mirror caused.
+    for d in */pyproject.toml; do
+        sub="${d%/pyproject.toml}"
+        for f in ROADMAP CLAUDE BACKLOG; do
+            [ -f "$sub/$f.md" ] && printf '%s\n' "$sub/$f.md"
+        done
+    done 2>/dev/null
 
     # Dated research findings — factual records, not superseded intent
     find . -path '*/research/*.md' \
