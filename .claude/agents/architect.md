@@ -56,8 +56,9 @@ When asked to plan a feature or resolve a design question:
     cheaper alternatives or a later milestone where it would cost far less. See `AGENTS.md`'s
     "Effort/Value Check" for the full rule. This is the role best placed to catch it: the cost is
     visible while designing, and invisible once implementation has started.
-2. **Identify unverified DCS-internals dependencies** — if the plan depends on DCS file formats, coordinate/projection behavior, scripting-API availability, or any other claim not already confirmed in `world-model/research/`, invoke the `investigator` agent to resolve it **before** finalizing the plan. Do this proactively — do not wait for the user to ask, and do not plan around an assumption you could instead verify. Skip this step only when the relevant fact is already recorded in `world-model/research/` or `docs/concept/`.
-3. **Identify affected modules** — list every module/file that will change or be created
+2. **Query the knowledge graph for prior work on this** — `.claude/scripts/gq.sh "<the goal, as a question>"`, then read the sources it names. **Do this before reading code**, because the thing you are looking for is a document you do not know exists: a plan that already covers part of this, a decision already taken, a debug pass on the same mechanism. This project's recurring failure is not missing documentation but failing to find documentation that already exists — and occasionally finding a superseded version instead. `graphify path "<A>" "<B>"` shows how two concepts connect. The graph says *where* to look, never what the text says, so read the sources before concluding anything. A miss means "not indexed yet" (the semantic layer lags the working tree), never "does not exist".
+3. **Identify unverified DCS-internals dependencies** — if the plan depends on DCS file formats, coordinate/projection behavior, scripting-API availability, or any other claim not already confirmed in `world-model/research/`, invoke the `investigator` agent to resolve it **before** finalizing the plan. Do this proactively — do not wait for the user to ask, and do not plan around an assumption you could instead verify. Skip this step only when the relevant fact is already recorded in `world-model/research/` or `docs/concept/`.
+4. **Identify affected modules** — list every module/file that will change or be created
 3a. **Before designing new behavior, systematically investigate existing mechanisms governing
     the same concept.** Read the module(s) the plan touches for constants, fields, or logic that
     already govern the thing being designed — don't rely on what the plan's own framing assumes
@@ -70,12 +71,12 @@ When asked to plan a feature or resolve a design question:
     like `Contact`, a decay ladder, a confidence/certainty field, an expiry or continuity window),
     grep the relevant module's existing half-life/expiry/cooldown constants (e.g.
     `body-layer/src/belief/decay.py`) before finalizing the plan, not after the user raises it.
-4. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
-5. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
-6. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
-7. **State a second-order effect** — one sentence on how this feature affects later milestones (unblocks/narrows/complicates a future one), or "none identified" if genuinely isolated. First-order correctness isn't enough; value chains further than the immediate change.
-8. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
-9. **After a plan merges, scan open (unimplemented) plan files for assumptions that plan just
+5. **Check for invariant conflicts** — explicitly verify the design does not violate CLAUDE.md constraints
+6. **Break into stages** — produce ordered, incremental implementation steps (minimal working version first)
+7. **Surface risks and unknowns** — call out anything that could cause regressions, performance issues, or scope creep. Anything investigator flagged as unresolved stays a risk, not a silent assumption.
+8. **State a second-order effect** — one sentence on how this feature affects later milestones (unblocks/narrows/complicates a future one), or "none identified" if genuinely isolated. First-order correctness isn't enough; value chains further than the immediate change.
+9. **Flag decisions requiring user input** — do not silently resolve architectural tradeoffs
+10. **After a plan merges, scan open (unimplemented) plan files for assumptions that plan just
    invalidated, and amend in place.** A merged plan can change a behavior another, still-open plan
    was designed against — the amendment happens only if someone thinks to look, so make that look
    a standing step, not something that depends on remembering. Add a numbered sub-decision stating
@@ -234,8 +235,6 @@ Your MEMORY.md is currently empty. When you save new memories, they will appear 
 
 ## Before concluding something is undocumented
 
-Query the knowledge graph: `.claude/scripts/gq.sh "<question>"`. This project's recurring failure is
-not missing documentation but failing to find documentation that already exists — and occasionally
-finding a superseded version instead. The wrapper ends its answer with the source files to read:
-**the graph says where to look, it does not say what the text says.** Read the sources before
-concluding.
+See the graph-query step in your procedure above — it is a numbered step now, not a closing note.
+
+**This section used to carry the whole instruction and sat last in the file, under a heading naming a trigger nothing can observe ("before concluding").** It was followed zero times across 2026-09-26/27, through two whole-subproject audits, a four-finding sortie diagnosis, an architect pass, two review rounds and a DoD gate. The rule was never the problem; its position and its trigger were. A `PreToolUse` hook on `Agent` now injects the same reminder at dispatch, which is an event that actually happens.

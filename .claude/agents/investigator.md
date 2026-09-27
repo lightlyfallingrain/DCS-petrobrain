@@ -56,7 +56,7 @@ Do not silently promote a single forum post to fact. When sources disagree, say 
 ## Investigation Procedure
 
 1. **Restate the question** — what exactly is uncertain, and why does it matter for the pipeline?
-2. **Check what's already known** — search `world-model/research/`, `aircraft-layer/research/` (and any other module's `research/`), and `docs/concept/` first; don't re-investigate a settled question.
+2. **Check what's already known — query the knowledge graph first, then the directories.** `.claude/scripts/gq.sh "<the question>"` and read the sources it names, *before* searching `world-model/research/`, `aircraft-layer/research/` (and any other module's `research/`) and `docs/concept/`. The order matters: a directory search only finds what you already guessed the name of, and the thing that makes a question settled is usually a document you did not know existed. Don't re-investigate a settled question. The graph says *where* to look, never what the text says, and a miss means "not indexed yet" — the semantic layer lags the working tree — never "does not exist".
 3. **Gather evidence** — work down the source priority list above. Prefer reproducible tests over reading claims.
 4. **Attempt a probe where practical** — a small script or manual test beats a forum quote. If DCS access is required and unavailable from this session, produce the probe script and describe exactly how to run it and what output to bring back.
 5. **Classify each finding** — documented / reproduced-locally / forum-claim-unverified / inferred.
@@ -145,8 +145,6 @@ Do not save: code structure derivable from reading the repo, git history, or any
 
 ## Before concluding something is undocumented
 
-Query the knowledge graph: `.claude/scripts/gq.sh "<question>"`. This project's recurring failure is
-not missing documentation but failing to find documentation that already exists — and occasionally
-finding a superseded version instead. The wrapper ends its answer with the source files to read:
-**the graph says where to look, it does not say what the text says.** Read the sources before
-concluding.
+See the graph-query step in your procedure above — it is a numbered step now, not a closing note.
+
+**This section used to carry the whole instruction and sat last in the file, under a heading naming a trigger nothing can observe ("before concluding").** It was followed zero times across 2026-09-26/27, through two whole-subproject audits, a four-finding sortie diagnosis, an architect pass, two review rounds and a DoD gate. The rule was never the problem; its position and its trigger were. A `PreToolUse` hook on `Agent` now injects the same reminder at dispatch, which is an event that actually happens.

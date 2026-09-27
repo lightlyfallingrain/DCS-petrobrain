@@ -131,9 +131,39 @@ built from a corpus that is **a file list, not a directory** — `.claude/script
 produces it). A copied `graphify-corpus/` mirror was tried and removed: it broke cache lookups keyed
 on mirror paths, and files at the mirror root were keyed `graphify_corpus_*`, leaking a staging
 directory into the graph's own vocabulary. **Do not reintroduce a mirror** — `/graph-refresh` carries
-the full reasoning. **Query it before concluding something is undocumented** —
-this project's recurring failure is not missing documentation but failing to find documentation that
+the full reasoning.
+
+### When to query it — observable moments, not "before concluding"
+
+This project's recurring failure is not missing documentation but failing to find documentation that
 already exists, and occasionally finding a superseded version instead.
+
+**The rule used to read "query it before concluding something is undocumented", and it was followed
+zero times on 2026-09-26/27** — across two whole-subproject audits, a four-finding sortie diagnosis,
+an architect pass, two review rounds, a DoD gate and a performance pass. The last real query predated
+the previous rebuild. The rule was not the problem. Its **trigger** was: "before concluding" names an
+internal state, so nothing can observe it failing, and a rule nobody can see being broken stays
+broken. `AGENTS.md` had already reached exactly this conclusion about the worktree rule — *"a rule
+that must be remembered at the exact moment attention is elsewhere will keep being broken. This one
+is structural instead."*
+
+So query it at these moments, each of which is a thing that visibly happens:
+
+- **Before writing a plan**, or a diagnosis, or a research note.
+- **Before dispatching architect, debugger or investigator.** A `PreToolUse` hook on `Agent`
+  (`.claude/scripts/graph-query-reminder.sh`) injects this at dispatch, and those three role files
+  carry it as a numbered procedure step rather than a closing note — it was a closing note before,
+  in two of the three, and that is part of why it never fired.
+- **When the user asks whether something exists, is documented, or was already decided.**
+- **Before saying "there is no X" / "nothing covers Y" / "this has not been decided."** That sentence
+  is the observable form of the old trigger — if you are about to write it, you owe a query first.
+
+What went wrong concretely, so the cost is legible: a debugger dispatched onto the crossing-callout
+defect re-derived a mechanism that `plans/callout-outside-gaze/debug.md` had already diagnosed *and
+partly fixed*, finding it eventually by reading plans. One query would have opened with it.
+
+**A miss means "not indexed yet", never "does not exist"** — the semantic layer lags the working
+tree, and `GRAPH_REPORT.md`'s mtime says by how much.
 
 ```sh
 .claude/scripts/gq.sh "<question>"   # query, then list the sources to read

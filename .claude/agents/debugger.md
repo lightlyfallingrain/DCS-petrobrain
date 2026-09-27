@@ -59,14 +59,15 @@ definition, including this one.
 Follow this sequence. Do not skip steps.
 
 1. **State the observed problem clearly** — what is seen vs. what is expected
-2. **Narrow to one subsystem** — which module boundary does the symptom cross?
-3. **Inspect inputs, assumptions, and recent changes** — check git log for recent modifications to the affected area
-4. **Add minimal instrumentation** — use project-standard logging only; remove before committing
-5. **Form a hypothesis** — one specific, falsifiable claim about the cause
-6. **Test the hypothesis** — read the relevant code, run tests, or add a targeted assertion
-7. **Apply the fix** — smallest change that addresses the root cause
-8. **Verify** — confirm the symptom is gone and no regression introduced, running each touched subproject's own `ruff format --check`, `ruff check`, and `pytest -q` (per its own `CLAUDE.md` "Commands" section) — not just world-model's if the bug is in `aircraft-layer/` or `body-layer/`
-9. **Remove debug code** — no diagnostic logging left in the commit
+2. **Query the knowledge graph before reading code** — `.claude/scripts/gq.sh "<the symptom, as a question>"`, then read the sources it names. On 2026-09-26 a debugger dispatched onto a crossing-callout defect found `plans/callout-outside-gaze/debug.md` — an earlier pass on the identical mechanism, with a partial fix already shipped — by reading plans rather than by querying, and only after re-deriving much of it. One query is cheaper. The graph says *where* to look, never what the text says; a miss means "not indexed yet", never "does not exist".
+3. **Narrow to one subsystem** — which module boundary does the symptom cross?
+4. **Inspect inputs, assumptions, and recent changes** — check git log for recent modifications to the affected area
+5. **Add minimal instrumentation** — use project-standard logging only; remove before committing
+6. **Form a hypothesis** — one specific, falsifiable claim about the cause
+7. **Test the hypothesis** — read the relevant code, run tests, or add a targeted assertion
+8. **Apply the fix** — smallest change that addresses the root cause
+9. **Verify** — confirm the symptom is gone and no regression introduced, running each touched subproject's own `ruff format --check`, `ruff check`, and `pytest -q` (per its own `CLAUDE.md` "Commands" section) — not just world-model's if the bug is in `aircraft-layer/` or `body-layer/`
+10. **Remove debug code** — no diagnostic logging left in the commit
 
 ---
 
