@@ -95,11 +95,6 @@
             "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/session-start.sh",
             "timeout": 10,
             "statusMessage": "Checking session state..."
-          },
-          {
-            "type": "command",
-            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:\"AGENTS.md role sequences \u2014 apply automatically, no user input needed. Core loop: Architect \u2192 Implementer \u2192 Reviewer (loop back to Implementer until Reviewer approves) \u2192 Definition of Done; a bug fix starts at Debugger instead of Architect. performance-reviewer and security each run ONCE per whole feature, immediately before DoD \u2014 not mid-feature and not once per stage. There is NO exemption in force: the previous blanket skip was replaced by that once-per-feature cadence on 2026-09-24 (CLAUDE.md, Agents section). A Security or Performance Reviewer change request re-enters the loop rather than going straight to DoD: Implementer \u2192 Reviewer on the fix \u2192 DoD. Consequential work gets an Explore conversation with the user before Architect. For small features one role may cover the whole task. This summary is not authoritative \u2014 AGENTS.md has the full sequences and CLAUDE.md Agents section has the current cadence; read those if they disagree with this text. Escalate only per AGENTS.md escalation rules.\"}}'",
-            "statusMessage": "Loading agent context..."
           }
         ]
       }
