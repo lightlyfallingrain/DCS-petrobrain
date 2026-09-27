@@ -65,7 +65,10 @@ details and `WORKFLOW.md` for the cross-machine deploy/run workflow. Full design
 
 ## Backlog
 
-- [x] **Push-to-talk channel — implemented and ACCEPTED live 2026-09-23** (the voice sortie: the trigger works, and a radio call stays out of it).
+Items here are `AC-B<n>`. A new one takes the next unused number; numbers are never reused or
+renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
+
+- [x] **AC-B1 — Push-to-talk channel — implemented and ACCEPTED live 2026-09-23** (the voice sortie: the trigger works, and a radio call stays out of it).
   (`feature/inbound-speech-stage4`, `plans/inbound-speech/plan.md` Stage 5). `Export.lua` publishes
   the pilot stick trigger (arg 738) as its own line kind; `PttSample`/`PttCache`/`GET /ptt/state`
   carry it to the capture process. Wire version bumped to `2026-09-23a`.
@@ -79,7 +82,7 @@ details and `WORKFLOW.md` for the cross-machine deploy/run workflow. Full design
   because a full press *transits* the intercom stop for 19-32 ms, and a threshold that has to be
   tuned should not require copying a file into Saved Games to change.
 
-- [ ] **Regenerate `research/mi24p-command-surface.md` with a parser that handles raw table
+- [ ] **AC-B2 — Regenerate `research/mi24p-command-surface.md` with a parser that handles raw table
   literals.** Found 2026-09-20 on the Windows box: the dump enumerates the
   `default_2_position_tumb(…)`-style helper forms only, so **13 of `clickabledata.lua`'s 749
   elements are missing** — and the missing set is biased, because a control needs the raw form
@@ -91,14 +94,14 @@ details and `WORKFLOW.md` for the cross-machine deploy/run workflow. Full design
   the generator is the real fix. Full detail:
   `research/2026-09-20-dcs-install-detection-deep-read.md` finding 11.
 
-- [ ] **Split the export throttle** so `LoGetWorldObjects`/HelperAI can poll slower than self-data.
+- [ ] **AC-B3 — Split the export throttle** so `LoGetWorldObjects`/HelperAI can poll slower than self-data.
   `Export.lua`'s `EXPORT_INTERVAL_S = 0.2` (5 Hz) is one shared throttle gating all three feeds
   together. Ground units don't need 5 Hz; self-data (and any future threat-reaction signal) may
   want to stay fast. Fix: two independent interval constants. Not urgent — no measured FPS cost yet
   to react to (see next item). BL-2's contact-decay timescales (30s/120s) are ~2 orders of
   magnitude slower than either 5 Hz or a candidate 2 Hz, so this is a pure export-cost/latency
   tradeoff, not a belief-quality one. Raised 2026-09-09.
-- [ ] **Measure `LoGetWorldObjects` FPS cost live** before tuning its poll rate. No confirmed,
+- [ ] **AC-B4 — Measure `LoGetWorldObjects` FPS cost live** before tuning its poll rate. No confirmed,
   quantified per-call cost exists at realistic unit counts (~50–200) — only qualitative
   forum/Tacview-wiki folklore. Fly with world-objects export on/off at 5/2/1 Hz and diff
   FPS/frame-time. Also worth checking whether "being fired at" is even served by this poll rate at

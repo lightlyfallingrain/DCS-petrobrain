@@ -287,7 +287,10 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
 
 ## Backlog (open, unscheduled)
 
-- [ ] **Prefer a Latin-script place name at OSM ingest.** Named places currently store OSM's `name`
+Items here are `WM-B<n>`. A new one takes the next unused number; numbers are never reused or
+renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
+
+- [ ] **WM-B1 — Prefer a Latin-script place name at OSM ingest.** Named places currently store OSM's `name`
   tag verbatim, so Syrian features arrive in Arabic script — and **DCS cannot render non-Latin-1
   text**, so they reach the cockpit overlay as blanks (observed live, 2026-09-18). Body-layer now
   guards at render time (`belief.enrichment.displayable_name` drops an unrenderable name so the
@@ -297,7 +300,7 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   was used. Needs a rebuild to take effect, so it should ride along with the next full-theatre run
   rather than triggering one.
 
-- [>] **Power lines from DCS data — deferred 2026-09-13 (user: not important now).** Wanted as a
+- [>] **WM-B2 — Power lines from DCS data — deferred 2026-09-13 (user: not important now).** Wanted as a
   low-level wire hazard and navigation landmark, but only with exact in-DCS positions (OSM's ~1 km
   offset rules it out as a source). Recon done: `research/2026-09-13-dcs-power-lines-recon.md`.
   Syria's model catalogs include `power_trans_line_big`/`power_pole_wooden`; placements live in
