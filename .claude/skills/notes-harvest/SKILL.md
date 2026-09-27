@@ -14,7 +14,7 @@ The DoD agent reads this output and decides which candidates to add — the scri
 
 ```bash
 #!/usr/bin/env bash
-cd {{PROJECT_DIR}}
+cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 
 FEATURE="${1:-}"
 if [ -z "$FEATURE" ]; then

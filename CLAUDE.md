@@ -101,9 +101,23 @@ state, not only the account of it.** The roadmap says what is *next*; it does no
 *already underway*, because a branch that exists is not a milestone that is done and nothing writes
 it down.
 
-- **`git branch -v --sort=-committerdate | head -20` and `git worktree list`, always.** A branch
-  whose name matches the milestone you are about to start means the work exists. Read its log and
-  diff before writing a line of your own.
+- **Always, and filter the scaffolding out:**
+
+  ```sh
+  git branch -v --sort=-committerdate | grep -v 'worktree-agent-' | head -20
+  git worktree list
+  ```
+
+  A branch whose name matches the milestone you are about to start means the work exists. Read its
+  log and diff before writing a line of your own.
+
+  **The `grep -v` is not cosmetic.** Agents commit to `worktree-agent-<id>` branches, the harvest is
+  a cherry-pick (so they stay unmerged forever), and nothing used to delete them: by 2026-09-27
+  there were 67 of them against 58 real branches, and an unfiltered `head -20` showed 13 lines of
+  scaffolding with the only live feature branch buried among them. The 26 that were merged were
+  deleted that day and the handoff now deletes each one as its last step (`AGENTS.md`, rule 1), but
+  the 41 already-cherry-picked ones cannot be told apart from unharvested work, so they stay — and
+  the filter is what keeps this check readable while they do.
 - **Read that milestone's own `plans/<feature>/` directory in full** — `plan.md`, and `explore-notes.md`
   where one exists. The plan carries decisions with the user's own words attached, later milestones
   that constrain this one, and measurements already taken. A cleared session that skips this

@@ -20,14 +20,19 @@ You operate in three modes depending on when you are invoked.
 
 **Steps:**
 
-1. **Extract new dependencies** — run `/extract-plan-deps plans/<feature>/plan.md`
-   - If output is empty: no new deps, skip to step 3
-   - If non-empty: you have a list of new packages to vet
+1. **Dependency posture** — run `/extract-plan-deps plans/<feature>/plan.md`
+   - It prints the plan's own dependency statements next to what each subproject declares, so a
+     "no new dependency" claim can be checked rather than taken
+   - If the plan proposes nothing new: skip to step 3
+   - A new dependency is an `AGENTS.md` escalation trigger — a decision for the user, not a finding
+     to resolve yourself
 
-2. **CVE check new deps:**
-   - Run `/audit-report` on the current state
-   - For any new dependency not yet in the manifest, use `WebSearch` to search: `"[package-name] [version] vulnerability CVE"` and `site:github.com/advisories [package-name]`
-   - Record any advisories found with CVE ID, severity, and whether the project's usage pattern is actually affected
+2. **CVE check any genuinely new package:**
+   - Use `WebSearch`: `"[package-name] [version] vulnerability CVE"` and `site:github.com/advisories [package-name]`
+   - Record advisories with CVE ID, severity, and whether this project's usage pattern is affected
+   - There is no `/audit-report` skill and no CVE table to regenerate: the whole declared surface is
+     `pyproj`, `pillow` and `osmium`, so scanning it per feature was cost without signal (removed
+     2026-09-27). Search the specific new package instead.
 
 3. **Baseline pattern scan** — run `/security-grep` on the current source
    - Use output as context; do not report pre-existing findings as plan failures
@@ -89,12 +94,15 @@ You operate in three modes depending on when you are invoked.
 **Steps:**
 
 1. **Run full security scan** — run `/security-scan`
-   - Produces: CVE table (from audit-report), grep hit list (from security-grep), feature diff (from extract-feature-diff), updated SBOM
+   - Produces: the grep hit list (from `security-grep`, Python across every discovered subproject
+     plus the DCS Lua) and the changed-code diff (from `extract-feature-diff`)
+   - No CVE table and no SBOM: both were dropped 2026-09-27 with the `audit-report` skill. Every
+     real security finding on this project came from reading code on a boundary — an unbounded
+     `Content-Length`, an unguarded poll loop dying silently, the `net.dostring_in` bridge — not
+     from a dependency database
 
-2. **Interpret CVE table:**
-   - For each advisory: is the affected code path actually reachable in this project's usage?
-   - A CVE in a dep is only a confirmed risk if the vulnerable function/feature is exercised
-   - Note which advisories are fixable by version bump vs. require dep replacement
+2. **Read the changed-code diff before the grep hits.** The diff is the feature; the hit list is
+   context. A pre-existing hit is not this feature's finding unless the feature made it reachable
 
 3. **Assess grep hits** — for each category of hit:
    - Unsafe/raw operations: Is the usage justified? Is the safety invariant documented?
@@ -123,17 +131,14 @@ You operate in three modes depending on when you are invoked.
    ```
    ## Security Deep Analysis: <feature>
 
-   ### CVE Status
-   | Package | Version | Advisory | Severity | Affected in This Project |
-   |---|---|---|---|---|
-   | [pkg] | [ver] | [CVE/ID] | [severity] | yes/no — [reason] |
+   ### Dependency Status
+   [One line. "No dependency change" is the normal answer and is enough. If the feature
+   added a package, name it with the advisory search result and whether the vulnerable
+   path is reachable here.]
 
    ### Code Findings
    | File:Line | Pattern | Assessment | Action Required |
    |---|---|---|---|
-
-   ### SBOM
-   Regenerated — [N] packages, [N] direct deps.
 
    ### Verdict
    APPROVED / NEEDS FIXES
@@ -152,7 +157,7 @@ You operate in three modes depending on when you are invoked.
 
 **Steps:**
 
-1. Run `/security-scan` (full audit + grep + SBOM regeneration)
+1. Run `/security-scan` (pattern sweep + changed-code diff; no CVE/SBOM step — see Mode 2 step 1)
 2. Read the full `security-grep` output across all source files (not just the feature diff)
 3. Review key attack surfaces for this project:
    - Parsing untrusted `.miz` archives (ZIP extraction) and embedded Lua mission tables — zip-slip/path traversal on extraction, unsafe Lua deserialization.
@@ -204,7 +209,6 @@ Never silently accept a risk. Always surface it and let the user decide.
 | `plans/<feature>/security-plan-review.md` | 1 | Plan-level security clearance |
 | `plans/<feature>/security-review.md` | 2 | Code-level security clearance |
 | `security-full-audit-<date>.md` | 3 | Full project audit report |
-| `sbom.json` | 2 & 3 | Updated SBOM |
 
 ---
 

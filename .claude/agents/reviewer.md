@@ -53,8 +53,12 @@ definition, including this one.
 - No writes to the DCS installation; extraction stays read-only?
 - No large raw/generated datasets accidentally staged for commit (`world-model/data/` must stay gitignored)?
 
-For UI/visual projects, include a visual smoke-test step here — run `/visual-smoke-test` (or the
-project's equivalent) to confirm the app actually runs and renders, not just that it compiles.
+**There is no visual smoke test to run, and nothing here renders for you to check.** The template's
+`/visual-smoke-test` skill was deleted 2026-09-27 as an unadapted stub: this project has no GUI, and
+what it does have — the in-game text overlay, the eyesight debug view — only renders inside a live
+DCS session on the Windows box, which no agent can reach. The equivalent evidence is a **live sortie
+by the user**, which is DoD's acceptance step, not the Reviewer's. So do not claim a feature "runs";
+say what the tests cover and name the branch and the acceptance card the pilot needs to fly.
 
 In addition to project-specific checks, always verify:
 

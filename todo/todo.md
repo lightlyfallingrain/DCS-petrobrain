@@ -1,8 +1,10 @@
 # Todo
 
 **Milestone status, backlog, and deferred items live in `../ROADMAP.md` (cross-subproject) and
-each subproject's own `ROADMAP.md`** (`world-model/ROADMAP.md`, `aircraft-layer/ROADMAP.md`,
-`body-layer/ROADMAP.md`) — not here. This file only holds User priority tasks and cross-cutting
+each subproject's own `ROADMAP.md`** — not here. **Take the subproject list from root `ROADMAP.md`'s
+status table, never from a list written in this file**: three were named here long after six
+existed, which is the same enumeration defect root `CLAUDE.md` warns about and which has now
+recurred four times in this repo. This file only holds User priority tasks and cross-cutting
 items that don't yet belong to one subproject's roadmap. See root `ROADMAP.md`'s "Keeping this
 current" note for how staleness is prevented: the `/merge` skill and the DoD agent both require
 the relevant roadmap to be updated in the same push as any merge.
@@ -45,51 +47,25 @@ Four findings, in the user's own words plus what each implies:
   it is making the spoken phrasings discoverable somewhere, which belongs with BL-10/SRS free
   speech, not here.
 
-### State of play — end of 2026-09-24 (read this first after a context clear)
+### Where the state of play lives — not here
 
-`main` is at `c912478`, clean and pushed. `feature/binocular-optic` merged today (`c398675`) and
-the local branch still exists, unneeded.
+**A dated "state of play" narrative used to sit in this spot, headed "read this first after a
+context clear". It was removed 2026-09-27 because it had gone wrong in every particular**, while
+still instructing a cleared session to trust it first: it named `main` at `c912478` (~30 commits
+behind), called three milestones unflown and pointed at
+`docs/acceptance/2026-09-23-eyes-and-voice-sortie.md` as the outstanding card — root `ROADMAP.md`
+records all three as flown and closed 2026-09-25 — and said the brain layer was "the only component
+with no plan file" after `plans/brain-layer/plan.md` landed and BR-1 Stages 1–2 merged.
 
-**Three milestones are merged and unflown**, by the user's deliberate decision to merge before
-flying — so any correction the sortie produces now lands on `main`, not a branch:
-binocular optic, voice command completeness, precise position belief. The outstanding card is
-`docs/acceptance/2026-09-23-eyes-and-voice-sortie.md`. **Name that card and that state whenever
-asking the user to test.** Two things changed after it was written and are worth repeating to them:
-the speech log now writes by default to `body-layer/logs/speech.jsonl` (every utterance, including
-unrecognised ones, `t_wall` stamped — so garbling data accumulates with no flag to remember), and
-belief now carries a fused covariance rather than quantised buckets, so ranges that feel *wrong but
-consistent* are the new error model working, not a bug.
+That is not an update that was forgotten; it is a second source of truth, which drifts by
+construction. Root `ROADMAP.md`'s own "Keeping this current" note already says a disagreement
+between a roadmap and this file is a bug in the update discipline, not ambiguity to guess through.
+The 2026-09-10 restructure removed one of these narratives for the same reason; this was the second.
 
-**Mission Interpreter passed its first real acceptance** (three missions the user built, Syria).
-Verdict: tested and passed with notes. Both notes are deferred to the brain layer, deliberately —
-building either now would stand up a second hand-rolled judgement layer the brain would replace.
-
-**The brain layer is the bottleneck, and it is the only component with no plan file.** Four
-already-built things now wait on it: free-text commands, BL-7's mission-phase relevance, MI-5's
-question set, and anything conversational in BL-8's kneeboard. Its seams already exist and sit
-idle — `BrainClient` has an `awaiting_reply_id` round trip designed in, `EscalationPayload` already
-carries `partial_parse` and `situational_header`, and the tool API has been frozen at 15
-deterministic tools since BL-6. Every free-text utterance already arrives correctly formed at
-`NullBrainClient` and is dropped. So this is not an integration project; it is a model loop plugged
-into an interface that has been waiting for it.
-
-**`watch-reporting` is done, merged 2026-09-24** (`feature/watch-reporting`, all five stages) —
-`plans/watch-reporting/plan.md`/`implementation.md`, `body-layer/ROADMAP.md`'s Status entry. Adds
-`belief/threat.py` (the module BL-8's Stages 3/5 sit underneath) and threat.py's provenance data
-is now committed. **Unflown**, same "merge before flying" posture as the three milestones above —
-add it to the next acceptance card.
-
-**Recommended next move: `/explore` the brain layer with the user before any architect pass.**
-This project's repeated pattern is that the decisive constraint arrives *after* implementation
-starts and reverses it. `plans/bl8-memory/plan.md` is also ready, decisions resolved, and is now
-unblocked on `threat.py` existing.
-
-**Done 2026-09-24, no longer gated:** re-enabled `performance-reviewer` and `security`, running
-**once per whole feature, before DoD, not mid-feature** (user, 2026-09-24). Scoping in the user's
-own terms: single-user, LAN-only, under active development; deeper effort once brain and memory are
-done. The root `CLAUDE.md` "Agents" edit is made; it also records why the old blanket skip outlived
-its premise (no lapse condition, while the project grew a live 5 Hz DCS pipeline, a LAN HTTP
-surface and inbound speech capture).
+**So after a context clear, follow `CLAUDE.md`'s Session Start protocol** — the subproject
+`ROADMAP.md` files for status, this file for User priority tasks, `todo/backlog.md` for
+cross-cutting items, and `git branch -v --sort=-committerdate` plus `git worktree list` for what is
+actually underway. Nothing in this file is a substitute for that last step.
 
 
 - [x] Route crew-text speech callouts ("tank, 12 o'clock, 3 km" style contact reports, from

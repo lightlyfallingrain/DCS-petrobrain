@@ -8,15 +8,13 @@ Outputs only the code changed in the current feature branch relative to master. 
 
 ```bash
 #!/usr/bin/env bash
-cd {{PROJECT_DIR}}
+cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 
-# File extensions to include in diff — set to your project's source extensions
-EXTENSIONS="{{SOURCE_EXTENSIONS}}"
-# Example values:
-#   Rust:       '*.rs *.wgsl'
-#   TypeScript: '*.ts *.tsx'
-#   Python:     '*.py'
-#   Go:         '*.go'
+# Source extensions for this project: Python everywhere, plus the Lua that runs
+# inside DCS (aircraft-layer's Export.lua hooks and the F10 command hook -- real
+# shipped source, not config, and the only code a security or review pass would
+# otherwise miss because it never appears in a Python diff).
+EXTENSIONS='*.py *.lua'
 
 CURRENT_BRANCH=$(git branch --show-current)
 
@@ -42,6 +40,7 @@ fi
 ```
 
 <!--
-SOURCE_EXTENSIONS — space-separated glob patterns for your source files.
-PROJECT_DIR       — absolute path to the project root.
+Adapted from the template 2026-09-27: `EXTENSIONS` and the working directory are
+now this project's own, not placeholders. `BASE` resolves to `main` below, which is
+this repo's default branch; the `master` fallback is the template's and is harmless.
 -->

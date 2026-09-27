@@ -10,7 +10,7 @@ it failed the way rules relying on main-loop discipline fail: the main loop did 
 having quoted the rule at agents in between. A rule that must be remembered at the exact moment
 attention is elsewhere will keep being broken. This one is structural instead.
 
-### The three rules
+### The four rules
 
 1. **Read-mostly agents always run with `isolation: "worktree"`** — Reviewer, Definition of Done,
    Architect, Investigator, Security, Performance Reviewer. It makes them immune to anything the
@@ -39,6 +39,14 @@ attention is elsewhere will keep being broken. This one is structural instead.
      pick caught everything.
    - **Only then remove the worktree**, with a plain `git worktree remove` — **never `--force`,
      which is now in the deny list** (`.claude/settings.json`).
+   - **Then delete the agent's branch**, `git branch -D worktree-agent-<id>`, once the cherry-pick is
+     verified against the agent's file list. Added 2026-09-27: nothing deleted them, and because the
+     harvest is a cherry-pick they never register as merged, so they accumulate permanently. There
+     were 67 against 58 real branches, which broke the Session Start state check (`CLAUDE.md` step 4,
+     now filtered) and — worse — left no way to tell a harvested branch from an unharvested one.
+     Deleting at harvest time makes the branch's existence mean "not yet harvested", which is the
+     signal the accumulation destroyed. The 41 already-ambiguous ones were left in place rather than
+     guessed at.
 
      `--force` is not needed, and that was established by testing rather than assumed: a plain
      remove succeeds on a clean worktree, succeeds when the only leftovers are **gitignored** build
@@ -65,6 +73,40 @@ attention is elsewhere will keep being broken. This one is structural instead.
 3. **The main checkout belongs to the main loop and the user.** This is the inversion: side quests
    no longer need a worktree, because nothing else is using the checkout.
 
+4. **Name the commit the agent is meant to be looking at, and make the agent check it.** Added
+   2026-09-27, after the 2026-09-27 integrity audit found three roles had each been burned by the
+   same thing separately.
+
+   A worktree is created at *some* commit, and until now nothing said which. Git will not check the
+   same branch out twice, so when the branch under review is already in the main checkout, the
+   worktree lands on `main` — which predates the work. The agent then verifies the wrong code and
+   reports a plausible result:
+
+   | role | what happened |
+   |---|---|
+   | Reviewer | worktree based on `main`, so `body-layer/src` on disk was pre-fix code; a probe compared the fix against itself (`fix/position-belief-runaway`, 2026-09-25) |
+   | Definition of Done | pytest in the worktree reported `1177/4` — exactly `main`'s baseline — against the branch's own `1192/4`. The gate would have passed on `main` |
+   | Performance Reviewer | the worktree's HEAD (`6b8a86e`) was not even an ancestor of the tip the task named (`cdb8c7f`); `git log` looked entirely plausible |
+
+   **Every one of those is a silent wrong-code verification**, and the only thing that caught them
+   was three separate agent-memory files — which means it was being *re-learned*, per role, rather
+   than prevented. So:
+
+   - **The dispatching prompt states the branch and the expected tip sha.** "Review the
+     fix" is not an address.
+   - **The agent's first action is `git rev-parse HEAD`**, compared against that sha. A mismatch is
+     reported and the run stops there — it is never worked around silently.
+   - **When the tip is not checked out and cannot be** (it is in the main checkout), verify against
+     an isolated snapshot: `git archive <branch> | tar -x -C <scratch>`, and run every command with
+     `cwd` inside that tree's own subproject directory. `pyproject.toml`'s
+     `[tool.pytest.ini_options] pythonpath` resolves relative to pytest's own rootdir, so
+     `PYTHONPATH` alone does **not** redirect imports — that is the specific trap behind two of the
+     three rows above.
+
+   A `PreToolUse` hook on `Agent` (`.claude/scripts/agent-worktree-reminder.sh`) injects this at
+   dispatch, because the moment it matters is the moment attention is on the task instead — the
+   same argument that made rule 1 structural.
+
 ### The main checkout's branch is a contract with the user
 
 **The user tests on the main checkout. They do not operate in worktrees.** So the branch checked out
@@ -78,7 +120,7 @@ there is not an implementation detail — it is how they know what they are flyi
 - **Never leave the main checkout on a worktree branch or a detached HEAD.** Those are agent
   scaffolding and mean nothing to the person flying the aircraft.
 
-### Status: all three rules in force
+### Status: all four rules in force
 
 Rule 2 was trialled on cones 2B (2026-09-21) and **worked** — the agent committed cleanly on its own
 branch, reported the sha, and nothing raced. Two frictions surfaced, both now handled:
