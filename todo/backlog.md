@@ -91,8 +91,49 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   during it** — if the answer is terrain-only, that slice's LOS design collapses and the
   statistical model has to cover every channel instead.
 
-- [ ] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
-  itself.** User direction, 2026-09-25. The config is treated as prose nobody reviews, while it is
+- [x] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
+  itself.** Done 2026-09-27. All three roles ran in worktrees, advisory-only as this item required;
+  reports at `reviews/claude-setup-{review,performance,security}.md`. All HIGH/MEDIUM findings fixed
+  with the user in the loop in `d1c5724`.
+
+  **What the audit actually found, beyond the seed list below** (most of which had self-corrected by
+  the time it ran — the mirror contradiction, the "Current Focus" dead reference, `dod-check`'s
+  hardcoded list and the `AGENTS.md` role count were all already fixed):
+  - Two mechanisms injecting text into *every turn* had drifted from `CLAUDE.md`, each toward
+    skipping a step it requires: the `UserPromptSubmit` reminder omitted Security entirely and
+    asserted an exemption revoked on 2026-09-24, and `session-start.sh` still taught the
+    todo.md-derived milestone protocol with no ROADMAP.md and no branch/worktree state check.
+  - **`commit-quality-gate.sh` could not pass at all.** It invoked bare `ruff`/`mypy`/`pytest`, none
+    of which are on `PATH` (each subproject has its own `.venv`), so every check exited 127 and the
+    gate blocked any commit touching subproject code. Invisible for as long as commits touched only
+    `.claude/`, `docs/` and `todo/`. It also ran mypy from the repo root, where config discovery is
+    CWD-only — `body-layer` reports 6 phantom import errors from there and none from inside.
+  - The deny list was defeated by ordinary flag rewrites (`rm -fr`, `git worktree remove -f`,
+    `git -C <dir> reset --hard`), the last of these demonstrated destroying an uncommitted change.
+    Replaced by argv-aware parsing in `destructive-command-gate.sh`.
+  - The hardcoded-three-of-six defect recurred in three more places (`posttooluse-mypy.sh`,
+    `push-roadmap-gate.sh`, root `CLAUDE.md`'s Subprojects section) — all now discovery-based.
+
+  **Two lessons worth more than the fixes**, both about how the audit itself went wrong:
+  - *A rule whose trigger is unobservable stays broken, and so does a script nobody executes.* The
+    performance pass read `commit-quality-gate.sh`, called it "correctly scoped", and never ran it;
+    one synthetic payload would have shown the 127s. For a hook, running it with a fake input is the
+    first step, not the last.
+  - *File counts do not predict cost for an incrementally-cached tool.* The same pass estimated
+    whole-subproject mypy at 3–8s per edit from file counts and recommended narrowing the check.
+    Measured with the real venv it is **110ms** warm — and a single file is also 110ms. The
+    recommendation was dropped rather than applied, and the estimate would have bought a real loss of
+    coverage for nothing.
+
+  **Left open, deliberately** (all low-priority; see the reports for detail): `body-layer/CLAUDE.md`
+  at ~24K tokens is the largest fixed-context item in the setup and wants a content pass by whoever
+  owns it; the `UserPromptSubmit` reminder has no session-marker gate, so it re-injects ~170 tokens
+  every turn; agent-dispatch overhead (~20–40K tokens × 5–6 per feature) is structural to
+  worktree isolation and was sized for visibility, not for cutting.
+
+  Original framing follows.
+
+  The config is treated as prose nobody reviews, while it is
   in fact the thing that decides how every agent behaves — and a defect in it is executed rather
   than read.
 
@@ -479,3 +520,27 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   telemetry source, not a reuse of the existing one. Do not start scoping this until the current
   three-layer architecture (world model, mission interpreter, body/brain layer) is mature and
   proven for the single-player-aircraft case first.
+
+- [ ] **X-B22 — Two failing body-layer tests on `main`, exposed 2026-09-27 when the commit quality
+  gate was repaired.** Found by X-B5's fixes, not by X-B5's review — the gate had been exiting 127 on
+  every check, so nothing had actually run these at commit time:
+
+  ```
+  tests/test_contacts.py::test_range_crossing_does_not_fire_for_a_contact_behind_the_cockpit_mask
+  tests/test_optic_policy.py::test_a_command_interrupted_look_is_not_permanently_burned
+  ```
+
+  `cd body-layer && ./.venv/bin/pytest tests -q` → 2 failed, 1292 passed, 4 xfailed in 11.03s.
+
+  Not investigated — X-B5 was scoped to configuration, not code, so these were reported and left
+  rather than fixed on a config commit. Both test names describe *belief-state behaviour the pilot
+  would notice*: a crossing callout firing for a contact behind the cockpit mask is Petrovich
+  reporting something he cannot see (the no-omniscience invariant), and a burned interrupted look is
+  an optic that never recovers. So treat these as possible real regressions with pilot-visible
+  consequences, not as stale tests, until the diagnosis says otherwise. Debugger, and check whether
+  `plans/callout-outside-gaze/debug.md` already covers the first one — root `CLAUDE.md` records that
+  a debugger once re-derived a mechanism that file had already diagnosed and partly fixed.
+
+  **How long they have been failing is unknown and worth establishing first** (`git bisect` or
+  `git log -S` on the assertions): the gate's 127 failure mode means the last commit that genuinely
+  ran body-layer's tests is not the last commit that appeared to.
