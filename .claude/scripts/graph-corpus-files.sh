@@ -60,11 +60,21 @@ ACTIVE_PLAN="${GRAPH_ACTIVE_PLAN:-plans/inbound-speech}"
     # also matches todo/backlog.md and lists it a second time under a spelling
     # that does not exist on disk. Two corpus entries for one file is precisely
     # the path-keyed cache mismatch the graphify-corpus/ mirror caused.
+    # A subproject's own docs/ is included too, not just its three top-level
+    # files. Added 2026-09-27, the same day it would first have been needed:
+    # body-layer/CLAUDE.md's 901-line module reference moved to
+    # body-layer/docs/STRUCTURE.md (it was ~97KB, the largest always-loaded
+    # context item in the repo), and this loop's three fixed names would have
+    # dropped 84KB of design rationale out of the corpus silently -- exactly the
+    # failure the comment above describes. Splitting a document is a normal way
+    # to keep CLAUDE.md readable, so the corpus has to follow content rather than
+    # enumerate filenames.
     for d in */pyproject.toml; do
         sub="${d%/pyproject.toml}"
         for f in ROADMAP CLAUDE BACKLOG; do
             [ -f "$sub/$f.md" ] && printf '%s\n' "$sub/$f.md"
         done
+        find "$sub/docs" -name '*.md' 2>/dev/null
     done 2>/dev/null
 
     # Dated research findings — factual records, not superseded intent
