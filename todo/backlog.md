@@ -544,3 +544,35 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **How long they have been failing is unknown and worth establishing first** (`git bisect` or
   `git log -S` on the assertions): the gate's 127 failure mode means the last commit that genuinely
   ran body-layer's tests is not the last commit that appeared to.
+
+- [ ] **X-B23 — 41 `worktree-agent-*` branches whose harvest state is unknowable.** Filed
+  2026-09-27 from the integrity audit's finding 6. Because the worktree handoff is a cherry-pick,
+  an agent branch never registers as merged into `main` — so an unharvested branch and a harvested
+  one look identical, and 67 had accumulated against 58 real branches, crowding the Session Start
+  state check (`git branch -v --sort=-committerdate | head -20` was 13/20 scaffolding).
+
+  **Half is fixed and needs no decision:** the 26 that *were* merged are deleted, `CLAUDE.md`'s
+  Session Start command now filters the prefix, and `AGENTS.md` rule 1 deletes each branch at
+  harvest time, so from now on a branch's existence means "not yet harvested" again.
+
+  What remains is the 41 already-ambiguous ones, left in place rather than guessed at. Resolving
+  them means, per branch, checking whether its commits' content reached `main` (`git log -p` against
+  the corresponding `plans/*/` and `.claude/agent-memory/` files, since a cherry-pick changes the
+  sha but not the content). Worth doing once, in one pass, mainly to find any **agent memory that
+  was never harvested** — `AGENTS.md` calls that the most expensive loss in this system, because its
+  whole purpose is to stop a later agent repeating a mistake, and the failure is silent by
+  construction. Not urgent: the filter makes the daily cost zero.
+
+- [ ] **X-B24 — Decide whether the status page's daily refresh should actually run.** Filed
+  2026-09-27 from the integrity audit's finding 7. The skill and the script both asserted "a launchd
+  agent runs it at 05:00 local, daily"; `launchctl` has no such job and `~/Library/LaunchAgents/`
+  no such plist, so it has only ever run by hand. Both statements now say
+  available-and-not-installed, which closes the *contradiction* — this item is the remaining
+  **decision**, and it is the user's: installing a background job on their Mac is not something to
+  do unasked.
+
+  The plist (`.claude/scripts/com.petrobrain.status-page.plist`) carries its own `launchctl
+  bootstrap` line and the script is already guarded to do nothing on a dirty tree, a non-`main`
+  branch, no commits in 24h, or a missing `claude` binary. So installing it is one command; the
+  question is only whether a derived page regenerating itself overnight is wanted at all, given it
+  is explicitly never authoritative.
