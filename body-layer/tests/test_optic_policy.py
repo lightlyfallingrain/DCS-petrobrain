@@ -385,7 +385,13 @@ class TestEveryContactInTheConeIsAttempted:
     def test_a_look_marks_all_the_contacts_it_covers(self) -> None:
         """They all get the benefit of the look, so they all bear the
         retry rule -- otherwise the ones that were merely nearby would be
-        glassed again immediately."""
+        glassed again immediately.
+
+        Checks `pending_attempted_at_range_m`, not `attempted_at_range_m`
+        (`plans/sortie-2026-09-26-fixes/plan.md` Stage 2, Fix B1): a look
+        that has only just started has not yet delivered its benefit, so
+        its marks are pending, not committed -- see that field's own
+        docstring."""
         targets = [
             _target("CONTACT_1", azimuth_deg=40.0, range_m=1_200.0),
             _target("CONTACT_2", azimuth_deg=41.0, range_m=1_200.0),
@@ -397,7 +403,7 @@ class TestEveryContactInTheConeIsAttempted:
             targets=targets,
             steady=True,
         )
-        assert set(state.attempted_at_range_m) == {"CONTACT_1", "CONTACT_2"}
+        assert set(state.pending_attempted_at_range_m) == {"CONTACT_1", "CONTACT_2"}
 
     def test_a_contact_outside_the_cone_is_not_marked(self) -> None:
         targets = [
@@ -411,7 +417,7 @@ class TestEveryContactInTheConeIsAttempted:
             targets=targets,
             steady=True,
         )
-        assert "CONTACT_FAR_OFF" not in state.attempted_at_range_m
+        assert "CONTACT_FAR_OFF" not in state.pending_attempted_at_range_m
 
 
 def test_decide_is_pure() -> None:
@@ -447,7 +453,13 @@ def test_a_look_is_not_ended_by_its_own_attempt_marking() -> None:
     return: a look marks every contact it covers as attempted the instant
     it begins, so a stop condition phrased as "is this still *worth* a
     look" ends every look on the very next poll. Starting a look and
-    continuing one are different questions about the same contact."""
+    continuing one are different questions about the same contact.
+
+    Checks `pending_attempted_at_range_m` (`plans/sortie-2026-09-26-fixes/
+    plan.md` Stage 2, Fix B1's committed/pending split) -- the look has
+    only just started, so its mark is pending, not yet committed. `is_
+    worth_a_look` itself still correctly reads `False` regardless, via its
+    own `pending_attempted_at_range_m` check."""
     state, _ = decide(
         OpticState(phase_started_sim=0.0),
         now_sim=_CYCLE_S,
@@ -455,7 +467,7 @@ def test_a_look_is_not_ended_by_its_own_attempt_marking() -> None:
         targets=[_target()],
         steady=True,
     )
-    assert state.attempted_at_range_m  # the look marked it
+    assert state.pending_attempted_at_range_m  # the look marked it
     assert not is_worth_a_look(_target(), state)  # so a *new* look is not due
 
     state, decision = decide(
@@ -1197,4 +1209,66 @@ def test_a_command_interrupted_look_is_not_permanently_burned() -> None:
         "an interrupted (not naturally concluded) look should not "
         "permanently exhaust the retry budget for a contact that never "
         "closes further"
+    )
+
+
+def test_time_based_reeligibility_fires_for_a_naturally_completed_look_on_a_stalled_contact() -> (
+    None
+):
+    """Fix B2 (Stage 3) companion to the test above: this time the look
+    runs to its own *natural* end (`look_is_finished` via `MAX_LOOK_S`,
+    recognition never having come), so it genuinely commits the attempt --
+    unlike the interrupted case above, `RETRY_RANGE_FRACTION` alone is the
+    correct gate here in principle, except the contact never closes range
+    at all (a stand-off watch, not a close). `OPTIC_RETRY_INTERVAL_S`
+    (`plans/sortie-2026-09-26-fixes/decisions.md` Decision 2's own named
+    gap in D5: "not even for watched") is what eventually unlocks it
+    instead, alongside (not replacing) the existing range-based retry."""
+    target = _target(range_m=1_700.0)  # inside the presence -> class window
+    state, _ = decide(
+        OpticState(phase_started_sim=0.0),
+        now_sim=_CYCLE_S,
+        scan_cycle_period_s=_CYCLE_S,
+        targets=[target],
+        steady=True,
+    )
+    assert state.phase is OpticPhase.GLASSING
+
+    # The look runs to MAX_LOOK_S with recognition never having come --
+    # a natural end, so this commits the attempt (unlike lower_binoculars
+    # above, which drops it).
+    state, decision = decide(
+        state,
+        now_sim=_CYCLE_S + MAX_LOOK_S,
+        scan_cycle_period_s=_CYCLE_S,
+        targets=[target],
+        steady=True,
+    )
+    assert state.phase is OpticPhase.SCANNING
+    assert decision.optic is UNAIDED_OPTIC
+    assert state.attempted_at_range_m == {"CONTACT_1": 1_700.0}
+
+    # The contact never closes range and never advances classification for
+    # the rest of a long encounter -- RETRY_RANGE_FRACTION alone would lock
+    # it out forever, exactly Decision 2's own named gap.
+    stalled_target = _target(range_m=1_700.0)
+    ever_glassed_again = False
+    for cycle in range(
+        1, 10
+    ):  # up to ~144 s -- comfortably past OPTIC_RETRY_INTERVAL_S
+        state, decision = decide(
+            state,
+            now_sim=_CYCLE_S + MAX_LOOK_S + cycle * _CYCLE_S,
+            scan_cycle_period_s=_CYCLE_S,
+            targets=[stalled_target],
+            steady=True,
+        )
+        if decision.optic is BINOCULAR_OPTIC:
+            ever_glassed_again = True
+            break
+
+    assert ever_glassed_again, (
+        "a naturally completed look on a contact that never closes range "
+        "and never advances classification should still become eligible "
+        "again once OPTIC_RETRY_INTERVAL_S has elapsed"
     )

@@ -67,6 +67,44 @@ that does not, does not.** The `follow <target>` case is specified by the user d
 glassing that target, continue; if glassing something else, lower, re-point at the target, and then
 re-judge whether binoculars are warranted for it (rather than assuming they are).
 
+### Decision 2a — coverage, not a watched-contact special case
+
+The user corrected an earlier framing of this (which had described time-based re-eligibility as the
+thing that "unlocks the watched one"):
+
+> *"not just the watched. If I'm orbiting a group of units and command scan left (units on left) I
+> expect all of them to get the necessary attention. It's important to know *what* is out there."*
+
+So the requirement is **coverage of an attended sector**, not a carve-out for watched contacts. If the
+player commands `scan left` and there are ten units to the left, the expectation is that all ten
+eventually get the attention needed to say what they are — because identifying what is out there is
+the point of asking.
+
+**This is a different shape of requirement from a retry budget, and the plan must treat it as such.**
+The current model is per-contact and one-shot: each contact gets a single attempt, with re-eligibility
+only once it has closed by `RETRY_RANGE_FRACTION`. Ten units in a scanned sector therefore yield ten
+attempts and then silence, regardless of how long the aircraft loiters there — which matches what the
+sortie showed (44 of 52 contacts spent time inside the 500-1750 m classification window, several for
+200-1200+ seconds, and several never advanced past PRESENCE).
+
+What this implies, for the plan to work out rather than assume:
+
+- Time-based re-eligibility is necessary but probably not sufficient on its own. Something has to
+  ensure the *unclassified* contacts in an attended sector get looked at, rather than attention
+  returning to whichever contact is nearest or was most recently eventful.
+- That suggests a selection rule with some notion of fairness across the sector's contacts — round
+  robin, or preferring the least-known — rather than only a per-contact eligibility test. The
+  distinction matters: eligibility says *may* he look again, coverage says *whom* he looks at next.
+- It should not become an obligation to classify everything before anything else happens. A sector
+  with thirty units must not starve the rest of his behaviour, and a contact that genuinely cannot be
+  resolved (too far, too obscured) must not be retried forever. Say how that is bounded.
+
+**Effort note:** this makes Fix B materially larger than the "interrupted look does not burn the
+attempt" change it started as — that part is a small correction, this part is a change to how look
+targets are chosen. If the plan finds the coverage half is better as its own staged piece of work,
+say so and stage it separately rather than folding it in silently; the user's direction is clear about
+the intent, not about the size.
+
 ### This supersedes D5's "not a timer"
 
 D5 chose range-based retry with an explicit rationale: *"a contact at constant range has not become
@@ -77,11 +115,81 @@ constant range can never satisfy `RETRY_RANGE_FRACTION`, so under D5 alone it is
 permanently. Time-based re-eligibility is what unlocks it; range-based retry stays for the closing
 case.
 
+## Decision 3 — briefing-derived belief is knowledge, but it is pull-only
+
+> *"exception to not reporting what is not seen: units believed to be at location based on mission
+> briefing. Then belief is the state from mission briefing. Direct observation is impossible. Only
+> report about such contacts if the player asks about them. Like 'target unit near <place> can we see
+> them yet?' -> '<answer>'. Or 'where are <something>' -> 'beyond the hill at 2 o'clock'."*
+>
+> *"cannot answer state of units that are not visible, but can know where they are supposed to be,
+> roughly. But only report if asked."*
+
+This is an exception to Decision 1, and it is a **provenance** distinction rather than a visibility
+one. The no-omniscience invariant bounds knowledge by what Petrovich *could perceive* — and a crew
+briefing is something he perceived, before the flight. So briefing-derived belief is legitimate
+knowledge he genuinely holds; it is simply knowledge of a different kind, and it comes with different
+rules about when he may speak.
+
+**Three constraints, all load-bearing:**
+
+1. **Pull-only, never volunteered.** A briefing-derived contact must never produce a spontaneous
+   callout — no crossing report, no sighting, nothing. It may only ever appear in an *answer* to
+   something the player asked.
+2. **Position roughly, state never.** He can say where a unit is *supposed* to be. He cannot say what
+   it is doing, what condition it is in, or anything else that would require having looked at it.
+   "Beyond the hill at 2 o'clock" is in bounds; "three trucks, stationary" is not, unless it was
+   observed.
+3. **The briefing is the state.** Its contents are the belief — not a prior to be refined by
+   imagination. If the briefing is wrong or stale, he is wrong in exactly the way a real crewman
+   briefed on bad intelligence would be, and that is correct behaviour, not a defect.
+
+### What this changes about Fix A's design
+
+**The observability gate belongs on the volunteering path, not on the answering path.** A gate that
+simply suppresses every mention of an unobservable contact would also silence the legitimate answer
+to "where are the trucks?", which is the opposite of what the user wants. So the two paths must be
+distinguishable at the point the gate is applied — spontaneous callout versus response to a query.
+Whichever placement the plan chooses for the gate has to preserve that distinction; a gate low enough
+to catch both is the wrong gate.
+
+### Scope note — most of this is not buildable yet
+
+The pull-only answering behaviour needs three things this change set does not have: briefing-derived
+contacts in belief at all (Mission Interpreter output reaching the body layer), free-text questions
+("where are the trucks?" is not in the command vocabulary and is a `fallthrough` today), and terrain
+knowledge to phrase "beyond the hill at 2 o'clock" (world-model ridges). **So Decision 3 is recorded
+here as a constraint on Fix A's design, not as work in this change set.** What Fix A must do now is
+avoid foreclosing it — do not build a gate that cannot later admit a pull-only answering path.
+
+## Decision 4 — the three sizing answers (2026-09-26)
+
+Answers to the plan's "Decisions Requiring User Input", in the user's own words: *"1 - follow on / 2 -
+include / 3 - fine"*.
+
+1. **Sector coverage (Decision 2a) is a follow-on**, not part of this branch. It gets its own plan and,
+   per the architect's recommendation, an `/explore` pass with the user before it is designed — it is a
+   `choose_look` selection-fairness redesign with open starvation-bound and give-up-condition
+   questions, not an extension of the per-contact eligibility fix. **Do not partially implement it
+   here**: a half-coverage rule would be harder to reason about than the current honest gap, and the
+   explore pass is what the open questions need.
+2. **`CONTACT_MOTION_CHANGED` is included in Fix A.** It carries the identical structural gap — no
+   visibility check at all on a spontaneous-callout path — and the user chose to fix both together
+   rather than leave a known instance of the same defect in place. Note the wider blast radius the
+   plan flagged: it fires for unwatched contacts too, so the observability gate affects more callouts
+   here than on the crossing path. That is the point, not a side effect, but it does mean the stage
+   needs test coverage for the unwatched case specifically, not only the watched one.
+3. **The two seeded constants stand as proposed** — `CALLOUT_OBSERVABILITY_GRACE_S = 10.0` and
+   `OPTIC_RETRY_INTERVAL_S ~= 64s`. They are starting values to be tuned against a sortie, not
+   measurements, and both must say so where they are defined.
+
 ## What is in scope for the fix
 
 - Observability gate on the crossing-callout path, with a grace window for brief occlusion (D1).
 - An interrupted look no longer marks the target attempted (D2).
-- Time-based re-eligibility alongside the existing range-based retry (D2).
+- Time-based re-eligibility alongside the existing range-based retry (D2), **and coverage of an
+  attended sector** so every contact in it eventually gets the attention needed to say what it is
+  (D2a) — not a watched-contact carve-out.
 - Command-dependent lowering: unrecognised speech does not interrupt; `follow <target>` continues if
   already glassing that target, otherwise re-points and re-judges (D2).
 

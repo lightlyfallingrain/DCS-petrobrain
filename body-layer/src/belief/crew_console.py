@@ -645,6 +645,18 @@ class CrewConsole:
     #: not reset -- a monotonic count is what makes the comparison safe
     #: across any number of commands in one poll.
     commands_handled: int = 0
+    #: `plans/sortie-2026-09-26-fixes/decisions.md` Decision 2's `follow
+    #: <target>` continuation: the contact id `_handle_follow` most recently
+    #: resolved its target to. Reset to `None` at the top of every
+    #: `handle_command` dispatch (the only surface `_handle_follow` is
+    #: reachable from) so a stale value from an earlier `follow` can never
+    #: leak into an unrelated later command's evaluation. `logger.py`'s
+    #: "any command lowers binoculars" glue block reads this alongside
+    #: `OpticState.look_contact_id` to decide whether the just-dispatched
+    #: `follow` named the contact already being glassed -- if so, the look
+    #: continues rather than being lowered and immediately re-pointed at
+    #: the same target.
+    last_command_target_contact_id: str | None = None
     #: Optional sink for every recognised transcript and what was done
     #: about it (`--speech-log`). Same optional-collaborator shape as
     #: `overlay_client`/`speech_client`: `None` is a true no-op.
@@ -948,6 +960,10 @@ class CrewConsole:
         nothing was indistinguishable, from the cockpit, from not having
         been heard at all."""
         self._note_player_command()
+        # Reset before dispatch -- see `last_command_target_contact_id`'s
+        # own docstring for why a stale value from an earlier `follow`
+        # must not leak into this command's evaluation.
+        self.last_command_target_contact_id = None
         bearing_degrees = slots.get("bearing_degrees") if slots is not None else None
         if not isinstance(bearing_degrees, int):
             bearing_degrees = None
@@ -1281,6 +1297,7 @@ class CrewConsole:
         if contact_id is None:
             return no_match_lines
 
+        self.last_command_target_contact_id = contact_id
         if self.tasks is not None:
             task = watch_contact_task(
                 self.store, self.tasks, contact_id, now_sim, source="player"
@@ -1875,15 +1892,24 @@ class CrewConsole:
         return f"{_UTTERANCE_ID_PREFIX}_{self._next_utterance_number}"
 
     def _handle_utterance(self, transcript: str, now_sim: float) -> list[str]:
-        # `plans/binocular-optic/plan.md` D4: the player asking for anything
-        # is itself evidence Petrovich's current optic activity matters less
-        # than what was just asked -- unconditional across surfaces, not a
-        # per-command special case. This is the one point both `handle_line`
-        # (typed free text) and voice's `"fallthrough"` disposition (which
-        # itself calls `handle_line` -- see `_act_on_voice_decision`) pass
-        # through, so counting here covers both without double-counting
-        # `handle_command`'s own call for the token-dispatch surface.
-        self._note_player_command()
+        # `plans/binocular-optic/plan.md` D4, narrowed by `plans/
+        # sortie-2026-09-26-fixes/decisions.md` Decision 2: the player
+        # asking for something *that was understood* is itself evidence
+        # Petrovich's current optic activity matters less than what was
+        # just asked -- unconditional across surfaces, not a per-command
+        # special case, but only once there is something to prefer over
+        # the current look. An utterance the free-text parser also fails to
+        # understand (escalated to the brain layer, `disposition ==
+        # "escalated"` below) is not a new task -- "say again" is not a
+        # request to stop what he is doing, it is a recognition failure,
+        # and lowering the binoculars there would destroy real work in
+        # response to one. This is the one point both `handle_line` (typed
+        # free text) and voice's `"fallthrough"` disposition (which itself
+        # calls `handle_line` -- see `_act_on_voice_decision`) pass
+        # through, so counting here (moved inside the `"handled"` branch,
+        # not called unconditionally as it used to be) covers both without
+        # double-counting `handle_command`'s own call for the token-dispatch
+        # surface.
         parse = parse_utterance(self.store, transcript, now_sim)
         utterance = PlayerUtterance(
             id=self._new_utterance_id(),
@@ -1894,6 +1920,7 @@ class CrewConsole:
             parse=parse,
         )
         if parse.disposition == "handled":
+            self._note_player_command()
             return self._act(parse, now_sim)
         # `plans/brain-layer/plan.md` -- tracked so `_handle_brain_reply`
         # knows what to act on if/when a reply lands (D4's table), and so
