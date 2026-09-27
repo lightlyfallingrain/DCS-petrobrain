@@ -45,8 +45,18 @@ symbols — but the judgement is not. Three things to look for specifically:
 
 ```sh
 .claude/scripts/graph-corpus-files.sh > graphify-out/.corpus.txt
-wc -l graphify-out/.corpus.txt
+.claude/scripts/graph-corpus-guard.sh graphify-out/.corpus.txt   # refuses a too-wide corpus
 ```
+
+**The guard is not a formality — run it and let it stop you.** On 2026-09-26 a rebuild indexed
+**1182 files / ~1.56M words** and announced it in its own `GRAPH_REPORT.md` ("Consider running on a
+subfolder"), while the curated corpus is ~119 files / ~333k words. Nobody noticed for a day. That run
+cost roughly **14x an incremental refresh**, and every one of those tokens was an extraction
+subagent's.
+
+The reason it went unnoticed is worth keeping: a too-wide corpus produces a *bigger* graph, which
+reads as richer rather than wrong. There is no symptom to spot. So the count is the only defence, and
+`graph-corpus-guard.sh` exits non-zero rather than printing a number somebody skims past.
 
 The corpus is a **selection expressed as a file list, not a directory**. It was once a copied mirror
 under `graphify-corpus/` and that broke two things at once: cache lookups keyed on mirror paths
