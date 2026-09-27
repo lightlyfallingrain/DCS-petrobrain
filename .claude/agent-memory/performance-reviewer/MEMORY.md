@@ -14,3 +14,6 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Aircraft-layer hotspots](project_aircraft_layer_hotspots.md) — Export.lua runs on DCS's thread; LoGetWorldObjects/list_indication cost unmeasured; audio queue unbounded unlike F10's.
 - [Audio-adapter hotspots](project_audio_adapter_hotspots.md) — DcsPTT polls collector at 60Hz not documented 30Hz (dead constant); queues bounded correctly; readback caching already tracked in ROADMAP.
 - [Claude setup overhead baseline](project_claude_setup_overhead.md) — posttooluse-mypy.sh runs whole-subproject mypy per edit, covers only 3/6 subprojects; body-layer/CLAUDE.md is ~24K tokens, largest fixed-context item.
+- [Cockpit-mask gate cost](project_cockpit_mask_gate_cost.md) — measured 1.44us/contact, 0.08ms/tick at 55 contacts for the sortie-2026-09-26 observability gate; non-issue at 1Hz.
+- [Optic-policy dict-copy cost](project_optic_policy_dict_copy_cost.md) — measured 0.08/0.45/1.46 ms/call at 55/300/1000 contacts for decide()'s unpruned-map copies; non-issue at this project's scale.
+- [Contact ingest/association unmeasured](project_contact_ingest_association_unmeasured.md) — ingest+tick microbenchmark didn't finish in minutes at 55x500; ingest itself untouched by sortie-2026-09-26-fixes but worth a dedicated future pass.

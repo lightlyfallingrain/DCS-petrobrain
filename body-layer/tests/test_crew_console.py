@@ -2863,6 +2863,115 @@ def test_follow_with_no_qualifiers_says_again() -> None:
     assert lines == ["say again -- follow needs at least one of what/where/how far"]
 
 
+# --- Stage 4 (plans/sortie-2026-09-26-fixes/plan.md, Fix C): --------------
+# command-dependent lowering. `logger.py` reads `commands_handled`/
+# `last_command_target_contact_id` to decide whether to lower the
+# binoculars -- these tests pin the `CrewConsole`-side facts that decision
+# rests on: what actually increments `commands_handled`, and what
+# `_handle_follow` records.
+
+
+def test_an_unrecognised_utterance_does_not_burn_the_optic_interrupt() -> None:
+    """Decision 2: "not every player command should lower the binoculars.
+    Especially not those that are not understood." An utterance the
+    free-text parser also fails to understand escalates to the brain layer
+    (`disposition == "escalated"`) rather than acting on anything -- this
+    is the actual bug Stage 4 fixes (`_note_player_command()` used to be
+    called unconditionally at the top of `_handle_utterance`, before this
+    check)."""
+    console = CrewConsole(store=ContactStore())
+    commands_before = console.commands_handled
+
+    console.handle_line(
+        "completely unrelated free speech nobody could act on", now_sim=0.0
+    )
+
+    assert console.commands_handled == commands_before
+
+
+def test_say_again_does_not_burn_the_optic_interrupt() -> None:
+    """Regression guard (plan Stage 4): `say_again` is handled entirely
+    inside `_act_on_voice_decision`'s own branch and already never called
+    `_note_player_command()` -- nothing was asked for yet, so there is
+    nothing to prefer over the current look. Pinned so a future change
+    cannot reintroduce the interrupt here."""
+    console = CrewConsole(store=ContactStore())
+    commands_before = console.commands_handled
+
+    lines = console.handle_transcript(
+        "garbled beyond recognition",
+        confidence=0.9,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    assert lines == ["Say again?"]
+    assert console.commands_handled == commands_before
+
+
+def test_follow_records_its_resolved_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_handle_follow` sets `last_command_target_contact_id` to the
+    contact it resolved -- the fact `logger.py`'s glue block reads to
+    decide whether a `follow` continued an in-progress look. Confirmed
+    directly against `CrewConsole` state, independent of `OpticState`
+    (that half is `logger.py`'s own concern, see `test_logger.py`)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    contact_id = store.contacts[0].id
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    assert console.last_command_target_contact_id is None
+
+    console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
+
+    assert console.last_command_target_contact_id == contact_id
+
+
+def test_follow_target_resets_between_unrelated_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`last_command_target_contact_id` is reset at the top of every
+    `handle_command` dispatch -- a stale value from an earlier `follow`
+    must not leak into an unrelated later command's evaluation."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_for_follow(
+                obs_id="OBS_ARMOR",
+                t_sim=0.0,
+                classification_raw="OP_ARMORED",
+                classification_level=2,
+                clock=2,
+                range_m=3000.0,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+    console.handle_command("follow", now_sim=0.0, slots={"descriptor": "armor"})
+    assert console.last_command_target_contact_id is not None
+
+    console.handle_command("cancel_task", now_sim=1.0)
+
+    assert console.last_command_target_contact_id is None
+
+
 def test_follow_beyond_the_match_floor_watches_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

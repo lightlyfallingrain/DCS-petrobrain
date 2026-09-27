@@ -446,6 +446,52 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   would only return if the borderless restyle is ever revisited, and that restyle is itself
   rejected.
 
+<!-- BL-B20/B21/B22 arrived here with the fix/sortie-2026-09-26 merge (2026-09-27). The branch
+     predated this file's split out of ROADMAP.md, so it raised them in ROADMAP.md's own Backlog
+     section; the merge routed them here instead of reverting the split. Ids unchanged -- B20 was
+     the next unused number here too, so nothing needed renumbering. -->
+
+- [ ] **BL-B20 — Sector coverage — Decision 2a of `plans/sortie-2026-09-26-fixes/decisions.md`, staged out
+  as a follow-on, 2026-09-26.** The user's requirement: if a scanned/watched sector holds several
+  contacts, all of them should eventually get the attention needed to say what they are — not just
+  re-eligibility for whichever one `choose_look` happens to land on. This is a `choose_look`
+  selection-fairness redesign (least-known-first or round-robin among worth-a-look candidates), a
+  different mechanism from the per-contact eligibility fix `sortie-2026-09-26-fixes` shipped
+  (Stages 2/3, time-based retry). **Needs its own `/explore` pass with the user before Architect**
+  (per `AGENTS.md`'s "Explore Before Deciding") — the starvation bound (what stops a 30-unit sector
+  from crowding out search/react-to-threat/other watched contacts) and the give-up condition (what
+  happens to a contact that genuinely cannot be resolved) are both open and need the user's
+  cockpit-feel judgment, not a derived answer. Proposed plan location:
+  `plans/optic-sector-coverage/plan.md` (not created yet).
+
+- [ ] **BL-B21 — More frequent glances at a watched contact — Decision 1's third point,
+  `plans/sortie-2026-09-26-fixes/decisions.md`, 2026-09-26.** The user's own framing: the durable
+  fix for a watched contact staying observable is Petrovich looking at it often enough to keep the
+  knowledge fresh (and learn more about it), not a longer grace window — `CALLOUT_OBSERVABILITY_
+  GRACE_S` (`sortie-2026-09-26-fixes` Fix A) only covers a brief occlusion, deliberately, and must
+  not be tuned as a substitute for this. The user places this under **attention-grabbing
+  behaviour, which does not exist yet** in this codebase — no plan or milestone currently owns it.
+  Once it exists, revisit whether `CALLOUT_OBSERVABILITY_GRACE_S` still needs to be as long as it
+  is, since attention-grabbing is what is meant to make the grace window rarely matter in practice.
+
+- [ ] **BL-B22 — Pull-only briefing-derived belief (Decision 3, `plans/sortie-2026-09-26-fixes/
+  decisions.md`, 2026-09-26) — a real exception to the no-omniscience callout gate, not built.**
+  The user's spec: a unit believed to be at a location per the mission briefing is legitimate
+  knowledge (a crew briefing is something Petrovich perceived, before the flight), but it may
+  *only* be spoken in answer to a direct player question ("where are the trucks?" -> "beyond the
+  hill at 2 o'clock"), never volunteered, and only position ("roughly where"), never state
+  ("doing what"). `sortie-2026-09-26-fixes`' Fix A deliberately placed its observability gate only
+  on the spontaneous path (`ContactStore.tick`/`route_event`) so this can be added later as a
+  separate query path through the existing `describe_contact`/`render_contact_report` machinery,
+  without needing to touch or work around the gate. **Three prerequisites, none built yet**:
+  briefing-derived contacts reaching belief at all (Mission Interpreter output reaching
+  body-layer — see BL-7's own still-open "phase data is unreachable in a sortie" entry below for
+  the sibling MI-integration gap), free-text questions (today "where are the trucks?" is a
+  `fallthrough` to the brain layer, not a parsed command), and terrain knowledge to phrase "beyond
+  the hill at 2 o'clock" (world-model ridge/relief query). Not actionable until at least the first
+  two exist; recorded here so the constraint on Fix A's design isn't lost before this becomes
+  buildable.
+
 - **Detection under real world conditions — weather, light, vegetation.** Raised by the user
   2026-09-19, not started, no milestone assigned. **The framing matters more than the list:** every
   detection test so far has been flown in near-perfect visual conditions, which makes the current
