@@ -247,9 +247,28 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   change — worth updating in the same pass.
 
 
-- [>] **X-B12 — Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
-  shipped while they were exempt. Deferred until Stage 4b of the group contact model is done**
-  (user, 2026-09-19) — not because the finding is weak, but because interrupting the current run
+- [~] **X-B12 — Re-enable the performance-reviewer and security roles, and run a catch-up audit of what
+  shipped while they were exempt.** *(Was `[>]` deferred until Stage 4b of the group contact model;
+  first half is done, second half is partial — state corrected 2026-09-27.)*
+
+  **The roles were re-enabled on 2026-09-24** and root `CLAUDE.md`'s "Agents" section has said so
+  since: *"performance-reviewer and security run once per whole feature, immediately before DoD"*,
+  replacing the blanket skip. This item nevertheless still read as deferred three days later, and it
+  was found by a knowledge-graph extraction pass noticing that a deferred backlog item and a
+  completed one described the same thing — which is the first time on this project that the graph
+  caught a staleness nobody was looking for. Worth recording as evidence for the graph's own value,
+  next to the fact that the graph had gone unqueried for a day.
+
+  **Catch-up audit, actual state:** aircraft-layer (2026-09-26, `research/2026-09-26-performance-
+  review.md` + `-security-review.md`) and audio-adapter (2026-09-26, `docs/reviews/`) have both had
+  whole-subproject passes. Per-feature passes exist for brain-layer, watch-reporting and
+  position-belief-runaway under `plans/*/`. **Still unaudited as whole subprojects: world-model,
+  body-layer, brain-layer, mission-interpreter** — body-layer is the notable gap, being the largest
+  and the one holding the belief state. That remainder is what [[X-B8]] and [[X-B9]] (per-module
+  performance and security reviews, findings to a document) actually cover, so this item should
+  close into those two rather than tracking the same work a third time.
+
+  Original deferral rationale (user, 2026-09-19) — not because the finding is weak, but because interrupting the current run
   to re-audit would cost more than the risk carries today.
 
   **Both exempted roles independently reported their own exemption has gone stale**
