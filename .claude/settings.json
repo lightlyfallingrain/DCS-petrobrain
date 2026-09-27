@@ -71,6 +71,15 @@
             "statusMessage": "Checking skill file layout..."
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/graph-query-reminder.sh"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
