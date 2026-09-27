@@ -433,7 +433,10 @@ body-side view and the slice numbering both files share.
 
 ## Backlog
 
-- [ ] **Voice character — accent *and* prosody.** Currently a generic English voice. Two distinct
+Items here are `AA-B<n>`. A new one takes the next unused number; numbers are never reused or
+renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
+
+- [ ] **AA-B1 — Voice character — accent *and* prosody.** Currently a generic English voice. Two distinct
   problems, and the second was not obvious until it was heard aloud (user, 2026-09-18): no
   Russian-accented English voice exists in macOS `say`, **and the delivery is monotonous** — flat
   pitch and even stress regardless of whether the line is a routine contact report or "break
@@ -442,11 +445,11 @@ body-side view and the slice numbering both files share.
   (a different engine or voice for accent; SSML, per-line rate/pitch, or an urgency-aware
   template for prosody). Auditioning candidates costs one `--target local --voice <name>` command
   each. See `body-layer/ROADMAP.md`'s backlog entry.
-- [ ] **Process supervision.** This is a third long-running process alongside body-layer's
+- [ ] **AA-B2 — Process supervision.** This is a third long-running process alongside body-layer's
   `logger.py` and aircraft-layer's collector, with no auto-start or health check — the same
   informal, manually-launched posture the other two already have. Worth revisiting once three
   processes become tedious to start by hand, not before.
-- [ ] **`POST /audio/play` has no request-size cap** (and neither do audio-adapter's own
+- [ ] **AA-B3 — `POST /audio/play` has no request-size cap** (and neither do audio-adapter's own
   `/speak`/`/transcribe`/`/stop`, per the 2026-09-26 security audit's RECOMMENDED #1 — the same
   standing exemption covers them explicitly rather than by assumption) and, like every other
   endpoint on that LAN API, no auth. Same severity class as the existing overlay-text and search-trigger endpoints
