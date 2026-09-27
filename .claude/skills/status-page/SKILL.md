@@ -8,7 +8,7 @@ Regenerate `docs/status/petrobrain-status.html` from the roadmap files and repub
 existing artifact URL. Usage: `/status-page`.
 
 **The page is a view, never a source of truth.** Every fact on it is derived from the roadmap files
-plus `todo/todo.md`. If the page and a roadmap disagree, **the page is wrong** — fix the page, never
+plus `todo/todo.md`, `todo/backlog.md` and each subproject's `BACKLOG.md`. If the page and a roadmap disagree, **the page is wrong** — fix the page, never
 the roadmap. `docs/status/README.md` states this contract; do not weaken it.
 
 **Get the list of roadmaps from root `ROADMAP.md`'s status table, not from memory and not from this
@@ -46,7 +46,7 @@ three graphs" is state and does not.
 | The five counters (`.count`) | Count `- [x]` / `- [~]` / `- [ ]` / `- [>]` across every roadmap. "Await hardware" is hand-identified: items a roadmap explicitly blocks on the user's own hardware or on a sortie. |
 | Subsystem cards (`.sys`, one per subproject) | That subproject's `ROADMAP.md` — its status line, its next actionable item, and a progress fraction that is a judgement call, not a computed ratio. |
 | The Mermaid dependency map (`#graph-deps`) | The gating relationships stated in the roadmaps ("gated on", "needs a sortie", "deliberately last"). Node classes are `done`/`active`/`open`/`hold`/`block`. Shows *how the project got here* — it includes done work. |
-| The forward-only map (`#graph-upcoming`) | Every `- [ ]` / `- [~]` / `- [>]` across all roadmaps plus `todo/todo.md`. **Nothing done appears.** See "The forward-only map" below. |
+| The forward-only map (`#graph-upcoming`) | Every `- [ ]` / `- [~]` / `- [>]` across all roadmaps and backlogs (`*/BACKLOG.md`, `todo/backlog.md`) plus `todo/todo.md`. **Nothing done appears.** See "The forward-only map" below. |
 | "Waiting on you, not on code" (`.callout`) | Items that cannot advance without the user — hardware, a sortie, or a decision. This section is the page's most useful part; keep it honest and short. |
 | Open work rows (`.row`) | Milestone-level open items. Not every backlog entry — the board stays legible by staying selective. |
 | Drawer detail (`const DETAIL`) | The *reasoning* in each roadmap entry: why a constraint exists, what an earlier pass got wrong. **This is the part a kanban card cannot hold and the reason this format was chosen.** Do not reduce entries to status restatements. |
@@ -61,7 +61,7 @@ It answers a different question from the map above it: not *how did we get here*
 front of us, and what has to happen first*.
 
 **Build it from the state markers**, not from prose: `- [ ]`, `- [~]` and `- [>]` across every
-roadmap plus `todo/todo.md`. A done item appearing here is a bug — the whole point is that the eye
+roadmap, every `BACKLOG.md`, plus `todo/todo.md` and `todo/backlog.md`. A done item appearing here is a bug — the whole point is that the eye
 is not asked to filter.
 
 **Group into subgraphs by chain.** Read the current page for the groups it last used, then ask

@@ -45,7 +45,7 @@ directory?**
    mark the milestone done/merged (status, branch, merge
    commit hash), fix any stale entry the merge makes wrong (e.g. a sibling item that said "pending
    merge" or a blocked item this merge unblocks), and update root `ROADMAP.md`'s status table if
-   the subproject's overall phase status changed. Only touch `todo/todo.md` if the branch also
+   the subproject's overall phase status changed. Only touch `todo/todo.md` / `todo/backlog.md` if the branch also
    affects a cross-cutting/unscoped item there. Commit this (a separate commit from the merge
    commit is fine — do not amend the merge commit). A merge is not finished until the roadmap
    reflects it, and it must go out in the *same push* as the merge itself, not a later,
@@ -74,7 +74,7 @@ directory?**
     subproject `ROADMAP.md` is the source of truth for milestone status — mark the milestone
     done/merged (status, branch, merge commit hash), fix any stale entry the merge makes wrong, and
     update root `ROADMAP.md`'s status table if the subproject's overall phase status changed. Only
-    touch `todo/todo.md` if the branch also affects a cross-cutting/unscoped item there. Commit
+    touch `todo/backlog.md` if the branch also affects a cross-cutting/unscoped item there. Commit
     this (separate commit from the merge commit is fine). A merge is not finished until the
     roadmap reflects it, and it must go out in the *same push* as the merge — not a later,
     easy-to-forget follow-up.

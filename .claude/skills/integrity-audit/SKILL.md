@@ -25,7 +25,7 @@ point is catching drift since the last audit. Enumerate:
   scripts they invoke under `.claude/scripts/`
 - `.claude/agent-memory/**` (per-role memory) and the auto-memory dir for this project
   (`~/.claude/projects/<sanitized-cwd>/memory/`, indexed by its `MEMORY.md`)
-- `todo/todo.md`, `NOTES.md`, and each subproject's own `NOTES.md`/`ROADMAP.md` if present
+- `todo/todo.md`, `todo/backlog.md`, `NOTES.md`, and each subproject's own `NOTES.md`/`ROADMAP.md`/`BACKLOG.md` if present
 - `plans/**` directory names (to sanity-check milestone/feature references elsewhere)
 
 Skim each, don't deep-read yet — this pass is just "what exists and what does it claim to
