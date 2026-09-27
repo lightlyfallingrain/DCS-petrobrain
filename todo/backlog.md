@@ -563,7 +563,7 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   whole purpose is to stop a later agent repeating a mistake, and the failure is silent by
   construction. Not urgent: the filter makes the daily cost zero.
 
-- [ ] **X-B24 — Decide whether the status page's daily refresh should actually run.** Filed
+- [x] **X-B24 — Status page's daily launchd refresh: REJECTED by the user, 2026-09-27.** It stays manual. The plist template remains in the repo unused; do not propose installing it again, and do not re-file this. Original text follows. Filed
   2026-09-27 from the integrity audit's finding 7. The skill and the script both asserted "a launchd
   agent runs it at 05:00 local, daily"; `launchctl` has no such job and `~/Library/LaunchAgents/`
   no such plist, so it has only ever run by hand. Both statements now say
