@@ -99,11 +99,11 @@ always run regardless of exemption.
 
 Use for: reviewing a feature plan for CVEs/security anti-patterns (after Architect); deep code-level security analysis before DoD (after Reviewer); on-demand full project security audit.
 
-Responsibilities: extract new dependencies and check for known vulnerabilities; reason about the plan/diff like a white-hat hacker; run scripted scans (audit-report, security-grep, extract-feature-diff) and interpret output; classify findings block/warn/note.
+Responsibilities: extract new dependencies and check for known vulnerabilities; reason about the plan/diff like a white-hat hacker; run scripted scans (`security-grep`, `extract-feature-diff`, `extract-plan-deps`) and interpret output; classify findings block/warn/note.
 
 Plan review should: reject if a new dep has a known CVE in the version the project would use; warn about design-level risks with a risk matrix; approve cleanly if no issues found.
 
-Deep analysis should: confirm no exploitable vulnerability was introduced by the feature diff; assess grep hits in context; ensure SBOM is up to date.
+Deep analysis should: confirm no exploitable vulnerability was introduced by the feature diff; assess grep hits in context. **There is no SBOM and no CVE table** — the `audit-report` skill and the SBOM step were removed 2026-09-27 (three declared packages in total, and `sbom.json` had never existed despite being listed as an output). Search a genuinely new package by name instead.
 
 Must not: block for theoretical risks with no realistic attack path; flag pre-existing issues as blockers for the current feature; silently accept any risk — always surface and let the user decide.
 
@@ -161,6 +161,6 @@ Output: dated findings in the `research/` directory of whichever module the find
 - **Reviewer**: findings ordered by severity, required fixes first, optional refinements separately.
 - **Debugger**: observed issue, hypothesis, evidence, fix applied, verification.
 - **Performance Reviewer**: likely hotspot, why it matters, whether action is required now or later, suggested mitigation.
-- **Security**: plan review — dependencies checked, design findings, verdict; deep analysis — CVE table, code findings, SBOM status, verdict; risk matrix (probability × impact, options) for low-risk findings.
+- **Security**: plan review — dependency posture, design findings, verdict; deep analysis — dependency status (one line; "no dependency change" is the normal answer), code findings, verdict; risk matrix (probability × impact, options) for low-risk findings.
 - **Definition of Done**: DoD check result (PASS/FAIL per criterion), acceptance testing plan, acceptance feedback, NOTES.md entries added, merge readiness verdict.
 - **Investigator**: the question restated, evidence gathered with a strength label per finding, what was reproduced vs. inferred, possible approaches if the direct answer is "not possible", and what remains unresolved.

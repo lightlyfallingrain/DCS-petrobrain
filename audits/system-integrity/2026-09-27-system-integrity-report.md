@@ -315,3 +315,52 @@ that point at skills still full of `{{PROJECT_DIR}}` and `cargo audit` examples,
 became a mandatory per-feature gate three days ago. And **finding 4**, three roles that have each
 independently verified the wrong code because nothing states which commit their worktree is based
 on.
+
+---
+
+## Fixes applied, same day
+
+All nine Tier 1 findings were fixed on the user's instruction, on `main` (config and cross-cutting
+work does not belong in a feature branch's commits — `AGENTS.md`, "Why a feature branch's history
+still stays clean"). Two corrections to this report came out of doing it, recorded here rather than
+silently edited above:
+
+- **Finding 2 said 13 skills; the real number was 11.** `update-template` and `pull-from-template`
+  mention `{{...}}` in prose *about* the token convention — they are not stubs. Counting a
+  pattern-match as a finding is the same error the report criticises elsewhere.
+- **Finding 2's "adapt or delete" list survived contact, but its reasoning about two skills did
+  not.** `plan-summary` and `notes-harvest` looked like guesses at this project's plan structure;
+  they match it exactly (89× `### Notable Discoveries`, 76× `### Required Fixes`, 52× `### Goal`,
+  50× `### Affected Modules / Files` across `plans/**`). Only `cd {{PROJECT_DIR}}` was stopping them.
+
+What changed:
+
+| # | Fix |
+|---|---|
+| 1 | `session-start.sh` keys its marker on `.session_id` (which `/clear` reissues) instead of `$PPID`, in `.claude/state/sessions/` instead of `/tmp`, with a PPID fallback if the payload ever lacks the field. Tested: fires once per id, silent on repeat, fires for a new id. |
+| 2 | Seven skills adapted for Python/Lua and each **run against `main`** before being committed: `invariant-check` (rewritten around this project's real invariants — the Percept boundary, module independence, the retired `BINOCULAR_RANGE_MULTIPLIER`; 7 PASS, 2 WARN today), `security-grep` (Python + DCS Lua, with `net.dostring_in` reported as expected-in-`dcs-export`), `extract-feature-diff`, `extract-plan-deps` (rewritten twice — see below), `plan-summary`, `notes-harvest`, `done`. Three deleted as having no surface here: `visual-smoke-test`, `audit-report`, `dependency-audit-update`. `security-scan` reduced to the two steps that survive. Every citation in `security.md`, `reviewer.md` and `docs/AGENT_ROLES.md` updated, including the `sbom.json` output row for a file that never existed. |
+| 3 | `dod.md:191` now points at `AGENTS.md` for who owns the main checkout, as `merge/SKILL.md` already did. Its roadmap step also stopped naming three subprojects. |
+| 4 | New `AGENTS.md` rule 4 (the three rules are now four) plus `agent-worktree-reminder.sh`, a `PreToolUse` hook on `Agent` that detects whether the dispatch prompt names a commit at all and injects the `git rev-parse HEAD` check and the `git archive` snapshot procedure. |
+| 5 | The stale "State of play" block is gone, replaced by why a second state narrative drifts by construction. The file header no longer names three roadmaps. |
+| 6 | 26 merged `worktree-agent-*` branches deleted (125 → 99). `CLAUDE.md`'s Session Start command now filters the rest, and `AGENTS.md` rule 1 deletes each branch at harvest time so its existence means "not yet harvested" again. The 41 ambiguous ones were left rather than guessed at. |
+| 7 | The status-page skill and script now say the launchd job is **available and not installed**, with how to check (`launchctl`, not the plist's existence — which is what made it wrong). |
+| 8 | Not fixed here, by decision: X-B22 is a code regression and takes the bug-fix sequence on its own branch. It stays open. |
+| 9 | `commit-quality-gate.sh`'s docstring no longer names three subprojects forty lines above its own comment about that defect. |
+
+**One finding surfaced while fixing, not while auditing** — and it is the kind this audit exists for.
+Writing `invariant-check` against `body-layer/CLAUDE.md`'s invariant list turned up a stale invariant:
+"`BINOCULAR_RANGE_MULTIPLIER` is declared in `visibility.py`; `optics.py` imports it, never the
+reverse." Cones slice 2A retired that constant and inverted the import direction (`visibility.py`
+now imports from `optics.py`; both docstrings say so). The bullet's first sentence — the naked eye is
+the default — still holds and is the one that matters. Corrected, and the mechanical half is now a
+check that fails if the constant reappears. An invariant that names a deleted symbol is worse than no
+invariant: a reader reconciling it with the code has no way to tell which is current.
+
+`extract-plan-deps` is worth one line as a method note. Transliterating the template (match manifest
+lines in a plan) would have reported "none" forever, because plans here name packages in prose. The
+first replacement — every backticked identifier as a candidate — produced 60 lines of
+`bearing_uncertainty_deg` per plan, which is worse than nothing, because a list that long does not
+get read. What works is that this project's plans state their dependency posture in sentences, almost
+always to rule one out; extracting those sentences is both the signal and a check on the claim. Two
+wrong versions were run before that was visible, which is the argument for running a skill before
+committing it.

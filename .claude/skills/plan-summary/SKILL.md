@@ -12,7 +12,7 @@ Extracts key metadata from `plans/<feature>/plan.md` so the Implementer and Revi
 
 ```bash
 #!/usr/bin/env bash
-cd {{PROJECT_DIR}}
+cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 
 FEATURE="${1:-}"
 if [ -z "$FEATURE" ]; then

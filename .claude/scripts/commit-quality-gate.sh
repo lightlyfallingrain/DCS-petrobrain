@@ -1,8 +1,11 @@
 #!/bin/bash
 # Hook script: PreToolUse gate on `git commit`. Detects which subproject(s) the staged diff
-# touches (world-model/, aircraft-layer/, body-layer/) and runs each touched subproject's own
-# format/lint/type/test commands (per its own CLAUDE.md "Commands" section), not just
-# world-model's. Blocks the commit with combined output on any failure.
+# touches -- DISCOVERED from the filesystem, never a list written here; see the loop below -- and
+# runs each touched subproject's own format/lint/type/test commands (per its own CLAUDE.md
+# "Commands" section). Blocks the commit with combined output on any failure.
+#
+# This docstring named three subprojects out of six until 2026-09-27, forty lines above a comment
+# recounting two prior audits of that exact defect. A reader trusts the docstring.
 set -uo pipefail
 cd "$CLAUDE_PROJECT_DIR" || exit 0
 

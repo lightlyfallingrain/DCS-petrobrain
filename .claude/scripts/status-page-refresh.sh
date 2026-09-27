@@ -1,10 +1,15 @@
 #!/bin/bash
 # Daily refresh of the derived status page (docs/status/petrobrain-status.html).
 #
-# Run by a launchd agent at 05:00 local time; see the plist template in
-# `.claude/skills/status-page/SKILL.md`. launchd uses local wall-clock time, so this
-# stays at 05:00 across DST changes without intervention, and a job missed
-# because the Mac was asleep fires when it wakes.
+# INTENDED to be run by a launchd agent at 05:00 local time, and NOT currently
+# installed anywhere (verified 2026-09-27: launchctl has no petrobrain job and
+# ~/Library/LaunchAgents/ has no plist). Today it runs only when invoked by hand or
+# by /status-page. The plist template is `.claude/scripts/com.petrobrain.status-page.plist`;
+# if it is ever bootstrapped, say so here and in the skill, with the date.
+#
+# The reason launchd is the intended host, kept because it still decides the design:
+# it uses local wall-clock time, so this stays at 05:00 across DST changes without
+# intervention, and a job missed because the Mac was asleep fires when it wakes.
 #
 # It does nothing at all unless there is something to do. Three guards, each
 # logged so a silent morning is distinguishable from a broken one:

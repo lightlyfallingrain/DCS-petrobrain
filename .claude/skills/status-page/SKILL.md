@@ -210,10 +210,23 @@ page. Passing `url` unconditionally costs nothing and removes the whole class of
 path stability means remembering a precondition that is invisible at the moment it matters.
 - Keep the `description` and `favicon` unchanged; pass a short `label` describing the update.
 
-## Automatic daily refresh
+## Automatic daily refresh — available, NOT currently installed
 
-A launchd agent runs `.claude/scripts/status-page-refresh.sh` at 05:00 local, daily. The plist
-template and its install/remove commands are in `.claude/scripts/com.petrobrain.status-page.plist`.
+**Corrected 2026-09-27.** This section used to state as fact that "a launchd agent runs … at 05:00
+local, daily". It does not: `launchctl list | grep petrobrain` is empty and
+`~/Library/LaunchAgents/` holds no such plist on this machine. What exists is the in-repo **template**
+at `.claude/scripts/com.petrobrain.status-page.plist`, never bootstrapped. The page had last been
+regenerated 2026-09-26 while the sentence claimed a daily job.
+
+The page is explicitly derived-not-authoritative, so staleness is not a correctness hazard — but
+"it regenerates daily" is exactly the kind of claim that decides how much anyone trusts it, and a
+mechanism nobody installed cannot earn that. **Either install it (the plist carries its own
+`launchctl bootstrap` line) or treat regeneration as manual. Until it is installed, it is manual.**
+
+If it is installed later, say so here with the date — and check `launchctl` rather than the plist's
+existence, which is what made this wrong.
+
+The rest of this section describes what the script does when it *is* run, by hand or by launchd.
 
 The script does nothing unless there is something to do, and logs which guard stopped it so a quiet
 morning is distinguishable from a broken one: no commits in 24 hours, a dirty working tree or a

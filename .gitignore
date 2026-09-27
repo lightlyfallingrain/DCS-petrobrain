@@ -19,3 +19,7 @@ graphify-out/
 # Saved-page asset directories (browser "Web Page, complete") -- the HTML
 # itself is committed as provenance; its styling/scripts are not.
 *_files/
+
+# Per-context markers written by .claude/scripts/session-start.sh (one file per
+# session id, swept after 12h). Local session state, not project state.
+.claude/state/sessions/

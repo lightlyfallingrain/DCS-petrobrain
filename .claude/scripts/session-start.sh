@@ -1,7 +1,7 @@
 #!/bin/bash
-# Detects first user message of a Claude session (keyed on parent PID).
-# On first message: injects the session-start protocol pointer and the role-sequence
-# reminder. On subsequent messages: silent (no output).
+# Detects the first user message of a Claude *context* -- a new session, or a
+# session that has just been /clear'ed. On that message: injects the session-start
+# protocol pointer and the role-sequence reminder. On subsequent messages: silent.
 #
 # WHY THE ROLE-SEQUENCE REMINDER LIVES HERE NOW (merged 2026-09-27). It used to be a
 # second, ungated UserPromptSubmit hook in settings.json that re-injected ~170 tokens
@@ -25,19 +25,42 @@
 # with nobody reading it. Every step spelled out here is a step that can drift
 # again -- so name the steps briefly and point at the file that owns them.
 
-SESSION_MARKER="/tmp/claude-project-session-${PPID}"
+# KEY THE MARKER ON THE SESSION ID, NOT THE PROCESS (fixed 2026-09-27). It was
+# `/tmp/claude-project-session-$PPID`, and `/clear` does not start a new process --
+# so the marker survived a clear and this hook went silent for the one case
+# CLAUDE.md calls "not optional after a context clear". Demonstrated live during the
+# 2026-09-27 integrity audit: marker written 13:27, PPID 39517, the audit session
+# cleared at 14:24 with the same PPID, no injection. The hook fired reliably only
+# for a brand-new process -- the case that needs it least, since a fresh session
+# reads CLAUDE.md anyway -- and was silent for the case it was written for.
+#
+# `/clear` issues a new session_id, which arrives in the hook payload, so that is
+# the identity that actually tracks a context. Markers live in .claude/state/ now
+# rather than /tmp: a stale one is then visible in the repo (and gitignored) instead
+# of accumulating invisibly in a shared temp directory, which is how the PPID-reuse
+# hazard went unnoticed in the first place.
+INPUT=$(cat 2>/dev/null || true)
+SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 
-# A marker is stale if it outlives the session that made it: PPIDs get reused, and
-# these files persist indefinitely (one found from three days earlier). A reused PPID
-# would make a genuinely new session look like a continuing one and silently skip the
-# whole Session Start protocol -- the same class of silent-nonevent this script exists
-# to prevent. Treat anything older than 12h as belonging to a dead session.
-if [ -f "$SESSION_MARKER" ]; then
-    if [ -z "$(find "$SESSION_MARKER" -mmin +720 2>/dev/null)" ]; then
-        exit 0                      # fresh marker: same session, stay silent
-    fi
-    rm -f "$SESSION_MARKER"         # stale marker: a reused PPID, treat as new
+# Fall back to the old PPID key only if the payload carries no session_id, so a
+# harness change degrades to the previous behaviour instead of firing every turn.
+if [ -n "$SESSION_ID" ]; then
+    MARKER_KEY="$SESSION_ID"
+else
+    MARKER_KEY="ppid-${PPID}"
 fi
+
+STATE_DIR="${CLAUDE_PROJECT_DIR:-.}/.claude/state/sessions"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+SESSION_MARKER="$STATE_DIR/$MARKER_KEY"
+
+# A session id is unique, so an existing marker means this context has already been
+# greeted -- no staleness window needed for that case. The 12h sweep below is only
+# housekeeping: it removes markers from finished sessions so the directory does not
+# grow without bound, and it still covers the PPID fallback, where ids are reused.
+find "$STATE_DIR" -type f -mmin +720 -delete 2>/dev/null || true
+
+[ -f "$SESSION_MARKER" ] && exit 0   # already greeted this context, stay silent
 
 touch "$SESSION_MARKER"
 jq -n '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:"SESSION START: follow the Session Start protocol in CLAUDE.md, which is authoritative over this reminder. In outline: (1) read root ROADMAP.md for the cross-subproject picture, then the ROADMAP.md of whichever subproject its status table shows as most active — the subproject roadmaps, not todo.md, are the source of truth for milestone status; (2) read todo/todo.md for User priority tasks and todo/backlog.md for cross-cutting/unscoped backlog; (3) identify the next actionable milestone from that subproject ROADMAP.md (first non-done, non-deferred/blocked item); (4) CHECK THE STATE, NOT ONLY THE ACCOUNT OF IT — run `git branch -v --sort=-committerdate | head -20` and `git worktree list`, and read the milestone plans/<feature>/ directory in full; a branch matching the milestone you are about to start means the work already exists, and skipping this check once cost ~2000 lines of duplicated implementation; (5) show that milestone and its subitems to the user and ask what they want to work on.\n\nROLE SEQUENCES (AGENTS.md, already in context via CLAUDE.md’s @AGENTS.md import — this is a pointer, not the source): apply them automatically, no user input needed. Core loop: Architect → Implementer → Reviewer (loop back to Implementer until Reviewer approves) → Definition of Done; a bug fix starts at Debugger instead of Architect. performance-reviewer and security each run ONCE per whole feature, immediately before DoD — not mid-feature and not once per stage. There is NO exemption in force: the previous blanket skip was replaced by that once-per-feature cadence on 2026-09-24 (CLAUDE.md, Agents section). A Security or Performance Reviewer change request re-enters the loop rather than going straight to DoD: Implementer → Reviewer on the fix → DoD. Consequential work gets an Explore conversation with the user before Architect. For small features one role may cover the whole task. Escalate only per AGENTS.md escalation rules."}}'
