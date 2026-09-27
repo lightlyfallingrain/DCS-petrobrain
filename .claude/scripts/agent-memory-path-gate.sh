@@ -20,6 +20,18 @@
 # is how it was found. A memory that is never written is the most expensive
 # kind of loss here, because its whole purpose is to stop a later agent
 # repeating a mistake.
+#
+# PATHS ARE RESOLVED BEFORE COMPARING (added 2026-09-27). Every check below used
+# to be a string-prefix test on the raw input, so
+# <project>/.claude/agent-memory/../../../../tmp/pwned.md passed it: the string
+# starts with the allowed prefix even though the path lands outside the repo
+# entirely. The 2026-09-27 security audit demonstrated that (exit 0, no deny).
+# The gate is a lint for a recurring mistake rather than the real write boundary
+# -- Claude Code's own Write/Edit permissions are that -- but a check whose
+# implicit promise ("memory writes stay under .claude/agent-memory/") is false
+# for any path containing `..` is worse than no check, because people and later
+# automation read it as containment. realpath -m resolves without requiring the
+# file to exist yet, which matters since these writes usually create the file.
 set -uo pipefail
 
 input=$(cat)
@@ -34,18 +46,44 @@ esac
 
 root="$CLAUDE_PROJECT_DIR/.claude/agent-memory/"
 
+# Normalize `..`, `.` and doubled slashes before any prefix comparison.
+# Done in pure bash rather than with realpath: BSD/macOS realpath has no `-m`
+# (verified -- "realpath: illegal option -- m"), and the GNU-only spelling failing
+# silently is exactly how the original string-prefix bug would have survived the
+# fix. No subprocess also keeps this hook in the ~18ms band the 2026-09-27
+# performance review measured, since it runs on every Write/Edit.
+normpath() {
+    local path="$1" out=() seg
+    local IFS=/
+    for seg in $path; do
+        case "$seg" in
+            ''|.) ;;
+            ..) [ ${#out[@]} -gt 0 ] && unset 'out[${#out[@]}-1]' ;;
+            *) out+=("$seg") ;;
+        esac
+    done
+    case "$path" in
+        /*) printf '/%s' "${out[*]}" ;;
+        *)  printf '%s' "${out[*]}" ;;
+    esac
+}
+
+resolved=$(normpath "$file_path")
+resolved_root="$(normpath "$root")/"
+
 # Valid: the main checkout's own agent-memory directory.
-case "$file_path" in
-  "$root"*) exit 0 ;;
+case "$resolved" in
+  "$resolved_root"*) exit 0 ;;
 esac
 
 # Valid: an agent worktree's agent-memory directory. The path must be
 # <project>/.claude/worktrees/<one segment>/.claude/agent-memory/..., which is
 # narrow enough that a subproject path cannot satisfy it.
 wt_prefix="$CLAUDE_PROJECT_DIR/.claude/worktrees/"
-case "$file_path" in
-  "$wt_prefix"*)
-    rest=${file_path#"$wt_prefix"}
+resolved_wt_prefix="$(normpath "$wt_prefix")/"
+case "$resolved" in
+  "$resolved_wt_prefix"*)
+    rest=${resolved#"$resolved_wt_prefix"}
     wt_name=${rest%%/*}
     tail=${rest#"$wt_name"/}
     case "$tail" in

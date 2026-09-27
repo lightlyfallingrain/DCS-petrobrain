@@ -4,7 +4,7 @@
 # format/lint/type/test commands (per its own CLAUDE.md "Commands" section), not just
 # world-model's. Blocks the commit with combined output on any failure.
 set -uo pipefail
-cd $CLAUDE_PROJECT_DIR
+cd "$CLAUDE_PROJECT_DIR" || exit 0
 
 STAGED=$(git diff --cached --name-only)
 FAIL=0
@@ -24,6 +24,53 @@ $this_out"
     fi
 }
 
+# Run a check from INSIDE the subproject directory. Two defects made this
+# necessary, both found and reproduced on 2026-09-27, and together they meant
+# this gate could not pass on any commit that touched a subproject's code:
+#
+#   1. Bare `ruff`/`mypy`/`pytest` are not on PATH at all here (verified in both
+#      an interactive and a login shell). Each subproject keeps its own .venv
+#      (root CLAUDE.md, "Module independence"), so every check exited 127
+#      "command not found" -> FAIL=1 -> commit blocked with noise instead of a
+#      real result. `check`/SKILL.md and `dod-check` already resolve the
+#      venv-qualified binary; this script and posttooluse-mypy.sh never got it.
+#      Nobody noticed because the recent commits that exercised the gate touched
+#      only .claude/, docs/ and todo/ -- paths that skip the loop entirely.
+#   2. mypy's config discovery is CWD-only. Run from the repo root (no root-level
+#      pyproject.toml exists) it silently loses `strict` and the CWD-relative
+#      `mypy_path`. Reproduced on body-layer: `mypy body-layer/src` from the root
+#      reports 6 phantom import-not-found errors, while `cd body-layer && mypy src`
+#      reports "Success: no issues found in 52 source files".
+#
+# All six subprojects share the same config shape, so all six get the same
+# treatment rather than body-layer being special-cased -- the reviewer's open
+# question about whether the others were silently weaker is resolved by running
+# every one of them the way its own CLAUDE.md documents.
+run_in() {
+    local sub="$1" label="$2"; shift 2
+    local this_out
+    this_out=$(cd "$sub" && "$@" 2>&1)
+    local status=$?
+    if [ $status -ne 0 ]; then
+        FAIL=1
+        OUT="$OUT
+
+## $label — FAIL
+$this_out"
+    fi
+}
+
+# Resolve a tool to the subproject's own venv, falling back to PATH. Mirrors
+# dod-check's resolve_tool.
+resolve_tool() {
+    local sub="$1" tool="$2"
+    if [ -x "$sub/.venv/bin/$tool" ]; then
+        printf '%s' "$PWD/$sub/.venv/bin/$tool"
+    elif command -v "$tool" >/dev/null 2>&1; then
+        printf '%s' "$tool"
+    fi
+}
+
 
 
 
@@ -39,10 +86,34 @@ for sub in */; do
     sub=${sub%/}
     [ -d "$sub/src" ] && [ -d "$sub/tests" ] || continue
     printf '%s\n' "$STAGED" | grep -q "^$sub/" || continue
-    run "$sub ruff format" ruff format --check "$sub/src" "$sub/tests"
-    run "$sub ruff check" ruff check "$sub/src" "$sub/tests"
-    run "$sub mypy" mypy "$sub/src"
-    run "$sub pytest" pytest "$sub/tests" -q
+
+    RUFF=$(resolve_tool "$sub" ruff)
+    MYPY=$(resolve_tool "$sub" mypy)
+    PYTEST=$(resolve_tool "$sub" pytest)
+
+    # A missing tool is reported as a missing tool, not as 127 noise attached to
+    # whichever check happened to run first.
+    MISSING=""
+    [ -z "$RUFF" ] && MISSING="$MISSING ruff"
+    [ -z "$MYPY" ] && MISSING="$MISSING mypy"
+    [ -z "$PYTEST" ] && MISSING="$MISSING pytest"
+    if [ -n "$MISSING" ]; then
+        FAIL=1
+        OUT="$OUT
+
+## $sub toolchain — FAIL
+Cannot run the quality gate for $sub: missing tool(s):$MISSING
+Not found in $sub/.venv/bin/ and not on PATH. Provision the subproject venv
+(cd $sub && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]') or
+activate it before committing."
+        continue
+    fi
+
+    # Every check runs with the subproject as CWD (see run_in's comment).
+    run_in "$sub" "$sub ruff format" "$RUFF" format --check src tests
+    run_in "$sub" "$sub ruff check"  "$RUFF" check src tests
+    run_in "$sub" "$sub mypy"        "$MYPY" src
+    run_in "$sub" "$sub pytest"      "$PYTEST" tests -q
 done
 
 # Lua syntax (parse-only, Lua 5.1 = the version DCS embeds) for staged aircraft-layer Lua files.

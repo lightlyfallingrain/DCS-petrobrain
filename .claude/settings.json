@@ -2,11 +2,15 @@
   "permissions": {
     "deny": [
       "Bash(rm -rf*)",
+      "Bash(rm -fr*)",
+      "Bash(rm -Rf*)",
+      "Bash(rm -fR*)",
       "Bash(cat .env*)",
       "Bash(curl*)",
       "Bash(wget*)",
       "Bash(git reset --hard*)",
-      "Bash(git worktree remove --force*)"
+      "Bash(git worktree remove --force*)",
+      "Bash(git worktree remove -f*)"
     ]
   },
   "hooks": {
@@ -16,8 +20,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE 'git reset --hard'; then printf '{\"continue\":false,\"stopReason\":\"git reset --hard is blocked: it reverts tracked files AND deletes staged new files. On 2026-09-20 it destroyed a pre-commit script, a .gitignore edit and a whole docs/PROCESS.md section during hook test cleanup. Use instead: git revert <sha> to undo a commit, git restore <path> for one file, git reset --soft HEAD~1 to keep the work, or git stash. If you genuinely need --hard, ask the user.\"}'; exit 0; fi",
-            "statusMessage": "Checking for destructive reset..."
+            "command": "$CLAUDE_PROJECT_DIR/.claude/scripts/destructive-command-gate.sh",
+            "timeout": 10,
+            "statusMessage": "Checking for destructive commands..."
           },
           {
             "type": "command",
@@ -93,7 +98,7 @@
           },
           {
             "type": "command",
-            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:\"AGENTS.md role sequences \u2014 apply automatically, no user input needed. Full sequences (see AGENTS.md) include Security/Performance Reviewer steps, but CLAUDE.md Agents section may currently exempt one or both for this project phase \u2014 that exemption wins. New feature or refactor: Architect \u2192 Implementer \u2192 Reviewer \u2192 Definition of Done. Performance-sensitive feature: Architect \u2192 Implementer \u2192 Performance Reviewer \u2192 Reviewer \u2192 Definition of Done. Bug fix: Debugger \u2192 Reviewer \u2192 Definition of Done. Performance issue: Debugger \u2192 Performance Reviewer \u2192 Reviewer \u2192 Definition of Done. For small features one role may cover the whole task. Escalate only per AGENTS.md escalation rules.\"}}'",
+            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:\"AGENTS.md role sequences \u2014 apply automatically, no user input needed. Core loop: Architect \u2192 Implementer \u2192 Reviewer (loop back to Implementer until Reviewer approves) \u2192 Definition of Done; a bug fix starts at Debugger instead of Architect. performance-reviewer and security each run ONCE per whole feature, immediately before DoD \u2014 not mid-feature and not once per stage. There is NO exemption in force: the previous blanket skip was replaced by that once-per-feature cadence on 2026-09-24 (CLAUDE.md, Agents section). A Security or Performance Reviewer change request re-enters the loop rather than going straight to DoD: Implementer \u2192 Reviewer on the fix \u2192 DoD. Consequential work gets an Explore conversation with the user before Architect. For small features one role may cover the whole task. This summary is not authoritative \u2014 AGENTS.md has the full sequences and CLAUDE.md Agents section has the current cadence; read those if they disagree with this text. Escalate only per AGENTS.md escalation rules.\"}}'",
             "statusMessage": "Loading agent context..."
           }
         ]
