@@ -521,7 +521,27 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   three-layer architecture (world model, mission interpreter, body/brain layer) is mature and
   proven for the single-player-aircraft case first.
 
-- [ ] **X-B22 — Two failing body-layer tests on `main`, exposed 2026-09-27 when the commit quality
+- [x] **X-B22 — CLOSED 2026-09-27: not regressions, an unmerged branch.** Both tests were committed to
+  `main` **already red**, by `e40e9da` — the sortie diagnosis, explicitly diagnosis-only: *"reproduced
+  in a new failing test."* They are reproduction tests. The fix had been finished on
+  `fix/sortie-2026-09-26` for a day — Reviewer, Security (APPROVED), Performance (APPROVED), **DoD
+  PASSED** — and was never merged. Merged as `2ac8e61`; `body-layer` now 1303 passed / 0 failed.
+
+  **Two things worth keeping from how this was found.** `git log -S` on the two test names answered it
+  in one command — which is what this item's own last paragraph said to do first, and doing it before
+  dispatching a debugger saved a diagnosis of a defect that did not exist. And the audit that filed
+  this item got its framing wrong in a specific, instructive way: it said "treat these as possible
+  real regressions with pilot-visible consequences". The consequences are pilot-visible, but a red
+  test does not imply broken code — it can equally mean *finished work that never landed*. A test
+  suite's colour is evidence about the tree, not about the codebase's history.
+
+  The other half of the finding stands and was the real cost: because `commit-quality-gate.sh` had
+  been exiting 127 on every check, nothing had run these at commit time, so a completed, fully-gated
+  branch sat unmerged with nothing announcing it. The gate's repair is what surfaced it at all.
+
+  Original text follows.
+
+  **Two failing body-layer tests on `main`, exposed 2026-09-27 when the commit quality
   gate was repaired.** Found by X-B5's fixes, not by X-B5's review — the gate had been exiting 127 on
   every check, so nothing had actually run these at commit time:
 

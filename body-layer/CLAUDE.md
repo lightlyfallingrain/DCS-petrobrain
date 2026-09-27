@@ -233,8 +233,17 @@ break without noticing.
 - **The default optic is `UNAIDED_OPTIC` (naked eye), not binoculars.** Modelling Petrovich as
   permanently glassed-up was the single biggest source of over-detection in this channel (user
   direction, 2026-09-20). Binoculars are a deliberate, narrower, raised act.
-  `BINOCULAR_RANGE_MULTIPLIER` is declared in `visibility.py`; `optics.py` imports it, never the
-  reverse.
+
+  **The import-direction clause that used to close this bullet was deleted 2026-09-27: it described a
+  constant the code no longer has, and named the direction backwards.** It read
+  "`BINOCULAR_RANGE_MULTIPLIER` is declared in `visibility.py`; `optics.py` imports it, never the
+  reverse." Cones slice 2A **retired** that constant — a flat range multiplier *is* the
+  permanently-glassed-up model, so deleting it was the point — and doing so dissolved the real
+  circular import the clause was guarding: `optics.py` now imports nothing from `visibility.py`, and
+  `visibility.py` imports `Optic`/`UNAIDED_OPTIC`/`within_optic_fov` from `optics.py` as an ordinary
+  top-level import. Both modules' docstrings say so. What survives is the first sentence — the naked
+  eye is the default — and `/invariant-check` now holds the rest mechanically: it fails if an
+  assignment to `BINOCULAR_RANGE_MULTIPLIER` reappears anywhere in `src/`.
 - **New CLI flags are additive and a true no-op when absent.** Every flag added since `--overlay`
   follows it: defaults off, unchanged behaviour without it, `parser.error` for a missing companion
   argument. Keep that posture.
