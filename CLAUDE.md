@@ -86,7 +86,8 @@ The previous rule ("skip both for now — an offline single-user local pipeline 
 
 1. Read root `ROADMAP.md` for the cross-subproject picture, then the `ROADMAP.md` of whichever
    subproject looks most active (its Status table row is the pointer).
-2. Read `todo/todo.md` for any User priority tasks and cross-cutting/unscoped backlog items.
+2. Read `todo/todo.md` for any User priority tasks, and `todo/backlog.md` for cross-cutting/unscoped
+   backlog items (split 2026-09-27).
 3. Identify the next actionable milestone (first non-done, non-deferred/blocked item in the
    relevant subproject's roadmap).
 4. Show that milestone and its subitems to the user.
@@ -218,7 +219,9 @@ earlier claim, or a disagreement with a request gets said plainly — in a sente
 
 ## Backlog Management
 
-`todo/todo.md` is the source of truth. States: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` decision needed · `[>]` deferred.
+`todo/todo.md` holds User priority tasks and session-scoped notes; `todo/backlog.md` holds the
+cross-cutting backlog (split 2026-09-27 — each edit used to re-extract the other into the
+knowledge graph). Between them they are the source of truth. States: `[ ]` open · `[~]` in progress · `[x]` done · `[?]` decision needed · `[>]` deferred.
 
 - Read before starting work; prefer the User priority tasks at the top of the file
 - Do not start `[?]` or `[>]` tasks without instruction
@@ -233,11 +236,11 @@ milestone — `BL-4` is a body-layer milestone, `BL-B4` a body-layer backlog ite
 
 | prefix | where |
 |---|---|
-| `BL-B<n>` | `body-layer/ROADMAP.md` |
+| `BL-B<n>` | `body-layer/BACKLOG.md` |
 | `AC-B<n>` | `aircraft-layer/ROADMAP.md` |
 | `AA-B<n>` | `audio-adapter/ROADMAP.md` |
 | `WM-B<n>` | `world-model/ROADMAP.md` |
-| `X-B<n>` | `todo/todo.md`, cross-cutting / unscoped |
+| `X-B<n>` | `todo/backlog.md`, cross-cutting / unscoped |
 
 `MI-B<n>` and `BR-B<n>` are reserved for mission-interpreter and brain-layer, neither of which has a
 Backlog section yet.
@@ -251,6 +254,6 @@ Backlog section yet.
   message or plan citing the old meaning now reads as evidence for the new one. Done items keep their
   IDs in place for exactly this reason.
 
-An item that moves from a subproject's backlog to `todo/todo.md` (or the reverse) takes a **new** ID
+An item that moves from a subproject's backlog to `todo/backlog.md` (or the reverse) takes a **new** ID
 in its destination and the old entry says where it went — the same reason: an ID belongs to one file's
 sequence, so carrying one across files would make two files' numbering collide.
