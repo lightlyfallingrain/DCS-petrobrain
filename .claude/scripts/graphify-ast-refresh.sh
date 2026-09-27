@@ -36,7 +36,29 @@ PY=$(cat graphify-out/.graphify_python 2>/dev/null) || exit 0
 [ -x "$PY" ] || exit 0
 
 changed=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null) || exit 0
-code=$(printf '%s\n' "$changed" | grep -E '\.py$' | grep -vE '^(\.claude/worktrees/|graphify-corpus/)') || true
+# .py and .lua. Lua added 2026-09-27.
+#
+# Why it was missing and what that cost: the full rebuild's AST pass already
+# covers .lua (and .sh and .toml), so nothing was ever lost from graph.json --
+# this hook's job is only to keep the spine current *between* rebuilds. With
+# .py alone, editing Export.lua or a mission hook left the graph describing the
+# previous structure until the next full rebuild, which on this project can be
+# a week apart. That is the whole defect: a lag, not a loss.
+#
+# It is worth closing because Lua is where the DCS-side behaviour lives --
+# Export.lua, nine probe variants, five mission hooks, the world-model mission
+# probes, 22 files and 233 nodes -- and it is the code least reconstructable
+# from memory, which is exactly what the investigator role goes to the graph
+# for.
+#
+# .sh and .toml stay out of *this* hook but remain in the full rebuild's spine,
+# because graphify's code discovery has no extension-exclude knob and
+# post-filtering would have to be redone after every rebuild. They are 99 nodes
+# of glue out of 8405 (1.2%) -- .claude/scripts/ gates, run-scripts/ launchers,
+# WSL probe wrappers, pyproject manifests. Not worth a fragile filter to remove
+# (user direction, 2026-09-27: "those need not be indexed" -- they need not, and
+# they also do no harm at this share).
+code=$(printf '%s\n' "$changed" | grep -E '\.(py|lua)$' | grep -vE '^(\.claude/worktrees/|graphify-corpus/)') || true
 [ -z "$code" ] && exit 0
 
 # Only files that still exist -- a commit that deletes a module must not make

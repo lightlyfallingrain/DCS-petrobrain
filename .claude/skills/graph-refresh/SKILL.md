@@ -48,15 +48,24 @@ symbols — but the judgement is not. Three things to look for specifically:
 .claude/scripts/graph-corpus-guard.sh graphify-out/.corpus.txt   # refuses a too-wide corpus
 ```
 
-**The guard is not a formality — run it and let it stop you.** On 2026-09-26 a rebuild indexed
-**1182 files / ~1.56M words** and announced it in its own `GRAPH_REPORT.md` ("Consider running on a
-subfolder"), while the curated corpus is ~119 files / ~333k words. Nobody noticed for a day. That run
-cost roughly **14x an incremental refresh**, and every one of those tokens was an extraction
-subagent's.
+**The guard is not a formality — run it and let it stop you.** It is prevention, not a fix for
+something that happened, and the story behind it is a lesson about reading a report:
 
-The reason it went unnoticed is worth keeping: a too-wide corpus produces a *bigger* graph, which
-reads as richer rather than wrong. There is no symptom to spot. So the count is the only defence, and
-`graph-corpus-guard.sh` exits non-zero rather than printing a number somebody skims past.
+`GRAPH_REPORT.md` from the 2026-09-26 build opens with *"Large corpus: 1182 files · ~1,558,241 words.
+Semantic extraction will be expensive... Consider running on a subfolder"*, against a curated corpus
+of ~120 files / ~333k words. On 2026-09-27 that was read as evidence the build had extracted ten times
+the intended set, and asserted as a **14x cost overrun** — in conversation, in a commit message, and
+in this file. It was wrong. That line is a *corpus-check warning about what the repository looks
+like*, not a record of what was extracted. The disproof took one query: **zero `.md` files in
+`graph.json` sit outside the curated corpus**, so semantic extraction had run on exactly the right
+documents.
+
+Keep the guard anyway. A too-wide corpus produces a *bigger* graph, which reads as richer rather than
+wrong, so there is no symptom to spot and the count is the only defence — `graph-corpus-guard.sh`
+exits non-zero rather than printing a number somebody skims past. But note which half of that
+sentence was load-bearing: the failure mode is real and undetectable, *and* the one apparent instance
+of it was a misreading. Check `graph.json`'s own source files before believing a corpus-size claim,
+including one written here.
 
 The corpus is a **selection expressed as a file list, not a directory**. It was once a copied mirror
 under `graphify-corpus/` and that broke two things at once: cache lookups keyed on mirror paths
