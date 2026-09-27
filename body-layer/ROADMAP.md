@@ -1225,7 +1225,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
 ## Backlog (body-layer)
 
-- [ ] **Threat-database follow-on extraction: search/track radar + acquire time — raised
+Items here are `BL-B<n>`. A new one takes the next unused number; numbers are never reused or
+renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
+
+- [ ] **BL-B1 — Threat-database follow-on extraction: search/track radar + acquire time — raised
   `plans/watch-reporting/plan.md` Decision 4f-iii, 2026-09-24.** The Hoggit source page (saved
   beside `body-layer/data/threat_envelopes.json` for exactly this) carries `Track RADAR`/`Search
   RADAR` columns with HARM codes and an acquire-time column; none of it is in the extracted
@@ -1239,7 +1242,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     time-in-envelope model nothing in this codebase has.
   Re-extract from the already-saved HTML; no re-fetch needed.
 
-- [ ] **`OP_SRSAM`'s ~4x-7x internal range spread makes its class-level danger call early and
+- [ ] **BL-B2 — `OP_SRSAM`'s ~4x-7x internal range spread makes its class-level danger call early and
   often badly wrong in magnitude — recorded, not fixed, `plans/watch-reporting/plan.md` Decision
   4c, 2026-09-24.** `belief.threat._CLASS_ENVELOPES`'s derived rollup for `OP_SRSAM` is driven by
   whichever member has the longest reach in the extracted table (S-125/SA-3 at 25.0 km,
@@ -1251,7 +1254,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   design, and should be recorded against the buckets (a future `object_model.py`/classification
   pass) rather than patched in `threat.py`.
 
-- [ ] **`belief.threat`'s class-level rollup only actually joined 3 of ~19 SAM/AAA threat rows into
+- [ ] **BL-B3 — `belief.threat`'s class-level rollup only actually joined 3 of ~19 SAM/AAA threat rows into
   a class bucket on the real table — found during `watch-reporting` implementation, 2026-09-24.**
   `_derive_class_envelopes` joins `body-layer/data/threat_envelopes.json`'s `threat` names through
   `perception.object_model.profile_for` by design (Decision 4c: computed, not hand-written), but
@@ -1265,7 +1268,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Not a defect in the join mechanism itself (a hand-authored patch here is exactly what Decision 4c
   warns against) — the fix belongs in `object_model.py`'s own keyword coverage.
 
-- [ ] **`alt_ok` has no hysteresis counterpart to `range_ok`'s `ENGAGEMENT_LEAVING_HYSTERESIS` —
+- [ ] **BL-B4 — `alt_ok` has no hysteresis counterpart to `range_ok`'s `ENGAGEMENT_LEAVING_HYSTERESIS` —
   found during the watch-reporting performance-review fix, 2026-09-24.** The short-circuit that
   skips `line_of_sight_clear` when `range_ok and alt_ok` is already `False` (performance fix,
   `contacts.py`) means any tick where ownship altitude oscillates right at `envelope.alt_min_m`
@@ -1276,7 +1279,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   never drop or falsely clear one. Fix (not done in `watch-reporting`, deliberately, per the fix
   review): a matching hysteresis margin on `alt_min_m` for symmetry with the range side.
 
-- [ ] **Two non-blocking hardening items from `watch-reporting`'s security deep review, deferred
+- [ ] **BL-B5 — Two non-blocking hardening items from `watch-reporting`'s security deep review, deferred
   to backlog by user direction, 2026-09-24.** Both are unreachable through the code that exists
   today; recorded because the two processes that make them unreachable restart independently.
   - `body-layer/src/belief/crew_console.py:486,1009` (and the token-keyed siblings at
@@ -1291,7 +1294,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     _FOLLOW_DESCRIPTOR_OP_CLASSES` already is, so a wire violation is dropped at the boundary
     rather than reaching the dict index above three calls later.
 
-- [ ] **Sector coverage — Decision 2a of `plans/sortie-2026-09-26-fixes/decisions.md`, staged out
+- [ ] **BL-B20 — Sector coverage — Decision 2a of `plans/sortie-2026-09-26-fixes/decisions.md`, staged out
   as a follow-on, 2026-09-26.** The user's requirement: if a scanned/watched sector holds several
   contacts, all of them should eventually get the attention needed to say what they are — not just
   re-eligibility for whichever one `choose_look` happens to land on. This is a `choose_look`
@@ -1304,7 +1307,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   cockpit-feel judgment, not a derived answer. Proposed plan location:
   `plans/optic-sector-coverage/plan.md` (not created yet).
 
-- [ ] **More frequent glances at a watched contact — Decision 1's third point,
+- [ ] **BL-B21 — More frequent glances at a watched contact — Decision 1's third point,
   `plans/sortie-2026-09-26-fixes/decisions.md`, 2026-09-26.** The user's own framing: the durable
   fix for a watched contact staying observable is Petrovich looking at it often enough to keep the
   knowledge fresh (and learn more about it), not a longer grace window — `CALLOUT_OBSERVABILITY_
@@ -1314,7 +1317,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Once it exists, revisit whether `CALLOUT_OBSERVABILITY_GRACE_S` still needs to be as long as it
   is, since attention-grabbing is what is meant to make the grace window rarely matter in practice.
 
-- [ ] **Pull-only briefing-derived belief (Decision 3, `plans/sortie-2026-09-26-fixes/
+- [ ] **BL-B22 — Pull-only briefing-derived belief (Decision 3, `plans/sortie-2026-09-26-fixes/
   decisions.md`, 2026-09-26) — a real exception to the no-omniscience callout gate, not built.**
   The user's spec: a unit believed to be at a location per the mission briefing is legitimate
   knowledge (a crew briefing is something Petrovich perceived, before the flight), but it may
@@ -1332,7 +1335,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   two exist; recorded here so the constraint on Fix A's design isn't lost before this becomes
   buildable.
 
-- [x] **`OP_LRSAM` folded into the air-defence command classes — merged 2026-09-24
+- [x] **BL-B6 — `OP_LRSAM` folded into the air-defence command classes — merged 2026-09-24
   (`fix/lrsam-air-defence`).** "Watch nearest air defence" could not select an S-300:
   `crew_console._AIR_DEFENCE_OP_CLASSES` held the two gun systems and the short/medium SAM tiers
   and nothing else. The excluded contact was the worst possible one to miss — at the calibrated
@@ -1353,7 +1356,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Found while reading `plans/watch-reporting/plan.md`, which flagged it and deliberately left it
   unfixed; fixed on user direction ("it is air defence"). Merged as a small fix, no DoD pass.
 
-- [x] **F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
+- [x] **BL-B7 — F10 radio-menu command input for Petrovich — mechanism done, merged 2026-09-13 (merge
   `eacc45c`, `feature/f10-crew-commands`).** The player's preferred in-cockpit command UI: the
   native DCS F10 radio menu, not keybinds (F-4E-style radial wheel explicitly out of scope). A
   Hook script (`aircraft-layer/dcs-export/petrobrain-f10-commands-hook.lua`) registers
@@ -1371,7 +1374,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   dod-check). Next-milestone impact: none on the BL sequence; it adds a second `CrewConsole` input
   surface that BL-10's audio transport can follow.
 
-- [x] **F10 command vocabulary and ownship-relative sectors — command half done, merged
+- [x] **BL-B8 — F10 command vocabulary and ownship-relative sectors — command half done, merged
   2026-09-16, merge `1a9189c` (`feature/f10-command-vocabulary`,
   `plans/f10-command-vocabulary/plan.md`).** Addresses "F10
   command refinement and specification" below for the command half of `docs/concept/
@@ -1402,13 +1405,13 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   the whole point is to enable the next sortie; that sortie is the acceptance test and feeds the
   autonomous half. Next-milestone impact: none on the BL-x sequence.
 
-- [x] **F10 Watch Nearest reply in contact-report format — done, merged 2026-09-13 (merge
+- [x] **BL-B9 — F10 Watch Nearest reply in contact-report format — done, merged 2026-09-13 (merge
   `a4e8704`, `fix/f10-watch-nearest-readback`).** Live
   2026-09-13 it replied "Watching CONTACT_1."; now `"Watching <unit type>, <clock> o'clock, <range>
   km[ <semantic fact>]."` via `speech.render_watch_nearest_readback` / `_contact_report_text`, no
   spoken id. Typed `watch <id>` readback unchanged.
 
-- [x] **Movement detection — ACCEPTED 2026-09-23** on the five-fix sortie (user: *"pass on
+- [x] **BL-B10 — Movement detection — ACCEPTED 2026-09-23** on the five-fix sortie (user: *"pass on
   preliminary test, will test and adjust more in future"*). Design settled 2026-09-20 (user),
   implemented 2026-09-22 (`plans/movement-detection/plan.md`).
 
@@ -1530,7 +1533,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   detection-range constants: a still frame cannot show motion, so that constant's only calibration
   path is a purpose-built sortie.
 
-- [>] **Threat-based report prioritisation (`docs/concept/threat-levels.md`) — spec exists, mostly
+- [>] **BL-B11 — Threat-based report prioritisation (`docs/concept/threat-levels.md`) — spec exists, mostly
   gated.** The user's own table: five priority bands (urgent / high / medium / low / ignore), what
   each does to reporting, and what counts as "dangerous to us". Raised 2026-09-20 asking where it
   fits; the answer is that it is **not one milestone** — it decomposes by what each row needs, and
@@ -1587,7 +1590,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
 
   **Do not start without the user's instruction**, same posture as the coalition item it depends on.
 
-- [>] **Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:
+- [>] **BL-B12 — Coalition/IFF for contact reports — deferred, inferred not omniscient.** Raised 2026-09-10:
   the new contact-report format (`belief/speech.py`'s `render_contact_report`) has a
   FRIENDLY/ENEMY/HOSTILE/UNKNOWN slot, always `"UNKNOWN"` for now — no coalition/IFF perception
   channel exists (`perception.association`'s own docstring: "no coalition/IFF filtering"), and
@@ -1598,7 +1601,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   doesn't exist in world-model yet either. Not scoped to a specific BL-x milestone. **Do not start
   without the user's instruction.**
 
-- [>] **Parked: stop consuming DCS's ambient detection at all, own perception end-to-end.** Raised
+- [>] **BL-B13 — Parked: stop consuming DCS's ambient detection at all, own perception end-to-end.** Raised
   2026-09-09 after the PB-1.5 live probe showed DCS's ambient callout is unreadable/late/
   sight-coupled. All four open questions were answered by the user 2026-09-09 (scope channel
   stays — needed for future acquire/lock/fire gameplay, which is why the association-namespace-
@@ -1610,7 +1613,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   should too." Calibration needs live sorties, so it's meant to ride along with a milestone that's
   flying anyway rather than run standalone. **Do not start without the user's instruction.**
 
-- [ ] **Contact report fine tuning — a running list, appended to as real sorties surface things.**
+- [ ] **BL-B14 — Contact report fine tuning — a running list, appended to as real sorties surface things.**
   Opened 2026-09-18 from the first flights with TTS live. These are about what Petrovich *says* and
   how it sounds, not about what he believes; most touch `belief/speech.py` and
   `belief/enrichment.py` only. Grouped by what they cost.
@@ -1657,7 +1660,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
     whether `object_model`'s `OP_*` vocabulary has air classes or needs them. This is plausibly a
     classification change rather than a speech one, which would put it outside this item.
 
-- [ ] **Petrovich's voice has no character — generic English TTS, and monotonous with it.** Deferred deliberately at
+- [ ] **BL-B15 — Petrovich's voice has no character — generic English TTS, and monotonous with it.** Deferred deliberately at
   BL-10 slice 1 (`plans/tts-voice-output/plan.md` Decision 7) rather than forgotten. macOS `say`
   ships no Russian-accented English voice (`Milena` is Russian-*language*, a different thing), and
   solving it would have expanded a slice whose point was "audible at all". Options when picked up:
@@ -1668,7 +1671,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   and it has different fixes — SSML, per-line rate and pitch, or urgency-aware templates. Cheap to try in isolation — `audio-adapter --target local --voice <name>` plays a
   line on the Mac with nothing else running, so voice auditioning costs one command per candidate.
 
-- [ ] **Cross-channel contact duplication — continuity maps are per-channel, not shared.** Found
+- [ ] **BL-B16 — Cross-channel contact duplication — continuity maps are per-channel, not shared.** Found
   2026-09-10 during the object-permanence fix's live acceptance: a real civilian bus was tracked as
   two separate contacts, one per channel (naked-eye and scope/HelperAI), because each
   `PerceptionSource` instance keeps its own `object_id → observation_id` continuity map, not a
@@ -1676,7 +1679,7 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   Candidate fix: a shared, cross-channel map (owned where — `belief/`? a new shared perception-layer
   component?). Not investigated or scoped yet.
 
-- [~] **`certainty`/classification fusion is last-writer-wins — classification half resolved by
+- [~] **BL-B17 — `certainty`/classification fusion is last-writer-wins — classification half resolved by
   BL-2.6, certainty half still open.** `Contact.classification` no longer overwrites on last-write
   (BL-2.6's `fold_classification`). `decay.certainty_of` is still a pure function of
   `now_sim - last_seen_sim` with no notion of which contributing observation had tighter position
@@ -1686,13 +1689,13 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   different uncertainty models), not a quick patch — revisit once real sortie data shows it actually
   degrading perceived contact quality.
 
-- [x] **BL-2.5 overlay clips its last line at 420×200 — REJECTED 2026-09-26 (user), not fixed.**
+- [x] **BL-B18 — BL-2.5 overlay clips its last line at 420×200 — REJECTED 2026-09-26 (user), not fixed.**
   Closed as won't-fix rather than done: the clipping is real and the candidate fix still stands
   (re-implement dynamic sizing as its own commit, separate from any cosmetic change — the fix was
   bundled with a since-reverted restyle and went back with it). The user judged it not worth
   spending on. Reopen only if a future overlay change makes it cheap or makes the clipping worse.
 
-- [x] **BL-2.5 overlay has no dismiss affordance — REJECTED 2026-09-26 (user), not fixed.** It was
+- [x] **BL-B19 — BL-2.5 overlay has no dismiss affordance — REJECTED 2026-09-26 (user), not fixed.** It was
   already moot while the titled window keeps its close button; the user closed it outright. It
   would only return if the borderless restyle is ever revisited, and that restyle is itself
   rejected.
