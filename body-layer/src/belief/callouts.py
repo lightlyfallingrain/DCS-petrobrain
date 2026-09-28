@@ -39,43 +39,50 @@ slots in as that first element later without touching anything else (see
 the plan's "Priority" section for the full rationale on each surviving
 key: attention, then proximity, then recency).
 
-**Aggregation groups in report space, not world space.**
-`group_candidates` does **not** reuse `perception.clustering.
-cluster_candidates` -- that module answers a different question (are two
-*live candidates* optically resolvable apart, at the magnitude of one
-target width) from the one a callout grouping asks (would two *reports*
-sound the same to a listener, at the magnitude of the reporting
-quantisation -- a 30-degree clock bucket, a rounded range word). It is
-computed entirely from `belief.tools.describe_contact` facts, reusing
-`belief.speech._unit_type_display`/`_format_range_km` so a report's own
-displayed words are exactly what decide whether two reports would sound
-the same -- deliberately not a second, parallel word-choice path.
-`ClusterCandidate` also carries ground-truth positions that `belief/` must
-not see (`belief/percept.py`'s structural no-omniscience boundary); this
-module never imports `perception.clustering` for that reason, independent
-of the "different question" argument above.
+**Group disclosure now speaks for its members (`plans/group-reporting/
+plan.md` Stage 4).** `tick` reads `store.groups` directly, once per call,
+alongside `store.unacknowledged_events` -- two candidate sources feeding
+one shared priority sort (`callout_priority`/`group_priority`), no `Event`
+kind minted for a group's own trigger. A `CONTACT_DETECTED`/`CONTACT_
+REACQUIRED` event whose contact currently belongs to a group is filtered
+out of the event candidate pool before scoring (never consumed -- it
+surfaces instead as the group's own line changing, see `belief.groups`'
+module docstring on why a membership change is always a live disclosure
+trigger); every other kind still competes and speaks exactly as it does
+today, grouped contact or not. `group_candidates` (the event-level,
+report-space bucketer this replaces) is retired -- see below.
 
-`CONTACT_CLASSIFICATION_CHANGED` events are never grouped -- aggregating a
-specific identification into a generic count is exactly what would make a
-BTR-70 disappear into "three infantry", which is the failure this design
-explicitly guards against (plan, "What is lost, and what is not").
+**`group_facts`/`render_group_report` are report-space bucketing, kept as
+the residual path for contacts a real `belief.groups.Group` does not
+cover** -- `CrewConsole._handle_report`'s own on-demand "report" command
+(the `belief.crew_console` module), and any live candidate whose
+`describe_contact` facts have no `relative_now` at all. This module no
+longer calls either from `tick` itself: `group_candidates`, the function
+that used to bucket *events* the same way, is deleted -- with grouped
+detections filtered out before scoring and nothing else ever needing a
+multi-`Event` report-space bucket, nothing calls it. `CONTACT_
+CLASSIFICATION_CHANGED` events are never grouped by anything, upstream or
+here -- aggregating a specific identification into a generic count is
+exactly what would make a BTR-70 disappear into "three infantry", which is
+the failure this design explicitly guards against (plan, "What is lost,
+and what is not").
 
-**Per-contact disclosure gating (`plans/group-reporting/plan.md` Stage 1).**
-`CalloutScheduler` also suppresses a scheduled `CONTACT_DETECTED`/
-`CONTACT_REACQUIRED` candidate whose rendered text is byte-identical to the
-last one actually spoken for that same contact (`_last_spoken_signature`,
-checked in `_render_group`'s singleton branch before `route_event` is ever
-called, so a suppressed duplicate is never acknowledged). This is real
-value on its own -- a repeated detection/reacquisition cycle at the same
-rounded range/clock no longer re-speaks the identical line -- but it is a
-per-contact check, not a cross-contact one: it does not, by itself, fix the
-"fifty different single-vehicle contacts each say a near-identical line
-once" noise a real belief-level `belief.groups.Group` (Stage 2) exists to
-fix. See `plans/group-reporting/plan.md`'s own effort/value section."""
+**Per-contact disclosure gating (`plans/group-reporting/plan.md` Stage 1)
+still stands for ungrouped contacts.** `CalloutScheduler` suppresses a
+scheduled `CONTACT_DETECTED`/`CONTACT_REACQUIRED` candidate whose rendered
+text is byte-identical to the last one actually spoken for that same
+contact (`_last_spoken_signature`, checked in `_render_event`'s singleton
+branch before `route_event` is ever called, so a suppressed duplicate is
+never acknowledged) -- a repeated detection/reacquisition cycle at the same
+rounded range/clock no longer re-speaks the identical line. A grouped
+contact's own detection never reaches this check at all (filtered out
+before scoring, above); this gate now only ever sees a contact with no
+group."""
 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
@@ -91,11 +98,13 @@ from belief.events import (
     Event,
     EventKind,
 )
+from belief.groups import Group
 from belief.speech import (
     _format_range_km,
+    _group_member_facts,
     _unit_type_display,
     render_contact_report,
-    render_group_report,
+    render_group_disclosure,
     route_event,
 )
 from belief.tools import acknowledge_event, describe_contact
@@ -124,12 +133,12 @@ _TEMPLATED_KINDS: Final[frozenset[EventKind]] = frozenset(
 #: regardless (see `belief.events`'s own docstring for `CONTACT_MOTION_
 #: CHANGED`), and whether it is ever *spoken* depends on attention at the
 #: moment `tick` considers it -- so a contact watched after its event fired
-#: still gets the callout. Also forced to always be a singleton group in
-#: `group_candidates` below, alongside `CONTACT_CLASSIFICATION_CHANGED` --
+#: still gets the callout. Never filtered by group membership either (see
+#: module docstring's "Group disclosure now speaks for its members") --
 #: these kinds render through `_contact_report_text`'s `event_clause`/`lead`
-#: affixes (`belief.speech`), which `render_group_report` has no concept of,
-#: so merging one into a multi-contact group would silently drop the very
-#: fact the event exists to report.
+#: affixes (`belief.speech`), which `render_group_report`/`render_group_
+#: disclosure` have no concept of, so folding one into a group's own line
+#: would silently drop the very fact the event exists to report.
 _WATCHED_ONLY_KINDS: Final[frozenset[EventKind]] = frozenset(
     {CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, CONTACT_ENGAGEMENT_CHANGED}
 )
@@ -175,7 +184,7 @@ MIN_UTTERANCE_S: Final[float] = 0.6
 
 #: The 30-degree clock bucket `belief.association_over_time` already treats
 #: as one bucket -- two reports whose clock positions are this close read as
-#: "the same direction" to a listener. See `group_candidates`'s docstring.
+#: "the same direction" to a listener. See `group_facts`'s docstring.
 CALLOUT_GROUP_CLOCK_SPAN_HOURS: Final[int] = 1
 
 #: A chaining cap `perception/clustering.py` deliberately still lacks
@@ -248,6 +257,43 @@ def callout_priority(
     return (_DEFAULT_THREAT_BAND, -rank, range_m, -event.t_sim)
 
 
+def group_priority(
+    member_facts: Sequence[dict[str, object]], now_sim: float
+) -> tuple[int, int, float, float]:
+    """`callout_priority`'s group-level analogue (`plans/group-reporting/
+    plan.md`'s Stage 4 design, section 3) -- same tuple shape, so a `Group`
+    candidate and an `Event` candidate sort in one shared list. `-attention_
+    rank` uses the *highest* rank among `member_facts` -- any one watched/
+    prioritised member elevates the whole group's line, matching `belief.
+    speech.render_group_disclosure`'s own trailing `", watched"` clause,
+    which fires on the same "any member" test (user direction). `range_m`
+    is the nearest member's, the same convention `render_group_disclosure`/
+    `render_group_report` both already use. `-now_sim` stands in for
+    `-event.t_sim`: a group candidate has no event and no age -- it is read
+    fresh from `Group.last_spoken_signature` every tick (`belief.groups`'
+    module docstring: groups need no expiry and no `_consumed` bookkeeping)
+    -- so "now" is the only honest recency value, and every group candidate
+    this tick ties on it, which is fine: ties only matter for stable
+    ordering, not for staleness."""
+    default_rank = _ATTENTION_PRIORITY_RANK["normal"]
+    best_rank = default_rank
+    nearest_range_m = math.inf
+    for facts in member_facts:
+        attention = facts.get("attention")
+        rank = (
+            _ATTENTION_PRIORITY_RANK.get(attention, default_rank)
+            if isinstance(attention, str)
+            else default_rank
+        )
+        best_rank = max(best_rank, rank)
+        relative_now = facts.get("relative_now")
+        if isinstance(relative_now, dict):
+            range_m = relative_now["range_m"]
+            assert isinstance(range_m, float)
+            nearest_range_m = min(nearest_range_m, range_m)
+    return (_DEFAULT_THREAT_BAND, -best_rank, nearest_range_m, -now_sim)
+
+
 def report_priority(facts: dict[str, object]) -> tuple[int, int, float]:
     """`callout_priority`'s facts-only sibling, for ordering a report's
     groups (`plans/voice-command-completeness/plan.md` Decision 1b's
@@ -281,6 +327,14 @@ def _clock_diff(a: int, b: int) -> int:
 
 _ChainItem = TypeVar("_ChainItem")
 
+#: `CalloutScheduler.tick`'s one shared candidate type -- an `Event` (an
+#: ungrouped contact's own lifecycle/classification candidate) or a
+#: `belief.groups.Group` (a persisted associative belief's own disclosure
+#: candidate, Stage 4). Scored into one list via `callout_priority`/
+#: `group_priority`'s identically-shaped tuples; `isinstance(candidate,
+#: Group)` at speak-time picks which render path applies.
+_Candidate = Event | Group
+
 
 def _chain_by_clock(
     members: list[tuple[_ChainItem, int]],
@@ -293,8 +347,11 @@ def _chain_by_clock(
     voice-command-completeness/plan.md` Stage 2 extracted `group_facts`,
     below, which chains raw `facts` dicts rather than `Event`s; this
     function never reads anything `Event`-specific, so widening it to any
-    item type is a pure generalisation, not a behaviour change) --
-    `group_candidates` still calls it with `Event` members.
+    item type is a pure generalisation, not a behaviour change). `group_
+    facts` is this function's only caller now -- `group_candidates`, the
+    event-level wrapper that used to call it with `Event` members, was
+    retired in `plans/group-reporting/plan.md`'s Stage 4 (module
+    docstring's "Group disclosure now speaks for its members").
 
     Clock positions are circular (12 and 1 are adjacent), so this first
     finds the widest gap in the *sorted-by-value* set of distinct clock
@@ -357,27 +414,29 @@ def group_facts(
     facts_list: list[dict[str, object]],
 ) -> list[list[dict[str, object]]]:
     """The bucket+chain merge rule (see module docstring's "Aggregation"
-    note), lifted verbatim out of `group_candidates` (`plans/
+    note), originally lifted out of `group_candidates` (`plans/
     voice-command-completeness/plan.md` Stage 2) to a purely facts-level
     function -- the grouping decision has never needed anything but
     `belief.tools.describe_contact` facts; only the event->facts lookup
-    that used to precede it was event-specific. `group_candidates` below
-    is now the thin event->facts->`group_facts`->events wrapper this split
-    leaves it as; `crew_console.CrewConsole._handle_report` is the other,
-    new caller -- a report has no events at all to look facts up from, it
-    already holds a facts list.
+    that used to precede it was event-specific. `group_candidates` itself
+    was retired in `plans/group-reporting/plan.md`'s Stage 4 (module
+    docstring's "Group disclosure now speaks for its members") once a real
+    `belief.groups.Group` took over the event-level case this function used
+    to be called for; `crew_console.CrewConsole._handle_report`'s own
+    residual bucketing of contacts with no `Group` (report has no events to
+    look facts up from -- it already holds a facts list) is this function's
+    sole caller now.
 
     A facts dict with no `relative_now` (no `EnrichmentContext` supplied,
     or -- for a report's own pre-filtered list -- unreachable in practice
     since the caller has already dropped those) is always a singleton
-    group; grouping degrades to "no grouping" rather than guessing, the
-    same accepted consequence `group_candidates`'s own docstring already
-    states.
+    group; grouping degrades to "no grouping" rather than guessing.
 
     Bucketed on the same reporting-word key `_format_range_km`/
     `_unit_type_display` would render, so a report's own spoken words are
     exactly what decides whether two contacts sound the same -- see module
-    docstring's "Aggregation groups in report space, not world space"."""
+    docstring's "`group_facts`/`render_group_report` are report-space
+    bucketing" note."""
     singles: list[list[dict[str, object]]] = []
     bucketed: dict[tuple[str, str], list[tuple[dict[str, object], int]]] = {}
 
@@ -402,59 +461,6 @@ def group_facts(
     return groups
 
 
-def group_candidates(
-    events: list[Event],
-    store: ContactStore,
-    now_sim: float,
-    enrichment: EnrichmentContext | None,
-) -> list[list[Event]]:
-    """Partition `events` into groups that should be spoken as one line --
-    see module docstring's "Aggregation" note for the merge rule and why it
-    is computed here rather than reusing `perception.clustering`. The
-    merge rule itself now lives in `group_facts` above; this function is
-    only the event->facts lookup around it, plus the two singleton cases
-    that are genuinely event-specific (a `CONTACT_CLASSIFICATION_CHANGED`
-    kind, or a contact that has vanished since the event was recorded --
-    `group_facts` cannot see either, since it only ever receives facts).
-
-    `CONTACT_CLASSIFICATION_CHANGED` events are always singleton groups
-    (never aggregated), as is any kind in `_WATCHED_ONLY_KINDS` (see that
-    constant's own docstring -- their `event_clause`/`lead` affixes have no
-    group-report equivalent). An event whose contact has since vanished is
-    also always a singleton group -- `CalloutScheduler.tick` discovers a
-    vanished contact itself when it tries to render, this function only
-    needs facts to bucket."""
-    singles: list[Event] = []
-    remaining: list[tuple[Event, dict[str, object]]] = []
-
-    for event in events:
-        if (
-            event.kind == CONTACT_CLASSIFICATION_CHANGED
-            or event.kind in _WATCHED_ONLY_KINDS
-        ):
-            singles.append(event)
-            continue
-        result = describe_contact(
-            store, event.contact_id, now_sim, enrichment=enrichment
-        )
-        if result is None:
-            singles.append(event)
-            continue
-        remaining.append((event, result["facts"]))
-
-    # `group_facts` never reorders or copies the dicts it is given -- it
-    # only reorganises references into new lists -- so mapping by object
-    # identity back to the event each facts dict came from is safe, and
-    # cheaper than threading an id through the shared, facts-only function.
-    event_by_facts_id = {id(facts): event for event, facts in remaining}
-    grouped_facts = group_facts([facts for _, facts in remaining])
-
-    groups: list[list[Event]] = [[event] for event in singles]
-    for facts_group in grouped_facts:
-        groups.append([event_by_facts_id[id(facts)] for facts in facts_group])
-    return groups
-
-
 @dataclass
 class CalloutScheduler:
     """Owns speech-time occupancy for one `CrewConsole` -- see module
@@ -472,17 +478,16 @@ class CalloutScheduler:
     _last_spoken_sim: dict[str, float] = field(default_factory=dict, repr=False)
     #: `plans/group-reporting/plan.md` Stage 1 -- per-contact rendered-
     #: signature gating for `CONTACT_DETECTED`/`CONTACT_REACQUIRED`
-    #: (see `_render_group`'s singleton branch): the exact text `render_
+    #: (see `_render_event`'s singleton branch): the exact text `render_
     #: contact_report` last actually produced for this contact, keyed by
     #: `contact_id`. A candidate whose freshly rendered text is
     #: byte-identical to this is suppressed -- a hold on a lockout-armed
     #: classification, or a re-detection at the same rounded range/clock,
     #: both read as "unchanged" under this check, since both produce the
     #: same rendered text. Absent-not-null: no entry means "never spoken
-    #: yet," never `None`. This is real value on its own (the plan's own
-    #: effort/value section), but is **not** expected to close most of the
-    #: cross-contact noise a real `Group` (Stage 2) fixes -- this only
-    #: suppresses a *repeated* line about the *same* contact.
+    #: yet," never `None`. Since Stage 4 (module docstring), a grouped
+    #: contact's own `CONTACT_DETECTED`/`CONTACT_REACQUIRED` never reaches
+    #: this check at all -- it only ever sees an ungrouped contact now.
     _last_spoken_signature: dict[str, str] = field(default_factory=dict, repr=False)
 
     def note_urgent(self, now_sim: float, text: str) -> None:
@@ -520,54 +525,50 @@ class CalloutScheduler:
             now_sim + estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S,
         )
 
-    def _render_group(
+    def _render_event(
         self,
         store: ContactStore,
-        group: list[Event],
+        event: Event,
         now_sim: float,
         enrichment: EnrichmentContext | None,
     ) -> str | None:
-        """Renders one candidate (a singleton or a multi-member group) and
-        acknowledges every member event it actually spoke for. Returns
-        `None` without acknowledging anything if any member's contact has
-        vanished since grouping -- the caller then consumes every id in
-        this candidate and tries the next one (plan, step 5: "If the render
-        returns `None` ... consume and try the next candidate")."""
-        if len(group) == 1:
-            event = group[0]
-            if event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED):
-                # `plans/group-reporting/plan.md` Stage 1: suppress a
-                # scheduled contact-report callout whose rendered text is
-                # unchanged from the last one actually spoken for this
-                # contact -- computed *before* calling `route_event`
-                # (which auto-acknowledges on success), so a suppressed
-                # duplicate is left unacknowledged, same "lost, not
-                # deferred" treatment `tick` already gives an expired or
-                # vanished candidate.
-                candidate = render_contact_report(
-                    store, event.contact_id, now_sim, enrichment
-                )
-                if candidate is None:
-                    return None
-                if self._last_spoken_signature.get(event.contact_id) == candidate.text:
-                    return None
-            speech = route_event(store, event, now_sim, enrichment)
-            if speech is None:
-                return None
-            if event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED):
-                self._last_spoken_signature[event.contact_id] = speech.text
-            return speech.text
-        facts_list: list[dict[str, object]] = []
-        for event in group:
-            result = describe_contact(
-                store, event.contact_id, now_sim, enrichment=enrichment
+        """Renders one event candidate and acknowledges it. Returns `None`
+        without acknowledging anything if its contact has vanished since
+        scoring -- the caller then consumes this candidate's id and tries
+        the next one (plan, step 5: "If the render returns `None` ...
+        consume and try the next candidate").
+
+        Takes a single `Event`, never a list -- `plans/group-reporting/
+        plan.md`'s Stage 4 design retired `group_candidates`, the only
+        source of a multi-`Event` candidate, so the multi-member branch
+        this function used to have (`render_group_report` over several
+        events) is dead code once nothing constructs that shape anymore;
+        deleted here rather than left unreachable. Renamed from `_render_
+        group` in the same change -- that name, for a `list[Event]`, would
+        collide with `belief.groups.Group` now that this module scores
+        real `Group` candidates too (see `tick` below)."""
+        if event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED):
+            # `plans/group-reporting/plan.md` Stage 1: suppress a
+            # scheduled contact-report callout whose rendered text is
+            # unchanged from the last one actually spoken for this
+            # contact -- computed *before* calling `route_event` (which
+            # auto-acknowledges on success), so a suppressed duplicate is
+            # left unacknowledged, same "lost, not deferred" treatment
+            # `tick` already gives an expired or vanished candidate. Only
+            # ever reached for an ungrouped contact since Stage 4 -- a
+            # grouped one is filtered out of `live` before this is called.
+            candidate = render_contact_report(
+                store, event.contact_id, now_sim, enrichment
             )
-            if result is None:
+            if candidate is None:
                 return None
-            facts_list.append(result["facts"])
-        speech = render_group_report(facts_list)
-        for event in group:
-            acknowledge_event(store, event.id)
+            if self._last_spoken_signature.get(event.contact_id) == candidate.text:
+                return None
+        speech = route_event(store, event, now_sim, enrichment)
+        if speech is None:
+            return None
+        if event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED):
+            self._last_spoken_signature[event.contact_id] = speech.text
         return speech.text
 
     def tick(
@@ -577,14 +578,30 @@ class CalloutScheduler:
         enrichment: EnrichmentContext | None = None,
     ) -> list[str]:
         """Speak at most one thing, chosen fresh from current belief. See
-        module docstring for the full algorithm; this is the plan's
-        numbered steps 1-7 in one function."""
+        module docstring for the full algorithm; this is `plans/
+        group-reporting/plan.md`'s Stage 4 design, section 4, "`tick`'s
+        shape, end to end" -- two candidate sources (`store.
+        unacknowledged_events`, `store.groups`) feeding one shared priority
+        sort, no `Event` ever minted for a group's own trigger."""
         if now_sim < self.busy_until_sim:
             return []
 
         live: list[Event] = []
         for event in store.unacknowledged_events:
             if event.kind not in _TEMPLATED_KINDS or event.id in self._consumed:
+                continue
+            if (
+                event.kind
+                in (
+                    CONTACT_DETECTED,
+                    CONTACT_REACQUIRED,
+                )
+                and store.group_for_contact(event.contact_id) is not None
+            ):
+                # Spoken for by the group's own disclosure line instead --
+                # skip without consuming, same "not yet" treatment
+                # `_WATCHED_ONLY_KINDS`'s not-watched-yet case gets below
+                # (Stage 4 design, section 1).
                 continue
             if event.kind in _WATCHED_ONLY_KINDS:
                 result = describe_contact(
@@ -610,43 +627,69 @@ class CalloutScheduler:
                 continue
             live.append(event)
 
-        if not live:
-            return []
-
-        groups = group_candidates(live, store, now_sim, enrichment)
-
-        scored: list[tuple[tuple[int, int, float, float], list[Event]]] = []
-        for group in groups:
-            priorities: list[tuple[int, int, float, float]] = []
-            vanished = False
-            for event in group:
-                result = describe_contact(
-                    store, event.contact_id, now_sim, enrichment=enrichment
-                )
-                if result is None:
-                    vanished = True
-                    break
-                priorities.append(callout_priority(result["facts"], event, now_sim))
-            if vanished:
-                for event in group:
-                    self._consumed.add(event.id)
+        scored: list[tuple[tuple[int, int, float, float], _Candidate]] = []
+        for event in live:
+            result = describe_contact(
+                store, event.contact_id, now_sim, enrichment=enrichment
+            )
+            if result is None:
+                self._consumed.add(event.id)
                 continue
-            scored.append((min(priorities), group))
+            scored.append((callout_priority(result["facts"], event, now_sim), event))
+
+        for belief_group in store.groups:
+            member_facts = _group_member_facts(
+                store, belief_group, now_sim, enrichment=enrichment
+            )
+            if member_facts is None:
+                # Fewer than two members currently resolve -- self-corrects
+                # on the next `GroupStore.reconcile`, nothing to do here.
+                continue
+            speech = render_group_disclosure(store, belief_group, now_sim, enrichment)
+            if speech is None or speech.text == belief_group.last_spoken_signature:
+                # Nothing changed since this group last spoke -- silent,
+                # not a candidate this tick at all (Stage 4 design,
+                # section 4, step 2).
+                continue
+            scored.append((group_priority(member_facts, now_sim), belief_group))
+
+        if not scored:
+            return []
 
         scored.sort(key=lambda item: item[0])
 
-        for _, group in scored:
-            text = self._render_group(store, group, now_sim, enrichment)
-            if text is None:
-                for event in group:
-                    self._consumed.add(event.id)
-                continue
+        for _, candidate in scored:
+            text: str | None
+            if isinstance(candidate, Group):
+                # Re-render fresh at the instant of speaking, not the
+                # scoring-time text -- the same "nothing exists ahead of
+                # being spoken" invariant every other candidate gets
+                # (Stage 4 design, section 4, step 4).
+                speech = render_group_disclosure(store, candidate, now_sim, enrichment)
+                if speech is None or speech.text == candidate.last_spoken_signature:
+                    # Rare/defensive: belief moved between scoring and
+                    # speaking within this one `tick()` call. Fall through
+                    # to the next candidate exactly as a vanished event
+                    # candidate does.
+                    continue
+                store.mark_group_spoken(candidate.id, speech.text, now_sim)
+                for member_event in store.unacknowledged_events:
+                    if (
+                        member_event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED)
+                        and member_event.contact_id in candidate.member_contact_ids
+                    ):
+                        acknowledge_event(store, member_event.id)
+                text = speech.text
+            else:
+                text = self._render_event(store, candidate, now_sim, enrichment)
+                if text is None:
+                    self._consumed.add(candidate.id)
+                    continue
+                if candidate.kind in _WATCHED_ONLY_KINDS:
+                    self._last_spoken_sim[candidate.contact_id] = now_sim
             self.busy_until_sim = (
                 now_sim + estimate_speech_duration_s(text) + INTER_UTTERANCE_GAP_S
             )
-            for event in group:
-                if event.kind in _WATCHED_ONLY_KINDS:
-                    self._last_spoken_sim[event.contact_id] = now_sim
             return [text]
 
         return []

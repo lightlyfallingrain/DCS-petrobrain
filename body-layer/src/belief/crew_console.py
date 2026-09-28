@@ -96,6 +96,7 @@ from belief.speech import (
     render_confirm_request,
     render_contact_report,
     render_disambiguation,
+    render_group_disclosure,
     render_group_report,
     render_lost_contact,
     render_no_contact,
@@ -1436,7 +1437,16 @@ class CrewConsole:
         empty result for a rear-hemisphere `sector` speaks `render_no_view`
         instead of `render_clear`. A contact that *is* believed to sit
         there is still reported normally -- belief survives the aircraft
-        turning away; only the *absence* claim is withheld."""
+        turning away; only the *absence* claim is withheld.
+
+        **Group+render (`plans/group-reporting/plan.md` Stage 4, section 6)**
+        resolves each in-scope contact's `belief.groups.Group` first and
+        speaks each distinct group once via `belief.speech.render_group_
+        disclosure` -- the same renderer `CalloutScheduler.tick` uses for
+        the push path, so a pushed callout and a pulled "report" describe
+        one group identically. Contacts with no group still go through the
+        pre-existing `group_facts`/`render_group_report` report-space
+        bucketing."""
         if self.enrichment is None:
             return ["no world-model connection configured"]
 
@@ -1475,17 +1485,59 @@ class CrewConsole:
                 return [render_no_view(direction_label).text]
             return [render_clear(direction_label).text]
 
-        groups = sorted(
-            group_facts(facts_list),
-            key=lambda group: min(report_priority(facts) for facts in group),
-        )
-        texts = [
-            _contact_report_text(group[0])
-            if len(group) == 1
-            else render_group_report(group).text
-            for group in groups[:REPORT_MAX_GROUPS]
-        ]
-        truncated = len(groups) > REPORT_MAX_GROUPS
+        # `plans/group-reporting/plan.md` Stage 4 design, section 6: a
+        # contact already in this report's scope may belong to a real,
+        # persisted `belief.groups.Group` -- resolve those first and speak
+        # each distinct group once via `render_group_disclosure`, so a
+        # pushed callout and a pulled "report" describe the same group
+        # identically. Everything left over (no group at all) still goes
+        # through `group_facts`/`render_group_report`'s report-space
+        # bucketing exactly as before.
+        grouped_by_id: dict[str, list[dict[str, object]]] = {}
+        ungrouped_facts_list: list[dict[str, object]] = []
+        for facts in facts_list:
+            contact_id = facts["id"]
+            assert isinstance(contact_id, str)
+            belief_group = self.store.group_for_contact(contact_id)
+            if belief_group is None:
+                ungrouped_facts_list.append(facts)
+                continue
+            grouped_by_id.setdefault(belief_group.id, []).append(facts)
+
+        report_entries: list[tuple[tuple[int, int, float], str]] = []
+        for in_scope_member_facts in grouped_by_id.values():
+            leading_id = in_scope_member_facts[0]["id"]
+            assert isinstance(leading_id, str)
+            belief_group = self.store.group_for_contact(leading_id)
+            assert belief_group is not None
+            # A report is pull-based, so it always speaks fresh -- no
+            # `last_spoken_signature` gate here, that exists only to
+            # throttle the push (`CalloutScheduler`) path.
+            speech = render_group_disclosure(
+                self.store, belief_group, now_sim, self.enrichment
+            )
+            if speech is None:
+                # Fewer than two members currently resolve to a live
+                # `Contact` -- fall back to this report's own ungrouped
+                # bucketing for the in-scope member(s) rather than
+                # silently dropping them from the report.
+                ungrouped_facts_list.extend(in_scope_member_facts)
+                continue
+            priority = min(report_priority(facts) for facts in in_scope_member_facts)
+            report_entries.append((priority, speech.text))
+
+        for bucket in group_facts(ungrouped_facts_list):
+            priority = min(report_priority(facts) for facts in bucket)
+            text = (
+                _contact_report_text(bucket[0])
+                if len(bucket) == 1
+                else render_group_report(bucket).text
+            )
+            report_entries.append((priority, text))
+
+        report_entries.sort(key=lambda item: item[0])
+        texts = [text for _, text in report_entries[:REPORT_MAX_GROUPS]]
+        truncated = len(report_entries) > REPORT_MAX_GROUPS
         return [render_report(texts, truncated).text]
 
     def _describe_task_for_speech(self, task: PendingIntent) -> str | None:

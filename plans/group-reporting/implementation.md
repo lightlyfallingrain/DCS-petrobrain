@@ -122,3 +122,173 @@ per the plan's own "commit per stage" instruction):
   <tool>` with `cwd` inside this worktree's `body-layer/` directory — confirmed this resolves
   `mypy_path`/`pytest`'s `pythonpath` correctly (both are relative to the invoking process's CWD,
   not the venv's own location) before relying on it for every subsequent check.
+
+---
+
+### Stage 4: wiring group disclosure into `CalloutScheduler` and `_handle_report`
+
+Implemented the Stage 4 design (plan.md, "Stage 4 design — wiring the disclosure into
+`CalloutScheduler`") on top of `6fb99b4` (base = Stages 1-3 merged + the Stage 4 design). Base was
+correct: `body-layer/src/belief/groups.py` existed and the plan carried the design section.
+
+**Two decisions arrived after the base commit, both from the coordinator mid-task, and both
+implemented instead of the design's own settled positions:**
+
+1. **A two-contact grouping is now a real, persisted `Group`** — user direction 2026-09-28,
+   overturning the design's Decision 2 ("accept the below-floor residual" at a floor of 3). The
+   belief-side floor is renamed `GROUP_REPORTING_MIN_MEMBERS` (2), explicitly *not*
+   `perception.group_salience.GROUP_MIN_MEMBERS` (3, untouched) — the two now govern genuinely
+   different questions (perceptual salience admission vs. reporting-side grouping) and must not be
+   made to agree by accident; the old shared name/value was itself a latent collision.
+2. **The quantity word tracks classification specificity, one ladder, not two vocabularies.** A
+   two-member group's wording is `"a couple of {contacts}"` when undifferentiated (vague
+   classification → vague quantity, reusing `_cardinality_phrase`'s own hedge word) and `"Pair of
+   {plural}"` when every member shares one real classification (precise classification → precise
+   quantity — e.g. *"Pair of T-72."*, unpluralized per `_plural_unit_type_display`'s existing
+   type-level quirk). A mixed (differentiated-but-not-homogeneous) pair falls through to the
+   existing `_group_composition_clause` unchanged (`"A tank and a truck."` already names each
+   member once, no quantity word needed). Implemented in `render_group_disclosure` by extending the
+   existing `differentiated` gate rather than adding a parallel branch, per the coordinator's
+   explicit instruction.
+
+### Files Changed (Stage 4)
+
+- `body-layer/src/belief/groups.py` — `GROUP_MIN_MEMBERS` (3) renamed `GROUP_REPORTING_MIN_MEMBERS`
+  (2); module docstring rewritten to state why it must stay distinct from `perception.
+  group_salience.GROUP_MIN_MEMBERS`.
+- `body-layer/src/belief/speech.py` — `_group_member_facts` (new, extracted from `render_group_
+  disclosure`'s own gathering loop, shared with `belief.callouts.group_priority`'s scoring);
+  `_classification_key` (new, factored out of `_group_composition_clause`, reused for the pair/
+  couple homogeneity check); `render_group_disclosure` extended with the pair/couple ladder.
+- `body-layer/src/belief/callouts.py` — `group_candidates` (function) and its multi-`Event`
+  bucketing deleted; `_render_group` renamed `_render_event`, simplified to take one `Event`
+  (its multi-member branch was dead code once nothing constructs that shape); `group_priority`
+  (new) mirrors `callout_priority`'s tuple shape for `Group` candidates; `tick` rewritten per the
+  design's section 4 — filters a grouped contact's own `CONTACT_DETECTED`/`CONTACT_REACQUIRED`
+  before scoring, scores `Event`/`Group` candidates into one list, re-renders a chosen `Group`
+  fresh at speak time, sweeps and acknowledges member events on a successful group speak. `group_
+  facts`/`render_group_report` are kept as the residual report-space path (module docstring
+  updated throughout to describe the new shape and retire every stale `group_candidates`
+  cross-reference).
+- `body-layer/src/belief/crew_console.py` — `_handle_report` resolves each in-scope contact's
+  `Group` first and speaks each distinct one via `render_group_disclosure` (no `last_spoken_
+  signature` gate — a report always speaks fresh); everything left over still goes through the
+  pre-existing `group_facts`/`render_group_report` bucketing.
+- `body-layer/tests/test_groups.py` — constant renamed; the below-floor test rewritten (a pair now
+  forms a group); the split test rewritten (the below-floor remnant now founds its own fresh
+  two-member group instead of vanishing).
+- `body-layer/tests/test_speech.py` — three new tests for the pair/couple ladder (undifferentiated,
+  homogeneous, mixed).
+- `body-layer/tests/test_callouts.py` — `group_candidates`'s own four direct unit tests deleted
+  (orphaned by the function's deletion); the 2C-transcript headline test's expected output and
+  docstring rewritten against actually-observed behaviour (see Notable Discoveries); the
+  reacquired/classification-changed tie-break test's expectation swapped (see Notable
+  Discoveries); the vanished-candidate test's fixture clears group membership directly (see
+  Notable Discoveries); a new "Slice C" section added covering `group_priority` directly, a fresh
+  cohering trio's first-tick single-line speech + full acknowledgement, a grouped contact's
+  `CONTACT_CLASSIFICATION_CHANGED` still speaking, progressive-disclosure silence/re-trigger, and
+  two groups changed in one tick (one speaks, the other stays live, no expiry).
+- `body-layer/tests/test_crew_console.py` — two existing report tests (`test_report_clock_3_finds_
+  the_matching_contact`, `test_report_all_groups_and_truncates_multiple_contacts`) clear group
+  membership directly for the same reason as the callouts fixture above; a new test pins `_handle_
+  report` speaking a real persisted group through `render_group_disclosure`.
+
+### Tests Added
+
+- `test_render_group_disclosure_undifferentiated_pair_says_a_couple_of`,
+  `test_render_group_disclosure_homogeneous_pair_says_pair_of`,
+  `test_render_group_disclosure_mixed_pair_uses_the_composition_clause` — the pair/couple ladder.
+- `test_two_tightly_spaced_contacts_form_a_group`,
+  `test_split_majority_child_keeps_the_id_minority_pair_founds_a_new_group` (rewritten) — floor-2
+  membership behaviour.
+- `test_group_priority_uses_the_highest_attention_rank_and_nearest_range`,
+  `test_fresh_cohering_trio_speaks_one_group_line_and_acknowledges_all_members`,
+  `test_grouped_contacts_own_classification_changed_still_speaks_on_its_own`,
+  `test_progressive_disclosure_silent_until_composition_changes`,
+  `test_two_groups_changed_in_the_same_tick_one_speaks_the_other_stays_live`,
+  `test_ungrouped_singleton_output_is_byte_identical` — `CalloutScheduler`'s Stage 4 wiring.
+- `test_report_speaks_a_persisted_group_through_render_group_disclosure` — `_handle_report`'s own
+  Stage 4 wiring (§6).
+
+### Tests removed / behaviour changed (called out per dispatch instruction)
+
+- **Deleted, orphaned by `group_candidates`'s deletion**: `test_group_candidates_is_a_thin_
+  wrapper_over_group_facts`, `test_mixed_type_pair_does_not_merge`, `test_very_close_never_
+  merges_with_a_kilometre_range`, `test_group_candidates_never_groups_classification_changed_
+  events`. Nothing else was lost with them — `group_facts` (the function they exercised
+  indirectly) keeps its own direct tests untouched.
+- **`test_reacquired_with_changed_render_is_still_spoken`**: which of a reacquisition's own
+  `CONTACT_REACQUIRED` and its co-occurring `CONTACT_CLASSIFICATION_CHANGED` speaks first is now
+  the *other* order. Root cause: `group_candidates`'s deleted construction (`groups: list[list
+  [Event]] = [[event] for event in singles]`, `singles` built from a first pass that always put
+  `CONTACT_CLASSIFICATION_CHANGED` ahead of a same-tick `CONTACT_REACQUIRED`) incidentally
+  resolved every scoring tie in classification's favour. Nothing in `callout_priority`'s tuple
+  ever encoded that preference; it was a construction-order artefact of the retired function, not
+  a rule. `tick` now scores events in their natural `unacknowledged_events` emission order
+  (`ContactStore.tick`'s own "lifecycle → classification" ordering), so `CONTACT_REACQUIRED` wins
+  the tie now. Test updated to assert the natural order, with the mechanism explained in its own
+  docstring.
+- **`test_vanished_contacts_candidate_is_skipped_and_the_next_is_taken`**,
+  **`test_report_clock_3_finds_the_matching_contact`**,
+  **`test_report_all_groups_and_truncates_multiple_contacts`**: none of these intended to test
+  group formation, but their fixtures' contacts incidentally cohere into a real `Group` under
+  Stage 4 (see Notable Discoveries below), which would have hijacked each test's own scenario.
+  Each now clears `store._groups._groups` directly after `store.tick`, with an explanatory comment,
+  rather than fighting the (correct, intended) cohesion algorithm with contrived geometry.
+- **`test_2c_transcript_fixture_renders_four_lines_not_seven`**: still speaks exactly four lines,
+  but the content is materially different — see Notable Discoveries. Rewritten against the
+  actually-observed output (confirmed by print-instrumenting the test, not guessed), with the
+  docstring explaining why.
+
+### Checks (body-layer/ — the only subproject touched)
+
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src`: pass, 53 source files, no issues
+- `pytest tests -q`: **1347 passed, 4 xfailed** (baseline on `6fb99b4` was 1340 passed/4 xfailed;
+  net effect: -4 deleted `group_candidates` tests, +11 new, 0 unexplained regressions — every
+  changed assertion is accounted for above)
+
+### Notable Discoveries
+
+- **`belief.groups._cluster_contacts`'s relative-gap cohesion has a degenerate case at low contact
+  counts, now reachable for the first time at `GROUP_REPORTING_MIN_MEMBERS`=2.** Confirmed directly
+  (not inferred): with only two contacts in the whole store, each is the other's *sole* nearest
+  neighbour, so the cohesion threshold (`GROUP_PROXIMITY_GAP_RATIO` × that mutual gap) is always
+  some multiple of their own separation — meaning **any** two contacts, however far apart (tested
+  at 500 km), cohere as a group whenever they are the only two contacts that exist. This is the
+  intended, documented "relative gap, not an absolute radius" rule (`belief.groups`'s own module
+  docstring, the "sparse desert" cohesion case already tested for 3+ members) — not a bug I found,
+  but a consequence of the floor change that is worth the architect/user knowing about explicitly:
+  a sparse scene (very plausible early in a real sortie, and the default shape of almost every
+  existing unit-test fixture in this codebase) will now report *any* two nearby-ish contacts as a
+  "pair," and — combined with `_handle_report`'s design (§6: the whole group speaks once any
+  in-scope member triggers it) — can pull a contact **outside the requested clock/sector into the
+  answer** (demonstrated in `test_report_clock_3_finds_the_matching_contact`'s original fixture,
+  where a clock-3 request would have also named a clock-12 contact). I did not alter the cohesion
+  algorithm or `_handle_report`'s "whole group speaks" design to address this — that is a
+  mechanism decision beyond this dispatch's scope, flagged here rather than decided silently.
+- **The 2C-transcript headline test's synthetic geometry, once inert against `group_candidates`'s
+  report-space bucketing, is directly exposed to the above discovery.** All five detections in
+  that fixture sit within a few hundred metres of each other and nothing else is ever tracked in
+  the whole scene — exactly the sparse-scene shape above. By the time all five have been detected,
+  they cohere into **one** persisted `Group` (three infantry, a BTR-70, and a truck) and speak as
+  one composite line, `"Three infantry, a BTR-70 and a truck, 1 o'clock, very close."` — a
+  materially different outcome from the plan's original (Stage-4-unaware) report-space-only
+  expectation. The test now pins this actually-observed sequence and explains why in its own
+  docstring; reworking either the cohesion algorithm or this fixture's geometry to keep visually
+  distinct unit types apart in a sparse scene is flagged for follow-up, not decided here.
+- **Association ambiguity blocks re-detection-based classification refinement inside a tight
+  group.** Attempting to refine one member of a 3-member cohering group via a second `store.ingest`
+  (the natural way every other classification-refinement test in this file works) spawns a
+  *fourth* contact instead, at any tested spacing up to 800 m: `belief.association_over_time.
+  passes_gate` returns `True` against all three existing members for a fresh percept (their
+  covariance is wide enough that the ambiguous-match safety rule correctly declines to guess which
+  one it means). Not a defect — the ambiguous-merge refusal is doing its job — but it meant two new
+  tests needed to mutate `Contact.classification` directly (bypassing association) to isolate the
+  event-derivation/speech-wiring behaviour they were actually testing; both say so in their own
+  docstrings.
+- **`speech.py`'s existing `differentiated`/composition-clause branch was the right extension
+  point for the pair/couple wording**, exactly as the coordinator predicted — no parallel gate was
+  needed, only a `len(member_facts) == 2` + homogeneity check layered onto the same boolean that
+  already chose between "Group"/composition-clause.

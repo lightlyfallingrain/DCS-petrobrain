@@ -36,6 +36,7 @@ from belief.crew_console import (
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
+from belief.speech import render_group_disclosure
 from belief.tasks import TaskStore
 from belief.voice_commands import (
     ACT_FLOOR,
@@ -2560,6 +2561,22 @@ def test_report_clock_3_finds_the_matching_contact(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
+    # `belief.groups._cluster_contacts`'s relative-gap cohesion measures
+    # density against *every* currently tracked contact -- with only these
+    # two in the whole store, each is the other's sole nearest neighbour,
+    # so they cohere into a `Group` regardless of the ~1.4 km between them
+    # (the intended "relative gap, not an absolute radius" rule -- see
+    # `belief.groups`'s own module docstring -- newly reachable at two
+    # members since `plans/group-reporting/plan.md`'s Stage 4 addendum).
+    # `_handle_report` would then speak the whole group through OBS_E's
+    # in-scope membership, folding in OBS_N even though it sits at 12
+    # o'clock, well outside this test's clock-3 request -- exactly the
+    # cross-scope leak this test exists to rule out for the *ungrouped*
+    # case. Clearing group membership directly keeps this test about
+    # clock-scoping, not group formation (`tests/test_groups.py` and
+    # `test_report_speaks_a_persisted_group_through_render_group_
+    # disclosure`, below, cover that on their own).
+    store._groups._groups = {}
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     # OBS_E is east of ownship (3 o'clock); OBS_N is dead ahead (12 o'clock)
@@ -2753,6 +2770,18 @@ def test_report_all_groups_and_truncates_multiple_contacts(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
+    # These four contacts, evenly spaced 1 km apart along one line with
+    # nothing else tracked, are exactly `tests/test_groups.py`'s own
+    # "sparse desert" cohesion case -- `belief.groups.GroupStore.reconcile`
+    # (run inside `store.tick` above) coheres them all into one `Group`
+    # (relative-gap cohesion has no absolute radius by design). This test
+    # is about `group_facts`'s report-space bucketing and `REPORT_MAX_
+    # GROUPS` truncation specifically, not persisted-group disclosure, so
+    # group membership is cleared to keep it isolated from Stage 4's
+    # belief-level grouping (`plans/group-reporting/plan.md`) -- see
+    # `test_report_clock_3_finds_the_matching_contact`'s identical note,
+    # above.
+    store._groups._groups = {}
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     lines = console.handle_command("report_all", now_sim=0.0)
@@ -2765,6 +2794,45 @@ def test_report_all_groups_and_truncates_multiple_contacts(
             "And more."
         )
     ]
+
+
+def test_report_speaks_a_persisted_group_through_render_group_disclosure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/group-reporting/plan.md` Stage 4 design, section 6:
+    `_handle_report` resolves each in-scope contact's `belief.groups.Group`
+    and speaks it once via `render_group_disclosure` -- the same renderer
+    `CalloutScheduler.tick` uses for the push path -- rather than the older
+    `group_facts`/`render_group_report` report-space bucketing, once a real
+    group exists. Three same-type contacts a few metres apart cohere into
+    one `Group` on `store.tick`; the report names all three as one line,
+    not three separate `"BMP-2, ..."` reports."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_at(
+                obs_id=f"OBS_{i}",
+                t_sim=0.0,
+                ownship_x=float(i) * 5.0,
+                ownship_z=1000.0,
+                classification_raw="BMP-2",
+            )
+            for i in range(3)
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.groups) == 1
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("report_all", now_sim=0.0)
+
+    expected = render_group_disclosure(
+        store, store.groups[0], now_sim=0.0, enrichment=console.enrichment
+    )
+    assert expected is not None
+    assert lines == [expected.text]
+    assert lines == ["Three BMP-2, 3 o'clock, 1 kilometre."]
 
 
 def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(
