@@ -157,9 +157,104 @@ def test_classify_yes_no_affirm_words() -> None:
         assert classify_yes_no(word) == "affirm", word
 
 
+def test_classify_yes_no_accepts_the_word_the_question_itself_asks_for() -> None:
+    """`speech.render_confirm_request` renders "<X>, confirm?", so echoing
+    "confirm" back is the most natural answer there is -- and it was not an
+    affirmative until the 2026-09-26 sortie found it (pilot: *"yes"/
+    "confirm"* -> *"no such command"*)."""
+    for word in ("confirm", "Confirm", "confirmed", "correct"):
+        assert classify_yes_no(word) == "affirm", word
+
+
+def test_classify_yes_no_accepts_colloquial_affirmatives() -> None:
+    for word in ("yeah", "yep", "ok", "Okay"):
+        assert classify_yes_no(word) == "affirm", word
+
+
 def test_classify_yes_no_negative_words() -> None:
-    for word in ("negative", "no", "disregard", "No."):
+    for word in ("negative", "no", "disregard", "No.", "nope", "belay"):
         assert classify_yes_no(word) == "negative", word
+
+
+def test_classify_yes_no_ignores_a_long_sentence_that_opens_with_an_answer() -> None:
+    """Review round 1: with a first-word check, a real instruction opening
+    "okay ..." classified as a late answer and was swallowed with a "Say
+    again?"."""
+    for sentence in (
+        "okay watch that truck at three o'clock",
+        "correct the bearing is two seven zero",
+        "yeah I can see them over there now",
+    ):
+        assert classify_yes_no(sentence) == "other", sentence
+
+
+def test_classify_yes_no_defers_to_a_resolved_command_token() -> None:
+    """For a *multi-word* utterance a resolved command token is the
+    discriminator: "okay scan left" is a command however short, "yes do
+    it" is an answer however elaborated. Neither a first-word rule nor a
+    whole-transcript rule could separate those two.
+
+    **A resolved token, not `verb_anchored`** -- the anchor is computed
+    from the first word alone, so "roger wilco" anchors on "roger" while
+    resolving nothing, and gating on it rejected a perfectly ordinary
+    answer (review round 4)."""
+    # Both `matched_command=True` cases below are phrases the real matcher
+    # really does resolve a token for ("okay scan left" -> `scan_left`,
+    # "roger scan left" -> `scan_left`); the `False` one it really does
+    # not. Asserting against a value the matcher would never produce is
+    # what hid round 4 for a whole round.
+    assert classify_yes_no("okay scan left", matched_command=True) == "other"
+    assert classify_yes_no("roger scan left", matched_command=True) == "other"
+    assert classify_yes_no("yes do it", matched_command=False) == "affirm"
+
+
+def test_classify_yes_no_never_lets_the_anchor_overrule_a_bare_answer() -> None:
+    """The ordering that review round 3 forced. Every one of these words
+    anchors a verb in the real `audio_adapter.command_matcher` -- "roger"
+    scores 0.55 against "report", "disregard" *is* the `cancel_nevermind`
+    phrasing at 1.00 -- so consulting the anchor first broke bare "roger"
+    and "negative", which had answered correctly before this branch
+    existed. A bare answer word is an answer, full stop.
+
+    `audio-adapter/tests/test_command_matcher.py` holds the other half of
+    this coupling (that these words do in fact anchor); body-layer cannot
+    import that module, so the fact is asserted on both sides rather than
+    shared."""
+    for word in ("roger", "ok", "okay"):
+        assert classify_yes_no(word, matched_command=True) == "affirm", word
+    for word in ("negative", "nope", "belay", "disregard"):
+        assert classify_yes_no(word, matched_command=True) == "negative", word
+    assert classify_yes_no("roger that", matched_command=True) == "affirm"
+
+
+def test_classify_yes_no_accepts_a_short_elaborated_answer() -> None:
+    """Review round 2: requiring *every* word to be an answer word rejected
+    "yes do it" and friends -- and inside an open window a rejected answer
+    silently discards the pending command with no feedback at all, so for
+    "cancel everything, confirm?" the cancel simply would not happen.
+
+    Every `matched_command` value below is what the real
+    `audio_adapter.command_matcher` actually returns for that phrase
+    (checked by hand against it -- round 4 was found precisely because
+    this test used the parameter's default instead): none of these
+    resolves a token, though several of them *do* anchor a verb on their
+    opening word, which is why the anchor is not what rule 2 consults."""
+    for answer in (
+        "yes do it",
+        "affirm execute",
+        "roger wilco",
+        "yes go ahead",
+        "roger that",
+        "yes sir",
+    ):
+        assert classify_yes_no(answer, matched_command=False) == "affirm", answer
+    for answer in ("negative hold off", "nope hold on", "belay that order"):
+        assert classify_yes_no(answer, matched_command=False) == "negative", answer
+
+
+def test_classify_yes_no_refuses_a_mixed_answer() -> None:
+    assert classify_yes_no("yes no") == "other"
+    assert classify_yes_no("no yes") == "other"
 
 
 def test_classify_yes_no_other() -> None:

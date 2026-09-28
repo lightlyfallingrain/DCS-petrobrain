@@ -126,6 +126,7 @@ from belief.utterance import (
     parse_utterance,
 )
 from belief.voice_commands import (
+    CONFIRM_LATE_ANSWER_GRACE_S,
     CONFIRM_WINDOW_S,
     BandDecision,
     PendingConfirmation,
@@ -724,6 +725,14 @@ class CrewConsole:
     #: answered, discarded, or expired (`CONFIRM_WINDOW_S`). `None` means
     #: no question is currently open.
     _pending_confirmation: PendingConfirmation | None = field(default=None, repr=False)
+    #: `now_sim` at which the last confirm question stopped being
+    #: answerable -- set when one expires, so a yes/no word arriving just
+    #: after the window can still be recognised as a *late answer* rather
+    #: than escalated to the brain layer as free speech (see
+    #: `CONFIRM_LATE_ANSWER_GRACE_S`, and `handle_transcript`'s own
+    #: docstring for why that escalation was the defect the pilot heard).
+    #: `None` means no question has ever expired on this console.
+    _confirmation_expired_sim: float | None = field(default=None, repr=False)
     #: `plans/brain-layer/plan.md` -- every escalation currently awaiting a
     #: brain reply, keyed by `utterance_id`: `(t_sim it was escalated at,
     #: the belief.utterance.PartialParse that was escalated, the original
@@ -1698,12 +1707,24 @@ class CrewConsole:
         `handle_command`, not this call's own `slots` -- the qualifiers
         belong to whichever transcript originally proposed the pending
         command, not to the (typically slot-less) "affirm" reply that
-        commits it."""
+        commits it.
+
+        **A yes/no word arriving just after the window is answered, not
+        escalated** (`CONFIRM_LATE_ANSWER_GRACE_S`). It cannot commit
+        anything -- the question and its slots are gone -- so it draws a
+        "Say again?", which is what the 2026-09-26 sortie should have
+        heard: the pilot's "yes" fell through to `_handle_utterance`
+        instead, the decider found no command in the word itself, and
+        Petrovich answered "Unable, no such command." That wording tells
+        the pilot his *command* was rejected, when in fact his *answer*
+        was late -- a materially wrong readback, and the reason this
+        branch exists rather than leaving the fallthrough alone."""
         if self._pending_confirmation is not None:
             pending = self._pending_confirmation
             if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:
-                answer = classify_yes_no(transcript)
+                answer = classify_yes_no(transcript, token is not None)
                 self._pending_confirmation = None
+                self._confirmation_expired_sim = None
                 if answer == "affirm":
                     if pending.contact_pick is not None:
                         # `plans/brain-layer/plan.md` D4's "confirm the
@@ -1725,6 +1746,30 @@ class CrewConsole:
                 # its own merits below.
             else:
                 self._pending_confirmation = None
+                self._confirmation_expired_sim = pending.pending_since_sim + (
+                    CONFIRM_WINDOW_S
+                )
+
+        # A yes/no word arriving just *after* the window is a late answer,
+        # not free speech. It cannot commit anything -- the question is
+        # gone and its slots with it -- but it must not be escalated
+        # either: the brain layer finds no command in "yes" and answers
+        # "Unable, no such command.", which tells the pilot his command
+        # was rejected when in fact his answer was late. "Say again?" is
+        # the honest signal and prompts the retry that actually works.
+        if (
+            self._pending_confirmation is None
+            and self._confirmation_expired_sim is not None
+        ):
+            since_expiry = now_sim - self._confirmation_expired_sim
+            if (
+                0.0 <= since_expiry <= CONFIRM_LATE_ANSWER_GRACE_S
+                and classify_yes_no(transcript, token is not None) != "other"
+            ):
+                self._confirmation_expired_sim = None
+                lines = [render_say_again().text]
+                self._print(lines, now_sim)
+                return lines
 
         decision = classify_response(
             token, match_ratio, confidence, verb_anchored, ambiguous
@@ -1779,6 +1824,9 @@ class CrewConsole:
                 pending_since_sim=now_sim,
                 slots=slots,
             )
+            # A fresh question supersedes any late-answer grace left over
+            # from the previous one -- the pilot is answering this one now.
+            self._confirmation_expired_sim = None
             lines = [render_confirm_request(description).text]
         else:  # "say_again"
             lines = [render_say_again().text]

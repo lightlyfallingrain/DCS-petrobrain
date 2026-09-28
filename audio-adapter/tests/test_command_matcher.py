@@ -546,3 +546,29 @@ def test_follow_with_no_recognisable_slots_says_again() -> None:
     result = match_transcript("follow the thing over there")
     assert result.verb_anchored is True
     assert result.token is None
+
+
+def test_several_confirm_band_answer_words_do_anchor_a_verb() -> None:
+    """A cross-subproject fact `body-layer` depends on, recorded here
+    because this is the side that owns it.
+
+    `belief.voice_commands` classifies answers to a confirm question
+    ("<X>, confirm?") from its own small word set, and for multi-word
+    utterances it consults `verb_anchored` to tell an answer from a
+    command. It must *not* consult it for a bare answer word, and this
+    test is why: `VERB_FLOOR` (0.5) is deliberately permissive fuzzy
+    matching, so several plain English answers clear it against real
+    command verbs -- "roger" scores 0.55 against "report". "Disregard" is
+    stronger still: it is a literal `cancel_nevermind` phrasing.
+
+    Nothing here is a defect in this module -- the floor's asymmetry is
+    deliberate (see `VERB_FLOOR`'s own comment). It is a coupling body-layer
+    had to be told about, and it was found only after a body-layer change
+    broke bare "roger" and "negative" in the confirm band. If a future
+    change to the phrase table makes one of these *stop* anchoring, that is
+    fine and this test should be updated; it exists so the reverse -- more
+    answer words silently starting to anchor -- is visible here rather than
+    in the cockpit.
+    """
+    for word in ("roger", "ok", "okay", "negative", "nope", "belay", "disregard"):
+        assert match_transcript(word).verb_anchored is True, word

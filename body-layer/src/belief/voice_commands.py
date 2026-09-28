@@ -124,11 +124,31 @@ CONFIRM_FLOOR: float = 0.35
 
 #: How long a confirm-band question stays open before it is dropped
 #: silently, the same as an unrecognised answer (Decision 4 Layer 3).
-#: **Not measured** -- Stage 1's bench times the *engine's* recognition
-#: latency, not how long a human takes to hear a question and answer it --
-#: a plain, round guess at "long enough to answer, short enough not to
-#: leave a stale question hanging," pending Stage 6.
-CONFIRM_WINDOW_S: float = 8.0
+#: **Still not measured end to end**, but no longer a bare guess: the
+#: 2026-09-26 sortie failed this band, and adding up the round trip the
+#: window has to cover explains why 8.0 s was too tight. The window starts
+#: when the question is *decided*, not when the pilot hears it, and it has
+#: to cover TTS synthesis (<1 s, `audio-adapter/ROADMAP.md`), playback of
+#: the question itself (~1.5 s), the pilot hearing it, deciding, holding
+#: PTT and speaking (2-3 s while also flying), Whisper `small.en`
+#: recognition (p90 1.46 s, max 1.68 s -- `audio-adapter/research/
+#: 2026-09-19-whisper-model-sweep.md`), and one 1.0 s body poll interval.
+#: That is ~6.5-7.5 s with nothing going wrong, i.e. inside the noise of
+#: an 8.0 s window. 15.0 s leaves real headroom for a pilot who is busy
+#: without leaving a "cancel everything" question hanging long enough to
+#: be answered by accident. Revise from a sortie, not from this comment.
+CONFIRM_WINDOW_S: float = 15.0
+
+#: How long *after* a confirm question expires a bare yes/no answer is
+#: still recognised as a (late) answer rather than treated as free speech.
+#: It never commits the command -- the question is gone -- it only decides
+#: whether Petrovich says "Say again?" or escalates the word to the brain
+#: layer. Escalating is the 2026-09-26 failure the pilot actually heard:
+#: his "yes" reached `_handle_utterance`, the decider found no command in
+#: it, and the answer to "cancel everything, confirm?" came back as
+#: "Unable, no such command." -- which reads as the command being
+#: rejected, not as the question having timed out.
+CONFIRM_LATE_ANSWER_GRACE_S: float = 20.0
 
 #: Words that commit a pending confirm-band command, checked only while
 #: one is pending (behaviour #3 above). A small, stable, body-owned
@@ -137,7 +157,38 @@ CONFIRM_WINDOW_S: float = 8.0
 #: yes/no question*, a different and much smaller closed set that belongs
 #: to body's own confirm-band behaviour). `"roger"` is standard radio
 #: usage for "understood/affirmative".
-_AFFIRM_WORDS: frozenset[str] = frozenset({"affirm", "affirmative", "yes", "roger"})
+#:
+#: **`"confirm"` is in here because the question itself asks for it.**
+#: `belief.speech.render_confirm_request` renders "<X>, confirm?", and
+#: echoing the operative word back is the most natural possible answer --
+#: the 2026-09-26 sortie's pilot did exactly that ("yes"/"confirm") and
+#: got "Unable, no such command." The word was missing while the question
+#: invited it, which made the band unanswerable for anyone who answers in
+#: the question's own terms. The colloquial affirmatives alongside it
+#: ("yeah"/"yep"/"ok"/"okay"/"correct") are the same class of fix: the set
+#: is consulted only inside an open confirm window, so widening it cannot
+#: collide with any command, *given* `classify_yes_no`'s verb-anchor
+#: rule below -- an "okay" that opens a sentence is not an answer, and an
+#: ordinary "okay" outside the window reaches `classify_response`
+#: untouched. The first version of this widening claimed the same safety
+#: from the window alone and was wrong: the review found
+#: "okay watch that truck at three o'clock" being eaten as a late answer,
+#: because the classifier read only the first word.
+_AFFIRM_WORDS: frozenset[str] = frozenset(
+    {
+        "affirm",
+        "affirmative",
+        "confirm",
+        "confirmed",
+        "correct",
+        "ok",
+        "okay",
+        "roger",
+        "yeah",
+        "yep",
+        "yes",
+    }
+)
 
 #: Words that discard a pending confirm-band command. `"disregard"` here
 #: is the same English word `audio-adapter`'s `vocabulary.py` also lists as
@@ -146,24 +197,107 @@ _AFFIRM_WORDS: frozenset[str] = frozenset({"affirm", "affirmative", "yes", "roge
 #: are "valid only while a confirmation is pending"): the two meanings
 #: never compete, because this set is consulted only inside that window
 #: and `cancel_nevermind` is matched by the adapter outside it.
-_NEGATIVE_WORDS: frozenset[str] = frozenset({"negative", "no", "disregard"})
+#:
+#: **That non-competition survives only because a bare answer word is
+#: classified before `verb_anchored` is consulted** (`classify_yes_no`,
+#: rule 1). "Disregard" matches `cancel_nevermind` at ratio 1.00 in the
+#: real matcher, and `roger`/`ok`/`okay`/`negative`/`nope`/`belay` all
+#: clear its `VERB_FLOOR` of 0.5 on fuzzy similarity to real verbs
+#: ("roger" against "report", 0.55). A version of this module that gated
+#: every word on the anchor broke `roger` and `negative` -- two words that
+#: worked before this branch existed -- which is what put the ordering
+#: below in the code and this paragraph next to the set.
+_NEGATIVE_WORDS: frozenset[str] = frozenset(
+    {"negative", "no", "nope", "disregard", "belay"}
+)
 
 YesNo = Literal["affirm", "negative", "other"]
 
 
-def classify_yes_no(transcript: str) -> YesNo:
-    """Whether `transcript` is an affirm/negative answer word, checked
-    against the transcript's own first word after a minimal local
-    normalisation (lowercase, strip punctuation) -- deliberately not
-    `audio-adapter`'s `vocabulary.normalize_for_match` (module independence:
-    this module holds no import of that subproject), and deliberately
-    exact rather than fuzzy: this vocabulary is six short, common words,
-    not a 39-entry phrase table, and exact matching is enough for it."""
+#: How many words a transcript may carry and still be an *answer* rather
+#: than speech. "Yes", "roger that", "yes do it", "affirmative go ahead"
+#: are all answers a pilot plausibly gives; nothing longer reads as one.
+#: A round number, not a measurement. It only ever decides the *unanchored
+#: multi-word* case -- a bare answer word is settled before it is reached,
+#: and an anchored one by the anchor -- so being approximately right is
+#: enough for what it does.
+_MAX_ANSWER_WORDS: int = 4
+
+#: Words that may ride along with a bare answer without stopping it being
+#: one -- "roger that", "yes sir". Needed only by rule 1 below, and only
+#: because rule 1 must hold against an anchored transcript: "roger that"
+#: anchors a verb, so without this it would fall to rule 2 and be read as
+#: a command. Deliberately tiny and closed; an unlisted word makes the
+#: transcript a sentence, which is then rules 2 and 3's business.
+_ANSWER_FILLER_WORDS: frozenset[str] = frozenset({"that", "sir", "copy", "please"})
+
+
+def classify_yes_no(transcript: str, matched_command: bool = False) -> YesNo:
+    """Whether `transcript` is an affirm/negative *answer* to a confirm
+    question, after a minimal local normalisation (lowercase, strip
+    punctuation) -- deliberately not `audio-adapter`'s `vocabulary.
+    normalize_for_match` (module independence: this module holds no import
+    of that subproject), and deliberately exact rather than fuzzy: this
+    vocabulary is a dozen short, common words, not a 39-entry phrase
+    table.
+
+    **Three rules in a fixed order, each covering a hole the others
+    leave.** Four review rounds produced four plausible single rules and
+    each broke something a previous one had right, so what is here is their
+    union rather than the last one standing:
+
+    1. **The whole transcript is answer words (bar `_ANSWER_FILLER_WORDS`)
+       -> that answer**, checked first and without consulting
+       `matched_command`. "Yes", "roger", "negative", "disregard", "roger
+       that" are answers by inspection and nothing may overrule that. The
+       ordering is load-bearing, not stylistic: "disregard" resolves to
+       `cancel_nevermind` at ratio 1.00 in the real matcher, so a version
+       of this function that checked the matcher first broke it, along
+       with bare "roger" and "negative" -- words that answered correctly
+       before this branch existed (review round 3).
+    2. **Otherwise, the matcher resolved a real command token -> not an
+       answer.** "Okay scan left" resolves to `scan_left` and is a command
+       however short. **`matched_command`, not `verb_anchored`** (review
+       round 4): the anchor is computed from the transcript's *first word
+       alone*, so "roger wilco", "negative hold off", "nope hold on" and
+       "belay that order" all anchor on their opening answer word while
+       resolving no token at all -- gating on the anchor intercepted every
+       one of them before rule 3 could accept it, and the pilot got "Say
+       again?" to a perfectly ordinary answer. A resolved token is a
+       statement about the whole utterance, which is what this rule needs.
+    3. **Otherwise, first word in an answer set and at most
+       `_MAX_ANSWER_WORDS` long -> that answer.** Requiring *every* word
+       to be an answer word instead (round 2's rule) rejected "yes do it",
+       "roger wilco", "affirm execute" -- and inside an open window a
+       rejected answer is not a "say again", it silently discards the
+       pending command, so for "cancel everything, confirm?" the cancel
+       would simply not happen. The length cap is what stops "okay watch
+       that truck at three o'clock" being read as an answer when the
+       matcher resolves nothing from it (round 1's failure).
+
+    A caller with no matcher verdict (the `!voice` harness, a direct test)
+    leaves `matched_command=False`: permissive, and correct for them,
+    since nothing there is competing with a command match.
+
+    Mixed answers ("yes no") are `"other"` deliberately: two conflicting
+    answer words are exactly the case where guessing is worse than asking
+    again."""
     stripped = "".join(
         char for char in transcript.strip().lower() if char.isalnum() or char == " "
     )
     words = stripped.split()
     if not words:
+        return "other"
+    has_affirm = any(word in _AFFIRM_WORDS for word in words)
+    has_negative = any(word in _NEGATIVE_WORDS for word in words)
+    if has_affirm and has_negative:
+        return "other"
+    bare = [word for word in words if word not in _ANSWER_FILLER_WORDS]
+    if bare and all(word in _AFFIRM_WORDS for word in bare):
+        return "affirm"
+    if bare and all(word in _NEGATIVE_WORDS for word in bare):
+        return "negative"
+    if matched_command or len(words) > _MAX_ANSWER_WORDS:
         return "other"
     first = words[0]
     if first in _AFFIRM_WORDS:
