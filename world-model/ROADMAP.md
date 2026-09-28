@@ -8,6 +8,22 @@ Decisions locked in for this phase:
 
 Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tracked here as work proceeds.
 
+**Live acceptance debt.** A milestone or fix can pass DoD on fixture testing alone; this list is
+for the kind whose live-DCS acceptance was *deferred*, not waived, and hasn't been confirmed since
+(mirrors `body-layer/ROADMAP.md`'s section of the same name). Clear an entry only once a real
+sortie actually exercises it, and say which one.
+
+- [ ] **`fix/los-elevation-tolerance` — `_TERRAIN_TOLERANCE_M = 12.0` added to
+  `query.line_of_sight.line_of_sight_clear` (merged 2026-09-29), unflown.** Fixes a reproduced
+  (offline, not yet re-confirmed live) defect: the SRTM elevation grid can place a real unit
+  below the modelled terrain at its own position, permanently blocking terrain LOS to it from
+  every angle. Card: `docs/acceptance/2026-09-29-los-tolerance-sortie.md` — same flight as the
+  group-reporting acceptance. Settles two things a fixture cannot: whether Petrovich now detects
+  the previously-missed insurgent AAA on a similar attack pass, and whether the 12 m tolerance
+  starts revealing units genuinely masked by a ridge (accepted cost, but only a real flight can
+  show it happening). Also carries `--detection-trace` and the two optional live-terrain-probing
+  reads (`land.getHeight`, `bridge_call_ms`) riding along on the same sortie.
+
 - [x] **M0 — Repo + research notebook.** Scaffold done. DCS version + Syria theatre presence recorded in `research/`.
 - [x] **M1 — One coordinate.** Prove DCS x/z ↔ lat/lon for Syria against a known real-world control point. Measure error. Done: `src/coordinates/` (pyproj-based, theatre-agnostic), three real-world ARP control points (Damascus, Latakia, Beirut), measured residual ~1.0-1.3km (DCS terrain-art placement error, not transform error). See `research/2026-09-03-m1-coordinate-transform-verification.md`.
 - [x] **M2 — Raster understanding.** Read Syria's `RasterCharts`: tile hierarchy, dimensions, scales, registration. Render a known DCS coordinate onto the raster. Done: `src/raster/` (Pillow-based DDS loader + empirical x/z-arithmetic registration, `confidence="provisional"`), `tools/inspect_raster.py` (`scan`/`mark` diagnostic CLI), control-point + held-out-point tests. Registration fitted against Sivas/Kahramanmaras/Hama/Erzincan; independently validated against held-out Gemerek (~129m x-axis, ~5.5km z-axis residual). Scope note: this raster is scanned real-world cartography (Turkish JOG-A-class chart), not DCS-rendered geometry — feeds only the F10 paper-map mode; provenance-taxonomy follow-up still open, see `plans/m2-raster-understanding/plan.md` "Decisions Requiring User Input". `level` tile-suffix semantics (`-2`/`-1`/`00`/`01`) remain unresolved, no sample beyond `"00"`. See `research/2026-09-03-m2-rastercharts-recon.md`.
@@ -285,6 +301,35 @@ Milestones below are from `../docs/concept/WORLD_MODEL_BUILDER.md` — status tr
   `.../review.md` (APPROVED), `.../dod-check.md` (PASS), `.../implementation.md`, and
   `research/2026-09-13-osm-landcover-optimization-validation.md`.
 
+- [x] **LOS elevation-tolerance fix (no M-number — a bug fix, not a milestone; done, merged
+  2026-09-29).** A real sortie (2026-09-28) flew close past an insurgent AAA position, boresight
+  on an attack run, and Petrovich never called it out. Debugged and reproduced offline
+  (`plans/missed-aaa-detection/debug.md`): `query.line_of_sight.line_of_sight_clear` treated its
+  SRTM-sourced elevation grid as exact, so a unit sitting under a grid cell that overestimates
+  ground height by as little as M7's own recorded error (mean −7.19 m, stddev 11.52 m) reads as
+  permanently "underground" relative to the model at its own position — blocked from every
+  angle, at every range, not a per-look coin flip. Fix (user-chosen option 1 of five laid out):
+  `_TERRAIN_TOLERANCE_M = 12.0` (rounded up from the stddev) added to the terrain-blocking
+  comparison in `world-model/src/query/line_of_sight.py` — terrain blocks only when it exceeds
+  the sightline by more than that margin. A module constant, one comparison, one caller
+  (body-layer's `perception.geometry.line_of_sight_clear`, an unchanged thin wrapper); no
+  override surface. Two new regression tests pin the reproduction and the exact 12.0 m boundary
+  in both directions. **Accepted cost, explicit and permanent, not a stopgap**: a unit genuinely
+  masked by a real ridge clearing the sightline by less than 12 m now reads as visible — accepted
+  because the Mi-24P attacks in a run rather than from a masked pop-up hover (user direction,
+  2026-09-28); revisit if this primitive is ever asked to model a pop-up-and-shoot airframe
+  (Ka-50, Apache). Reviewer: APPROVED, no required fixes (one optional boundary-test refinement,
+  acted on in a follow-up commit). Security: APPROVED — confirmed the fix implements exactly the
+  accepted no-omniscience trade and nothing wider. Both `world-model` (475 passed/3 skipped) and
+  `body-layer` (1313 passed/4 xfailed, consumes the primitive via the unchanged wrapper) full
+  check suites re-run clean. **Unflown — see "Live acceptance debt" above.** Next-milestone
+  impact: none — a same-module constant change, no consumer contract change. Surfaces a broader
+  gap worth tracking (`WM-B3` below): the elevation grid's own measured 11.52 m stddev sat in a
+  research note for three weeks while a downstream gate consumed that data as if exact — the
+  defect was in the gap between the measurement and its consumer, not in either one. See
+  `plans/missed-aaa-detection/debug.md`, `.../implementation.md`, `.../review.md`,
+  `.../security-review.md`.
+
 ## Backlog (open, unscheduled)
 
 Items here are `WM-B<n>`. A new one takes the next unused number; numbers are never reused or
@@ -309,6 +354,16 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   `world.searchObjects(SCENERY)` probe, `tools/dcs-mission-probe/power_line_scenery_probe.lua`
   (written, never run; run steps in its header). Alternative: decode `Syria.scn5` records, a large,
   uncertain reverse-engineering job.
+
+- [ ] **WM-B3 — Measured data-quality figures need to reach their consumers, not just a research
+  note.** Raised 2026-09-29, from `fix/los-elevation-tolerance`: M7's SRTM-vs-DCS accuracy figure
+  (mean −7.19 m, stddev 11.52 m) sat correctly recorded in `world-model/ROADMAP.md`'s M7 entry for
+  three weeks while `query.line_of_sight.line_of_sight_clear` consumed the elevation grid as if
+  exact, causing a real missed-detection defect. The measurement wasn't wrong and the consumer
+  code wasn't wrong in isolation — the gap was that nothing connected the two. No fix scoped yet;
+  worth asking, next time a grid/store gains a measured error figure, whether every consumer that
+  treats that data as exact has been checked against it, rather than trusting a docstring or
+  roadmap entry to be read at the right moment.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are

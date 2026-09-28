@@ -1,0 +1,473 @@
+<!doctype html>
+<title>LOS Tolerance Sortie</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ground:#14171c;
+  --panel:#1c2027;
+  --panel-2:#232833;
+  --line:#31374252;
+  --text:#e9e6dd;
+  --text-dim:#9aa1ad;
+  --amber:#e8a33d;
+  --amber-dim:#7a5a26;
+  --record:#5fb3a3;
+  --record-dim:#1e3833;
+  --neg:#d9705b;
+  --pos:#7fbf7f;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --ground:#f3f0e8;
+    --panel:#ffffff;
+    --panel-2:#ece7db;
+    --line:#d8d2c2;
+    --text:#1d1a14;
+    --text-dim:#635c4d;
+    --amber:#b06f12;
+    --amber-dim:#e6c98f;
+    --record:#1c7a68;
+    --record-dim:#cfe9e2;
+    --neg:#a8402a;
+    --pos:#2f7a3f;
+  }
+}
+:root[data-theme="light"]{
+  --ground:#f3f0e8;
+  --panel:#ffffff;
+  --panel-2:#ece7db;
+  --line:#d8d2c2;
+  --text:#1d1a14;
+  --text-dim:#635c4d;
+  --amber:#b06f12;
+  --amber-dim:#e6c98f;
+  --record:#1c7a68;
+  --record-dim:#cfe9e2;
+  --neg:#a8402a;
+  --pos:#2f7a3f;
+}
+:root[data-theme="dark"]{
+  --ground:#14171c;
+  --panel:#1c2027;
+  --panel-2:#232833;
+  --line:#31374252;
+  --text:#e9e6dd;
+  --text-dim:#9aa1ad;
+  --amber:#e8a33d;
+  --amber-dim:#7a5a26;
+  --record:#5fb3a3;
+  --record-dim:#1e3833;
+  --neg:#d9705b;
+  --pos:#7fbf7f;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;}
+body{
+  background:var(--ground);
+  color:var(--text);
+  font-family:"Source Sans 3", system-ui, sans-serif;
+  padding-inline:16px;
+  padding-block:calc(env(safe-area-inset-top,0px) + 14px) calc(env(safe-area-inset-bottom,0px) + 40px);
+  line-height:1.5;
+}
+img{max-width:100%;}
+[hidden]{display:none!important;}
+.wrap{max-width:640px;margin:0 auto;}
+
+.topbar{
+  position:sticky;
+  top:env(safe-area-inset-top,0px);
+  background:var(--ground);
+  padding-block:10px 8px;
+  z-index:5;
+  border-bottom:1px solid var(--line);
+  margin-bottom:18px;
+}
+.eyebrow{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  font-size:.72rem;
+  color:var(--amber);
+  font-weight:600;
+}
+h1{
+  font-family:"Barlow Condensed",sans-serif;
+  font-weight:700;
+  font-size:clamp(1.7rem,7vw,2.3rem);
+  margin:2px 0 8px;
+  text-wrap:balance;
+  letter-spacing:.01em;
+}
+.branch-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+  font-size:.92rem;
+  color:var(--text-dim);
+}
+.branch-name{
+  font-family:"JetBrains Mono",monospace;
+  color:var(--amber);
+  background:var(--amber-dim);
+  padding:2px 8px;
+  border-radius:4px;
+  font-size:.85rem;
+}
+pre{
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:12px 14px;
+  overflow-x:auto;
+  font-family:"JetBrains Mono",monospace;
+  font-size:.82rem;
+  line-height:1.55;
+  margin:8px 0 0;
+}
+code{font-family:"JetBrains Mono",monospace;}
+
+.callout{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-left:3px solid var(--amber);
+  border-radius:8px;
+  padding:12px 14px;
+  margin:0 0 18px;
+  font-size:.94rem;
+}
+.callout.fold{
+  border-left-color:var(--record);
+}
+.callout p{margin:0;}
+.callout strong{color:var(--amber);}
+.callout.fold strong{color:var(--record);}
+
+.section-label{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-size:.78rem;
+  color:var(--text-dim);
+  margin:26px 0 8px;
+}
+
+.block{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:16px 16px 14px;
+  margin-bottom:16px;
+}
+.block h2{
+  font-family:"Barlow Condensed",sans-serif;
+  font-weight:600;
+  font-size:1.25rem;
+  margin:0 0 10px;
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+}
+.block h2 .n{
+  color:var(--amber);
+  font-weight:700;
+}
+.block.prize{
+  border-color:var(--amber);
+  box-shadow:0 0 0 1px var(--amber-dim) inset;
+}
+.prize-tag{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  font-size:.68rem;
+  letter-spacing:.1em;
+  color:var(--ground);
+  background:var(--amber);
+  padding:2px 8px;
+  border-radius:99px;
+  font-weight:700;
+}
+.block.optional{
+  opacity:.9;
+}
+.optional-tag{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  font-size:.68rem;
+  letter-spacing:.1em;
+  color:var(--text-dim);
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  padding:2px 8px;
+  border-radius:99px;
+  font-weight:700;
+}
+
+.kv{margin:10px 0;}
+.kv .k{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  font-size:.72rem;
+  letter-spacing:.08em;
+  color:var(--text-dim);
+  margin-bottom:3px;
+}
+.kv .v{font-size:.96rem;}
+.kv.expect .k{color:var(--pos);}
+.kv.expect .v{font-weight:500;}
+
+.record-rail{
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px dashed var(--line);
+}
+.record-rail .k{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  font-size:.72rem;
+  letter-spacing:.08em;
+  color:var(--record);
+  margin-bottom:6px;
+}
+label.item{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:6px 0;
+  cursor:pointer;
+}
+label.item input[type="checkbox"]{
+  appearance:none;
+  width:20px;height:20px;
+  min-width:20px;
+  border:2px solid var(--record);
+  border-radius:5px;
+  background:transparent;
+  margin-top:1px;
+  position:relative;
+  cursor:pointer;
+}
+label.item input[type="checkbox"]:checked{
+  background:var(--record);
+}
+label.item input[type="checkbox"]:checked::after{
+  content:"";
+  position:absolute;
+  left:5px;top:1px;
+  width:6px;height:11px;
+  border:solid var(--ground);
+  border-width:0 2px 2px 0;
+  transform:rotate(40deg);
+}
+label.item input[type="checkbox"]:focus-visible{
+  outline:2px solid var(--record);
+  outline-offset:2px;
+}
+label.item span{font-size:.94rem;}
+label.item input:checked ~ span{color:var(--text-dim);text-decoration:line-through;text-decoration-color:var(--line);}
+
+.setup-note{
+  font-size:.86rem;
+  color:var(--text-dim);
+  margin:8px 0 0;
+}
+
+.bringback{
+  background:var(--record-dim);
+  border:1px solid var(--record);
+  border-radius:10px;
+  padding:16px;
+  margin-top:26px;
+}
+.bringback h2{
+  font-family:"Barlow Condensed",sans-serif;
+  font-size:1.2rem;
+  margin:0 0 10px;
+  color:var(--record);
+}
+.bringback ol{margin:0 0 10px;padding-left:1.2em;}
+.bringback li{margin-bottom:6px;font-size:.94rem;}
+.bringback .surprise{
+  font-weight:600;
+  border-top:1px dashed var(--record);
+  padding-top:10px;
+  margin-top:10px;
+}
+
+footer{
+  text-align:center;
+  color:var(--text-dim);
+  font-size:.78rem;
+  margin-top:28px;
+}
+</style>
+
+<div class="wrap">
+  <div class="topbar">
+    <div class="eyebrow">Acceptance &middot; world-model / body-layer</div>
+    <h1>LOS Tolerance Sortie</h1>
+    <div class="branch-row">
+      <span>Branch</span>
+      <span class="branch-name">fix/los-elevation-tolerance</span>
+    </div>
+    <pre>git checkout fix/los-elevation-tolerance &amp;&amp; git pull</pre>
+    <p class="setup-note">Will become <code>main</code> once merged &mdash; after checkout, <code>git log --oneline -3</code> should show this fix, not an older main.</p>
+  </div>
+
+  <div class="callout fold">
+    <p><strong>Not a standalone sortie.</strong> Fly this inside your
+    <code>feature/group-reporting</code> acceptance flight &mdash; no conflict, nothing here needs
+    its own dedicated sortie. Group-reporting is a callout-scheduling change; this is a terrain-LOS
+    constant. One flight covers both.</p>
+  </div>
+
+  <div class="callout">
+    <p><strong>Why this card exists.</strong> 2026-09-28: you flew close past an insurgent AAA
+    position, boresight, on an attack run, attacked it &mdash; Petrovich never called it out, not
+    once. Diagnosed offline: the elevation grid (SRTM, 1000m spacing, measured 11.52m stddev
+    against DCS truth) can place a real unit <em>below</em> the modelled terrain at its own
+    position, permanently blocking line-of-sight to it from every angle. Fixed with a 12m tolerance
+    on the terrain check. <strong>Every test is a monkeypatched grid</strong> &mdash; it proves the
+    arithmetic, not that Petrovich now calls the real position, and not whether the accepted cost
+    below is actually mild. Only this flight settles either.</p>
+  </div>
+
+  <div class="section-label">Setup</div>
+  <div class="block">
+    <p style="margin:0 0 8px;">Same collector/brain/crew-text stack as your other current-branch
+    sorties. From <code>run-scripts/</code> on the Mac:</p>
+    <pre>cd run-scripts
+./run-audio-adapter.sh
+./run-brain.sh --decider ollama
+./run-crew-text.sh --detection-trace ~/dcs-detection-trace.jsonl</pre>
+    <p class="setup-note"><strong>Fly with <code>--detection-trace</code> enabled</strong> (shown
+    above &mdash; additive, no other behaviour change). Without it, a miss on this flight is exactly
+    as unevidenced as the one that started this fix: belief-truth logging structurally cannot
+    record a rejected candidate, only an admitted one.</p>
+  </div>
+
+  <div class="section-label">The one test that matters</div>
+
+  <div class="block prize">
+    <h2><span class="n">1</span> Fly the same kind of pass that missed it <span class="prize-tag">the headline</span></h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">In mountainous terrain &mdash; the same region as 2026-09-28 if you can place
+      it, otherwise any hilly area with a known ground unit &mdash; fly a boresight attack pass:
+      diving, target dead ahead, close enough you'd naturally have called it yourself.</div>
+    </div>
+    <div class="kv expect">
+      <div class="k">Expect</div>
+      <div class="v">Petrovich calls it out this time. This is the only thing that actually needs
+      to work for this fix to be worth keeping.</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="t1-called"><span>Did Petrovich call the target out on this pass?</span></label>
+      <label class="item"><input type="checkbox" data-k="t1-window"><span>If not: roughly when in the pass would you have expected the call (range/angle)?</span></label>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2><span class="n">2</span> Listen for the cost, not just the fix</h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">The 12m tolerance necessarily reveals some units it shouldn't &mdash;
+      anything genuinely masked by a ridge/treeline clearing the sightline by less than 12m now
+      reads as visible. Accepted 2026-09-28 on the grounds the Mi-24P attacks in a run, not a
+      Ka-50/Apache-style pop-up-and-shoot. Over the flight, notice any moment Petrovich calls a
+      contact that is plainly, visibly masked by terrain from your seat.</div>
+    </div>
+    <div class="kv expect">
+      <div class="k">Expect</div>
+      <div class="v">Nothing, ideally &mdash; the accepted cost is meant to be small and rare at
+      Mi-24P attack geometries. Any real instance matters even if it doesn't change the verdict
+      today.</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="t2-through"><span>Any call that felt like Petrovich saw through terrain plainly hiding the target? Rough geometry if so.</span></label>
+    </div>
+  </div>
+
+  <div class="section-label">Optional &mdash; not required for this fix</div>
+
+  <div class="block optional">
+    <h2><span class="n">3</span> <code>land.getHeight</code> through the live bridge <span class="optional-tag">unverified</span></h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">No prior sortie has called <code>land.getHeight</code> through the live
+      mission-scripting Hook bridge and read a number back. If convenient this flight, add
+      temporarily to <code>petrobrain-mission-telemetry-hook.lua</code>'s <code>VELOCITY_CODE</code>
+      (or a throwaway sibling snippet), then remove it afterwards &mdash; this is not something this
+      DoD pass has added to the branch, it's unrelated to this fix's scope:</div>
+    </div>
+    <pre>return tostring(land.getHeight({x = 0, y = 0}))</pre>
+    <div class="kv">
+      <div class="v" style="font-size:.86rem;color:var(--text-dim);">Use a real ownship position
+      instead of <code>{x=0,y=0}</code> for a meaningful number, not just "it didn't error".
+      Gates a <em>future</em> incremental-elevation design, not this fix &mdash; entirely your call
+      whether to try it.</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="t3-height"><span>If tried: did it return a real number, and what was it?</span></label>
+    </div>
+  </div>
+
+  <div class="block optional">
+    <h2><span class="n">4</span> <code>bridge_call_ms</code> at real scale <span class="optional-tag">no setup needed</span></h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">Already logging every poll, nothing to enable. If this flight happens to have
+      50-200 units present (a busy mission), grep <code>dcs.log</code> for
+      <code>"velocity poll: unit_count="</code> afterwards.</div>
+    </div>
+    <div class="kv expect">
+      <div class="k">Expect</div>
+      <div class="v">A <code>bridge_call_ms</code> reading at a unit count well above the only
+      flown sample so far (12 units).</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="t4-ms"><span>If the mission was busy: what bridge_call_ms range did dcs.log show?</span></label>
+    </div>
+  </div>
+
+  <div class="bringback">
+    <h2>Debrief list</h2>
+    <ol>
+      <li>Did the AAA-style pass get called out this time?</li>
+      <li>Any terrain call that looked like it saw through a ridge?</li>
+      <li>(if tried) did <code>land.getHeight</code> return a number, and what was it?</li>
+      <li>(if the mission was busy) what <code>bridge_call_ms</code> range did <code>dcs.log</code> show?</li>
+    </ol>
+    <p class="surprise">Anything that surprises you is worth more than anything on this list.</p>
+  </div>
+
+  <footer>Source: docs/acceptance/2026-09-29-los-tolerance-sortie.md &middot; world-model / body-layer</footer>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='los-tolerance-sortie-2026-09-29';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>

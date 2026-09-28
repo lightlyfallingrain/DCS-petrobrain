@@ -525,3 +525,15 @@ two functions that must agree (2026-09-19).
   any change that widens what a fixed set/threshold/window accepts should budget for multiple rounds
   of adjacent-subsystem end-to-end probing before it is trusted, not one plausible-looking pass
   (`plans/confirm-band-affirmatives/review.md`, five rounds, `867cbfe`, 2026-09-28).
+
+- **A measured data-quality figure recorded correctly in a roadmap/docstring is not the same as
+  that figure reaching its consumer.** M7's SRTM-vs-DCS elevation accuracy (mean −7.19 m, stddev
+  11.52 m) was measured and written down accurately in `world-model/ROADMAP.md` three weeks before
+  a real sortie found `query.line_of_sight.line_of_sight_clear` treating the same grid as exact —
+  a unit sitting under a cell that overestimated ground height by close to that stddev read as
+  permanently masked from every angle. Neither the measurement nor the consumer code was wrong in
+  isolation; the defect lived in the unchecked gap between them. Fixed by adding an explicit
+  tolerance sized to the recorded stddev (`_TERRAIN_TOLERANCE_M = 12.0`), not by re-measuring
+  anything. Worth checking, whenever a store gains a new measured error figure, whether its
+  consumers were re-examined against it — a number sitting in a research note does not audit its
+  own callers (`plans/missed-aaa-detection/debug.md`, `fix/los-elevation-tolerance`, 2026-09-29).
