@@ -188,15 +188,33 @@ def test_classify_yes_no_ignores_a_long_sentence_that_opens_with_an_answer() -> 
         assert classify_yes_no(sentence) == "other", sentence
 
 
-def test_classify_yes_no_defers_to_the_matchers_verb_anchor() -> None:
-    """A short utterance `audio_adapter.command_matcher` anchored on a verb
-    is a command, whatever it opens with -- the signal that separates
-    "okay scan left" (command) from "yes do it" (answer), which neither a
-    first-word rule nor a whole-transcript rule could do."""
+def test_classify_yes_no_defers_to_the_matchers_verb_anchor_for_a_sentence() -> None:
+    """For a *multi-word* utterance the anchor is the discriminator: "okay
+    scan left" is a command however short, "yes do it" is an answer
+    however elaborated. Neither a first-word rule nor a whole-transcript
+    rule could separate those two."""
     assert classify_yes_no("okay scan left", verb_anchored=True) == "other"
     assert classify_yes_no("no watch nearest", verb_anchored=True) == "other"
-    # ...and the same opener with nothing anchored is still an answer.
-    assert classify_yes_no("okay", verb_anchored=False) == "affirm"
+    assert classify_yes_no("yes do it", verb_anchored=False) == "affirm"
+
+
+def test_classify_yes_no_never_lets_the_anchor_overrule_a_bare_answer() -> None:
+    """The ordering that review round 3 forced. Every one of these words
+    anchors a verb in the real `audio_adapter.command_matcher` -- "roger"
+    scores 0.55 against "report", "disregard" *is* the `cancel_nevermind`
+    phrasing at 1.00 -- so consulting the anchor first broke bare "roger"
+    and "negative", which had answered correctly before this branch
+    existed. A bare answer word is an answer, full stop.
+
+    `audio-adapter/tests/test_command_matcher.py` holds the other half of
+    this coupling (that these words do in fact anchor); body-layer cannot
+    import that module, so the fact is asserted on both sides rather than
+    shared."""
+    for word in ("roger", "ok", "okay"):
+        assert classify_yes_no(word, verb_anchored=True) == "affirm", word
+    for word in ("negative", "nope", "belay", "disregard"):
+        assert classify_yes_no(word, verb_anchored=True) == "negative", word
+    assert classify_yes_no("roger that", verb_anchored=True) == "affirm"
 
 
 def test_classify_yes_no_accepts_a_short_elaborated_answer() -> None:
