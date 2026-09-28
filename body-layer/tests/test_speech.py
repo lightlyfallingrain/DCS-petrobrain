@@ -1360,6 +1360,55 @@ def test_render_group_disclosure_appends_watched_when_any_member_is_watched() ->
     assert speech.text == "Group, watched."
 
 
+def test_render_group_disclosure_undifferentiated_pair_says_a_couple_of() -> None:
+    """A two-member group, still undifferentiated, is worded with the
+    hedged form of the word (`plans/group-reporting/plan.md`'s Stage 4
+    addendum, user direction 2026-09-28) -- `"a couple of"` is the same
+    hedge `_cardinality_phrase` already uses for a lo-2-hi-3 interval
+    *within* one contact; here it is the same word for the same reason
+    (nothing precise is known yet), just counting distinct members
+    instead. Three-or-more undifferentiated members are unaffected, still
+    the bare `"Group"` (`test_render_group_disclosure_undifferentiated_
+    group_says_bare_group`, above)."""
+    store, group = _cohering_group_store([("Ural truck", 1), ("Ural truck", 1)])
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "A couple of contacts."
+
+
+def test_render_group_disclosure_homogeneous_pair_says_pair_of() -> None:
+    """A two-member group sharing one real classification speaks the exact
+    form of the word -- `"Pair of {plural}"` -- earned because the
+    classification itself is exact, the same "count precision tracks
+    classification specificity" rule `plans/group-contact-model/plan.md`
+    already settled for a single contact's cardinality, now extended to a
+    group's own member count. `T-72` is `type`-level, which `_plural_unit_
+    type_display` deliberately never pluralizes (`_group_composition_
+    clause`'s own accepted quirk) -- `"Pair of T-72"`, not `"...T-72s"`."""
+    store, group = _cohering_group_store([("T-72", 3), ("T-72", 3)])
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "Pair of T-72."
+
+
+def test_render_group_disclosure_mixed_pair_uses_the_composition_clause() -> None:
+    """A two-member group with real, *different* classifications never
+    reaches for "pair" or "a couple of" at all -- `_group_composition_
+    clause` already names each member exactly once (`"a tank and a
+    truck"`), which is unambiguous without a quantity word, matching the
+    "differentiated but mixed" rung of the same ladder."""
+    store, group = _cohering_group_store([("OP_ARMORED", 2), ("OP_TRUCK", 2)])
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "A armor and a truck."
+
+
 def test_render_group_disclosure_returns_none_when_membership_has_collapsed() -> None:
     """Fewer than two members still resolve to a live `Contact` (the group
     reference is stale relative to the store) -- nothing coherent left to

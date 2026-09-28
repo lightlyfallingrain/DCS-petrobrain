@@ -928,12 +928,16 @@ def render_contact_report(
 
 def render_group_report(facts_list: list[dict[str, object]]) -> OutgoingSpeech:
     """A speech-time-only group report (`plans/callout-scheduling/plan.md`,
-    "Aggregation" section) -- `belief.callouts.group_candidates` has already
+    "Aggregation" section) -- `belief.callouts.group_facts` has already
     decided `facts_list` all share the same `_unit_type_display`/
     `_format_range_km` words, so this function does no grouping decision of
     its own; it only composes one line from several `describe_contact`
     results, reusing exactly the vocabulary a single-contact report already
-    uses rather than adding a second phrasing path:
+    uses rather than adding a second phrasing path. (`group_facts`'s own
+    caller since `plans/group-reporting/plan.md`'s Stage 4 is `belief.
+    crew_console.CrewConsole._handle_report`'s residual bucketing of
+    contacts with no persisted `belief.groups.Group` -- `belief.callouts.
+    group_candidates`, this function's original caller, is retired.)
 
     - the group interval is `lo = sum(member.lo)`, `hi = sum(member.hi)` --
       the same lower-bound idea as `belief.tools._estimated_units_lower_
@@ -951,8 +955,8 @@ def render_group_report(facts_list: list[dict[str, object]]) -> OutgoingSpeech:
     - clock/range are taken from the group's **nearest** member (by
       `relative_now.range_m`) -- a crew reports the near edge of a cluster,
       not its centroid. Every member of a group is guaranteed to carry
-      `relative_now` (`group_candidates` only ever buckets members that
-      have one).
+      `relative_now` (`group_facts` only ever buckets members that have
+      one).
     - the semantic-enrichment fragment is dropped entirely for a group --
       one enrichment fact true of one member (e.g. "near a road") is not
       necessarily true of the whole group, unlike `_contact_report_text`'s
@@ -1007,10 +1011,21 @@ def render_group_report(facts_list: list[dict[str, object]]) -> OutgoingSpeech:
     return OutgoingSpeech(text=text, template="contact_report")
 
 
+def _classification_key(facts: dict[str, object]) -> tuple[object, object]:
+    """`(value, level)` out of `facts["classification"]` -- the grouping
+    key `_group_composition_clause` buckets on, factored out so `render_
+    group_disclosure`'s pair/couple wording (below) can ask the identical
+    "do these members share one classification" question without
+    duplicating the dict-shape assertion."""
+    classification = facts["classification"]
+    assert isinstance(classification, dict)
+    return (classification.get("value"), classification.get("level"))
+
+
 def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     """The per-class member breakdown for `render_group_disclosure`'s
     composition line (`plans/group-reporting/plan.md` Stage 3's worked
-    example, rows 2-4): buckets `member_facts` by `(value, level)` and
+    example, rows 2-4): buckets `member_facts` by `_classification_key` and
     counts real members per bucket -- an **exact** count, never a
     `_cardinality_phrase` hedge, because this is a literal groupby over
     already-individuated, already-identified `Contact`s (the plan's own
@@ -1031,9 +1046,7 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     order: list[tuple[object, object]] = []
     counts: dict[tuple[object, object], int] = {}
     for facts in member_facts:
-        classification = facts["classification"]
-        assert isinstance(classification, dict)
-        key = (classification.get("value"), classification.get("level"))
+        key = _classification_key(facts)
         if key not in counts:
             order.append(key)
             counts[key] = 0
@@ -1057,6 +1070,36 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
     return ", ".join(phrases[:-1]) + f" and {phrases[-1]}"
 
 
+def _group_member_facts(
+    store: ContactStore,
+    group: Group,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> list[dict[str, object]] | None:
+    """The member-facts gathering loop `render_group_disclosure` needs, and
+    `belief.callouts.group_priority` (`plans/group-reporting/plan.md`
+    Stage 4 design, section 3) needs too, for its own `range_m`/
+    `attention_rank` -- extracted here rather than gathered twice, once per
+    caller. Returns `None` under the same "fewer than two members still
+    resolve" guard `render_group_disclosure` already enforces -- there is
+    nothing coherent left to score or report as a group.
+
+    Does not resolve `Contact` objects, only `describe_contact` facts --
+    `render_group_disclosure`'s own threat-leading logic needs the real
+    `Contact.classification` (`belief.threat.envelope_for`'s argument type),
+    which this function deliberately does not gather, since `belief.
+    callouts` has no use for it and no license to hold a `Contact` at all."""
+    member_facts: list[dict[str, object]] = []
+    for member_id in sorted(group.member_contact_ids):
+        result = describe_contact(store, member_id, now_sim, enrichment=enrichment)
+        if result is None:
+            continue
+        member_facts.append(result["facts"])
+    if len(member_facts) < 2:
+        return None
+    return member_facts
+
+
 def render_group_disclosure(
     store: ContactStore,
     group: Group,
@@ -1065,47 +1108,79 @@ def render_group_disclosure(
 ) -> OutgoingSpeech | None:
     """`plans/group-reporting/plan.md` Stage 3's disclosure ladder for a
     persisted `belief.groups.Group` -- **not** `render_group_report` above,
-    which is `belief.callouts.group_candidates`'s speech-time, report-space
-    aggregation of several *events*. This function reads a real, persisted
-    associative belief instead. (The plan's own prose names both functions
-    `render_group_report`; this one is named `render_group_disclosure`
-    instead, deliberately, to avoid colliding with the function that
-    already existed under that name and stays live -- `belief.callouts`'
-    speech-time aggregation is not retired by this stage; see that
-    module's own docstring, "What happens to `group_candidates`," and
-    `plans/group-reporting/plan.md`'s Stage 4, out of scope here.)
+    which was `belief.callouts.group_candidates`'s speech-time, report-space
+    aggregation of several *events* (`group_candidates` itself is retired
+    as of Stage 4 -- see this module's own docstring). This function reads
+    a real, persisted associative belief instead. (The plan's own prose
+    names both functions `render_group_report`; this one is named `render_
+    group_disclosure` instead, deliberately, to avoid colliding with the
+    function that already existed under that name and stays live, as the
+    residual report-space path -- see `belief.callouts`' own docstring,
+    "`group_facts`/`render_group_report` are report-space bucketing.")
+
+    Stage 4 wires this function into `belief.callouts.CalloutScheduler.tick`
+    (the live speech path) and into `belief.crew_console.CrewConsole.
+    _handle_report` (the on-demand "report" command) -- both read this
+    same function so a pushed callout and a pulled report describe one
+    group identically.
 
     Returns `None` if fewer than two members still resolve to a live
-    `Contact` (`describe_contact` returns `None` for a vanished one) --
-    there is nothing coherent left to report as a group.
+    `Contact` (`_group_member_facts` returns `None`) -- there is nothing
+    coherent left to report as a group.
 
     **Threat leads the line** (`belief.threat.envelope_for`, called on each
     member's own `Contact.classification` -- the no-omniscience boundary is
     upstream of this call, in `envelope_for` itself): the member with the
     widest resolvable engagement envelope leads with `"Danger, {type}."`,
     and every other member's composition follows as `"Also {composition}"`.
-    With no threat-capable member, an undifferentiated group (every member
-    still at `presence`/`unknown` level) says the bare word `"Group"`; once
-    any member has refined past that, the composition clause alone leads.
+
+    **With no threat-capable member, the quantity word tracks classification
+    specificity, the same rule `_cardinality_phrase` already applies to a
+    single contact's own count clause -- never a precise count paired with
+    a vague class, never a vague count paired with a precise one** (user
+    direction 2026-09-28, extending `plans/group-contact-model/plan.md`'s
+    settled "count precision must track classification specificity" rule
+    from *within* one contact's cardinality to *across* a group's members).
+    A two-member group is the only size this stage words specially:
+
+    - **Undifferentiated** (every member still at `presence`/`unknown`
+      level -- nothing precise is known to speak): `"A couple of
+      {contacts}"` for a pair, the bare word `"Group"` for three or more.
+      `"a couple of"` is `_cardinality_phrase`'s own hedge for two-or-three,
+      reused here rather than invented, because the quantity being hedged
+      is genuinely the same kind of vague count.
+    - **Differentiated, and every member shares one classification** (a
+      real, identical class/type across the whole group): `"Pair of
+      {plural}"` for a pair (e.g. *"Pair of T-72s"*) -- the exact-count form
+      of the same word, earned because the classification being counted is
+      itself exact. Three or more homogeneous members still go through
+      `_group_composition_clause`'s existing `_SPOKEN_NUMBERS` ladder
+      (`"Three T-72s"`), unchanged by this stage.
+    - **Differentiated but mixed** (a real classification exists, but not
+      every member shares it): `_group_composition_clause` as before --
+      `"A tank and a truck"` already names each member exactly once, with
+      no quantity word to pick between at all.
+
+    A sentence never reaches for both "pair" and "a couple of" together,
+    because the classification specificity that selects one rules out the
+    other -- this is one ladder with two rungs, not two competing
+    vocabularies needing a tiebreak.
+
     Clock/range are taken from the group's nearest member (`_contact_report_
     text`'s single-contact convention, restated here since a group has no
     such helper of its own), and a trailing `", watched"` is appended when
     any member is under `watch`/`priority` attention -- the group-level
     analogue of a single contact's own trailing motion clause."""
-    member_facts: list[dict[str, object]] = []
-    member_contacts: list[Contact] = []
-    contacts_by_id = {contact.id: contact for contact in store.contacts}
-    for member_id in sorted(group.member_contact_ids):
-        result = describe_contact(store, member_id, now_sim, enrichment=enrichment)
-        if result is None:
-            continue
-        contact = contacts_by_id.get(member_id)
-        if contact is None:
-            continue
-        member_facts.append(result["facts"])
-        member_contacts.append(contact)
-    if len(member_facts) < 2:
+    member_facts = _group_member_facts(store, group, now_sim, enrichment)
+    if member_facts is None:
         return None
+    contacts_by_id = {contact.id: contact for contact in store.contacts}
+    member_contacts: list[Contact] = []
+    for facts in member_facts:
+        contact_id = facts["id"]
+        assert isinstance(contact_id, str)
+        contact = contacts_by_id[contact_id]
+        member_contacts.append(contact)
 
     leading_index: int | None = None
     leading_range_max_m = -1.0
@@ -1127,14 +1202,22 @@ def render_group_disclosure(
         else:
             text = f"Danger, {leading_word}."
     else:
+        is_pair = len(member_facts) == 2
         differentiated = any(
             isinstance(facts["classification"], dict)
             and facts["classification"].get("level") not in ("presence", "unknown")
             for facts in member_facts
         )
-        if differentiated:
+        homogeneous = len({_classification_key(facts) for facts in member_facts}) == 1
+        if differentiated and is_pair and homogeneous:
+            value, level = _classification_key(member_facts[0])
+            text = f"Pair of {_plural_unit_type_display(value, level)}"
+        elif differentiated:
             composition = _group_composition_clause(member_facts)
             text = composition[0].upper() + composition[1:]
+        elif is_pair:
+            value, level = _classification_key(member_facts[0])
+            text = f"A couple of {_plural_unit_type_display(value, level)}"
         else:
             text = "Group"
 

@@ -1257,31 +1257,46 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   utterances before either downstream piece is built further. This entry flips to `[x]`/merged on
   merge, per the roadmap-discipline rule below.
 
-- [~] **Group reporting: `belief.groups.Group`, the disclosure ladder. Stages 1-3 implemented,
-  not yet reviewed/DoD'd, not audible.** `plans/group-reporting/plan.md`, from the 2026-09-28
-  sortie's log analysis (`plans/contact-fragmentation-at-range/2026-09-28-log-analysis.md`) — the
-  noise was contact *count*, not per-contact chattiness (only 3 of 52 contacts ever plural), which
-  an associative `Group` fixes and a per-contact disclosure gate alone cannot. **Stage 1** —
-  `belief.callouts.CalloutScheduler` suppresses a scheduled `CONTACT_DETECTED`/`CONTACT_REACQUIRED`
+- [~] **Group reporting: `belief.groups.Group`, the disclosure ladder. Stages 1-4 implemented, now
+  audible; not yet reviewed/DoD'd.** `plans/group-reporting/plan.md`, from the 2026-09-28 sortie's
+  log analysis (`plans/contact-fragmentation-at-range/2026-09-28-log-analysis.md`) — the noise was
+  contact *count*, not per-contact chattiness (only 3 of 52 contacts ever plural), which an
+  associative `Group` fixes and a per-contact disclosure gate alone cannot. **Stage 1** — `belief.
+  callouts.CalloutScheduler` suppresses a scheduled `CONTACT_DETECTED`/`CONTACT_REACQUIRED`
   candidate whose rendered text repeats the last one actually spoken for that contact. **Stage 2**
   — `belief/groups.py`'s `Group`/`GroupStore`: relative-gap cohesion (`GROUP_PROXIMITY_GAP_RATIO`
-  = 3.0, `GROUP_MIN_MEMBERS` = 3, both stated assumptions with no data behind them), union-find
-  over fused `Contact.position`, majority-overlap split/merge reconciliation once per
-  `ContactStore.tick()` call. Inspectable via `belief.tools`'s new absent-not-null `"group"` fact
-  and `console.py`'s `show <id>`. **Stage 3** — `belief.speech.render_group_disclosure`, the
-  disclosure ladder (bare `"Group."` while undifferentiated, a per-class composition clause once
-  refined, `"Danger, <type>."` leading when a member resolves a real `belief.threat.envelope_for`
-  envelope). Named `render_group_disclosure`, not `render_group_report` — that name already belongs
-  to `belief.callouts`' unrelated speech-time report-space aggregation, which this work does not
-  touch or retire. **Not wired into any live speech path** — Stage 4 (`CalloutScheduler`
-  integration, the `Event`/group-id shape decision, retiring `belief.callouts.group_candidates`)
-  and Stage 5 (common-fate cohesion) are out of scope for this pass, deferred pending a sortie
-  under Stages 1-3 per the plan's own recommendation. This means nothing is yet audible from this
-  work despite the plan's own framing of Stage 3 as "the first stage that changes what the pilot
-  hears" — flagged explicitly rather than silently reaching into Stage 4's scope to make it so.
-  1340 passed/4 xfailed, `ruff`/`mypy --strict` clean. Does this change what the next milestone
-  should be? Likely yes: Stage 4 needs its own short design pass on the `Event`/group-id question
-  before implementation, not an assumption carried over from this stage.
+  = 3.0, `GROUP_REPORTING_MIN_MEMBERS` = 2 — lowered from 3 by user direction 2026-09-28,
+  deliberately renamed off `perception.group_salience.GROUP_MIN_MEMBERS`'s name so the two floors
+  can no longer collide), union-find over fused `Contact.position`, majority-overlap split/merge
+  reconciliation once per `ContactStore.tick()` call. Inspectable via `belief.tools`'s new
+  absent-not-null `"group"` fact and `console.py`'s `show <id>`. **Stage 3** — `belief.speech.
+  render_group_disclosure`, the disclosure ladder (bare `"Group."` while undifferentiated, a
+  per-class composition clause once refined, `"Danger, <type>."` leading when a member resolves a
+  real `belief.threat.envelope_for` envelope) — since Stage 4, extended with a two-member "pair"
+  rung (`"A couple of contacts."` vague, `"Pair of T-72."` exact, tracking classification
+  specificity the same way `_cardinality_phrase` already does within one contact). Named `render_
+  group_disclosure`, not `render_group_report` — that name belongs to `belief.callouts`' separate,
+  still-live report-space aggregation for contacts with no group. **Stage 4** — wired into both
+  live speech paths: `CalloutScheduler.tick` reads `store.groups` alongside `store.
+  unacknowledged_events` into one shared priority sort (`group_priority` mirrors `callout_
+  priority`'s tuple shape), filtering a grouped contact's own `CONTACT_DETECTED`/`CONTACT_
+  REACQUIRED` before scoring; `CrewConsole._handle_report` resolves and speaks each in-scope
+  group the same way, so a pushed callout and a pulled "report" describe one group identically.
+  `belief.callouts.group_candidates` (the event-level, report-space bucketer Stage 4 replaces) is
+  deleted. **Stage 5** (common-fate cohesion) remains deferred, gated on a sortie's evidence.
+  **A real discovery worth a decision before the next sortie**: at floor 2, `belief.groups`'
+  relative-gap cohesion — working exactly as designed (no absolute radius, only a relative one) —
+  means any two contacts alone in an otherwise-empty scene always cohere into a "pair," however far
+  apart; combined with `_handle_report` speaking a whole group from one in-scope trigger member,
+  this can pull a contact from *outside* a requested clock/sector into the answer. Confirmed
+  directly (two contacts 500 km apart, nothing else tracked, still form one `Group`), not
+  theorised — see `plans/group-reporting/implementation.md`'s Stage 4 "Notable Discoveries" for the
+  full readout and the test fixtures it forced to route around it. Not fixed here: whether to add
+  an absolute cap, a unit-type similarity gate, or accept it as-is is a mechanism decision for the
+  next design pass, not this implementation's to make silently. 1347 passed/4 xfailed, `ruff`/
+  `mypy --strict` clean. Does this change what the next milestone should be? Yes: the sparse-scene
+  cohesion discovery above should be resolved (or explicitly accepted) before this milestone is
+  called done, and ideally before a live sortie is flown under it.
 
 ## Backlog (body-layer)
 
