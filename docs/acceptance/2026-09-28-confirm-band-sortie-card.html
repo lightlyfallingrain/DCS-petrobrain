@@ -1,0 +1,441 @@
+<!doctype html>
+<title>Confirm Band Sortie</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ground:#14171c;
+  --panel:#1c2027;
+  --panel-2:#232833;
+  --line:#31374252;
+  --text:#e9e6dd;
+  --text-dim:#9aa1ad;
+  --amber:#e8a33d;
+  --amber-dim:#7a5a26;
+  --record:#5fb3a3;
+  --record-dim:#1e3833;
+  --neg:#d9705b;
+  --pos:#7fbf7f;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --ground:#f3f0e8;
+    --panel:#ffffff;
+    --panel-2:#ece7db;
+    --line:#d8d2c2;
+    --text:#1d1a14;
+    --text-dim:#635c4d;
+    --amber:#b06f12;
+    --amber-dim:#e6c98f;
+    --record:#1c7a68;
+    --record-dim:#cfe9e2;
+    --neg:#a8402a;
+    --pos:#2f7a3f;
+  }
+}
+:root[data-theme="light"]{
+  --ground:#f3f0e8;
+  --panel:#ffffff;
+  --panel-2:#ece7db;
+  --line:#d8d2c2;
+  --text:#1d1a14;
+  --text-dim:#635c4d;
+  --amber:#b06f12;
+  --amber-dim:#e6c98f;
+  --record:#1c7a68;
+  --record-dim:#cfe9e2;
+  --neg:#a8402a;
+  --pos:#2f7a3f;
+}
+:root[data-theme="dark"]{
+  --ground:#14171c;
+  --panel:#1c2027;
+  --panel-2:#232833;
+  --line:#31374252;
+  --text:#e9e6dd;
+  --text-dim:#9aa1ad;
+  --amber:#e8a33d;
+  --amber-dim:#7a5a26;
+  --record:#5fb3a3;
+  --record-dim:#1e3833;
+  --neg:#d9705b;
+  --pos:#7fbf7f;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;}
+body{
+  background:var(--ground);
+  color:var(--text);
+  font-family:"Source Sans 3", system-ui, sans-serif;
+  padding-inline:16px;
+  padding-block:calc(env(safe-area-inset-top,0px) + 14px) calc(env(safe-area-inset-bottom,0px) + 40px);
+  line-height:1.5;
+}
+img{max-width:100%;}
+[hidden]{display:none!important;}
+.wrap{max-width:640px;margin:0 auto;}
+
+.topbar{
+  position:sticky;
+  top:env(safe-area-inset-top,0px);
+  background:var(--ground);
+  padding-block:10px 8px;
+  z-index:5;
+  border-bottom:1px solid var(--line);
+  margin-bottom:18px;
+}
+.eyebrow{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  font-size:.72rem;
+  color:var(--amber);
+  font-weight:600;
+}
+h1{
+  font-family:"Barlow Condensed",sans-serif;
+  font-weight:700;
+  font-size:clamp(1.7rem,7vw,2.3rem);
+  margin:2px 0 8px;
+  text-wrap:balance;
+  letter-spacing:.01em;
+}
+.branch-row{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+  font-size:.92rem;
+  color:var(--text-dim);
+}
+.branch-name{
+  font-family:"JetBrains Mono",monospace;
+  color:var(--amber);
+  background:var(--amber-dim);
+  padding:2px 8px;
+  border-radius:4px;
+  font-size:.85rem;
+}
+pre{
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:12px 14px;
+  overflow-x:auto;
+  font-family:"JetBrains Mono",monospace;
+  font-size:.82rem;
+  line-height:1.55;
+  margin:8px 0 0;
+}
+code{font-family:"JetBrains Mono",monospace;}
+
+.callout{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-left:3px solid var(--amber);
+  border-radius:8px;
+  padding:12px 14px;
+  margin:0 0 18px;
+  font-size:.94rem;
+}
+.callout.fold{
+  border-left-color:var(--record);
+}
+.callout p{margin:0;}
+.callout strong{color:var(--amber);}
+.callout.fold strong{color:var(--record);}
+
+.section-label{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-size:.78rem;
+  color:var(--text-dim);
+  margin:26px 0 8px;
+}
+
+.block{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:16px 16px 14px;
+  margin-bottom:16px;
+}
+.block h2{
+  font-family:"Barlow Condensed",sans-serif;
+  font-weight:600;
+  font-size:1.25rem;
+  margin:0 0 10px;
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+}
+.block h2 .n{
+  color:var(--amber);
+  font-weight:700;
+}
+.block.prize{
+  border-color:var(--amber);
+  box-shadow:0 0 0 1px var(--amber-dim) inset;
+}
+.prize-tag{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  font-size:.68rem;
+  letter-spacing:.1em;
+  color:var(--ground);
+  background:var(--amber);
+  padding:2px 8px;
+  border-radius:99px;
+  font-weight:700;
+}
+
+.kv{margin:10px 0;}
+.kv .k{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  font-size:.72rem;
+  letter-spacing:.08em;
+  color:var(--text-dim);
+  margin-bottom:3px;
+}
+.kv .v{font-size:.96rem;}
+.kv.expect .k{color:var(--pos);}
+.kv.expect .v{font-weight:500;}
+
+.record-rail{
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px dashed var(--line);
+}
+.record-rail .k{
+  font-family:"Barlow Condensed",sans-serif;
+  text-transform:uppercase;
+  font-size:.72rem;
+  letter-spacing:.08em;
+  color:var(--record);
+  margin-bottom:6px;
+}
+label.item{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:6px 0;
+  cursor:pointer;
+}
+label.item input[type="checkbox"]{
+  appearance:none;
+  width:20px;height:20px;
+  min-width:20px;
+  border:2px solid var(--record);
+  border-radius:5px;
+  background:transparent;
+  margin-top:1px;
+  position:relative;
+  cursor:pointer;
+}
+label.item input[type="checkbox"]:checked{
+  background:var(--record);
+}
+label.item input[type="checkbox"]:checked::after{
+  content:"";
+  position:absolute;
+  left:5px;top:1px;
+  width:6px;height:11px;
+  border:solid var(--ground);
+  border-width:0 2px 2px 0;
+  transform:rotate(40deg);
+}
+label.item input[type="checkbox"]:focus-visible{
+  outline:2px solid var(--record);
+  outline-offset:2px;
+}
+label.item span{font-size:.94rem;}
+label.item input:checked ~ span{color:var(--text-dim);text-decoration:line-through;text-decoration-color:var(--line);}
+
+.setup-note{
+  font-size:.86rem;
+  color:var(--text-dim);
+  margin:8px 0 0;
+}
+
+.bringback{
+  background:var(--record-dim);
+  border:1px solid var(--record);
+  border-radius:10px;
+  padding:16px;
+  margin-top:26px;
+}
+.bringback h2{
+  font-family:"Barlow Condensed",sans-serif;
+  font-size:1.2rem;
+  margin:0 0 10px;
+  color:var(--record);
+}
+.bringback ol{margin:0 0 10px;padding-left:1.2em;}
+.bringback li{margin-bottom:6px;font-size:.94rem;}
+.bringback .surprise{
+  font-weight:600;
+  border-top:1px dashed var(--record);
+  padding-top:10px;
+  margin-top:10px;
+}
+
+footer{
+  text-align:center;
+  color:var(--text-dim);
+  font-size:.78rem;
+  margin-top:28px;
+}
+</style>
+
+<div class="wrap">
+  <div class="topbar">
+    <div class="eyebrow">Acceptance &middot; body-layer</div>
+    <h1>Confirm Band Sortie</h1>
+    <div class="branch-row">
+      <span>Branch</span>
+      <span class="branch-name">fix/confirm-band-affirmatives</span>
+    </div>
+    <pre>git checkout fix/confirm-band-affirmatives &amp;&amp; git pull</pre>
+  </div>
+
+  <div class="callout">
+    <p><strong>Why this card exists.</strong> Last sortie: <code>"cancel"</code> &rarr;
+    <em>"Cancel everything, confirm?"</em> &rarr; <code>"yes"</code> / <code>"confirm"</code> &rarr;
+    <em>"Unable, no such command."</em> The confirm band could not be answered at all. Three
+    defects behind that one symptom, fixed here and reviewed five rounds deep in code &mdash; but
+    none of it has been flown. Static review can't settle timing or whether cancel actually stops
+    the task.</p>
+  </div>
+
+  <div class="callout fold">
+    <p><strong>Optional fold-in.</strong> You may fly this inside
+    <code>2026-09-25-crew-behaviour-sortie.md</code> instead &mdash; its "Cancel everything" block
+    already says <code>cancel</code> and confirms it, so every cancel there exercises this fix too.
+    Your call.</p>
+  </div>
+
+  <div class="section-label">Setup</div>
+  <div class="block">
+    <p style="margin:0 0 8px;">Windows collector, <code>--ptt dcs</code> &mdash; unchanged. From
+    <code>run-scripts/</code> on the Mac:</p>
+    <pre>cd run-scripts
+./run-audio-adapter.sh
+./run-brain.sh --decider ollama
+./run-crew-text-debug-view.sh --brain-client http --brain-url http://127.0.0.1:7796</pre>
+    <p class="setup-note">Not testing brain-layer behaviour today? The stub decider is fine &mdash;
+    this fix lives entirely in body-layer's confirm band, not the brain.</p>
+  </div>
+
+  <div class="section-label">Test cases</div>
+
+  <div class="block">
+    <h2><span class="n">1</span> Cancel, confirmed three ways</h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">Issue any task (e.g. <code>scan left</code>), say <code>cancel</code>. When
+      asked <em>"Cancel everything, confirm?"</em>, answer <code>"confirm"</code>. Repeat twice
+      more, answering <code>"yes"</code> then <code>"roger"</code>.</div>
+    </div>
+    <div class="kv expect">
+      <div class="k">Expect</div>
+      <div class="v">All three words accepted, no "unable, no such command" &mdash; and the task
+      actually stops each time.</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="c1-words"><span>Did all three words (confirm / yes / roger) work?</span></label>
+      <label class="item"><input type="checkbox" data-k="c1-stop"><span>Did the task genuinely stop each time, not just get acknowledged?</span></label>
+    </div>
+  </div>
+
+  <div class="block prize">
+    <h2><span class="n">2</span> Timing <span class="prize-tag">worth most</span></h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">A few times over the sortie, say <code>cancel</code> and answer at your
+      normal pace &mdash; not rushed, not deliberately slow. 15s to answer, 20s late-grace, both
+      reasoned budgets, never measured against a real cockpit.</div>
+    </div>
+    <div class="kv expect">
+      <div class="k">Expect</div>
+      <div class="v">Never hear "Say again?" when you believe you answered promptly.</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="c2-late"><span>How long, roughly, from hearing the question to speaking your answer &mdash; and did any prompt answer still get "Say again?"</span></label>
+      <label class="item"><input type="checkbox" data-k="c2-grace"><span>Answering a beat later than usual (inside the ~20s grace) &mdash; does it still work, or does it feel like it's rushing you?</span></label>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2><span class="n">3</span> Negative leaves it running</h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">Issue a task, say <code>cancel</code>, answer <code>"negative"</code>. Repeat
+      with <code>"no"</code>, then <code>"disregard"</code>.</div>
+    </div>
+    <div class="kv expect">
+      <div class="k">Expect</div>
+      <div class="v">Task keeps running, all three times &mdash; nothing stops.</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="c3-neg"><span>Did all three negatives correctly leave the task alone?</span></label>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2><span class="n">4</span> A command is still a command</h2>
+    <div class="kv">
+      <div class="k">Do</div>
+      <div class="v">Say <code>cancel</code>. While the confirm question is still open, say an
+      ordinary command that isn't an answer word &mdash; e.g. <code>"okay scan left"</code>.</div>
+    </div>
+    <div class="kv expect">
+      <div class="k">Expect</div>
+      <div class="v">It acts as the command (scan starts), not swallowed as an answer to the open
+      question.</div>
+    </div>
+    <div class="record-rail">
+      <div class="k">Bring back</div>
+      <label class="item"><input type="checkbox" data-k="c4-cmd"><span>Did the command fire normally, with nothing misread as yes/no?</span></label>
+    </div>
+  </div>
+
+  <div class="bringback">
+    <h2>Debrief list</h2>
+    <ol>
+      <li>All three affirmatives (confirm/yes/roger) accepted, task genuinely stops?</li>
+      <li>Any "Say again?" on an answer you thought was prompt &mdash; and roughly how late was it?</li>
+      <li>All three negatives (negative/no/disregard) correctly leave the task running?</li>
+      <li>Any command swallowed as a confirm answer instead of firing?</li>
+    </ol>
+    <p class="surprise">Anything that surprises you is worth more than anything on this list.</p>
+  </div>
+
+  <footer>Source: docs/acceptance/2026-09-28-confirm-band-sortie.md &middot; body-layer</footer>
+</div>
+
+<script>
+(function(){
+  try{
+    var KEY='confirm-band-sortie-2026-09-28';
+    var saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function(b){
+      if(saved[b.dataset.k]) b.checked=true;
+      b.addEventListener('change',function(){
+        try{
+          var s=JSON.parse(localStorage.getItem(KEY)||'{}');
+          s[b.dataset.k]=b.checked;
+          localStorage.setItem(KEY,JSON.stringify(s));
+        }catch(e){}
+      });
+    });
+  }catch(e){}
+})();
+</script>
