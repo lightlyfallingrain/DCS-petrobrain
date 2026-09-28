@@ -596,3 +596,33 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   branch, no commits in 24h, or a missing `claude` binary. So installing it is one command; the
   question is only whether a derived page regenerating itself overnight is wanted at all, given it
   is explicitly never authoritative.
+
+### Added 2026-09-28
+
+- [>] **X-B25 — The destructive tokens share the ordinary confirm window; revisit when the channel
+  changes.** `fix/confirm-band-affirmatives` raised `CONFIRM_WINDOW_S` 8.0 → 15.0 s and added a 20 s
+  late-answer grace, and that window also gates `cancel_task`/`cancel_scan`/`cancel_watch` — the
+  three tokens that *destroy* standing state and already carry a raised confidence floor
+  (`ACT_FLOOR_CANCEL`) for exactly that reason. So a stale "cancel everything, confirm?" now stays
+  committable for 15 s instead of 8, answerable by a wider set of words.
+
+  **Accepted by the user 2026-09-28** — *"15 s acceptable for now"* — on Security's own reasoning:
+  the too-narrow window was the sortie-demonstrated defect being fixed, and a destructive confirm
+  nobody can ever answer is not safer, only silently broken. Probability low, impact medium, and
+  the input is the pilot's own PTT-gated speech in a single-player session.
+
+  **This item exists because of the "for now", and carries the lapse condition the project requires
+  of any standing acceptance** (root `CLAUDE.md`, Agents: a blanket exemption with no stated end
+  outlived its premise once already). Revisit when **either** of these becomes true:
+
+  - **BL-10/SRS changes who can speak into this channel.** The whole risk assessment rests on one
+    pilot, one microphone, one session. Anything that widens that — another crew member, a shared
+    intercom, a recorded or replayed audio path — invalidates the premise rather than merely
+    stressing it.
+  - **A sortie shows the window is longer than it needs to be.** 15 s is a reasoned budget, not a
+    measurement. If the pilot reports answering comfortably every time, the right move is to shorten
+    it for the destructive tokens specifically rather than leave headroom nobody uses.
+
+  The narrower fix, if it is ever wanted, is a `CONFIRM_WINDOW_S_CANCEL` mirroring the existing
+  `ACT_FLOOR_CANCEL` split — the mechanism is already there and precedented, which is part of why
+  accepting now costs little.
