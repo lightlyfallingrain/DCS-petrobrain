@@ -58,7 +58,20 @@ of the "different question" argument above.
 `CONTACT_CLASSIFICATION_CHANGED` events are never grouped -- aggregating a
 specific identification into a generic count is exactly what would make a
 BTR-70 disappear into "three infantry", which is the failure this design
-explicitly guards against (plan, "What is lost, and what is not")."""
+explicitly guards against (plan, "What is lost, and what is not").
+
+**Per-contact disclosure gating (`plans/group-reporting/plan.md` Stage 1).**
+`CalloutScheduler` also suppresses a scheduled `CONTACT_DETECTED`/
+`CONTACT_REACQUIRED` candidate whose rendered text is byte-identical to the
+last one actually spoken for that same contact (`_last_spoken_signature`,
+checked in `_render_group`'s singleton branch before `route_event` is ever
+called, so a suppressed duplicate is never acknowledged). This is real
+value on its own -- a repeated detection/reacquisition cycle at the same
+rounded range/clock no longer re-speaks the identical line -- but it is a
+per-contact check, not a cross-contact one: it does not, by itself, fix the
+"fifty different single-vehicle contacts each say a near-identical line
+once" noise a real belief-level `belief.groups.Group` (Stage 2) exists to
+fix. See `plans/group-reporting/plan.md`'s own effort/value section."""
 
 from __future__ import annotations
 
@@ -81,6 +94,7 @@ from belief.events import (
 from belief.speech import (
     _format_range_km,
     _unit_type_display,
+    render_contact_report,
     render_group_report,
     route_event,
 )
@@ -456,6 +470,20 @@ class CalloutScheduler:
     #: against `WATCH_REPORT_MIN_GAP_S` in `tick` below. Absent-not-null:
     #: no entry means "never spoken yet."
     _last_spoken_sim: dict[str, float] = field(default_factory=dict, repr=False)
+    #: `plans/group-reporting/plan.md` Stage 1 -- per-contact rendered-
+    #: signature gating for `CONTACT_DETECTED`/`CONTACT_REACQUIRED`
+    #: (see `_render_group`'s singleton branch): the exact text `render_
+    #: contact_report` last actually produced for this contact, keyed by
+    #: `contact_id`. A candidate whose freshly rendered text is
+    #: byte-identical to this is suppressed -- a hold on a lockout-armed
+    #: classification, or a re-detection at the same rounded range/clock,
+    #: both read as "unchanged" under this check, since both produce the
+    #: same rendered text. Absent-not-null: no entry means "never spoken
+    #: yet," never `None`. This is real value on its own (the plan's own
+    #: effort/value section), but is **not** expected to close most of the
+    #: cross-contact noise a real `Group` (Stage 2) fixes -- this only
+    #: suppresses a *repeated* line about the *same* contact.
+    _last_spoken_signature: dict[str, str] = field(default_factory=dict, repr=False)
 
     def note_urgent(self, now_sim: float, text: str) -> None:
         """An urgent (`bypass_gate=True`) line just went out through a path
@@ -506,9 +534,28 @@ class CalloutScheduler:
         this candidate and tries the next one (plan, step 5: "If the render
         returns `None` ... consume and try the next candidate")."""
         if len(group) == 1:
-            speech = route_event(store, group[0], now_sim, enrichment)
+            event = group[0]
+            if event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED):
+                # `plans/group-reporting/plan.md` Stage 1: suppress a
+                # scheduled contact-report callout whose rendered text is
+                # unchanged from the last one actually spoken for this
+                # contact -- computed *before* calling `route_event`
+                # (which auto-acknowledges on success), so a suppressed
+                # duplicate is left unacknowledged, same "lost, not
+                # deferred" treatment `tick` already gives an expired or
+                # vanished candidate.
+                candidate = render_contact_report(
+                    store, event.contact_id, now_sim, enrichment
+                )
+                if candidate is None:
+                    return None
+                if self._last_spoken_signature.get(event.contact_id) == candidate.text:
+                    return None
+            speech = route_event(store, event, now_sim, enrichment)
             if speech is None:
                 return None
+            if event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED):
+                self._last_spoken_signature[event.contact_id] = speech.text
             return speech.text
         facts_list: list[dict[str, object]] = []
         for event in group:
