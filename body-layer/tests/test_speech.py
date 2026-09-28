@@ -31,6 +31,7 @@ from belief.speech import (
     _cardinality_phrase,
     _contact_report_text,
     _format_range_km,
+    _group_composition_clause,
     _plural_unit_type_display,
     _respell_for_tts,
     _round_enrichment_fragment,
@@ -39,6 +40,7 @@ from belief.speech import (
     render_confirm_request,
     render_contact_report,
     render_disambiguation,
+    render_group_disclosure,
     render_lost_contact,
     render_no_view,
     render_readback,
@@ -1204,3 +1206,172 @@ def test_route_event_contact_engagement_changed_returns_none_for_unknown_contact
         engaged=True,
     )
     assert route_event(store, event, now_sim=0.0) is None
+
+
+# --- render_group_disclosure (plans/group-reporting/plan.md Stage 3) --------
+
+
+def _group_member_observation(
+    *,
+    obs_id: str,
+    bearing_deg: float,
+    classification_raw: str,
+    classification_level: int,
+) -> Observation:
+    """One degree of bearing apart at a fixed 1000 m range puts members
+    ~17 m apart -- well inside `GROUP_PROXIMITY_GAP_RATIO`'s cohesion
+    threshold for a tight trio, and far enough apart that `belief.
+    association_over_time`'s spatial gate never folds two of these
+    observations into one `Contact` (mirrors `test_tools.py`'s own
+    `test_group_fact_present_for_a_cohering_trio`)."""
+    return Observation(
+        id=obs_id,
+        contact_id=None,
+        t_sim=0.0,
+        t_wall=0.0,
+        source=SOURCE_PETROVICH_DETECTION_ASSOCIATED,
+        classification_raw=classification_raw,
+        bearing_deg=bearing_deg,
+        range_m=1000.0,
+        ownship_at_observation=_ownship(),
+        derived_world_position=DerivedWorldPosition(
+            x=99999.0, z=99999.0, confidence=0.9, method="bearing_range_terrain"
+        ),
+        provenance="test_fixture",
+        classification_level=classification_level,
+    )
+
+
+def _cohering_group_store(
+    members: list[tuple[str, int]],
+) -> tuple[ContactStore, object]:
+    """Ingests one `_group_member_observation` per `(classification_raw,
+    classification_level)` pair, ticks once (which both classifies and
+    reconciles group membership), and returns the store plus the resulting
+    `belief.groups.Group` -- asserts exactly one group formed, since every
+    test using this helper expects the whole trio to cohere."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _group_member_observation(
+                obs_id=f"OBS_{i}",
+                bearing_deg=float(i),
+                classification_raw=raw,
+                classification_level=level,
+            )
+            for i, (raw, level) in enumerate(members)
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.groups) == 1
+    return store, store.groups[0]
+
+
+def test_group_composition_clause_singular_uses_indefinite_article() -> None:
+    facts = [{"classification": {"value": "OP_TRUCK", "level": "class"}}]
+    assert _group_composition_clause(facts) == "a truck"
+
+
+def test_group_composition_clause_counts_members_exactly() -> None:
+    facts = [
+        {"classification": {"value": "OP_ARMORED", "level": "class"}},
+        {"classification": {"value": "OP_ARMORED", "level": "class"}},
+        {"classification": {"value": "OP_TRUCK", "level": "class"}},
+    ]
+    assert _group_composition_clause(facts) == "two armor and a truck"
+
+
+def test_render_group_disclosure_undifferentiated_group_says_bare_group() -> None:
+    """Row 1 of the plan's worked example: all members still at `presence`
+    level says the bare word, no composition detail to give yet."""
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "Group."
+
+
+def test_render_group_disclosure_differentiated_group_gives_composition() -> None:
+    """Row 2's shape: no threat-capable member, but classification has
+    refined past `presence` -- the composition clause leads, capitalised."""
+    store, group = _cohering_group_store(
+        [
+            ("OP_ARMORED", 2),
+            ("OP_ARMORED", 2),
+            ("OP_TRUCK", 2),
+        ]
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "Two armor and a truck."
+
+
+def test_render_group_disclosure_threat_capable_member_leads_the_line() -> None:
+    """Row 3's shape: one member resolves to a real threat envelope
+    (`belief.threat.envelope_for`) and leads with "Danger, <type>." -- the
+    rest of the group follows as its own composition clause."""
+    store, group = _cohering_group_store(
+        [
+            ("ZSU-23-4 Shilka", 3),
+            ("OP_ARMORED", 2),
+            ("OP_ARMORED", 2),
+        ]
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "Danger, ZSU-23-4 Shilka. Also two armor."
+
+
+def test_render_group_disclosure_appends_clock_range_from_nearest_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    enrichment = _enrichment_context(monkeypatch)
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+
+    speech = render_group_disclosure(store, group, now_sim=0.0, enrichment=enrichment)
+
+    assert speech is not None
+    assert speech.text.startswith("Group, ")
+    assert speech.text.endswith("o'clock, very close.")
+
+
+def test_render_group_disclosure_appends_watched_when_any_member_is_watched() -> None:
+    store, group = _cohering_group_store(
+        [("Ural truck", 1), ("Ural truck", 1), ("Ural truck", 1)]
+    )
+    watched_member = next(iter(group.member_contact_ids))
+    for contact in store.contacts:
+        if contact.id == watched_member:
+            contact.attention = "watch"
+
+    speech = render_group_disclosure(store, group, now_sim=0.0)
+
+    assert speech is not None
+    assert speech.text == "Group, watched."
+
+
+def test_render_group_disclosure_returns_none_when_membership_has_collapsed() -> None:
+    """Fewer than two members still resolve to a live `Contact` (the group
+    reference is stale relative to the store) -- nothing coherent left to
+    report."""
+    from belief.groups import Group as _Group
+
+    store = ContactStore()
+    stale_group = _Group(
+        id="GROUP_1",
+        member_contact_ids=frozenset({"CONTACT_999", "CONTACT_998"}),
+        established_sim=0.0,
+        last_reconciled_sim=0.0,
+    )
+
+    assert render_group_disclosure(store, stale_group, now_sim=0.0) is None
