@@ -56,11 +56,15 @@ Four findings, in the user's own words plus what each implies:
      "<X>, confirm?" and `"confirm"` was not an affirmative — the pilot's own report is
      *"yes"/"confirm"*, and echoing the operative word back is the most natural answer there is.
      Widened to include `confirm`/`confirmed`/`correct`/`yeah`/`yep`/`ok`/`okay`, and the
-     negatives to include `nope`/`belay`. **Widening the set forced a second change, found in
-     review**: `classify_yes_no` matched the transcript's *first word*, which was survivable for
-     four words of radio usage and not for colloquial openers — `"okay watch that truck at three
-     o'clock"` classified as an answer and was swallowed. The whole transcript must now be the
-     answer (bare filler like `"roger that"` allowed, mixed `"yes no"` refused).
+     negatives to include `nope`/`belay`. **Widening the set took two review rounds to make safe,
+     and the lesson is worth more than the fix**: no rule over the transcript's own text can
+     separate an answer from speech. A first-word check swallowed `"okay watch that truck at
+     three o'clock"`; requiring *every* word to be an answer word then rejected `"yes do it"`,
+     and a rejected answer inside the window silently discards the pending command — so the
+     cancel just would not happen, worse than the original defect. The signal that actually
+     decides it was already at the seam: `verb_anchored`, the matcher's own verdict on whether
+     the pilot was issuing a command. `"okay scan left"` anchors on a verb and is a command;
+     `"yes do it"` anchors on nothing and is an answer. Length caps it at 4 words as a backstop.
   2. **`CONFIRM_WINDOW_S` was 8.0 s, measured from when the question was *decided*, not heard.**
      The round trip it has to cover is TTS synthesis + playback of the question + the pilot
      hearing, deciding, holding PTT and speaking + Whisper `small.en` (p90 1.46 s) + one 1.0 s
