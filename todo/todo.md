@@ -33,11 +33,30 @@ on `fix/confirm-band-affirmatives`.
   founds a *new* contact, which makes the next look ambiguous against one more candidate. A
   recurrence of `plans/contact-duplication-ambiguity-runaway/`'s runaway with a new trigger.
 
-  **Four directions are listed in the debug note and none is chosen** — the anti-guessing rule is
-  load-bearing, so this needs a decision, not a patch. That makes it `/explore` → Architect work,
-  not a debugger sortie. Note also that contacts drift between real objects over a sortie, so any
-  fix validated against the belief-truth join must account for the join re-resolving, or it
-  measures itself.
+  **CORRECTION, same day, from reading the actual log** (`plans/contact-fragmentation-at-range/
+  2026-09-28-log-analysis.md`): **this is not X-B6.** The attribution above was made before anyone
+  opened `~/dcs-belief-truth.jsonl` and it is wrong. In the longest run, **3 of 52 contacts were
+  ever plural**, and two other runs had none at all — against 62 distinct real objects, which is
+  close to 1:1 and the *opposite* of X-B6's one-outpost-becomes-18 signature. Clustering and
+  cardinality are working; they are correctly concluding that vehicles tens of metres apart at
+  2 km are individually resolvable.
+
+  The noise is the **callout policy**: one resolvable vehicle produces one callout, roughly one
+  every eleven seconds for half an hour, and 4310 of 5996 belief rows sit at `PRESENCE`/
+  `OP_GROUPSOMETHING`, so nearly every line is the same words. Speech-time aggregation exists
+  (`belief.callouts.group_candidates`) but needs members pending *simultaneously* and sharing the
+  same range *word* — detections trickle in one per poll, and `"2 kilometres"` versus
+  `"2.5 kilometres"` are different buckets, so it almost never fires.
+
+  So the lever is how long Petrovich waits before speaking and how coarse the buckets are, not the
+  association gate. **X-B6 stays open and unfixed** — a genuinely separate defect from a different
+  sortie shape, whose 3 → 5 mitigation was never re-flown — but it is not what made this flight
+  loud.
+
+  **Needs the user's judgement before any plan**: what a crew member should *say* when sixteen
+  individually-resolvable vehicles sit in one sector. The 2026-09-19 vocabulary decisions do not
+  cover it — they assumed the plural case arrives as one plural contact, not as sixteen singular
+  ones.
 
 - [ ] **Free text reaches the brain and comes back "Unable, no such command."** User's words:
   *"'free text' is escalated to brain, but it comes back to 'unable, no such command'. While brain
@@ -49,12 +68,18 @@ on `fix/confirm-band-affirmatives`.
   vocabulary, exactly as the user diagnosed: the model can only ever say what the closed set lets
   it say, and a pilot speaking freely is mostly outside it.
 
-  **The decision this actually raises is what free speech should do at all**, and it is a real fork
-  worth the user's input rather than a fix to schedule: widen the closed set (more tokens, same
-  architecture), let the brain answer *questions* about belief state without commanding anything
-  (it already has the tool API), or keep the closed set and make the refusal honest — "I can't do
-  that" rather than a phrasing that sounds like the command was misheard. Not started; see the
-  brain-layer plan's D11 before scoping.
+  **DECIDED (user, 2026-09-28): let the brain answer questions about what he believes, without
+  commanding anything.** Chosen over widening the command set or merely making the refusal honest.
+  The tool API this needs already exists and has been frozen since BL-6 (15 tools,
+  `belief/tools.py`), and the brain already holds a body-side trust boundary that re-validates every
+  model reply against body-owned data (D10) — so this is a new *intent class* through machinery
+  that is built, not new machinery. Not started; read `plans/brain-layer/plan.md` D11 (the closed
+  reason set) and D4 (contact reference resolution) before scoping, since a question about a
+  contact has to resolve which contact it is about, and that resolver is the same one `follow` uses.
+
+  Worth naming the boundary while scoping: a question answered from belief must be answerable
+  *wrongly* when belief is wrong. "How many trucks?" gets the believed count, not the true one —
+  the no-omniscience invariant applies to answers exactly as it applies to callouts.
 
 ### Sortie 2026-09-26 — crew behaviour findings (user-flown, unfixed)
 
