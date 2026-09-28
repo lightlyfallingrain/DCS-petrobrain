@@ -189,3 +189,135 @@ requested fix actually closes it; the new required-fix finding was verified by d
 reproduction of `classify_yes_no` against several short plausible answers, and by tracing
 `handle_transcript`'s in-window discard path to confirm what "other" actually does to a pending
 command (silent discard, not a retry prompt) rather than assuming from the docstring.
+
+---
+
+## Review: fix commit `a631e7a` (`verb_anchored` as the discriminator)
+
+HEAD matched the expected tip (`a631e7a`, one commit on `2471542`) — verified via `git rev-parse
+HEAD` first.
+
+**The reasoning for rejecting my Round 2 suggestion is correct, and I confirmed it rather than
+took it on faith.** My proposed "first word answers AND ≤3-4 words" rule would accept `"okay scan
+left"` (3 words, first word an answer word) as an affirm inside an open window — committing a
+stale pending command and dropping the genuinely new one, which is exactly the failure Round 1's
+own `test_handle_transcript_confirm_then_unrelated_answer_discards_and_processes_new` exists to
+prevent. Both of my suggested rules and both of the implementer's tried to decide from the
+transcript's text alone, and text alone can't separate `"okay scan left"` from `"yes do it"` —
+they're the same shape. Using `verb_anchored`, a signal from *outside* the text (the adapter's own
+match attempt), is the right category of fix.
+
+**But `verb_anchored` is not reliable for exactly the vocabulary this module depends on, and I
+confirmed this against the real matcher, not a mock.** `audio-adapter/src/command_matcher.py`
+computes it by fuzzy-matching the transcript's first word against `VERB_ANCHOR_WORDS` at
+`VERB_FLOOR = 0.5` — deliberately permissive, "asymmetric" toward false anchors, per that module's
+own docstring. I ran every current answer word through `_verb_anchor_ratio` directly:
+
+```
+roger      0.55  ANCHORS  (vs "report")
+ok         0.67  ANCHORS
+okay       0.57  ANCHORS
+negative   0.62  ANCHORS
+nope       0.50  ANCHORS
+belay      0.50  ANCHORS
+disregard  1.00  ANCHORS  (it IS a real command phrasing, cancel_nevermind)
+yes        0.33
+confirm    0.38
+correct    0.46
+(the rest below floor)
+```
+
+Then ran the full path end to end — a real pending confirmation ("cancel everything, confirm?"),
+answered with the real `command_matcher.match_transcript()` output fed into
+`CrewConsole.handle_transcript`:
+
+| bare answer | matcher's `verb_anchored` | pilot-facing result |
+|---|---|---|
+| `"yes"` | `False` | commits `cancel_task` — correct |
+| `"confirm"` | `False` | commits `cancel_task` — correct |
+| `"roger"` | **`True`** | **"Say again?" — command not committed** |
+| `"negative"` | **`True`** | **"Say again?" — pending discarded, no negative ack** |
+| `"ok"` | **`True`** | **"Say again?"** |
+| `"disregard"` | **`True`**, resolves to token `cancel_nevermind`, ratio 1.0 | falls through to `classify_response` instead of the negative-answer branch; currently a no-op only because `cancel_nevermind` has no dispatch handler yet |
+
+`classify_yes_no` returns `"other"` the instant `verb_anchored` is `True`, before it even looks at
+the word. For `"roger"` and `"negative"` this is a real regression, not an edge case: both are
+founding vocabulary — `_AFFIRM_WORDS`/`_NEGATIVE_WORDS` had exactly `{affirm, affirmative, yes,
+roger}` / `{negative, no, disregard}` before any of these three rounds started, per Round 1's own
+diagnosis in `todo/todo.md`. This branch has now broken two words that worked correctly before it
+touched anything, using the exact single-word phrasing the confirm band is supposed to make
+answerable, and it does so silently — the visible symptom ("Say again?") is milder than the
+original "Unable, no such command," but the command still does not commit, so the pilot has to
+notice and retry rather than being told anything is wrong.
+
+`"disregard"` is worse in kind: it isn't merely misclassified, it now falls all the way through to
+being treated as an attempted *command* (the adapter resolves it to `cancel_nevermind` at
+`match_ratio=1.0`), bypassing the intended negative-answer branch entirely. `_NEGATIVE_WORDS`'s own
+docstring in `voice_commands.py` claims this is safe by construction: *"the two meanings never
+compete, because this set is consulted only inside \[the confirm] window and `cancel_nevermind` is
+matched by the adapter outside it."* That was true when `classify_yes_no` only looked at the
+transcript's text — it is no longer true now that `verb_anchored` (the adapter's own match
+verdict) is threaded into the same function the docstring is describing. The two meanings *do*
+compete now, and the command-meaning wins whenever the fuzzy anchor fires, which for `"disregard"`
+is always (ratio 1.0, it's an exact phrasing). It happens to be inert today only because
+`cancel_nevermind` has "no dispatch behaviour" yet (confirmed via the repro's own stderr) — the
+moment that token gets a real handler, a bare "disregard" answer to *any* pending confirm question
+will run that handler instead of discarding the pending command, and nothing in this change's
+tests would catch it.
+
+**Answering the four specific judgment questions:**
+
+1. **Is `verb_anchored` reliable here?** No — demonstrated above. It can be `True` for a bare
+   answer word a pilot plausibly says alone (`"roger"`, `"negative"`, `"ok"`, `"okay"`, `"nope"`,
+   `"belay"`, `"disregard"`), because `VERB_ANCHOR_WORDS`' fuzzy floor (0.5) was tuned for a
+   different asymmetry (a false verb rejection is worse than a false verb anchor, per that
+   module's own docstring) with no awareness that its output would later gate a *different*
+   module's yes/no vocabulary. It is reliable in the direction the commit message argues (a real
+   command like `"okay scan left"` does anchor, correctly), just not reliably *absent* for the
+   bare answer words it needs to stay absent for.
+2. **The `verb_anchored=False` default** does not hide a real production path — both call sites in
+   `crew_console.py` pass `handle_transcript`'s own required (non-optional) `verb_anchored`
+   parameter through explicitly, and the `!voice` harness's own syntax requires the operator to
+   type a `0|1` for it (`crew_console.py:1882`). Every direct call using the default is a test.
+   This part is sound.
+3. **Is 4 words defensible?** As a backstop behind a discriminator that actually worked, yes —
+   it's honestly labelled "a round number, not a measurement," and it correctly rejects the
+   original 8-word free-speech case even in the (hypothetical) situation where verb-anchoring
+   fails to fire on a short non-answer opener. Given finding 1, though, it is now carrying more
+   weight than "belt to its braces" implies, since the primary buckle is failing for several real
+   words.
+4. **Stale docstring left by an earlier round**: yes — `_NEGATIVE_WORDS`'s "the two meanings never
+   compete" claim, quoted above, is the one that matters; it was accurate through Rounds 1-2 and
+   is falsified by this round's own change. `todo/todo.md`'s Round 3 summary doesn't repeat the
+   false claim but also doesn't mention this collision at all, so it isn't stale, just incomplete
+   once this is fixed.
+
+Fix suggestion: don't gate on `VERB_ANCHOR_WORDS`' general-purpose fuzzy floor for this. Either
+(a) check word-set membership *before* consulting `verb_anchored` — if the first word is an exact
+member of `_AFFIRM_WORDS`/`_NEGATIVE_WORDS`, decide from the text as before and only fall back to
+`verb_anchored` for the ambiguous multi-word cases the word-only rules got wrong; or (b) exclude
+`_AFFIRM_WORDS`/`_NEGATIVE_WORDS` members from ever fuzzy-anchoring in `command_matcher.py` itself
+(a cross-subproject change, and a bigger one — audio-adapter has no reason today to know
+body-layer's answer vocabulary, so this would introduce the coupling explicitly rather than
+leave it implicit and untested). (a) is the smaller, more local fix and keeps the coupling inside
+body-layer where the confirm band already lives. Either way, add a regression test that runs the
+*real* `command_matcher.match_transcript` (or a small fixture mirroring its verb-anchor floor)
+against every word in `_AFFIRM_WORDS | _NEGATIVE_WORDS` and asserts none of them anchors — that is
+the test this round's own suite is missing, and it's exactly the kind of cross-subproject
+assumption this project's "module independence" note warns can drift silently.
+
+### Verdict (this round)
+
+NEEDS REVISION — the chosen discriminator is right in kind but is demonstrably wrong for at least
+three specific words already in this module's own vocabulary, two of which predate this whole
+three-round fix. `"roger"` and `"negative"` — plausibly the two most likely words a pilot actually
+says — no longer commit or discard a pending confirmation; `"disregard"` no longer discards one
+either and is one future dispatch-table entry away from doing something unrelated instead.
+
+### Review Confidence (this round)
+
+Full read of the diff between `2471542` and `a631e7a`. The required-fix finding was verified two
+ways, neither by inference: `_verb_anchor_ratio` was run directly against every current answer
+word to find the collisions, and then the real `command_matcher.match_transcript` output was fed
+through an actual `CrewConsole.handle_transcript` call (a full pending-confirmation round trip) to
+confirm the pilot-facing outcome, not just the classifier's internal return value.
