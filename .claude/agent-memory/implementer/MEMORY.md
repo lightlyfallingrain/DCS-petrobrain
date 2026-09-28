@@ -112,3 +112,5 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Sortie 2026-09-26 fixes](project_sortie_2026_09_26_fixes.md) — grace field needs "last confirmed observable"; pending/committed split.
 - [Verify a reviewer's suggested test mechanism](feedback_regression_test_verify_mechanism_not_just_hypothesis.md) — read both code paths first.
 - [Worktree branch behind main](feedback_worktree_branch_behind_main.md) — check worktree's own branch vs main; ff-merge, never reset --hard.
+- [Group-reporting Stages 1-3](project_group_reporting_stage1_3.md) — plan named collision `render_group_report`; exact per-class counts.
+- [Don't improvise scope for plan framing](feedback_dont_improvise_scope_to_satisfy_plan_framing.md) — flag the tension, don't wire into next stage's territory.
