@@ -508,3 +508,20 @@ two functions that must agree (2026-09-19).
   a verified fact — before writing the assertion, revert to the pre-fix code and run the candidate
   test against it; if it passes, the mechanism doesn't discriminate, no matter how plausible it reads
   (`plans/audio-adapter-review-findings/review.md` round 2, `1b2e337`, 2026-09-26).
+
+- **A tuning-parameter widening (a threshold, a window, a word set) tends to fail in rounds, each
+  round's single rule correct about the case that motivated it and wrong just outside that case —
+  and each round is found by running the real adjacent subsystem end to end, not by reasoning about
+  it or trusting a test that supplies its own default for the parameter under scrutiny.** The
+  confirm-band affirmatives fix (widened `_AFFIRM_WORDS`/`_NEGATIVE_WORDS`, `CONFIRM_WINDOW_S`
+  8.0→15.0s, new `CONFIRM_LATE_ANSWER_GRACE_S`) took five review rounds to land safely: first word
+  is an answer word → swallows a real utterance opening with that word; require the whole transcript
+  to match → breaks "roger, cancelling" style acknowledgements; and so on, each fix correct about its
+  own motivating input and wrong on the next one probed. Every round was actually caught by
+  constructing a real transcript and running it through the live matcher/`handle_transcript`, never
+  by inspecting the widened set and reasoning "this looks safe." This is now the second/third time
+  this exact lesson has surfaced in this project's retro material (see also the shutdown-race and
+  audio-adapter-review-findings entries above) — it is a process pattern, not a one-off code note:
+  any change that widens what a fixed set/threshold/window accepts should budget for multiple rounds
+  of adjacent-subsystem end-to-end probing before it is trusted, not one plausible-looking pass
+  (`plans/confirm-band-affirmatives/review.md`, five rounds, `867cbfe`, 2026-09-28).
