@@ -197,7 +197,24 @@ theatre-wide coverage.
   once that chunk's elevation is available — no separate design needed, it already operates on a
   local grid neighborhood.
 
-**The one open blocker this whole idea hinges on**: there is currently no live data path from a
+**The one open blocker this whole idea hinged on — RESOLVED, and it was already resolved for two
+weeks before anyone noticed.** The paragraph below is kept because its reasoning is still sound;
+its premise is not. See `aircraft-layer/research/2026-09-28-live-terrain-probing-feasibility.md`.
+
+Since **2026-09-13**, `net.dostring_in("scripting", ...)` has carried a live bridge from a Hook
+script into the mission-scripting state, at 1 Hz, with results forwarded over loopback UDP to the
+collector and out over the LAN. Two production features ride it, both flown and accepted: the F10
+command vocabulary and the unit-velocity feed (`petrobrain-mission-telemetry-hook.lua`). So the
+path this section calls impossible is the one the project has been flying nightly.
+
+**What is actually open is narrower and different**: nobody has yet called `land.getHeight`
+*through* that bridge and read a number back (high-confidence that it works — it is documented
+Mission Scripting API and the bridge runs in exactly that environment — but never demonstrated),
+and the bridge's throughput under a terrain-probe batch is **unmeasured**. The velocity hook
+already self-measures `bridge_call_ms`, and nobody has read it from a sortie with a realistic unit
+count. Both are answerable by riding along on any flight; neither needs a dedicated sortie.
+
+*Original text, now false:* there is currently no live data path from a
 running DCS mission back into the persistent world-model store. Every extraction to date
 (`world-model/WORKFLOW.md`) is a manual, offline, batch round-trip — a mission runs, writes to
 `Saved Games/DCS/Logs/`, a human syncs the file back to the Mac hours later via Dropbox, then it
