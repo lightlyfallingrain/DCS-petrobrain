@@ -774,7 +774,13 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     lost_lines = console.drain_events(now_sim=lost_at)
     assert lost_lines == []
 
-    # Petrovich later detects it again.
+    # Petrovich later detects it again, at the same believed classification
+    # and position -- `plans/group-reporting/plan.md` Stage 1's disclosure
+    # gate suppresses this `CONTACT_REACQUIRED`, since its rendered text
+    # ("BMP-2.") is byte-identical to the "BMP-2." already spoken above.
+    # (Behaviour change from this test's own pre-Stage-1 assertion, which
+    # expected the identical line to be re-spoken -- exactly the repeat
+    # Stage 1 exists to suppress.)
     reacquired_at = lost_at + 1.0
     store.ingest(
         [_observation(obs_id="OBS_2", t_sim=reacquired_at, classification_raw="BMP-2")],
@@ -782,7 +788,7 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     )
     store.tick(now_sim=reacquired_at)
     reacquired_lines = console.drain_events(now_sim=reacquired_at)
-    assert "BMP-2." in reacquired_lines
+    assert reacquired_lines == []
 
     # Player: "Where was that BMP?" -> a memory-backed answer, not a guess.
     answer_lines = console.handle_line("where was that bmp?", now_sim=reacquired_at)
