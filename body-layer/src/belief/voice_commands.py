@@ -232,7 +232,7 @@ _MAX_ANSWER_WORDS: int = 4
 _ANSWER_FILLER_WORDS: frozenset[str] = frozenset({"that", "sir", "copy", "please"})
 
 
-def classify_yes_no(transcript: str, verb_anchored: bool = False) -> YesNo:
+def classify_yes_no(transcript: str, matched_command: bool = False) -> YesNo:
     """Whether `transcript` is an affirm/negative *answer* to a confirm
     question, after a minimal local normalisation (lowercase, strip
     punctuation) -- deliberately not `audio-adapter`'s `vocabulary.
@@ -242,29 +242,29 @@ def classify_yes_no(transcript: str, verb_anchored: bool = False) -> YesNo:
     table.
 
     **Three rules in a fixed order, each covering a hole the others
-    leave.** Three review rounds produced three plausible single rules and
-    each broke something the previous one had right, so what is here is
-    their union rather than the last one standing:
+    leave.** Four review rounds produced four plausible single rules and
+    each broke something a previous one had right, so what is here is their
+    union rather than the last one standing:
 
     1. **The whole transcript is answer words (bar `_ANSWER_FILLER_WORDS`)
-       -> that answer**, checked
-       *first and without consulting `verb_anchored`*. "Yes", "roger",
-       "negative", "disregard", "roger that" are answers by inspection and
-       nothing may overrule that. The ordering is load-bearing, not
-       stylistic: run against the real `audio_adapter.command_matcher`,
-       `roger`/`ok`/`okay`/`negative`/`nope`/`belay` all clear its
-       `VERB_FLOOR` of 0.5 on fuzzy similarity to real command verbs
-       ("roger" against "report" scores 0.55), and "disregard" *is* the
-       `cancel_nevermind` phrasing at ratio 1.00. A version of this
-       function that consulted the anchor first therefore broke bare
-       "roger" and "negative" -- two words that answered correctly before
-       this branch existed (review round 3).
-    2. **Otherwise, anchored on a verb -> not an answer.** For a
-       *multi*-word transcript this is the signal neither text rule could
-       supply: "okay scan left" anchors and is a command however short;
-       "yes do it" anchors on nothing and is an answer despite the extra
-       words. Rule 1's own words are already gone by here, so the anchor's
-       fuzziness costs nothing.
+       -> that answer**, checked first and without consulting
+       `matched_command`. "Yes", "roger", "negative", "disregard", "roger
+       that" are answers by inspection and nothing may overrule that. The
+       ordering is load-bearing, not stylistic: "disregard" resolves to
+       `cancel_nevermind` at ratio 1.00 in the real matcher, so a version
+       of this function that checked the matcher first broke it, along
+       with bare "roger" and "negative" -- words that answered correctly
+       before this branch existed (review round 3).
+    2. **Otherwise, the matcher resolved a real command token -> not an
+       answer.** "Okay scan left" resolves to `scan_left` and is a command
+       however short. **`matched_command`, not `verb_anchored`** (review
+       round 4): the anchor is computed from the transcript's *first word
+       alone*, so "roger wilco", "negative hold off", "nope hold on" and
+       "belay that order" all anchor on their opening answer word while
+       resolving no token at all -- gating on the anchor intercepted every
+       one of them before rule 3 could accept it, and the pilot got "Say
+       again?" to a perfectly ordinary answer. A resolved token is a
+       statement about the whole utterance, which is what this rule needs.
     3. **Otherwise, first word in an answer set and at most
        `_MAX_ANSWER_WORDS` long -> that answer.** Requiring *every* word
        to be an answer word instead (round 2's rule) rejected "yes do it",
@@ -273,11 +273,11 @@ def classify_yes_no(transcript: str, verb_anchored: bool = False) -> YesNo:
        pending command, so for "cancel everything, confirm?" the cancel
        would simply not happen. The length cap is what stops "okay watch
        that truck at three o'clock" being read as an answer when the
-       matcher does not anchor it (round 1's failure).
+       matcher resolves nothing from it (round 1's failure).
 
     A caller with no matcher verdict (the `!voice` harness, a direct test)
-    leaves `verb_anchored=False`: permissive, and correct for them, since
-    nothing there is competing with a command match.
+    leaves `matched_command=False`: permissive, and correct for them,
+    since nothing there is competing with a command match.
 
     Mixed answers ("yes no") are `"other"` deliberately: two conflicting
     answer words are exactly the case where guessing is worse than asking
@@ -297,7 +297,7 @@ def classify_yes_no(transcript: str, verb_anchored: bool = False) -> YesNo:
         return "affirm"
     if bare and all(word in _NEGATIVE_WORDS for word in bare):
         return "negative"
-    if verb_anchored or len(words) > _MAX_ANSWER_WORDS:
+    if matched_command or len(words) > _MAX_ANSWER_WORDS:
         return "other"
     first = words[0]
     if first in _AFFIRM_WORDS:
