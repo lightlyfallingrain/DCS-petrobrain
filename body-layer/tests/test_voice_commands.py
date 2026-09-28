@@ -188,14 +188,24 @@ def test_classify_yes_no_ignores_a_long_sentence_that_opens_with_an_answer() -> 
         assert classify_yes_no(sentence) == "other", sentence
 
 
-def test_classify_yes_no_defers_to_the_matchers_verb_anchor_for_a_sentence() -> None:
-    """For a *multi-word* utterance the anchor is the discriminator: "okay
-    scan left" is a command however short, "yes do it" is an answer
-    however elaborated. Neither a first-word rule nor a whole-transcript
-    rule could separate those two."""
-    assert classify_yes_no("okay scan left", verb_anchored=True) == "other"
-    assert classify_yes_no("no watch nearest", verb_anchored=True) == "other"
-    assert classify_yes_no("yes do it", verb_anchored=False) == "affirm"
+def test_classify_yes_no_defers_to_a_resolved_command_token() -> None:
+    """For a *multi-word* utterance a resolved command token is the
+    discriminator: "okay scan left" is a command however short, "yes do
+    it" is an answer however elaborated. Neither a first-word rule nor a
+    whole-transcript rule could separate those two.
+
+    **A resolved token, not `verb_anchored`** -- the anchor is computed
+    from the first word alone, so "roger wilco" anchors on "roger" while
+    resolving nothing, and gating on it rejected a perfectly ordinary
+    answer (review round 4)."""
+    # Both `matched_command=True` cases below are phrases the real matcher
+    # really does resolve a token for ("okay scan left" -> `scan_left`,
+    # "roger scan left" -> `scan_left`); the `False` one it really does
+    # not. Asserting against a value the matcher would never produce is
+    # what hid round 4 for a whole round.
+    assert classify_yes_no("okay scan left", matched_command=True) == "other"
+    assert classify_yes_no("roger scan left", matched_command=True) == "other"
+    assert classify_yes_no("yes do it", matched_command=False) == "affirm"
 
 
 def test_classify_yes_no_never_lets_the_anchor_overrule_a_bare_answer() -> None:
@@ -211,17 +221,24 @@ def test_classify_yes_no_never_lets_the_anchor_overrule_a_bare_answer() -> None:
     import that module, so the fact is asserted on both sides rather than
     shared."""
     for word in ("roger", "ok", "okay"):
-        assert classify_yes_no(word, verb_anchored=True) == "affirm", word
+        assert classify_yes_no(word, matched_command=True) == "affirm", word
     for word in ("negative", "nope", "belay", "disregard"):
-        assert classify_yes_no(word, verb_anchored=True) == "negative", word
-    assert classify_yes_no("roger that", verb_anchored=True) == "affirm"
+        assert classify_yes_no(word, matched_command=True) == "negative", word
+    assert classify_yes_no("roger that", matched_command=True) == "affirm"
 
 
 def test_classify_yes_no_accepts_a_short_elaborated_answer() -> None:
     """Review round 2: requiring *every* word to be an answer word rejected
     "yes do it" and friends -- and inside an open window a rejected answer
     silently discards the pending command with no feedback at all, so for
-    "cancel everything, confirm?" the cancel simply would not happen."""
+    "cancel everything, confirm?" the cancel simply would not happen.
+
+    Every `matched_command` value below is what the real
+    `audio_adapter.command_matcher` actually returns for that phrase
+    (checked by hand against it -- round 4 was found precisely because
+    this test used the parameter's default instead): none of these
+    resolves a token, though several of them *do* anchor a verb on their
+    opening word, which is why the anchor is not what rule 2 consults."""
     for answer in (
         "yes do it",
         "affirm execute",
@@ -230,8 +247,9 @@ def test_classify_yes_no_accepts_a_short_elaborated_answer() -> None:
         "roger that",
         "yes sir",
     ):
-        assert classify_yes_no(answer) == "affirm", answer
-    assert classify_yes_no("negative hold off") == "negative"
+        assert classify_yes_no(answer, matched_command=False) == "affirm", answer
+    for answer in ("negative hold off", "nope hold on", "belay that order"):
+        assert classify_yes_no(answer, matched_command=False) == "negative", answer
 
 
 def test_classify_yes_no_refuses_a_mixed_answer() -> None:

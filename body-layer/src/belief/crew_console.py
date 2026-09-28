@@ -1722,7 +1722,7 @@ class CrewConsole:
         if self._pending_confirmation is not None:
             pending = self._pending_confirmation
             if now_sim - pending.pending_since_sim <= CONFIRM_WINDOW_S:
-                answer = classify_yes_no(transcript, verb_anchored)
+                answer = classify_yes_no(transcript, token is not None)
                 self._pending_confirmation = None
                 self._confirmation_expired_sim = None
                 if answer == "affirm":
@@ -1764,7 +1764,7 @@ class CrewConsole:
             since_expiry = now_sim - self._confirmation_expired_sim
             if (
                 0.0 <= since_expiry <= CONFIRM_LATE_ANSWER_GRACE_S
-                and classify_yes_no(transcript, verb_anchored) != "other"
+                and classify_yes_no(transcript, token is not None) != "other"
             ):
                 self._confirmation_expired_sim = None
                 lines = [render_say_again().text]
