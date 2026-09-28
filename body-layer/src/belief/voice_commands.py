@@ -197,6 +197,16 @@ _AFFIRM_WORDS: frozenset[str] = frozenset(
 #: are "valid only while a confirmation is pending"): the two meanings
 #: never compete, because this set is consulted only inside that window
 #: and `cancel_nevermind` is matched by the adapter outside it.
+#:
+#: **That non-competition survives only because a bare answer word is
+#: classified before `verb_anchored` is consulted** (`classify_yes_no`,
+#: rule 1). "Disregard" matches `cancel_nevermind` at ratio 1.00 in the
+#: real matcher, and `roger`/`ok`/`okay`/`negative`/`nope`/`belay` all
+#: clear its `VERB_FLOOR` of 0.5 on fuzzy similarity to real verbs
+#: ("roger" against "report", 0.55). A version of this module that gated
+#: every word on the anchor broke `roger` and `negative` -- two words that
+#: worked before this branch existed -- which is what put the ordering
+#: below in the code and this paragraph next to the set.
 _NEGATIVE_WORDS: frozenset[str] = frozenset(
     {"negative", "no", "nope", "disregard", "belay"}
 )
@@ -207,9 +217,19 @@ YesNo = Literal["affirm", "negative", "other"]
 #: How many words a transcript may carry and still be an *answer* rather
 #: than speech. "Yes", "roger that", "yes do it", "affirmative go ahead"
 #: are all answers a pilot plausibly gives; nothing longer reads as one.
-#: A round number, not a measurement -- the load-bearing discriminator is
-#: `verb_anchored` below, and this is the belt to its braces.
+#: A round number, not a measurement. It only ever decides the *unanchored
+#: multi-word* case -- a bare answer word is settled before it is reached,
+#: and an anchored one by the anchor -- so being approximately right is
+#: enough for what it does.
 _MAX_ANSWER_WORDS: int = 4
+
+#: Words that may ride along with a bare answer without stopping it being
+#: one -- "roger that", "yes sir". Needed only by rule 1 below, and only
+#: because rule 1 must hold against an anchored transcript: "roger that"
+#: anchors a verb, so without this it would fall to rule 2 and be read as
+#: a command. Deliberately tiny and closed; an unlisted word makes the
+#: transcript a sentence, which is then rules 2 and 3's business.
+_ANSWER_FILLER_WORDS: frozenset[str] = frozenset({"that", "sir", "copy", "please"})
 
 
 def classify_yes_no(transcript: str, verb_anchored: bool = False) -> YesNo:
@@ -221,51 +241,65 @@ def classify_yes_no(transcript: str, verb_anchored: bool = False) -> YesNo:
     vocabulary is a dozen short, common words, not a 39-entry phrase
     table.
 
-    **Three signals, and `verb_anchored` is the one that matters.** Two
-    review rounds each broke a rule that used only the transcript's own
-    text, in opposite directions, which is what says the text alone cannot
-    decide this:
+    **Three rules in a fixed order, each covering a hole the others
+    leave.** Three review rounds produced three plausible single rules and
+    each broke something the previous one had right, so what is here is
+    their union rather than the last one standing:
 
-    1. *First word in an answer set* -- necessary, nowhere near
-       sufficient. On its own it read "okay watch that truck at three
-       o'clock" as an answer and swallowed a real instruction (review
-       round 1).
-    2. *Every word an answer word* -- fixed that and broke the other side:
-       "yes do it", "roger wilco", "affirm execute" all became `"other"`,
-       and inside an open window `"other"` silently discards the pending
-       command with no feedback at all. For "cancel everything, confirm?"
-       that means the cancel simply does not happen -- worse than the
-       defect this branch set out to fix (review round 2).
-    3. *`verb_anchored`* -- `audio_adapter.command_matcher`'s own verdict
-       on whether the pilot was issuing a command. This is the signal the
-       first two rules were both trying to approximate from text, and it
-       is already carried through `handle_transcript`'s seam. "Okay scan
-       left" anchors on a verb and is therefore a command, however short;
-       "yes do it" anchors on nothing and is an answer, despite the extra
-       words. A caller that has no matcher verdict (the `!voice` harness,
-       a direct test) leaves it `False`, which is the permissive default
-       and correct for those callers -- they are not competing with a
-       command match.
+    1. **The whole transcript is answer words (bar `_ANSWER_FILLER_WORDS`)
+       -> that answer**, checked
+       *first and without consulting `verb_anchored`*. "Yes", "roger",
+       "negative", "disregard", "roger that" are answers by inspection and
+       nothing may overrule that. The ordering is load-bearing, not
+       stylistic: run against the real `audio_adapter.command_matcher`,
+       `roger`/`ok`/`okay`/`negative`/`nope`/`belay` all clear its
+       `VERB_FLOOR` of 0.5 on fuzzy similarity to real command verbs
+       ("roger" against "report" scores 0.55), and "disregard" *is* the
+       `cancel_nevermind` phrasing at ratio 1.00. A version of this
+       function that consulted the anchor first therefore broke bare
+       "roger" and "negative" -- two words that answered correctly before
+       this branch existed (review round 3).
+    2. **Otherwise, anchored on a verb -> not an answer.** For a
+       *multi*-word transcript this is the signal neither text rule could
+       supply: "okay scan left" anchors and is a command however short;
+       "yes do it" anchors on nothing and is an answer despite the extra
+       words. Rule 1's own words are already gone by here, so the anchor's
+       fuzziness costs nothing.
+    3. **Otherwise, first word in an answer set and at most
+       `_MAX_ANSWER_WORDS` long -> that answer.** Requiring *every* word
+       to be an answer word instead (round 2's rule) rejected "yes do it",
+       "roger wilco", "affirm execute" -- and inside an open window a
+       rejected answer is not a "say again", it silently discards the
+       pending command, so for "cancel everything, confirm?" the cancel
+       would simply not happen. The length cap is what stops "okay watch
+       that truck at three o'clock" being read as an answer when the
+       matcher does not anchor it (round 1's failure).
 
-    `_MAX_ANSWER_WORDS` still caps the length, so a long unanchored ramble
-    that happens to open with "okay" is not read as an answer either.
+    A caller with no matcher verdict (the `!voice` harness, a direct test)
+    leaves `verb_anchored=False`: permissive, and correct for them, since
+    nothing there is competing with a command match.
 
     Mixed answers ("yes no") are `"other"` deliberately: two conflicting
     answer words are exactly the case where guessing is worse than asking
     again."""
-    if verb_anchored:
-        return "other"
     stripped = "".join(
         char for char in transcript.strip().lower() if char.isalnum() or char == " "
     )
     words = stripped.split()
-    if not words or len(words) > _MAX_ANSWER_WORDS:
+    if not words:
         return "other"
-    first = words[0]
     has_affirm = any(word in _AFFIRM_WORDS for word in words)
     has_negative = any(word in _NEGATIVE_WORDS for word in words)
     if has_affirm and has_negative:
         return "other"
+    bare = [word for word in words if word not in _ANSWER_FILLER_WORDS]
+    if bare and all(word in _AFFIRM_WORDS for word in bare):
+        return "affirm"
+    if bare and all(word in _NEGATIVE_WORDS for word in bare):
+        return "negative"
+    if verb_anchored or len(words) > _MAX_ANSWER_WORDS:
+        return "other"
+    first = words[0]
     if first in _AFFIRM_WORDS:
         return "affirm"
     if first in _NEGATIVE_WORDS:
