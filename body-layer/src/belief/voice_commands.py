@@ -167,8 +167,13 @@ CONFIRM_LATE_ANSWER_GRACE_S: float = 20.0
 #: the question's own terms. The colloquial affirmatives alongside it
 #: ("yeah"/"yep"/"ok"/"okay"/"correct") are the same class of fix: the set
 #: is consulted only inside an open confirm window, so widening it cannot
-#: collide with any command -- an ordinary "okay" outside that window
-#: still reaches `classify_response` untouched.
+#: collide with any command, *given* `classify_yes_no`'s whole-transcript
+#: rule below -- an "okay" that opens a sentence is not an answer, and an
+#: ordinary "okay" outside the window reaches `classify_response`
+#: untouched. The first version of this widening claimed the same safety
+#: from the window alone and was wrong: the review found
+#: "okay watch that truck at three o'clock" being eaten as a late answer,
+#: because the classifier read only the first word.
 _AFFIRM_WORDS: frozenset[str] = frozenset(
     {
         "affirm",
@@ -199,24 +204,45 @@ _NEGATIVE_WORDS: frozenset[str] = frozenset(
 YesNo = Literal["affirm", "negative", "other"]
 
 
+#: Words allowed to ride along with an answer without changing it --
+#: "roger that", "affirm sir", "yes copy". Small and closed on purpose:
+#: anything not here makes the transcript a sentence rather than an
+#: answer, which is the whole discriminator this module now relies on.
+_ANSWER_FILLER_WORDS: frozenset[str] = frozenset({"that", "sir", "copy", "please"})
+
+
 def classify_yes_no(transcript: str) -> YesNo:
-    """Whether `transcript` is an affirm/negative answer word, checked
-    against the transcript's own first word after a minimal local
-    normalisation (lowercase, strip punctuation) -- deliberately not
+    """Whether `transcript` *is* an affirm/negative answer, after a minimal
+    local normalisation (lowercase, strip punctuation) -- deliberately not
     `audio-adapter`'s `vocabulary.normalize_for_match` (module independence:
     this module holds no import of that subproject), and deliberately
-    exact rather than fuzzy: this vocabulary is six short, common words,
-    not a 39-entry phrase table, and exact matching is enough for it."""
+    exact rather than fuzzy: this vocabulary is a dozen short, common
+    words, not a 39-entry phrase table, and exact matching is enough.
+
+    **The whole transcript has to be the answer**, not merely start with
+    one. This used to check the first word alone, which was survivable
+    while the sets were four words of radio usage, and stopped being so
+    the moment they grew the colloquial openers ("ok", "okay", "correct",
+    "yeah") that a pilot also starts ordinary sentences with. The review
+    of that widening found "okay watch that truck at three o'clock"
+    classifying as an answer -- swallowing a real tactical instruction to
+    reply "Say again?". A real answer here is one or two words; a sentence
+    that merely opens with one is not answering, it is talking, so it
+    falls through to `classify_response` like any other speech. Filler
+    ("roger that", "yes sir") is allowed, from a closed list.
+
+    Mixed answers ("yes no") are `"other"` deliberately: two conflicting
+    answer words are exactly the case where guessing is worse than asking
+    again."""
     stripped = "".join(
         char for char in transcript.strip().lower() if char.isalnum() or char == " "
     )
-    words = stripped.split()
+    words = [word for word in stripped.split() if word not in _ANSWER_FILLER_WORDS]
     if not words:
         return "other"
-    first = words[0]
-    if first in _AFFIRM_WORDS:
+    if all(word in _AFFIRM_WORDS for word in words):
         return "affirm"
-    if first in _NEGATIVE_WORDS:
+    if all(word in _NEGATIVE_WORDS for word in words):
         return "negative"
     return "other"
 

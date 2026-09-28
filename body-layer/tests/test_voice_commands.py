@@ -176,6 +176,30 @@ def test_classify_yes_no_negative_words() -> None:
         assert classify_yes_no(word) == "negative", word
 
 
+def test_classify_yes_no_ignores_a_sentence_that_merely_opens_with_an_answer() -> None:
+    """Found in review of the widened answer sets: with a first-word
+    check, a real instruction opening "okay ..." classified as a late
+    answer and was swallowed with a "Say again?". The whole transcript has
+    to be the answer."""
+    for sentence in (
+        "okay watch that truck at three o'clock",
+        "correct the bearing is two seven zero",
+        "no scan left",
+        "yeah I see them now",
+    ):
+        assert classify_yes_no(sentence) == "other", sentence
+
+
+def test_classify_yes_no_allows_answer_filler() -> None:
+    assert classify_yes_no("roger that") == "affirm"
+    assert classify_yes_no("yes sir") == "affirm"
+    assert classify_yes_no("negative that") == "negative"
+
+
+def test_classify_yes_no_refuses_a_mixed_answer() -> None:
+    assert classify_yes_no("yes no") == "other"
+
+
 def test_classify_yes_no_other() -> None:
     assert classify_yes_no("scan left") == "other"
     assert classify_yes_no("") == "other"
