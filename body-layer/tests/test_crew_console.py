@@ -37,7 +37,12 @@ from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
 from belief.tasks import TaskStore
-from belief.voice_commands import ACT_FLOOR, CONFIRM_FLOOR, CONFIRM_WINDOW_S
+from belief.voice_commands import (
+    ACT_FLOOR,
+    CONFIRM_FLOOR,
+    CONFIRM_LATE_ANSWER_GRACE_S,
+    CONFIRM_WINDOW_S,
+)
 from perception import object_model
 from perception.geometry import GeoPosition
 from perception.hybrid_source import SOURCE_PETROVICH_DETECTION_ASSOCIATED
@@ -2099,10 +2104,88 @@ def test_handle_transcript_confirm_expires_after_window(
         now_sim=CONFIRM_WINDOW_S + 1.0,
     )
 
-    # The window elapsed -- "roger" is no longer answering anything, and
-    # (verb_anchored=False here) falls through instead of committing.
+    # The window elapsed -- "roger" no longer commits anything. It is still
+    # inside `CONFIRM_LATE_ANSWER_GRACE_S`, so it is recognised as a late
+    # *answer* and draws a "Say again?" rather than being escalated as free
+    # speech (which is what produced "Unable, no such command." on the
+    # 2026-09-26 sortie). The command itself must still not have fired.
+    assert lines == ["Say again?"]
+    assert tasks.tasks == []
+
+
+def test_handle_transcript_late_answer_beyond_the_grace_falls_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the grace window a yes/no word is ordinary speech again -- the
+    late-answer branch is a short courtesy after a question, not a
+    permanent reinterpretation of the word."""
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    console.handle_transcript(
+        "scan ahead",
+        confidence=confidence_mid,
+        token="scan_ahead",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    lines = console.handle_transcript(
+        "roger",
+        confidence=0.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=CONFIRM_WINDOW_S + CONFIRM_LATE_ANSWER_GRACE_S + 1.0,
+    )
+
     assert lines == []
     assert tasks.tasks == []
+
+
+def test_handle_transcript_confirm_commits_on_the_questions_own_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 2026-09-26 sortie's exact sequence: a command lands in the
+    confirm band, Petrovich asks "<X>, confirm?", and the pilot answers
+    with the word the question asked for. That used to fall through to the
+    brain layer and come back "Unable, no such command."."""
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    asked = console.handle_transcript(
+        "scan ahead",
+        confidence=confidence_mid,
+        token="scan_ahead",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+    assert asked == ["Scan ahead, confirm?"]
+
+    console.handle_transcript(
+        "confirm",
+        confidence=0.0,
+        token=None,
+        match_ratio=0.0,
+        verb_anchored=False,
+        ambiguous=False,
+        now_sim=2.0,
+    )
+
+    assert [task.kind for task in tasks.tasks] == ["scan_area"]
 
 
 def test_handle_transcript_cancel_task_needs_the_higher_floor(

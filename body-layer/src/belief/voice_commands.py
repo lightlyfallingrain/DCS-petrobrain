@@ -124,11 +124,31 @@ CONFIRM_FLOOR: float = 0.35
 
 #: How long a confirm-band question stays open before it is dropped
 #: silently, the same as an unrecognised answer (Decision 4 Layer 3).
-#: **Not measured** -- Stage 1's bench times the *engine's* recognition
-#: latency, not how long a human takes to hear a question and answer it --
-#: a plain, round guess at "long enough to answer, short enough not to
-#: leave a stale question hanging," pending Stage 6.
-CONFIRM_WINDOW_S: float = 8.0
+#: **Still not measured end to end**, but no longer a bare guess: the
+#: 2026-09-26 sortie failed this band, and adding up the round trip the
+#: window has to cover explains why 8.0 s was too tight. The window starts
+#: when the question is *decided*, not when the pilot hears it, and it has
+#: to cover TTS synthesis (<1 s, `audio-adapter/ROADMAP.md`), playback of
+#: the question itself (~1.5 s), the pilot hearing it, deciding, holding
+#: PTT and speaking (2-3 s while also flying), Whisper `small.en`
+#: recognition (p90 1.46 s, max 1.68 s -- `audio-adapter/research/
+#: 2026-09-19-whisper-model-sweep.md`), and one 1.0 s body poll interval.
+#: That is ~6.5-7.5 s with nothing going wrong, i.e. inside the noise of
+#: an 8.0 s window. 15.0 s leaves real headroom for a pilot who is busy
+#: without leaving a "cancel everything" question hanging long enough to
+#: be answered by accident. Revise from a sortie, not from this comment.
+CONFIRM_WINDOW_S: float = 15.0
+
+#: How long *after* a confirm question expires a bare yes/no answer is
+#: still recognised as a (late) answer rather than treated as free speech.
+#: It never commits the command -- the question is gone -- it only decides
+#: whether Petrovich says "Say again?" or escalates the word to the brain
+#: layer. Escalating is the 2026-09-26 failure the pilot actually heard:
+#: his "yes" reached `_handle_utterance`, the decider found no command in
+#: it, and the answer to "cancel everything, confirm?" came back as
+#: "Unable, no such command." -- which reads as the command being
+#: rejected, not as the question having timed out.
+CONFIRM_LATE_ANSWER_GRACE_S: float = 20.0
 
 #: Words that commit a pending confirm-band command, checked only while
 #: one is pending (behaviour #3 above). A small, stable, body-owned
@@ -137,7 +157,33 @@ CONFIRM_WINDOW_S: float = 8.0
 #: yes/no question*, a different and much smaller closed set that belongs
 #: to body's own confirm-band behaviour). `"roger"` is standard radio
 #: usage for "understood/affirmative".
-_AFFIRM_WORDS: frozenset[str] = frozenset({"affirm", "affirmative", "yes", "roger"})
+#:
+#: **`"confirm"` is in here because the question itself asks for it.**
+#: `belief.speech.render_confirm_request` renders "<X>, confirm?", and
+#: echoing the operative word back is the most natural possible answer --
+#: the 2026-09-26 sortie's pilot did exactly that ("yes"/"confirm") and
+#: got "Unable, no such command." The word was missing while the question
+#: invited it, which made the band unanswerable for anyone who answers in
+#: the question's own terms. The colloquial affirmatives alongside it
+#: ("yeah"/"yep"/"ok"/"okay"/"correct") are the same class of fix: the set
+#: is consulted only inside an open confirm window, so widening it cannot
+#: collide with any command -- an ordinary "okay" outside that window
+#: still reaches `classify_response` untouched.
+_AFFIRM_WORDS: frozenset[str] = frozenset(
+    {
+        "affirm",
+        "affirmative",
+        "confirm",
+        "confirmed",
+        "correct",
+        "ok",
+        "okay",
+        "roger",
+        "yeah",
+        "yep",
+        "yes",
+    }
+)
 
 #: Words that discard a pending confirm-band command. `"disregard"` here
 #: is the same English word `audio-adapter`'s `vocabulary.py` also lists as
@@ -146,7 +192,9 @@ _AFFIRM_WORDS: frozenset[str] = frozenset({"affirm", "affirmative", "yes", "roge
 #: are "valid only while a confirmation is pending"): the two meanings
 #: never compete, because this set is consulted only inside that window
 #: and `cancel_nevermind` is matched by the adapter outside it.
-_NEGATIVE_WORDS: frozenset[str] = frozenset({"negative", "no", "disregard"})
+_NEGATIVE_WORDS: frozenset[str] = frozenset(
+    {"negative", "no", "nope", "disregard", "belay"}
+)
 
 YesNo = Literal["affirm", "negative", "other"]
 
