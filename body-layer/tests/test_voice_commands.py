@@ -176,28 +176,49 @@ def test_classify_yes_no_negative_words() -> None:
         assert classify_yes_no(word) == "negative", word
 
 
-def test_classify_yes_no_ignores_a_sentence_that_merely_opens_with_an_answer() -> None:
-    """Found in review of the widened answer sets: with a first-word
-    check, a real instruction opening "okay ..." classified as a late
-    answer and was swallowed with a "Say again?". The whole transcript has
-    to be the answer."""
+def test_classify_yes_no_ignores_a_long_sentence_that_opens_with_an_answer() -> None:
+    """Review round 1: with a first-word check, a real instruction opening
+    "okay ..." classified as a late answer and was swallowed with a "Say
+    again?"."""
     for sentence in (
         "okay watch that truck at three o'clock",
         "correct the bearing is two seven zero",
-        "no scan left",
-        "yeah I see them now",
+        "yeah I can see them over there now",
     ):
         assert classify_yes_no(sentence) == "other", sentence
 
 
-def test_classify_yes_no_allows_answer_filler() -> None:
-    assert classify_yes_no("roger that") == "affirm"
-    assert classify_yes_no("yes sir") == "affirm"
-    assert classify_yes_no("negative that") == "negative"
+def test_classify_yes_no_defers_to_the_matchers_verb_anchor() -> None:
+    """A short utterance `audio_adapter.command_matcher` anchored on a verb
+    is a command, whatever it opens with -- the signal that separates
+    "okay scan left" (command) from "yes do it" (answer), which neither a
+    first-word rule nor a whole-transcript rule could do."""
+    assert classify_yes_no("okay scan left", verb_anchored=True) == "other"
+    assert classify_yes_no("no watch nearest", verb_anchored=True) == "other"
+    # ...and the same opener with nothing anchored is still an answer.
+    assert classify_yes_no("okay", verb_anchored=False) == "affirm"
+
+
+def test_classify_yes_no_accepts_a_short_elaborated_answer() -> None:
+    """Review round 2: requiring *every* word to be an answer word rejected
+    "yes do it" and friends -- and inside an open window a rejected answer
+    silently discards the pending command with no feedback at all, so for
+    "cancel everything, confirm?" the cancel simply would not happen."""
+    for answer in (
+        "yes do it",
+        "affirm execute",
+        "roger wilco",
+        "yes go ahead",
+        "roger that",
+        "yes sir",
+    ):
+        assert classify_yes_no(answer) == "affirm", answer
+    assert classify_yes_no("negative hold off") == "negative"
 
 
 def test_classify_yes_no_refuses_a_mixed_answer() -> None:
     assert classify_yes_no("yes no") == "other"
+    assert classify_yes_no("no yes") == "other"
 
 
 def test_classify_yes_no_other() -> None:
