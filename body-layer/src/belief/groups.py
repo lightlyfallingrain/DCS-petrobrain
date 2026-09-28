@@ -22,16 +22,31 @@ wedge model). Two contacts cohere when their fused-position gap is within
 among all currently tracked contacts -- the boundary scales with how
 densely populated the scene already is, with no absolute constant.
 
-**`GROUP_PROXIMITY_GAP_RATIO` (3.0) and `GROUP_MIN_MEMBERS` (3) are both
-stated assumptions with no data behind them yet** (`plan.md`'s own
-"Risks & Unknowns" -- the first is not even backed by the one flown
-dataset `perception.group_salience`'s own cohesion constant had; the second
-mirrors that module's constant of the same name and value for the same
-reason: a pair is a pair, not a formation, and there is no evidence
-suggesting otherwise). Both are one-line changes, expected to move after
-the first sortie flown under this model -- mechanism and calibration are
-kept in this one small file precisely so retuning either later is a single,
-attributable, uncalibrated-constant commit, not a mechanism change.
+**`GROUP_PROXIMITY_GAP_RATIO` (3.0) is a stated assumption with no data
+behind it yet** (`plan.md`'s own "Risks & Unknowns" -- not even backed by
+the one flown dataset `perception.group_salience`'s own cohesion constant
+had). A one-line change, expected to move after the first sortie flown
+under this model -- mechanism and calibration are kept in this one small
+file precisely so retuning it later is a single, attributable,
+uncalibrated-constant commit, not a mechanism change.
+
+**`GROUP_REPORTING_MIN_MEMBERS` (2) is a deliberately different constant
+from `perception.group_salience.GROUP_MIN_MEMBERS` (3), not a renamed copy
+of it, and the two must never be made to agree by accident.** This module
+used to declare its own floor under the same name and value as that
+module's, on the reasoning "a pair is a pair, not a formation" -- that
+reasoning was overturned by user direction 2026-09-28 (`plans/
+group-reporting/plan.md`'s Stage 4 addendum): two already-individuated
+`Contact`s belonging together *is* a reportable group, worded as a "pair"
+(see `belief.speech.render_group_disclosure`), not withheld until a third
+member arrives. Keeping the old name once its value diverged from `group_
+salience`'s would have left one identifier meaning two different floors in
+two modules -- exactly the collision this rename exists to avoid.
+`group_salience.py`'s constant answers an unrelated question -- how many
+*unresolved candidates* a distant naked-eye detection needs before it is
+salient enough to be admitted at the coarser resolution threshold instead
+of the finer one, calibrated against that channel's own dots-off ladder --
+and stays at 3, untouched by this decision.
 
 **Similarity and common fate are deliberately not gates here.** Proximity
 plus local density is what ships this pass; adding either now would be
@@ -86,9 +101,11 @@ if TYPE_CHECKING:
 #: Stated assumption, no data behind it yet -- see module docstring.
 GROUP_PROXIMITY_GAP_RATIO: Final[float] = 3.0
 
-#: Stated assumption, mirroring `perception.group_salience`'s constant of
-#: the same name and value -- see module docstring.
-GROUP_MIN_MEMBERS: Final[int] = 3
+#: Deliberately not `perception.group_salience.GROUP_MIN_MEMBERS` -- see
+#: module docstring for why the two are named differently and free to
+#: diverge. Two already-individuated `Contact`s are enough to report as
+#: one group, spoken as a "pair".
+GROUP_REPORTING_MIN_MEMBERS: Final[int] = 2
 
 _GROUP_ID_PREFIX: Final[str] = "GROUP"
 
@@ -243,11 +260,11 @@ class GroupStore:
         persisted `Group`s by majority-member-overlap -- see module
         docstring for the split/merge rule. Replaces this store's entire
         membership every call; a persisted group with no matching cluster
-        (every member dispersed, or the cluster fell below `GROUP_MIN_
-        MEMBERS`) is simply dropped, no event fired (deferred, per the
+        (every member dispersed, or the cluster fell below `GROUP_
+        REPORTING_MIN_MEMBERS`) is simply dropped, no event fired (deferred, per the
         plan)."""
         clusters = _cluster_contacts(
-            contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_MIN_MEMBERS
+            contacts, GROUP_PROXIMITY_GAP_RATIO, GROUP_REPORTING_MIN_MEMBERS
         )
 
         scored: list[tuple[int, frozenset[str], Group]] = []
