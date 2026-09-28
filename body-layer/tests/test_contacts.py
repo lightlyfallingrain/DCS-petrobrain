@@ -1749,3 +1749,54 @@ def test_tick_without_ownship_is_a_no_op_for_engagement() -> None:
     store.tick(now_sim=0.0)
     assert store.contacts[0].last_emitted_engagement is None
     assert not any(e.kind == CONTACT_ENGAGEMENT_CHANGED for e in store.events)
+
+
+# --- Eighth block: group reconciliation (plans/group-reporting/plan.md) ----
+
+
+def test_tick_reconciles_group_membership_for_a_cohering_trio() -> None:
+    """`ContactStore.tick`'s eighth, cross-contact block wires `belief.
+    groups.GroupStore.reconcile` -- three tightly-spaced contacts cohere
+    into one group after a single `tick()` call, exposed via `store.
+    groups`/`group_for_contact`."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0, range_m=1000.0),
+            _observation(obs_id="OBS_3", t_sim=0.0, bearing_deg=2.0, range_m=1000.0),
+        ],
+        now_sim=0.0,
+    )
+    assert len(store.contacts) == 3
+    assert store.groups == []  # not reconciled until tick() runs
+
+    store.tick(now_sim=0.0)
+
+    assert len(store.groups) == 1
+    member_ids = {c.id for c in store.contacts}
+    assert store.groups[0].member_contact_ids == member_ids
+    for contact_id in member_ids:
+        assert store.group_for_contact(contact_id) is store.groups[0]
+
+
+def test_tick_is_idempotent_for_group_membership() -> None:
+    """Calling `tick()` again with the same `now_sim` and no belief change
+    must not refound the group -- same idempotence `tick`'s own docstring
+    already promises for the seven per-contact blocks."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0, range_m=1000.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0, range_m=1000.0),
+            _observation(obs_id="OBS_3", t_sim=0.0, bearing_deg=2.0, range_m=1000.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    group_id = store.groups[0].id
+
+    store.tick(now_sim=0.0)
+
+    assert len(store.groups) == 1
+    assert store.groups[0].id == group_id
