@@ -15,8 +15,13 @@ clock/range summary). This list is for the other kind: a milestone whose live ac
 caveat being logged repeatedly (BL-4, BL-5, the continuity fix) without ever being tracked as
 accumulating risk. Clear an entry only once a real sortie actually exercises it, and say which one.
 
-- [ ] **`fix/confirm-band-affirmatives` — the confirm band was unanswerable in the air; fixed
-  2026-09-28, unflown.** The 2026-09-26 sortie: `"cancel"` → *"Cancel everything, confirm?"* →
+- [ ] **`fix/confirm-band-affirmatives` — the confirm band was unanswerable in the air; fixed and
+  merged 2026-09-28 (`583d786`), unflown.** **Merged before its acceptance flight at user
+  direction** — *"so many things at this stage are intertwined that it's better to test to current
+  HEAD"* — so the card
+  (`docs/acceptance/2026-09-28-confirm-band-sortie.md`) is now flown from `main` alongside
+  everything else outstanding, not from a branch. Same posture as the 2026-09-24 binocular-optic
+  merge: a correction the flight produces lands on `main` rather than on a branch that has drifted. The 2026-09-26 sortie: `"cancel"` → *"Cancel everything, confirm?"* →
   `"yes"`/`"confirm"` → *"Unable, no such command."* Three defects behind one symptom, and
   `cancel` always routes through the confirm band whatever its match ratio, so all three hit
   every cancel: `"confirm"` — the word the question itself asks for — was not an affirmative;
