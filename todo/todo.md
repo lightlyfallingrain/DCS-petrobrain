@@ -156,7 +156,9 @@ Four findings, in the user's own words plus what each implies:
      GRACE_S` (20 s) of expiry now draws "Say again?" instead, which prompts the retry that works.
 
   `cancel` always routes to the confirm band whatever its match ratio, so this hit every single
-  cancel. Leave this open until a sortie confirms "cancel" → "confirm" → the task actually stops.
+  cancel. **Merged to `main` 2026-09-28 (`583d786`) before its acceptance flight, at user
+  direction** — the card is flown from `main` now. Leave this open until a sortie confirms
+  "cancel" → "confirm" → the task actually stops.
 - [x] **"full scan" vs "scan full" — no defect, closed 2026-09-26.** *"I noticed myself saying
   'full scan', but the recognized format is 'scan full'. Both would be good."* Both already work.
   Ran the matcher directly: `"full scan"`, `"scan full"` and `"scan all around"` each resolve to
