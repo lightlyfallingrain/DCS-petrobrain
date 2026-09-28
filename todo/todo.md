@@ -12,6 +12,40 @@ the relevant roadmap to be updated in the same push as any merge.
 ## User priority tasks
 Prioritize any open task here over any other task in this file or roadmap files.
 
+### Player bubble: 10 km, settled 2026-09-28
+
+- [ ] **Unit detection computations are bounded to a 10 km radius around ownship.** User decision,
+  2026-09-28: *"Let's settle on 10 km for the player bubble radius. While some very large units may
+  be visible beyond that, we don't usually care about things that far."* Nothing outside it is
+  computed at all — not gated late, not scored and discarded, simply never considered.
+
+  **Scope, stated precisely because the obvious misreading is expensive:**
+
+  - It applies to **ground and air units only**. It does **not** apply to world features —
+    landmarks, settlements, roads, beacons, airports. Those are world-model geography, they do not
+    move, and enrichment already reaches for them by proximity to a contact rather than by
+    scanning; bounding them would break `describe_position` for no gain.
+  - **Memory outlives the bubble.** Once the memory layer exists (BL-8), a unit that was seen and
+    then fell outside the radius stays *remembered* — what stops is *detection computation*, not
+    belief. A contact does not cease to exist because it is 11 km away; Petrovich simply is not
+    actively looking that far.
+  - The one exception, already recorded on its own item: **the 9K113 sight, out to 20 km and only
+    within its own field of view** — see "Model the 9K113 sight as an optic" below. Not yet
+    implemented, so not yet a live exception.
+
+  **Why this is worth having as an explicit decision rather than an implementation detail**: it is
+  the first *computation-scope* limit in the perception path, as opposed to a perception limit.
+  `NAKED_EYE_RANGE_CAP_M` (10000 m) happens to carry the same number today and is a different
+  thing — a sanity bound on what the eye is allowed to claim, itself an admitted guess. Whatever
+  expresses the bubble must not be folded into that constant, because the 9K113 exception will
+  separate them: the sight's cone reaches 20 km while the naked eye's cap stays where it is.
+
+  **Not measured, and deliberately not.** Nothing here establishes what DCS's own culling radius
+  is — `LoGetWorldObjects` may well report large units further out. This is a decision about what
+  is *worth computing*, taken on the pilot's judgement about what he cares about, not a discovered
+  limit. If a sortie ever shows something important being missed at 9-10 km, this is a number to
+  revisit, not a law.
+
 ### Sortie 2026-09-28 — user-flown, two findings
 
 Flown on `main` with the brain wired to Ollama (the user's own `run-scripts/` edits: `--decider
@@ -260,6 +294,23 @@ actually underway. Nothing in this file is a substitute for that last step.
     3.55/7.00/6.50) are already measured and sitting in `perception/optics.py`'s module docstring,
     waiting for a slice that wires them. Full arithmetic: `plans/watch-reporting/plan.md` Decision
     4d.
+  - **This slice needs an exception to the 10 km player-bubble radius: up to 20 km, and only
+    within the sight's own field of view** (user direction, 2026-09-28, recorded when the bubble
+    was settled — see "Player bubble" in the priority section above). The bubble exists so units
+    beyond it are never computed at all; the 9K113 is the one instrument that can legitimately see
+    past it, and it sees through a **few degrees at a time**, not everywhere. So the exception is
+    not "raise the radius when the sight is selected" — that would reinstate the whole-sphere cost
+    the bubble removes, at four times the area. It is a narrow cone out to 20 km, evaluated only
+    for candidates inside the sight's current FOV, while the ordinary 10 km sphere continues to
+    govern every other channel.
+
+    Two consequences worth knowing before the slice is scoped: the existing `NAKED_EYE_RANGE_CAP_M`
+    (10000 m) coincides with the bubble radius today, so whatever expresses the bubble must not be
+    conflated with that constant — one is a perception sanity bound, the other a computation-scope
+    limit, and they will diverge the moment this exception lands. And the FOV/field-of-regard split
+    this item already calls out becomes load-bearing rather than tidy: the exception follows the
+    **field of view** (where the sight is pointed right now), not the ±60° field of regard (where it
+    *could* be pointed).
   - Also recorded there and relevant: the operator commands an angular **rate**, not a position, so
     pointing the sight costs time proportional to angular distance; the gyro-stabilised head needs
     **~3 minutes** from power-on before it is ready; and launch entry requires the sight line within
