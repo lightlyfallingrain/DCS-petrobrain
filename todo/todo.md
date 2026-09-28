@@ -12,6 +12,50 @@ the relevant roadmap to be updated in the same push as any merge.
 ## User priority tasks
 Prioritize any open task here over any other task in this file or roadmap files.
 
+### Sortie 2026-09-28 — user-flown, two findings
+
+Flown on `main` with the brain wired to Ollama (the user's own `run-scripts/` edits: `--decider
+ollama`, `--brain-client http`). **The confirm-band fix was not in this flight** — it is unmerged
+on `fix/confirm-band-affirmatives`.
+
+- [ ] **Grouping is the priority: every unit gets its own callout and it is far too much noise.**
+  User's words: *"we badly need grouping, currently all units get single call outs and it's way too
+  much noise. Fixing this is priority."* This is **X-B6** (`todo/backlog.md`), diagnosed
+  2026-09-25 from a `--belief-truth-log` and never fixed — an outpost fragmenting into 18 contacts,
+  the same *"ground, 11 o'clock, 1 kilometre"* heard four times. Full analysis:
+  `plans/contact-fragmentation-at-range/debug.md`.
+
+  **The diagnosis is counter-intuitive and worth not re-deriving**: it is not clustering (the
+  contacts are founded across different polls, so per-poll clustering never sees them together) and
+  the association gate is not too *tight* at range but too **loose** — `naked_eye_sigma_m` scales
+  with range, so at 4 km the 3-sigma gate accepts a ~2.9 km down-range discrepancy, several
+  existing contacts pass, `ingest`'s anti-guessing rule reads "2+ candidates" as ambiguous and
+  founds a *new* contact, which makes the next look ambiguous against one more candidate. A
+  recurrence of `plans/contact-duplication-ambiguity-runaway/`'s runaway with a new trigger.
+
+  **Four directions are listed in the debug note and none is chosen** — the anti-guessing rule is
+  load-bearing, so this needs a decision, not a patch. That makes it `/explore` → Architect work,
+  not a debugger sortie. Note also that contacts drift between real objects over a sortie, so any
+  fix validated against the belief-truth join must account for the join re-resolving, or it
+  measures itself.
+
+- [ ] **Free text reaches the brain and comes back "Unable, no such command."** User's words:
+  *"'free text' is escalated to brain, but it comes back to 'unable, no such command'. While brain
+  may work, we do not have sufficient command vocabulary -> no sensible speech from brain."*
+
+  **This is the closed-set design working as specified, not a bug** — `brain-layer/src/decider.py`
+  classifies against a fixed command vocabulary and returns `NO_SUCH_COMMAND` when nothing in it
+  matches, and `speech.py` renders that as "Unable, no such command." So the ceiling is the
+  vocabulary, exactly as the user diagnosed: the model can only ever say what the closed set lets
+  it say, and a pilot speaking freely is mostly outside it.
+
+  **The decision this actually raises is what free speech should do at all**, and it is a real fork
+  worth the user's input rather than a fix to schedule: widen the closed set (more tokens, same
+  architecture), let the brain answer *questions* about belief state without commanding anything
+  (it already has the tool API), or keep the closed set and make the refusal honest — "I can't do
+  that" rather than a phrasing that sounds like the command was misheard. Not started; see the
+  brain-layer plan's D11 before scoping.
+
 ### Sortie 2026-09-26 — crew behaviour findings (user-flown, unfixed)
 
 Flown on `main` after the audio-adapter hardening merge (`1a8795d`). **Passed:** scan-is-not-watch,
