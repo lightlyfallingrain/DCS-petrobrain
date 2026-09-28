@@ -260,6 +260,26 @@ def _motion_facts(contact: Contact, now_sim: float) -> dict[str, object] | None:
     }
 
 
+def _group_facts(contact: Contact, store: ContactStore) -> dict[str, object] | None:
+    """`facts.group`'s shape (`plans/group-reporting/plan.md` Stage 2) --
+    `_cardinality_facts`/`_motion_facts`'s sibling: `None` (omitted from
+    `facts` entirely, this module's documented absent-not-null convention)
+    whenever `contact` belongs to no `belief.groups.Group`. Deliberately
+    minimal for this stage -- membership only, no per-member breakdown --
+    since Stage 2 only needs this to be *inspectable* (`console.py`'s
+    `show <id>`), not yet spoken; Stage 3's `belief.speech.
+    render_group_disclosure` reads the group's members directly off the
+    store, not off this fact."""
+    group = store.group_for_contact(contact.id)
+    if group is None:
+        return None
+    return {
+        "group_id": group.id,
+        "member_contact_ids": sorted(group.member_contact_ids),
+        "member_count": len(group.member_contact_ids),
+    }
+
+
 def _contact_facts(
     contact: Contact,
     now_sim: float,
@@ -291,6 +311,9 @@ def _contact_facts(
     motion_facts = _motion_facts(contact, now_sim)
     if motion_facts is not None:
         facts["motion"] = motion_facts
+    group_facts = _group_facts(contact, store)
+    if group_facts is not None:
+        facts["group"] = group_facts
     if enrichment is not None:
         _add_enrichment_facts(facts, contact, now_sim, store, enrichment)
     return facts
