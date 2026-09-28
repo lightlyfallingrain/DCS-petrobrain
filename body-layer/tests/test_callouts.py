@@ -42,6 +42,7 @@ from belief.callouts import (
 )
 from belief.classification import PRESENCE_CLASS
 from belief.contacts import ContactStore
+from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.events import CONTACT_MOTION_CHANGED, CONTACT_RANGE_CROSSED, Event
 from belief.speech import render_group_report
@@ -1300,3 +1301,113 @@ def test_unwatched_contact_never_speaks_an_engagement_change() -> None:
 
     scheduler = CalloutScheduler()
     assert scheduler.tick(store, now_sim=0.0) == []
+
+
+# --- Stage 1 (plans/group-reporting/plan.md): per-contact disclosure gating -
+
+
+def test_reacquired_with_unchanged_render_is_suppressed() -> None:
+    """A contact detected, then lost, then reacquired at the same believed
+    classification produces a `CONTACT_REACQUIRED` whose rendered text is
+    byte-identical to the already-spoken `CONTACT_DETECTED` line -- the
+    scheduler must not speak it a second time."""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+
+    first = _observation(
+        obs_id="OBS_1", t_sim=0.0, classification_raw="OP_TRUCK", classification_level=2
+    )
+    store.ingest([first], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    assert scheduler.tick(store, now_sim=0.0) == ["truck."]
+
+    lost_at = LOST_THRESHOLD_S + 1.0
+    store.tick(now_sim=lost_at)
+    assert scheduler.tick(store, now_sim=lost_at) == []  # CONTACT_LOST has no template
+
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=lost_at + 1.0,
+        classification_raw="OP_TRUCK",
+        classification_level=2,
+    )
+    store.ingest([second], now_sim=lost_at + 1.0)
+    store.tick(now_sim=lost_at + 1.0)
+
+    assert [e.kind for e in store.events] == [
+        "CONTACT_DETECTED",
+        "CONTACT_LOST",
+        "CONTACT_REACQUIRED",
+    ]
+    assert scheduler.tick(store, now_sim=lost_at + 1.0) == []
+
+
+def test_reacquired_with_changed_render_is_still_spoken() -> None:
+    """Same lost/reacquired shape as above, but the reacquisition carries a
+    refined classification (`fold_classification` refines `presence` ->
+    `class`), so the rendered line differs from the one already spoken --
+    the signature gate must not suppress genuinely new information. (The
+    refinement also fires its own `CONTACT_CLASSIFICATION_CHANGED` event,
+    which the scheduler speaks instead of a plain contact report -- that
+    kind is untouched by Stage 1's gate, and is exactly the "changed"
+    case this test needs: it is never the byte-identical repeat Stage 1
+    exists to suppress.)"""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+
+    first = _observation(
+        obs_id="OBS_1", t_sim=0.0, classification_raw="OP_TRUCK", classification_level=1
+    )
+    store.ingest([first], now_sim=0.0)
+    store.tick(now_sim=0.0)
+    first_line = scheduler.tick(store, now_sim=0.0)
+    assert first_line == ["ground."]
+
+    lost_at = LOST_THRESHOLD_S + 1.0
+    store.tick(now_sim=lost_at)
+    scheduler.tick(store, now_sim=lost_at)  # CONTACT_LOST -- no template
+
+    second = _observation(
+        obs_id="OBS_2",
+        t_sim=lost_at + 1.0,
+        classification_raw="OP_TRUCK",
+        classification_level=2,
+    )
+    store.ingest([second], now_sim=lost_at + 1.0)
+    store.tick(now_sim=lost_at + 1.0)
+
+    second_line = scheduler.tick(store, now_sim=lost_at + 1.0)
+    assert second_line == ["unit is truck."]
+    assert second_line != first_line
+
+    # The CONTACT_REACQUIRED event is still live (only one thing is spoken
+    # per `tick()` call, and occupancy from the line just spoken must
+    # clear first) -- its own render now reads "truck." (the belief has
+    # already refined), which differs from the "ground." signature stored
+    # after the very first detection, so it speaks too rather than being
+    # suppressed as a repeat. Still well within `CALLOUT_MAX_AGE_S` of the
+    # `CONTACT_REACQUIRED` event's own `t_sim` (`lost_at + 1.0`).
+    third_line = scheduler.tick(store, now_sim=lost_at + 4.6)
+    assert third_line == ["truck."]
+
+
+def test_first_detection_is_never_suppressed() -> None:
+    """A brand-new contact's very first `CONTACT_DETECTED` has no prior
+    signature to compare against (`_last_spoken_signature` starts empty) --
+    it must always speak."""
+    store = ContactStore()
+    scheduler = CalloutScheduler()
+    store.ingest(
+        [
+            _observation(
+                obs_id="OBS_1",
+                t_sim=0.0,
+                classification_raw="OP_TRUCK",
+                classification_level=2,
+            )
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+
+    assert scheduler.tick(store, now_sim=0.0) == ["truck."]
