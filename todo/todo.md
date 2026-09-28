@@ -56,8 +56,11 @@ Four findings, in the user's own words plus what each implies:
      "<X>, confirm?" and `"confirm"` was not an affirmative — the pilot's own report is
      *"yes"/"confirm"*, and echoing the operative word back is the most natural answer there is.
      Widened to include `confirm`/`confirmed`/`correct`/`yeah`/`yep`/`ok`/`okay`, and the
-     negatives to include `nope`/`belay`. The set is consulted only inside an open confirm
-     window, so widening it cannot collide with a command.
+     negatives to include `nope`/`belay`. **Widening the set forced a second change, found in
+     review**: `classify_yes_no` matched the transcript's *first word*, which was survivable for
+     four words of radio usage and not for colloquial openers — `"okay watch that truck at three
+     o'clock"` classified as an answer and was swallowed. The whole transcript must now be the
+     answer (bare filler like `"roger that"` allowed, mixed `"yes no"` refused).
   2. **`CONFIRM_WINDOW_S` was 8.0 s, measured from when the question was *decided*, not heard.**
      The round trip it has to cover is TTS synthesis + playback of the question + the pilot
      hearing, deciding, holding PTT and speaking + Whisper `small.en` (p90 1.46 s) + one 1.0 s

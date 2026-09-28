@@ -2150,6 +2150,46 @@ def test_handle_transcript_late_answer_beyond_the_grace_falls_through(
     assert tasks.tasks == []
 
 
+def test_handle_transcript_grace_window_does_not_swallow_a_real_utterance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Found in review: the late-answer grace runs over *every* transcript
+    for 20 s after a question expires, so a first-word answer check turned
+    an ordinary instruction that happens to open with "okay" into a
+    swallowed "Say again?". A sentence is not an answer."""
+    tasks = TaskStore()
+    console = CrewConsole(
+        store=ContactStore(),
+        tasks=tasks,
+        enrichment=_enrichment_context(monkeypatch),
+    )
+    confidence_mid = (ACT_FLOOR + CONFIRM_FLOOR) / 2
+    console.handle_transcript(
+        "scan ahead",
+        confidence=confidence_mid,
+        token="scan_ahead",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=0.0,
+    )
+
+    # Inside the grace window, but a real command -- it must act, not be
+    # read as a late answer.
+    lines = console.handle_transcript(
+        "okay scan left",
+        confidence=1.0,
+        token="scan_left",
+        match_ratio=1.0,
+        verb_anchored=True,
+        ambiguous=False,
+        now_sim=CONFIRM_WINDOW_S + 5.0,
+    )
+
+    assert lines != ["Say again?"]
+    assert [task.kind for task in tasks.tasks] == ["scan_area"]
+
+
 def test_handle_transcript_confirm_commits_on_the_questions_own_word(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
