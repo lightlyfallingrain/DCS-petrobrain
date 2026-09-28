@@ -199,7 +199,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from belief.attention import Attention
-from belief.contacts import ContactStore
+from belief.contacts import Contact, ContactStore
 from belief.enrichment import EnrichmentContext
 from belief.events import (
     CONTACT_CARDINALITY_CHANGED,
@@ -212,6 +212,8 @@ from belief.events import (
     CONTACT_REACQUIRED,
     Event,
 )
+from belief.groups import Group
+from belief.threat import envelope_for
 from belief.tools import ContactResult, acknowledge_event, describe_contact
 from belief.utterance import ReferenceCandidate
 
@@ -1000,6 +1002,159 @@ def render_group_report(facts_list: list[dict[str, object]]) -> OutgoingSpeech:
     if nearest_relative_now is not None:
         clock = nearest_relative_now["clock_position"]
         text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
+
+    text += "."
+    return OutgoingSpeech(text=text, template="contact_report")
+
+
+def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
+    """The per-class member breakdown for `render_group_disclosure`'s
+    composition line (`plans/group-reporting/plan.md` Stage 3's worked
+    example, rows 2-4): buckets `member_facts` by `(value, level)` and
+    counts real members per bucket -- an **exact** count, never a
+    `_cardinality_phrase` hedge, because this is a literal groupby over
+    already-individuated, already-identified `Contact`s (the plan's own
+    "not new belief machinery" framing), not an estimate of how many real
+    objects one unresolved cluster stands for. Reuses `_SPOKEN_NUMBERS`/
+    `_unit_type_display`/`_plural_unit_type_display` exactly as the
+    single-contact vocabulary already does, so a mass-noun class (e.g.
+    `"armor"`, which has no distinct plural form) reads the same way here
+    as it already does in a single contact's own count clause -- a known,
+    accepted quirk of that vocabulary, not new to this function.
+
+    Callers must not call this with an empty sequence, and must not call
+    it with only undifferentiated (`presence`/`unknown` level) members --
+    see `render_group_disclosure`'s own "Group" bare-word branch for that
+    case, which this function has no sensible rendering for (`_unit_type_
+    display(None, "presence")` returns `"ground"`, which does not compose
+    into a listed clause the way a real class/type word does)."""
+    order: list[tuple[object, object]] = []
+    counts: dict[tuple[object, object], int] = {}
+    for facts in member_facts:
+        classification = facts["classification"]
+        assert isinstance(classification, dict)
+        key = (classification.get("value"), classification.get("level"))
+        if key not in counts:
+            order.append(key)
+            counts[key] = 0
+        counts[key] += 1
+
+    phrases: list[str] = []
+    for key in order:
+        value, level = key
+        count = counts[key]
+        if count == 1:
+            phrases.append(f"a {_unit_type_display(value, level)}")
+        elif count in _SPOKEN_NUMBERS:
+            phrases.append(
+                f"{_SPOKEN_NUMBERS[count]} {_plural_unit_type_display(value, level)}"
+            )
+        else:
+            phrases.append(f"many {_plural_unit_type_display(value, level)}")
+
+    if len(phrases) == 1:
+        return phrases[0]
+    return ", ".join(phrases[:-1]) + f" and {phrases[-1]}"
+
+
+def render_group_disclosure(
+    store: ContactStore,
+    group: Group,
+    now_sim: float,
+    enrichment: EnrichmentContext | None = None,
+) -> OutgoingSpeech | None:
+    """`plans/group-reporting/plan.md` Stage 3's disclosure ladder for a
+    persisted `belief.groups.Group` -- **not** `render_group_report` above,
+    which is `belief.callouts.group_candidates`'s speech-time, report-space
+    aggregation of several *events*. This function reads a real, persisted
+    associative belief instead. (The plan's own prose names both functions
+    `render_group_report`; this one is named `render_group_disclosure`
+    instead, deliberately, to avoid colliding with the function that
+    already existed under that name and stays live -- `belief.callouts`'
+    speech-time aggregation is not retired by this stage; see that
+    module's own docstring, "What happens to `group_candidates`," and
+    `plans/group-reporting/plan.md`'s Stage 4, out of scope here.)
+
+    Returns `None` if fewer than two members still resolve to a live
+    `Contact` (`describe_contact` returns `None` for a vanished one) --
+    there is nothing coherent left to report as a group.
+
+    **Threat leads the line** (`belief.threat.envelope_for`, called on each
+    member's own `Contact.classification` -- the no-omniscience boundary is
+    upstream of this call, in `envelope_for` itself): the member with the
+    widest resolvable engagement envelope leads with `"Danger, {type}."`,
+    and every other member's composition follows as `"Also {composition}"`.
+    With no threat-capable member, an undifferentiated group (every member
+    still at `presence`/`unknown` level) says the bare word `"Group"`; once
+    any member has refined past that, the composition clause alone leads.
+    Clock/range are taken from the group's nearest member (`_contact_report_
+    text`'s single-contact convention, restated here since a group has no
+    such helper of its own), and a trailing `", watched"` is appended when
+    any member is under `watch`/`priority` attention -- the group-level
+    analogue of a single contact's own trailing motion clause."""
+    member_facts: list[dict[str, object]] = []
+    member_contacts: list[Contact] = []
+    contacts_by_id = {contact.id: contact for contact in store.contacts}
+    for member_id in sorted(group.member_contact_ids):
+        result = describe_contact(store, member_id, now_sim, enrichment=enrichment)
+        if result is None:
+            continue
+        contact = contacts_by_id.get(member_id)
+        if contact is None:
+            continue
+        member_facts.append(result["facts"])
+        member_contacts.append(contact)
+    if len(member_facts) < 2:
+        return None
+
+    leading_index: int | None = None
+    leading_range_max_m = -1.0
+    for index, contact in enumerate(member_contacts):
+        envelope = envelope_for(contact.classification)
+        if envelope is not None and envelope.range_max_m > leading_range_max_m:
+            leading_range_max_m = envelope.range_max_m
+            leading_index = index
+
+    if leading_index is not None:
+        leading_classification = member_facts[leading_index]["classification"]
+        assert isinstance(leading_classification, dict)
+        leading_word = _unit_type_display(
+            leading_classification.get("value"), leading_classification.get("level")
+        )
+        rest = member_facts[:leading_index] + member_facts[leading_index + 1 :]
+        if rest:
+            text = f"Danger, {leading_word}. Also {_group_composition_clause(rest)}"
+        else:
+            text = f"Danger, {leading_word}."
+    else:
+        differentiated = any(
+            isinstance(facts["classification"], dict)
+            and facts["classification"].get("level") not in ("presence", "unknown")
+            for facts in member_facts
+        )
+        if differentiated:
+            composition = _group_composition_clause(member_facts)
+            text = composition[0].upper() + composition[1:]
+        else:
+            text = "Group"
+
+    nearest_relative_now: dict[str, object] | None = None
+    nearest_range_m = math.inf
+    for facts in member_facts:
+        relative_now = facts.get("relative_now")
+        if not isinstance(relative_now, dict):
+            continue
+        range_m = relative_now["range_m"]
+        assert isinstance(range_m, float)
+        if range_m < nearest_range_m:
+            nearest_range_m = range_m
+            nearest_relative_now = relative_now
+    if nearest_relative_now is not None:
+        clock = nearest_relative_now["clock_position"]
+        text += f", {clock} o'clock, {_format_range_km(nearest_range_m)}"
+
+    if any(facts.get("attention") in ("watch", "priority") for facts in member_facts):
+        text += ", watched"
 
     text += "."
     return OutgoingSpeech(text=text, template="contact_report")
