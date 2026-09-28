@@ -321,3 +321,136 @@ ways, neither by inference: `_verb_anchor_ratio` was run directly against every 
 word to find the collisions, and then the real `command_matcher.match_transcript` output was fed
 through an actual `CrewConsole.handle_transcript` call (a full pending-confirmation round trip) to
 confirm the pilot-facing outcome, not just the classifier's internal return value.
+
+---
+
+## Review: fix commit `7126236` (union of all three rounds' rules)
+
+HEAD matched the expected tip (`7126236`, one commit on `a631e7a`) — verified via `git rev-parse
+HEAD` first.
+
+Checks: body-layer ruff/mypy clean, pytest 1313 passed / 4 xfailed. audio-adapter ruff/mypy clean,
+pytest 213 passed / 1 skipped — re-ran all four independently rather than trusting the report.
+
+**The two-sided coupling assertion is the right shape.** Judged
+`test_several_confirm_band_answer_words_do_anchor_a_verb`
+(`audio-adapter/tests/test_command_matcher.py`) against "is this brittle" — no. It pins a fact
+about the *current* phrase table (these seven words clear `VERB_FLOOR`), is explicitly labelled as
+updatable if the table changes such that one stops anchoring, and its actual job is to make the
+*dangerous* direction (a word that starts fuzzy-anchoring and nobody in body-layer notices) visible
+where it originates. That's the correct failure mode to guard against for a fact that can't be
+shared by import (module independence). No change requested here.
+
+**But the fix's own worked example is where round 4 stops short, and running it end to end finds
+a fourth real gap — round 4 verified `"roger"`, `"roger that"`, `"yes do it"`, `"affirmative"` end
+to end, but not the two elaborated forms its own carried-over test asserts must also work:**
+`"roger wilco"` and `"negative hold off"` (`test_classify_yes_no_accepts_a_short_elaborated_answer`,
+inherited from round 2, still calling `classify_yes_no(answer)` with the **default**
+`verb_anchored=False` rather than a real value). Fed the real `match_transcript` output for these
+two phrases through the same `CrewConsole.handle_transcript` round trip used in every prior round:
+
+| answer to "cancel everything, confirm?" | matcher's real `verb_anchored` | pilot-facing result |
+|---|---|---|
+| `"roger wilco"` | **`True`** | **"Say again?" — not committed** |
+| `"negative hold off"` | **`True`** | **"Say again?" — not discarded** |
+| `"nope hold on"` | `True` (same shape) | same failure |
+| `"belay that order"` | `True` (same shape) | same failure |
+| `"roger that"` | `True` | commits correctly (rule 1 catches it — `"that"` is filler) |
+| `"yes do it"` | `False` (real) | commits correctly |
+| `"okay do it"` | `False` (real — `"okay"` is one of *audio-adapter's own* `FILLER_WORDS`, stripped before the anchor check) | commits correctly |
+
+**Root cause, confirmed by direct calculation, not guesswork:** `verb_anchored` is computed from
+only the transcript's *first word*, independent of anything after it. For a first word that both
+(a) is a real answer-set member and (b) is not one of `audio-adapter`'s own filler words (`roger`,
+`negative`, `nope`, `belay`, `disregard` — `ok`/`okay` are exempt because they *are* filler there),
+the anchor is constant regardless of what follows: any elaboration that isn't itself all
+answer-words (rule 1) or made only of body-layer's small filler set gets intercepted by rule 2
+before rule 3 (the first-word + length-cap rule built specifically for `"yes do it"`-style
+elaboration) is ever reached. Rule 3 is therefore live code for `yes`/`affirm`/`affirmative`/
+`confirm`/`confirmed`/`correct`/`yeah`/`yep`/`no`/`ok`/`okay`, and **dead code** for `roger`/
+`negative`/`nope`/`belay`/`disregard` whenever they're elaborated with a real (non-filler,
+non-answer) word — exactly the five words round 3 found were the ones actually broken by
+`verb_anchored` in the first place.
+
+**The fix is small and doesn't require any adapter-side change**, because a better signal than
+`verb_anchored` is already flowing through the same seam and unused by `classify_yes_no`: whether
+the matcher actually resolved a *token* (`MatchResult.token is not None`), not merely whether the
+first word fuzzy-anchored. `"okay scan left"` gets a real token (`scan_left`, ratio 1.0) — a
+genuine phrase match, correctly still "other". `"roger wilco"` gets `token=None` — the anchor fired
+but nothing in the phrase table matched, which is exactly the "false anchor, no real command"
+case `VERB_FLOOR`'s own docstring already describes as expected and common. I simulated the
+substitution (`token is not None` in place of `verb_anchored` at rule 2) against every case
+established across all four rounds, using the real `match_transcript` output for each:
+
+- `"okay scan left"`, `"okay watch that truck at three o'clock"` → still "other" (correct,
+  unaffected — the long-sentence case is still caught by the length cap regardless).
+- `"roger wilco"`, `"negative hold off"`, `"nope hold on"`, `"belay that order"` → now "affirm"/
+  "negative" correctly.
+- `"yes do it"`, `"affirm execute"`, `"yes go ahead"`, `"okay do it"`, `"ok go ahead"` → unaffected,
+  still correct.
+- The one existing test this changes the meaning of is
+  `test_classify_yes_no_defers_to_the_matchers_verb_anchor_for_a_sentence`'s
+  `classify_yes_no("no watch nearest", verb_anchored=True)` — a hand-built input where the real
+  matcher would never actually set `verb_anchored=True` for that phrase (it doesn't anchor in
+  reality) or find a token either, so under the corrected signal this specific synthetic case
+  would need `token_found` supplied directly (`True`) to keep testing the branch, rather than
+  relying on `verb_anchored`'s name matching the parameter.
+
+Suggested concrete change: at both call sites in `crew_console.py`, pass `token is not None` (a
+value already computed by the caller) instead of the raw `verb_anchored` boolean — either by
+renaming the `classify_yes_no` parameter to reflect what it now means, or by computing the
+boolean at the call site and keeping the parameter name generic. Either way, add
+`"roger wilco"`/`"negative hold off"`-shaped tests that use the *real* `match_transcript` output
+(mirroring what `test_classify_yes_no_never_lets_the_anchor_overrule_a_bare_answer` already does
+for the bare-word case), not the default/hand-picked boolean the current
+`test_classify_yes_no_accepts_a_short_elaborated_answer` still uses for these two phrases.
+
+**Should the end-to-end check become a committed test?** Not as a cross-subproject import — root
+`CLAUDE.md` states module independence as a standing rule with `body-layer`↔`world-model` the
+*sole* deliberate exception, so a body-layer test importing `audio_adapter.command_matcher` (or
+the reverse) would be a second, unjustified instance of exactly the coupling that rule warns
+against, even though the fact being tested is real and worth pinning. The two-sided
+same-subprojects-own-fact pattern already in this commit (`audio-adapter` pins what anchors,
+body-layer pins what the classifier does with a given `verb_anchored` value) is the right shape
+for staying inside that rule — it just needs the *values* in body-layer's own tests to be ones
+the real matcher would actually produce for the phrases in question (verified against
+`match_transcript` once, by hand, when the test is written) rather than assumed. A standalone
+script exercising the seam end to end (like the one used for this and the last two rounds'
+repros) is worth keeping around as a manual/CI-adjacent check outside either subproject's own
+test tree, if this keeps recurring — but that is process, not something this review is blocking
+on.
+
+**Answering the two remaining questions:**
+- **Is the 4-word cap still defensible?** As a backstop for the cases it's actually reached for
+  (the non-anchor-vulnerable openers), yes, unchanged from round 3's judgement. It does not need
+  to change for this fix; the fix is about *reaching* rule 3, not about its cap once reached.
+- **Anything stale?** `todo/todo.md`'s item 1 (fixed on `fix/confirm-band-affirmatives`) still
+  describes round 3's superseded model verbatim — *"The signal that actually decides it was
+  already at the seam: `verb_anchored`... 'okay scan left' anchors on a verb and is a command;
+  'yes do it' anchors on nothing and is an answer"* — with no mention that round 4 found
+  `verb_anchored` alone unsafe for bare answers and built the three-rule union that superseded it.
+  It isn't *false* (that was an accurate account of round 3's commit at the time), but it now
+  reads as the final explanation of a design that changed twice since. Worth a short addendum
+  covering rounds 3 and 4's corrections, the same way item 1 already narrates its own history for
+  rounds 1 and 2.
+
+### Verdict (this round)
+
+NEEDS REVISION — one required fix, same standing as every prior round: a phrase the fix's own test
+suite asserts must work (`"roger wilco"`, `"negative hold off"`, and by the same shape `"nope hold
+on"`/`"belay that order"`) does not, once run against the real matcher rather than the test's
+hand-picked default. The fix is well-understood and low-risk this time — swap the rejection
+signal from "did the first word fuzzy-anchor" to "did the matcher actually resolve a token,"
+using data already available at both call sites — and I verified the substitution against every
+case established across all four rounds before recommending it, not only the new one.
+
+### Review Confidence (this round)
+
+Full read of the diff between `a631e7a` and `7126236`, including both subprojects' test diffs.
+Re-ran all four check commands (body-layer and audio-adapter, format/lint/type/test) independently
+rather than trusting the reported numbers. The required-fix finding was verified end to end
+(`CrewConsole.handle_transcript` fed real `command_matcher.match_transcript` output) for the two
+specific phrases the current test suite claims work; the suggested fix was not merely proposed but
+simulated against every phrase established as a fixed point across all four review rounds before
+being written up, specifically to avoid repeating this review's own round-2/round-3 pattern of
+recommending a rule that breaks something already known to work.

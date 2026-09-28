@@ -1,63 +1,69 @@
 ---
 name: confirm-band-affirmatives-grace-swallow
-description: fix/confirm-band-affirmatives (c33739e, 2471542, a631e7a) — three review rounds, each fix breaking a different, real case; cross-subproject signal coupling as the recurring root cause
+description: fix/confirm-band-affirmatives — four review rounds, each fix breaking a different real case; "verify against the real adjacent function, not the fix's own test defaults" is the technique that caught every one
 metadata:
   type: project
 ---
 
-Reviewed `fix/confirm-band-affirmatives` (body-layer) across three rounds, fixing the
+Reviewed `fix/confirm-band-affirmatives` (body-layer) across four rounds, fixing the
 2026-09-26 "cancel" -> "confirm?" -> "yes"/"confirm" -> "Unable, no such command." sortie defect.
-Every round was caught by direct reproduction against the real code (or, in round 3, the real
-adjacent-subproject function), never by reading the diff alone.
+Every round was caught by direct reproduction against the real code (or the real adjacent
+subproject function), never by reading the diff or trusting the fix's own tests alone.
 
-**Round 1 (`c33739e`)**: widened `_AFFIRM_WORDS`, raised `CONFIRM_WINDOW_S`, added a
-`CONFIRM_LATE_ANSWER_GRACE_S` late-answer window. `classify_yes_no` matched only the first word,
-so the widened set let an unrelated sentence ("okay watch that truck at three o'clock") get
-swallowed as a late answer. NEEDS REVISION.
+**Round 1 (`c33739e`)**: widened `_AFFIRM_WORDS`, added a late-answer grace window.
+`classify_yes_no` matched only the first word, so the widened set let an unrelated sentence
+("okay watch that truck at three o'clock") get swallowed as a late answer. NEEDS REVISION.
 
-**Round 2 (`2471542`)**: fixed by requiring *every* word to be an answer word (plus a closed
-filler list). Broke the opposite direction: "yes do it", "roger wilco", "affirm execute" all
-became "other", which inside an open window silently discards the pending command with zero
-feedback. NEEDS REVISION.
+**Round 2 (`2471542`)**: required *every* word to be an answer word. Broke the opposite
+direction: "yes do it" etc. became "other", silently discarding a pending command with zero
+feedback inside the open window. NEEDS REVISION.
 
-**Round 3 (`a631e7a`)**: dropped the filler list, used `command_matcher`'s own `verb_anchored`
-verdict (threaded through `handle_transcript`'s existing seam) as the discriminator, plus a
-4-word length backstop. Right category of fix — my own round-2 suggestion (first-word + length)
-was correctly rejected because it would have accepted `"okay scan left"` as an answer, breaking
-round 1's own regression test. But `verb_anchored` comes from `audio-adapter`'s fuzzy verb-anchor
-match (`VERB_FLOOR = 0.5`, deliberately permissive, tuned for a different asymmetry — a false
-verb-rejection is worse than a false anchor, per that module's own docstring), and several answer
-words fuzzy-collide with it: `_verb_anchor_ratio` gives `roger` 0.55, `ok` 0.67, `okay` 0.57,
-`negative` 0.62, `nope`/`belay` 0.50, `disregard` 1.00 (it's a real command phrasing,
-`cancel_nevermind`). Fed the real `command_matcher.match_transcript()` output through an actual
-`CrewConsole.handle_transcript` pending-confirmation round trip: bare `"roger"`/`"negative"`/`"ok"`
-now get `verb_anchored=True` and return "Say again?" instead of committing/discarding — breaking
-two words (`roger`, `negative`) that were correct *before this entire three-round fix started*.
-`"disregard"` falls through to being treated as an attempted command instead of a negative
-answer, currently inert only because `cancel_nevermind` has no dispatch handler yet — a latent
-landmine for whenever it gets one. This also falsified `_NEGATIVE_WORDS`'s own docstring claim
-that "the two meanings never compete" for `disregard`'s dual role as both an answer word and a
-real command phrasing — true before `verb_anchored` was threaded in, false after. NEEDS REVISION.
+**Round 3 (`a631e7a`)**: used `command_matcher`'s `verb_anchored` as the discriminator, gating
+every word on it. `VERB_FLOOR=0.5` fuzzy-matches several answer words against real command verbs
+(`roger` 0.55 vs "report", `ok`/`okay`/`negative`/`nope`/`belay` also clear it, `disregard` is a
+literal `cancel_nevermind` phrasing at 1.00) — broke bare `roger`/`negative`, which worked before
+this whole branch existed. NEEDS REVISION.
 
-**The recurring root cause across all three rounds is the same shape**: each fix tried to add one
-more signal/rule to solve the previous round's failure, and each new signal turned out to have its
-own blind spot the previous rounds' tests never exercised, because each round's own tests were
-written to cover exactly the case that round was fixing. Round 3's specific version of this is a
-**cross-subproject coupling with no test enforcing it**: `body-layer`'s answer-word vocabulary is
-now implicitly dependent on `audio-adapter`'s `VERB_ANCHOR_WORDS`/`VERB_FLOOR` fuzzy-matching
-behavior staying disjoint from it, and nothing in either subproject's test suite checks that.
-Recommended: a regression test that runs the real `command_matcher.match_transcript` (or a small
-fixture mirroring its verb-anchor floor) against every word in `_AFFIRM_WORDS | _NEGATIVE_WORDS`
-and asserts none of them anchors.
+**Round 4 (`7126236`)**: made `classify_yes_no` the union of all three rounds' rules in a fixed
+order (whole-transcript-is-answer-words first, without consulting the anchor; then anchor; then
+first-word+length-cap backstop), with a small filler list restored for rule 1 only. Correctly
+fixed bare `roger`/`negative`/`disregard`. Also asserted the cross-subproject fact on *both*
+sides without either subproject importing the other (`audio-adapter` pins that these 7 words
+anchor; `body-layer` pins what the classifier does given that value) — a good pattern for a fact
+that can't be shared by import under this project's module-independence rule.
 
-**Technique that caught all three**: don't trust a classifier's own test suite to have exercised
-the input that matters — construct a direct repro against the real function (round 1-2: the
-classifier itself with hand-picked plausible phrases; round 3: the *adjacent subproject's real
-function*, `_verb_anchor_ratio`/`match_transcript`, not a mock or an assumption from its
-docstring) and, where the finding is about pilot-facing behavior, run it through the actual
-`CrewConsole.handle_transcript` round trip rather than stopping at the classifier's return value.
+**But found a fourth real gap, same technique as every round**: the round's own carried-over
+test (`test_classify_yes_no_accepts_a_short_elaborated_answer`) asserts `"roger wilco"` and
+`"negative hold off"` classify as affirm/negative, but calls `classify_yes_no(answer)` with the
+**default** `verb_anchored=False` rather than a real value. Fed the real `match_transcript`
+output through the actual `CrewConsole.handle_transcript` round trip: both phrases get
+`verb_anchored=True` from the real matcher (their first word still fuzzy-anchors; only the
+*trailing* words differ from the bare case round 4 fixed), so they return `"other"` in production
+and the pilot gets "Say again?" instead of a commit/discard. Root cause: `verb_anchored` is
+computed from the first word alone, independent of anything after it, so rule 3 (the
+first-word+length-cap rule built for "yes do it"-style elaboration) is *dead code* for any
+opener that both is an answer word and fuzzy-anchors but isn't itself a filler word to the
+matcher (`roger`/`negative`/`nope`/`belay`/`disregard` — `ok`/`okay` are exempt because
+`audio-adapter`'s own `FILLER_WORDS` strips them before the anchor check, which is *why* "okay do
+it" already worked correctly and "roger wilco" didn't).
 
-See [[feedback_bounded_magnitude_isnt_optional_severity]] — all three findings were Required
-because each contradicted a stated invariant/design intent (a safety claim in a docstring, or the
-implementer's own "a real answer is one or two words" model), not merely because a worst case was
-large.
+**Proposed fix, verified before writing it up (learning from rounds 2/3's mistake of proposing
+untested rules)**: swap the rejection signal from "did the first word fuzzy-anchor" to "did the
+matcher resolve an actual token" (`MatchResult.token is not None`) — data already available at
+both `crew_console.py` call sites, no adapter change needed. Simulated this substitution against
+every phrase established as a fixed point across all four rounds (`"okay scan left"` still
+"other" via its real token match; `"roger wilco"`/`"negative hold off"`/`"nope hold on"`/
+`"belay that order"` now correct; nothing else changes) before recommending it.
+
+**The recurring pattern across all four rounds**: each fix correctly solves the exact case that
+motivated it, using a signal that turns out to have a blind spot the previous rounds' own tests
+never exercised — because each round's tests use hand-picked/default parameter values instead of
+the real value the adjacent function would actually produce for that exact phrase. The technique
+that caught every single round: **run the phrase through the real adjacent function (or the real
+end-to-end call path) rather than trusting a test that supplies its own value for the parameter
+under scrutiny.** A test asserting `classify_yes_no("roger wilco") == "affirm"` with an implicit
+default parameter looks like coverage; it is not coverage of what production actually sends.
+
+See [[feedback_bounded_magnitude_isnt_optional_severity]] — every finding across all four rounds
+was Required because it contradicted the fix's own stated intent or its own shipped test's
+assertion, verified by direct reproduction, not because a worst case was large.
