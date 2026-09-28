@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
-from belief.groups import GROUP_MIN_MEMBERS, GROUP_PROXIMITY_GAP_RATIO, GroupStore
+from belief.groups import (
+    GROUP_PROXIMITY_GAP_RATIO,
+    GROUP_REPORTING_MIN_MEMBERS,
+    GroupStore,
+)
 from belief.position_belief import Covariance2D, PositionEstimate
 
 
@@ -33,15 +37,32 @@ def _contact(contact_id: str, x: float, z: float) -> Contact:
     )
 
 
-def test_below_min_members_never_forms_a_group() -> None:
-    """Two tightly-spaced contacts, well below `GROUP_MIN_MEMBERS` -- a
-    pair is a pair, not a formation (module docstring)."""
+def test_a_lone_contact_never_forms_a_group() -> None:
+    """A single tracked contact is always below `GROUP_REPORTING_MIN_
+    MEMBERS` (2) -- `_cluster_contacts` short-circuits before computing any
+    distance at all, since no cluster meeting the floor is possible
+    either way."""
+    store = GroupStore()
+    contacts = [_contact("C1", 0.0, 0.0)]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_two_tightly_spaced_contacts_form_a_group() -> None:
+    """Two already-individuated contacts belonging together *is* a
+    reportable group as of `GROUP_REPORTING_MIN_MEMBERS` (2) -- user
+    direction 2026-09-28, overturning the earlier "a pair is a pair, not a
+    formation" reasoning (module docstring)."""
     store = GroupStore()
     contacts = [_contact("C1", 0.0, 0.0), _contact("C2", 10.0, 0.0)]
 
     store.reconcile(contacts, now_sim=0.0)
 
-    assert store.groups == []
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"C1", "C2"})
 
 
 def test_tight_cluster_forms_one_group() -> None:
@@ -126,12 +147,15 @@ def test_group_established_sim_persists_across_unchanged_reconciliation() -> Non
     assert store.groups[0].last_reconciled_sim == 5.0
 
 
-def test_split_majority_child_keeps_the_id_minority_founds_new_group() -> None:
+def test_split_majority_child_keeps_the_id_minority_pair_founds_a_new_group() -> None:
     """A five-member group loses its tail (destroyed in DCS terms) and
-    splits into a three-member remainder and a two-member remnant that
-    falls below `GROUP_MIN_MEMBERS` -- the surviving three keep the
-    original id; the remnant pair simply stops being a group at all
-    (dropped, not orphaned into a degenerate group of its own)."""
+    splits into a three-member remainder and a two-member remnant. With
+    `GROUP_REPORTING_MIN_MEMBERS` at 2 (user direction 2026-09-28), that
+    remnant pair is itself enough to report -- it does not simply
+    disappear the way a below-floor remnant used to. The majority trio
+    keeps the original id (highest overlap); the pair founds a genuinely
+    fresh group (unclaimed `established_sim`/`last_spoken_signature`), not
+    a continuation of anything."""
     store = GroupStore()
     contacts = [
         _contact("C1", 0.0, 0.0),
@@ -147,7 +171,10 @@ def test_split_majority_child_keeps_the_id_minority_founds_new_group() -> None:
     )
 
     # The tail (C4, C5) moves far away and no longer coheres with the
-    # remaining trio; the remaining trio's own spacing is unchanged.
+    # remaining trio; the remaining trio's own spacing is unchanged. C4 and
+    # C5 still cohere with each other (10 m apart, same as the trio's own
+    # spacing), so they form their own two-member cluster rather than
+    # dispersing entirely.
     remaining = [
         _contact("C1", 0.0, 0.0),
         _contact("C2", 10.0, 0.0),
@@ -158,11 +185,17 @@ def test_split_majority_child_keeps_the_id_minority_founds_new_group() -> None:
     store.reconcile(remaining, now_sim=10.0)
 
     groups = store.groups
-    assert len(groups) == 1
-    assert groups[0].id == original_id
-    assert groups[0].member_contact_ids == frozenset({"C1", "C2", "C3"})
-    assert store.group_for_contact("C4") is None
-    assert store.group_for_contact("C5") is None
+    assert len(groups) == 2
+    trio = next(
+        g for g in groups if g.member_contact_ids == frozenset({"C1", "C2", "C3"})
+    )
+    pair = next(g for g in groups if g.member_contact_ids == frozenset({"C4", "C5"}))
+    assert trio.id == original_id
+    assert pair.id != original_id
+    assert pair.established_sim == 10.0
+    assert pair.last_spoken_signature is None
+    assert store.group_for_contact("C4") is pair
+    assert store.group_for_contact("C5") is pair
 
 
 def test_merge_of_two_prior_groups_keeps_the_larger_overlap_id() -> None:
@@ -260,6 +293,8 @@ def test_mark_spoken_on_unknown_group_id_returns_false() -> None:
 
 def test_constants_are_the_stated_assumptions() -> None:
     """Pins the two uncalibrated constants so a future retuning commit is
-    visible as a diff here, not a silent behaviour change."""
+    visible as a diff here, not a silent behaviour change. `GROUP_
+    REPORTING_MIN_MEMBERS` is 2, not `perception.group_salience.
+    GROUP_MIN_MEMBERS`'s 3 -- see module docstring for why they differ."""
     assert GROUP_PROXIMITY_GAP_RATIO == 3.0
-    assert GROUP_MIN_MEMBERS == 3
+    assert GROUP_REPORTING_MIN_MEMBERS == 2
