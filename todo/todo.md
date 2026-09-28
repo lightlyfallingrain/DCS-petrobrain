@@ -39,11 +39,37 @@ Four findings, in the user's own words plus what each implies:
   live-acceptance-debt entry as above. **Sector coverage (all contacts in a scanned sector
   eventually get looked at, Decision 2a) is explicitly not part of this fix** — staged out as its
   own follow-on needing an `/explore` pass, see `body-layer/BACKLOG.md` (BL-B20).
-- [ ] **The confirm band asks a question nothing can answer.** *me "cancel" -> P "cancel everything,
-  confirm?" -> me "yes"/"confirm" -> P "no such command".* `render_confirm_request` (
-  `body-layer/src/belief/speech.py`) emits "<X>, confirm?", but the vocabulary has no affirmative
-  token at all — so the confirm band is unreachable by design, not mis-tuned. Needs an affirmative
-  (and presumably a negative) token plus whatever holds the pending command between turns.
+- [~] **The confirm band asks a question nothing can answer.** *me "cancel" -> P "cancel everything,
+  confirm?" -> me "yes"/"confirm" -> P "no such command".*
+
+  **The diagnosis written here on 2026-09-26 was wrong and is kept for the record**: it said "the
+  vocabulary has no affirmative token at all — so the confirm band is unreachable by design". It
+  is not. `belief/voice_commands.py` already had `_AFFIRM_WORDS = {affirm, affirmative, yes,
+  roger}`, `PendingConfirmation` already held the command between turns, and
+  `handle_transcript` already checked both before anything else. Writing that from reading the
+  symptom rather than the code cost a day of the item reading as bigger than it was — the
+  project's own "verify state, not the account of it" rule, applied to a defect report.
+
+  What was actually wrong (fixed on `fix/confirm-band-affirmatives`, 2026-09-28, unflown):
+
+  1. **The question asks for a word the answer set rejected.** `render_confirm_request` renders
+     "<X>, confirm?" and `"confirm"` was not an affirmative — the pilot's own report is
+     *"yes"/"confirm"*, and echoing the operative word back is the most natural answer there is.
+     Widened to include `confirm`/`confirmed`/`correct`/`yeah`/`yep`/`ok`/`okay`, and the
+     negatives to include `nope`/`belay`. The set is consulted only inside an open confirm
+     window, so widening it cannot collide with a command.
+  2. **`CONFIRM_WINDOW_S` was 8.0 s, measured from when the question was *decided*, not heard.**
+     The round trip it has to cover is TTS synthesis + playback of the question + the pilot
+     hearing, deciding, holding PTT and speaking + Whisper `small.en` (p90 1.46 s) + one 1.0 s
+     body poll ≈ 6.5–7.5 s with nothing going wrong. Raised to 15.0 s. Still not measured end to
+     end — a sortie should set it.
+  3. **A late yes/no escalated to the brain**, which is literally where *"Unable, no such
+     command."* came from (`decider.py`'s `NO_SUCH_COMMAND`). That wording says the *command* was
+     rejected when in fact the *answer* was late. A yes/no word within `CONFIRM_LATE_ANSWER_
+     GRACE_S` (20 s) of expiry now draws "Say again?" instead, which prompts the retry that works.
+
+  `cancel` always routes to the confirm band whatever its match ratio, so this hit every single
+  cancel. Leave this open until a sortie confirms "cancel" → "confirm" → the task actually stops.
 - [x] **"full scan" vs "scan full" — no defect, closed 2026-09-26.** *"I noticed myself saying
   'full scan', but the recognized format is 'scan full'. Both would be good."* Both already work.
   Ran the matcher directly: `"full scan"`, `"scan full"` and `"scan all around"` each resolve to

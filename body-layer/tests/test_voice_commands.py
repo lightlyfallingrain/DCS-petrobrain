@@ -157,8 +157,22 @@ def test_classify_yes_no_affirm_words() -> None:
         assert classify_yes_no(word) == "affirm", word
 
 
+def test_classify_yes_no_accepts_the_word_the_question_itself_asks_for() -> None:
+    """`speech.render_confirm_request` renders "<X>, confirm?", so echoing
+    "confirm" back is the most natural answer there is -- and it was not an
+    affirmative until the 2026-09-26 sortie found it (pilot: *"yes"/
+    "confirm"* -> *"no such command"*)."""
+    for word in ("confirm", "Confirm", "confirmed", "correct"):
+        assert classify_yes_no(word) == "affirm", word
+
+
+def test_classify_yes_no_accepts_colloquial_affirmatives() -> None:
+    for word in ("yeah", "yep", "ok", "Okay"):
+        assert classify_yes_no(word) == "affirm", word
+
+
 def test_classify_yes_no_negative_words() -> None:
-    for word in ("negative", "no", "disregard", "No."):
+    for word in ("negative", "no", "disregard", "No.", "nope", "belay"):
         assert classify_yes_no(word) == "negative", word
 
 
