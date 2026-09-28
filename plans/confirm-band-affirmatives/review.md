@@ -91,3 +91,101 @@ field traced by hand across all three code paths that touch `_pending_confirmati
 by direct reproduction (a standalone script exercising `CrewConsole.handle_transcript`), not
 inferred from reading; the two cited external latency numbers were checked against their source
 research docs rather than trusted from the docstring's citation alone.
+
+---
+
+## Review: fix commit `2471542` (whole-transcript `classify_yes_no`)
+
+HEAD matched the expected tip (`2471542`, one commit on `c33739e`) — verified via `git rev-parse
+HEAD` before anything else.
+
+**The requested fix landed correctly, at the right layer.** The implementer rejected my suggested
+mitigation (gate only the grace branch on transcript length) in favor of fixing `classify_yes_no`
+itself, because the same first-word hole existed *inside* the open confirm window too — a pending
+"scan ahead" confirm answered with "okay scan left" would previously have matched first-word
+"okay" and committed the stale `scan_ahead`, not been re-evaluated as the new command it actually
+is. Fixing the classifier closes both call sites with one change; my suggestion would have left
+the in-window half of the same hole standing. Re-ran my exact original repro
+(`"okay watch that truck at three o'clock"`, 5 s after an expired confirm) — it now falls through
+to `classify_response` instead of being swallowed, matching the new
+`test_handle_transcript_grace_window_does_not_swallow_a_real_utterance`. The false "cannot
+collide" safety claim is corrected in both places it appeared (`_AFFIRM_WORDS` docstring,
+`todo/todo.md`).
+
+Checks: `ruff format --check` / `ruff check` clean, `mypy --strict` clean (52 files), `pytest`
+1311 passed / 4 xfailed.
+
+**New required fix, found by direct reproduction, in the direction this fix opens.** The
+whole-transcript rule can now *reject* a real answer a plausible pilot would give — not just
+mixed answers, which are refused on purpose, but ordinary short affirmations that add one more
+word beyond the closed filler list (`{that, sir, copy, please}`):
+
+```
+'yes do it'          -> other
+'affirm execute'     -> other
+'roger wilco'         -> other
+'yes go ahead'       -> other
+'affirmative sir go' -> other
+```
+
+(`confirm that` / `yes copy that` do work — the filler list covers those two-word radio forms.)
+
+This matters because of what "other" *does* here, not just that it's the wrong label. Within the
+open window, `handle_transcript` clears `_pending_confirmation` unconditionally before checking
+the classification, so an "other" result discards the pending command **silently** (Decision 4
+Layer 3's designed behavior for stale/ambiguous input, now reached by a wider set of genuine
+answers than before this commit). For "cancel everything, confirm?" -> "yes, do it", the cancel
+now simply does not happen, with no "Say again?", no "Unable" — nothing. That is a worse pilot
+experience than the original defect this whole branch exists to fix: an "Unable, no such command"
+at least tells the pilot something went wrong; a silent non-cancel does not. And unlike the
+grace-window swallow (which needed an *unrelated* sentence happening to open with a matched
+word), this fires on a *directly on-topic* elaboration of the same answer — arguably more likely
+in real cockpit speech than the bare single-word answers the existing tests all use.
+
+This is not a hypothetical: it directly contradicts the fix's own stated design intent. The
+`classify_yes_no` docstring says "a real answer here is one or two words" — but "yes do it" *is*
+a real answer of three words, reinforcing rather than replacing the affirmation, and the closed
+filler list is simply too narrow to recognize it as such.
+
+Fix suggestion: don't require every remaining word to be in the closed filler set. A cheaper and
+more forgiving rule that still blocks the demonstrated free-speech case: accept as
+affirm/negative when the *first* word is an answer word **and** the transcript is short overall
+(e.g. word count <= 3-4) — `"okay watch that truck at three o'clock"` (8 words) still fails that
+test, while `"yes do it"` / `"roger wilco"` / `"affirm execute"` (2-3 words) pass. Whichever shape
+is chosen, add tests for these specific short-elaboration forms alongside the existing
+sentence-swallow and mixed-answer tests — the sortie that will validate this feature (still
+correctly marked "unflown" in `todo/todo.md`) is exactly where phrasing like this will show up
+first, and it's cheaper to test for now than to diagnose from a third live-sortie report later.
+
+**Everything else checked out:**
+- In-window fall-through for a genuine new multi-word command while a confirm is pending is still
+  correct — `test_handle_transcript_confirm_then_unrelated_answer_discards_and_processes_new`
+  (pre-existing, unchanged) still passes, and its mechanism (whole-transcript check on "watch
+  nearest" -> "other" -> discard pending, process new command) is unaffected by this commit's
+  change in the way that matters: multi-word *unrelated* commands still fall through correctly,
+  it's specifically multi-word *elaborated answers* that now misclassify.
+- The filler list itself (`that`/`sir`/`copy`/`please`) is a reasonable, conservative starting
+  set and not a slippery slope as written — it's closed, small, and each word is inert on its own
+  (`"copy"` alone still classifies as `"other"`, unchanged from before this whole branch, since
+  `"copy"` was never a member of `_AFFIRM_WORDS` either). The problem isn't the list's contents,
+  it's that "every remaining word must be filler" is a stricter bar than "a real answer would
+  plausibly clear."
+- Mixed-answer refusal (`"yes no"` -> `"other"`) is correct and appropriately conservative —
+  no change requested there.
+- `plans/confirm-band-affirmatives/review.md` (this file, the prior review round) and the
+  reviewer agent-memory note were correctly carried into this commit rather than left unstaged.
+
+### Verdict (this round)
+
+NEEDS REVISION — one required fix (short-elaboration answers silently rejected in-window), same
+severity class as the previous round's finding: a real, reproduced case where the confirm band's
+own stated goal ("make it answerable") fails for plausible pilot speech, just moved from
+over-acceptance to under-acceptance.
+
+### Review Confidence (this round)
+
+Full read of the diff between `c33739e` and `2471542`; re-ran the original repro to confirm the
+requested fix actually closes it; the new required-fix finding was verified by direct
+reproduction of `classify_yes_no` against several short plausible answers, and by tracing
+`handle_transcript`'s in-window discard path to confirm what "other" actually does to a pending
+command (silent discard, not a retry prompt) rather than assuming from the docstring.

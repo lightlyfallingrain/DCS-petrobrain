@@ -1,44 +1,48 @@
 ---
 name: confirm-band-affirmatives-grace-swallow
-description: fix/confirm-band-affirmatives (c33739e) review outcome — NEEDS REVISION on a late-answer grace window that swallows unrelated free speech
+description: fix/confirm-band-affirmatives (c33739e, 2471542) review outcome — two rounds, over-acceptance then under-acceptance, same root cause
 metadata:
   type: project
 ---
 
-Reviewed `fix/confirm-band-affirmatives` (body-layer, tip `c33739e`) — the fix for the 2026-09-26
-"cancel" -> "confirm?" -> "yes"/"confirm" -> "Unable, no such command." sortie defect. Widened
-`_AFFIRM_WORDS`/`_NEGATIVE_WORDS`, raised `CONFIRM_WINDOW_S` 8.0->15.0, added
-`CONFIRM_LATE_ANSWER_GRACE_S` (20.0) + `CrewConsole._confirmation_expired_sim` so a late yes/no
-after expiry draws "Say again?" instead of escalating to the brain as free speech.
+Reviewed `fix/confirm-band-affirmatives` (body-layer) across two rounds, fixing the 2026-09-26
+"cancel" -> "confirm?" -> "yes"/"confirm" -> "Unable, no such command." sortie defect.
 
-**Found one required fix by direct reproduction, not by reading alone**: `classify_yes_no`
-matches on the transcript's *first word only*. The widened affirm set now includes ordinary
-sentence-openers ("ok"/"okay"/"correct"/"yeah"/"yep"), and the new 20s grace window checks *every*
-post-expiry transcript against that set before command classification — with no confirm window
-open. A standalone repro script fed `"okay watch that truck at three o'clock"` 5s after an
-unanswered confirm expired and got back `["Say again?"]`, silently dropping the tactical report.
-This also falsifies a safety claim stated twice in the same commit (`voice_commands.py`'s
-`_AFFIRM_WORDS` docstring and `todo/todo.md`'s entry): "the set is consulted only inside an open
-confirm window, so widening it cannot collide with any command" — true for literal command-token
-collisions, false once the grace window (added by this same commit, in a different file) is
-counted.
+**Round 1 (`c33739e`)**: widened `_AFFIRM_WORDS`/`_NEGATIVE_WORDS`, raised `CONFIRM_WINDOW_S`
+8.0->15.0, added `CONFIRM_LATE_ANSWER_GRACE_S` (20.0). Found by direct reproduction: `classify_
+yes_no` matched only the transcript's *first word*, so the widened set (now including "ok"/
+"okay"/"correct"/"yeah") let an unrelated fresh utterance ("okay watch that truck at three
+o'clock", 5s after an expired confirm) get swallowed as a late answer, returning "Say again?" and
+dropping a real tactical report. Also falsified a "cannot collide with any command" safety claim
+stated twice (docstring + `todo/todo.md`). NEEDS REVISION.
 
-**Technique worth repeating**: when a fix adds a *time-windowed* reinterpretation of a shared
-word-classification function (`classify_yes_no` here, used both inside the confirm window and in
-the new post-expiry grace window), write a standalone repro exercising the new window with a
-plausible *unrelated* multi-word utterance, not just the single-word inputs the implementer's own
-tests use. The implementer's tests were all one-word answers ("roger", "confirm"); the swallow
-only shows up with a longer sentence that happens to open with a matched word — exactly the shape
-real radio speech takes and exactly the shape a same-word single-token test can't catch.
+**Round 2 (`2471542`)**: fixed at the classifier, not the grace branch — `classify_yes_no` now
+requires *every* word of the transcript to be an answer word or a closed filler
+(`that`/`sir`/`copy`/`please`), refuses mixed answers ("yes no" -> "other"). This was the right
+call over my suggested narrower fix (gate only the grace branch on length) because the same
+first-word hole existed *inside* the open confirm window too (a pending confirm answered "okay
+scan left" would have committed the stale command). Verified the original repro now falls
+through correctly.
 
-The `CONFIRM_WINDOW_S`/`CONFIRM_LATE_ANSWER_GRACE_S` docstring math (Whisper `small.en` p90
-1.46s, TTS "<1s") was checked against real research docs (`audio-adapter/research/
-2026-09-19-whisper-model-sweep.md`, `audio-adapter/ROADMAP.md`) and held up — not fabricated,
-unlike some past latency claims in this project. The one existing test that was changed rather
-than extended was the right call — its assertion legitimately changed and a new test covers what
-it used to guard.
+**But found a new required fix by direct reproduction, in the opposite direction**: the
+whole-transcript rule now *rejects* short, plausible elaborated answers that add one word beyond
+the closed filler list — `classify_yes_no("yes do it")`, `"affirm execute"`, `"roger wilco"`,
+`"yes go ahead"` all return `"other"`. Inside the open window, "other" silently discards the
+pending command (Decision 4 Layer 3's existing design) with zero feedback — worse than the
+original "Unable" defect for exactly the command class that matters most (cancel). This directly
+contradicts the fix's own stated design intent ("a real answer here is one or two words" — "yes
+do it" is three, and is a real answer). Recommended a length-based heuristic (first word is an
+answer word AND word count small, e.g. <=3-4) instead of "every remaining word must be filler."
 
-See [[feedback_bounded_magnitude_isnt_optional_severity]] — same axis distinction applies: the
-swallow window is narrow (20s, only if the next utterance opens with a matched word), but it
-violates a stated invariant (the docstring's "cannot collide" claim), which is what made it a
-required fix rather than optional.
+**Pattern worth naming**: fixing an over-acceptance bug by narrowing a classifier with a *closed
+list* (filler words, in this case) is a natural move, but closed lists have a matching failure
+mode in the opposite direction — they reject anything not enumerated, including things the
+implementer's own stated design intent says should pass. When reviewing a narrowing fix, always
+generate a few short, on-topic (not just adversarial/unrelated) test inputs and run them through
+the changed function directly, not just the fix's own tests (which naturally only cover the
+inputs the fix was written to handle). Both rounds of this feature were caught the same way:
+direct reproduction against the raw classifier/console call, not by reading the diff.
+
+See [[feedback_bounded_magnitude_isnt_optional_severity]] — both findings were flagged Required
+because they contradict a stated invariant/design intent, not merely because the worst case was
+large.
