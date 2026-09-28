@@ -44,6 +44,20 @@ from store.reader import sample_grid
 #: terrain in the way" checks).
 _DEFAULT_LOS_SAMPLES = 20
 
+#: Terrain is only treated as blocking once it exceeds the sightline
+#: altitude by more than this many metres, rather than by any amount at
+#: all -- world-model's elevation grid is a sampled estimate, not ground
+#: truth, and a check that treats it as exact can place a real unit
+#: "underground" relative to the model at its own position, blocking it
+#: from every angle, permanently (`plans/missed-aaa-detection/debug.md`).
+#: Value calibrated separately from this mechanism -- see below.
+#:
+#: A module constant, not a parameter: nothing in this package or its one
+#: caller (body-layer's `perception.geometry.line_of_sight_clear`, a thin
+#: wrapper) has a reason to run this check at a different tolerance today,
+#: and an unused override parameter is its own maintenance cost.
+_TERRAIN_TOLERANCE_M = 0.0
+
 
 def line_of_sight_clear(
     conn: sqlite3.Connection,
@@ -65,6 +79,11 @@ def line_of_sight_clear(
     clear -- absence of data must never manufacture a detection outcome
     either way; it is simply not evidence.
 
+    Terrain blocks only when it exceeds the sightline altitude by more
+    than `_TERRAIN_TOLERANCE_M` -- see that constant's comment for why an
+    exact-match check is wrong for a coarse, imprecise grid, and what the
+    tolerance costs.
+
     This is a plain geometric LOS check only -- no earth curvature, no
     atmospheric refraction, no target-size/optical-plausibility reasoning.
     Those, along with turning "clear line of sight" into an actual
@@ -83,6 +102,6 @@ def line_of_sight_clear(
         if terrain_m is None:
             continue
         sightline_alt_m = observer_alt_m + (target_alt_m - observer_alt_m) * t
-        if terrain_m > sightline_alt_m:
+        if terrain_m > sightline_alt_m + _TERRAIN_TOLERANCE_M:
             return False
     return True
