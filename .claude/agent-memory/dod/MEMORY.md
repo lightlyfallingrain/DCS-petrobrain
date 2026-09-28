@@ -11,3 +11,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [DoD worktree pytest/PYTHONPATH trap](feedback_dod_worktree_pythonpath_trap_applies_here_too.md) — main-based DoD worktree + branch checked out elsewhere: use a git-archive scratch tree, not the worktree checkout.
 - [curl blocked in worktree sandbox](feedback_curl_blocked_in_worktree_sandbox.md) — use Python urllib, not curl, for a live loopback HTTP spot-check from inside a worktree.
 - [Change-request fix needs no security-plan-review](project_change_request_fix_no_security_plan_review_expected.md) — Security/Perf-Reviewer change-request branches correctly skip plan.md/security-plan-review.md; check the whole-subproject audit doc instead.
+- [Recurring: multi-round threshold widening](project_recurring_multiround_threshold_widening.md) — widening a fixed set/threshold/window tends to take several rounds, each caught only by running the real subsystem, not by inspection.
