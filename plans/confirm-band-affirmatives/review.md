@@ -454,3 +454,87 @@ specific phrases the current test suite claims work; the suggested fix was not m
 simulated against every phrase established as a fixed point across all four review rounds before
 being written up, specifically to avoid repeating this review's own round-2/round-3 pattern of
 recommending a rule that breaks something already known to work.
+
+---
+
+## Review: fix commit `1044bc3` (`matched_command`, the proposed fix as landed)
+
+HEAD matched the expected tip (`1044bc3`, one commit on `7126236`) — verified via `git rev-parse
+HEAD` first.
+
+Checks re-run independently: body-layer ruff/mypy clean, pytest 1313 passed / 4 xfailed.
+audio-adapter ruff/mypy clean, pytest 213 passed / 1 skipped.
+
+**The landed fix is exactly the one proposed in the previous round** — rule 2 now gates on
+`token is not None` (renamed `matched_command`, a real improvement: the old `verb_anchored` name
+no longer described what the parameter meant once round 3's signal was replaced) at both
+`crew_console.py` call sites, no adapter-side change. Confirmed both test corrections are honest
+about the real matcher rather than asserting a hand-picked value: I ran `match_transcript`
+directly against every phrase in both corrected tests and every value matches what the real
+matcher actually returns (`"roger scan left"` really does resolve `scan_left`; `"no watch
+nearest"` really does resolve nothing, so the old test's `verb_anchored=True` for it asserted a
+state the matcher can never produce — the exact bug class this whole sequence of rounds has been
+about, now removed from the test suite that would have hidden the next one).
+
+**Independent end-to-end sweep, not just re-reading the diff.** Ran every phrase this branch has
+ever cited as a fixed point — 18 affirmative forms, 9 negative forms, 3 in-window command forms,
+plus the long-sentence and late-answer expiry cases — through the real `match_transcript` →
+`CrewConsole.handle_transcript` round trip myself:
+
+- All 18 affirmative forms (`yes`, `confirm`, `confirmed`, `correct`, `ok`, `okay`, `roger`,
+  `yeah`, `yep`, `affirm`, `affirmative`, `roger that`, `yes sir`, `yes do it`, `affirm execute`,
+  `yes go ahead`, `okay do it`, `ok go ahead`) commit the pending command.
+- All 9 negative forms (`negative`, `no`, `nope`, `disregard`, `belay`, `negative hold off`,
+  `nope hold on`, `belay that order`, `negative that`) discard it silently, as designed.
+- `"okay scan left"` / `"scan left"` / `"roger scan left"` while a confirm is pending all act as
+  the command they are (blocked only by an unrelated harness limitation — no world-model
+  connection in this standalone script — not swallowed as an answer).
+- The long unrelated sentence and a late bare `"yes"` past the grace window both still draw
+  "Say again?".
+
+No mismatch anywhere in that sweep. This closes every defect found across rounds 1-4 with no
+regression on any of them.
+
+**On the deliberate scope decision (`"no watch nearest"` losing the command half):** agreed, this
+is the right call and not a defect to fix. Verified the mechanism directly: the real matcher gives
+`token=None`/`matched_command=False` for that exact phrase, so `classify_yes_no` reaches rule 3,
+sees first word `"no"` in `_NEGATIVE_WORDS`, and returns `"negative"` — the pending command is
+discarded and `"watch nearest"` is never re-evaluated, because the negative branch returns
+immediately rather than falling through the way an `"other"` result would. This is a genuinely
+different case from every prior round's findings: no docstring, test, or stated design intent in
+this branch claims combined answer-plus-new-command-in-one-breath is handled, so there's no
+contradicted invariant here, only an unhandled input class the implementer chose not to build
+machinery for. Building it would mean parsing intent *inside* an answer word rather than
+classifying the word itself — a materially different, bigger feature (compound-utterance
+splitting) than this branch has ever been about, and four rounds have already gone into just the
+single-intent case. I'd note explicitly: this is a **theoretical gap, not a defect a pilot is
+likely to notice in a sortie** — it requires the pilot to fuse a negative answer and an unrelated
+new command into one breath with no pause, which is a narrower and more contrived utterance shape
+than any of the previous four rounds' findings (all of which were plain single-answer phrasings a
+pilot would plausibly use verbatim, one of them — `"roger"`/`"negative"`, another — the two most
+likely words in the entire vocabulary). No fix requested; worth a one-line note next to the mixed-
+answer docstring so a future round doesn't rediscover it as a bug (optional, not blocking).
+
+**No new defect found this round.** This is the first round of five where the sweep came back
+clean.
+
+### Verdict (this round)
+
+**APPROVED.** All four prior rounds' findings are fixed and reverified end to end; no new defect
+found despite an independent full sweep across every phrase this branch has ever touched. The one
+open item (`"no watch nearest"`-shaped compound utterances) is a disclosed, reasoned scope
+boundary, not a contradicted invariant, and is small enough in likelihood and consequence that
+it does not belong in this branch. The item in `todo/todo.md` is accurate, current, and correctly
+still marked unflown — the remaining open question (do `CONFIRM_WINDOW_S`/`CONFIRM_LATE_ANSWER_
+GRACE_S` actually hold up, does "cancel" → "confirm" → the task stop in a real cockpit) is a
+question a sortie answers, not a further round of static review.
+
+### Review Confidence (this round)
+
+Full read of the diff between `7126236` and `1044bc3`. All four check commands re-run
+independently for both touched subprojects. Every value in both corrected tests was checked
+against the real `command_matcher.match_transcript` output, not taken on the commit message's
+word. An independent end-to-end sweep (not merely a re-run of the implementer's own claimed
+sweep) was executed across every phrase cited as a fixed point in all five rounds combined,
+covering affirmative, negative, in-window-command, long-sentence, and late-answer cases, before
+concluding no further defect exists.
