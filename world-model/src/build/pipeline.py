@@ -130,16 +130,28 @@ from terrain.features import DEFAULT_MIN_CELL_COUNT
 
 _PROBE_GRID_SPACING_M = 500.0
 # Default storage spacing for the M7 Stage 2 SRTM-primary full-theatre
-# elevation grid -- deliberately coarser than `_PROBE_GRID_SPACING_M`
-# (SRTM's own native ~30-90m sampling density is unaffected; this only
-# controls how many of those samples get stored as grid cells). At 500m,
-# `syria-full`'s ~827x771 km padded bbox would be ~1,650 x 1,540 = ~2.5M
-# grid cells; SQLite handles millions of rows fine per M5, but this is the
-# first full-theatre-scale grid this pipeline has built, so the CLI exposes
-# this as an override rather than hardcoding either number -- see
-# `build.ingest_srtm`'s module docstring and
+# elevation grid. Raised from the original 1000m to match
+# `_PROBE_GRID_SPACING_M` (2026-09-29, plans/terrain-feature-probing/
+# plan.md Stage 1/2): the user rejected 1000m for the terrain-semantics
+# (ridge/valley) stage this grid now also feeds -- "an entire mountain can
+# fit inside it" -- and a real sweep over `latakia-20km` SRTM data
+# (`world-model/research/2026-09-29-terrain-feature-probing-spacing.md`)
+# confirmed it empirically: at 1000m the curvature classifier both loses
+# real secondary relief and never reproduces more than a handful of
+# components at any workable threshold. 500m reproduces M6's own
+# already-validated probe-grid tuning (`terrain.curvature.
+# DEFAULT_CURVATURE_THRESHOLD_M`) almost exactly on real SRTM data, and the
+# same sweep found no landmark-quality benefit from going finer (250m/100m
+# still checkerboard at every threshold tested -- a resolution ceiling, not
+# a threshold-tuning gap, matching M6's own finding). At 500m,
+# `syria-full`'s ~827x771 km padded bbox is ~1,650 x 1,540 = ~2.5M grid
+# cells; SQLite handles millions of rows fine per M5, and the stored
+# `grid_sample` cost scales to roughly 49 MB (linear in cell count from the
+# 1000m baseline's 12.2 MB) -- a modest, affordable increase, not a
+# storage-cost concern. The CLI still exposes this as an override rather
+# than hardcoding it -- see `build.ingest_srtm`'s module docstring and
 # `world-model/docs/M7_RUN_INSTRUCTIONS.md`'s Stage 2 section.
-DEFAULT_SRTM_GRID_SPACING_M = 1000.0
+DEFAULT_SRTM_GRID_SPACING_M = 500.0
 _TOTAL_STAGES = 8
 
 # How many `StoredFeature` rows `osm_pbf_path`'s cache-hit fast path reads
