@@ -4,6 +4,13 @@
 **DCS version:** 2.9.29.27278 (per prior sessions' `autoupdate.cfg` read; not reprobed this session)
 **Theatre:** n/a (scripting-API/architecture question, applies to any theatre)
 
+> **UPDATED 2026-09-29 — Finding 3's "single most load-bearing open number" has been read.**
+> The velocity hook's self-measurement was sitting in `dcs.log` from a 568-unit sortie: mean
+> 1.99 ms, p99 8 ms, ~2.6 us per item, at 1 Hz. Finding 5's arithmetic is now safe to do. See
+> `aircraft-layer/research/2026-09-29-bridge-call-cost-at-scale.md`. Reproducible Test item 1
+> (`land.getHeight` through the bridge) is still unrun — the probe for it is written and deployed:
+> `aircraft-layer/dcs-export/petrobrain-elevation-cost-probe-hook.lua`.
+
 ### Question
 
 Is live in-mission terrain elevation probing (`land.getHeight`, plus `land.getSurfaceType`)
