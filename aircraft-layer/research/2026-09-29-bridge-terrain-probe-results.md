@@ -209,6 +209,73 @@ per-point cost.**
   (`SYRIA_BLOCK_BUILDING_01..05`, `SYRIA_HOUSE_03/08`, `SYRIA_CITY_HOUSE_02`, …), so this is
   tedious rather than hard — but it is work that did not exist in the plan.
 
+**12. X-B4 ANSWERED: `land.isVisible` is terrain-only. Buildings do not block it. Flight 6.**
+
+- **evidence: reproduced-locally, confound removed** — `dcs.log` 14:16:38 → 14:16:55, full run.
+- `through_buildings` asks `world.searchObjects` where the buildings actually are, then fires a
+  ray through each one — 60 m either side of its centre, 2 m above local ground — with the
+  terrain-only verdict computed over the same 120 m so a rise between endpoints cannot be mistaken
+  for the building.
+
+  | test | buildings | blocked by something | clear | terrain-blocked |
+  |---|---|---|---|---|
+  | 200 m radius | 12 | **0** | 12 | 0 |
+  | wider | **40** | **0** | **40** | 0 |
+
+  Named in the sample: `SYRIA_BLOCK_BUILDING_05`, `SYRIA_BLOCK_BUILDING_04`, `SYRIA_HOUSE_08`,
+  `TRASHCAN_EU_SMALL` — every one `CLEAR`.
+- **Forty rays fired deliberately through forty known buildings, not one blocked.** This is not a
+  statistical argument and there is no sampling confound left: the ray geometry was derived from
+  the buildings' own reported positions.
+- The same flight's occlusion sweep agrees and is cleaner than flight 4's: **0/40 terrain-clear-
+  but-`isVisible`-blocked in both areas** (ownship 37 clear / 3 terrain-blocked; desert 27 / 13).
+- **Trees: the same conclusion, one step weaker.** No tree ever appears as a scenery object, so
+  there is nothing to fire a ray *through* by construction; the evidence is the 0/40 sweep in an
+  area the user deliberately positioned near forest. Combined with buildings being definitively
+  invisible to the call, a tree-only exception would be a strange thing for the engine to make.
+- **This reconciles with `Scripts/AI/Detection.lua` rather than contradicting it.**
+  `objects_LOS_test = true` and `trees_LOS_test_T4 = true` describe **ED's AI detection**, which is
+  a different code path from the scripting API. Both facts hold; they were never about the same
+  thing. The install file was never going to answer this, which is why it needed a flight.
+
+**13. What this costs the project, and what it opens.**
+
+- **`land.isVisible` cannot replace our own LOS.** It sees exactly what we already see — the bare
+  terrain mesh — so routing occlusion through it would buy nothing but a bridge call. The hope
+  recorded in X-B4 ("if it is cheap and does see objects, it could replace our elevation-grid LOS
+  outright") is dead.
+- **But the raw material for doing better ourselves is now in hand**, and that is the more useful
+  outcome:
+  - **Buildings**: `world.searchObjects` returns **590 objects in a 600 m radius**, each with a
+    world position and a type name. That is denser and more authoritative than OSM's building
+    footprints.
+  - **Trees**: world-model already holds **44,811 OSM `landcover` polygons** (forest/orchard/scrub),
+    which is the only tree source there is going to be.
+  - **The gap is extent.** Scenery carries no dimensions — the full `getDesc()` is
+    `life / _origin / category / typeName / displayName`, and `life` is hit points, not size
+    (`SYRIA_BLOCK_BUILDING_05` = 100, `_03` = 150, `POWER_TRANS_LINE_BIG` = 20). A type-name → size
+    table, built once offline over a finite catalogue, is the missing piece.
+
+**14. Cost, third independent confirmation, and where the stutter actually lives.**
+
+- `getHeight` **0.8 µs/point** warm, **1.1 µs/point** cold — 2,601 points (a full M8 chunk) in
+  **2.0 ms**. `isVisible` **10.6 µs/ray** — 200 rays in 2.1 ms. Three flights now agree.
+- **Scenery search cost is the one that bites, and it is superlinear:**
+
+  | radius | objects | cost | µs/object |
+  |---|---|---|---|
+  | 150 m | 12 | 0 ms | — |
+  | 300 m | 126 | 1 ms | 8 |
+  | 600 m | 590 | **18 ms** | 31 |
+
+  **Keep scenery searches at or below 300 m.** 600 m is an 18 ms call, a dropped frame on its own.
+- **The stutter is confirmed as distance, not volume.** `occlusion_desert`'s first chunk cost
+  **41 ms** (Deir ez-Zor, ~400 km away, untouched) while `occlusion_urban`'s identical first chunk
+  cost **1 ms** locally. `known_points`, eight theatre-scattered locations, ran at median 7 ms /
+  peak 9 ms. Local work is sub-millisecond throughout. **An ownship-following probe bubble is the
+  cheap case; jumping across the map is the expensive one** — and the probe is the only thing here
+  that jumps.
+
 ### Reproducible Test
 
 Re-fly with the fixed probe (deployed). Extract with:
