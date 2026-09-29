@@ -1,11 +1,13 @@
 --[[
 Throwaway probe Hook script: does `land.getHeight` work through the
-mission-scripting bridge, and what does a batch of them cost?
+mission-scripting bridge, do trees and buildings block `land.isVisible`,
+and what does any of it cost?
 
 **This is a probe, not pipeline code.** It is deployed by hand for one
 sortie, writes only to `dcs.log`, and is deleted afterwards. It answers the
 two questions `aircraft-layer/research/2026-09-28-live-terrain-probing-
-feasibility.md` left open ("Unresolved", items 1 and 3):
+feasibility.md` left open ("Unresolved", items 1 and 3), plus backlog item
+X-B4.
 
   1. `land.getHeight`/`land.getSurfaceType` are *inferred* to work through
      `net.dostring_in("scripting", ...)` because they live in the same
@@ -27,17 +29,59 @@ every call returns `("Invalid state name", false)`. It is already present
 on this machine (the F10 menu works), so nothing needs doing.
 
 DEPLOY: copy to `Saved Games/DCS/Scripts/Hooks/`, fly or just sit in any
-**Syria** mission for ~30 s, then delete the file again. Output goes to
+**Syria** mission for ~60 s, then delete the file again. Output goes to
 `Saved Games/DCS/Logs/dcs.log`, prefixed `PetrobrainElevProbe`.
 
-WHY THE ODD MEASUREMENT SHAPE: `os.clock()` on Windows is wall-clock with
-`CLOCKS_PER_SEC = 1000`, i.e. **1 ms granularity**. That is why the
-production velocity hook's numbers are all whole milliseconds, and it means
-a single small batch cannot be timed at all -- it reads 0 or 1 ms. So each
-batch size is run `REPEATS` times and the *total* is divided, and a
-zero-work `return "x"` call is timed the same way to separate fixed bridge
-overhead from the terrain queries themselves. Without that null column the
-batch numbers would be unattributable.
+-------------------------------------------------------------------------
+THE THROTTLE, AND WHY IT IS ADAPTIVE RATHER THAN A FIXED CAP
+-------------------------------------------------------------------------
+
+**User direction, 2026-09-29: *"We can't freeze the cockpit for a minute,
+not even for testing. DCS might crash or windows might close it as
+unresponsive."*** He is right, and the first version of this probe was
+unsafe: it ran up to 20 repeats of a 2,601-point batch back-to-back inside
+a single `onSimulationFrame`, which is ~52,000 engine calls in one frame.
+At an unknown per-call cost that is an unbounded stall on DCS's own thread,
+and Windows marks a process unresponsive after ~5 s without a message pump.
+
+**A fixed cap would not have fixed it**, which is the point worth keeping:
+the per-call cost is precisely the thing being measured, so any batch size
+chosen in advance is a guess against an unknown. Two mechanisms instead:
+
+1. **One bridge call per `TICK_INTERVAL_S`, never a burst.** Repeats are
+   spread across frames rather than run in a loop, so the game gets every
+   intervening frame back. At a `CALL_BUDGET_MS` call every 250 ms the duty
+   cycle is a few percent, and the whole probe takes ~40 s of sitting still
+   instead of one long hitch.
+2. **Escalate only where measurement says it is safe.** Every batch starts
+   at N=1 and steps up only while `fixed + N x per_item`, doubled for
+   safety, stays under `CALL_BUDGET_MS`. `per_item` comes from the batch
+   just measured, so each step is gated by real numbers rather than
+   optimism. **Every** step adapts, including the two that are not simple
+   batches: the scenery search walks 50 -> 600 m predicting each radius by
+   area scaling from the last one's measured cost, and the occlusion sweep
+   picks both its samples-per-pair and its pairs-per-call from the measured
+   `getHeight`/`isVisible` costs. A step that cannot fit says so and is
+   skipped; none of them guesses.
+
+Driving a harness over this state machine at simulated costs from 1 us to
+1000 us per engine call keeps the worst single call between 1.1 and
+16.5 ms, and the whole probe between 18 and 45 s of sitting still. The
+16.5 ms worst case is `known_points`, the one call that runs before any
+measurement exists to gate it -- see its own comment.
+
+`ABORT_MS` is the backstop: any single call over it stops the entire probe
+immediately. **Hitting it is not a failure of the probe, it is the
+headline finding** -- it would mean live terrain probing is not affordable
+at any useful density, and the `.surface5` file route stops being a parked
+fallback (`world-model/research/2026-09-29-surface5-elevation-confirmed.md`).
+
+`os.clock()` on Windows is wall-clock with `CLOCKS_PER_SEC = 1000`, i.e.
+**1 ms granularity**, which is also why the production velocity hook's
+numbers are all whole milliseconds. A single small call cannot be timed at
+all -- it reads 0 or 1 ms -- so small sizes are averaged over `REPEATS`
+and the per-item estimate is floored and safety-doubled before it is
+trusted to gate anything.
 
 THE COORDINATE CONVENTION IS THE EASY MISTAKE, AND THE TWO CALLS DIFFER:
 `land.getHeight` takes a **2D** vector `{x = <world x>, y = <world z>}` --
@@ -69,32 +113,52 @@ disk and can only be measured live. Hence this probe.
 **The discriminating design, which is the part worth getting right.**
 Asking "did `isVisible` return false" proves nothing on its own: our own
 terrain-only LOS would also return false across a ridge, and a sightline
-that clips a hill our 60-sample sweep happened to step over would *look*
-like an object blocking it. So the probe runs a **controlled comparison**:
+that clips a hill our sample sweep happened to step over would *look* like
+an object blocking it. So the probe runs a **controlled comparison**:
 
-  - the same procedure in two places -- **Mezzeh (dense urban)** and
-    **Deir ez-Zor (open desert)**, both with recorded ground-truth heights;
-  - per point pair, a terrain-only occlusion verdict computed here from 60
+  - the same procedure in two places -- a **3 km box around the player's
+    own aircraft**, which the user positions near a town, forest and
+    mountains for exactly this purpose, and **Deir ez-Zor (open desert)**
+    as the control. Ownship beats any blind coordinate here: he can set up
+    the discriminating case deliberately and then check the logged centre
+    against what he built. If `world.getPlayer()` turns out unreachable
+    through the bridge, it falls back to Mezzeh and says so;
+  - per point pair, a terrain-only occlusion verdict computed here from
     `land.getHeight` samples (our own algorithm, so the comparison is
     against the thing we would otherwise ship), against `land.isVisible`;
   - endpoints 2 m above local terrain, pairs under ~1.5 km, so terrain
     almost never blocks and anything that does is something else.
 
 The signal is the **"terrain says clear, `isVisible` says blocked" rate,
-urban minus desert.** Terrain-sampling error is present in both areas
+ownship-area minus desert.** Terrain-sampling error is present in both areas
 equally, so it subtracts out; buildings and trees are not. A large gap
 means `isVisible` sees more than the heightfield. A gap near zero means it
 is terrain-only and X-B4's 9K113 half collapses, which is a real outcome
 and the reason the desert control is here rather than assumed away.
 
+**Town and forest test different things and both are wanted.** Buildings
+are candidate `world.searchObjects` scenery, i.e. potentially extractable
+as data; trees almost certainly are not, so for them `isVisible` is the
+only route and this comparison is the only evidence. Mountains in the same
+box are the sanity check: terrain-only and `isVisible` should agree there,
+and if they do not, the comparison machinery itself is wrong.
+
+Pairs are derived from a stateless integer hash of the pair index, not a
+running RNG, so the sweep can be cut into per-frame chunks that each
+compute their own pairs independently -- and so two sorties produce the
+same pairs and a surprising number can be re-examined at the exact
+coordinates that produced it.
+
 **`world.searchObjects` is the other half** -- if it enumerates
 `Object.Category.SCENERY` with positions, buildings are *extractable* into
 the world model, not merely testable one ray at a time. The probe reports
-how many it finds in a 1 km sphere over Mezzeh and dumps a few type names
-and positions, which is what would tell us whether the data has the shape
+how many it finds over Mezzeh and dumps a few type names and positions,
+which is what would tell us whether the data has the shape
 `store.models.StoredFeature` could hold. Trees are almost certainly not
 scenery objects (they are terrain-baked), so for them `isVisible` is
 expected to be the only route -- the comparison above is what tests that.
+Its radius starts small for the same throttle reason: an unbounded search
+over a dense city is exactly the call that could stall a frame.
 
 Everything is `pcall`-wrapped and reports which call failed: all three of
 these functions are unverified through this bridge, and a probe that dies
@@ -105,25 +169,90 @@ local DCS = require("DCS")
 
 local LOG_PREFIX = "PetrobrainElevProbe"
 local START_DELAY_S = 10.0 -- let the terrain finish loading before probing
-local BATCH_SIZES = { 1, 100, 500, 2601 }
-local REPEATS = 20
 
--- X-B4. 40 pairs per area is enough to separate a "buildings block" rate
--- from a "they do not" rate (a 0/40 vs 15/40 split is unmistakable) while
--- keeping each area under ~2,400 getHeight calls.
+--: Target ceiling for any single bridge call. Well under a 60 fps frame
+--: (16.7 ms), so even a call that lands badly costs part of one frame
+--: rather than a visible hitch.
+local CALL_BUDGET_MS = 5.0
+--: Any single call over this stops the whole probe. See the header: this
+--: firing is a finding, not a malfunction.
+local ABORT_MS = 25.0
+--: Minimum gap between bridge calls. The game gets every frame in between.
+local TICK_INTERVAL_S = 0.25
+--: Repeats per measured size. Enough to average out 1 ms granularity
+--: without making the probe outlast the user's patience.
+local REPEATS = 10
+
+--: Escalation ladders. Each starts at 1 and steps up only while the
+--: measured cost predicts the next rung stays under `CALL_BUDGET_MS`.
+local BATCH_SIZES = { 1, 10, 50, 200, 500, 2601 }
+local ISVISIBLE_BATCH_SIZES = { 1, 10, 50, 200 }
+
+--: X-B4 occlusion sweep. 40 pairs per area separates a "buildings block"
+--: rate from a "they do not" rate (0/40 vs 15/40 is unmistakable);
+--: 30 samples per pair keeps terrain-sampling error low enough that the
+--: urban-minus-desert difference is the dominant term.
 local OCCLUSION_PAIRS = 40
--- Batch sizes a real per-poll detectability gate would use: one sightline
--- per candidate contact, a dense scene being the upper end.
-local ISVISIBLE_BATCH_SIZES = { 1, 50, 200 }
--- Wall-clock ceiling per timed series. Eight series, so the whole probe's
--- worst case is bounded at a few seconds of cockpit freeze rather than
--- whatever 52,000 unknown-cost engine calls happen to add up to.
-local SERIES_BUDGET_MS = 500.0
+--: Hard ceiling on pairs per bridge call, whatever the cost estimate says.
+local OCCLUSION_MAX_PAIRS_PER_CALL = 8
+
+--: Scenery search radii, metres -- another escalation ladder, and the one
+--: that most needs to be. `world.searchObjects`'s cost scales with however
+--: many objects are in the volume, which is exactly what is unknown before
+--: asking: a 600 m sphere over a dense city could be a handful of
+--: buildings or thousands. Driving a harness over this probe's own state
+--: machine at 200 us/engine-call had the fixed-radius version take 40 ms
+--: in one call -- past the abort ceiling. So it starts tiny and grows only
+--: while the measured cost, scaled by area, says the next radius fits.
+local SCENERY_RADII_M = { 50, 150, 300, 600 }
+
+--: Terrain-sample counts per occlusion pair, largest first. The sweep
+--: takes the largest that fits one pair inside the call budget. Dropping
+--: to a coarser count is sound here in a way it would not normally be:
+--: the finding is the *difference* between the urban and desert rates, and
+--: both areas get whatever count is chosen, so sampling error stays a
+--: common term and cancels. A coarser sweep widens the confidence interval;
+--: it does not bias the comparison.
+local OCCLUSION_SAMPLE_LADDER = { 30, 10, 4 }
+
+local MEZZEH_X, MEZZEH_Z = -171265.8281, 25122.6621 -- dense urban fallback
+local DEIR_X, DEIR_Z = 25885.5547, 390774.8750 -- open desert control
+
+--: The rich-terrain centre every non-control step probes around. Resolved
+--: at run time to the **player's own aircraft** via `world.getPlayer()`,
+--: because the user prepares the flight to sit near a town, forest and
+--: mountains (his offer, 2026-09-29) -- which is a far better test bed
+--: than any coordinate picked blind, and one he can eyeball against what
+--: the probe reports. Falls back to Mezzeh if `world.getPlayer()` is not
+--: available through the bridge, and says which it used either way.
+local probeX, probeZ = MEZZEH_X, MEZZEH_Z
+local probeCentreSource = "fallback:mezzeh"
+
+--: One engine call. Returns the player's ground position, or an error we
+--: report and carry on from -- `world.getPlayer()` is itself unverified
+--: through this bridge, so it must not be able to sink the probe.
+local LOCATE_CODE = [[
+local ok, unit = pcall(world.getPlayer)
+if not ok or unit == nil then return "ERR|world.getPlayer unavailable" end
+local okP, p = pcall(function() return unit:getPoint() end)
+if not okP or p == nil then return "ERR|getPoint failed" end
+local name = "?"
+local okN, n = pcall(function() return unit:getTypeName() end)
+if okN and n then name = tostring(n) end
+return string.format("OK|%.1f|%.1f|%s", p.x, p.z, name)
+]]
 
 -- The eight M4 spot-check points, with the heights `land.getHeight`
 -- returned for them on 2026-09-06 via a mission-editor trigger. If the
 -- bridge route works, it must reproduce these; a mismatch means the bridge
 -- reaches a different terrain state, which would itself be the finding.
+--
+-- This is the one call that cannot be cost-gated -- it runs first, before
+-- anything has been measured, so there is no estimate to gate it with.
+-- That is why it is exactly 16 engine calls (8 points x getHeight +
+-- getSurfaceType) and not a point more: even at an absurd 1 ms per call
+-- that is ~16 ms, one frame, and still inside `ABORT_MS`. Adding points
+-- here is not free the way it looks.
 local KNOWN_POINTS = [[
 local known = {
     {"damascus_osdi", -179748.3281, 50728.2656},
@@ -145,10 +274,11 @@ end
 return table.concat(out, ";")
 ]]
 
--- A batch of N getHeight calls on a 100 m grid (M8's locked probe spacing)
--- anchored near Damascus, i.e. over real varied terrain rather than sea.
--- Returns a checksum plus the count so the call cannot be optimised away
--- and a truncated/failed batch is visible.
+local NULL_CODE = [[return "x"]]
+
+-- N getHeight calls on a 100 m grid (M8's locked probe spacing) over real
+-- varied terrain near Damascus. Returns a checksum plus the count so the
+-- call cannot be optimised away and a truncated batch is visible.
 local function batchCode(n)
     return string.format(
         [[
@@ -167,20 +297,49 @@ return tostring(got) .. "|" .. string.format("%%.1f", sum)
     )
 end
 
-local NULL_CODE = [[return "x"]]
+-- N `isVisible` rays in one bridge call, fanning out from one observer
+-- over Mezzeh to N points on a 5 km ring -- the shape a per-poll
+-- detectability gate would issue.
+local function isVisibleBatchCode(n)
+    return string.format(
+        [[
+local n = %d
+local ax, az = %f, %f
+local okA, ay = pcall(land.getHeight, { x = ax, y = az })
+if not okA or ay == nil then return "ERR|getHeight failed" end
+local from = { x = ax, y = ay + 30.0, z = az }
+local blocked, errs = 0, 0
+for i = 1, n do
+    local a = (i / n) * 2 * math.pi
+    local tx = ax + math.cos(a) * 5000
+    local tz = az + math.sin(a) * 5000
+    local okH, th = pcall(land.getHeight, { x = tx, y = tz })
+    if okH and th then
+        local okV, vis = pcall(land.isVisible, from, { x = tx, y = th + 2.0, z = tz })
+        if okV and vis ~= nil then
+            if not vis then blocked = blocked + 1 end
+        else errs = errs + 1 end
+    else errs = errs + 1 end
+end
+return tostring(blocked) .. "/" .. tostring(n) .. " blocked, errs=" .. tostring(errs)
+]],
+        n,
+        probeX,
+        probeZ
+    )
+end
 
 -- X-B4 part 1: does `world.searchObjects` enumerate buildings, and with
--- what attached to them? A 1 km sphere over Mezzeh (dense urban, and a
--- recorded ground-truth point). Capped at SAMPLE_CAP reported objects --
--- the count is the interesting number, the samples are there to show what
--- shape the data has.
-local SCENERY_CODE = [[
-local centre = { x = -171265.8281, z = 25122.6621 }
-local okH, groundY = pcall(land.getHeight, { x = centre.x, y = centre.z })
+-- what attached to them?
+local function sceneryCode(radius)
+    return string.format(
+        [[
+local cx, cz = %f, %f
+local okH, groundY = pcall(land.getHeight, { x = cx, y = cz })
 if not okH or groundY == nil then return "ERR|getHeight failed at centre" end
 local volume = {
     id = world.VolumeType.SPHERE,
-    params = { point = { x = centre.x, y = groundY, z = centre.z }, radius = 1000 },
+    params = { point = { x = cx, y = groundY, z = cz }, radius = %d },
 }
 local count, samples = 0, {}
 local SAMPLE_CAP = 6
@@ -200,137 +359,137 @@ local ok, err = pcall(function()
                 desc = tostring(d.typeName or d.displayName or "tbl")
             end
             samples[#samples + 1] = string.format(
-                "%s@%s,%s,%s[%s]", name, tostring(px), tostring(py), tostring(pz), desc)
+                "%%s@%%s,%%s,%%s[%%s]", name, tostring(px), tostring(py), tostring(pz), desc)
         end
         return true
     end)
 end)
 if not ok then return "ERR|" .. tostring(err) end
-return "OK|count=" .. tostring(count) .. "|" .. table.concat(samples, ";")
-]]
-
--- X-B4 part 2: the controlled comparison. `area` is "urban" or "desert";
--- both run identically, and the DIFFERENCE between them is the finding --
--- see the file header for why a single area proves nothing.
---
--- Deterministic LCG rather than math.random: the same pairs every run, so
--- two sorties are comparable and a surprising number can be re-examined at
--- the exact coordinates that produced it.
-local function occlusionCode(area, pairs_n)
-    local cx, cz = -171265.8281, 25122.6621 -- Mezzeh, dense urban
-    if area == "desert" then
-        cx, cz = 25885.5547, 390774.8750 -- Deir ez-Zor, open desert
-    end
-    return string.format(
-        [[
-local cx, cz, N = %f, %f, %d
-local seed = 12345
-local function rnd()
-    seed = (1103515245 * seed + 12345) %% 2147483648
-    return seed / 2147483648
-end
-local SAMPLES = 60
-local EYE = 2.0
-local terrainClearVisBlocked, bothClear, bothBlocked, terrainBlockedVisClear = 0, 0, 0, 0
-local visErrors, heightErrors = 0, 0
-for i = 1, N do
-    local ax = cx + (rnd() - 0.5) * 3000
-    local az = cz + (rnd() - 0.5) * 3000
-    local bx = cx + (rnd() - 0.5) * 3000
-    local bz = cz + (rnd() - 0.5) * 3000
-    local okA, ay = pcall(land.getHeight, { x = ax, y = az })
-    local okB, by = pcall(land.getHeight, { x = bx, y = bz })
-    if not (okA and okB and ay and by) then
-        heightErrors = heightErrors + 1
-    else
-        local fromY, toY = ay + EYE, by + EYE
-        -- terrain-only verdict, our own algorithm at high sample density
-        local terrainBlocked = false
-        for s = 1, SAMPLES - 1 do
-            local t = s / SAMPLES
-            local sx = ax + (bx - ax) * t
-            local sz = az + (bz - az) * t
-            local okS, sh = pcall(land.getHeight, { x = sx, y = sz })
-            if okS and sh then
-                if sh > fromY + (toY - fromY) * t then terrainBlocked = true break end
-            end
-        end
-        local okV, vis = pcall(land.isVisible,
-            { x = ax, y = fromY, z = az }, { x = bx, y = toY, z = bz })
-        if not okV or vis == nil then
-            visErrors = visErrors + 1
-        else
-            local visBlocked = not vis
-            if terrainBlocked and visBlocked then bothBlocked = bothBlocked + 1
-            elseif terrainBlocked and not visBlocked then
-                terrainBlockedVisClear = terrainBlockedVisClear + 1
-            elseif (not terrainBlocked) and visBlocked then
-                terrainClearVisBlocked = terrainClearVisBlocked + 1
-            else bothClear = bothClear + 1 end
-        end
-    end
-end
-return string.format(
-    "pairs=%%d bothClear=%%d bothBlocked=%%d TERRAIN_CLEAR_VIS_BLOCKED=%%d terrainBlockedVisClear=%%d visErr=%%d hErr=%%d",
-    N, bothClear, bothBlocked, terrainClearVisBlocked, terrainBlockedVisClear, visErrors, heightErrors)
+return "OK|radius=%d count=" .. tostring(count) .. "|" .. table.concat(samples, ";")
 ]],
-        cx,
-        cz,
-        pairs_n
-    )
-end
-
--- Cost of N `isVisible` rays in one bridge call, fanning out from one
--- observer over Mezzeh to N points on a 5 km ring -- the shape a per-poll
--- detectability gate would issue. Returns the blocked count so the call
--- cannot be optimised away and a silently-failing batch is visible.
-local function isVisibleBatchCode(n)
-    return string.format(
-        [[
-local n = %d
-local ax, az = -171265.8281, 25122.6621
-local okA, ay = pcall(land.getHeight, { x = ax, y = az })
-if not okA or ay == nil then return "ERR|getHeight failed" end
-local from = { x = ax, y = ay + 30.0, z = az }
-local blocked, errs = 0, 0
-for i = 1, n do
-    local a = (i / n) * 2 * math.pi
-    local tx = ax + math.cos(a) * 5000
-    local tz = az + math.sin(a) * 5000
-    local okH, th = pcall(land.getHeight, { x = tx, y = tz })
-    if okH and th then
-        local okV, vis = pcall(land.isVisible, from, { x = tx, y = th + 2.0, z = tz })
-        if okV and vis ~= nil then
-            if not vis then blocked = blocked + 1 end
-        else errs = errs + 1 end
-    else errs = errs + 1 end
-end
-return tostring(blocked) .. "/" .. tostring(n) .. " blocked, errs=" .. tostring(errs)
-]],
-        n
+        probeX,
+        probeZ,
+        radius,
+        radius
     )
 end
 
 -- X-B4 part 3: does `land.getIP` return *where* the ray was blocked? That
 -- is the difference between Petrovich knowing he cannot see something and
--- being able to say "the treeline short of it" -- which is the half of
--- this that reaches the pilot. Fired along a shallow ray over Mezzeh.
-local GETIP_CODE = [[
-local ax, az = -171265.8281, 25122.6621
+-- being able to say "the treeline short of it" -- the half that reaches
+-- the pilot.
+-- Eight rays, one per compass octant, so a ray that happens to point at
+-- open ground does not read as "getIP returns nil". Shallow (-0.02) and
+-- 2 m up, i.e. the geometry of looking *along* the ground at a treeline or
+-- a building edge rather than down at terrain.
+local function getIPCode()
+    return string.format(
+        [[
+local ax, az = %f, %f
 local okA, ay = pcall(land.getHeight, { x = ax, y = az })
 if not okA or ay == nil then return "ERR|getHeight failed" end
 local origin = { x = ax, y = ay + 2.0, z = az }
-local dir = { x = 1.0, y = -0.02, z = 0.0 }
-local ok, ip = pcall(land.getIP, origin, dir, 5000)
-if not ok then return "ERR|" .. tostring(ip) end
-if ip == nil then return "OK|nil (nothing hit within 5000 m)" end
-return string.format("OK|hit at %s,%s,%s (%.0f m out)",
-    tostring(ip.x), tostring(ip.y), tostring(ip.z), ip.x - ax)
-]]
+local out = {}
+for i = 0, 7 do
+    local a = i * math.pi / 4
+    local dir = { x = math.cos(a), y = -0.02, z = math.sin(a) }
+    local ok, ip = pcall(land.getIP, origin, dir, 5000)
+    if not ok then
+        out[#out + 1] = i .. "=ERR"
+    elseif ip == nil then
+        out[#out + 1] = i .. "=nil"
+    else
+        local dx, dz = ip.x - ax, ip.z - az
+        out[#out + 1] = string.format("%%d=%%.0fm/y%%.0f", i, math.sqrt(dx * dx + dz * dz), ip.y)
+    end
+end
+return "OK|" .. table.concat(out, ";")
+]],
+        probeX,
+        probeZ
+    )
+end
+
+-- X-B4 part 2: one chunk of the controlled comparison -- pairs
+-- `firstPair`..`lastPair` of the sweep over `area`. Pair coordinates come
+-- from a stateless hash of the pair index so chunks are independent and
+-- reproducible; see the header.
+local function occlusionChunkCode(area, firstPair, lastPair, samplesPerPair)
+    local cx, cz = probeX, probeZ
+    if area == "desert" then
+        cx, cz = DEIR_X, DEIR_Z
+    end
+    return string.format(
+        [[
+local cx, cz = %f, %f
+local first, last, SAMPLES, EYE = %d, %d, %d, 2.0
+local function hash(i, salt)
+    local v = (i * 2654435 + salt * 40503) %% 2147483648
+    v = (v * 1103515245 + 12345) %% 2147483648
+    return v / 2147483648
+end
+local tcvb, bc, bb, tbvc, visErr, hErr = 0, 0, 0, 0, 0, 0
+for i = first, last do
+    local ax = cx + (hash(i, 1) - 0.5) * 3000
+    local az = cz + (hash(i, 2) - 0.5) * 3000
+    local bx = cx + (hash(i, 3) - 0.5) * 3000
+    local bz = cz + (hash(i, 4) - 0.5) * 3000
+    local okA, ay = pcall(land.getHeight, { x = ax, y = az })
+    local okB, by = pcall(land.getHeight, { x = bx, y = bz })
+    if not (okA and okB and ay and by) then
+        hErr = hErr + 1
+    else
+        local fromY, toY = ay + EYE, by + EYE
+        local terrainBlocked = false
+        for s = 1, SAMPLES - 1 do
+            local t = s / SAMPLES
+            local okS, sh = pcall(land.getHeight,
+                { x = ax + (bx - ax) * t, y = az + (bz - az) * t })
+            if okS and sh and sh > fromY + (toY - fromY) * t then
+                terrainBlocked = true
+                break
+            end
+        end
+        local okV, vis = pcall(land.isVisible,
+            { x = ax, y = fromY, z = az }, { x = bx, y = toY, z = bz })
+        if not okV or vis == nil then
+            visErr = visErr + 1
+        else
+            local visBlocked = not vis
+            if terrainBlocked and visBlocked then bb = bb + 1
+            elseif terrainBlocked then tbvc = tbvc + 1
+            elseif visBlocked then tcvb = tcvb + 1
+            else bc = bc + 1 end
+        end
+    end
+end
+return table.concat({tcvb, bc, bb, tbvc, visErr, hErr}, ",")
+]],
+        cx,
+        cz,
+        firstPair,
+        lastPair,
+        samplesPerPair
+    )
+end
 
 local petrobrainElevProbe = {}
-local fireAt = nil
-local done = false
+
+local simulationRunning = false
+local startAt = nil
+local nextCallAt = 0
+local aborted = false
+local finished = false
+
+--: Cost model, filled in as the probe measures itself. `fixedMs` is the
+--: bare bridge overhead; the per-item figures gate every escalation.
+local fixedMs = 0.5
+local getHeightPerItemMs = nil
+local isVisiblePerItemMs = nil
+
+--: The current measurement group. `codeFor(i)` yields the i-th call's
+--: code; `onDone(samples, lastResult)` summarises and queues what is next.
+local group = nil
 
 local function logi(message)
     log.write(LOG_PREFIX, log.INFO, message)
@@ -344,141 +503,426 @@ local function dostring(code)
     return success ~= false, result
 end
 
--- Times `code` REPEATS times and logs every individual sample, so the tail
--- is visible and not just a mean -- a p99 stutter is what would actually
--- hurt in the cockpit, and a mean hides it.
-local function timeSeries(label, code)
-    local samples = {}
-    local total = 0
-    local lastResult = nil
-    local n = 0
-    for i = 1, REPEATS do
-        local t0 = os.clock()
-        local ok, result = dostring(code)
-        local ms = (os.clock() - t0) * 1000.0
-        if not ok then
-            logi(label .. ": FAILED on iteration " .. i .. " result=" .. tostring(result))
-            return
-        end
-        lastResult = result
-        n = n + 1
-        samples[#samples + 1] = ms
-        total = total + ms
-        -- The cost being measured is the thing that is unknown, and this
-        -- runs on DCS's own thread. 20 repeats of a 2,601-point batch is
-        -- ~52,000 engine calls; at 1 ms each that is a minute-long freeze
-        -- in the cockpit. So stop the series once it has spent its budget
-        -- and report how many samples actually ran -- a smaller n with an
-        -- honest mean is worth more than a hung game, and if the budget is
-        -- hit at all that is itself the headline finding.
-        if total > SERIES_BUDGET_MS then
-            logi(
-                string.format(
-                    "%s: budget %.0f ms hit after %d/%d repeats -- series cut short",
-                    label,
-                    SERIES_BUDGET_MS,
-                    n,
-                    REPEATS
-                )
-            )
-            break
-        end
-    end
-    table.sort(samples)
-    logi(
-        string.format(
-            "%s: n=%d mean_ms=%.3f min_ms=%.2f med_ms=%.2f max_ms=%.2f result=%s",
-            label,
-            n,
-            total / n,
-            samples[1],
-            samples[math.ceil(n / 2)],
-            samples[n],
-            tostring(lastResult)
-        )
-    )
+local function median(sorted)
+    return sorted[math.ceil(#sorted / 2)]
 end
 
--- One call, result logged verbatim, timing included but incidental. For
--- the semantic questions, where the answer is the returned string and a
--- 1 ms-granular duration is only context.
-local function runOnce(label, code)
+local function mean(values)
+    local total = 0
+    for _, v in ipairs(values) do
+        total = total + v
+    end
+    return total / #values
+end
+
+--: Would a batch of `n` items at `perItemMs` fit the budget? Doubled for
+--: safety, because `perItemMs` is derived from 1 ms-granular timings and
+--: is therefore an estimate with real error in it. An unmeasured
+--: `perItemMs` (nil) means only the smallest rung is allowed.
+local function fitsBudget(n, perItemMs)
+    if perItemMs == nil then
+        return n <= 1
+    end
+    return (fixedMs + n * perItemMs) * 2.0 <= CALL_BUDGET_MS
+end
+
+local function estimatePerItem(meanMs, n)
+    --: Floor at a small positive value: at n=1 the measurement is 0 or
+    --: 1 ms, and a zero estimate would wave every later rung through.
+    return math.max((meanMs - fixedMs) / n, 0.002)
+end
+
+local function beginGroup(label, codeFor, count, onDone)
+    group = {
+        label = label,
+        codeFor = codeFor,
+        count = count,
+        index = 0,
+        samples = {},
+        results = {},
+        onDone = onDone,
+    }
+end
+
+local plan = {}
+local planIndex = 0
+
+local function advancePlan()
+    planIndex = planIndex + 1
+    local step = plan[planIndex]
+    if step == nil then
+        finished = true
+        logi("=== elevation bridge probe end ===")
+        return
+    end
+    step()
+end
+
+--: Walks an escalation ladder: measure rung `ladderIndex`, then continue
+--: only if the measured cost says the next rung is affordable.
+local function runLadder(name, sizes, ladderIndex, codeFn, perItemSetter, perItemGetter)
+    local n = sizes[ladderIndex]
+    if n == nil then
+        advancePlan()
+        return
+    end
+    if not fitsBudget(n, perItemGetter()) then
+        logi(
+            string.format(
+                "%s_batch_%d: SKIPPED -- predicted %.1f ms exceeds the %.1f ms call budget"
+                    .. " (this is the affordability answer, not an error)",
+                name,
+                n,
+                (fixedMs + n * (perItemGetter() or 0)) * 2.0,
+                CALL_BUDGET_MS
+            )
+        )
+        advancePlan()
+        return
+    end
+    beginGroup(name .. "_batch_" .. n, function()
+        return codeFn(n)
+    end, REPEATS, function(samples, lastResult)
+        local m = mean(samples)
+        perItemSetter(estimatePerItem(m, n))
+        table.sort(samples)
+        logi(
+            string.format(
+                "%s_batch_%d: n=%d mean_ms=%.3f min_ms=%.2f med_ms=%.2f max_ms=%.2f"
+                    .. " per_item_us=%.1f result=%s",
+                name,
+                n,
+                #samples,
+                m,
+                samples[1],
+                median(samples),
+                samples[#samples],
+                perItemGetter() * 1000.0,
+                tostring(lastResult)
+            )
+        )
+        runLadder(name, sizes, ladderIndex + 1, codeFn, perItemSetter, perItemGetter)
+    end)
+end
+
+--: Picks the sample count and pairs-per-call that fit the budget, from
+--: what has actually been measured. Returns nil when even the coarsest
+--: single pair does not fit -- in which case the sweep is skipped and said
+--: so, rather than quietly running something that stalls a frame.
+local function occlusionShape()
+    local perHeight = getHeightPerItemMs or 0.05
+    local perVis = isVisiblePerItemMs or perHeight
+    local budget = CALL_BUDGET_MS / 2.0 - fixedMs
+    for _, samplesPerPair in ipairs(OCCLUSION_SAMPLE_LADDER) do
+        local perPair = perHeight * (samplesPerPair + 1) + perVis
+        if perPair <= budget then
+            local n = math.floor(budget / perPair)
+            if n > OCCLUSION_MAX_PAIRS_PER_CALL then
+                n = OCCLUSION_MAX_PAIRS_PER_CALL
+            end
+            return samplesPerPair, n
+        end
+    end
+    return nil, nil
+end
+
+local function runOcclusion(area)
+    local samplesPerPair, perCall = occlusionShape()
+    if samplesPerPair == nil then
+        logi(
+            string.format(
+                "occlusion_%s: SKIPPED -- even one pair at %d samples exceeds the"
+                    .. " %.1f ms call budget at the measured cost."
+                    .. " X-B4's tree/building question is unanswered this sortie.",
+                area,
+                OCCLUSION_SAMPLE_LADDER[#OCCLUSION_SAMPLE_LADDER],
+                CALL_BUDGET_MS
+            )
+        )
+        advancePlan()
+        return
+    end
+    local chunks = math.ceil(OCCLUSION_PAIRS / perCall)
+    logi(
+        string.format(
+            "occlusion_%s: %d pairs in %d chunks of <=%d (%d height samples/pair)",
+            area,
+            OCCLUSION_PAIRS,
+            chunks,
+            perCall,
+            samplesPerPair
+        )
+    )
+    beginGroup("occlusion_" .. area, function(i)
+        local first = (i - 1) * perCall + 1
+        local last = math.min(i * perCall, OCCLUSION_PAIRS)
+        return occlusionChunkCode(area, first, last, samplesPerPair)
+    end, chunks, function(samples, _lastResult)
+        local totals = { 0, 0, 0, 0, 0, 0 }
+        for _, raw in ipairs(group.results) do
+            local k = 1
+            for value in tostring(raw):gmatch("[^,]+") do
+                totals[k] = totals[k] + (tonumber(value) or 0)
+                k = k + 1
+            end
+        end
+        table.sort(samples)
+        logi(
+            string.format(
+                "occlusion_%s: TERRAIN_CLEAR_VIS_BLOCKED=%d bothClear=%d bothBlocked=%d"
+                    .. " terrainBlockedVisClear=%d visErr=%d hErr=%d"
+                    .. " (chunks=%d max_call_ms=%.2f)",
+                area,
+                totals[1],
+                totals[2],
+                totals[3],
+                totals[4],
+                totals[5],
+                totals[6],
+                #samples,
+                samples[#samples]
+            )
+        )
+        advancePlan()
+    end)
+end
+
+--: Walks the scenery radii, one call each, predicting the next radius by
+--: area scaling from what the last one actually cost. Stops as soon as the
+--: prediction leaves the budget -- so the ladder's last completed rung is
+--: itself the answer to "how big a volume can we afford to search".
+local function runScenery(ladderIndex, lastRadius, lastMs)
+    local radius = SCENERY_RADII_M[ladderIndex]
+    if radius == nil then
+        advancePlan()
+        return
+    end
+    if lastRadius ~= nil then
+        local scale = (radius / lastRadius) ^ 2
+        local predicted = (fixedMs + (lastMs - fixedMs) * scale) * 2.0
+        if predicted > CALL_BUDGET_MS then
+            logi(
+                string.format(
+                    "scenery_search_%dm: SKIPPED -- predicted %.1f ms from the %d m"
+                        .. " measurement exceeds the %.1f ms call budget."
+                        .. " Largest affordable search volume: %d m radius.",
+                    radius,
+                    predicted,
+                    lastRadius,
+                    CALL_BUDGET_MS,
+                    lastRadius
+                )
+            )
+            advancePlan()
+            return
+        end
+    end
+    beginGroup("scenery_search_" .. radius .. "m", function()
+        return sceneryCode(radius)
+    end, 1, function(samples, lastResult)
+        logi(
+            string.format(
+                "scenery_search_%dm: ms=%.2f result=%s",
+                radius,
+                samples[1],
+                tostring(lastResult)
+            )
+        )
+        runScenery(ladderIndex + 1, radius, samples[1])
+    end)
+end
+
+local function runSingle(label, code)
+    beginGroup(label, function()
+        return code
+    end, 1, function(samples, lastResult)
+        logi(string.format("%s: ms=%.2f result=%s", label, samples[1], tostring(lastResult)))
+        advancePlan()
+    end)
+end
+
+--: Runs one queued bridge call. Never more than one per tick, so a slow
+--: call costs part of one frame and the game gets the next one back.
+local function step()
+    group.index = group.index + 1
+    local code = group.codeFor(group.index)
     local t0 = os.clock()
     local ok, result = dostring(code)
     local ms = (os.clock() - t0) * 1000.0
+
     if not ok then
-        logi(label .. ": FAILED result=" .. tostring(result))
+        logi(group.label .. ": FAILED on call " .. group.index .. " result=" .. tostring(result))
+        advancePlan()
         return
     end
-    logi(string.format("%s: ms=%.2f result=%s", label, ms, tostring(result)))
+
+    group.samples[#group.samples + 1] = ms
+    group.results[#group.results + 1] = result
+
+    if ms > ABORT_MS then
+        aborted = true
+        logi(
+            string.format(
+                "ABORT: %s call %d took %.1f ms (ceiling %.1f ms). Stopping the probe --"
+                    .. " this is the finding: live probing is not affordable at this density.",
+                group.label,
+                group.index,
+                ms,
+                ABORT_MS
+            )
+        )
+        logi("=== elevation bridge probe end (aborted on cost) ===")
+        return
+    end
+
+    if group.index >= group.count then
+        local done = group.onDone
+        done(group.samples, result)
+    end
 end
 
-local function runProbe()
-    logi("=== elevation bridge probe start ===")
-
-    -- Question 1: does it work at all, and does it agree with the M4 probe?
-    local ok, result = dostring(KNOWN_POINTS)
-    if not ok then
-        logi("KNOWN POINTS FAILED: " .. tostring(result))
-        logi("=== elevation bridge probe end (land.* unreachable via bridge) ===")
-        return
-    end
-    logi("known points (name=height/surfacetype): " .. tostring(result))
-
-    -- Question 2: what does it cost?
-    timeSeries("null_call", NULL_CODE)
-    for _, n in ipairs(BATCH_SIZES) do
-        timeSeries("getHeight_batch_" .. n, batchCode(n))
-    end
-
-    -- X-B4. Run once each (not REPEATS times): these are semantic
-    -- questions, and the occlusion comparison is already 40 pairs x 60
-    -- height samples per area. Cost for isVisible specifically is measured
-    -- separately below, on its own, where a repeat loop is affordable.
-    runOnce("scenery_search", SCENERY_CODE)
-    runOnce("getIP", GETIP_CODE)
-    runOnce("occlusion_urban", occlusionCode("urban", OCCLUSION_PAIRS))
-    runOnce("occlusion_desert", occlusionCode("desert", OCCLUSION_PAIRS))
-
-    -- Cost of isVisible alone, at the batch sizes a per-poll detectability
-    -- gate would actually use. If this is cheap, DCS's own occlusion test
-    -- could replace our elevation-grid LOS outright rather than supplement
-    -- it -- which is the outcome worth knowing.
-    for _, n in ipairs(ISVISIBLE_BATCH_SIZES) do
-        timeSeries("isVisible_batch_" .. n, isVisibleBatchCode(n))
-    end
-
-    logi("=== elevation bridge probe end ===")
+local function buildPlan()
+    plan = {
+        function()
+            runSingle("known_points", KNOWN_POINTS)
+        end,
+        function()
+            --: Resolve the probe centre to the player's aircraft before
+            --: anything that uses it. The user prepares the flight to sit
+            --: near a town, forest and mountains, so this is where the
+            --: tree/building question is actually answerable -- and he can
+            --: check the logged position against what he set up.
+            beginGroup("locate_ownship", function()
+                return LOCATE_CODE
+            end, 1, function(samples, result)
+                local x, z, unitName = tostring(result):match("^OK|([%-%d%.]+)|([%-%d%.]+)|(.*)$")
+                if x ~= nil then
+                    probeX, probeZ = tonumber(x), tonumber(z)
+                    probeCentreSource = "ownship:" .. tostring(unitName)
+                    logi(
+                        string.format(
+                            "locate_ownship: ms=%.2f centre=%.1f,%.1f source=%s"
+                                .. " -- rich-terrain steps will probe a 3 km box here",
+                            samples[1],
+                            probeX,
+                            probeZ,
+                            probeCentreSource
+                        )
+                    )
+                else
+                    logi(
+                        string.format(
+                            "locate_ownship: ms=%.2f FAILED (%s) -- falling back to %s at %.1f,%.1f",
+                            samples[1],
+                            tostring(result),
+                            probeCentreSource,
+                            probeX,
+                            probeZ
+                        )
+                    )
+                end
+                advancePlan()
+            end)
+        end,
+        function()
+            beginGroup("null_call", function()
+                return NULL_CODE
+            end, REPEATS, function(samples, _)
+                fixedMs = mean(samples)
+                table.sort(samples)
+                logi(
+                    string.format(
+                        "null_call: n=%d mean_ms=%.3f med_ms=%.2f max_ms=%.2f"
+                            .. " -- taken as fixed bridge overhead",
+                        #samples,
+                        fixedMs,
+                        median(samples),
+                        samples[#samples]
+                    )
+                )
+                advancePlan()
+            end)
+        end,
+        function()
+            runLadder("getHeight", BATCH_SIZES, 1, batchCode, function(v)
+                getHeightPerItemMs = v
+            end, function()
+                return getHeightPerItemMs
+            end)
+        end,
+        function()
+            runLadder("isVisible", ISVISIBLE_BATCH_SIZES, 1, isVisibleBatchCode, function(v)
+                isVisiblePerItemMs = v
+            end, function()
+                return isVisiblePerItemMs
+            end)
+        end,
+        function()
+            runScenery(1, nil, nil)
+        end,
+        function()
+            runSingle("getIP", getIPCode())
+        end,
+        function()
+            runOcclusion("urban")
+        end,
+        function()
+            runOcclusion("desert")
+        end,
+    }
+    planIndex = 0
 end
 
 function petrobrainElevProbe.onSimulationStart()
-    fireAt = nil
-    done = false
+    simulationRunning = true
+    startAt = nil
+    aborted = false
+    finished = false
+    group = nil
+    getHeightPerItemMs = nil
+    isVisiblePerItemMs = nil
     logi("loaded, will probe " .. START_DELAY_S .. "s after sim start")
 end
 
 function petrobrainElevProbe.onSimulationFrame()
-    if done then
+    if not simulationRunning or aborted or finished then
         return
     end
     local now = DCS.getRealTime()
-    if fireAt == nil then
-        fireAt = now + START_DELAY_S
+    if startAt == nil then
+        startAt = now + START_DELAY_S
         return
     end
-    if now < fireAt then
+    if now < startAt or now < nextCallAt then
         return
     end
-    done = true
-    local ok, err = pcall(runProbe)
+    nextCallAt = now + TICK_INTERVAL_S
+
+    if group == nil then
+        logi("=== elevation bridge probe start ===")
+        logi(
+            string.format(
+                "throttle: <=1 bridge call / %.2fs, call budget %.1f ms, abort ceiling %.1f ms",
+                TICK_INTERVAL_S,
+                CALL_BUDGET_MS,
+                ABORT_MS
+            )
+        )
+        buildPlan()
+        advancePlan()
+        return
+    end
+
+    local ok, err = pcall(step)
     if not ok then
         logi("probe raised: " .. tostring(err))
+        aborted = true
     end
 end
 
 function petrobrainElevProbe.onSimulationStop()
-    done = false
-    fireAt = nil
+    simulationRunning = false
+    group = nil
 end
 
 DCS.setUserCallbacks(petrobrainElevProbe)
