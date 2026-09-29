@@ -112,3 +112,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Sortie 2026-09-26 fixes](project_sortie_2026_09_26_fixes.md) — grace field needs "last confirmed observable"; pending/committed split.
 - [Verify a reviewer's suggested test mechanism](feedback_regression_test_verify_mechanism_not_just_hypothesis.md) — read both code paths first.
 - [Worktree branch behind main](feedback_worktree_branch_behind_main.md) — check worktree's own branch vs main; ff-merge, never reset --hard.
+- [Missed-AAA LOS tolerance](project_missed_aaa_los_tolerance.md) — real mechanism/calibration commit split; tolerance cost can depend on consumer's tactics, not just data error.
