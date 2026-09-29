@@ -276,6 +276,38 @@ per-point cost.**
   cheap case; jumping across the map is the expensive one** — and the probe is the only thing here
   that jumps.
 
+**15. The API surface, dumped from the running engine — three leads, one of them cheap.**
+
+- **evidence: reproduced-locally** — `pairs()` over the live tables, flight 7, `dcs.log` 14:31:15.
+- Asked because the user's question ("is there any DCS call that accounts for buildings and
+  trees?") **cannot be answered from the install** — every one of these is native, and `grep` over
+  `Scripts/`/`MissionEditor/` finds no definition, only `class(SceneryObject, Object)`.
+
+  | table | members that matter |
+  |---|---|
+  | `land` (9) | `getHeight` `getSurfaceType` `isVisible` `getIP` — all tested, all terrain-only. Plus **`profile`**, `getSurfaceHeightWithSeabed`, `getClosestPointOnRoads`, `findPathOnRoads` |
+  | `world.VolumeType` | **`SEGMENT=0`** `BOX=1` `SPHERE=2` `PYRAMID=3` |
+  | `Controller` (23) | **`isTargetDetected`** `knowTarget` `getDetectedTargets` `Detection:table` |
+  | `world` (16) | `searchObjects` **`weather:table`** `getAirbases` `getMarkPanels` `removeJunk` |
+
+- **`world.VolumeType.SEGMENT` exists.** `searchObjects` takes a volume and a segment volume is a
+  line, so a segment search along a sightline should return the scenery intersecting it — building
+  occlusion computed by DCS's own intersection test, **removing the type-name → size table**
+  (Finding 11) that is otherwise the one thing standing between us and an occluder layer. This is
+  the cheap win.
+- **`land.profile` exists**, and is a straight upgrade to `query/line_of_sight.py` regardless of
+  buildings: our LOS currently spends 20+ `getHeight` calls per sightline, and this returns the
+  terrain along a line in one call.
+- **`Controller.isTargetDetected` exists**, and is the AI path `Detection.lua` configures with
+  `objects_LOS_test`/`trees_LOS_test_T4`. So the engine **can** test trees — only the `land.*`
+  calls do not. **But it answers "has this AI detected that target"**, folding skill, alertness,
+  range and reaction time on top of line of sight. It is not a clean LOS primitive and must not be
+  treated as one; it is also the wrong shape for Petrovich, whose knowledge is supposed to be
+  bounded by his own perception, not an AI unit's.
+- **Trees remain out of reach either way.** They are not scenery objects — seven flights of
+  `searchObjects` have never returned one — so a SEGMENT search cannot find them. If buildings
+  work this way, trees stay OSM landcover's job.
+
 ### Reproducible Test
 
 Re-fly with the fixed probe (deployed). Extract with:
