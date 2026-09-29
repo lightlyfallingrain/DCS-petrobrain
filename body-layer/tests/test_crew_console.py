@@ -2561,14 +2561,15 @@ def test_report_clock_3_finds_the_matching_contact(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
-    # No workaround needed here: OBS_E and OBS_N are ~1.4 km apart, well
-    # past `belief.groups.GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` (300 m),
-    # the fix for the two-contact cohesion tautology that used to group
-    # any two contacts regardless of distance (`belief.groups`'s own
-    # module docstring). They do not cohere, so this test is naturally
-    # about clock-scoping alone -- group formation itself is covered by
-    # `tests/test_groups.py` and `test_report_speaks_a_persisted_group_
-    # through_render_group_disclosure`, below.
+    # Transitional workaround: `belief.groups.GROUP_REPORTING_COHESION_GAP_
+    # UNIT_WIDTHS` is a mechanism-only placeholder (`math.inf`) at this
+    # commit -- the calibrated value (a follow-up commit) will put OBS_E/
+    # OBS_N (~1.4 km apart) back past the backstop, but at `math.inf` the
+    # n=2 cohesion tautology (`belief.groups`'s own module docstring) is
+    # unguarded again, so this test's two contacts cohere. Isolate this
+    # test's own clock-scoping concern from that transitional state --
+    # group formation itself is covered by `tests/test_groups.py`.
+    store._groups._groups = {}
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     # OBS_E is east of ownship (3 o'clock); OBS_N is dead ahead (12 o'clock)
