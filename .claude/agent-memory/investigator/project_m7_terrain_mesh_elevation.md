@@ -35,3 +35,18 @@ a coarse elevation grid without full mesh decode.
 Unresolved: two directly-on-topic ED forum threads (`forum.dcs.world/topic/157234-can-i-export-terrain-mesh-for-app/`,
 `.../topic/48556-dcs-terrain-tool-for-3rd-party-developers`) 403'd on fetch, need user to paste manually.
 `TRI` payload compression scheme unknown (no zlib magic found in head samples, may just not have reached it).
+
+**Update 2026-09-29 (X-B26, `world-model/research/2026-09-29-x-b26-terrain-file-vs-live-probe.md`):**
+nothing decoded further — still exactly where this note left it, 24 days later, zero commits touching
+`surface5`/terrain-mesh since. New this pass: `DCS-files.txt` confirms the identical file family
+(`.scn5`/`.ng5`/`.onlay.sup4`/`.surface5`) ships under every installed terrain (Afghanistan, Caucasus,
+Kola, MarianaIslands, Syria) — the *shape* of this lead generalizes across theatres by filename, but
+the byte-level decode has only ever been attempted against Syria's copy; re-verify per terrain, don't
+assume. Also ruled out clipmaps as a second lead: only `colortexture`/`normalmap`/`splatmap` subdirs
+exist, no `heightmap` clipmap layer anywhere. Recommended next step is unchanged in spirit but now
+concrete: **one cheap spike** — decode one `.surface5` quadtree node's anchor float32 triple and
+cross-check it against a live `land.getHeight` call at the same `(x,z)` (now easy to run — the
+mission-telemetry bridge already flies at 1Hz, see `aircraft-layer/research/
+2026-09-28-live-terrain-probing-feasibility.md`) — before committing to either the 1-2wk full decode
+or the live-probe plumbing. This is hours of work, not weeks, and resolves the yes/no question
+directly.
