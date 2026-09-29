@@ -510,11 +510,39 @@ still need it, so this narrows rather than removes the coupling.
 
 ### Decisions Requiring User Input
 
-- **Confirm the engagement-term behaviour change above** (hybrid-only and stale contacts always
-  fail-open to "can be seen," rather than getting an actively-computed terrain clearance as they do
-  today). This is the one substantive consequence of "belief stops computing LOS" that was not
-  visible before working through the reciprocity argument, and it changes what "safe from" can mean
-  for a contact outside the naked-eye channel's recent coverage.
+- ~~**Confirm the engagement-term behaviour change**~~ **SETTLED (user, 2026-09-29): defer
+  "safe from" entirely rather than ship it narrowed.** His answer to the fail-open consequence:
+
+  > *"We can optimize and not LOS units that are outside possible visibility cone, if need be. Then
+  > for 'safe from' when unit is not within visibility cone, mission memory of where those are
+  > believed to be would have to be used. Defer safe-from."*
+
+  **This dissolves the concern rather than accepting it.** The worry was that hybrid-only and stale
+  contacts would fail open to "can be seen", quietly narrowing what a clearance means. The answer is
+  that the clearance should not be issued at all yet.
+
+  **The asymmetry is the reasoning, and it is worth keeping:** *"Danger"* is a claim about something
+  Petrovich can currently see. *"Safe from"* is a claim about an **absence** — it asserts a unit is
+  no longer able to shoot you, which requires knowing where it is *now*, not where it was last
+  observed. Without mission memory that is a guess wearing the clothes of a clearance, and it is the
+  more dangerous of the two to get wrong.
+
+  **What this means concretely:** `CONTACT_ENGAGEMENT_CHANGED`'s `engaged=False` branch
+  (`belief/speech.py`, the `"Safe from "` lead) stops producing a callout; `engaged=True`
+  (*"Danger, ..."*) is untouched. The event itself may continue to exist for state-tracking; it is
+  the *utterance* that is deferred. Shipped in watch-reporting and never flown, so nothing the pilot
+  has heard changes.
+
+  **Un-defers when mission memory lands** (BL-8 territory — believed positions of units currently
+  outside the visibility cone are exactly what it would hold). Record the dependency there rather
+  than leaving this as a permanently dropped feature.
+
+- **Cone filtering is an available optimisation, not a requirement** (same user message: *"if need
+  be"*). Worth recording why it is not needed yet: the measured cost is 0.5 ms fixed plus 8.7 µs per
+  sightline, so the settled 10 km bubble alone keeps a 200-unit sweep at ~2.2 ms, about 0.2% duty at
+  1 Hz. The bubble is already doing the filtering the cone would do, and LOS is gaze-independent, so
+  adding a cone filter now would buy nothing measurable while coupling the feed to where Petrovich
+  happens to be looking. Reach for it if a scene ever makes the sweep expensive.
 - **`LOS_MAX_AGE_S`'s value (proposed 3.0 s)** — reasonable default, not measured; confirm or
   adjust once flown.
 - **Stage 3's terrain swap is optional relative to Stages 1-2.** Given the 12 m tolerance already
