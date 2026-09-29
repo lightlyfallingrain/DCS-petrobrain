@@ -126,33 +126,57 @@ shape — it already exists (M8), untouched, for whenever a real consumer needs 
 
 ### Implementation Plan
 
-1. **Stage 1 — un-gate ridge/valley extraction from the probe grid; run it against `syria-full`'s
-   real SRTM data, offline.** Mechanical pipeline change plus one real rebuild. **Flyable/checkable
-   acceptance, no sortie needed**: `syria-full.sqlite` gains real `ridge`/`valley` rows for the
-   first time ever (currently zero, in any built theatre); `tools/inspect_terrain.py` run against
-   the result shows whether 1,000 m spacing resolves anything landmark-scale, or whether it's too
-   coarse/too noisy to be useful — this is the empirical check the "what must be validated" section
-   below requires, and it costs a rebuild, not a flight.
-2. **Stage 2 — retune the curvature threshold for whatever Stage 1's real data shows**, following
-   M6 Stage 2's own sweep-and-record methodology. If 1,000 m proves structurally inadequate (not
-   just needing a different threshold — genuinely too coarse to resolve a landmark-scale feature at
-   all), the fallback is a finer SRTM *storage* spacing re-ingest (still fully offline, no DCS
-   probe), not a live-probing build. Record whichever outcome in a research note per this
-   subproject's own convention.
-3. **Stage 3 — bearing + ordered-along-bearing query in `describe_position`.** Wire
-   `geometry.bearing_deg` into the ridge/valley (and, since it's the same mechanism, road/water —
-   coordinate with BL-B14 rather than duplicating) feature-info dataclasses; add the bearing-sector
-   nearest-N query for *"next valley"*. Pure query-layer addition, no store schema change, no new
-   extraction.
-4. **Stage 4 — the callout itself.** `enrichment.py`/`speech.py` wiring for foot/slope/crest
-   phrasing and o'clock bearing, using Stage 3's new fields. **Flyable acceptance**: fly near a real
-   extracted ridge/valley and confirm a callout like the user's own examples is producible from the
-   pipeline's actual output, not a hand-built fixture.
-5. **Not this plan**: navigation (*"follow that valley"*, *"stay north of ridge"*) — no stage, no
-   API surface, no speculative field. The representation chosen above (unmodified M6 output) is
-   confirmed able to answer both `signed_side_of_polyline`-style side questions and axis-following
-   later, but nothing is built toward it now, per the instruction not to half-build a surface
-   nobody reads yet.
+**Revised 2026-09-29 after the user settled three things the original staging predated**: 1000 m is
+rejected outright, *"next valley"* means adjacency rather than ray-ordering, and BL-B14's bearing
+item folds in here. Where this section and "Decisions" ever disagree, Decisions wins.
+
+1. **Stage 1 — un-gate ridge/valley extraction, and pick a processing spacing by looking.**
+   The stage is currently nested inside `pipeline.py`'s probe branch (line ~675: the `else` sets
+   both `probe_skipped` and `terrain_skipped`), so it has never run against the SRTM grid that has
+   been present since M7 — even though its own first line, `load_full_grid(conn, "elevation")`,
+   would return it. Un-gate it, then **run the classifier at more than one spacing and compare the
+   output with `tools/inspect_terrain.py`**, exactly as M6 Stage 2 settled its original threshold.
+   1000 m is rejected by the user (*"an entire mountain can fit inside it"*), so the candidates are
+   finer: SRTM is 30-90 m native, so anything from ~90 m up needs no new data.
+
+   **Processing spacing and storage spacing are separate decisions.** The curvature pass can run
+   over a fine transient grid and emit only the `LineString` features, leaving the stored grid
+   coarse — the disk cost is then the features, not the mesh. Sizing, for reference: `grid_sample`
+   is 12.2 MB of the 589 MB store at 1000 m, ~210 MB at 250 m, ~1.3 GB at 100 m. Decide and record
+   which grid is stored and why.
+
+   **Acceptance needs no sortie**: `syria-full.sqlite` gains real `ridge`/`valley` rows for the
+   first time in any built theatre (currently zero), and the inspection output says whether they
+   are landmark-scale or noise.
+
+2. **Stage 2 — retune the curvature threshold for whatever Stage 1's real data shows**, per M6
+   Stage 2's own sweep-and-record method, and write the outcome to a dated research note. The
+   thresholds were tuned at 500 m; nothing guarantees they transfer.
+
+3. **Stage 3 — landform adjacency, computed once at build time.** A valley-to-valley (and
+   ridge-to-valley) neighbour relation over the extracted `LineString`s. **New work, not in the
+   original staging** — it is what *"next valley"* actually needs now that the user has settled
+   adjacency over ray-ordering. It is **static geography**: two valleys are neighbours regardless of
+   ownship, so this is computed and stored during the build, never derived at runtime.
+
+4. **Stage 4 — generic feature bearing in `describe_position`, retiring BL-B14.** Wire
+   `geometry.bearing_deg` (it exists; it has never been surfaced for any feature kind) into the
+   feature-info shape for ridge/valley **and** road/water, since it is one mechanism. User approved
+   folding BL-B14's road/water bearing item in here rather than building it twice — close that
+   backlog entry when this lands. **No bearing-sector query**: that belonged to the ray-ordering
+   reading and left this plan with it.
+
+5. **Stage 5 — the callout.** `enrichment.py`/`speech.py` wiring for the user's own examples —
+   *"contact, three o'clock, 2 km at the foot of hill"*, *"armor, 10 o'clock, next valley"* —
+   using Stages 3 and 4's fields. Foot/slope/crest comes from comparing the query point against the
+   feature's stored `elevation_range_m` band. **Flyable acceptance**: fly near a real extracted
+   landform and confirm the callout is producible from pipeline output rather than a hand-built
+   fixture.
+
+6. **Not this plan**: navigation (*"follow that valley"*, *"stay north of ridge"*) and the
+   ray-ordering query it needs. The representation is confirmed able to support both later —
+   the `LineString` is already an axis, and `geometry.signed_side_of_polyline` already exists and
+   is proven on this shape for coastline — but nothing is built toward it now.
 
 ### What must be validated before trusting it
 
