@@ -91,6 +91,35 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   during it** — if the answer is terrain-only, that slice's LOS design collapses and the
   statistical model has to cover every channel instead.
 
+  **WIDENED 2026-09-29 (user), and the probe is now written and deployed.** User: *"we could also
+  check if it is possible to get data for trees and buildings from DCS. That would be valuable for
+  LOS, if we can get that data."* That is a second question alongside the original one, and the
+  two have different answers in prospect:
+
+  - **Test it per ray** — `land.isVisible` / `land.getIP`, DCS answering "can A see B" including
+    whatever it counts as occluding. A query, not data.
+  - **Extract it as data** — `world.searchObjects(Object.Category.SCENERY, …)` for buildings, into
+    the world model as ordinary `StoredFeature` rows. Trees are almost certainly not scenery
+    objects (terrain-baked), so for them the per-ray test is likely the only route.
+
+  **Read from the install, 2026-09-29:** `Scripts/AI/Detection.lua`'s `visual_detection` sets
+  `objects_LOS_test = true`, `trees_LOS_test = false`, `trees_LOS_test_T4 = true`, and every
+  installed theatre is Terrain-4 — so **ED's AI** does test buildings and trees. That says nothing
+  about the scripting API, which is native (nothing in `Scripts/` defines `land.isVisible`; only
+  `ScriptingSystem.lua`'s `class(SceneryObject, Object)`), so it can only be measured live.
+
+  `aircraft-layer/dcs-export/petrobrain-elevation-cost-probe-hook.lua` (deployed) answers all of
+  it on the next sortie, with a **desert control** — the same 40-pair terrain-only-vs-`isVisible`
+  comparison run over Mezzeh and over Deir ez-Zor, because terrain-sampling error appears in both
+  and subtracts out while buildings and trees do not. A near-zero urban-minus-desert gap means
+  `isVisible` is terrain-only and this item's 9K113 half collapses, which is why the control is
+  there rather than assumed away.
+
+  **If `isVisible` is cheap and does see objects, the prize is larger than this item assumed**: it
+  could replace our elevation-grid LOS outright rather than supplement it, which would also make
+  the SRTM-resolution question (X-B26) much less pressing. The probe times it at 1/50/200 rays per
+  bridge call for exactly that reason.
+
 - [x] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** Done 2026-09-27. All three roles ran in worktrees, advisory-only as this item required;
   reports at `reviews/claude-setup-{review,performance,security}.md`. All HIGH/MEDIUM findings fixed
