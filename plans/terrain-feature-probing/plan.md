@@ -193,19 +193,56 @@ not a re-extraction. It narrows `docs/concept/PETROBRAIN_RUNTIME.md`'s "expandin
 bubble" section to apply only to genuinely dynamic/fine-grained future needs, since the
 landmark-naming need that section partly motivated is now served offline instead.
 
-### Decisions Requiring User Input
+### Decisions — SETTLED (user, 2026-09-29), except one that turned out to be a question
 
-- **Confirm dropping live in-flight probing entirely for this feature**, per the verdict above —
-  this is the one decision that determines whether this plan is an offline pipeline change (small)
-  or `design-input.md`'s original live-accumulation build (large). Recommendation: drop it: the
-  named consumer is static geography, and the existing SRTM grid already covers the whole theatre
-  offline.
-- **Bearing mechanism: build it once, generically, and coordinate with BL-B14 rather than each
-  plan inventing its own.** `body-layer/BACKLOG.md`'s BL-B14 already flagged the identical gap for
-  roads/water ("200 meters north of the road" needs a bearing `describe_position` does not
-  return). Recommendation: this plan's Stage 3 builds the generic mechanism
-  (`geometry.bearing_deg` wired into `describe_position`'s feature-info shape) and BL-B14's road/
-  water item reuses it rather than being built twice — flag to whoever picks up BL-B14 next.
-- **Bearing-sector half-width for "next valley"/"that direction".** No number chosen yet; a coarse
-  default (e.g. a 45 deg cone, matching a rough o'clock-clock-face granularity) is a reasonable
-  starting guess but is the user's call, not derived from anything measured.
+- ~~**Confirm dropping live in-flight probing**~~ **SETTLED: dropped.** The user's own reasoning,
+  which names why the live design existed at all and why it dies with LOS:
+
+  > *"The slowly accumulating probe model was primarily for the very fine mesh that LOS would have
+  > required. That would take tons of time and disk space if built into world model for the whole
+  > theatre. If we process a more sparse grid directly into ridges and valleys etc, then that's a
+  > viable one time operation cost."*
+
+  So live accumulation was never the point — it was the only affordable way to get a *very fine*
+  mesh, and LOS was the only consumer needing one. Landform extraction needs far less, and a
+  one-time offline pass is affordable. `plans/live-terrain-sampling/design-input.md` is superseded
+  for this purpose; M8's probe store stays built and unexercised for whenever something genuinely
+  needs finer-than-SRTM or in-flight terrain.
+
+- ~~**Bearing mechanism: coordinate with BL-B14**~~ **SETTLED: build it once here, and retire
+  BL-B14's separate item.** User: *"Ok to retire BL-B14 when doing this."* So this plan's bearing
+  work is generic across feature kinds — roads and water included, not ridge/valley only — and
+  `body-layer/BACKLOG.md`'s BL-B14 road/water bearing entry closes when it lands rather than being
+  built twice.
+
+- **Storage spacing: 1000 m is rejected.** User: *"1000 m is too coarse, an entire mountain can fit
+  inside it."* Correct, and it means Stage 1's un-gating alone is not sufficient — the classifier
+  would run, but over a grid too coarse to resolve what it is looking for.
+
+  **The distinction that keeps this cheap, raised after the plan was written:** the resolution the
+  curvature classifier *processes* at and the resolution the store *keeps* need not be the same.
+  SRTM is 30-90 m native, so a finer ingest costs no new data acquisition — and if the fine grid is
+  consumed to produce ridge/valley `LineString` features and then **not stored**, the disk cost is
+  the features, not the mesh. That is exactly the user's "process a more sparse grid directly into
+  ridges and valleys" as a one-time operation. Sizing for reference: `grid_sample` is 12.2 MB of the
+  589 MB store at 1000 m; ~210 MB at 250 m; ~1.3 GB at 100 m — all of which is avoidable for the
+  landform purpose if the working grid is transient.
+
+  **Open, and the thing Stage 1 must answer with real output:** what processing spacing actually
+  resolves a landform a pilot would name, and whether M6's curvature thresholds (tuned at 500 m)
+  need retuning at that spacing. `tools/inspect_terrain.py` against the first real run is how M6
+  settled this before.
+
+- **"Next valley" — the sector question was malformed, and the underlying ambiguity is real.**
+  The plan proposed a bearing-sector half-width. Put to the user, he asked what that meant, and
+  restating it surfaced that his example admits two readings needing different machinery:
+
+  1. **Ordering along a ray** — from ownship, landforms crossing the bearing to the contact at
+     increasing range; *"next"* = the second one out. This is what a sector half-width is for:
+     how wide a wedge counts as "that direction".
+  2. **Adjacency** — ownship is in one valley, the contact is in the one over the ridge. *"Next"*
+     means neighbouring, not further along a line. **No sector at all** — it needs valley-to-valley
+     adjacency, which is a different derived relation and not currently produced by anything.
+
+  His phrasing (*"armor, 10 o'clock, next valley"*) reads as (2). **Unresolved pending his answer**;
+  do not build either until it is settled, since (2) needs a relation M6 does not emit today.
