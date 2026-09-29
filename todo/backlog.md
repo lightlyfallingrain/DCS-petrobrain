@@ -637,7 +637,28 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   committing to a probing design, not after.** Investigator pass; the DCS install is on the Windows
   box, and `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` inventories it.
 
-- [ ] **X-B27 — Measure the line-of-sight call rate per poll before considering a world-model
+- [>] **X-B27 — Topology: body-layer and world-model stay together, on the Mac for now, Windows
+  eventually. DECIDED 2026-09-29, deferred as work.** User: *"I will keep body and world layers on
+  Mac for now, development is much easier that way. The eventual setup will run them on windows."*
+
+  **So the service split is rejected, not merely unscheduled** — the in-process coupling stays, and
+  the two subprojects move together or not at all. Three standing consequences, which are the
+  reason this item stays open rather than being closed:
+
+  - **Nothing may assume the Mac.** body-layer and world-model must stay cross-platform and free of
+    macOS-only assumptions (paths, `say`, shell tools), because the target is Windows even though
+    today's runtime is not. A Mac-only dependency introduced now is a migration cost incurred
+    silently.
+  - **Nothing may assume a network seam between body-layer and world-model either.** The import
+    stays in-process, per root `CLAUDE.md`'s sole-exception rule. Do not design around a future
+    HTTP boundary that has now been decided against.
+  - **The LOS call-rate measurement below is no longer needed for this decision.** It was the
+    gate on the *service* route only. Keep it in mind as ordinary performance curiosity if a dense
+    scene ever feels slow, not as a blocker for anything.
+
+  Original item follows, kept because its reasoning is what the decision rests on.
+
+- [ ] **Measure the line-of-sight call rate per poll before considering a world-model
   service split.** The user raised making world-model its own service on the Windows box (where the
   DCS terrain files are), with an HTTP API to body-layer on the Mac — motivated, and stronger still
   if X-B26 says terrain files are readable. But body-layer ↔ world-model is the **sole sanctioned
