@@ -1291,12 +1291,31 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   this can pull a contact from *outside* a requested clock/sector into the answer. Confirmed
   directly (two contacts 500 km apart, nothing else tracked, still form one `Group`), not
   theorised — see `plans/group-reporting/implementation.md`'s Stage 4 "Notable Discoveries" for the
-  full readout and the test fixtures it forced to route around it. Not fixed here: whether to add
-  an absolute cap, a unit-type similarity gate, or accept it as-is is a mechanism decision for the
-  next design pass, not this implementation's to make silently. 1347 passed/4 xfailed, `ruff`/
-  `mypy --strict` clean. Does this change what the next milestone should be? Yes: the sparse-scene
-  cohesion discovery above should be resolved (or explicitly accepted) before this milestone is
-  called done, and ideally before a live sortie is flown under it.
+  full readout and the test fixtures it forced to route around it.
+
+  **The n=2 case above is FIXED on this same branch** (`9ecedaf`/`b0f9518`, user direction
+  2026-09-29): `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M = 300.0` applies as a cap **only** when fewer
+  than three contacts are tracked, i.e. exactly when the relative-gap median is tautologically the
+  pair's own separation and so measures nothing. A dense scene is provably unchanged, and the
+  user picked this over an always-on cap or dropping pairs. 300 m is convoy/outpost scale and a
+  stated assumption, not a measurement.
+
+  **A different, narrower risk remains open at n>=3, and it is not the same defect** (found by
+  review, `plans/group-reporting/review.md`): three or more contacts spread kilometres apart with
+  little else tracked can still cohere on the relative rule alone, since the backstop does not
+  apply there. Two consequences, both confirmed by code reading rather than theorised — and the
+  first is the one that matters in the cockpit, because it can put a named threat in the wrong
+  place: `render_group_disclosure` takes clock/range from the **nearest** member while the line is
+  **led by the threat** member, so a sparse merge can say *"Danger, ZSU-23-4, 3 o'clock, one
+  kilometre"* with the ZSU actually somewhere else entirely. Separately,
+  `CrewConsole._handle_report` speaks a contact's **whole** persisted group rather than the
+  sector-filtered subset, so `report clock 3` can name something outside the sector asked about.
+
+  Stage 5 (common-fate cohesion) was always the intended real fix and is deliberately deferred
+  pending sortie evidence — so this is a known gap to fly *knowingly*, not scope creep. 1349
+  passed/4 xfailed, `ruff`/`mypy --strict` clean. Does this change what the next milestone should
+  be? Yes: the n>=3 behaviour needs the user's explicit acceptance (or a targeted mitigation)
+  before this milestone is called done.
 
 ## Backlog (body-layer)
 
