@@ -141,6 +141,36 @@ established, and the fog-of-war design's own cost is small regardless of source.
   the next stress case in `project_m7_kola_stress_test` agent memory, and has its own separate,
   unrelated elevation-source gap — SRTM doesn't cover ~68-69°N at all — so it's a natural next
   target for both questions at once).
+## Forum threads READ 2026-09-29 (user pasted both) — no prior art, and the negative is informative
+
+Both 403'd threads were opened manually by the user and pasted back. **Neither documents the
+`.surface5` format, and neither offers an extraction method.** Recording the content rather than
+leaving them as an open lead, so nobody re-fetches them:
+
+- **`topic/157234` — "Can I export terrain mesh for app?" (2017).** Someone asking *this exact
+  question*, for this exact purpose: a route-planning app needing DCS terrain heights, explicitly
+  wanting the game's own data because *"it may or may not match real data"* — the same concern that
+  produced this project's 11.52 m stddev problem. The replies point only at external DEMs (SRTM,
+  paid providers). **The asker's own conclusion: *"I guess I'll just use a lua script in game to
+  query the terrain height over a grid of lats and longs to get what I need."*** That is the live-
+  probe route, chosen by someone who wanted the file route and did not find one.
+- **`topic/48556` — "DCS Terrain Tool for 3rd party developers?" (2010).** About terrain *authoring*,
+  not runtime files: the SDK is a **3ds Max** toolchain for building new theatres, and map makers
+  describe creating a "land mesh" and populating it. Relevant only as corroboration of the shape of
+  the problem — DCS terrain is an authored mesh compiled into a runtime artifact, not a heightmap
+  that ships and can be sampled. Contains one dead-looking wiki pointer (`en.wiki.eagle.ru/wiki/
+  All_about_land`, 2010-era).
+
+**What this does to the recommendation.** It does not make the decode impossible, but it removes the
+cheapest hoped-for outcome (someone has already named or cracked the format) and adds evidence for
+the opposite: the only person found publicly asking this question gave up on files and went to
+in-game Lua queries. Combined with the existing finding that no public documentation or community RE
+of `.surface5` exists anywhere, **the expected value of the byte-decode spike drops and the
+live-probe route's relative standing rises.** The spike is still cheap (hours) and still worth doing
+before committing, but it should now be timeboxed as a *disproof* attempt rather than approached as
+likely to succeed — and the live-probe design should be treated as the working assumption rather
+than the fallback.
+
 - **Two directly-on-topic ED forum threads remain unread**, 403'd on automated fetch both times this
   was tried (`forum.dcs.world/topic/157234-...`, `.../topic/48556-...`). Per this project's own
   standing convention (`forum-dcs-world-fetch.md` agent memory), this needs the user to open both
