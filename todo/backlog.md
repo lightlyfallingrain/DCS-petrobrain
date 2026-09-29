@@ -649,3 +649,25 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   or keep it in-process), so measure it before moving code. The detection trace already records
   every `check_visibility` call, so this is a reduction over data the project already collects, not
   new instrumentation.
+
+  **The alternative the user raised 2026-09-29, and it is probably the better one: keep the
+  in-process coupling and eventually run *both* body-layer and world-model on the Windows box.**
+  It preserves the sole sanctioned cross-subproject import instead of breaking it, and it moves the
+  topology in the right direction rather than sideways. Today the *high-rate* seams cross the LAN —
+  aircraft-layer → body-layer polls telemetry and world objects at 5 Hz over the wire, and
+  world-model answers LOS in-process on the Mac. Moving body-layer to Windows makes **both** of
+  those loopback (aircraft-layer is already there; world-model would sit next to the DCS terrain
+  files it wants to read, per X-B26), leaving on the wire only the seams designed to be
+  asynchronous: body → brain (`/escalate` + poll, whose own plan constraint is *"the brain cannot
+  block anything"*) and body → audio-adapter (a line of text, occasionally). It also removes the
+  manual `.sqlite` copy step `body-layer/CLAUDE.md` currently puts on the user.
+
+  Costs, both real: the Mac is the development box and body-layer is where most iteration happens,
+  so its tests and console harness would run away from where the work is done (mitigable — nothing
+  in body-layer touches DCS directly, so it stays testable anywhere); and the Windows box would
+  need body-layer's heavier dependency chain, `pyproj` included. Brain and TTS stay on the Mac
+  either way.
+
+  **Note for whoever picks this up: the measurement above is only needed for the *service* route.**
+  The both-on-Windows route does not need it at all, because the LOS call never leaves the process.
+  On that route this item becomes a deployment/packaging task, not a performance investigation.
