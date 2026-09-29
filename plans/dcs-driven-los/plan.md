@@ -431,6 +431,48 @@ trees ride a parallel investigation rather than blocking it.
   called anywhere in `belief/`. Named here so a reader checking "what did this plan touch" sees the
   negative confirmed, not merely absent.
 
+### REVISION (user, 2026-09-29): one hook computing both verdicts, published as two fields
+
+The staging below deploys the Hook script twice — buildings in Stage 1, terrain added to the same
+snippet in Stage 3. The user questioned whether those are really separate:
+
+> *"The DCS LOS calculation that detects a blocking building should also detect blocking terrain,
+> right? So that would be 1 and 3 in the same call, no?"*
+
+**Half right, and the half that is wrong is worth stating precisely.** They are **two engine
+calls**: `world.searchObjects`/`SEGMENT` returns *scenery objects* intersecting the volume, and
+terrain is not a scenery object; `land.isVisible` is the terrain test and was measured
+terrain-*only* (40 rays through 40 buildings, 0 blocked). Complementary, not redundant — hence
+`clear = building_clear and terrain_clear`.
+
+**But they ride one bridge payload.** One `dostring_in` round trip, two engine calls per sightline
+inside it. The 0.5 ms fixed overhead is paid once either way; terrain adds ~10.6 µs/sightline on top
+of buildings' 8.7 µs. So deploying the hook twice buys nothing.
+
+**Approved revision: write the hook once, compute both, publish them as two fields.**
+
+- The Hook script computes `building_clear` and `terrain_clear` per unit from the first deployment.
+- The endpoint publishes **both**, as separate fields, rather than a single pre-ANDed boolean.
+- Body-layer wires them into the gate **in two steps**, exactly as the stages below describe —
+  buildings first, terrain second.
+
+This keeps the whole reason the stages were split, which is **attributability, not call structure**:
+Stage 1 cannot change any answer the current code gives (nothing models buildings today), while the
+terrain swap changes answers the existing path already produces. Keeping the verdicts separable in
+the data means a misbehaviour after both are live is still attributable to one half. What it removes
+is a second Windows-box deployment, a second schema change, and a second flight to enable a field
+that was already being computed.
+
+**Consequence for the stage descriptions below:** Stage 1's "Hook script + schema + endpoint" work
+covers both fields; Stage 3 becomes a body-layer-only change (start reading the second field) plus
+its verification sortie, with no Windows-side work at all.
+
+**One assumption to test before relying on it.** That `SEGMENT` ignores terrain is *inferred* from
+what it returns (scenery objects), never tested by firing a ray through a hill. **If SEGMENT does
+catch terrain, Stage 3 collapses into Stage 1 entirely** and `land.isVisible` is not needed at all.
+Added to the Windows-box probe list alongside the tree questions — it is one ray from a known
+position into a known ridge, with an open-ground control at the same range.
+
 ### Implementation Plan
 
 1. **Stage 1 — buildings only, collector-side, the new-capability slice.** Hook script + schema +
