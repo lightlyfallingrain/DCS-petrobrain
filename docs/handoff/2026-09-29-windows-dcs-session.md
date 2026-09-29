@@ -1,5 +1,36 @@
 # Windows-box session handoff — what to do with DCS access
 
+> **CLOSED 2026-09-29 on the Windows box. All four tasks done, plus a fifth the user added.**
+> Ten flights. Branch `investigate/terrain-elevation-source`. Read the results in
+> `aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md` (the main one, 21 findings),
+> `2026-09-29-bridge-call-cost-at-scale.md`, and
+> `world-model/research/2026-09-29-surface5-elevation-confirmed.md`.
+>
+> | task | outcome |
+> |---|---|
+> | 1. `bridge_call_ms` at scale | **Done.** A 568-unit sortie was already in `dcs.log`, unread: mean 1.99 ms, p99 8 ms at 1 Hz, ~2.6 us/item. |
+> | 2. `land.getHeight` through the bridge | **Done.** Works, and matches the M4 mission-editor probe on all 8 points to 4.6e-05 m. Costs **0.9 us/point** — a full 2,601-point M8 chunk is 2.0 ms. |
+> | 3. `.surface5` decode spike | **Done, and it did not disprove.** The file does encode elevation: 129/129 ground-truth points fall strictly inside their tile's y-range against a 71/129 null control. But only a per-tile envelope decoded; per-node values need the `Pbase` payload located inside 30 GB. **Recommendation: park it.** |
+> | 4. Does the format generalise? | **Not run, deliberately** — conditional on pursuing task 3, which is not recommended. The walker is theatre-agnostic, so it is one command whenever wanted. Kola remains the right second target. |
+> | 5. *(added by the user)* Trees and buildings for LOS | **Answered, and positively — on a call nobody had tried.** See below. |
+>
+> **The headline the Mac session most needs:** `land.isVisible` is **terrain-only** — 40 rays fired
+> deliberately through 40 buildings, 0 blocked. But `world.searchObjects` with
+> `world.VolumeType.SEGMENT` **does** return the buildings on a sightline, as a **true 3D test**
+> (6 hits at 2 m AGL, 0 at 15 m and above), for **8.7 us/sightline** — *cheaper* than
+> `land.isVisible`'s 10.6 us. Trees have **no DCS route at all**; OSM landcover is the only source.
+> Remaining build work is filed as **X-B28** (not started); **X-B4 is closed**.
+>
+> **Also found, unasked:** `line_of_sight_clear` reads the **base grid only** and body-layer never
+> ATTACHes the probe store — so finer probe data will not reach the missed-AAA defect until that is
+> wired. And SRTM's 1000 m grid is *our resampling choice*, not SRTM's resolution (it ships at
+> 30-90 m); the whole elevation grid is 12 MB of a 589 MB store, so rebuilding finer is cheap.
+> That discussion is **open and continues on the Mac** — see `X-B26`.
+>
+> **Still outstanding, still needs this box:** the acceptance sortie
+> (`docs/acceptance/2026-09-29-group-reporting-sortie.md`). Unaffected by any of the above.
+
+
 Written 2026-09-29 on the Mac, for a Claude Code session running on the Windows box where DCS is
 installed. Everything here needs either the DCS install or a running mission; none of it can be
 done from the Mac, which is why it has been queued rather than attempted.
