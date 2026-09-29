@@ -173,7 +173,7 @@ local START_DELAY_S = 10.0 -- let the terrain finish loading before probing
 --: Target ceiling for any single bridge call. Well under a 60 fps frame
 --: (16.7 ms), so even a call that lands badly costs part of one frame
 --: rather than a visible hitch.
-local CALL_BUDGET_MS = 5.0
+local CALL_BUDGET_MS = 8.0
 --: Any single call over this stops the whole probe. See the header: this
 --: firing is a finding, not a malfunction.
 local ABORT_MS = 25.0
@@ -182,6 +182,9 @@ local TICK_INTERVAL_S = 0.25
 --: Repeats per measured size. Enough to average out 1 ms granularity
 --: without making the probe outlast the user's patience.
 local REPEATS = 10
+--: Samples discarded from the top of each series before estimating cost.
+--: See `trimmedMean` for what this is defending against and why.
+local TRIM_TOP = 2
 
 --: Escalation ladders. Each starts at 1 and steps up only while the
 --: measured cost predicts the next rung stays under `CALL_BUDGET_MS`.
@@ -353,10 +356,31 @@ local ok, err = pcall(function()
             local px, py, pz = "?", "?", "?"
             local okP, p = pcall(function() return obj:getPoint() end)
             if okP and p then px, py, pz = p.x, p.y, p.z end
+            -- Dump the desc table's own keys, one level deep, for the
+            -- FIRST object only. A LOS occluder needs extent, not a
+            -- point, and the 2026-09-29 run read only `typeName` -- so
+            -- whether a box/dimensions field exists here is still open.
+            -- This is what closes it, at the cost of one serialisation.
             local desc = "?"
             local okD, d = pcall(function() return obj:getDesc() end)
             if okD and type(d) == "table" then
-                desc = tostring(d.typeName or d.displayName or "tbl")
+                if #samples == 0 then
+                    local keys = {}
+                    for k, v in pairs(d) do
+                        if type(v) == "table" then
+                            local inner = {}
+                            for k2, v2 in pairs(v) do
+                                inner[#inner + 1] = tostring(k2) .. "=" .. tostring(v2)
+                            end
+                            keys[#keys + 1] = tostring(k) .. "{" .. table.concat(inner, ",") .. "}"
+                        else
+                            keys[#keys + 1] = tostring(k) .. "=" .. tostring(v)
+                        end
+                    end
+                    desc = "FULLDESC:" .. table.concat(keys, "|")
+                else
+                    desc = tostring(d.typeName or d.displayName or "tbl")
+                end
             end
             samples[#samples + 1] = string.format(
                 "%%s@%%s,%%s,%%s[%%s]", name, tostring(px), tostring(py), tostring(pz), desc)
@@ -507,14 +531,6 @@ local function median(sorted)
     return sorted[math.ceil(#sorted / 2)]
 end
 
-local function mean(values)
-    local total = 0
-    for _, v in ipairs(values) do
-        total = total + v
-    end
-    return total / #values
-end
-
 --: Would a batch of `n` items at `perItemMs` fit the budget? Doubled for
 --: safety, because `perItemMs` is derived from 1 ms-granular timings and
 --: is therefore an estimate with real error in it. An unmeasured
@@ -526,10 +542,51 @@ local function fitsBudget(n, perItemMs)
     return (fixedMs + n * perItemMs) * 2.0 <= CALL_BUDGET_MS
 end
 
-local function estimatePerItem(meanMs, n)
-    --: Floor at a small positive value: at n=1 the measurement is 0 or
-    --: 1 ms, and a zero estimate would wave every later rung through.
-    return math.max((meanMs - fixedMs) / n, 0.002)
+--: Mean of the samples with the top `drop` discarded.
+--:
+--: **This is the fix for the 2026-09-29 run, where a plain mean shut the
+--: whole probe down on noise.** At 1 ms clock granularity a sub-millisecond
+--: call reads 0 ms nine times out of ten and then catches one stray frame:
+--: `getHeight_batch_1` logged nine 0 ms samples and a single 4 ms one, and
+--: the mean (0.4 ms) was then attributed entirely to *one* `getHeight`
+--: call -- 400 us each. `isVisible_batch_1` did the same with a 15 ms
+--: outlier and came out at 1600 us. Both ladders then refused their next
+--: rung as unaffordable, and the X-B4 occlusion sweep was skipped for want
+--: of a cost estimate. The real cost is nowhere near that: the same run
+--: searched 135 scenery objects in 1 ms and fired 8 `getIP` raycasts in
+--: under one.
+--:
+--: An outlier that large is scheduler or frame contention, not the payload
+--: -- the 2026-09-28 bridge measurements showed exactly that shape, maxima
+--: an order of magnitude over p99 and indifferent to payload size. So trim
+--: it. The maximum is still logged, because the tail is what would stutter
+--: the cockpit and must stay visible even when it is excluded from the
+--: estimate.
+local function trimmedMean(values, drop)
+    local sorted = {}
+    for i, v in ipairs(values) do
+        sorted[i] = v
+    end
+    table.sort(sorted)
+    local keep = #sorted - drop
+    if keep < 1 then
+        keep = #sorted
+    end
+    local total = 0
+    for i = 1, keep do
+        total = total + sorted[i]
+    end
+    return total / keep
+end
+
+local function estimatePerItem(costMs, n)
+    --: Floor at a small positive value: a trimmed mean of all-zero samples
+    --: is 0, and a zero estimate would wave every later rung through with
+    --: no check at all. 0.5 us/call is below anything plausible for an
+    --: engine call and is deliberately not a guess at the real figure --
+    --: it exists so the *next* rung produces a measurable number, which
+    --: then replaces it.
+    return math.max((costMs - fixedMs) / n, 0.0005)
 end
 
 local function beginGroup(label, codeFor, count, onDone)
@@ -583,12 +640,12 @@ local function runLadder(name, sizes, ladderIndex, codeFn, perItemSetter, perIte
     beginGroup(name .. "_batch_" .. n, function()
         return codeFn(n)
     end, REPEATS, function(samples, lastResult)
-        local m = mean(samples)
+        local m = trimmedMean(samples, TRIM_TOP)
         perItemSetter(estimatePerItem(m, n))
         table.sort(samples)
         logi(
             string.format(
-                "%s_batch_%d: n=%d mean_ms=%.3f min_ms=%.2f med_ms=%.2f max_ms=%.2f"
+                "%s_batch_%d: n=%d trimmed_ms=%.3f min_ms=%.2f med_ms=%.2f max_ms=%.2f"
                     .. " per_item_us=%.1f result=%s",
                 name,
                 n,
@@ -784,6 +841,20 @@ end
 local function buildPlan()
     plan = {
         function()
+            --: Warm-up, discarded. On the 2026-09-29 run the very first
+            --: bridge call (`known_points`, 16 engine calls) took 19 ms
+            --: while everything after it sat at 0-1 ms -- one-time state
+            --: or JIT setup, not per-call cost. Paying that on a throwaway
+            --: call keeps it out of the measurements and out of
+            --: `known_points`, which is the one step nothing can gate.
+            beginGroup("warmup", function()
+                return NULL_CODE
+            end, 1, function(samples, _)
+                logi(string.format("warmup: ms=%.2f (discarded)", samples[1]))
+                advancePlan()
+            end)
+        end,
+        function()
             runSingle("known_points", KNOWN_POINTS)
         end,
         function()
@@ -828,11 +899,11 @@ local function buildPlan()
             beginGroup("null_call", function()
                 return NULL_CODE
             end, REPEATS, function(samples, _)
-                fixedMs = mean(samples)
+                fixedMs = trimmedMean(samples, TRIM_TOP)
                 table.sort(samples)
                 logi(
                     string.format(
-                        "null_call: n=%d mean_ms=%.3f med_ms=%.2f max_ms=%.2f"
+                        "null_call: n=%d trimmed_ms=%.3f med_ms=%.2f max_ms=%.2f"
                             .. " -- taken as fixed bridge overhead",
                         #samples,
                         fixedMs,
