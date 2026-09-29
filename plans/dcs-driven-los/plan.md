@@ -187,6 +187,42 @@ plan replaces. The probe grid (M8) and its spacing redesign stay exactly where `
 X-B28 (superseded) already left them: lower priority, for land formations/`describe_position`, not
 line of sight. Nothing here changes that.
 
+### Trees — REFRAMED by the user, 2026-09-29, after this plan was drafted
+
+The section below was written against the standing measurement that a vehicle under trees is
+undetectable at any range from any optic, which made trees look like a *forest* problem — a
+statistical transmission model over landcover polygons, safely off the critical path. **The user
+has corrected the scope, and it changes the shape of the requirement:**
+
+> *"'vehicle under trees is undetectable at any range from any optic' — in a forest, yes very much.
+> But if it's just a couple of trees or a line of trees along a road, then tree LOS really matters.
+> We must investigate if there is any way to get LOS considering trees. We don't need to know
+> individual tree placement (though that wouldn't hurt and could be useful), but need to know if
+> they block LOS. If we can."*
+
+So there are **two distinct tree problems**, and only the first is covered by the landcover model:
+
+1. **Forest** — a mass of canopy, where the honest model is probabilistic transmission over an OSM
+   polygon and the answer is "he cannot see in there". The measurement supports this.
+2. **Sparse and linear tree cover** — a treeline along a road, a windbreak, a handful of trees
+   between the aircraft and a vehicle. A polygon model answers this *wrongly in both directions*:
+   OSM may carry no polygon at all for a roadside treeline, and where it does, a probability over
+   an area cannot express "this particular sightline is blocked and the one ten metres left is
+   not". This is **discrete occlusion**, the same shape as the building test, and it is exactly the
+   case a Mi-24P attacking along a road meets constantly.
+
+**What this changes:** the tree question is no longer safely deferrable behind Stages 1 and 2. The
+user's ask is explicit — *"We must investigate if there is any way to get LOS considering trees"* —
+and his acceptance criterion is looser than full tree geometry: **a blocked/clear verdict is
+enough**; individual tree placement would be a bonus, not a requirement. That materially widens
+what counts as success for the probes named below, and it means a negative result on those probes
+is a real finding rather than a formality.
+
+**It does not change the staging below.** Stage 1 (buildings) is unaffected, measured and ready;
+trees ride a parallel investigation rather than blocking it. But if the probes come back positive,
+the tree verdict joins the same batched sightline call rather than becoming a second mechanism —
+which is an argument for settling the probes before Stage 1's wire format is frozen.
+
 ### Trees
 
 **Not resolved, and this plan does not resolve it.** Established: `world.searchObjects` never
