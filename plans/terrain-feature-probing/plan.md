@@ -244,5 +244,29 @@ landmark-naming need that section partly motivated is now served offline instead
      means neighbouring, not further along a line. **No sector at all** — it needs valley-to-valley
      adjacency, which is a different derived relation and not currently produced by anything.
 
-  His phrasing (*"armor, 10 o'clock, next valley"*) reads as (2). **Unresolved pending his answer**;
-  do not build either until it is settled, since (2) needs a relation M6 does not emit today.
+  **SETTLED (user, 2026-09-29): adjacency.** His words: *"I mean adjacency. Ordering along ray is
+  relevant in navigation, not so much contact detection."*
+
+  So the two readings are not competing — they belong to the two different consumers, and the split
+  falls out cleanly:
+
+  | reading | consumer | when |
+  |---|---|---|
+  | **adjacency** — the valley over the ridge from this one | contact callouts | **now** |
+  | **ordering along a ray** — which landform is next out along a bearing | navigation ("follow that valley") | later, with navigation |
+
+  **The bearing-sector half-width therefore leaves this plan entirely.** It was only ever needed for
+  reading (1); there is no number to choose here. It should resurface with the navigation work, not
+  be guessed at now.
+
+  **What adjacency needs, and the property that keeps it cheap:** a valley-to-valley (and
+  ridge-to-valley) neighbour relation that nothing currently emits. But **it is static geography** —
+  two valleys are neighbours regardless of where ownship is, what it is doing, or what it has
+  detected. So it is computed **once at build time from the extracted LineStrings and stored**, never
+  derived at runtime. Same one-time cost as the landforms themselves, and it inherits their storage
+  shape rather than needing a new one.
+
+  The runtime half is then only *"which landform is the contact in or nearest to"* and *"which is
+  ownship in"* — both point-to-feature queries `describe_position` already knows how to answer, so
+  the callout *"armor, 10 o'clock, next valley"* becomes a stored-relation lookup rather than a
+  geometric computation per report.
