@@ -2561,15 +2561,15 @@ def test_report_clock_3_finds_the_matching_contact(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
-    # Transitional workaround: `belief.groups.GROUP_REPORTING_COHESION_GAP_
-    # UNIT_WIDTHS` is a mechanism-only placeholder (`math.inf`) at this
-    # commit -- the calibrated value (a follow-up commit) will put OBS_E/
-    # OBS_N (~1.4 km apart) back past the backstop, but at `math.inf` the
-    # n=2 cohesion tautology (`belief.groups`'s own module docstring) is
-    # unguarded again, so this test's two contacts cohere. Isolate this
-    # test's own clock-scoping concern from that transitional state --
-    # group formation itself is covered by `tests/test_groups.py`.
-    store._groups._groups = {}
+    # No workaround needed here: OBS_E/OBS_N are BMP-2/T-72 (both 7 m,
+    # `belief.groups.GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * 7.0 = 140`
+    # m backstop), ~1.4 km apart -- well past it, the fix for the
+    # two-contact cohesion tautology that used to group any two contacts
+    # regardless of distance (`belief.groups`'s own module docstring).
+    # They do not cohere, so this test is naturally about clock-scoping
+    # alone -- group formation itself is covered by `tests/test_groups.py`
+    # and `test_report_speaks_a_persisted_group_through_render_group_
+    # disclosure`, below.
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     # OBS_E is east of ownship (3 o'clock); OBS_N is dead ahead (12 o'clock)
@@ -2763,18 +2763,14 @@ def test_report_all_groups_and_truncates_multiple_contacts(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
-    # These four contacts, evenly spaced 1 km apart along one line with
-    # nothing else tracked, are exactly `tests/test_groups.py`'s own
-    # "sparse desert" cohesion case -- `belief.groups.GroupStore.reconcile`
-    # (run inside `store.tick` above) coheres them all into one `Group`
-    # (relative-gap cohesion has no absolute radius by design). This test
-    # is about `group_facts`'s report-space bucketing and `REPORT_MAX_
-    # GROUPS` truncation specifically, not persisted-group disclosure, so
-    # group membership is cleared to keep it isolated from Stage 4's
-    # belief-level grouping (`plans/group-reporting/plan.md`) -- see
-    # `test_report_clock_3_finds_the_matching_contact`'s identical note,
-    # above.
-    store._groups._groups = {}
+    # No workaround needed (unlike before the unit-width cohesion backstop,
+    # `belief.groups.GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS`): these four
+    # contacts are all 7 m vehicles (BMP-2/T-72/BTR-70 keyword-match; the
+    # ZSU-23-4 falls back to `belief.groups.GROUP_REPORTING_UNKNOWN_SIZE_M`,
+    # also 7 m), so the backstop is `20.0 * 7.0 = 140` m -- well under their
+    # 1 km spacing. They no longer cohere into one `Group`, so this test is
+    # naturally about `group_facts`'s report-space bucketing and `REPORT_
+    # MAX_GROUPS` truncation alone, as intended.
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     lines = console.handle_command("report_all", now_sim=0.0)

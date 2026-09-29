@@ -12,7 +12,9 @@ from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.groups import (
     GROUP_PROXIMITY_GAP_RATIO,
+    GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS,
     GROUP_REPORTING_MIN_MEMBERS,
+    GROUP_REPORTING_UNKNOWN_SIZE_M,
     GroupStore,
 )
 from belief.position_belief import Covariance2D, PositionEstimate
@@ -65,6 +67,43 @@ def test_two_tightly_spaced_contacts_form_a_group() -> None:
     assert groups[0].member_contact_ids == frozenset({"C1", "C2"})
 
 
+def test_two_distant_contacts_do_not_form_a_group() -> None:
+    """The pair case the relative rule cannot honestly answer: with only
+    two contacts in the whole store, `_cluster_contacts`'s local-median
+    computation is tautological (each contact's sole candidate nearest
+    neighbour is the other, so the median always equals their own
+    separation) -- the unit-width backstop is the fallback for exactly this
+    size. `_contact`'s fixtures are `OP_TRUCK` (6 m, `object_model.
+    profile_for("OP_TRUCK")` matches the "truck" keyword directly), so the
+    backstop here is `20.0 * 6.0 = 120.0` m. 500 km is the distance the
+    defect was originally confirmed at (`plans/group-reporting/
+    implementation.md`)."""
+    store = GroupStore()
+    contacts = [_contact("C1", 0.0, 0.0), _contact("C2", 500_000.0, 0.0)]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_two_close_contacts_within_the_backstop_still_form_a_group() -> None:
+    """The other side of the same fix: a genuinely close pair -- well
+    inside the 120 m backstop (see the previous test) -- still coheres. Not
+    a duplicate of `test_two_tightly_spaced_contacts_form_a_group` (10 m
+    apart, which the relative rule alone already covers) -- 100 m is picked
+    close to, but comfortably under, the backstop itself, and above the
+    point (40 m) where the backstop rather than the relative rule is what
+    actually binds at n=2 (`3 * 100 = 300 > 120`)."""
+    store = GroupStore()
+    contacts = [_contact("C1", 0.0, 0.0), _contact("C2", 100.0, 0.0)]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"C1", "C2"})
+
+
 def test_tight_cluster_forms_one_group() -> None:
     """Three contacts 10 m apart, one far outlier 5 km away -- the outlier
     sets no meaningful nearest-neighbour gap for the tight trio (each of
@@ -90,16 +129,25 @@ def test_sparse_desert_group_can_span_a_wide_gap() -> None:
     """The figure-ground cue (module docstring): with only these three
     contacts in the whole scene, their own mutual spacing sets a
     proportionally wide cohesion threshold, so a much larger absolute gap
-    than the tight-cluster test still coheres. Transitional at this commit:
-    `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` is a mechanism-only
-    placeholder (`math.inf`), so no absolute bound is exercised here yet --
-    a follow-up commit recalibrates this test once the real bound is set,
-    per the module docstring's n>=3 finding."""
+    than the tight-cluster test's 10 m still coheres -- but, unlike before
+    the unit-width backstop applied at every scene density, not without
+    limit. 110 m is picked close to, but under, the 120 m backstop
+    (`OP_TRUCK`, 6 m, `20.0 * 6.0`) -- at this spacing the relative rule
+    alone would already permit it (`3 * 110 = 330`, comfortably above
+    `110`), so the backstop is not what is binding here, but a span this
+    wide has nowhere near as much headroom as the old, unbounded version of
+    this test had (400 m per gap, 800 m end to end) -- see `plans/
+    group-reporting/review.md`'s n>=3 finding and the module docstring for
+    why an unbounded relative rule is not safe at any n. A companion
+    negative case (a gap that clears the relative rule but exceeds the
+    backstop) is `test_two_distant_contacts_do_not_form_a_group`'s n=2
+    case; this test's job is only to show the *relative* rule's
+    scene-density scaling still does real work below the bound."""
     store = GroupStore()
     contacts = [
         _contact("C1", 0.0, 0.0),
-        _contact("C2", 400.0, 0.0),
-        _contact("C3", 800.0, 0.0),
+        _contact("C2", 110.0, 0.0),
+        _contact("C3", 220.0, 0.0),
     ]
 
     store.reconcile(contacts, now_sim=0.0)
@@ -295,9 +343,14 @@ def test_mark_spoken_on_unknown_group_id_returns_false() -> None:
 
 
 def test_constants_are_the_stated_assumptions() -> None:
-    """Pins the three uncalibrated constants so a future retuning commit is
+    """Pins the uncalibrated constants so a future retuning commit is
     visible as a diff here, not a silent behaviour change. `GROUP_
     REPORTING_MIN_MEMBERS` is 2, not `perception.group_salience.
-    GROUP_MIN_MEMBERS`'s 3 -- see module docstring for why they differ."""
+    GROUP_MIN_MEMBERS`'s 3 -- see module docstring for why they differ.
+    `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` is 20.0, not `perception.
+    group_salience.GROUP_COHESION_GAP_UNIT_WIDTHS`'s 10.0 -- same reason,
+    different currency, see module docstring."""
     assert GROUP_PROXIMITY_GAP_RATIO == 3.0
     assert GROUP_REPORTING_MIN_MEMBERS == 2
+    assert GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS == 20.0
+    assert GROUP_REPORTING_UNKNOWN_SIZE_M == 7.0
