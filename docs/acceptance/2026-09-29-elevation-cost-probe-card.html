@@ -1,0 +1,429 @@
+<title>Elevation Cost Probe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+
+<style>
+/* Deliberately single-theme: this is read on a second monitor beside a night
+   cockpit, so the card commits to a dark instrument ground in every host. */
+:root {
+  --ground: #0D1012;
+  --panel: #151A1D;
+  --panel-2: #1C2326;
+  --rule: #2A3438;
+  --ink: #E9EEF0;
+  --ink-2: #94A3AA;
+  --ink-3: #6B7A81;
+  --amber: #E3A130;
+  --amber-dim: #3A2C11;
+  --teal: #43A596;
+  --teal-dim: #10302C;
+  --red: #C85A48;
+  --red-dim: #341813;
+}
+
+* { box-sizing: border-box; }
+
+html, body { background: var(--ground); }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16.5px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding-block: 40px 96px;
+  padding-left: 20px;
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+/* ---- masthead ---- */
+
+.eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+h1 {
+  font-family: "Barlow Condensed", ui-sans-serif, sans-serif;
+  font-weight: 700;
+  font-size: clamp(40px, 8vw, 62px);
+  line-height: .98;
+  letter-spacing: .004em;
+  margin: 10px 0 0;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.standfirst {
+  margin: 12px 0 0;
+  color: var(--ink-2);
+  font-size: 17.5px;
+  max-width: 62ch;
+}
+
+/* ---- notices ---- */
+
+.notice {
+  border-left: 3px solid var(--red);
+  background: var(--red-dim);
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notice.quiet {
+  border-left-color: var(--ink-3);
+  background: var(--panel);
+}
+.notice b {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 19px;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.notice p { margin: 0; color: var(--ink-2); font-size: 15.5px; max-width: 64ch; }
+
+/* ---- sections ---- */
+
+section { display: flex; flex-direction: column; gap: 14px; }
+
+h2 {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--rule);
+}
+
+p { margin: 0; max-width: 64ch; }
+.dim { color: var(--ink-2); }
+
+ol.steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; color: var(--ink-2); }
+ol.steps strong { color: var(--ink); }
+
+code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13.5px;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.unverified {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+/* ---- blocks ---- */
+
+.block {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--ink-3);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.block.prize {
+  border-left-color: var(--amber);
+  background: linear-gradient(180deg, var(--amber-dim) 0%, var(--panel) 46%);
+}
+
+.block-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.block.prize .tag { color: var(--amber); }
+.block h3 {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.line { display: flex; flex-direction: column; gap: 3px; }
+.line .lbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.line p { color: var(--ink-2); font-size: 15.5px; }
+.line.expect .lbl { color: var(--teal); }
+
+/* ---- record rail ---- */
+
+.record {
+  border-left: 2px solid var(--teal);
+  background: var(--teal-dim);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.record .lbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+.record ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.record li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
+.record label { color: var(--ink); font-size: 15.5px; cursor: pointer; }
+
+input[type=checkbox] {
+  appearance: none;
+  width: 17px; height: 17px;
+  margin: 4px 0 0;
+  border: 1.5px solid var(--teal);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  flex: none;
+}
+input[type=checkbox]:checked { background: var(--teal); }
+input[type=checkbox]:checked::after {
+  content: "";
+  display: block;
+  width: 5px; height: 9px;
+  margin: 1px 0 0 4.5px;
+  border: solid var(--ground);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type=checkbox]:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* ---- bring back ---- */
+
+.bring { display: flex; flex-direction: column; gap: 12px; }
+.bring ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 9px; }
+.bring li { color: var(--ink); }
+.bring li span { color: var(--ink-2); }
+.closing {
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+  color: var(--amber);
+  font-size: 16.5px;
+  max-width: 64ch;
+}
+
+footer {
+  color: var(--ink-3);
+  font-size: 13.5px;
+  border-top: 1px solid var(--rule);
+  padding-top: 16px;
+  max-width: 68ch;
+}
+footer code { font-size: 12.5px; }
+
+@media (max-width: 480px) {
+  h1 { font-size: 38px; }
+  .wrap { gap: 28px; }
+}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">
+      <span>Windows box · DCS Syria</span>
+      <span>2026-09-29</span>
+      <span>~5 minutes airborne</span>
+    </div>
+    <h1>Elevation Cost Probe</h1>
+    <p class="standfirst">One question the log can answer, and one only you can. The hook runs
+      itself ten seconds after mission start — your job is to notice whether the aircraft
+      stutters while it does.</p>
+  </header>
+
+  <div class="notice">
+    <b>Do not combine this with the group-reporting sortie</b>
+    <p>The probe may hitch the frame by design. That is exactly what would contaminate a judgement
+      about whether Petrovich's callouts feel right — and a cockpit full of callouts is exactly
+      what would mask a hitch. Two flights, not one.</p>
+  </div>
+
+  <div class="notice quiet">
+    <b>Nothing to check out</b>
+    <p>The Hook script is already on the Windows box, deployed by the Windows-box session. Its
+      source sits on <code>investigate/terrain-elevation-source</code>, unpushed — so nothing about
+      it is readable from the Mac repo, and every claim on this card about what it does is relayed
+      from that session rather than verified here.</p>
+  </div>
+
+  <section>
+    <h2>What this flight settles</h2>
+    <p class="dim">Bridge cost is already known for <code>getVelocity</code>: 0.5 ms fixed plus
+      ~2.6 µs per item, p99 of 8 ms at 568 units, read out of a sortie already sitting in
+      <code>dcs.log</code>. Two things that figure cannot tell us.</p>
+    <p class="dim"><strong style="color:var(--ink)">Does <code>land.getHeight</code> work through
+      the bridge at all?</strong> High confidence, never demonstrated — every prior elevation probe
+      ran offline through mission-editor triggers.</p>
+    <p class="dim"><strong style="color:var(--ink)">What does it cost, and does it block DCS's own
+      frame?</strong> A different engine call, and the 20 ms outliers in the existing data hint
+      that a payload might stall the renderer rather than merely taking time.</p>
+  </section>
+
+  <section>
+    <h2>Setup — DCS alone</h2>
+    <p class="dim">No collector, no body-layer, no brain, no audio adapter. The hook writes straight
+      to <code>dcs.log</code>.</p>
+    <ol class="steps">
+      <li>Start DCS on the <strong>Windows box</strong>.</li>
+      <li>Load <strong>any Syria mission</strong> — the probe's eight reference coordinates are
+        Syria-specific.</li>
+      <li>Let it run. The hook fires <strong>~10 s after mission start</strong> on its own.</li>
+    </ol>
+    <p class="unverified">Unverified — trigger timing, Syria dependency and output format are all as relayed</p>
+  </section>
+
+  <section>
+    <h2>Blocks</h2>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block A</span>
+        <h3>Did it return real heights?</h3>
+      </div>
+      <div class="line">
+        <span class="lbl">Do</span>
+        <p>Nothing. The hook checks <code>land.getHeight</code> against 8 coordinates whose true
+          heights are already on record.</p>
+      </div>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>Eight comparisons in the log, matching the recorded values. A mismatch is as interesting
+          as a match — it would mean the bridge reaches the function but returns a different surface
+          from the one the earlier probes read.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="a1" id="a1"><label for="a1">Nothing by hand — it is in the log.</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="block prize">
+      <div class="block-head">
+        <span class="tag">Block B · the prize</span>
+        <h3>Did the aircraft stutter?</h3>
+      </div>
+      <div class="line">
+        <span class="lbl">Do</span>
+        <p>Fly normally through the first minute, and pay attention at the ~10 s mark and the few
+          seconds after. The hook times batches of <strong>1, 100, 500 and 2601</strong> points
+          against a zero-work null call, 20 repeats each.</p>
+      </div>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>Extrapolating from <code>getVelocity</code>, a 2601-point batch is <strong>~7 ms</strong>
+          of bridge time — under one frame at 60 fps. If that holds, you should feel nothing at all.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record — in your own words</span>
+        <ul>
+          <li><input type="checkbox" data-k="b1" id="b1"><label for="b1">Did you feel a stutter, hitch or freeze? Roughly how long?</label></li>
+          <li><input type="checkbox" data-k="b2" id="b2"><label for="b2">Once, or several in a row? Several of growing length would point straight at batch size.</label></li>
+          <li><input type="checkbox" data-k="b3" id="b3"><label for="b3">Did anything look like a dropped frame rather than a pause?</label></li>
+        </ul>
+      </div>
+      <p class="dim"><strong style="color:var(--ink)">A clean &ldquo;felt nothing&rdquo; is a real
+        result</strong>, not a non-answer — it is what clears live probing to be designed around.</p>
+    </div>
+
+    <div class="block">
+      <div class="block-head">
+        <span class="tag">Block C · optional</span>
+        <h3>A second bridge data point</h3>
+      </div>
+      <div class="line">
+        <span class="lbl">Do</span>
+        <p>Stay airborne two or three minutes with whatever units the mission contains.</p>
+      </div>
+      <div class="line expect">
+        <span class="lbl">Expect</span>
+        <p>The existing telemetry hook keeps logging <code>bridge_call_ms</code> at 1 Hz throughout
+          — another sample of the same figure at a different unit count.</p>
+      </div>
+      <div class="record">
+        <span class="lbl">Record</span>
+        <ul>
+          <li><input type="checkbox" data-k="c1" id="c1"><label for="c1">Nothing by hand. Costs one extra lap.</label></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Not testable on this flight</h2>
+    <p class="dim"><strong style="color:var(--ink)">The <code>.surface5</code> file route.</strong>
+      Confirmed to hold elevation — 129 of 129 known heights fell inside the right tile's vertical
+      band, against 71 of 129 for a shuffled null control — but only the envelope decoded, so
+      per-node heights are still unread. Nothing about it is exercised here.</p>
+    <p class="dim"><strong style="color:var(--ink)">Grouping, the confirm band, the LOS
+      tolerance.</strong> Different flight, different card.</p>
+  </section>
+
+  <section class="bring">
+    <h2>Bring back</h2>
+    <ol>
+      <li><strong>dcs.log</strong> <span>— or just the probe's lines out of it. Everything numeric lives there.</span></li>
+      <li><strong>Did it stutter, and for how long?</strong> <span>The one thing the log cannot answer.</span></li>
+      <li><strong>Did the eight height comparisons match?</strong></li>
+    </ol>
+    <p class="closing">Anything that surprised you is worth more than anything on this list.</p>
+  </section>
+
+  <footer>
+    Source: <code>docs/acceptance/2026-09-29-elevation-cost-probe.md</code>. This card is a view —
+    results go into the roadmap and the research notes, not back into the card.
+  </footer>
+
+</div>
+
+<script>
+const KEY = 'elevation-cost-probe-2026-09-29';
+const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+document.querySelectorAll('input[type=checkbox][data-k]').forEach(b => {
+  if (saved[b.dataset.k]) b.checked = true;
+  b.addEventListener('change', () => {
+    const s = JSON.parse(localStorage.getItem(KEY) || '{}');
+    s[b.dataset.k] = b.checked;
+    localStorage.setItem(KEY, JSON.stringify(s));
+  });
+});
+</script>
