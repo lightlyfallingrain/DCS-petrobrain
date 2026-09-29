@@ -145,6 +145,53 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   2.0 ms), `isVisible` 10.6 us/ray. Scenery search is superlinear and is the one to watch: 126
   objects at 300 m costs 1 ms, 590 at 600 m costs **18 ms** — keep it at or below 300 m.
 
+  **FULLY CLOSED 2026-09-29 after ten flights — and the answer turned positive on a different
+  call.** The user asked whether *any* DCS call accounts for buildings and trees. Dumping the live
+  API surface (rather than answering from memory or the wiki) named
+  `world.VolumeType.SEGMENT`, and it works:
+
+  - **A SEGMENT volume search returns the buildings the sightline passes through**, with an
+    open-ground control returning zero — so it intersects rather than merely proximity-matches.
+  - **It is a true 3D test**: 6 hits at 2 m AGL, **0 at 15 m and above**, and 2 on a realistic
+    200 m-to-2 m slant. Flying *over* a town is not blocked; looking *down through* it is.
+  - **8.7 us per sightline** — *cheaper* than `land.isVisible`'s 10.6 us, which sees only terrain.
+    200 candidates with full building occlusion cost 1.9 ms, ~1% duty at 5 Hz.
+  - **No type-name → size table needed** — DCS does the intersection.
+
+  So `land.isVisible` is a dead end (terrain-only *and* dearer), and **trees have no DCS route at
+  all** — they are not scenery objects, so no volume search will ever find them. OSM landcover is
+  not a fallback for trees, it is the only source. Full results:
+  `aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md` Findings 15-21.
+
+  What remains is build work, not research — see `X-B28`.
+
+- [ ] **X-B28 — Build the occluder layer: buildings from DCS, trees from OSM.** Falls out of X-B4,
+  2026-09-29, and is build work with the research already done rather than a question.
+
+  Today `query/line_of_sight.py` samples bare terrain and nothing else, so Petrovich sees through
+  towns and forests. Three sources are now in hand and each has a measured cost:
+
+  | occluder | source | cost |
+  |---|---|---|
+  | terrain | today's elevation grid, or `land.profile` (one call vs 20+ `getHeight`) | 0.9 us/point |
+  | buildings | `world.searchObjects` + `VolumeType.SEGMENT`, true 3D, no size table | 8.7 us/sightline |
+  | trees | OSM `landcover` polygons — world-model already holds 44,811 | already local |
+
+  **The architectural question this raises, and it is not small:** buildings are only reachable
+  from the *Windows* box through the mission-scripting bridge, while `line_of_sight_clear` runs
+  in-process on the Mac inside body-layer's 5 Hz perception loop. A per-candidate LOS check would
+  have to cross the LAN. That collides with X-B27's topology decision and with
+  `plans/pb1-perception-logger/plan.md` decision 3 ("same box always"). **Resolve the topology
+  before designing the call**, not after — the measured 8.7 us is a loopback figure and says
+  nothing about a LAN round trip per candidate per poll.
+
+  Cheapest first slice, if one is wanted before the topology moves: **trees only**, entirely
+  Mac-side, since the OSM polygons are already in the store and need no bridge at all. That would
+  close the forest half of the missed-AAA class of defect without touching the seam.
+
+  **Do not start before `X-B26`'s SRTM-resolution question is settled** — both change
+  `line_of_sight_clear`, and doing them in either order separately means touching it twice.
+
 - [x] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** Done 2026-09-27. All three roles ran in worktrees, advisory-only as this item required;
   reports at `reviews/claude-setup-{review,performance,security}.md`. All HIGH/MEDIUM findings fixed
