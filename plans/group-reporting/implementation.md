@@ -292,3 +292,72 @@ implemented instead of the design's own settled positions:**
   point for the pair/couple wording**, exactly as the coordinator predicted — no parallel gate was
   needed, only a `len(member_facts) == 2` + homogeneity check layered onto the same boolean that
   already chose between "Group"/composition-clause.
+
+---
+
+### Fix: sparse-scene cohesion backstop (two commits)
+
+Fixes the defect Stage 4 discovered and deliberately left undecided (above): at exactly two
+tracked contacts, `belief.groups._cluster_contacts`'s relative-gap cohesion is mathematically
+tautological — each contact is the other's sole candidate nearest neighbour, so the local median
+always equals their own mutual separation, and the ratio threshold is always some multiple of the
+very distance being tested against it. User direction (given three options: always-on absolute
+backstop, backstop only when the scene is too sparse for a meaningful median, or raise the floor
+back to 3): chose the second, with a stated-assumption backstop of 300.0 m (convoy/outpost scale,
+off the user's own twelve-units-over-~200m calibration group).
+
+**Mechanism (commit `9ecedaf`, mechanism-first, behaviour-preserving):** added
+`GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` and `_MIN_CONTACTS_FOR_MEANINGFUL_MEDIAN` (3) to
+`belief/groups.py`; `_cluster_contacts` now caps `threshold` at the backstop when
+`len(contacts) < 3`. Shipped first at `math.inf` — `min(threshold, math.inf) == threshold` always
+— and verified by full-suite parity (1347 passed / 4 xfailed, identical to baseline) before the
+real number went in.
+
+**Calibration (commit `b0f9518`):** set the constant to 300.0 m and updated the module/function
+docstrings with the reasoning above. `GROUP_PROXIMITY_GAP_RATIO`, `GROUP_REPORTING_MIN_MEMBERS`,
+and the relative rule itself are untouched — the backstop only bounds the n=2 case where the
+relative rule's input is degenerate, and `test_sparse_desert_group_can_span_a_wide_gap` (n=3, its
+own 800 m span exceeding the 300 m backstop and still cohering) is direct proof the fix does not
+leak into scenes with 3+ tracked contacts.
+
+**Why the predicate is "total tracked contacts < 3", not "cluster size == 2":** the median is
+computed once per `reconcile()` call over the *whole* tracked set, not per candidate cluster. The
+tautology is specifically that at exactly two points in that whole set, neither has a third point
+to draw a genuinely different nearest-neighbour distance from. At three or more tracked contacts
+(even if a candidate pair within them is being tested for cohesion), at least one point's nearest-
+neighbour distance comes from a different pair, so the median is not self-referential — this is
+exactly the intended figure-ground behaviour, not something the fix should touch.
+
+**Tests added** (`tests/test_groups.py`): `test_two_distant_contacts_do_not_form_a_group` (500 km,
+the distance the defect was confirmed at, in an otherwise-empty store — no group) and
+`test_two_close_contacts_within_the_backstop_still_form_a_group` (250 m — still groups). Existing
+`test_two_tightly_spaced_contacts_form_a_group` (10 m) continues to pass unchanged.
+
+**Workaround audit** (the two `store._groups._groups = {}` sites the dispatch asked about, plus a
+third that was never in question):
+
+- `test_crew_console.py::test_report_clock_3_finds_the_matching_contact` — **workaround removed.**
+  Its two contacts are ~1.4 km apart (verified directly: `Contact.position` is (1000, 1000) and
+  (2000, 0)), past the 300 m backstop, so they no longer cohere and the test is naturally isolated
+  to clock-scoping again.
+- `test_callouts.py::test_vanished_contacts_candidate_is_skipped_and_the_next_is_taken` —
+  **workaround kept, and this is a real finding, not an oversight.** I initially removed it on the
+  same reasoning (dwp_x/dwp_z 50 km apart), and the suite caught it: `describe_contact` still spoke
+  `"A BMP-2 and a T-72."` instead of the expected `"T-72."` I instrumented the actual fixture
+  directly and found `Contact.position` for both contacts is `(1000, 0)` — **identical** — because
+  `_observation`'s `dwp_x`/`dwp_z` only drive spatial-gate matching (per that helper's own
+  docstring); `Contact.position` is instead derived from `bearing_deg`/`range_m` projected off
+  `ownship_at_observation`, which both observations in this fixture share (bearing 0, range
+  1000 m, ownship at the origin, `ownship_x`/`ownship_z` left at their defaults). So this pair is
+  genuinely co-located and legitimately coheres — the backstop is not in play, and clearing group
+  membership is still the right isolation for this test's own vanished-candidate scenario. Comment
+  updated to say so, so a future reader doesn't repeat my first (wrong) instinct.
+- `test_crew_console.py::test_report_all_groups_and_truncates_multiple_contacts` — **not touched**,
+  and correctly so: four contacts spaced 1 km apart (3 km total span), `len(contacts) == 4`, so the
+  backstop never applies; they cohere by the legitimate sparse-desert rule, same as before the fix.
+
+### Checks (body-layer/ — the only subproject touched)
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (strict): pass
+- `pytest tests -q`: 1349 passed, 4 xfailed (baseline 1347/4 + 2 new tests)
