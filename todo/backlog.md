@@ -626,3 +626,26 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   The narrower fix, if it is ever wanted, is a `CONFIRM_WINDOW_S_CANCEL` mirroring the existing
   `ACT_FLOOR_CANCEL` split — the mechanism is already there and precedented, which is part of why
   accepting now costs little.
+
+- [ ] **X-B26 — Can DCS terrain elevation be read from its own files during flight, rather than
+  probed?** User question, 2026-09-29: *"can we sample directly from DCS terrain grid files
+  dynamically during flight, or do we need to live probe DCS."* This gates the whole live-terrain
+  sampling design (`plans/live-terrain-sampling/design-input.md`) and the two routes are materially
+  different builds — a file read has no frame-rate risk and no bridge-throughput ceiling, while live
+  probing has both and its throughput is still unmeasured. The file route also matches this
+  project's standing preference for DCS-native extraction over probing. **Investigate before
+  committing to a probing design, not after.** Investigator pass; the DCS install is on the Windows
+  box, and `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` inventories it.
+
+- [ ] **X-B27 — Measure the line-of-sight call rate per poll before considering a world-model
+  service split.** The user raised making world-model its own service on the Windows box (where the
+  DCS terrain files are), with an HTTP API to body-layer on the Mac — motivated, and stronger still
+  if X-B26 says terrain files are readable. But body-layer ↔ world-model is the **sole sanctioned
+  in-process cross-subproject import** (root `CLAUDE.md`), narrowed to "same box always" by
+  `plans/pb1-perception-logger/plan.md` decision 3, and it sits on a hot path:
+  `perception/visibility.py:769` calls `line_of_sight_clear` per candidate, per poll, at 5 Hz. A
+  dense scene is plausibly hundreds of LOS checks per second — free over loopback, not free over
+  the LAN. **The call rate decides the design** (batch per poll, move the gate to the Windows side,
+  or keep it in-process), so measure it before moving code. The detection trace already records
+  every `check_visibility` call, so this is a reduction over data the project already collects, not
+  new instrumentation.
