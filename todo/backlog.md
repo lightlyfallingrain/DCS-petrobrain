@@ -692,3 +692,34 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   **Note for whoever picks this up: the measurement above is only needed for the *service* route.**
   The both-on-Windows route does not need it at all, because the LOS call never leaves the process.
   On that route this item becomes a deployment/packaging task, not a performance investigation.
+
+- [ ] **X-B28 — LOS must read the probe grid; SRTM stays coarse as the floor. DECIDED 2026-09-29.**
+  User, after the Windows-box session relayed its terrain findings: *"LOS calculations **must** use the
+  probed refined grid, that is the whole point. Flight over unprobed terrain would automatically probe
+  it. Therefore finer grid would always exist. Fine grid SRTM cost/value is low."*
+
+  **This rejects the 100 m SRTM rebuild** the Windows session recommended. The reasoning is sound: a
+  finer pre-built grid pays to compute something the probe supersedes the moment it matters. SRTM
+  stays at 1000 m as the always-there floor.
+
+  **The prerequisite, and it is the whole point of the item:** `query/line_of_sight.py` reads the
+  **base grid only** — `sample_grid(conn, "elevation", x, z)` at line 142, with no schema argument, so
+  it never touches the probe store. `perception/geometry.py:open_world_model` opens the region DB
+  read-only with no ATTACH either. Verified independently on the Mac, and the same gap was found by
+  the missed-AAA debugger. `query/describe.py` already does the layering correctly
+  (`sample_probe_grid(..., schema="probe")` first, `sample_grid` fallback), so this is a small change
+  — **but until it is made, no amount of probing improves line of sight at all.**
+
+  Two gaps that survive the decision, neither fatal:
+
+  - **The first-look window.** Probing happens on arrival, but LOS is asked its first questions
+    before those samples land, so genuinely new ground falls back to 1000 m SRTM exactly when the
+    aircraft is newest to it. `docs/concept/PETROBRAIN_RUNTIME.md`'s look-ahead ring exists for this;
+    it means "a finer grid always exists" is true a few seconds after it is needed, not before.
+  - **The Mission Interpreter has no probe data by definition** — it enriches waypoints, groups and
+    trigger zones offline, across the whole map, before anything has been flown. That keeps SRTM
+    alive whatever happens to the in-flight grid, and coarse is adequate there: it is waypoint
+    context, not line of sight.
+
+  Sequence, when work resumes: wire LOS probe-first (Mac side, per X-B27), then build probing. Not
+  the reverse — the probe store filling up changes nothing until LOS reads it.
