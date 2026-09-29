@@ -723,3 +723,56 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
   Sequence, when work resumes: wire LOS probe-first (Mac side, per X-B27), then build probing. Not
   the reverse — the probe store filling up changes nothing until LOS reads it.
+
+- [ ] **X-B29 — Compute line of sight in the aircraft layer, batched, next to DCS.** User idea,
+  2026-09-29: *"could aircraft layer fire LOS calc for every known unit inside player bubble and
+  within the 130 degree visibility cone? What would that cost? Maybe not every tick?"*
+
+  **This inverts the seam and removes the reason the LAN was a problem.** Instead of body-layer
+  asking per candidate (N round trips per poll), aircraft-layer computes LOS for every relevant
+  unit in **one batched bridge call** and publishes the result the way it already publishes
+  telemetry, world objects and indication text. Body-layer polls one response. Existing pattern,
+  no new seam.
+
+  Cost, from the Windows session's measured figures (0.5 ms fixed bridge overhead, 8.7 µs per
+  `world.searchObjects` SEGMENT sightline, `aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md`
+  finding 21):
+
+  | units in bubble + cone | one batched sweep |
+  |---|---|
+  | 50 | 0.9 ms |
+  | 200 | 2.2 ms |
+  | 500 | 4.9 ms |
+
+  At 1 Hz that is 0.2-0.5% duty, and the mission bridge already runs at 1 Hz, so it rides an
+  existing cadence. It does not need every tick: at 83 m/s LOS state changes over seconds.
+
+  **Density was already in the measurement** (user's own point: DCS missions do not carry hundreds
+  of *units* in cities, though they carry thousands of *buildings*). Finding 21's rungs were flown
+  over town/forest/mountains with 28% of 2 km rays clipping a building, and the two rungs agree to
+  0.1 µs. The superlinear result that prompted the worry was a *sphere* search, a different volume.
+
+  **The consequence that makes this more than an optimisation: it could remove the probe grid from
+  the LOS path entirely.** LOS computed against DCS's own terrain and own buildings has no SRTM
+  error to correct, needs no probe accumulation, and dissolves the missed-AAA defect class at its
+  source rather than mitigating it with a 12 m tolerance. That is not omniscience -- line of sight
+  is a physical fact about the world, not knowledge, and belief about *position* stays as fuzzy as
+  it is now.
+
+  Three constraints any design must keep:
+
+  - **Tests must run with no DCS and no collector** (`plans/body-layer/plan.md` §2, a hard
+    requirement). So world-model LOS stays as the offline and test path; this becomes the *live*
+    path, not a replacement.
+  - **The Mission Interpreter still needs the elevation grid** for offline enrichment, and
+    ridges/valleys are derived from it.
+  - Aircraft-layer so far reports facts rather than computing gates. HelperAI detection text is the
+    precedent that this is not a new kind of thing, but the boundary shift should be argued, not
+    assumed.
+
+- [ ] **X-B30 — Building occlusion is NOT gated on the Windows move.** User direction, 2026-09-29,
+  correcting an earlier read of mine: *"Do not gate buildings on the Windows move. While that may be
+  the eventual setup, development is easier on my mac. The LAN delay penalty is acceptable during
+  development."* So the buildings half of the occluder work proceeds Mac-side now, paying the LAN
+  round trip, rather than waiting on X-B27's eventual topology. X-B29 above may make the point moot
+  by batching the call anyway.
