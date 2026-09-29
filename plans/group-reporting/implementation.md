@@ -361,3 +361,120 @@ third that was never in question):
 - `ruff check src tests`: pass
 - `mypy src` (strict): pass
 - `pytest tests -q`: 1349 passed, 4 xfailed (baseline 1347/4 + 2 new tests)
+
+---
+
+## 2026-09-29: unit-width cohesion backstop (superseding the flat-metre backstop above)
+
+Base: `f19d719` (tip of `feature/group-reporting` at dispatch), confirmed via `git rev-parse HEAD`
+and the presence of `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` in `body-layer/src/belief/groups.py`
+before starting.
+
+**What changed and why.** The flat-metre backstop above (300.0 m, gated to `< 3` tracked contacts)
+had two problems review.md named: a flat metre figure has no notion of what the units are (300 m
+means something different for infantry than an S-300 component), and gating it to n<3 left the
+relative-only rule genuinely unbounded at n>=3 — confirmed by review.md against this branch's own
+`test_2c_transcript_fixture_renders_four_lines_not_seven` and
+`test_report_all_groups_and_truncates_multiple_contacts`, both of which needed a
+`store._groups._groups = {}` workaround precisely because their own fixtures legitimately merged
+at n>=3.
+
+Replaced it with `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` (20.0) — a per-pair bound in unit
+widths of the pair's own mean believed physical size (`perception.object_model.size_m`, read via
+each contact's `last_class_raw`, no omniscience), applied to *every* pair at *every* tracked-contact
+count, never just n<3. Deliberately a separate constant from `perception.group_salience.
+GROUP_COHESION_GAP_UNIT_WIDTHS` (10.0) — that one is angular (apparent-size mass at range, at the
+observer); this one is world-space (already-resolved `Contact`s' fused positions). The relative
+rule stays primary and can still be tighter in a dense scene; the bound only ever narrows it
+(`min(relative, backstop)` per pair), never widens it.
+
+**A new helper, `_representative_size_m`, and a new fallback constant.** `object_model.profile_for`
+is keyword-matching against real type strings (`"t-72"`, `"bmp"`, ...); it cannot resolve a
+CLASS-level value that is itself an `OP_*` bucket string (e.g. `"OP_ARMORED"` contains no matching
+keyword) or a PRESENCE/UNKNOWN-level placeholder (`"OP_GROUPSOMETHING"`). Both cases are detected
+the same way `belief.classification._op_class_of`/`belief.speech._identification_lead` already
+detect "no real match" — `profile.op_class == object_model.DEFAULT_OP_CLASS` — and both fall back to
+`GROUP_REPORTING_UNKNOWN_SIZE_M` (7.0 m), the reference vehicle size `perception.visibility`'s
+angular-radius tiers are themselves calibrated against, explicitly *not* `object_model.
+DEFAULT_SIZE_M` (5.0 m, a different purpose — ED's "unclassified" bucket for the angular-radius
+range-threshold numerator). One coincidental wrinkle worth recording: some `OP_*` bucket strings
+happen to keyword-match anyway (`"OP_TRUCK"`.lower() contains the substring `"truck"`), so
+`_contact`'s test fixture (which uses `"OP_TRUCK"`) gets a real 6.0 m via the ordinary keyword path,
+not the 7.0 m fallback — verified directly (`object_model.profile_for("OP_TRUCK")` →
+`size_m=6.0, op_class="OP_TRUCK"`), not assumed.
+
+**Mechanism and calibration landed as two separate commits**, mirroring the flat-metre backstop's
+own two-commit precedent (`9ecedaf`/`b0f9518`): the first sets
+`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS = math.inf` (a placeholder that makes `min(relative, inf)`
+always `relative` — no bound at any n), restructures `_cluster_contacts` to the new per-pair shape,
+and deletes the old flat constant and its n<3 gating; the second sets the real 20.0 value. Full
+behaviour preservation across the split was **not** achievable this time, unlike the original
+precedent: applying the bound to every n (not just n<3) is itself the whole point of this change,
+so the placeholder commit is a genuine, if temporary, regression of the already-shipped n=2
+protection (two of `test_groups.py`'s existing tests and one `test_crew_console.py` comment/
+workaround had to flex for that one commit, then flex back) — flagging this rather than silently
+claiming a "no behaviour change" the numbers don't support. Both commits' own full suites pass
+(1347/4 at the placeholder, 1349/4 at the calibrated value).
+
+**Test outcomes, checked against real instrumented behaviour, not guessed:**
+
+- `test_sparse_desert_group_can_span_a_wide_gap` — the plan's own dispatch anticipated this: at
+  20 unit widths (140 m for a 7 m vehicle, or 120 m for the `OP_TRUCK` fixture this test actually
+  uses) the old 400 m/800 m span no longer coheres. Recalibrated to 110 m gaps (span 220 m) — under
+  the 120 m backstop, still clearly wider than the tight-cluster test's 10 m, keeping the
+  figure-ground property (a sparse scene permits a wider threshold than a dense one) demonstrable
+  under the bound rather than unboundedly.
+- `test_2c_transcript_fixture_renders_four_lines_not_seven` — review.md's other pinned n>=3 example
+  (five objects, three infantry/a BTR-70/a truck, all within a few hundred metres, nothing else
+  tracked) used to merge into one composite `Group` regardless of type; that is exactly the
+  "Danger, ZSU-23-4 ... 3 o'clock, 1 kilometre"-from-the-wrong-place risk review.md warned about.
+  Instrumented the real per-tick output (`scheduler.tick`'s output, `store.contacts`, `store.
+  groups`) rather than guessing the new expected strings: only the two literal same-position pairs
+  (`OBS_1`/`OBS_3` and `OBS_5`/`OBS_6`, 0 m apart) still cohere; the third infantry detection
+  (~260 m away, past the 36 m infantry backstop) stays ungrouped; the BTR-70 and truck stay
+  ungrouped. Still four lines, through a different mix (one individual infantry report, the BTR-70's
+  own identification, the truck's own identification, one infantry-pair disclosure) — the pair
+  formed by `OBS_1`/`OBS_3` never wins a speaking slot inside this fixture's own 18 s polled window
+  (traced tick-by-tick: it consistently loses the same-tick priority contest to a fresher-arriving
+  candidate, and no later tick offers it an otherwise-empty slot before the window ends) — a
+  pre-existing scheduler contention property, not something this change introduces or needed to
+  fix.
+- `test_report_clock_3_finds_the_matching_contact` / `test_report_all_groups_and_truncates_
+  multiple_contacts` — both `store._groups._groups = {}` workarounds review.md flagged as needing a
+  fresh look are now genuinely unnecessary: their contacts are 7 m vehicles ~1.4 km / ~1 km apart,
+  past the new 140 m backstop, so they no longer cohere on their own. Removed.
+- `test_vanished_contacts_candidate_is_skipped_and_the_next_is_taken` — workaround **kept**, per the
+  flat-metre backstop's own prior investigation of this exact fixture (both contacts fold to the
+  same fused position, 0 m apart — a real cohering pair, not the backstop's concern). Comment
+  updated to the new constant name only.
+
+### Checks (body-layer/ — the only subproject touched)
+- `ruff format --check src tests`: pass
+- `ruff check src tests`: pass
+- `mypy src` (strict, `cd body-layer && .venv/bin/python -m mypy src` via the main checkout's venv
+  — this worktree has none): pass, 53 source files, no issues
+- `pytest tests -q` (`cd body-layer && PYTHONPATH=src:../world-model/src <main-checkout-venv>/bin/
+  python -m pytest tests -q`): 1349 passed, 4 xfailed at both the mechanism commit (transiently,
+  after re-adjusting 3 tests for the placeholder) and the final calibrated commit — matching
+  `f19d719`'s own 1349/4 baseline exactly (net zero: two backstop tests removed transiently by the
+  mechanism commit, reinstated recalibrated by the calibration commit).
+
+### Notable Discoveries
+- **The angular vs. world-space unit-width currencies read identically at a glance and must not
+  be conflated** — `perception.group_salience.GROUP_COHESION_GAP_UNIT_WIDTHS` (10.0, angular,
+  apparent-size mass at range) and `belief.groups.GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` (20.0,
+  world-space, already-resolved `Contact` positions) share a name pattern and a "unit widths"
+  vocabulary by deliberate design (borrowing the *currency*, not the constant), which is exactly
+  the kind of pair a future reader could accidentally unify. Both modules' docstrings say so
+  explicitly and neither imports the other's constant.
+- **`profile_for`'s keyword matching against `OP_*` bucket strings is inconsistent by accident, not
+  design** — some class buckets happen to contain a matching keyword as a substring (`"OP_TRUCK"` →
+  `"truck"`) and get a real size for free; others do not (`"OP_ARMORED"` matches nothing) and fall
+  to the fallback. This module's fallback (`GROUP_REPORTING_UNKNOWN_SIZE_M`) absorbs the
+  inconsistency safely (both paths land on a defensible size), but a future reader should not
+  assume every `OP_*` string either matches or fails to match `profile_for` — it depends on the
+  specific bucket name's spelling, which is incidental.
+- **Full behaviour preservation across the mechanism/calibration split was not achievable here**,
+  unlike the flat-metre backstop's own precedent — see "Mechanism and calibration landed as two
+  separate commits" above. Recorded so a future two-commit split doesn't assume the technique
+  always yields a zero-diff first commit; sometimes the scope change itself is the point.

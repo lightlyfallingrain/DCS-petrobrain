@@ -116,3 +116,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Group-reporting Stages 1-3](project_group_reporting_stage1_3.md) — plan named collision `render_group_report`; exact per-class counts.
 - [Don't improvise scope for plan framing](feedback_dont_improvise_scope_to_satisfy_plan_framing.md) — flag the tension, don't wire into next stage's territory.
 - [Group-reporting Stage 4](project_group_reporting_stage4.md) — mid-task course corrections invert dispatch; sparse-scene cohesion always groups any 2 contacts.
+- [Group-reporting unit-width backstop](project_group_reporting_unit_width_backstop.md) — borrow currency not constant; mechanism/calibration split isn't always zero-diff; profile_for/OP_* quirk.
