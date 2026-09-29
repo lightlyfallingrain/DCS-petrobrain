@@ -352,6 +352,48 @@ user's question, and it costs nothing.**
   1 km back, down to a point past the buildings). Hits falling to zero with altitude is a 3D test;
   hits staying flat is a footprint.
 
+**19. The SEGMENT search is a TRUE 3D intersection test. Finding 16 is usable.**
+
+- **evidence: reproduced-locally** — flight 9, `dcs.log` 14:49:53. Same segment, same buildings
+  (`SYRIA_BLOCK_BUILDING_04`, ground 110.9 m), only the altitude varied.
+
+  | segment altitude | scenery hits |
+  |---|---|
+  | 2 m AGL | **6** |
+  | 15 m | **0** |
+  | 50 m | 0 |
+  | 200 m | 0 |
+  | 500 m | 0 |
+  | **realistic slant** — 200 m up, 1 km back, down to 2 m past the buildings | **2** |
+
+- **Flying *over* a town is not blocked; looking *down through* it is.** That is exactly the
+  behaviour required, and it rules out the 2D-footprint failure mode that would have made the
+  mechanism worse than useless for a helicopter.
+- Hits vanish by **15 m**, so these `SYRIA_*` buildings are under 15 m — consistent, and it means
+  the test is sensitive to real geometry rather than to a fixed bounding height.
+- **So the route to building-aware LOS is settled**: `world.searchObjects` with
+  `world.VolumeType.SEGMENT` along the sightline, no size table, correct in 3D.
+
+**20. The per-search cost figure from that flight is WRONG, and by the same mistake as twice
+before.**
+
+- The flight logged `segment_cost_1: ms=1.00 -> ~1000 us per segment search`, then refused the
+  next rung on it. **Wrong by one to two orders of magnitude**, and flight 8 had already
+  contradicted it — a standalone SEGMENT search measured **0.00 ms**.
+- Two compounding errors, both mine:
+  1. **Setup inside the measurement.** The cost payload reused a preamble that runs a 200 m SPHERE
+     search to locate a building. At N=1 that sphere search *is* essentially the entire cost, and
+     dividing by one segment charged all of it to the segment.
+  2. **One sample at the clock's resolution.** 1 ms granularity means a single "1.00 ms" reading
+     is "somewhere in 0–2 ms" — and it was then multiplied by 20 to refuse the next rung.
+- **This is the third instance of one shape**: fixed overhead charged to per-item cost, off a
+  quantisation-limited sample. It produced the bogus 400 µs and 1600 µs figures earlier (Finding
+  5), where it shut down two ladders and the entire X-B4 sweep; then a cold estimate gating warm
+  work; now this. Noticing it each time has not prevented the next one. **The defence has to be
+  structural**: no setup inside a cost payload, an explicit N=0 baseline measured identically and
+  subtracted, and trimmed repeats with the peak still logged.
+- **Resolves with:** `petrobrain-segment-cost-probe-hook.lua` (deployed), which does all three.
+
 ### Reproducible Test
 
 Re-fly with the fixed probe (deployed). Extract with:
