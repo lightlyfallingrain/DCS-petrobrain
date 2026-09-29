@@ -308,6 +308,50 @@ per-point cost.**
   `searchObjects` have never returned one — so a SEGMENT search cannot find them. If buildings
   work this way, trees stay OSM landcover's job.
 
+**16. A SEGMENT volume search DOES return buildings on the sightline. This is the answer to the
+user's question, and it costs nothing.**
+
+- **evidence: reproduced-locally, with a discriminating control** — flight 8, `dcs.log` 14:41:08.
+
+  | 120 m segment, 2 m AGL | scenery hits |
+  |---|---|
+  | through a building (position taken from `searchObjects` itself) | **3** — `SYRIA_BLOCK_BUILDING_05`, `_06`, `_03` |
+  | open ground, 3 km away, same length | **0** |
+  | `land.isVisible` on the identical endpoints, same payload | `true` (clear) |
+
+  Cost: **0.00 ms**.
+- The open-ground control is what makes this a result rather than a coincidence: it rules out
+  "the search returns everything near the line" and leaves "it returns what the line intersects".
+- **So the answer to "is there any DCS call that accounts for buildings" is yes** —
+  `world.searchObjects` with `world.VolumeType.SEGMENT`. And it needs **no type-name → size
+  table**, which Finding 11 had identified as the blocker.
+- **Trees are still not covered** and cannot be by this route: they are not scenery objects.
+
+**17. Three other things the same flight settled, free.**
+
+- **`land.profile` works**: a 1 km line returned **14 points at ~77 m spacing** carrying real
+  terrain y (117.5 → 148.6 m), in **1 ms**. One call in place of the 20+ `getHeight` calls
+  `query/line_of_sight.py` currently issues per sightline. Note it did **not** start at the
+  requested `from` — first point was 160 m along — so the sampling rule needs establishing before
+  use.
+- **Fog is readable through the bridge**: `world.weather.getFogThickness()` = **320**,
+  `getFogVisibilityDistance()` = **2300**. That is the first half of X-B4's weather question
+  answered — meteorological visibility is a ceiling on detection for every optic, and it is now
+  reachable. (Setters exist too; we have no business calling them.)
+- **`Controller.Detection`** is a bitmask: `VISUAL=1 OPTIC=2 RADAR=4 IRST=8 RWR=16 DLINK=32`.
+
+**18. The question that decides whether Finding 16 is usable: 3D or 2D?**
+
+- **Not yet answered, and it is not a detail.** Every segment in Finding 16 was at **2 m AGL**, so
+  the result is equally consistent with a true 3D intersection *and* with a 2D footprint test that
+  ignores `y` altogether. If it is the latter, a Mi-24P at 200 m flying **over** a town would read
+  as blocked by every building beneath it — worse than useless, and wrong in precisely the
+  situation the aircraft spends the sortie in.
+- **Resolves with:** `petrobrain-segment-altitude-probe-hook.lua` (deployed) — the same segment
+  through the same buildings at 2/15/50/200/500 m, plus the realistic slanted geometry (200 m up,
+  1 km back, down to a point past the buildings). Hits falling to zero with altitude is a 3D test;
+  hits staying flat is a footprint.
+
 ### Reproducible Test
 
 Re-fly with the fixed probe (deployed). Extract with:
