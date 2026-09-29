@@ -214,6 +214,13 @@ local COLD_BUDGET_MS = 40.0
 local BATCH_SIZES = { 1, 10, 50, 200, 500, 2601 }
 local ISVISIBLE_BATCH_SIZES = { 1, 10, 50, 200 }
 
+--: Confirmation-only rungs. The per-item cost is settled -- 0.9 us/point
+--: and 10 us/ray, measured consistently on two flights -- so re-walking a
+--: six-rung ladder from N=1 buys nothing and costs 15 s of the user's
+--: sortie. Just re-check the top.
+local CONFIRM_BATCH_SIZES = { 2601 }
+local CONFIRM_ISVISIBLE_SIZES = { 200 }
+
 --: X-B4 occlusion sweep. 40 pairs per area separates a "buildings block"
 --: rate from a "they do not" rate (0/40 vs 15/40 is unmistakable);
 --: 30 samples per pair keeps terrain-sampling error low enough that the
@@ -625,9 +632,14 @@ local fixedMs = 0.5
 --: all of which are warm operations. That is the same mistake as the
 --: 2026-09-29 outlier bug wearing a different hat: one regime's number
 --: deciding another regime's budget.
-local getHeightWarmPerItemMs = nil
+--: Seeded from flights 4 and 5 (0.87-0.96 us/point measured twice) rather
+--: than left nil, because the decisive steps now run BEFORE the ladders
+--: that would otherwise measure it. A seed that is wrong by 2x still sizes
+--: a chunk safely; having no estimate at all would force the occlusion
+--: sweep down to 1 pair per call and cost another sortie.
+local getHeightWarmPerItemMs = 0.001
 local getHeightColdPerItemMs = nil
-local isVisiblePerItemMs = nil
+local isVisiblePerItemMs = 0.010
 
 --: The current measurement group. `codeFor(i)` yields the i-th call's
 --: code; `onDone(samples, lastResult)` summarises and queues what is next.
@@ -980,14 +992,20 @@ local function step()
 end
 
 local function buildPlan()
+    --: ORDER IS DELIBERATE, and it changed on 2026-09-29 after flight 5.
+    --:
+    --: That flight was stopped ~40 s in -- a perfectly reasonable length of
+    --: time to sit still -- and the probe was still grinding through cost
+    --: ladders whose answer was already settled twice over (0.9 us/point,
+    --: 10 us/ray). The one genuinely open question, `through_buildings`,
+    --: was queued behind them and never ran. Five sorties in, that is a
+    --: waste of the user's flying, not a scheduling detail.
+    --:
+    --: So: unanswered questions first, cheapest-decisive first of all, and
+    --: the re-measurements last where losing them costs nothing. Anything
+    --: that needs a long sit must be the thing that is already known.
     plan = {
         function()
-            --: Warm-up, discarded. On the 2026-09-29 run the very first
-            --: bridge call (`known_points`, 16 engine calls) took 19 ms
-            --: while everything after it sat at 0-1 ms -- one-time state
-            --: or JIT setup, not per-call cost. Paying that on a throwaway
-            --: call keeps it out of the measurements and out of
-            --: `known_points`, which is the one step nothing can gate.
             beginGroup("warmup", function()
                 return NULL_CODE
             end, 1, function(samples, _)
@@ -995,13 +1013,7 @@ local function buildPlan()
                 advancePlan()
             end)
         end,
-
         function()
-            --: Resolve the probe centre to the player's aircraft before
-            --: anything that uses it. The user prepares the flight to sit
-            --: near a town, forest and mountains, so this is where the
-            --: tree/building question is actually answerable -- and he can
-            --: check the logged position against what he set up.
             beginGroup("locate_ownship", function()
                 return LOCATE_CODE
             end, 1, function(samples, result)
@@ -1011,8 +1023,7 @@ local function buildPlan()
                     probeCentreSource = "ownship:" .. tostring(unitName)
                     logi(
                         string.format(
-                            "locate_ownship: ms=%.2f centre=%.1f,%.1f source=%s"
-                                .. " -- rich-terrain steps will probe a 3 km box here",
+                            "locate_ownship: ms=%.2f centre=%.1f,%.1f source=%s",
                             samples[1],
                             probeX,
                             probeZ,
@@ -1034,6 +1045,48 @@ local function buildPlan()
                 advancePlan()
             end)
         end,
+        --: THE open question: one call, and it settles X-B4.
+        function()
+            runSingle("through_buildings", throughBuildingsCode(12))
+        end,
+        --: Wider net, in case 200 m held too few buildings to be decisive.
+        function()
+            runSingle("through_buildings_wide", throughBuildingsCode(40))
+        end,
+        function()
+            runOcclusion("urban")
+        end,
+        function()
+            runOcclusion("desert")
+        end,
+        function()
+            runScenery(1, nil, nil)
+        end,
+        function()
+            runSingle("getIP", getIPCode())
+        end,
+        function()
+            beginGroup("known_points", function(i)
+                return string.format(KNOWN_POINT_TEMPLATE, i, i)
+            end, 8, function(samples, _)
+                table.sort(samples)
+                for idx, raw in ipairs(group.results) do
+                    logi(string.format("known_point[%d]: %s", idx, tostring(raw)))
+                end
+                logi(
+                    string.format(
+                        "known_points: 8 calls, med_ms=%.2f PEAK_ms=%.2f%s",
+                        median(samples),
+                        samples[#samples],
+                        samples[#samples] >= STUTTER_WARN_MS and " STUTTER_LIKELY" or ""
+                    )
+                )
+                advancePlan()
+            end)
+        end,
+        --: Re-measurements from here down. Settled twice; kept only to
+        --: confirm nothing has drifted, and last because losing them to a
+        --: short sortie costs nothing.
         function()
             beginGroup("null_call", function()
                 return NULL_CODE
@@ -1054,11 +1107,7 @@ local function buildPlan()
             end)
         end,
         function()
-            --: WARM first, because it is the well-behaved one and its
-            --: per-item figure is what gates everything else. Every repeat
-            --: probes the SAME patch, so only the first pays for cold
-            --: ground.
-            runLadder("getHeightWARM", BATCH_SIZES, 1, function(n, _i)
+            runLadder("getHeightWARM", CONFIRM_BATCH_SIZES, 1, function(n, _i)
                 return batchCode(n, 0)
             end, function(v)
                 getHeightWarmPerItemMs = v
@@ -1067,18 +1116,7 @@ local function buildPlan()
             end, CALL_BUDGET_MS)
         end,
         function()
-            --: COLD: every repeat probes a patch 4 km from the last, so no
-            --: repeat benefits from the one before it. This is what a real
-            --: probe bubble does -- it samples ground nobody has touched --
-            --: and on 2026-09-29 it is what the pilot felt as a stutter.
-            --:
-            --: Gated on the WARM per-item figure against the cold budget,
-            --: not on its own: a cold batch's cost is roughly
-            --: `fixed + per-patch penalty + N x warm`, so the penalty is a
-            --: constant per call rather than something that scales with N.
-            --: Dividing it by N and calling it "per item" is what poisoned
-            --: the estimate in simulation.
-            runLadder("getHeightCOLD", BATCH_SIZES, 1, function(n, i)
+            runLadder("getHeightCOLD", CONFIRM_BATCH_SIZES, 1, function(n, i)
                 return batchCode(n, i + 1)
             end, function(v)
                 getHeightColdPerItemMs = v
@@ -1089,52 +1127,11 @@ local function buildPlan()
             end)
         end,
         function()
-            runLadder("isVisible", ISVISIBLE_BATCH_SIZES, 1, isVisibleBatchCode, function(v)
+            runLadder("isVisible", CONFIRM_ISVISIBLE_SIZES, 1, isVisibleBatchCode, function(v)
                 isVisiblePerItemMs = v
             end, function()
                 return isVisiblePerItemMs
             end, CALL_BUDGET_MS)
-        end,
-        function()
-            runScenery(1, nil, nil)
-        end,
-        function()
-            runSingle("through_buildings", throughBuildingsCode(12))
-        end,
-        function()
-            runSingle("getIP", getIPCode())
-        end,
-        function()
-            runOcclusion("urban")
-        end,
-        function()
-            runOcclusion("desert")
-        end,
-        function()
-            --: Correctness check, deliberately LAST and split one call per
-            --: point. It was first and monolithic, and on 2026-09-29 its
-            --: 31 ms -- eight cold locations scattered across the whole
-            --: theatre, in one call -- tripped the abort and took the
-            --: entire sortie with it before a single measurement ran.
-            --: A correctness probe must not be able to do that.
-            beginGroup("known_points", function(i)
-                return string.format(KNOWN_POINT_TEMPLATE, i, i)
-            end, 8, function(samples, _)
-                table.sort(samples)
-                for idx, raw in ipairs(group.results) do
-                    logi(string.format("known_point[%d]: %s", idx, tostring(raw)))
-                end
-                logi(
-                    string.format(
-                        "known_points: 8 calls, med_ms=%.2f PEAK_ms=%.2f%s"
-                            .. " (each a cold, theatre-scattered location)",
-                        median(samples),
-                        samples[#samples],
-                        samples[#samples] >= STUTTER_WARN_MS and " STUTTER_LIKELY" or ""
-                    )
-                )
-                advancePlan()
-            end)
         end,
     }
     planIndex = 0
@@ -1146,9 +1143,9 @@ function petrobrainElevProbe.onSimulationStart()
     aborted = false
     finished = false
     group = nil
-    getHeightWarmPerItemMs = nil
+    getHeightWarmPerItemMs = 0.001
     getHeightColdPerItemMs = nil
-    isVisiblePerItemMs = nil
+    isVisiblePerItemMs = 0.010
     logi("loaded, will probe " .. START_DELAY_S .. "s after sim start")
 end
 
