@@ -187,7 +187,16 @@ def test_build_region_srtm_tile_paths_becomes_the_primary_elevation_grid(
     """M7 Stage 2's wiring: `srtm_tile_paths` ingests SRTM as the region's
     primary `elevation` grid, provenance-tagged `"srtm"` -- independent of
     `probe_output_path` (absent here, so the DCS-probe path stays skipped,
-    same as before this parameter existed)."""
+    same as before this parameter existed).
+
+    Per `plans/terrain-feature-probing/plan.md` Stage 1, the
+    terrain-semantics stage is no longer nested inside the probe branch --
+    it now runs over this SRTM grid too. The fixture tile is a flat,
+    uniform-value grid (see `_write_fake_hgt_tile`), so curvature
+    classification correctly finds nothing to extract: the stage runs
+    (`terrain_skipped is False`) but emits zero ridge/valley features,
+    which is the honest result for genuinely flat terrain, not a sign the
+    stage didn't run."""
     tile_path = tmp_path / "N36E037.hgt"
     _write_fake_hgt_tile(tile_path, value=250)
     out_path = tmp_path / "test-rectangular-region-srtm.sqlite"
@@ -205,8 +214,12 @@ def test_build_region_srtm_tile_paths_becomes_the_primary_elevation_grid(
     assert report.srtm_skipped is False
     assert report.srtm_stats is not None
     assert report.srtm_stats.points_sampled > 0
-    # SRTM never runs M6's ridge/valley classifier -- locked out of M7.
-    assert report.terrain_skipped is True
+    assert report.terrain_skipped is False
+    assert report.terrain_stats is not None
+    assert report.terrain_stats.ridge_feature_count == 0
+    assert report.terrain_stats.valley_feature_count == 0
+    assert "ridge" not in report.feature_counts
+    assert "valley" not in report.feature_counts
 
     conn = sqlite3.connect(f"file:{out_path}?mode=ro", uri=True)
     try:

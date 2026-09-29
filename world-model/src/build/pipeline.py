@@ -35,11 +35,14 @@ parse needed to change).
 `elevation` grid (`build.ingest_srtm`, `provenance="srtm"`), run before the
 pre-existing live-probe grid stage (`probe_output_path`,
 `provenance="dcs_probe"`) so that a build supplying both still lets the
-probe grid win as "most recent" for M6's ridge/valley classifier -- which
-this pipeline does **not** run over an SRTM-sourced grid (M6 is locked out
-of M7 entirely; see the plan's "Deferred / Out of Scope"). In practice a
-real `syria-full` build supplies only `srtm_tile_paths`, since M7 repurposes
-the live probe to a small spot-check validation set
+probe grid win as "most recent" for M6's ridge/valley classifier. **The
+terrain-semantics stage now runs over whichever grid wins** -- SRTM alone,
+or probe-over-SRTM when both are supplied -- per
+`plans/terrain-feature-probing/plan.md` Stage 1; it used to run only
+inside the probe branch, so an SRTM-only build (every real `syria-full`-
+scale build) never reached it at all. In practice a real `syria-full`
+build supplies only `srtm_tile_paths`, since M7 repurposes the live probe
+to a small spot-check validation set
 (`build.validate.compare_probe_to_srtm`) rather than a stored full grid, so
 this ordering concern does not arise for M7's own builds -- it exists only
 so the two paths compose safely if ever used together.
@@ -598,6 +601,17 @@ def build_region(
         else:
             report.junction_skipped = True
 
+        # `elevation_source_id` tracks whichever `Source` row actually
+        # produced the "elevation" grid the terrain-semantics stage below
+        # will read back -- SRTM is inserted first, so a probe grid
+        # inserted afterwards overwrites it as `store.reader`'s "most
+        # recently inserted" `elevation` row, per this function's own
+        # docstring on the two paths composing safely together. Tracked
+        # here (rather than re-derived from `report.srtm_skipped`/
+        # `probe_skipped`) so the terrain stage below attributes its
+        # features to the grid it actually classified, not a guess.
+        elevation_source_id: int | None = None
+
         if srtm_tile_paths:
             existing_tile_paths = [p for p in srtm_tile_paths if p.exists()]
             if existing_tile_paths:
@@ -630,6 +644,7 @@ def build_region(
                     )
                     insert_grid(conn, srtm_grid)
                     report.srtm_stats = srtm_stats
+                    elevation_source_id = srtm_source_id
             else:
                 report.srtm_skipped = True
         else:
@@ -671,12 +686,22 @@ def build_region(
                 insert_grid(conn, elevation_grid)
                 insert_grid(conn, surface_grid)
                 report.probe_stats = probe_stats
+                elevation_source_id = probe_source_id
+        else:
+            report.probe_skipped = True
 
+        # Un-gated (plans/terrain-feature-probing/plan.md Stage 1): this
+        # used to run only inside the probe branch above, so it never once
+        # ran against an SRTM-sourced grid -- the grid every real
+        # `syria-full`-scale build actually supplies. It now runs whenever
+        # *any* "elevation" grid was actually inserted above, SRTM or
+        # probe, attributed to whichever `Source` row produced that grid.
+        if elevation_source_id is not None:
             with _stage("terrain semantics (ridge/valley)", 8):
                 terrain_grid = load_full_grid(conn, "elevation")
                 if terrain_grid is not None:
                     terrain_features, terrain_stats = ingest_terrain(
-                        terrain_grid, probe_source_id
+                        terrain_grid, elevation_source_id
                     )
                     insert_features(conn, terrain_features)
                     for f in terrain_features:
@@ -685,7 +710,6 @@ def build_region(
                 else:
                     report.terrain_skipped = True
         else:
-            report.probe_skipped = True
             report.terrain_skipped = True
 
         return report
