@@ -77,11 +77,17 @@ pair), and single-link chaining still lets a long convoy cohere end-to-end
 as long as each *neighbour* gap clears the bound, even if the convoy's
 full span does not.
 
-`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` is `math.inf` at this commit --
-a pure-mechanism placeholder that changes no behaviour (`min(relative,
-inf)` is always `relative`), the same technique the flat-metre backstop's
-own introduction used (`9ecedaf`). A follow-up commit sets the calibrated
-value; see that commit's own docstring update for the reasoning.
+`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` (20.0) is a stated assumption
+(user direction 2026-09-29, *"I have no definitive answer. Pick something,
+we'll refine it later"*), not a measurement -- there is no flown data
+behind it either, same posture as `GROUP_PROXIMITY_GAP_RATIO`. In world
+terms: ~140 m for a 7 m vehicle, ~36 m for 1.8 m infantry. That sits above
+typical DCS road-convoy spacing (50-100 m, i.e. ~7-14 unit widths for a
+7 m vehicle) with margin, and is ~7x the only real group this project has
+flown data for -- the twelve-unit, ~200 m calibration line
+(`body-layer/research/2026-09-22-four-column-calibration-ladder.md`),
+~18 m spacing, ~2.6 unit widths. It is expected to move once a sortie
+actually exercises this path, the same as `GROUP_PROXIMITY_GAP_RATIO`.
 
 **`GROUP_REPORTING_MIN_MEMBERS` (2) is a deliberately different constant
 from `perception.group_salience.GROUP_MIN_MEMBERS` (3), not a renamed copy
@@ -167,10 +173,10 @@ GROUP_REPORTING_MIN_MEMBERS: Final[int] = 2
 #: not just the tautological n=2 case. Deliberately named and valued apart
 #: from `perception.group_salience.GROUP_COHESION_GAP_UNIT_WIDTHS` (10.0,
 #: angular, never touched by this module) -- see module docstring for why
-#: the two currencies differ and must not be confused. `math.inf` here is
-#: a pure-mechanism placeholder that changes no behaviour; a follow-up
-#: commit sets the calibrated value.
-GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS: Final[float] = math.inf
+#: the two currencies differ and must not be confused. Stated assumption
+#: (user direction 2026-09-29), no data behind it yet, same posture as
+#: `GROUP_PROXIMITY_GAP_RATIO`.
+GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS: Final[float] = 20.0
 
 #: Physical size (metres) used for a contact whose believed classification
 #: carries no size `object_model.profile_for` can resolve -- see module

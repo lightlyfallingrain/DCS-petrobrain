@@ -417,12 +417,13 @@ def test_vanished_contacts_candidate_is_skipped_and_the_next_is_taken(
     # `ownship_at_observation`, which both observations share (bearing 0,
     # range 1000 m, ownship at the origin), so OBS_A and OBS_B actually
     # fold to the *same* fused position. That makes this a real,
-    # legitimately-cohering pair -- not the two-contact backstop's
-    # concern (`belief.groups.GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M`, which
-    # only rescues a pair that is not actually close) -- so the workaround
-    # below still earns its place; it isolates this test's own
-    # vanished-candidate scenario from group disclosure, exactly as before
-    # (`tests/test_groups.py` already covers group formation on its own).
+    # legitimately-cohering pair (0 m apart) -- not the two-contact
+    # cohesion backstop's concern (`belief.groups.GROUP_REPORTING_
+    # COHESION_GAP_UNIT_WIDTHS`, which only rescues a pair that is not
+    # actually close) -- so the workaround below still earns its place; it
+    # isolates this test's own vanished-candidate scenario from group
+    # disclosure, exactly as before (`tests/test_groups.py` already covers
+    # group formation on its own).
     store._groups._groups = {}
     vanished_id = store.contacts[0].id
     live_id = store.contacts[1].id
@@ -562,34 +563,45 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     counted from *its own* arrival -- polled here every second, the way
     `logger.py`'s poll loop actually calls `drain_events`.
 
-    **A real, checked Stage 4 discovery, not a mismatch against this
-    test's own prior expectation for cosmetic reasons.** Before Stage 4
-    (`plans/group-reporting/plan.md`), aggregation happened at *speech
-    time*, in *report space* (the retired `group_candidates`): it only ever
-    merged reports that would render the same class/range words, so the
-    BTR-70 and truck identifications -- specific, differentiated types --
-    never merged with the generic infantry detections or with each other.
-    Stage 4 replaces that with a real, *persistent, world-space* `belief.
-    groups.Group` (Stage 2's cohesion), and this fixture's own geometry --
-    every detection within a few hundred metres of every other, and
-    nothing else tracked in the whole scene -- is exactly the "sparse
-    desert" case `belief.groups`' own module docstring documents: cohesion
-    is a *relative* gap with no absolute radius, so a scene this sparse
-    reads as one group *regardless of unit type*. By the time the BTR-70
-    and truck have both been identified, all five objects (three infantry,
-    the BTR-70, the truck) cohere into a single persisted `Group` and speak
-    as one composite disclosure line -- confirmed by print-instrumenting
-    this test's own `spoken` list while writing this stage, not guessed.
+    **Superseded by the unit-width cohesion backstop** (`belief.groups`'s
+    `GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS`, replacing the old flat-metre
+    backstop that only guarded n=2 -- the n>=3 risk `plans/group-reporting/
+    review.md` flagged this exact test as pinning). Before that fix, this
+    fixture's own geometry -- every detection within a few
+    hundred metres of every other, nothing else tracked in the whole scene
+    -- was exactly the unbounded "sparse desert" case: the relative-gap
+    rule alone merged all five objects (three infantry, the BTR-70, the
+    truck) into one composite `Group`, regardless of unit type, and this
+    test used to pin that as "the real, current behaviour" without
+    endorsing it. It no longer happens: the backstop bounds each pair's
+    cohesion by their own believed size (infantry, 1.8 m, backstop
+    `20.0 * 1.8 = 36` m; the BTR-70/truck are 7 m/6 m and far larger
+    relative to the infantry's own scale), so only genuinely close,
+    same-scale pairs still cohere.
 
-    This is worth a second look at the architecture level (a same-position
-    coincidence in this fixture -- `OBS_1`/`OBS_3` are both placed at
-    exactly clock 12, 500 m, so they are literally the same point --
-    additionally founds a same-class pair among the infantry trio before
-    the wider merge happens), but reworking the cohesion algorithm or this
-    fixture's geometry to keep unrelated types apart in a sparse scene is
-    not this stage's call to make silently; flagged in the implementation
-    notes for the user/architect rather than decided here. This test pins
-    the real, current behaviour."""
+    **Confirmed by print-instrumenting this test's own `spoken`/`store.
+    contacts`/`store.groups` while updating it, not guessed.** Only two
+    same-position coincidences (`OBS_1`/`OBS_3` at clock 12, and `OBS_5`/
+    `OBS_6` at clock 2 -- both literally the same point, 0 m apart) form
+    persisted pairs (`GROUP_1`, `GROUP_2`); the third infantry detection
+    (`OBS_2`, ~260 m from `OBS_1`/`OBS_3`, past the 36 m infantry backstop)
+    stays its own ungrouped `Contact` and speaks its own individual report
+    line; the BTR-70 and truck stay ungrouped entirely. Four lines still
+    come out, but through a different mix than before: one individual
+    infantry report, the BTR-70's own identification, the truck's own
+    identification, and `GROUP_2`'s pair disclosure. `GROUP_1`'s own
+    disclosure (`"Pair of infantry, 1 o'clock, very close."`) never wins a
+    speaking slot in this fixture's polled window -- confirmed by tracing
+    `scheduler.tick`'s per-poll output directly, it consistently loses the
+    same-tick priority contest to a fresher-arriving candidate (the
+    infantry singleton at t=0, the BTR-70 identification at t=4, the truck
+    identification at t=9) and no tick after t=9 offers it an otherwise-
+    empty slot before the fixture's window ends at t=18 -- a pre-existing
+    scheduler contention property this fix does not touch, not a new
+    regression; `belief.groups`'s own "groups need no expiry" design means
+    it remains a live, eligible candidate indefinitely, just never speaks
+    within this fixture's own 18 s. This test pins the real, current
+    behaviour."""
     store = ContactStore()
     enrichment = _enrichment_context(monkeypatch)
     scheduler = CalloutScheduler()
@@ -754,8 +766,8 @@ def test_2c_transcript_fixture_renders_four_lines_not_seven(
     assert spoken == [
         "infantry, 1 o'clock, 0.5 kilometres.",
         "armor 1 o'clock, very close is BTR-70.",
-        "Three infantry, a BTR-70 and a truck, 1 o'clock, very close.",
         "unit 12 o'clock, very close is truck.",
+        "Pair of infantry, 2 o'clock, very close.",
     ]
 
 
