@@ -30,37 +30,58 @@ under this model -- mechanism and calibration are kept in this one small
 file precisely so retuning it later is a single, attributable,
 uncalibrated-constant commit, not a mechanism change.
 
-**The relative-gap test is tautological at exactly two tracked contacts,
-and `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` exists only to cover that one
-degenerate size.** With two contacts in the whole store, each is
-mathematically the other's *sole* candidate nearest neighbour -- there is
-no third point to draw a genuinely different distance from -- so the
-"local median nearest-neighbour gap" always equals their own mutual
-separation exactly, and the cohesion threshold (`GROUP_PROXIMITY_GAP_
-RATIO` times that gap) is always some multiple of the very distance it is
-being compared against. The two contacts cohere regardless of how far
-apart they actually are (confirmed directly at 500 km --
-`plans/group-reporting/implementation.md`'s Notable Discoveries, found
-once `GROUP_REPORTING_MIN_MEMBERS` dropped to 2 and made this size
-reachable at all). At three or more tracked contacts this does not
-happen -- at least one contact's nearest-neighbour distance is drawn from
-a genuinely different pair, so the median is not anchored to the specific
-gap being tested, and the relative rule is exactly the figure-ground
-behaviour the module docstring above describes (see `test_sparse_desert_
-group_can_span_a_wide_gap`, unaffected by the backstop). So the backstop
-applies *only* when the whole tracked set has exactly two contacts, never
-as a general radius, and dense-scene cohesion is provably unchanged
-(the mechanism that introduced this cap was verified separately, at a
-placeholder value that changed no behaviour at all).
+**The relative-gap test is tautological at exactly two tracked contacts**
+(the historical reason a backstop exists at all). With two contacts in the
+whole store, each is mathematically the other's *sole* candidate nearest
+neighbour -- there is no third point to draw a genuinely different
+distance from -- so the "local median nearest-neighbour gap" always equals
+their own mutual separation exactly, and the cohesion threshold
+(`GROUP_PROXIMITY_GAP_RATIO` times that gap) is always some multiple of
+the very distance it is being compared against. Left alone, two contacts
+cohere regardless of how far apart they actually are (confirmed directly
+at 500 km -- `plans/group-reporting/implementation.md`'s Notable
+Discoveries, found once `GROUP_REPORTING_MIN_MEMBERS` dropped to 2 and
+made this size reachable at all). **The same failure mode is not actually
+confined to n=2** -- at three or more tracked contacts spread kilometres
+apart with nothing else in the scene, the relative rule alone still merges
+dissimilar, unrelated contacts into one `Group` (`plans/group-reporting/
+review.md`'s n>=3 finding, pinned by `tests/test_callouts.py::
+test_2c_transcript_fixture_renders_four_lines_not_seven` before this
+backstop existed). A relative-only rule has no natural floor at any n --
+it is answering "is this gap small *for this scene*," never "is this gap
+small in any absolute sense a person would recognise as one group" -- so a
+bound belongs on every pairwise comparison, not just the tautological
+n=2 case.
 
-`GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` (300.0 m) is, like the ratio above,
-a stated assumption rather than a measurement -- there is no flown data
-behind it either. It is sized at convoy/outpost scale, off the user's own
-calibration group for this feature (twelve units strung over roughly
-200 m), with headroom for a real convoy while still stopping two
-unrelated vehicles on opposite sides of a valley from being read as one
-pair. It is expected to move once a sortie actually exercises this path,
-the same as `GROUP_PROXIMITY_GAP_RATIO`.
+**The bound is measured in unit widths, not flat metres, and applies at
+every scene density.** A flat metre figure ignores what the units
+actually are -- 300 m means something different for infantry than for an
+S-300 component. `perception.group_salience.GROUP_COHESION_GAP_UNIT_
+WIDTHS` (10.0) already solved this currency problem at the perception
+layer, for a different question (whether unresolved dots merge into one
+*angular*, apparent-size mass at range, at the observer). This module
+borrows the *currency* -- unit widths, dimensionless, automatically
+range/size-correct -- not that constant or its question:
+`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` (its own, separate value) caps
+a *world-space* metre gap between two already-resolved `Contact`s'
+positions, scaled by their own believed physical size (`perception.
+object_model.size_m`, via each contact's `last_class_raw` -- no
+omniscience, never a DCS object_type). Each pair gets its own bound (the
+mean of the two members' sizes), so a backstop between two infantry is
+tighter than one between two S-300 components, exactly the currency fix
+the angular constant already proved out one layer down. The relative rule
+stays primary and can still be *tighter* than the backstop in a dense
+scene (the figure-ground behaviour above) -- the bound only ever narrows
+the relative threshold, never widens it (`min(relative, backstop)` per
+pair), and single-link chaining still lets a long convoy cohere end-to-end
+as long as each *neighbour* gap clears the bound, even if the convoy's
+full span does not.
+
+`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS` is `math.inf` at this commit --
+a pure-mechanism placeholder that changes no behaviour (`min(relative,
+inf)` is always `relative`), the same technique the flat-metre backstop's
+own introduction used (`9ecedaf`). A follow-up commit sets the calibrated
+value; see that commit's own docstring update for the reasoning.
 
 **`GROUP_REPORTING_MIN_MEMBERS` (2) is a deliberately different constant
 from `perception.group_salience.GROUP_MIN_MEMBERS` (3), not a renamed copy
@@ -127,6 +148,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from perception import object_model
+
 if TYPE_CHECKING:
     from belief.contacts import Contact
 
@@ -139,16 +162,23 @@ GROUP_PROXIMITY_GAP_RATIO: Final[float] = 3.0
 #: one group, spoken as a "pair".
 GROUP_REPORTING_MIN_MEMBERS: Final[int] = 2
 
-#: Absolute cap on member gap, applied only at exactly two tracked
-#: contacts, where the relative test is tautological -- see module
-#: docstring. Stated assumption (convoy/outpost scale), no data behind it
-#: yet, same as `GROUP_PROXIMITY_GAP_RATIO`.
-GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M: Final[float] = 300.0
+#: Absolute cap on member gap, in units of the pair's own mean believed
+#: physical size, applied to every pair at every tracked-contact count --
+#: not just the tautological n=2 case. Deliberately named and valued apart
+#: from `perception.group_salience.GROUP_COHESION_GAP_UNIT_WIDTHS` (10.0,
+#: angular, never touched by this module) -- see module docstring for why
+#: the two currencies differ and must not be confused. `math.inf` here is
+#: a pure-mechanism placeholder that changes no behaviour; a follow-up
+#: commit sets the calibrated value.
+GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS: Final[float] = math.inf
 
-#: Below this many tracked contacts, the "local median nearest-neighbour
-#: gap" has no third point to draw a genuinely different distance from --
-#: see module docstring's tautology argument.
-_MIN_CONTACTS_FOR_MEANINGFUL_MEDIAN: Final[int] = 3
+#: Physical size (metres) used for a contact whose believed classification
+#: carries no size `object_model.profile_for` can resolve -- see module
+#: docstring. The reference vehicle size `perception.visibility`'s
+#: angular-radius tiers are themselves calibrated against, not `object_
+#: model.DEFAULT_SIZE_M` (5.0 m, ED's "unclassified" bucket for a
+#: different purpose -- see `_representative_size_m`).
+GROUP_REPORTING_UNKNOWN_SIZE_M: Final[float] = 7.0
 
 _GROUP_ID_PREFIX: Final[str] = "GROUP"
 
@@ -188,20 +218,48 @@ def _pairwise_distance(
     return math.hypot(xi - xj, zi - zj)
 
 
+def _representative_size_m(contact: Contact) -> float:
+    """The physical size (metres) used to scale `contact`'s share of a
+    pair's cohesion backstop -- `contact.last_class_raw` (the believed
+    classification string; no omniscience, never a DCS `object_type`) run
+    through `object_model.profile_for`, the same lookup `belief.threat`/
+    `belief.speech` already use for a believed classification.
+
+    Falls back to `GROUP_REPORTING_UNKNOWN_SIZE_M` whenever that lookup
+    cannot resolve a real type -- detected via `object_model.
+    DEFAULT_OP_CLASS`, the same "no real match" signal `belief.
+    classification._op_class_of` and `belief.speech._identification_lead`
+    already key off, rather than duplicating a `SpecificityLevel` check
+    here. This covers both cases that need a default: genuinely no
+    classification claim yet (`PRESENCE`/`UNKNOWN`, whose value is the
+    `OP_GROUPSOMETHING` placeholder), and a `CLASS`-level value that is
+    itself an `OP_*` bucket string (e.g. `"OP_ARMORED"`) rather than a
+    keyword-matchable type name -- `profile_for` cannot resolve either, and
+    both deserve the same honest default rather than a silently wrong
+    size."""
+    profile = object_model.profile_for(contact.last_class_raw)
+    if profile.op_class == object_model.DEFAULT_OP_CLASS:
+        return GROUP_REPORTING_UNKNOWN_SIZE_M
+    return profile.size_m
+
+
 def _cluster_contacts(
     contacts: Sequence[Contact],
     gap_ratio: float,
     min_members: int,
 ) -> list[frozenset[str]]:
-    """Single-link union-find over `contact.position.x`/`.z`, cohesion
-    threshold `gap_ratio * median(nearest-neighbour gap)`, capped by
-    `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` when there are fewer than
-    `_MIN_CONTACTS_FOR_MEANINGFUL_MEDIAN` tracked contacts -- see module
-    docstring for why that size is tautological. Clusters smaller than
-    `min_members` are dropped entirely (never returned as a pair or a
-    singleton); a total contact count below `min_members` short-circuits
-    with no distance computation at all, since no cluster meeting the
-    floor is possible either way.
+    """Single-link union-find over `contact.position.x`/`.z`. Two contacts
+    cohere when their gap clears both of two thresholds: the relative test
+    (`gap_ratio * median(nearest-neighbour gap)`, scene-density-scaled, see
+    module docstring) and the pair's own absolute backstop
+    (`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * mean(the pair's own
+    believed size)`, `_representative_size_m`) -- `min()` of the two,
+    applied to *every* pair regardless of how many contacts are tracked
+    (see module docstring for why the old n<3-only gating did not go far
+    enough). Clusters smaller than `min_members` are dropped entirely
+    (never returned as a pair or a singleton); a total contact count below
+    `min_members` short-circuits with no distance computation at all,
+    since no cluster meeting the floor is possible either way.
 
     O(n^2) in the number of currently tracked contacts (same cost shape
     `perception.clustering`/`perception.group_salience` already pay) --
@@ -211,6 +269,7 @@ def _cluster_contacts(
         return []
     ids = [c.id for c in contacts]
     positions = [(c.position.x, c.position.z) for c in contacts]
+    sizes = [_representative_size_m(c) for c in contacts]
     n = len(ids)
 
     nn_gaps: list[float] = []
@@ -223,11 +282,7 @@ def _cluster_contacts(
             best = min(best, d)
         nn_gaps.append(best)
     median_gap = statistics.median(nn_gaps)
-    threshold = gap_ratio * median_gap
-    if n < _MIN_CONTACTS_FOR_MEANINGFUL_MEDIAN:
-        # Tautological at this size -- see module docstring. Cap at the
-        # absolute backstop rather than trusting the relative threshold.
-        threshold = min(threshold, GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M)
+    relative_threshold = gap_ratio * median_gap
 
     parent = list(range(n))
 
@@ -246,7 +301,11 @@ def _cluster_contacts(
 
     for i in range(n):
         for j in range(i + 1, n):
-            if _pairwise_distance(positions, i, j) <= threshold:
+            pair_backstop = GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * (
+                0.5 * (sizes[i] + sizes[j])
+            )
+            pair_threshold = min(relative_threshold, pair_backstop)
+            if _pairwise_distance(positions, i, j) <= pair_threshold:
                 union(i, j)
 
     members_by_root: dict[int, list[str]] = {}
