@@ -36,6 +36,7 @@ from belief.crew_console import (
 from belief.decay import LOST_THRESHOLD_S
 from belief.enrichment import EnrichmentContext
 from belief.escalation import BrainReply, EscalationPayload
+from belief.speech import render_group_disclosure
 from belief.tasks import TaskStore
 from belief.voice_commands import (
     ACT_FLOOR,
@@ -774,7 +775,13 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     lost_lines = console.drain_events(now_sim=lost_at)
     assert lost_lines == []
 
-    # Petrovich later detects it again.
+    # Petrovich later detects it again, at the same believed classification
+    # and position -- `plans/group-reporting/plan.md` Stage 1's disclosure
+    # gate suppresses this `CONTACT_REACQUIRED`, since its rendered text
+    # ("BMP-2.") is byte-identical to the "BMP-2." already spoken above.
+    # (Behaviour change from this test's own pre-Stage-1 assertion, which
+    # expected the identical line to be re-spoken -- exactly the repeat
+    # Stage 1 exists to suppress.)
     reacquired_at = lost_at + 1.0
     store.ingest(
         [_observation(obs_id="OBS_2", t_sim=reacquired_at, classification_raw="BMP-2")],
@@ -782,7 +789,7 @@ def test_scripted_crew_session_reproduces_the_first_useful_success_criterion() -
     )
     store.tick(now_sim=reacquired_at)
     reacquired_lines = console.drain_events(now_sim=reacquired_at)
-    assert "BMP-2." in reacquired_lines
+    assert reacquired_lines == []
 
     # Player: "Where was that BMP?" -> a memory-backed answer, not a guess.
     answer_lines = console.handle_line("where was that bmp?", now_sim=reacquired_at)
@@ -2554,6 +2561,15 @@ def test_report_clock_3_finds_the_matching_contact(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
+    # No workaround needed here: OBS_E/OBS_N are BMP-2/T-72 (both 7 m,
+    # `belief.groups.GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS * 7.0 = 140`
+    # m backstop), ~1.4 km apart -- well past it, the fix for the
+    # two-contact cohesion tautology that used to group any two contacts
+    # regardless of distance (`belief.groups`'s own module docstring).
+    # They do not cohere, so this test is naturally about clock-scoping
+    # alone -- group formation itself is covered by `tests/test_groups.py`
+    # and `test_report_speaks_a_persisted_group_through_render_group_
+    # disclosure`, below.
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     # OBS_E is east of ownship (3 o'clock); OBS_N is dead ahead (12 o'clock)
@@ -2747,6 +2763,14 @@ def test_report_all_groups_and_truncates_multiple_contacts(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
+    # No workaround needed (unlike before the unit-width cohesion backstop,
+    # `belief.groups.GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS`): these four
+    # contacts are all 7 m vehicles (BMP-2/T-72/BTR-70 keyword-match; the
+    # ZSU-23-4 falls back to `belief.groups.GROUP_REPORTING_UNKNOWN_SIZE_M`,
+    # also 7 m), so the backstop is `20.0 * 7.0 = 140` m -- well under their
+    # 1 km spacing. They no longer cohere into one `Group`, so this test is
+    # naturally about `group_facts`'s report-space bucketing and `REPORT_
+    # MAX_GROUPS` truncation alone, as intended.
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     lines = console.handle_command("report_all", now_sim=0.0)
@@ -2759,6 +2783,45 @@ def test_report_all_groups_and_truncates_multiple_contacts(
             "And more."
         )
     ]
+
+
+def test_report_speaks_a_persisted_group_through_render_group_disclosure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`plans/group-reporting/plan.md` Stage 4 design, section 6:
+    `_handle_report` resolves each in-scope contact's `belief.groups.Group`
+    and speaks it once via `render_group_disclosure` -- the same renderer
+    `CalloutScheduler.tick` uses for the push path -- rather than the older
+    `group_facts`/`render_group_report` report-space bucketing, once a real
+    group exists. Three same-type contacts a few metres apart cohere into
+    one `Group` on `store.tick`; the report names all three as one line,
+    not three separate `"BMP-2, ..."` reports."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation_at(
+                obs_id=f"OBS_{i}",
+                t_sim=0.0,
+                ownship_x=float(i) * 5.0,
+                ownship_z=1000.0,
+                classification_raw="BMP-2",
+            )
+            for i in range(3)
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    assert len(store.groups) == 1
+    console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
+
+    lines = console.handle_command("report_all", now_sim=0.0)
+
+    expected = render_group_disclosure(
+        store, store.groups[0], now_sim=0.0, enrichment=console.enrichment
+    )
+    assert expected is not None
+    assert lines == [expected.text]
+    assert lines == ["Three BMP-2, 3 o'clock, 1 kilometre."]
 
 
 def test_scan_bearing_deg_quantises_and_registers_the_nearest_sector_task(

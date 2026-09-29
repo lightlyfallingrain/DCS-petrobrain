@@ -315,3 +315,244 @@ within one. It also **unblocks** a future domain-aware extension (aircraft forma
   needed.
 - **The `Event` shape question for Stage 4** (`group_id` field vs. a parallel stream) — flagged above
   as needing its own short pass at that stage rather than being decided now.
+
+---
+
+### Stage 4 design — wiring the disclosure into `CalloutScheduler` (2026-09-28)
+
+Stages 1-3 are merged (`feature/group-reporting`, `84a0577`) and fully inert: `render_group_
+disclosure` is built and tested but nothing calls it from a live poll loop. This closes the `Event`
+shape question left open above and specifies exactly what changes in `callouts.py`/`groups.py`.
+
+#### 0. The headline question, answered: neither named option — no `Event` at all
+
+The plan's two candidates were "`Event` grows a `group_id` field" or "a parallel event stream."
+Both assume a group's speak-trigger is a discrete transition an `Event` could snapshot, the way
+`lifecycle_event_kind`/`classification_event`/etc. each compare one attribute's before/after. A
+group's trigger is not that shape: Stage 3 already built it as "does a *fresh render* differ from
+`Group.last_spoken_signature`" (the plan's own "progressive-disclosure trigger, concretely" section)
+— a whole-line text diff, not a single field's before/after. Minting an `Event` for it would mean
+either (a) deriving the same text diff a second time inside `events.py` just to decide whether to
+mint the event, which duplicates the comparison Stage 3 already owns on `Group` itself, or (b)
+minting an `Event` on every reconciliation regardless of whether the render actually changed, then
+letting the scheduler re-derive the diff anyway — either way the `Event` is a redundant middle layer
+around a comparison that already has a perfectly good home: `Group.last_spoken_signature` itself,
+exactly the mechanism Stage 1 already proved out for individual contacts (`_last_spoken_signature`
+in `CalloutScheduler`, promoted here to live on the belief object instead of the scheduler).
+
+**So: `CalloutScheduler.tick` reads `store.groups` directly, once per tick, alongside
+`store.unacknowledged_events` — two candidate sources feeding one shared priority sort, no new
+`Event` kind, no parallel stream.** This is the simplest option and it is obviously right once the
+trigger's actual shape is named; the rest of this design is the acknowledgement and priority rules
+the dispatch asked for.
+
+A consequence worth stating plainly: **groups need no expiry and no `_consumed` bookkeeping.**
+`store.unacknowledged_events` is a real queue an entry can go stale in (`CALLOUT_MAX_AGE_S`); `store.
+groups` is not a queue at all — it is read fresh every tick, and a group that loses this tick's
+priority contest is simply re-evaluated next tick against the same `last_spoken_signature`, with no
+staleness concept and nothing to mark "lost." This is a genuine simplification over the event path,
+not a gap.
+
+#### 1. Grouped detections are spoken for by the group, never individually
+
+**Rule:** in `tick`'s event-collection loop, a `CONTACT_DETECTED`/`CONTACT_REACQUIRED` event whose
+contact currently belongs to a group (`store.group_for_contact(event.contact_id) is not None`) is
+skipped before it ever reaches the candidate pool — not consumed, not acknowledged, just excluded
+from this tick's contest (the same "skip without consuming" treatment `_WATCHED_ONLY_KINDS` already
+gets for a not-yet-watched contact, a few lines above it in the same loop).
+
+**Why this has to happen before scoring, not after:** if a grouped contact's own detection stayed in
+the candidate pool, it would compete against its own group's disclosure candidate for the same
+tick's one speaking slot. Whichever won, the pilot would eventually hear both — the individual line
+this tick, the group's line (or vice versa) a later tick — which is the exact "fifty near-identical
+lines" failure this whole feature exists to remove, just shrunk to two. Filtering before scoring
+makes that pairing structurally impossible: a grouped contact's detection is never a candidate on
+its own, full stop.
+
+**Why this doesn't strand new members silently:** a new member joining an existing group changes
+that group's own composition (`_group_composition_clause`'s per-class counts), which changes the
+rendered line, which the signature check already treats as a live trigger — rule (c) of the
+plan's own "progressive-disclosure trigger" above ("a membership change from split/merge"). So a new
+member's detection is never silently lost; it surfaces as *the group's own line changing*, which is
+exactly the sentence the plan's worked-example table already wants said.
+
+**What is deliberately untouched by group membership:** `CONTACT_CLASSIFICATION_CHANGED` and every
+`_WATCHED_ONLY_KINDS` kind (`CONTACT_MOTION_CHANGED`/`CONTACT_RANGE_CROSSED`/`CONTACT_ENGAGEMENT_
+CHANGED`) compete and speak exactly as they do today, grouped contact or not — this is the plan's
+own already-settled decision ("`CONTACT_CLASSIFICATION_CHANGED` is never grouped... still fires and
+speaks on its own"), restated here because the filter above must not be written broad enough to
+catch it by accident. Concretely: only `event.kind in (CONTACT_DETECTED, CONTACT_REACQUIRED)` is
+gated on group membership; nothing else in `_TEMPLATED_KINDS` is.
+
+#### 2. Acknowledgement: filter early, reconcile at speak-time
+
+Filtering a grouped detection out of the candidate pool (step 1) leaves it sitting in `store.
+unacknowledged_events` indefinitely if nothing else ever touches it — a real cost, but not a new
+kind of one: it is the same "lost, not deferred" posture `CALLOUT_MAX_AGE_S` expiry and Stage 1's
+duplicate-suppression already accept elsewhere in this module, where a suppressed candidate stays
+visible to a future brain's `poll_events` rather than vanishing. Left alone, though, it would sit
+unacknowledged *forever* even after the group's line does eventually speak about it, which the old
+multi-event `_render_group` branch never did — it always acknowledged every member event once its
+group line actually spoke.
+
+**Rule: when a group's disclosure line is actually chosen and spoken this tick** (not merely
+scored — see step 3), sweep `store.unacknowledged_events` for `CONTACT_DETECTED`/`CONTACT_
+REACQUIRED` events whose `contact_id` is in that group's current `member_contact_ids`, and
+`acknowledge_event` each one. This exactly mirrors the multi-event branch of today's `_render_group`
+(which already does this for `render_group_report`'s event list) — nothing new, just retargeted
+at group membership instead of at report-space bucketing.
+
+Net effect: a grouped contact's detection sits unacknowledged for however many ticks pass before its
+group wins a priority slot (bounded only by the group's own composition changing again and
+re-triggering sooner), then is acknowledged the moment the group is actually heard. No event is ever
+double-spoken and none is silently dropped from the persisted log without ever being accounted for.
+
+#### 3. Priority: one shared tuple shape, group candidates included
+
+`callout_priority`'s tuple, `(threat_band, -attention_rank, range_m, -event.t_sim)`, needs a
+group-level twin so both candidate kinds sort in one list. Add:
+
+```python
+def group_priority(
+    member_facts: Sequence[dict[str, object]], now_sim: float
+) -> tuple[int, int, float, float]:
+    """`callout_priority`'s group-level analogue. `-attention_rank` uses the
+    *highest* rank among members -- any one watched/prioritised member
+    elevates the whole group's line, matching `render_group_disclosure`'s
+    own trailing ", watched" clause, which fires on the same "any member"
+    test. `range_m` is the nearest member's, the same convention `render_
+    group_disclosure`/`render_group_report` both already use. `-now_sim`
+    stands in for `-event.t_sim`: a group candidate has no event and no
+    age -- it is read fresh from `Group.last_spoken_signature` every tick
+    (see design doc, "groups need no expiry") -- so "now" is the only
+    honest recency value, and every group candidate this tick ties on it,
+    which is fine: ties only matter for stable ordering, not for staleness."""
+```
+
+Both `range_m` and `attention_rank` need the group's member facts, which `render_group_disclosure`
+already gathers internally but does not return. Rather than gather them twice (once here for
+priority, once inside `render_group_disclosure` for the text), **extract the gathering loop
+(`describe_contact` per member + the `len(member_facts) < 2` guard) out of `render_group_disclosure`
+into a small shared helper**, e.g. `belief.speech._group_member_facts(store, group, now_sim,
+enrichment) -> list[dict[str, object]] | None`, returning `None` under the same "fewer than two
+members still resolve" condition `render_group_disclosure` already checks. `render_group_disclosure`
+calls it first and keeps its existing behaviour; `callouts.py` calls it once at scoring time to
+build the priority tuple, and once more at speak-time via `render_group_disclosure` itself (see
+step 4 on why the second call is deliberate, not an oversight). This is a real, small duplication
+removed, not a new abstraction invented for its own sake.
+
+`threat_band` stays `_DEFAULT_THREAT_BAND` — same disposable placeholder every other candidate uses;
+a group's "danger, leads with the threat member" framing is already expressed in the rendered text
+via `envelope_for`, not in this tuple, and widening the tuple's meaning here would be a second,
+disagreeing threat model living next to the one `callout_priority` already doesn't have.
+
+#### 4. `tick`'s shape, end to end
+
+1. Build `live_events` exactly as today, plus the new group-membership filter from step 1.
+2. Build `live_groups`: for every `belief_group in store.groups`, call `_group_member_facts` (and,
+   if non-`None`, the rendered text via the existing composition/threat logic already in `render_
+   group_disclosure` — in practice this means calling `render_group_disclosure` itself, since it is
+   already the one function that turns member facts into the final string); skip a group whose
+   fresh text equals its own `last_spoken_signature` (silent — nothing changed) or whose member
+   facts come back `None` (fewer than two members currently resolve; self-corrects on the next
+   `GroupStore.reconcile`, needs no bookkeeping here).
+3. Score every event candidate via `callout_priority`, every group candidate via `group_priority`,
+   into one `scored` list, sorted ascending exactly as today.
+4. Walk `scored` in order. For an event candidate, behaviour is unchanged from today (render fresh,
+   speak, or consume-and-continue on `None`). For a group candidate, **re-render fresh at the
+   instant of speaking** (`render_group_disclosure` again, not the scoring-time text) — this is the
+   same "nothing exists ahead of being spoken" invariant the module docstring already states for
+   every other candidate, restated here so a group's line is never spoken from belief that is one
+   tick stale relative to the moment it is actually chosen. If the fresh render still differs from
+   `last_spoken_signature` (it should, almost always — nothing plausible changes belief between
+   scoring and speaking within one `tick()` call, but the check costs nothing and matches the
+   event path's own re-render-before-speaking discipline), call `store.mark_group_spoken(group.id,
+   text, now_sim)`, run step 2's acknowledgement sweep, update `busy_until_sim`, and return.
+   Otherwise (rare/defensive), fall through to the next candidate exactly as a vanished event
+   candidate does today.
+
+#### 5. `group_candidates` (the function) is retired, and so is half of `_render_group`
+
+With grouped detections filtered out before scoring (step 1) and the residual singleton events
+never re-bucketed at speech time, nothing ever calls `group_candidates` from `CalloutScheduler.tick`
+again — **delete it**. Its multi-Event bucketing existed to catch reports that would sound alike at
+speech time; the belief-level `Group` now answers that question once, upstream, exactly as the
+plan's own "What happens to `group_candidates`" section already decided. `group_facts`/
+`_chain_by_clock`/`render_group_report` are **not** deleted — they are still the residual path for
+report-space bucketing below `GROUP_MIN_MEMBERS` (see Decision 2 below) and, per §6, for `_handle_
+report`'s own remaining ungrouped case.
+
+`_render_group`'s multi-member branch (the `len(group) > 1` case, which called `describe_contact` +
+`render_group_report` + acknowledged every member) becomes dead code once nothing constructs a
+multi-`Event` list anymore — delete that branch too, and simplify the function to take one `Event`
+rather than `list[Event]`. **Rename it while doing so** — `_render_group`'s parameter is today named
+`group` for a *list of Events*, which now sits in the same module as `belief.groups.Group`; keeping
+the name risks exactly the kind of collision the Stage 3 implementer already flagged once for
+`render_group_report`/`render_group_disclosure`. Suggested name: `_render_event`.
+
+**What replaces `group_candidates`'s behaviour for contacts not in any group:** nothing does, by
+design — see Decision 2 below for why that residual is small and acceptable rather than something
+to build a replacement for.
+
+#### 6. The `report` command (`_handle_report`) — same question, smaller scope, still worth deciding now
+
+`crew_console.CrewConsole._handle_report` is a second, independent caller of the same report-space
+machinery (`group_facts`/`render_group_report`), reached only on-demand (the pilot says or selects
+"report"), not through `CalloutScheduler`. The plan's own Stage 4 description ("point `render_
+report`'s bundling at `GroupStore`") names this as in scope. **Recommend switching it too**: for
+each candidate contact already in the report's scope (direction/sector filtering is `_handle_
+report`'s own, untouched), resolve `store.group_for_contact`; render each distinct `Group` found
+that way via `render_group_disclosure` once (a report is pull-based, so it always speaks fresh —
+skip the `last_spoken_signature` gate entirely here, it exists only to throttle the push path);
+route every contact with no group through the existing `group_facts`/`render_group_report` residual
+bucketing exactly as today. See Decision 3 below — this is one extra call site, not a new
+mechanism, but it is scope beyond the dispatch's headline "CalloutScheduler" framing, so it is
+listed separately for confirmation rather than assumed.
+
+#### Tests this design needs, beyond what Stages 1-3 already pin
+
+- A fresh 3-member cluster's first tick speaks one group line, not three detections; all three
+  members' `CONTACT_DETECTED` events end up acknowledged afterward.
+- A grouped contact's `CONTACT_CLASSIFICATION_CHANGED` still fires and speaks on its own tick even
+  while grouped (pins §1's "deliberately untouched" carve-out).
+- A grouped, watched contact's `CONTACT_MOTION_CHANGED`/`CONTACT_RANGE_CROSSED`/`CONTACT_ENGAGEMENT_
+  CHANGED` still speaks independently of the group's own line (same carve-out, the watched-only
+  kinds).
+- Priority competition both directions: an urgent watched individual event beats a pending group
+  candidate; a watched group beats a normal-attention individual event.
+- Progressive disclosure: after a group's line is spoken once, an unchanged tick stays silent; a
+  membership or composition change re-triggers it.
+- Two groups changed in the same tick: exactly one speaks; the other is still a live candidate next
+  tick (not lost, no expiry).
+- A below-floor pair (2 contacts, `GROUP_MIN_MEMBERS` not met) still speaks as two individual
+  singleton lines with no cross-suppression — pins Decision 2's accepted residual.
+- Regression: ungrouped-contact singular output is byte-identical to today's (Stage 1's own
+  suppression path, untouched by any of the above).
+
+#### Decisions Requiring User Input
+
+- **Group priority's attention rule** (§3: highest attention rank among members elevates the whole
+  group). Worked example: a 3-truck group, one truck under `watch <id>` — the group's line now
+  outranks a normal-attention lone contact's detection competing for the same tick, exactly as it
+  would if that one truck were reported alone. Recommend as stated; flag in case "the group as a
+  whole" reading is preferred to "any one watched member speaks for the group."
+- **Accepting the below-`GROUP_MIN_MEMBERS` residual** (§5/§2 of tests): a 2-contact pair close
+  together no longer gets any cross-contact dedup at all once `group_candidates` is deleted — each
+  speaks its own singleton line, back to back if both are live the same tick. Worked example: two
+  BMPs 80 m apart -- "BMP-2, 5 o'clock, 3 kilometres." twice, not merged. Recommended: accept it.
+  `group_candidates` already barely fired on the push-callout path (its own docstring says so), and
+  lowering `GROUP_MIN_MEMBERS` to close this gap is `groups.py`'s own calibration constant, not a
+  mechanism change — it waits for a sortie's evidence like `GROUP_PROXIMITY_GAP_RATIO` already does.
+- **Whether `_handle_report` (§6) also switches to real-`Group`/`render_group_disclosure`, or keeps
+  the old report-space bucketing everywhere for now.** Recommend yes, switch it — otherwise the
+  pilot hears two different descriptions of the same group depending on whether he asked or waited:
+  a pushed callout says *"Group, eleven o'clock, four kilometres."*; without this, saying "report" a
+  moment later would answer *"Three trucks, eleven o'clock, four kilometres."* (the old cardinality-
+  hedged report-space phrasing) for the identical group. This is one extra call site reusing the
+  same renderer, not a second mechanism, but it is beyond the dispatch's named scope, so it is
+  listed here rather than assumed.
+- **The acknowledgement lag (§2)**: a grouped contact's own `CONTACT_DETECTED` sits unacknowledged
+  for as many ticks as its group takes to win a priority slot, with no explicit upper bound (unlike
+  `CALLOUT_MAX_AGE_S`'s bound for a lone event). Flagging since it is a new instance of an already-
+  accepted cost class (see §2's own reasoning), not because it looks wrong — confirm the "no explicit
+  bound" is acceptable rather than wanting a group-level max-age analogue added now.

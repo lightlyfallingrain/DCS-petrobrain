@@ -93,6 +93,7 @@ from belief.events import (
     lifecycle_event_kind,
     motion_event_kind,
 )
+from belief.groups import Group, GroupStore
 from belief.motion import MotionBelief, MotionState, fold_motion
 from belief.percept import Percept, percept_of
 from belief.position_belief import (
@@ -686,6 +687,13 @@ class ContactStore:
         self._next_contact_number = 0
         self._next_event_number = 0
         self._next_area_number = 0
+        #: `plans/group-reporting/plan.md` Stage 2 -- the associative
+        #: group-membership belief, reconciled once per `tick()` call from
+        #: the current `Contact` set (a cross-contact pass, so it cannot
+        #: live inside the per-contact loop above). See `belief.groups`'
+        #: module docstring for the cohesion rule and the split/merge
+        #: reconciliation it performs against its own prior state.
+        self._groups = GroupStore()
 
     @property
     def contacts(self) -> list[Contact]:
@@ -710,6 +718,23 @@ class ContactStore:
         """Every registered `AttentionArea`, insertion order (BL-4). A
         read-only view -- callers must not mutate the returned list."""
         return list(self._areas.values())
+
+    @property
+    def groups(self) -> list[Group]:
+        """Every currently persisted associative group (`plans/
+        group-reporting/plan.md` Stage 2), insertion order. A read-only
+        view -- callers must not mutate the returned list."""
+        return self._groups.groups
+
+    def group_for_contact(self, contact_id: str) -> Group | None:
+        """The `Group` `contact_id` currently belongs to, or `None` --
+        delegates to `belief.groups.GroupStore.group_for_contact`."""
+        return self._groups.group_for_contact(contact_id)
+
+    def mark_group_spoken(self, group_id: str, signature: str, now_sim: float) -> bool:
+        """Delegates to `belief.groups.GroupStore.mark_spoken` -- see that
+        method's docstring."""
+        return self._groups.mark_spoken(group_id, signature, now_sim)
 
     @property
     def unacknowledged_events(self) -> list[Event]:
@@ -1014,6 +1039,15 @@ class ContactStore:
         range-crossing block a no-op (see that block's own docstring). Not
         threaded into any of the five pre-existing blocks above, which have
         no use for ownship position.
+
+        **An eighth, cross-contact block runs once per `tick()` call, after
+        every contact's per-contact blocks above** (`plans/
+        group-reporting/plan.md` Stage 2): associative group-membership
+        reconciliation (`belief.groups.GroupStore.reconcile`), placed after
+        attention/engagement rather than inside the per-contact loop, since
+        it is not a per-contact computation and a group's own disclosure
+        (Stage 3) needs each member's already-current attention/threat
+        state to render from.
 
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
@@ -1348,6 +1382,15 @@ class ContactStore:
                             now_sim
                         )
                     contact.last_emitted_engagement = current_engaged
+
+        # Eighth block, cross-contact: associative group reconciliation
+        # (`plans/group-reporting/plan.md` Stage 2). Unlike the seven
+        # blocks above, this is not a per-contact computation and cannot
+        # live inside the loop -- it runs once per `tick()` call, after
+        # every contact's attention (and this call's engagement) state is
+        # already current, since a group's own rendering (Stage 3) needs
+        # each member's up-to-date attention/threat to lead the line with.
+        self._groups.reconcile(list(self._contacts.values()), now_sim)
 
     @staticmethod
     def _cooldown_elapsed(contact: Contact, kind: EventKind, now_sim: float) -> bool:
