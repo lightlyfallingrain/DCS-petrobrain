@@ -49,12 +49,18 @@ gap being tested, and the relative rule is exactly the figure-ground
 behaviour the module docstring above describes (see `test_sparse_desert_
 group_can_span_a_wide_gap`, unaffected by the backstop). So the backstop
 applies *only* when the whole tracked set has exactly two contacts, never
-as a general radius, and dense-scene cohesion is provably unchanged. This
-commit introduces the mechanism at a value (`math.inf`) that changes no
-behaviour at all -- `min(threshold, math.inf)` is always `threshold` --
-so it is verifiable as a pure mechanism change before a follow-up commit
-sets the actual number; see that commit's own docstring update for the
-calibration reasoning.
+as a general radius, and dense-scene cohesion is provably unchanged
+(the mechanism that introduced this cap was verified separately, at a
+placeholder value that changed no behaviour at all).
+
+`GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` (300.0 m) is, like the ratio above,
+a stated assumption rather than a measurement -- there is no flown data
+behind it either. It is sized at convoy/outpost scale, off the user's own
+calibration group for this feature (twelve units strung over roughly
+200 m), with headroom for a real convoy while still stopping two
+unrelated vehicles on opposite sides of a valley from being read as one
+pair. It is expected to move once a sortie actually exercises this path,
+the same as `GROUP_PROXIMITY_GAP_RATIO`.
 
 **`GROUP_REPORTING_MIN_MEMBERS` (2) is a deliberately different constant
 from `perception.group_salience.GROUP_MIN_MEMBERS` (3), not a renamed copy
@@ -135,9 +141,9 @@ GROUP_REPORTING_MIN_MEMBERS: Final[int] = 2
 
 #: Absolute cap on member gap, applied only at exactly two tracked
 #: contacts, where the relative test is tautological -- see module
-#: docstring. `math.inf` here is a pure-mechanism placeholder that changes
-#: no behaviour; a follow-up commit sets the calibrated value.
-GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M: Final[float] = math.inf
+#: docstring. Stated assumption (convoy/outpost scale), no data behind it
+#: yet, same as `GROUP_PROXIMITY_GAP_RATIO`.
+GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M: Final[float] = 300.0
 
 #: Below this many tracked contacts, the "local median nearest-neighbour
 #: gap" has no third point to draw a genuinely different distance from --

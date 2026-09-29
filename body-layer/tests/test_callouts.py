@@ -411,24 +411,18 @@ def test_vanished_contacts_candidate_is_skipped_and_the_next_is_taken(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
-    # `belief.groups._cluster_contacts`'s relative-gap cohesion measures
-    # density against *every* currently tracked contact -- with only these
-    # two in the whole store, each is the other's sole nearest neighbour,
-    # so the cohesion threshold (`GROUP_PROXIMITY_GAP_RATIO` times that
-    # mutual gap) is always some multiple of their own separation, and any
-    # two contacts, however far apart, cohere when they are the only two
-    # that exist (confirmed directly against `GroupStore.reconcile`: two
-    # contacts 500 km apart with nothing else tracked still form a
-    # `Group` -- the intended, documented "relative gap, not an absolute
-    # radius" cohesion rule, just newly reachable at two members instead
-    # of three, `plans/group-reporting/plan.md`'s Stage 4 addendum).
-    # `store.tick` above has already reconciled BMP-2 and T-72 into
-    # exactly that kind of group, which would hijack this test's own
-    # single-event vanished-candidate scenario with a group disclosure
-    # line instead of the individual fallback path this test is actually
-    # about (`tests/test_groups.py` already covers group formation on its
-    # own) -- clearing it directly is simpler and more honest than
-    # contriving geometry that fights an algorithm working as designed.
+    # This fixture's `dwp_x`/`dwp_z` (50 km apart) drive spatial-gate
+    # matching only, per `_observation`'s own docstring -- `Contact.
+    # position` is instead derived from `bearing_deg`/`range_m` against
+    # `ownship_at_observation`, which both observations share (bearing 0,
+    # range 1000 m, ownship at the origin), so OBS_A and OBS_B actually
+    # fold to the *same* fused position. That makes this a real,
+    # legitimately-cohering pair -- not the two-contact backstop's
+    # concern (`belief.groups.GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M`, which
+    # only rescues a pair that is not actually close) -- so the workaround
+    # below still earns its place; it isolates this test's own
+    # vanished-candidate scenario from group disclosure, exactly as before
+    # (`tests/test_groups.py` already covers group formation on its own).
     store._groups._groups = {}
     vanished_id = store.contacts[0].id
     live_id = store.contacts[1].id
