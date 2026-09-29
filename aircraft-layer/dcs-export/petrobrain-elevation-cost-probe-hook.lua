@@ -422,6 +422,92 @@ return "OK|radius=%d count=" .. tostring(count) .. "|" .. table.concat(samples, 
     )
 end
 
+-- X-B4 part 4, added after flight 4: the DECISIVE test, and the one the
+-- random-pair sweep cannot be trusted to have run.
+--
+-- Flight 4's sweep found no urban-vs-desert gap (1/40 vs 0/40), which
+-- points at `isVisible` being terrain-only. But 40 random pairs in a 3 km
+-- box mostly miss a town that occupies a small part of it, so "no gap" is
+-- confounded with "no sightline actually crossed a building". This removes
+-- the confound: ask `world.searchObjects` where the buildings ARE, then
+-- fire a ray straight through each one, 60 m either side of its centre at
+-- 2 m above local ground.
+--
+-- If `isVisible` tests buildings, these are blocked. If it is terrain-only,
+-- they are clear. There is nothing to interpret.
+local function throughBuildingsCode(maxBuildings)
+    return string.format(
+        [[
+local cx, cz, MAXB = %f, %f, %d
+local okH, groundY = pcall(land.getHeight, { x = cx, y = cz })
+if not okH or groundY == nil then return "ERR|getHeight failed at centre" end
+local volume = {
+    id = world.VolumeType.SPHERE,
+    params = { point = { x = cx, y = groundY, z = cz }, radius = 200 },
+}
+local buildings = {}
+local okS, err = pcall(function()
+    world.searchObjects(Object.Category.SCENERY, volume, function(obj)
+        if #buildings >= MAXB then return false end
+        local okP, p = pcall(function() return obj:getPoint() end)
+        local okN, n = pcall(function() return obj:getTypeName() end)
+        if okP and p then
+            buildings[#buildings + 1] = { p.x, p.z, okN and tostring(n) or "?" }
+        end
+        return true
+    end)
+end)
+if not okS then return "ERR|" .. tostring(err) end
+if #buildings == 0 then return "ERR|no scenery within 200 m" end
+local blocked, clear, terrBlocked, out = 0, 0, 0, {}
+for i, b in ipairs(buildings) do
+    local bx, bz = b[1], b[2]
+    -- ray axis: from the probe centre towards the building, extended past it
+    local dx, dz = bx - cx, bz - cz
+    local len = math.sqrt(dx * dx + dz * dz)
+    if len > 1 then
+        dx, dz = dx / len, dz / len
+        local ax, az = bx - dx * 60, bz - dz * 60
+        local ex, ez = bx + dx * 60, bz + dz * 60
+        local okA, ay = pcall(land.getHeight, { x = ax, y = az })
+        local okE, ey = pcall(land.getHeight, { x = ex, y = ez })
+        if okA and okE and ay and ey then
+            -- terrain-only verdict over the same 120 m, so a rise between
+            -- the endpoints is not mistaken for the building
+            local tBlocked = false
+            for k = 1, 19 do
+                local t = k / 20
+                local okM, mh = pcall(land.getHeight,
+                    { x = ax + (ex - ax) * t, y = az + (ez - az) * t })
+                if okM and mh and mh > (ay + 2) + ((ey + 2) - (ay + 2)) * t then
+                    tBlocked = true
+                    break
+                end
+            end
+            local okV, vis = pcall(land.isVisible,
+                { x = ax, y = ay + 2, z = az }, { x = ex, y = ey + 2, z = ez })
+            if okV and vis ~= nil then
+                if tBlocked then terrBlocked = terrBlocked + 1
+                elseif vis then clear = clear + 1
+                else blocked = blocked + 1 end
+                if #out < 4 then
+                    out[#out + 1] = b[3] .. (vis and ":CLEAR" or ":BLOCKED")
+                        .. (tBlocked and "(terrain)" or "")
+                end
+            end
+        end
+    end
+end
+return string.format(
+    "n=%%d BLOCKED_BY_SOMETHING=%%d clear=%%d terrainBlocked=%%d | %%s",
+    #buildings, blocked, clear, terrBlocked, table.concat(out, ";"))
+]],
+        probeX,
+        probeZ,
+        maxBuildings
+    )
+end
+
 -- X-B4 part 3: does `land.getIP` return *where* the ray was blocked? That
 -- is the difference between Petrovich knowing he cannot see something and
 -- being able to say "the treeline short of it" -- the half that reaches
@@ -802,7 +888,14 @@ local function runScenery(ladderIndex, lastRadius, lastMs)
         advancePlan()
         return
     end
-    if lastRadius ~= nil then
+    if lastRadius ~= nil and lastMs > 1.0 then
+        --: Only predict from a reading the clock could actually resolve.
+        --: Flight 4 refused the 150 m rung on a "predicted 18 ms" derived
+        --: from a 1 ms reading at 50 m -- but 1 ms IS the quantisation
+        --: floor, and flight 1 had already searched 300 m / 135 objects in
+        --: that same 1 ms. Scaling noise by 9 and then doubling it is not
+        --: a prediction. Below the resolution limit, just try the next rung;
+        --: the abort ceiling is the real protection.
         local scale = (radius / lastRadius) ^ 2
         local predicted = (fixedMs + (lastMs - fixedMs) * scale) * 2.0
         if predicted > CALL_BUDGET_MS then
@@ -1004,6 +1097,9 @@ local function buildPlan()
         end,
         function()
             runScenery(1, nil, nil)
+        end,
+        function()
+            runSingle("through_buildings", throughBuildingsCode(12))
         end,
         function()
             runSingle("getIP", getIPCode())
