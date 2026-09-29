@@ -137,6 +137,82 @@ table.sort(keys)
 return "OK|" .. table.concat(keys, " ")
 ]]
 
+--: Does a SEGMENT search catch TERRAIN, or only scenery?
+--:
+--: The Mac session's question, and a fair one: the DCS-driven LOS design
+--: uses `SEGMENT` for buildings AND `land.isVisible` for terrain, on the
+--: assumption that SEGMENT ignores terrain because terrain is not a scenery
+--: object. **That assumption is inferred and has never been tested** --
+--: nobody has fired a SEGMENT ray through a hill. It is the same shape of
+--: inference that turned out wrong when `isVisible` was assumed to see
+--: buildings. If SEGMENT does catch terrain, the LOS verdict is one call
+--: rather than two and a whole stage of that plan disappears.
+--:
+--: Geometry is not plausible-looking, it is provable, taken from
+--: `world-model`'s own elevation grid on this box:
+--:
+--:   - **RIDGE**: A(-179912, 368559) h=1143 -> B(-173912, 368559) h=1200,
+--:     6 km apart, with a crest between them at **h=2198** -- standing
+--:     **998 m above the higher endpoint**. A sightline at 2 m AGL is buried
+--:     under a kilometre of rock; no grid error survives that margin.
+--:   - **FLAT**: A(166088, -115441) -> B(172088, -115441), the same 6 km,
+--:     profile 763/762/762/762/763/763/763 m -- a **1 m** spread. The
+--:     control, which must come back empty.
+--:
+--: Both pairs have **nothing built, no landcover and no water within 1200 m**
+--: of either endpoint or the midpoint, so a hit cannot be a building sitting
+--: on the ridge. **What comes back matters as much as whether**: the type
+--: name distinguishes a terrain hit from a stray object, so it is reported.
+local function terrainSegmentCode(ax, az, bx, bz)
+    return string.format(
+        [[
+local ax, az, bx, bz = %f, %f, %f, %f
+local okA, ay = pcall(land.getHeight, { x = ax, y = az })
+local okB, by = pcall(land.getHeight, { x = bx, y = bz })
+if not (okA and okB and ay and by) then return "ERR|endpoint getHeight failed" end
+local from = { x = ax, y = ay + 2, z = az }
+local to = { x = bx, y = by + 2, z = bz }
+
+-- our own terrain verdict over the same line, and the worst intrusion
+local maxAbove, blocked = -1e9, false
+for k = 1, 59 do
+    local t = k / 60
+    local okS, sh = pcall(land.getHeight, { x = ax + (bx - ax) * t, y = az + (bz - az) * t })
+    if okS and sh then
+        local above = sh - (from.y + (to.y - from.y) * t)
+        if above > maxAbove then maxAbove = above end
+        if above > 0 then blocked = true end
+    end
+end
+
+local hits, names = 0, {}
+local okSeg, segErr = pcall(function()
+    world.searchObjects(Object.Category.SCENERY,
+        { id = world.VolumeType.SEGMENT, params = { from = from, to = to } },
+        function(obj)
+            hits = hits + 1
+            if #names < 4 then
+                local okN, n = pcall(function() return obj:getTypeName() end)
+                names[#names + 1] = okN and tostring(n) or "?"
+            end
+            return true
+        end)
+end)
+if not okSeg then return "ERR|segment search: " .. tostring(segErr) end
+
+local okV, vis = pcall(land.isVisible, from, to)
+return string.format(
+    "terrainBlocked=%%s maxTerrainAboveLine=%%.0fm | SEGMENT_hits=%%d[%%s] | isVisible=%%s",
+    tostring(blocked), maxAbove, hits, table.concat(names, ","),
+    (okV and tostring(vis) or "ERR"))
+]],
+        ax,
+        az,
+        bx,
+        bz
+    )
+end
+
 --: One site, `RAYS` rays. See the header for what each of the four facts is
 --: for and why it takes all of them to name a tree.
 local function siteCode(x, z)
@@ -329,7 +405,23 @@ function petrobrainTreeLos.onSimulationFrame()
         return
     end
 
-    local site = SITES[stepIndex - 1]
+    if stepIndex == 2 then
+        run(
+            "SEGMENT_vs_TERRAIN_ridge_crest+998m",
+            terrainSegmentCode(-179912.0, 368559.0, -173912.0, 368559.0)
+        )
+        return
+    end
+
+    if stepIndex == 3 then
+        run(
+            "SEGMENT_vs_TERRAIN_flat_control_1m",
+            terrainSegmentCode(166088.0, -115441.0, 172088.0, -115441.0)
+        )
+        return
+    end
+
+    local site = SITES[stepIndex - 3]
     if site ~= nil then
         local ms = run(site[1], siteCode(site[2], site[3]))
         if ms > ABORT_MS then
@@ -339,7 +431,7 @@ function petrobrainTreeLos.onSimulationFrame()
         return
     end
 
-    if stepIndex == #SITES + 2 and probeX ~= nil then
+    if stepIndex == #SITES + 4 and probeX ~= nil then
         run("OWNSHIP_opportunistic", siteCode(probeX, probeZ))
         return
     end
