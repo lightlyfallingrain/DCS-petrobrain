@@ -2561,22 +2561,14 @@ def test_report_clock_3_finds_the_matching_contact(
         now_sim=0.0,
     )
     store.tick(now_sim=0.0)
-    # `belief.groups._cluster_contacts`'s relative-gap cohesion measures
-    # density against *every* currently tracked contact -- with only these
-    # two in the whole store, each is the other's sole nearest neighbour,
-    # so they cohere into a `Group` regardless of the ~1.4 km between them
-    # (the intended "relative gap, not an absolute radius" rule -- see
-    # `belief.groups`'s own module docstring -- newly reachable at two
-    # members since `plans/group-reporting/plan.md`'s Stage 4 addendum).
-    # `_handle_report` would then speak the whole group through OBS_E's
-    # in-scope membership, folding in OBS_N even though it sits at 12
-    # o'clock, well outside this test's clock-3 request -- exactly the
-    # cross-scope leak this test exists to rule out for the *ungrouped*
-    # case. Clearing group membership directly keeps this test about
-    # clock-scoping, not group formation (`tests/test_groups.py` and
-    # `test_report_speaks_a_persisted_group_through_render_group_
-    # disclosure`, below, cover that on their own).
-    store._groups._groups = {}
+    # No workaround needed here: OBS_E and OBS_N are ~1.4 km apart, well
+    # past `belief.groups.GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` (300 m),
+    # the fix for the two-contact cohesion tautology that used to group
+    # any two contacts regardless of distance (`belief.groups`'s own
+    # module docstring). They do not cohere, so this test is naturally
+    # about clock-scoping alone -- group formation itself is covered by
+    # `tests/test_groups.py` and `test_report_speaks_a_persisted_group_
+    # through_render_group_disclosure`, below.
     console = CrewConsole(store=store, enrichment=_enrichment_context(monkeypatch))
 
     # OBS_E is east of ownship (3 o'clock); OBS_N is dead ahead (12 o'clock)

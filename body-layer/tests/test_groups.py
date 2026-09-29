@@ -11,6 +11,7 @@ from __future__ import annotations
 from belief.classification import SpecificityLevel, new_classification_belief
 from belief.contacts import Contact
 from belief.groups import (
+    GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M,
     GROUP_PROXIMITY_GAP_RATIO,
     GROUP_REPORTING_MIN_MEMBERS,
     GroupStore,
@@ -65,6 +66,38 @@ def test_two_tightly_spaced_contacts_form_a_group() -> None:
     assert groups[0].member_contact_ids == frozenset({"C1", "C2"})
 
 
+def test_two_distant_contacts_do_not_form_a_group() -> None:
+    """The pair case the relative rule cannot honestly answer: with only
+    two contacts in the whole store, `_cluster_contacts`'s local-median
+    computation is tautological (each contact's sole candidate nearest
+    neighbour is the other, so the median always equals their own
+    separation) -- `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` is the fallback
+    for exactly this size. 500 km is the distance the defect was
+    originally confirmed at (`plans/group-reporting/implementation.md`)."""
+    store = GroupStore()
+    contacts = [_contact("C1", 0.0, 0.0), _contact("C2", 500_000.0, 0.0)]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    assert store.groups == []
+
+
+def test_two_close_contacts_within_the_backstop_still_form_a_group() -> None:
+    """The other side of the same fix: a genuinely close pair -- well
+    inside `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` -- still coheres. Not a
+    duplicate of `test_two_tightly_spaced_contacts_form_a_group` (10 m
+    apart, which the relative rule alone already covers) -- this one is
+    picked close to, but comfortably under, the backstop itself."""
+    store = GroupStore()
+    contacts = [_contact("C1", 0.0, 0.0), _contact("C2", 250.0, 0.0)]
+
+    store.reconcile(contacts, now_sim=0.0)
+
+    groups = store.groups
+    assert len(groups) == 1
+    assert groups[0].member_contact_ids == frozenset({"C1", "C2"})
+
+
 def test_tight_cluster_forms_one_group() -> None:
     """Three contacts 10 m apart, one far outlier 5 km away -- the outlier
     sets no meaningful nearest-neighbour gap for the tight trio (each of
@@ -87,11 +120,14 @@ def test_tight_cluster_forms_one_group() -> None:
 
 
 def test_sparse_desert_group_can_span_a_wide_gap() -> None:
-    """The figure-ground cue (module docstring): with only these four
+    """The figure-ground cue (module docstring): with only these three
     contacts in the whole scene, their own mutual spacing sets a
     proportionally wide cohesion threshold, so a much larger absolute gap
     than the tight-cluster test still coheres -- there is no absolute
-    radius constant to violate."""
+    radius constant to violate. Also proves `GROUP_PROXIMITY_ABSOLUTE_
+    BACKSTOP_M` does not leak into this case: the full C1-C3 span (800 m)
+    exceeds the backstop (300 m), and the group still forms, because at
+    three tracked contacts the backstop does not apply at all."""
     store = GroupStore()
     contacts = [
         _contact("C1", 0.0, 0.0),
@@ -292,9 +328,10 @@ def test_mark_spoken_on_unknown_group_id_returns_false() -> None:
 
 
 def test_constants_are_the_stated_assumptions() -> None:
-    """Pins the two uncalibrated constants so a future retuning commit is
+    """Pins the three uncalibrated constants so a future retuning commit is
     visible as a diff here, not a silent behaviour change. `GROUP_
     REPORTING_MIN_MEMBERS` is 2, not `perception.group_salience.
     GROUP_MIN_MEMBERS`'s 3 -- see module docstring for why they differ."""
     assert GROUP_PROXIMITY_GAP_RATIO == 3.0
     assert GROUP_REPORTING_MIN_MEMBERS == 2
+    assert GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M == 300.0
