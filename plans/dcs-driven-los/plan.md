@@ -585,10 +585,31 @@ still need it, so this narrows rather than removes the coupling.
   1 Hz. The bubble is already doing the filtering the cone would do, and LOS is gaze-independent, so
   adding a cone filter now would buy nothing measurable while coupling the feed to where Petrovich
   happens to be looking. Reach for it if a scene ever makes the sweep expensive.
-- **`LOS_MAX_AGE_S`'s value (proposed 3.0 s)** — reasonable default, not measured; confirm or
-  adjust once flown.
-- **Stage 3's terrain swap is optional relative to Stages 1-2.** Given the 12 m tolerance already
-  covers the specific defect that motivated this work, confirm you want the terrain-source swap
-  built now rather than deferred behind Stage 1/2 landing and being flown for a while first.
-- **Whether to hand the tree probes to the Windows-box session now or after Stages 1-3 land** —
-  they are independent of this plan's build work and can run in parallel, but only if scheduled.
+- ~~**`LOS_MAX_AGE_S`'s value (proposed 3.0 s)**~~ **SETTLED (user, 2026-09-29): 3.0 s, ship it.**
+  Still unmeasured and still carried as that debt class; revisit from a sortie if a stale verdict
+  ever produces a visibly wrong call. At 83 m/s the aircraft covers ~250 m in 3 s, which is the
+  shape of error to listen for.
+- ~~**Stage 3's terrain swap is optional relative to Stages 1-2**~~ **SETTLED (user, 2026-09-29):
+  build Stages 1-3 together, gated on the SEGMENT probe.** His words: *"Do stages 1-3 together, but
+  there's dependency to whether SEGMENT ignores or catches terrain."*
+
+  **So this plan is now blocked on one measurement**, and deliberately: if `SEGMENT` catches
+  terrain, the hook makes **one** engine call per sightline and `land.isVisible` is never wired at
+  all; if it does not, the hook makes two and publishes two fields as the revision above describes.
+  Those are different hook scripts, different schemas and different gate wiring, so starting before
+  the answer means writing one of them twice.
+
+  The staging survives as **build order within one delivery** rather than as three separately-flown
+  increments: buildings wired first, terrain second, so a misbehaviour is still attributable to one
+  half — but one deployment, one schema, one sortie.
+
+  **Unblocks when the Windows-box session reports the SEGMENT-through-terrain probe** (sent
+  2026-09-29, alongside the tree questions; one ray through a ridge with an open-ground control).
+- ~~**Whether to hand the tree probes to the Windows-box session now**~~ **DONE (2026-09-29):
+  sent.** `land.getIP` into known canopy, and characterising `Controller.isTargetDetected`'s
+  `Controller.Detection` VISUAL bit for tree awareness. The user's acceptance bar is a blocked/clear
+  verdict rather than tree geometry, and the fallback is pre-decided (statistical landcover model),
+  so a negative result selects a design rather than reopening the question.
+
+**No open user decisions remain on this plan.** It is ready to implement the moment the SEGMENT
+probe reports.
