@@ -525,3 +525,18 @@ two functions that must agree (2026-09-19).
   any change that widens what a fixed set/threshold/window accepts should budget for multiple rounds
   of adjacent-subsystem end-to-end probing before it is trusted, not one plausible-looking pass
   (`plans/confirm-band-affirmatives/review.md`, five rounds, `867cbfe`, 2026-09-28).
+
+- **When a design decision rests on lived-cockpit intuition rather than code, expect it to be
+  refuted within minutes by the next thing the user says — the lesson is about *when* to ask, not
+  about the domain.** During group-reporting's explore phase, the user's grouping input arrived
+  across five short messages, and at least three of them invalidated a design just proposed: a
+  gaze-wedge/sector model for group boundaries was refuted immediately by the convoy-through-
+  ownship case ("I could fly through the middle of it and it would be on both sides of ownship, but
+  be single group"); a floor of 3 members was refuted by "a pair of aircraft are a group, in theory
+  — lead and wingman"; and a feared pair/couple vocabulary collision turned out to be one
+  specificity ladder, not two competing forms. None of these were derivable from the code or from
+  more design reasoning — they needed the person who has flown the aircraft. The actionable form of
+  this is not "ask more" in general, but: when a design choice is about how a human perceives the
+  simulated world (grouping, salience, disclosure), show a concrete proposal early and expect the
+  first answer to move it, rather than iterating internally first (`plans/group-reporting/
+  explore-notes.md`, 2026-09-28/29).

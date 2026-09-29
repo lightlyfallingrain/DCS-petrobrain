@@ -1257,8 +1257,10 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   utterances before either downstream piece is built further. This entry flips to `[x]`/merged on
   merge, per the roadmap-discipline rule below.
 
-- [~] **Group reporting: `belief.groups.Group`, the disclosure ladder. Stages 1-4 implemented, now
-  audible; not yet reviewed/DoD'd.** `plans/group-reporting/plan.md`, from the 2026-09-28 sortie's
+- [x] **Group reporting: `belief.groups.Group`, the disclosure ladder. Stages 1-4, reviewed,
+  security-approved (deep analysis), performance-approved (MONITOR), and DoD-passed 2026-09-29
+  pending the sortie's own acceptance verdict.** `plans/group-reporting/plan.md`, from the
+  2026-09-28 sortie's
   log analysis (`plans/contact-fragmentation-at-range/2026-09-28-log-analysis.md`) — the noise was
   contact *count*, not per-contact chattiness (only 3 of 52 contacts ever plural), which an
   associative `Group` fixes and a per-contact disclosure gate alone cannot. **Stage 1** — `belief.
@@ -1293,29 +1295,46 @@ accumulating risk. Clear an entry only once a real sortie actually exercises it,
   theorised — see `plans/group-reporting/implementation.md`'s Stage 4 "Notable Discoveries" for the
   full readout and the test fixtures it forced to route around it.
 
-  **The n=2 case above is FIXED on this same branch** (`9ecedaf`/`b0f9518`, user direction
-  2026-09-29): `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M = 300.0` applies as a cap **only** when fewer
-  than three contacts are tracked, i.e. exactly when the relative-gap median is tautologically the
-  pair's own separation and so measures nothing. A dense scene is provably unchanged, and the
-  user picked this over an always-on cap or dropping pairs. 300 m is convoy/outpost scale and a
-  stated assumption, not a measurement.
+  **The n=2 tautology above was fixed on this branch first** (`9ecedaf`/`b0f9518`, user direction
+  2026-09-29) with a flat 300 m backstop gated to `< 3` tracked contacts, then **superseded by a
+  second mechanism the same day** (`9ecedaf`.. through `718a65a`/`d04412b`) once review flagged two
+  problems with the flat figure: it had no notion of what the units meant (300 m is a different
+  fraction of a vehicle for infantry vs. an S-300 component), and gating it to n<3 left the
+  relative-only rule genuinely unbounded at n>=3 — confirmed against this branch's own
+  `test_2c_transcript_fixture_renders_four_lines_not_seven`/`test_report_all_groups_and_
+  truncates_multiple_contacts`, both of which had needed a `store._groups._groups = {}`
+  workaround precisely because their own fixtures legitimately merged at n>=3.
 
-  **A different, narrower risk remains open at n>=3, and it is not the same defect** (found by
-  review, `plans/group-reporting/review.md`): three or more contacts spread kilometres apart with
-  little else tracked can still cohere on the relative rule alone, since the backstop does not
-  apply there. Two consequences, both confirmed by code reading rather than theorised — and the
-  first is the one that matters in the cockpit, because it can put a named threat in the wrong
-  place: `render_group_disclosure` takes clock/range from the **nearest** member while the line is
-  **led by the threat** member, so a sparse merge can say *"Danger, ZSU-23-4, 3 o'clock, one
-  kilometre"* with the ZSU actually somewhere else entirely. Separately,
-  `CrewConsole._handle_report` speaks a contact's **whole** persisted group rather than the
-  sector-filtered subset, so `report clock 3` can name something outside the sector asked about.
+  **`GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS = 20.0` now closes both the n=2 and the n>=3 case**,
+  applied to *every* pair at *every* tracked-contact count (not gated by n): a per-pair bound in
+  unit widths of the pair's own mean believed physical size (`perception.object_model.size_m`, via
+  each contact's `last_class_raw`), so two contacts 500 km apart no longer cohere (n=2, the
+  original discovery) and neither do three-plus contacts kilometres apart with little else tracked
+  (n>=3, review's finding). The relative-gap rule stays primary and can still be tighter in a dense
+  scene; the unit-width bound only ever narrows it, never widens it. Confirmed by tests, not
+  theorised (`GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M`/its n<3 gate are deleted; `test_sparse_desert_
+  group_can_span_a_wide_gap` recalibrated to a 220 m span, still under the ~120-140 m backstop for
+  the vehicles it uses; `test_2c_transcript_fixture_renders_four_lines_not_seven` re-verified
+  against real per-tick output — the five-object n>=3 fixture no longer merges into one composite
+  group across types).
 
-  Stage 5 (common-fate cohesion) was always the intended real fix and is deliberately deferred
-  pending sortie evidence — so this is a known gap to fly *knowingly*, not scope creep. 1349
-  passed/4 xfailed, `ruff`/`mypy --strict` clean. Does this change what the next milestone should
-  be? Yes: the n>=3 behaviour needs the user's explicit acceptance (or a targeted mitigation)
-  before this milestone is called done.
+  **The two attribution consequences the n>=3 risk raised (nearest-member clock/range vs.
+  threat-led line; `_handle_report` speaking a whole group past a sector filter) are not separately
+  fixed, but their blast radius is now bounded to ~140 m (a 20-unit-width vehicle pair) rather than
+  unbounded kilometres** — a sparse merge can no longer put a named threat "somewhere else
+  entirely" the way the original 500 km/kilometres-apart discovery could. Security's deep analysis
+  (`plans/group-reporting/security-review.md`) independently re-traced this closure through the
+  code rather than taking the plan's word for it. Stage 5 (common-fate cohesion) remains the
+  intended real fix for cohesion generally and stays deliberately deferred pending this sortie's
+  evidence — the unit-width backstop is a stated assumption (20.0, not a measurement), not a
+  substitute for Stage 5.
+
+  1349 passed/4 xfailed, `ruff`/`mypy --strict` clean. **Milestone completion question**: does this
+  change what's next? Yes, in the direction Stage 5 should take — the sortie flying tonight is the
+  first real evidence on whether 20 unit-widths groups the right things (see
+  `docs/acceptance/2026-09-29-group-reporting-sortie.md`), and Stage 5's design should be built
+  from what that flight actually shows about cohesion misses/false-merges, not from more code
+  reading in advance of it.
 
 ## Backlog (body-layer)
 

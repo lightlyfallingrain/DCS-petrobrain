@@ -1,0 +1,434 @@
+<!doctype html>
+<title>Group Reporting Sortie</title>
+<style>
+  :root {
+    --ground: #f4f2ee;
+    --panel: #ffffff;
+    --panel-2: #ebe8e2;
+    --ink: #1b1d1f;
+    --ink-dim: #55585c;
+    --line: #d8d4cc;
+    --amber: #b5680a;
+    --amber-ink: #6f3f04;
+    --record: #1f6f74;
+    --record-bg: #e4f0f1;
+    --danger: #a3271f;
+    --danger-bg: #f6e6e3;
+    --mono-bg: #26241f;
+    --mono-ink: #f0ead8;
+    --mono-border: #3a3730;
+    color-scheme: light dark;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14161a;
+      --panel: #1c1f24;
+      --panel-2: #23262c;
+      --ink: #ece8de;
+      --ink-dim: #a3a099;
+      --line: #34373d;
+      --amber: #e2a13d;
+      --amber-ink: #f3c874;
+      --record: #6fd3d9;
+      --record-bg: #17302f;
+      --danger: #e2695f;
+      --danger-bg: #33201e;
+      --mono-bg: #0f1113;
+      --mono-ink: #e9e4d6;
+      --mono-border: #33363c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14161a;
+    --panel: #1c1f24;
+    --panel-2: #23262c;
+    --ink: #ece8de;
+    --ink-dim: #a3a099;
+    --line: #34373d;
+    --amber: #e2a13d;
+    --amber-ink: #f3c874;
+    --record: #6fd3d9;
+    --record-bg: #17302f;
+    --danger: #e2695f;
+    --danger-bg: #33201e;
+    --mono-bg: #0f1113;
+    --mono-ink: #e9e4d6;
+    --mono-border: #33363c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    padding-inline: 16px;
+  }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+
+  h1, h2, h3, .display {
+    font-family: "Barlow Condensed", "Segoe UI Condensed", system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-wrap: balance;
+  }
+  code, pre, .mono {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding-block: 20px 64px; }
+
+  .topbar {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    color: var(--amber);
+    font-weight: 700;
+  }
+  .branch-name {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 1.05rem;
+    color: var(--amber-ink);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 8px;
+    display: inline-block;
+  }
+  .branch-note { color: var(--ink-dim); font-size: 0.92rem; }
+
+  pre.cmd {
+    background: var(--mono-bg);
+    color: var(--mono-ink);
+    border: 1px solid var(--mono-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    margin: 8px 0 0;
+    white-space: pre;
+  }
+
+  h1.title { font-size: clamp(1.9rem, 5vw, 2.6rem); margin: 0 0 4px; font-weight: 800; }
+  .subtitle { color: var(--ink-dim); font-size: 1rem; margin: 0 0 22px; max-width: 62ch; }
+
+  section.block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px 20px;
+    margin-bottom: 18px;
+  }
+  section.rider-block { background: var(--panel-2); }
+
+  h2 { font-size: 1.15rem; margin: 0 0 10px; color: var(--ink); font-weight: 700; }
+  h2 .num { color: var(--amber); margin-right: 6px; }
+  p { margin: 0 0 10px; }
+  .lede { color: var(--ink-dim); font-size: 0.95rem; }
+
+  .prize {
+    border: 1px solid var(--amber);
+    box-shadow: 0 0 0 1px var(--amber) inset;
+  }
+  .prize .badge {
+    display: inline-block;
+    background: var(--amber);
+    color: #1b1305;
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 800;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    padding: 3px 8px;
+    margin-bottom: 10px;
+  }
+
+  .row { margin: 12px 0; }
+  .row-label {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 4px;
+  }
+  .row.expect .row-label { color: var(--amber); }
+  .row.record .row-label { color: var(--record); }
+
+  .line {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1px 7px;
+    font-size: 0.92em;
+  }
+  .line.danger { color: var(--danger); background: var(--danger-bg); border-color: var(--danger); }
+
+  ul.ladder { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  ul.ladder li { display: flex; align-items: baseline; gap: 8px; }
+  ul.ladder li .tag {
+    flex: 0 0 auto;
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    width: 8.5em;
+  }
+
+  .checks { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+  .check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--record-bg);
+    border: 1px solid var(--record);
+    border-radius: 8px;
+    padding: 9px 11px;
+  }
+  .check input[type="checkbox"] {
+    margin-top: 3px;
+    width: 17px;
+    height: 17px;
+    accent-color: var(--record);
+    flex: 0 0 auto;
+  }
+  .check label { font-size: 0.95rem; cursor: pointer; }
+
+  .riders h2 { font-size: 1rem; }
+  .rider-item { padding: 8px 0; border-top: 1px solid var(--line); }
+  .rider-item:first-of-type { border-top: none; padding-top: 0; }
+  .rider-item .rname { font-weight: 700; }
+  .rider-item .rdetail { color: var(--ink-dim); font-size: 0.92rem; }
+
+  .pass {
+    border-left: 4px solid var(--amber);
+  }
+
+  .bringback {
+    background: var(--panel-2);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-top: 6px;
+  }
+  .bringback ol { margin: 8px 0 0; padding-left: 1.3em; }
+  .bringback li { margin-bottom: 6px; }
+  .invite {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--danger-bg);
+    color: var(--danger);
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  :root:not([data-theme="light"]) .invite,
+  :root[data-theme="dark"] .invite { color: var(--danger); }
+
+  footer { color: var(--ink-dim); font-size: 0.82rem; margin-top: 30px; text-align: center; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="eyebrow">Checkout before you fly</div>
+    <div><span class="branch-name">feature/group-reporting</span> <span class="branch-note">— becomes <code>main</code> once merged; check root ROADMAP if unsure it's landed yet</span></div>
+    <pre class="cmd">git checkout feature/group-reporting &amp;&amp; git pull</pre>
+  </div>
+
+  <h1 class="title">Group Reporting Sortie</h1>
+  <p class="subtitle">Last flight (2026-09-28) was ~5 contact reports a minute, the same line up to
+    seven times — 52 individually-resolvable contacts each getting their own callout. Tonight:
+    one line per perceptual group, escalating with range and threat, silent otherwise.</p>
+
+  <section class="block">
+    <h2>Setup</h2>
+    <p class="lede">Three processes, Windows collector already running with <code class="line">--ptt dcs</code>. From <code class="line">run-scripts/</code> on the Mac:</p>
+    <pre class="cmd">cd run-scripts
+./run-audio-adapter.sh
+./run-brain.sh --decider ollama
+./run-crew-text-debug-view.sh --brain-client http --brain-url http://127.0.0.1:7796 \
+    --detection-trace ~/dcs-group-reporting-trace.jsonl</pre>
+    <p class="lede" style="margin-top:10px;">The trace flag matters tonight — any group that forms
+      wrong, or fails to form, gets a record you can read afterwards instead of relying on memory.
+      <code class="line">--decider stub</code> is fine if you're not testing brain-layer today.</p>
+  </section>
+
+  <section class="block prize">
+    <span class="badge">The one that matters</span>
+    <h2><span class="num">1</span>Is it quieter, and still informative?</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Fly a normal leg past whatever's out there — convoy, outpost, scattered armor. Just listen,
+        the way you would on any sortie.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <p>One line per group, not per vehicle. No repeated near-identical sentences like last time.</p>
+    </div>
+    <div class="checks">
+      <div class="check">
+        <input type="checkbox" id="c1a" data-k="c1a"><label for="c1a">Does it actually feel quieter than the 09-28 sortie?</label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="c1b" data-k="c1b"><label for="c1b">When it does speak about a group, does the line tell you <em>more</em> than the old chatter — or does it feel like it's hiding something you'd want? This one's the whole point of the feature.</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">2</span>The disclosure ladder</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Approach a group from range and let it develop — don't force it by re-scanning.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect, roughly in this order</div>
+      <ul class="ladder">
+        <li><span class="tag">Far, undifferentiated</span><span class="line">"Group."</span></li>
+        <li><span class="tag">Refined, no threat</span><span class="line">"Two armor and a truck."</span></li>
+        <li><span class="tag">Refined, threat member</span><span class="line danger">"Danger, ZSU-23-4 Shilka. Also two armor."</span></li>
+        <li><span class="tag">With clock/range</span><span class="line">"Group, &lt;clock&gt; o'clock, &lt;range&gt;."</span></li>
+        <li><span class="tag">No change</span><span class="line">— silence, deliberately —</span></li>
+      </ul>
+    </div>
+    <div class="checks">
+      <div class="check">
+        <input type="checkbox" id="c2a" data-k="c2a"><label for="c2a">Did the ladder actually escalate as a group closed or resolved, rather than repeating a line?</label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="c2b" data-k="c2b"><label for="c2b">Any case where it should have said more (a threat member present) or less than it should have known?</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">3</span>"Pair" vs. "a couple of"</h2>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Notice any two-member group Petrovich reports.</p>
+    </div>
+    <div class="row expect">
+      <div class="row-label">Expect</div>
+      <ul class="ladder">
+        <li><span class="tag">Exact, shared type</span><span class="line">"Pair of T-72."</span></li>
+        <li><span class="tag">Still undifferentiated</span><span class="line">"A couple of contacts."</span></li>
+        <li><span class="tag">Two different things</span><span class="line">"A armor and a truck."</span></li>
+      </ul>
+    </div>
+    <div class="checks">
+      <div class="check">
+        <input type="checkbox" id="c3a" data-k="c3a"><label for="c3a">Does "pair" vs. "a couple of" sound natural in the air, or does either read wrong once you actually hear it?</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">4</span>Group boundaries</h2>
+    <p class="lede"><code class="line">GROUP_REPORTING_COHESION_GAP_UNIT_WIDTHS = 20.0</code>
+      (~140 m between neighbouring 7 m vehicles) is a stated assumption, not a measurement — your
+      own words were <em>"I have no definitive answer. Pick something, we'll refine it later."</em>
+      Tonight is the first real evidence.</p>
+    <div class="row">
+      <div class="row-label">Do</div>
+      <p>Fly past anything with more than 2-3 units and judge whether Petrovich's grouping matches
+        your own read of "that's one thing" vs. "those are separate."</p>
+    </div>
+    <div class="checks">
+      <div class="check">
+        <input type="checkbox" id="c4a" data-k="c4a"><label for="c4a">Any units that felt like one group to you but got split into separate callouts?</label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="c4b" data-k="c4b"><label for="c4b">Any units that felt clearly separate (a convoy vs. a checkpoint it's passing) but got merged into one report?</label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="c4c" data-k="c4c"><label for="c4c">If you have a rough sense of the actual spacing in either case — that's the number this backstop gets tuned against next.</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2><span class="num">5</span>Known and deferred</h2>
+    <p>A moving convoy passing a static checkpoint may still merge into one group — the mechanism
+      only looks at current spacing, not who's moving together. Common-fate cohesion (Stage 5) is
+      the intended fix and is deliberately not in this build. If you see exactly this, it's
+      expected — record it under test 4 as evidence for Stage 5, not as a new defect.</p>
+  </section>
+
+  <section class="block rider-block riders">
+    <h2>Also on this flight</h2>
+    <div class="rider-item">
+      <div class="rname">Confirm band</div>
+      <div class="rdetail"><code class="line">cancel</code> → "confirm"/"yes"/"roger" all work now, and the task actually stops. A normal <code class="line">cancel</code> tonight already exercises it — dedicated card: <code>docs/acceptance/2026-09-28-confirm-band-sortie.md</code>.</div>
+    </div>
+    <div class="rider-item">
+      <div class="rname">2026-09-26 sortie fixes (underneath this branch)</div>
+      <div class="rdetail">Observability gate before crossing/motion callouts; interrupted looks no longer burn retry budget; commands lowercased before matching.</div>
+    </div>
+    <div class="rider-item">
+      <div class="rname">LOS elevation-tolerance fix — already on <code>main</code>, separate branch</div>
+      <div class="rdetail">The missed insurgent AAA should now be detected. Card: <code>docs/acceptance/2026-09-29-los-tolerance-sortie.md</code>. Fly it from <code>main</code> if this branch hasn't merged yet.</div>
+    </div>
+  </section>
+
+  <section class="block pass">
+    <h2>Pass criteria</h2>
+    <p>Test 1's judgment call comes back positive, the ladder in test 2 escalates correctly,
+      "pair"/"a couple of" sound right in test 3, and any boundary misses in test 4 are recorded as
+      tuning evidence rather than treated as a blocking defect — that number is expected to move.
+      A test-5 miss is not a failure; it's already known.</p>
+  </section>
+
+  <div class="bringback">
+    <h2 style="margin-bottom:6px;">Bring back</h2>
+    <ol>
+      <li>Quieter, and still informative — yes or no, and why?</li>
+      <li>Did the disclosure ladder escalate correctly, or ever say too much / too little?</li>
+      <li>Did "pair" / "a couple of" sound right in the air?</li>
+      <li>Any group-boundary miss — split-that-should-cohere or merged-that-should-split — with a
+        rough sense of the spacing involved?</li>
+      <li>Did the confirm band answer cleanly on every <code>cancel</code>?</li>
+    </ol>
+    <div class="invite">Anything that surprises you is worth more than anything on this list.</div>
+  </div>
+
+  <footer>docs/acceptance/2026-09-29-group-reporting-sortie.md is the source of truth — this card is generated from it.</footer>
+</div>
+
+<script>
+(function () {
+  try {
+    var KEY = 'group-reporting-sortie-2026-09-29';
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    document.querySelectorAll('input[type=checkbox][data-k]').forEach(function (b) {
+      if (saved[b.dataset.k]) b.checked = true;
+      b.addEventListener('change', function () {
+        try {
+          var s = JSON.parse(localStorage.getItem(KEY) || '{}');
+          s[b.dataset.k] = b.checked;
+          localStorage.setItem(KEY, JSON.stringify(s));
+        } catch (e) {}
+      });
+    });
+  } catch (e) {}
+})();
+</script>
