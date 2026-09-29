@@ -174,9 +174,17 @@ local START_DELAY_S = 10.0 -- let the terrain finish loading before probing
 --: (16.7 ms), so even a call that lands badly costs part of one frame
 --: rather than a visible hitch.
 local CALL_BUDGET_MS = 8.0
---: Any single call over this stops the whole probe. See the header: this
---: firing is a finding, not a malfunction.
-local ABORT_MS = 25.0
+--: Any single call over this stops the whole probe.
+--:
+--: **Raised from 25 ms to 60 ms on 2026-09-29 after it killed a run.**
+--: `known_points` touches eight locations scattered across the whole
+--: theatre and took 31 ms -- and that is now known to be a real, expected
+--: *cold-terrain* cost rather than a malfunction, so aborting on it threw
+--: away the entire sortie for nothing. Cold cost is the thing this probe
+--: now exists to measure; a ceiling below it cannot measure it. 60 ms is
+--: ~4 frames -- visible, not dangerous -- and the one-call-per-250 ms
+--: throttle keeps the duty cycle at ~1% even at that size.
+local ABORT_MS = 60.0
 --: Minimum gap between bridge calls. The game gets every frame in between.
 local TICK_INTERVAL_S = 0.25
 --: Repeats per measured size. Enough to average out 1 ms granularity
@@ -185,6 +193,21 @@ local REPEATS = 10
 --: Samples discarded from the top of each series before estimating cost.
 --: See `trimmedMean` for what this is defending against and why.
 local TRIM_TOP = 2
+
+--: Metres between successive "fresh ground" patches. Far enough apart that
+--: probing patch N tells the engine nothing about patch N+1.
+local PATCH_STRIDE_M = 4000
+
+--: A call at or above this probably dropped a frame the pilot could feel.
+--: Logged loudly rather than acted on -- the point is that it be visible in
+--: the log next to the thing that caused it.
+local STUTTER_WARN_MS = 12.0
+
+--: Cold calls get their own, larger budget. They are *expected* to exceed
+--: the warm one -- that overrun is the measurement, not a malfunction --
+--: so gating them at `CALL_BUDGET_MS` would refuse to measure the very
+--: thing the pilot felt. Still well under `ABORT_MS`.
+local COLD_BUDGET_MS = 40.0
 
 --: Escalation ladders. Each starts at 1 and steps up only while the
 --: measured cost predicts the next rung stays under `CALL_BUDGET_MS`.
@@ -256,7 +279,10 @@ return string.format("OK|%.1f|%.1f|%s", p.x, p.z, name)
 -- getSurfaceType) and not a point more: even at an absurd 1 ms per call
 -- that is ~16 ms, one frame, and still inside `ABORT_MS`. Adding points
 -- here is not free the way it looks.
-local KNOWN_POINTS = [[
+--: One point per bridge call -- see the plan step for why this is no
+--: longer a single 16-call payload. `%d` is substituted twice: once to
+--: pick the point, once so the returned string names it.
+local KNOWN_POINT_TEMPLATE = [[
 local known = {
     {"damascus_osdi", -179748.3281, 50728.2656},
     {"latakia_oslk", 43237.9688, 5841.1646},
@@ -267,26 +293,22 @@ local known = {
     {"deir_ez_zor_osdz_desert", 25885.5547, 390774.8750},
     {"kahramanmaras_ltcn_mountainous", 276904.9688, 101895.7422},
 }
-local out = {}
-for _, p in ipairs(known) do
-    local okH, h = pcall(land.getHeight, { x = p[2], y = p[3] })
-    local okS, s = pcall(land.getSurfaceType, { x = p[2], y = p[3] })
-    out[#out + 1] = p[1] .. "=" .. tostring(okH and h or "ERR")
-        .. "/" .. tostring(okS and s or "ERR")
-end
-return table.concat(out, ";")
+local p = known[%d]
+if p == nil then return "ERR|no such point %d" end
+local okH, h = pcall(land.getHeight, { x = p[2], y = p[3] })
+local okS, s = pcall(land.getSurfaceType, { x = p[2], y = p[3] })
+return p[1] .. "=" .. tostring(okH and h or "ERR") .. "/" .. tostring(okS and s or "ERR")
 ]]
-
 local NULL_CODE = [[return "x"]]
 
 -- N getHeight calls on a 100 m grid (M8's locked probe spacing) over real
 -- varied terrain near Damascus. Returns a checksum plus the count so the
 -- call cannot be optimised away and a truncated batch is visible.
-local function batchCode(n)
+local function batchCode(n, patchIndex)
     return string.format(
         [[
 local n, sum, got = %d, 0, 0
-local x0, z0 = -180000, 50000
+local x0, z0 = %f, %f
 local side = math.ceil(math.sqrt(n))
 for i = 0, n - 1 do
     local px = x0 + (i %% side) * 100
@@ -296,14 +318,16 @@ for i = 0, n - 1 do
 end
 return tostring(got) .. "|" .. string.format("%%.1f", sum)
 ]],
-        n
+        n,
+        probeX + patchIndex * PATCH_STRIDE_M,
+        probeZ
     )
 end
 
 -- N `isVisible` rays in one bridge call, fanning out from one observer
 -- over Mezzeh to N points on a 5 km ring -- the shape a per-poll
 -- detectability gate would issue.
-local function isVisibleBatchCode(n)
+local function isVisibleBatchCode(n, _patchIndex)
     return string.format(
         [[
 local n = %d
@@ -508,7 +532,15 @@ local finished = false
 --: Cost model, filled in as the probe measures itself. `fixedMs` is the
 --: bare bridge overhead; the per-item figures gate every escalation.
 local fixedMs = 0.5
-local getHeightPerItemMs = nil
+--: Kept apart deliberately. A cold figure must never gate warm work:
+--: in simulation, a cold `getHeight` estimate at N=1 (where the whole
+--: per-patch penalty lands on a single point) predicted 620 ms for N=10
+--: and shut down the warm ladder and the entire X-B4 occlusion sweep --
+--: all of which are warm operations. That is the same mistake as the
+--: 2026-09-29 outlier bug wearing a different hat: one regime's number
+--: deciding another regime's budget.
+local getHeightWarmPerItemMs = nil
+local getHeightColdPerItemMs = nil
 local isVisiblePerItemMs = nil
 
 --: The current measurement group. `codeFor(i)` yields the i-th call's
@@ -535,11 +567,11 @@ end
 --: safety, because `perItemMs` is derived from 1 ms-granular timings and
 --: is therefore an estimate with real error in it. An unmeasured
 --: `perItemMs` (nil) means only the smallest rung is allowed.
-local function fitsBudget(n, perItemMs)
+local function fitsBudget(n, perItemMs, budgetMs)
     if perItemMs == nil then
         return n <= 1
     end
-    return (fixedMs + n * perItemMs) * 2.0 <= CALL_BUDGET_MS
+    return (fixedMs + n * perItemMs) * 2.0 <= (budgetMs or CALL_BUDGET_MS)
 end
 
 --: Mean of the samples with the top `drop` discarded.
@@ -617,48 +649,64 @@ end
 
 --: Walks an escalation ladder: measure rung `ladderIndex`, then continue
 --: only if the measured cost says the next rung is affordable.
-local function runLadder(name, sizes, ladderIndex, codeFn, perItemSetter, perItemGetter)
+local function runLadder(name, sizes, ladderIndex, codeFn, perItemSetter, perItemGetter, budgetMs, gateGetter)
     local n = sizes[ladderIndex]
     if n == nil then
         advancePlan()
         return
     end
-    if not fitsBudget(n, perItemGetter()) then
+    local gate = (gateGetter or perItemGetter)()
+    if not fitsBudget(n, gate, budgetMs) then
         logi(
             string.format(
                 "%s_batch_%d: SKIPPED -- predicted %.1f ms exceeds the %.1f ms call budget"
                     .. " (this is the affordability answer, not an error)",
                 name,
                 n,
-                (fixedMs + n * (perItemGetter() or 0)) * 2.0,
-                CALL_BUDGET_MS
+                (fixedMs + n * (gate or 0)) * 2.0,
+                budgetMs
             )
         )
         advancePlan()
         return
     end
-    beginGroup(name .. "_batch_" .. n, function()
-        return codeFn(n)
+    beginGroup(name .. "_batch_" .. n, function(i)
+        return codeFn(n, i)
     end, REPEATS, function(samples, lastResult)
-        local m = trimmedMean(samples, TRIM_TOP)
-        perItemSetter(estimatePerItem(m, n))
+        --: Two numbers, not one, and the distinction is the whole point --
+        --: see `trimmedMean` and the header. `steady` is the repeat cost
+        --: with the top samples trimmed; `peak` is the untrimmed maximum,
+        --: which for a cold-ground batch IS the cost, not noise.
+        local steady = trimmedMean(samples, TRIM_TOP)
+        perItemSetter(estimatePerItem(steady, n))
         table.sort(samples)
+        local peak = samples[#samples]
         logi(
             string.format(
-                "%s_batch_%d: n=%d trimmed_ms=%.3f min_ms=%.2f med_ms=%.2f max_ms=%.2f"
-                    .. " per_item_us=%.1f result=%s",
+                "%s_batch_%d: n=%d steady_ms=%.3f med_ms=%.2f PEAK_ms=%.2f"
+                    .. " steady_per_item_us=%.1f peak_per_item_us=%.1f%s result=%s",
                 name,
                 n,
                 #samples,
-                m,
-                samples[1],
+                steady,
                 median(samples),
-                samples[#samples],
+                peak,
                 perItemGetter() * 1000.0,
+                math.max(peak - fixedMs, 0) / n * 1000.0,
+                peak >= STUTTER_WARN_MS and " STUTTER_LIKELY" or "",
                 tostring(lastResult)
             )
         )
-        runLadder(name, sizes, ladderIndex + 1, codeFn, perItemSetter, perItemGetter)
+        runLadder(
+            name,
+            sizes,
+            ladderIndex + 1,
+            codeFn,
+            perItemSetter,
+            perItemGetter,
+            budgetMs,
+            gateGetter
+        )
     end)
 end
 
@@ -667,7 +715,7 @@ end
 --: single pair does not fit -- in which case the sweep is skipped and said
 --: so, rather than quietly running something that stalls a frame.
 local function occlusionShape()
-    local perHeight = getHeightPerItemMs or 0.05
+    local perHeight = getHeightWarmPerItemMs or 0.05
     local perVis = isVisiblePerItemMs or perHeight
     local budget = CALL_BUDGET_MS / 2.0 - fixedMs
     for _, samplesPerPair in ipairs(OCCLUSION_SAMPLE_LADDER) do
@@ -854,9 +902,7 @@ local function buildPlan()
                 advancePlan()
             end)
         end,
-        function()
-            runSingle("known_points", KNOWN_POINTS)
-        end,
+
         function()
             --: Resolve the probe centre to the player's aircraft before
             --: anything that uses it. The user prepares the flight to sit
@@ -915,10 +961,38 @@ local function buildPlan()
             end)
         end,
         function()
-            runLadder("getHeight", BATCH_SIZES, 1, batchCode, function(v)
-                getHeightPerItemMs = v
+            --: WARM first, because it is the well-behaved one and its
+            --: per-item figure is what gates everything else. Every repeat
+            --: probes the SAME patch, so only the first pays for cold
+            --: ground.
+            runLadder("getHeightWARM", BATCH_SIZES, 1, function(n, _i)
+                return batchCode(n, 0)
+            end, function(v)
+                getHeightWarmPerItemMs = v
             end, function()
-                return getHeightPerItemMs
+                return getHeightWarmPerItemMs
+            end, CALL_BUDGET_MS)
+        end,
+        function()
+            --: COLD: every repeat probes a patch 4 km from the last, so no
+            --: repeat benefits from the one before it. This is what a real
+            --: probe bubble does -- it samples ground nobody has touched --
+            --: and on 2026-09-29 it is what the pilot felt as a stutter.
+            --:
+            --: Gated on the WARM per-item figure against the cold budget,
+            --: not on its own: a cold batch's cost is roughly
+            --: `fixed + per-patch penalty + N x warm`, so the penalty is a
+            --: constant per call rather than something that scales with N.
+            --: Dividing it by N and calling it "per item" is what poisoned
+            --: the estimate in simulation.
+            runLadder("getHeightCOLD", BATCH_SIZES, 1, function(n, i)
+                return batchCode(n, i + 1)
+            end, function(v)
+                getHeightColdPerItemMs = v
+            end, function()
+                return getHeightColdPerItemMs
+            end, COLD_BUDGET_MS, function()
+                return getHeightWarmPerItemMs
             end)
         end,
         function()
@@ -926,7 +1000,7 @@ local function buildPlan()
                 isVisiblePerItemMs = v
             end, function()
                 return isVisiblePerItemMs
-            end)
+            end, CALL_BUDGET_MS)
         end,
         function()
             runScenery(1, nil, nil)
@@ -940,6 +1014,32 @@ local function buildPlan()
         function()
             runOcclusion("desert")
         end,
+        function()
+            --: Correctness check, deliberately LAST and split one call per
+            --: point. It was first and monolithic, and on 2026-09-29 its
+            --: 31 ms -- eight cold locations scattered across the whole
+            --: theatre, in one call -- tripped the abort and took the
+            --: entire sortie with it before a single measurement ran.
+            --: A correctness probe must not be able to do that.
+            beginGroup("known_points", function(i)
+                return string.format(KNOWN_POINT_TEMPLATE, i, i)
+            end, 8, function(samples, _)
+                table.sort(samples)
+                for idx, raw in ipairs(group.results) do
+                    logi(string.format("known_point[%d]: %s", idx, tostring(raw)))
+                end
+                logi(
+                    string.format(
+                        "known_points: 8 calls, med_ms=%.2f PEAK_ms=%.2f%s"
+                            .. " (each a cold, theatre-scattered location)",
+                        median(samples),
+                        samples[#samples],
+                        samples[#samples] >= STUTTER_WARN_MS and " STUTTER_LIKELY" or ""
+                    )
+                )
+                advancePlan()
+            end)
+        end,
     }
     planIndex = 0
 end
@@ -950,7 +1050,8 @@ function petrobrainElevProbe.onSimulationStart()
     aborted = false
     finished = false
     group = nil
-    getHeightPerItemMs = nil
+    getHeightWarmPerItemMs = nil
+    getHeightColdPerItemMs = nil
     isVisiblePerItemMs = nil
     logi("loaded, will probe " .. START_DELAY_S .. "s after sim start")
 end

@@ -92,9 +92,14 @@ that is not evidence either way.**
   **1600 µs**. Both ladders refused their next rung as unaffordable, and **the X-B4 occlusion
   sweep was skipped for want of a cost estimate**.
 - Those per-item figures are contradicted by the same run: **135 scenery objects searched in 1 ms**
-  and **8 `getIP` raycasts in under 1 ms**. An outlier that large is scheduler/frame contention,
-  not payload — precisely the shape `2026-09-29-bridge-call-cost-at-scale.md` Finding 3 recorded
-  (maxima an order of magnitude over p99, indifferent to payload size).
+  and **8 `getIP` raycasts in under 1 ms**.
+
+> **CORRECTION, after flights 2 and 3 (same day).** This note first read those outliers as
+> "scheduler/frame contention, not payload", by analogy with
+> `2026-09-29-bridge-call-cost-at-scale.md` Finding 3. **That was wrong, and the same run's own log
+> refutes it**: `null_call`, which touches no `land.*` at all, returned **max_ms = 0.00 across all
+> ten samples** — not one spike. Both `land.*`-touching groups spiked exactly once each. An outlier
+> that appears only in calls that touch terrain is not the scheduler. See Finding 7.
 - The 1 ms `os.clock()` granularity was called out in that note *and* in the probe's own header,
   and the estimator still walked into it. Writing the caveat down is not the same as defending
   against it.
@@ -110,6 +115,34 @@ that is not evidence either way.**
   **below the clock's resolution**, i.e. well under 1 ms for work of that size.
 - Nothing hit the 25 ms abort ceiling. Nothing stuttered that the user reported.
 - That is consistent with, but does not replace, a real per-item figure.
+
+**7. Terrain access is cold/warm, and the cold cost is what the pilot feels. This is the most
+important finding here.**
+
+- **evidence: reproduced-locally (three flights) + the user's own observation**.
+- The user, unprompted, on the two flights: *"In first flight, there was a noticeable stutter every
+  few seconds. In the second flight, no stutter."* Flight 1 ran ~10 s of probing; **flight 2
+  aborted after two calls and did essentially no work**, so "no stutter" there is not a contrast
+  worth much — but flight 1's stutter is real signal, and it lines up with one spike per
+  measurement group, groups being ~2.5 s apart.
+- The mechanism is visible in flight 1's own numbers. `getHeight_batch_1` probed **the same single
+  point ten times**: one 4 ms sample, nine at 0 ms. `isVisible_batch_1` likewise: one 15 ms, nine
+  at 0. `null_call`: ten at 0, no spike. **First touch of a terrain location is expensive;
+  repeats are free.**
+- Flight 3 put a number on the upper end: `known_points`, which reads **eight locations scattered
+  across the whole theatre in one call**, took **31 ms** — and tripped the (then 25 ms) abort
+  ceiling, ending the sortie before a single measurement ran. A prior run had the same call at
+  19 ms. Roughly **~4 ms per cold, distant location**.
+- **This matters more than the steady-state figure, because probing new ground is the entire point
+  of live terrain sampling.** A probe bubble that follows the aircraft is, by construction, always
+  touching cold terrain. The warm number describes re-reading ground already sampled — which the
+  M8 probe store is designed to avoid ever doing.
+- It also means the trimmed mean added earlier is only half right: correct for estimating
+  steady-state per-item cost, **wrong as a basis for "is this affordable"**, because it discards
+  exactly the samples that caused the stutter. The probe now reports `steady_ms` and `PEAK_ms`
+  side by side, flags any call at or above 12 ms `STUTTER_LIKELY`, and runs **separate cold and
+  warm ladders** (`getHeightCOLD` probes a patch 4 km from the last one every repeat;
+  `getHeightWARM` re-probes one patch) so the two regimes are measured rather than averaged.
 
 ### Reproducible Test
 
@@ -127,5 +160,12 @@ grep "PetrobrainElevProbe" "$DCS_SAVED_GAMES_PATH/Logs/dcs.log"
 - **Per-item cost of `getHeight` and `isVisible`.** Same sortie.
 - **Do scenery objects carry dimensions?** Finding 3 read only the type name. A LOS occluder needs
   extent, not just a point. **Resolves with:** dumping a full `getDesc()` table for one object.
-- **Whether a `dostring_in` payload blocks DCS's own frame.** Still unestablished, and still the
-  question that decides whether any of this is safe at production rates.
+- **Whether a `dostring_in` payload blocks DCS's own frame.** **Effectively answered yes** by
+  Finding 7 — the pilot felt a stutter that tracks the probe's own cold calls — but not yet
+  measured against DCS's frame-time counter, which is what would turn "he felt it" into a number.
+- **The cold penalty's shape**: is it per location, per terrain page, or per distance from
+  the last access? That decides whether a *contiguous* expanding bubble (cheap, one page at a
+  time) behaves differently from scattered sampling (expensive). The cold/warm ladders measure
+  the magnitude; they do not yet separate these.
+- **Per-item cost of `getHeight` and `isVisible` in the warm regime.** Flight 3 aborted before
+  reaching them.
