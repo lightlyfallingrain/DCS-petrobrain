@@ -1,20 +1,32 @@
 ### Goal
 
-Ask DCS for line of sight directly (terrain + buildings, batched, at the aircraft layer) instead
-of approximating it from world-model's own SRTM elevation grid, and use our own model only for
-*detectability* (angular size, optic, conditions, salience) on top of that answered fact.
+Ask DCS for line of sight directly (terrain + buildings, batched, true position to true position,
+at the aircraft layer) instead of approximating it from world-model's own SRTM elevation grid, and
+use our own model only for *detectability* (angular size, optic, conditions, salience) on top of
+that answered fact. The boolean is computed collector-side from true positions, reaches perception
+as one more piece of joined unit data (the same shape movement detection already established), and
+belief never computes LOS itself — it remembers what perception observed, exactly as it already
+does for classification, cardinality and motion.
+
+**Revision note (this pass, 2026-09-29):** three user corrections landed on this plan after the
+first draft, as appended sections that argued against the body and against each other. This
+revision folds their conclusions into one coherent design and restages the plan around it —
+collector-side computation first, because that is now the foundation every consumer sits on, not a
+supporting detail of a body-layer feature. Nothing in this revision changes the measured costs,
+the buildings-before-terrain ordering, or the trees findings — all of that stood up to the
+corrections and is carried forward as-is.
 
 ### Starting premise, corrected before this plan
 
-The dispatch brief stated "trees have no DCS route at all" as settled. It is not. The user's own
-evidence: the F10 map renders individual trees, flying into one crashes the aircraft (collision
-geometry per tree), and DCS's own AI Petrovich with the 9K113 is blocked by trees — so a shipped
-code path performs tree-occluded LOS against a specific target. What the Windows investigation
-actually settled is narrower: **`world.searchObjects` never returns a tree object, and
-`land.isVisible` is terrain-only.** Those two scripting-API calls exclude trees. Whether any
-*other* exposed call reaches the engine's own tree-aware path is open, not closed. This plan
-treats terrain+building LOS as measured and ready to build, and treats trees as a named,
-unresolved follow-up investigation that does not block it — see "Trees" below.
+The dispatch brief stated "trees have no DCS route at all" as settled. It is not, in the strong
+form. The user's own evidence: the F10 map renders individual trees, flying into one crashes the
+aircraft (collision geometry per tree), and DCS's own AI Petrovich with the 9K113 is blocked by
+trees — so a shipped code path performs tree-occluded LOS against a specific target. What the
+Windows investigation actually settled is narrower: **`world.searchObjects` never returns a tree
+object, and `land.isVisible` is terrain-only.** Those two scripting-API calls exclude trees.
+Whether any *other* exposed call reaches the engine's own tree-aware path was open when this plan
+was drafted; the user has since reframed the requirement (see "Trees" below) and fixed a fallback
+in advance, so it no longer blocks anything here.
 
 ### Effort/value check first
 
@@ -23,8 +35,8 @@ report (`plans/missed-aaa-detection/debug.md`) diagnosed a real miss — SRTM ov
 under a real unit's position placed it permanently "underground" to the model — and Fix option 1
 (a 12 m tolerance on the terrain check, sized to M7's own recorded SRTM-vs-DCS stddev) is **already
 merged** into `world-model/src/query/line_of_sight.py` (`_TERRAIN_TOLERANCE_M = 12.0`, with a long
-comment carrying the Mi-24P-specific justification for that number). So X-B29's value is not "stop
-missing AAA that DCS driving LOS would have caught" — that class is already closed. Its real,
+comment carrying the Mi-24P-specific justification for that number). So this plan's value is not
+"stop missing AAA that DCS-driven LOS would have caught" — that class is already closed. Its real,
 smaller value is:
 
 1. Removing reliance on a *guessed* error margin for terrain, by asking DCS for ground truth
@@ -32,159 +44,131 @@ smaller value is:
    negatives beyond its own margin (the reproduction table showed +20 m still blocking); DCS's own
    terrain has none of that error, at any margin.
 2. **Building occlusion, which does not exist today in either path.** This is new capability, not
-   a fix — and it is the cheaper, lower-risk, higher-value half of this plan (Stage 1 below).
+   a fix — and it is the cheaper, lower-risk, higher-value half of this plan.
 
-Recommendation: ship building occlusion first (new, additive, cannot regress anything that works
-today) and treat the terrain-source swap as a second, independent, lower-urgency stage — not
-"this is all one bug fix that must land together."
+Recommendation, unchanged by the corrections: ship building occlusion first (new, additive, cannot
+regress anything that works today) and treat the terrain-source swap as a second, independent,
+lower-urgency stage — not "this is all one bug fix that must land together."
 
 ### The model
 
 ```
-DCS answers "is there terrain/a building in the way?" (a physical fact)
-        -> our own model answers "can Petrovich actually detect this?" (angular size,
-           optic, conditions, salience — check_visibility's existing gates, unchanged)
+DCS answers "is there terrain/a building in the way, between the two real positions?" (a physical
+fact, computed true-to-true)
+        -> our own model answers "can Petrovich actually detect this?" (angular size, optic,
+           conditions, salience — check_visibility's existing gates, unchanged)
+        -> belief remembers whether that fact held the last time this contact was actually
+           observed, and forgets it the same way it forgets everything else it hasn't looked at
+           recently.
 ```
 
-LOS stops being approximated from a static grid and becomes something DCS is asked directly, for
-every ground/air unit inside the already-settled 10 km player bubble (`todo/todo.md`, "Player
-bubble: 10 km, settled 2026-09-28"), once per second, batched in one bridge call — exactly the
-shape the user proposed. Nothing here grants Petrovich new knowledge: LOS is a fact about the
-physical world (a ray either crosses geometry or it doesn't), not information about a unit's
-identity or position that he could not otherwise derive; this project's no-omniscience invariant is
-about identity/position/interpretation, and this plan touches none of those.
+Nothing here grants Petrovich new knowledge: LOS is a fact about the physical world (a ray either
+crosses geometry or it doesn't), not information about a unit's identity or position that he could
+not otherwise derive. This project's no-omniscience invariant is about identity/position/
+interpretation, and this plan touches none of those — it is stated explicitly, per call site, in
+the section below.
 
-### CORRECTION 2 (user, 2026-09-29) — LOS is computed collector-side from TRUE positions, and belief never computes it at all
+### Where the boolean is computed, how it reaches perception, and how belief carries it
 
-The correction below got the conclusion right and the mechanism wrong. It proposed the engagement
-term ask point-to-point using the contact's **believed** position, and called preserving that error
-a feature. **The user rejected that too, and the reasoning is the one that settles the whole
-design:**
+**This is the section three separate corrections landed on. What follows is the settled design,
+not a debate.**
+
+**1. The collector computes LOS per unit, true ownship position to true unit position.** Every
+unit aircraft-layer already knows about from `LoGetWorldObjects`, excluding ownship
+(`is_ownship`), filtered to the 10 km player bubble around ownship's current position — the same
+radius body-layer's detection pipeline is already scoped to (`todo/todo.md`, "Player bubble: 10
+km, settled 2026-09-28"). Batched through the mission bridge in one call per poll, `world.
+getPlayer()` for ownship truth, `LoGetWorldObjects`-derived truth for each unit — both already
+available to the Lua side, per the measured probe work below.
+
+**Why it must be true-to-true, not believed-to-true.** The user, rejecting an earlier draft of
+this plan that asked the question against the contact's *believed* position:
 
 > *"Whether we can see a target, LOS or no LOS, is a world state **fact**. It is not a belief. Our
 > belief about a unit's location is belief and can be wrong. It in no way affects LOS, it is a
 > property of the simulated world, a 'physical' fact even though simulated. LOS **must use** the
 > unit's **factual** location and our ownship's **factual** location. Belief is in a layer above
 > all this."*
->
-> *"--> bake 'LOS / no-LOS' boolean into unit data transmitted from collector. Then belief system
-> can use that information without doing its own bogus calculations."*
 
-**Why the believed-position version was not merely different but wrong.** A line of sight to a
-point where nothing stands is not a preserved error, it is a fabricated answer to a question about
-empty space. The ray either clears real geometry between two real points or it does not. Asking
-about a believed position produces a verdict that corresponds to no physical fact at all — and it
-would have read as principled, which is what makes it worth recording rather than quietly fixing.
+A line of sight to a point where nothing stands is not a preserved error, it is a fabricated
+answer to a question about empty space. The ray either clears real geometry between two real
+points or it does not. **Recorded wrong turn, kept rather than deleted because it would have read
+as principled**: an earlier draft asked the engagement term to query point-to-point using the
+contact's *believed* position, and called preserving that error a feature — a plausible-sounding
+argument for a design that produces a verdict corresponding to no physical fact at all. Rejected;
+not revisited.
 
-**The design, then:**
+**2. The boolean reaches body-layer as one more piece of joined unit data — a second endpoint, not
+a merge into `/world_objects/latest`'s own payload.** The user's own framing:
 
-1. **The collector computes LOS per unit**, true ownship position to true unit position, batched
-   through the mission bridge in one call at the settled cadence. Ownship truth it already has from
-   telemetry; unit truth it already has from `/world_objects/latest`.
-2. **The boolean ships as a field on the unit data** — the same feed, the same join, no second
-   channel and no new staleness class beyond the feed's own.
-3. **Perception consumes it as a gate input** at `visibility.check_visibility` gate 4, replacing
-   that gate's own terrain computation. This is pre-boundary, where identity legitimately exists.
-4. **Belief never computes LOS.** The observed LOS state rides into the `Percept` and is carried on
-   the `Contact` as a last-known property, exactly as classification, cardinality and motion already
-   are. `belief/contacts.py::tick`'s engagement term **reads** that stored value instead of calling
-   `line_of_sight_clear` at all.
+> *"bake 'LOS / no-LOS' boolean into unit data transmitted from collector. Then belief system can
+> use that information without doing its own bogus calculations."*
 
-Point 4 is the load-bearing one for an implementer: it is not "belief calls a different LOS
-function", it is **belief stops calling one**. The pattern is already the project's own — perception
-observes, belief remembers, nothing downstream re-derives. A contact that has not been observed
-recently carries a stale LOS flag for the same reason it carries a stale classification, and the
-existing decay/certainty machinery is where that is expressed.
+That intent is honored at the point where "unit data" actually means something to a consumer: once
+`naked_eye_source.py` has joined it onto a `WorldObjectCandidate`, exactly as velocity already is.
+It is **not** honored by folding the field into `/world_objects/latest`'s own JSON, and that is not
+a new judgment call — it is `plans/movement-detection/plan.md` Decision 2, already made and
+already documented in `aircraft-layer/src/api/server.py`'s own module docstring:
 
-**What this leaves of world-model's `line_of_sight_clear`:** the offline and test path, unchanged
-and still first-class — Mission Interpreter enrichment, the replay harness, and every test that must
-run with no DCS and no collector (`plans/body-layer/plan.md` §2). It stops being the live path.
+> *"A **separate endpoint from `/world_objects/latest`, not merged into it**: merging would mean
+> either holding a world-objects snapshot back until a matching velocity snapshot arrives, or
+> emitting one timestamp for two feeds whose sim-clock stamps genuinely differ (5 Hz vs. 1 Hz
+> polls) -- silently destroying the provenance the dual-clock schema exists to preserve. The join
+> (by `unit_name`, within a skew bound) is `perception.motion`'s job on the body-layer side, not
+> this layer's."*
 
-### CORRECTION (user, 2026-09-29): both call sites use DCS LOS — the obstacle was the join key, not belief
+LOS is exactly this shape again: computed by a 1 Hz Hook-script bridge call (mission-scripting
+environment, `world.*`/`land.*`), while `/world_objects/latest` is Export.lua-native at 5 Hz. The
+same reasoning that kept velocity a sibling endpoint applies unchanged to LOS, and reusing it
+rather than re-deciding it is the point of writing this down. So: new `GET /line_of_sight/latest`
+endpoint, new schema, new cache, joined client-side by `unit_name` — see "Wire shape" below for the
+concrete shapes, which is the one section of the pre-correction draft that needed no revision.
 
-The section below concludes that `belief/contacts.py::tick`'s engagement term "keeps calling
-world-model's offline primitive forever, unaffected by this plan", because a `Contact` structurally
-cannot carry a DCS object id. **The user rejected that conclusion, and he is right:**
+**3. Perception consumes it as a gate input**, at `visibility.check_visibility`'s gate 4, replacing
+that gate's own terrain-only computation for the live path. This is pre-boundary
+(`WorldObjectCandidate.object_id` still carries ground-truth identity here), where identity
+legitimately exists — the same seam `perception.association`/`perception.naked_eye_source` already
+own.
+
+**4. Belief never computes LOS.** The observed value rides into the `Percept` for whichever
+contact this poll's admitted naked-eye observation belongs to, and is carried on the `Contact` as
+a last-known property, the same pattern classification and motion already use — see "What changes
+in body-layer" below for the exact field, fold rule, and staleness handling.
+`belief/contacts.py::tick`'s engagement term **reads** that stored value instead of calling
+`line_of_sight_clear` — or any callable at all — the way it does today. The user, rejecting the
+draft's conclusion that the engagement term was structurally locked out of this by the
+no-omniscience boundary:
 
 > *"No. With cheap access to DCS calculated LOS, that is the world truth and we must use that. LOS
 > is not a question of belief, it is a property of the DCS world state. If LOS exists and other
 > detection criteria pass, we can see it."*
 
-**What the analysis below actually established, and what it wrongly generalised.** The real
-obstacle is narrower than "belief cannot consume this": it is that a feed **keyed by DCS unit
-name** has no key the engagement term can join on. That much is true. But line of sight does not
-have to be asked per unit — `land.isVisible` and the `SEGMENT` search both take **coordinates, not
-unit handles**. So the engagement term asks exactly what it asks today, point to point, with the
-contact's *believed* position as the endpoint; only the terrain and occluder source underneath
-changes.
+**Why this is not a boundary violation, and why it is not merely a delegation either.** The
+engagement term's question ("can the threat see us") and the detection gate's question ("can we
+see the threat") are the *same ray test* run in the opposite conceptual direction: LOS is
+symmetric — a sightline either crosses geometry or it doesn't, independent of which end is asking.
+So the moment gate 4 admits a naked-eye observation of a contact, that admission is itself proof
+the ray was clear at that instant, in both directions at once. Belief does not need to re-derive
+this: it only needs to remember it, the same way it remembers "last seen moving north" without
+re-deriving the physics that produced that observation. A contact currently being freshly observed
+therefore always carries a *true* LOS fact (not a guess), and a contact that has gone quiet decays
+to *unknown* — which the engagement term already treats as "assume the threat can see us" (see
+`LOS_MASK_CONFIRM_S`'s existing fail-open direction below), the conservative default this codebase
+already prefers everywhere a signal is missing rather than merely stale.
 
-**So there are two query shapes on one wire, not two mechanisms:**
-
-| call site | endpoint | keyed by |
-|---|---|---|
-| `visibility.check_visibility` gate 4 | the candidate's true position (pre-boundary, already holds it) | DCS unit, or coordinates — either works |
-| `contacts.tick` engagement term | the contact's **believed** position | our own contact id, never a DCS one |
-
-**The no-omniscience boundary holds in both directions, and is worth stating explicitly because
-this is the seam where it would be easiest to lose.** We send a position we already believe; DCS
-returns a geometric fact about a ray. Nothing comes back that we did not already have — no
-identity, no true position, no existence claim about anything we had not already posited.
-
-**And one property to preserve deliberately rather than treat as a defect:** when the believed
-position is wrong, the point-to-point query returns the LOS answer *for that wrong point*. That is
-correct. Petrovich checks whether he can see where he **thinks** the thing is, which is what a crew
-member does — the error is preserved rather than laundered by asking about the real unit instead.
-
-**What this changes in the staging below:** the engagement term is no longer out of scope by
-invariant. It is a second consumer of the same source, and whether it lands in the same stage as
-the detection gate or a following one is an ordinary sequencing decision, not a structural one.
-The rest of the section below stands as written — its rejection of per-candidate round trips, and
-its argument for letting DCS answer terrain and buildings together on one sightline rather than
-mixing provenances, are unaffected.
-
-### Where the verdict is computed, and the finding that decides it
-
-**Only the perception-layer gate can consume a live, DCS-object-keyed verdict — the belief-layer
-engagement term cannot, by an existing invariant, not by this plan's choice.**
-
-`geometry.line_of_sight_clear` (body-layer) has exactly two callers today:
-
-1. `perception/visibility.py::check_visibility`'s gate 4 — called with a `WorldObjectCandidate`,
-   which still carries ground-truth identity (`candidate.object_id`). This is *before* the
-   no-omniscience boundary (`belief/percept.py`).
-2. `belief/contacts.py::tick`'s engagement term (`plans/watch-reporting/plan.md` Stage 4) — called
-   from a closure over a `Contact`'s *belief-estimated* `GeoPosition`, with no DCS object id at
-   all. `Contact` structurally cannot carry one (`body-layer/CLAUDE.md`'s invariant: "belief code
-   never sees `Observation.derived_world_position` or a DCS object id" — `detection_trace_writer.py`
-   is the one sanctioned exception, and this is not it).
-
-So a live feed keyed by DCS unit identity can only ever be joined at call site 1. Call site 2
-keeps calling world-model's offline primitive forever, unaffected by this plan. This is worth
-stating plainly because it means "DCS-driven LOS" does not become uniformly true everywhere LOS is
-checked in this codebase — only at the detection gate, which is also the only place it needed to
-be true to close the value this plan is chasing.
-
-**Rejected alternatives**, per the brief's request to argue rather than assume the user's shape:
-
-- *Body-layer asks DCS per-candidate.* Rejected — this is the exact N-round-trips-per-poll shape
-  `todo/backlog.md`'s X-B29 entry itself rejects, and it does not remove the LAN-cost objection
-  X-B26/X-B30 already argued about per-candidate building checks.
-- *Body-layer keeps its own terrain LOS and asks DCS only for building occluders.* Rejected —
-  still N round trips (one per candidate, to test buildings along that one candidate's sightline),
-  throws away the batching that is the whole reason the LAN stopped being a problem, and — more
-  importantly — mixes two terrain provenances on one sightline (our SRTM-derived terrain, DCS's
-  building geometry). A sightline that clears our terrain model but would have grazed DCS's own
-  (different) terrain surface near a ridge is exactly the failure class the missed-AAA bug was, just
-  moved to a different geometry. Letting DCS answer the whole sightline test — terrain and
-  buildings together — removes that mismatch class entirely rather than only the building half of
-  it.
+**The no-omniscience boundary, stated at the seam where it is easiest to lose:** the collector's
+LOS computation is DCS-object-keyed and identity-bearing; it may only cross into body-layer at
+`naked_eye_source.py`'s join (pre-boundary, alongside `object_id`, exactly where velocity already
+crosses). It may reach `belief/contacts.py` **only** as a value already carried on a `Percept`,
+never as a DCS-keyed lookup a `Contact` could perform on demand — `Contact` still cannot carry a
+DCS object id, and this plan does not change that. Nothing the collector knows about a unit's
+*identity* or *true position* reaches belief; only the yes/no fact of whether a ray it already
+looked at was clear.
 
 ### What exactly is asked, and for which units
 
-Every unit aircraft-layer already knows about from `LoGetWorldObjects` (via `/world_objects/latest`
-today; the new hook script enumerates independently, see below), excluding ownship
-(`is_ownship`), filtered to the 10 km player bubble around ownship's current position — the same
-radius body-layer's detection pipeline is already scoped to.
+Same bubble and same "no cone filtering" reasoning as originally drafted, unaffected by any of the
+corrections:
 
 **No cone filtering, deliberately, despite the user's own framing ("within the 130 degree
 visibility cone").** Reading `check_visibility`'s gate chain settles what that number actually is:
@@ -200,11 +184,11 @@ replicate any version of that shape in the Lua bridge script:
 2. **It is not needed as a cost optimization either.** The measured cost table (`aircraft-layer/
    research/2026-09-29-bridge-terrain-probe-results.md` Finding 21, ~8.7 µs/sightline for
    buildings) already gives 500 units in one 10 km bubble at 4.9 ms — under 0.5% duty at 1 Hz.
-   Duplicating body-layer's cockpit-mask/gaze logic in Lua, across the seam, to shave a
+   Duplicating body-layer's cockpit-mask/gaze logic in Lua, across the seam, to shave an
    already-cheap number, is complexity with no measured benefit.
 
 So: bubble-only filtering, done once per poll inside the Lua snippet (distance check against
-ownship's own position, the same self-contained shape `petrobrain-mission-telemetry-hook.lua`
+ownship's own true position, the same self-contained shape `petrobrain-mission-telemetry-hook.lua`
 already uses for enumerating units — no argument passing needed from the collector).
 
 ### Cadence
@@ -215,10 +199,12 @@ already uses for enumerating units — no argument passing needed from the colle
 own figure) LOS state changes over seconds, and body-layer's naked-eye poll is 5 Hz — so a verdict
 up to ~1-2 s old is not stale relative to how fast the underlying fact actually changes. No new
 cadence concept is introduced; this is a fourth sibling to the existing telemetry/world-objects/
-indication feeds, all polled from body-layer's own 5 Hz loop regardless of how often aircraft-layer
-refreshes them.
+indication feeds, joined the same way velocity already is.
 
 ### Wire shape and the join key that makes staleness precedented, not new
+
+Unaffected by the corrections — this is the one section of the original draft that stayed correct
+throughout, and the reasoning above ("Where the boolean is computed…", point 2) is exactly why.
 
 New Lua script `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua`, structurally a sibling
 of `petrobrain-mission-telemetry-hook.lua` — own loopback port, own `onSimulationStart/Frame/Stop`
@@ -226,8 +212,8 @@ lifecycle, own fixed code-literal snippet run via `dostring_in`, `timer.getTime(
 the scripting state (never `DCS.getRealTime()`, for the same replay-determinism reason that file's
 header already gives). The snippet enumerates units the same way `VELOCITY_CODE` does
 (`coalition.getGroups`/`getUnits`), filters to the bubble, and for each survivor runs the sightline
-test (Stage 1: buildings only; Stage 2 adds terrain — see below), packing
-`"unitName:buildingClear01;..."` the same delimited-string-in-JSON-envelope shape every other bridge
+test (Stage 1: buildings only; Stage 3 adds terrain — see staging below), packing
+`"unitName:losClear01;..."` the same delimited-string-in-JSON-envelope shape every other bridge
 feed here uses.
 
 **Join key: `unit_name`, not `object_id`.** `object_id` is `LoGetWorldObjects`'s `pairs()` key,
@@ -235,18 +221,19 @@ explicitly flagged in `aircraft-layer/src/schema/world_objects.py`'s own docstri
 "unconfirmed" for cross-poll stability. `unit_name` (`Unit:getName()`, matching
 `LoGetWorldObjects`'s `UnitName`) is the join key movement detection already established for
 exactly this same cross-feed problem (`plans/movement-detection/plan.md` Decision 1,
-`naked_eye_source.py::_resolve_velocity_by_object_id`). This plan reuses that precedent rather than
-inventing a second one: a new `_resolve_los_by_unit_name` follows the same shape — join this poll's
-`/line_of_sight/latest` snapshot onto the raw `/world_objects/latest` dicts by `unit_name`,
+`naked_eye_source.py::_resolve_velocity_by_object_id` — a misleading name for what is actually a
+unit-name join, kept as-is rather than renamed mid-plan). This plan reuses that precedent rather
+than inventing a second one: a new `_resolve_los_by_unit_name` follows the same shape — join this
+poll's `/line_of_sight/latest` snapshot onto the raw `/world_objects/latest` dicts by `unit_name`,
 computing a skew (`|world_objects_t_sim - line_of_sight_t_sim|`) exactly as `_resolve_velocity_by_
 object_id` already computes `motion_skew_s`, and dropping to `None` when that skew exceeds a new
-`LOS_MAX_AGE_S` constant (propose 3.0 s — three poll cycles at the feed's own 1 Hz rate, mirroring
-`brain-layer`'s D4 pattern of comparing a carried-through sim timestamp against "now" and discarding
-what's too old, `crew_console.py`'s `BRAIN_REPLY_MAX_AGE_S`). The result lands on a new optional
-field, `WorldObjectCandidate.live_los_clear: bool | None` — `None` means "no live verdict this poll
-(feed absent, unit not in the bubble that poll, or too stale)", never coerced to a guessed true/
-false, same tri-state discipline every other join field in this module already follows
-(`is_ownship`, `velocity`, `heading_true_deg`).
+`LOS_MAX_AGE_S` constant (proposed 3.0 s — three poll cycles at the feed's own 1 Hz rate, mirroring
+`brain-layer`'s D4 pattern of comparing a carried-through sim timestamp against "now" and
+discarding what's too old, `crew_console.py`'s `BRAIN_REPLY_MAX_AGE_S`). The result lands on a new
+optional field, `WorldObjectCandidate.live_los_clear: bool | None` — `None` means "no live verdict
+this poll (feed absent, unit not in the bubble that poll, or too stale)," never coerced to a
+guessed true/false, same tri-state discipline every other joined field in this module already
+follows (`is_ownship`, `velocity`, `heading_true_deg`).
 
 `check_visibility`'s gate 4 becomes:
 
@@ -266,21 +253,87 @@ reads a field off the candidate it was already handed. **Default behaviour (airc
 absent, as in every test and the replay harness) is unchanged**: `live_los_clear` stays `None`
 forever if nothing populates it, and the `elif` branch is today's code, untouched.
 
+### What changes in body-layer, and what is deleted
+
+**New field: `Contact.live_los_clear: bool | None = None`.** Set unconditionally from the incoming
+`Percept.live_los_clear` in `record()`/`from_percept()` — an overwrite, not a fold, the same
+semantics as `last_class_raw` (a raw most-recent-look value) rather than `classification`'s
+monotone specificity lattice. There is no ordering or specificity relation between "clear" and
+"masked" to fold over; it is a plain fact about the most recent look, nothing more.
+
+**Staleness reuses existing machinery rather than adding a bespoke half-life.** `Contact` already
+distinguishes "currently being perceived" from merely "recently tracked" via `decay.
+OBSERVED_WINDOW_S` (16.0 s, re-derived from the naked-eye scan cycle — `belief/decay.py`). LOS is a
+fast, physically transient fact exactly like the thing that window already gates, and reusing it
+avoids inventing a second, uncalibrated threshold for the same concept: the engagement term treats
+`live_los_clear` as meaningful only while `now_sim - contact.last_seen_sim <= OBSERVED_WINDOW_S`,
+and as unknown otherwise — not because it decays on its own timer, but because it was never
+observed to begin with once the contact has gone quiet. This is the "already has machinery for
+exactly that" the dispatch brief pointed at; it did not require adding a sixth half-life to
+`decay.py`.
+
+**The engagement term's block in `ContactStore.tick` (`plans/watch-reporting/plan.md` Decision
+4/5a-ii) keeps its existing masking-dwell logic untouched, fed a different input:**
+
+```python
+elif contact.live_los_clear is None or (now_sim - contact.last_seen_sim) > OBSERVED_WINDOW_S:
+    # No fresh live verdict -- correct degradation is fail-open, same
+    # posture as "no world-model connection" today.
+    los_ok = True
+    contact.los_masked_since_sim = None
+elif contact.live_los_clear:
+    contact.los_masked_since_sim = None
+    los_ok = True
+else:
+    if contact.los_masked_since_sim is None:
+        contact.los_masked_since_sim = now_sim
+    masked_for_s = now_sim - contact.los_masked_since_sim
+    los_ok = masked_for_s < LOS_MASK_CONFIRM_S  # Decision 5a-ii, unchanged
+```
+
+`LOS_MASK_CONFIRM_S` and `Contact.los_masked_since_sim` are **not new** — they already exist
+(`plans/watch-reporting/plan.md` Decision 5a-ii, `belief/decay.py`) and needed no change; only the
+signal feeding them moves from a live per-tick query to a carried observation.
+
+**Deleted, because belief genuinely stops computing LOS rather than delegating it:**
+
+- `_threat_has_los()` (`belief/contacts.py`) — the three-point uncertainty sweep against a believed
+  position has no remaining caller once the geometry is ground-truth and pre-computed; there is
+  nothing left to sweep.
+- `ContactStore.tick`'s `los_clear: Callable[[GeoPosition, GeoPosition], bool] | None` parameter,
+  and `logger.py`'s closure that builds and passes it (`src/logger.py` ~lines 506-517, plus the
+  `line_of_sight_clear` import there used only for this purpose).
+- `LOS_UNCERTAINTY_SAMPLES` (`belief/contacts.py`) — documented the sweep's sample count; nothing
+  reads it once the sweep is gone.
+
+**Narrower than the pre-correction draft, and worth stating as a real finding rather than a
+tidy-up:** the earlier draft still had `contacts.py::tick`'s engagement term calling world-model's
+`line_of_sight_clear` forever, unaffected by this plan. That is no longer true. After this plan,
+world-model's `line_of_sight_clear` has exactly one live caller left in body-layer —
+`visibility.check_visibility`'s gate 4, and only on its fallback branch when the live feed is
+absent.
+
+### What this leaves of world-model's `line_of_sight_clear`
+
+The offline and test path, unchanged and still first-class — Mission Interpreter enrichment, the
+replay harness, and every test that must run with no DCS and no collector (`plans/body-layer/
+plan.md` §2). It also remains gate 4's own fallback when the live feed is absent (test fixtures,
+the replay harness, a collector that hasn't started the LOS hook yet). It is **not** deleted and
+**not** deprecated — see "Risks & Unknowns" for one consequence of narrowing its live footprint to
+a single call site.
+
 ### What happens to the 12 m tolerance and the probe grid
 
 Unchanged, and this plan does not touch either. `_TERRAIN_TOLERANCE_M` and world-model's
-`line_of_sight_clear` remain the offline/test path and the belief-layer engagement term's *only*
-path (see "Where the verdict is computed" above) — both real, permanent uses, not a stopgap this
-plan replaces. The probe grid (M8) and its spacing redesign stay exactly where `todo/backlog.md`'s
-X-B28 (superseded) already left them: lower priority, for land formations/`describe_position`, not
-line of sight. Nothing here changes that.
+`line_of_sight_clear` remain the offline/test path and gate 4's fallback — both real, permanent
+uses, not a stopgap this plan replaces. The probe grid (M8) and its spacing redesign stay exactly
+where `todo/backlog.md`'s X-B28 (superseded) already left them: lower priority, for land
+formations/`describe_position`, not line of sight. Nothing here changes that.
 
-### Trees — REFRAMED by the user, 2026-09-29, after this plan was drafted
+### Trees
 
-The section below was written against the standing measurement that a vehicle under trees is
-undetectable at any range from any optic, which made trees look like a *forest* problem — a
-statistical transmission model over landcover polygons, safely off the critical path. **The user
-has corrected the scope, and it changes the shape of the requirement:**
+The user reframed this after the plan's first draft, and the reframing is now the settled
+position, not an open question:
 
 > *"'vehicle under trees is undetectable at any range from any optic' — in a forest, yes very much.
 > But if it's just a couple of trees or a line of trees along a road, then tree LOS really matters.
@@ -288,86 +341,69 @@ has corrected the scope, and it changes the shape of the requirement:**
 > individual tree placement (though that wouldn't hurt and could be useful), but need to know if
 > they block LOS. If we can."*
 
-So there are **two distinct tree problems**, and only the first is covered by the landcover model:
+Two distinct tree problems, only the first covered by a landcover model:
 
 1. **Forest** — a mass of canopy, where the honest model is probabilistic transmission over an OSM
-   polygon and the answer is "he cannot see in there". The measurement supports this.
+   polygon and the answer is "he cannot see in there." The measurement supports this.
 2. **Sparse and linear tree cover** — a treeline along a road, a windbreak, a handful of trees
-   between the aircraft and a vehicle. A polygon model answers this *wrongly in both directions*:
-   OSM may carry no polygon at all for a roadside treeline, and where it does, a probability over
-   an area cannot express "this particular sightline is blocked and the one ten metres left is
-   not". This is **discrete occlusion**, the same shape as the building test, and it is exactly the
-   case a Mi-24P attacking along a road meets constantly.
+   between the aircraft and a vehicle. A polygon model answers this *wrongly in both directions*
+   (OSM may carry no polygon at all for a roadside treeline; where it does, a probability over an
+   area cannot express "this sightline is blocked and the one ten metres left is not"). This is
+   **discrete occlusion**, the same shape as the building test, and exactly the case a Mi-24P
+   attacking along a road meets constantly. The user's acceptance bar here is a bare blocked/clear
+   verdict — individual tree placement would be a bonus, not a requirement.
 
-**What this changes:** the tree question is no longer safely deferrable behind Stages 1 and 2. The
-user's ask is explicit — *"We must investigate if there is any way to get LOS considering trees"* —
-and his acceptance criterion is looser than full tree geometry: **a blocked/clear verdict is
-enough**; individual tree placement would be a bonus, not a requirement. That materially widens
-what counts as success for the probes named below, and it means a negative result on those probes
-is a real finding rather than a formality.
-
-**It does not change the staging below.** Stage 1 (buildings) is unaffected, measured and ready;
-trees ride a parallel investigation rather than blocking it. But if the probes come back positive,
-the tree verdict joins the same batched sightline call rather than becoming a second mechanism —
-which is an argument for settling the probes before Stage 1's wire format is frozen.
-
-**Fallback settled in advance (user, 2026-09-29):** *"If there's no way for tree aware LOS, then
-we'll take the statistical model instead."* So the probes are not a gate — a negative result
-selects the OSM-landcover transmission model rather than leaving trees unhandled, and the sparse /
-linear-treeline case above is then a known, accepted limitation of that model rather than an
-unsolved problem. Worth recording that the decision was taken *before* the result, so a negative
-does not get relitigated as a failure.
-
-### Trees
+**Fallback settled in advance, before any probe result comes back:** *"If there's no way for tree
+aware LOS, then we'll take the statistical model instead."* So the probes below are not a gate — a
+negative result selects the OSM-landcover transmission model, and the sparse/linear-treeline case
+becomes a known, accepted limitation of that model rather than an unsolved problem. The decision
+was taken before the result on purpose, so a negative does not get relitigated as a failure.
 
 **Not resolved, and this plan does not resolve it.** Established: `world.searchObjects` never
 returns a tree object across ten flights (not a scenery object, no volume search will find one),
 and `land.isVisible` is confirmed terrain-only (the SEGMENT-through-known-buildings control,
-Finding 12). Both facts stand. **Also established, per the user's correction, and not previously
-weighed**: the F10 map renders individual trees, tree collision exists per-tree (crashing into one
-ends the aircraft), and DCS's own AI Petrovich with the 9K113 is blocked by trees — so the engine
-holds tree geometry and at least one shipped code path (`Scripts/AI/Detection.lua`'s
-`trees_LOS_test_T4`, feeding `Controller.isTargetDetected`/`getDetectedTargets`) tests LOS against
-it. The open question is narrow and specific: **is there any scripting-API call that reaches that
-same tree-aware geometry, as opposed to the terrain-only surface `land.*` exposes?**
+`aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md` Finding 12). Also established:
+the F10 map renders individual trees, tree collision exists per-tree, and DCS's own AI Petrovich
+with the 9K113 is blocked by trees — so the engine holds tree geometry and at least one shipped
+code path (`Scripts/AI/Detection.lua`'s `trees_LOS_test_T4`, feeding `Controller.isTargetDetected`/
+`getDetectedTargets`) tests LOS against it. The open question is narrow: **is there any
+scripting-API call that reaches that same tree-aware geometry, as opposed to the terrain-only
+surface `land.*` exposes?**
 
 Named follow-up for the Windows-box session, not this plan's build work:
 
-1. **Characterise `Controller.isTargetDetected`/`getDetectedTargets` even though it is probably the
-   wrong shape to consume directly.** Set up a controlled pair: an identical target with clear
-   terrain+building LOS, once with trees between observer and target and once without. If
-   `isTargetDetected` returns `false` only in the tree case, it *does* reach the tree test — and
-   then the real question becomes whether its skill/alertness/range/reaction-time terms can be
-   pinned to values that make it behave as a pure LOS oracle (e.g. maximum skill, zero reaction
-   time, `Controller.Detection.VISUAL` only), or whether those terms are inseparable from the
-   result. Reject it only once that's tried, not on the shape alone.
-2. **Fire `land.getIP` along a sightline into known tree canopy** (the Windows session flagged this
-   and never tried it). If the returned impact point sits at canopy height rather than bare-ground
-   height, `getIP` is sensing something above the terrain mesh at that point — worth knowing even
-   if it turns out to be a height-field artifact rather than a real per-tree hit.
+1. **Characterise `Controller.isTargetDetected`/`getDetectedTargets`** even though it is probably
+   the wrong shape to consume directly — a controlled pair (identical target, once with trees
+   between observer and target, once without) settles whether it reaches the tree test at all, and
+   if so whether its skill/alertness/range/reaction-time terms can be pinned to a pure-LOS-oracle
+   configuration or are inseparable from the result.
+2. **Fire `land.getIP` along a sightline into known tree canopy** — if the returned impact point
+   sits at canopy height rather than bare-ground height, `getIP` is sensing something above the
+   terrain mesh there, worth knowing even if it turns out to be a height-field artifact.
 
-**If neither resolves it, the interim stand-in is the OSM `landcover` polygon set world-model
-already holds (44,811 polygons) — but built as a probabilistic transmission model per optic, not a
-binary ray test, because that is a genuinely different mechanism from the SEGMENT/`isVisible`
-tests this plan builds, not a variant of them.** Naming it as an interim stand-in matters
-concretely: if a tree-aware call is later found, it replaces this model outright rather than being
-fused with it — a design that treated the statistical model as permanent would resist that
-replacement. **Not built in this plan.** File as its own backlog item once the two probes above
-report back, rather than building it against a question that might make it moot.
+**If neither resolves it**, the interim stand-in is the OSM `landcover` polygon set world-model
+already holds (44,811 polygons) — built as a probabilistic transmission model per optic, a
+genuinely different mechanism from the SEGMENT/`isVisible` tests this plan builds, not a variant of
+them, so a later tree-aware call can replace it outright rather than needing to be fused with it.
+**Not built in this plan.** File as its own backlog item once the two probes above report back.
+
+**It does not change the staging below.** Buildings (Stage 1) are unaffected, measured and ready;
+trees ride a parallel investigation rather than blocking it.
 
 ### Affected Modules / Files
 
 - `aircraft-layer/dcs-export/petrobrain-line-of-sight-hook.lua` — new. Sibling Hook script to
   `petrobrain-mission-telemetry-hook.lua`; Stage 1 tests buildings only (`world.searchObjects` +
-  `world.VolumeType.SEGMENT`), Stage 2 adds terrain (`land.isVisible`).
+  `world.VolumeType.SEGMENT`), Stage 3 adds terrain (`land.isVisible`).
 - `aircraft-layer/src/schema/line_of_sight.py` — new. `LineOfSightVerdict`
   (`unit_name`, `clear`, `dcs_model_time_s`, `received_wall_clock_s`) and `LineOfSightSnapshot`,
   mirroring `world_objects.py`'s shape.
 - `aircraft-layer/src/collector/cache.py` — new `LineOfSightCache`, same shape as
-  `WorldObjectsCache`.
+  `UnitVelocityCache`.
 - `aircraft-layer/src/collector/__main__.py` — wire the new receiver/cache in, alongside the
-  existing four.
-- `aircraft-layer/src/api/server.py` — new `GET /line_of_sight/latest`.
+  existing ones.
+- `aircraft-layer/src/api/server.py` — new `GET /line_of_sight/latest`, same "separate endpoint,
+  not merged" posture as `/unit_velocity/latest` (see "Where the boolean is computed" above).
 - `body-layer/src/aircraft_client.py` — new `get_line_of_sight_latest()`, same shape as
   `get_unit_velocity_latest()`.
 - `body-layer/src/perception/naked_eye_source.py` — new `_resolve_los_by_unit_name` (mirrors
@@ -377,28 +413,53 @@ report back, rather than building it against a question that might make it moot.
   `live_los_clear: bool | None = None`.
 - `body-layer/src/perception/visibility.py` — gate 4 reads `candidate.live_los_clear` first,
   falls back to `line_of_sight_clear` unchanged when `None`.
-- `world-model/src/query/line_of_sight.py`, `body-layer/src/perception/geometry.py`,
-  `body-layer/src/belief/contacts.py` — **unchanged.** Named here so a reader checking "what did
-  this plan touch" sees the negative confirmed, not merely absent.
+- `body-layer/src/perception/source.py` — `Observation` gains `live_los_clear: bool | None = None`,
+  set by `naked_eye_source.py` only for admitted candidates (never by the hybrid channel, which has
+  no geometric gate to source it from).
+- `body-layer/src/belief/percept.py` — `Percept` gains `live_los_clear: bool | None`, carried
+  straight through from `Observation` in `percept_of`.
+- `body-layer/src/belief/contacts.py` — `Contact` gains `live_los_clear: bool | None = None`, set
+  in `record()`/`from_percept()`. `tick`'s engagement term reads it per "What changes in
+  body-layer" above; `_threat_has_los`, the `los_clear` parameter, and `LOS_UNCERTAINTY_SAMPLES`
+  are **deleted**.
+- `body-layer/src/logger.py` — the LOS closure passed to `store.tick(..., los_clear=...)` is
+  **deleted**; `store.tick(ownship.t_sim, ownship=ownship)` no longer takes a third argument for
+  this purpose. `world_model_conn` remains required for enrichment/`describe_position`/gate 4's
+  fallback — this removes only its one LOS-specific use site.
+- `world-model/src/query/line_of_sight.py`, `body-layer/src/perception/geometry.py` — **unchanged**
+  except in role: still gate 4's fallback and the offline/test/Mission-Interpreter path, no longer
+  called anywhere in `belief/`. Named here so a reader checking "what did this plan touch" sees the
+  negative confirmed, not merely absent.
 
 ### Implementation Plan
 
-1. **Stage 1 — buildings only, the new-capability slice.** Hook script + schema + cache + endpoint
-   + client method, all building-occlusion only (`world.searchObjects`/`SEGMENT`, ~8.7 µs/
-   sightline). Join and wire into `check_visibility` as above. Flyable: any AAA/vehicle sitting
-   behind a real building that reads as clear today should now read as occluded. Zero regression
-   risk — `live_los_clear` is `None` until this stage's feed exists, and the fallback path is
-   exactly today's code.
-2. **Stage 2 — terrain via `land.isVisible`, replacing the SRTM sample for the live path only.**
-   Add the terrain test (~10.6 µs/sightline) to the same hook snippet; `clear = building_clear and
+1. **Stage 1 — buildings only, collector-side, the new-capability slice.** Hook script + schema +
+   cache + endpoint + client method + body-layer join, all building-occlusion only
+   (`world.searchObjects`/`SEGMENT`, ~8.7 µs/sightline true-to-true). Wire into `check_visibility`'s
+   gate 4 as above. Flyable: any AAA/vehicle sitting behind a real building that reads as clear
+   today should now read as occluded. Zero regression risk — `live_los_clear` is `None` until this
+   stage's feed exists and is joined, and the fallback path is exactly today's code.
+2. **Stage 2 — belief carries the observed value; the engagement term stops querying anything.**
+   `Contact.live_los_clear`, the `Percept`/`Observation` plumbing, and the engagement-term rewrite
+   above, plus the deletions (`_threat_has_los`, `tick`'s `los_clear` parameter,
+   `LOS_UNCERTAINTY_SAMPLES`, `logger.py`'s closure). Flyable and independently testable without a
+   live DCS session: fixtures can set `Percept.live_los_clear` directly, exercising the
+   masking-dwell logic exactly as `plans/watch-reporting/plan.md`'s own tests already do, just
+   against a fixed value instead of a fake callable. **After this stage, for currently-observed
+   contacts, the engagement term is building-aware for the first time** even before Stage 3 adds
+   terrain, because it is now reading Stage 1's ground-truth boolean rather than world-model's
+   terrain-only offline primitive.
+3. **Stage 3 — terrain via `land.isVisible`, added to the same collector-side call.** Add the
+   terrain test (~10.6 µs/sightline) to the same hook snippet; `clear = building_clear and
    terrain_clear`. This is the tolerance-removal half — verify against a live sortie flown in
    mountainous terrain (the missed-AAA geometry) that the live path agrees with the already-shipped
    12 m-tolerance fallback at the case that motivated it, and diverges (correctly) somewhere the
    tolerance alone would not have caught.
-3. **Stage 3 — acceptance sortie.** One flight validating both: a target behind a building
-   (new detection gained), and a paused-state check per `aircraft-layer/CLAUDE.md`'s testing note
-   (a bug class this exact family of Hook script has hit before).
-4. **Not this plan**: the tree probes above (hand to the Windows-box session whenever it next
+4. **Stage 4 — acceptance sortie.** One flight validating: a target behind a building (new
+   detection gained), the engagement term correctly calling danger/safe against a building/terrain
+   occluder while actively tracked, and a paused-state check per `aircraft-layer/CLAUDE.md`'s
+   testing note (a bug class this exact family of Hook script has hit before).
+5. **Not this plan**: the tree probes above (hand to the Windows-box session whenever it next
    flies), and the OSM-landcover transmission model (blocked on those probes' answer, filed
    separately once they report).
 
@@ -418,9 +479,21 @@ report back, rather than building it against a question that might make it moot.
   `BRAIN_REPLY_MAX_AGE_S`/`STAND_BY_AFTER_S` already carry in this codebase — fine to ship, flagged
   rather than presented as derived.
 - **The trees gap is now explicit rather than silently absent.** Before this plan, no naked-eye
-  mechanism accounted for trees at all; after Stage 2, a target hidden by trees but with clear
+  mechanism accounted for trees at all; after Stage 3, a target hidden by trees but with clear
   terrain+building LOS will read as visible, same as today — not a regression, but worth saying
   plainly since "DCS-driven LOS" could otherwise be misread as "solves occlusion."
+- **A real behaviour change for contacts that are watched but not currently corroborated by the
+  naked-eye channel — new with this revision, not present in the pre-correction draft.** Today,
+  the engagement term actively queries world-model's terrain LOS against every watched contact's
+  believed position on every tick, regardless of channel or recency. After this plan, only a
+  contact **freshly observed by the naked-eye channel within `OBSERVED_WINDOW_S` (16 s)** carries a
+  real LOS fact; a contact known only through the hybrid/HelperAI channel, or one that has gone
+  quiet, always fail-opens to "the threat can see us." This is the same conservative direction the
+  codebase already prefers (`LOS_MASK_CONFIRM_S`'s own asymmetry, "a false danger call costs a
+  glance, a missed one costs the aircraft"), and it is *more* physically grounded than before for
+  the contacts it does cover — but it is a real narrowing of which contacts ever get a "safe from"
+  clearance at all, worth confirming rather than discovering in a debrief. See "Decisions Requiring
+  User Input" below.
 
 ### Second-order effect
 
@@ -429,14 +502,23 @@ Once buildings+terrain LOS is DCS-driven, world-model's elevation grid has no re
 enrichment, exactly as X-B28 (superseded) already recorded. That narrows, rather than blocks, the
 already-deprioritized probe-grid-spacing redesign: whoever picks it up next should size spacing
 for `describe_position`/ridge-valley description quality, with no line-of-sight accuracy
-requirement pulling in the opposite direction.
+requirement pulling in the opposite direction. This revision adds a second, narrower effect: once
+`belief/contacts.py` no longer holds a live callable into world-model at all for LOS, a future move
+of body-layer off the Mac (`todo/backlog.md` X-B27/X-B31) loses one more reason to keep world-model
+in-process on that box for the live path — though gate 4's fallback and the offline/enrichment path
+still need it, so this narrows rather than removes the coupling.
 
 ### Decisions Requiring User Input
 
+- **Confirm the engagement-term behaviour change above** (hybrid-only and stale contacts always
+  fail-open to "can be seen," rather than getting an actively-computed terrain clearance as they do
+  today). This is the one substantive consequence of "belief stops computing LOS" that was not
+  visible before working through the reciprocity argument, and it changes what "safe from" can mean
+  for a contact outside the naked-eye channel's recent coverage.
 - **`LOS_MAX_AGE_S`'s value (proposed 3.0 s)** — reasonable default, not measured; confirm or
   adjust once flown.
-- **Stage 2's terrain swap is optional relative to Stage 1.** Given the 12 m tolerance already
+- **Stage 3's terrain swap is optional relative to Stages 1-2.** Given the 12 m tolerance already
   covers the specific defect that motivated this work, confirm you want the terrain-source swap
-  built now rather than deferred behind Stage 1 landing and being flown for a while first.
-- **Whether to hand the tree probes to the Windows-box session now or after Stage 1/2 land** — they
-  are independent of this plan's build work and can run in parallel, but only if scheduled.
+  built now rather than deferred behind Stage 1/2 landing and being flown for a while first.
+- **Whether to hand the tree probes to the Windows-box session now or after Stages 1-3 land** —
+  they are independent of this plan's build work and can run in parallel, but only if scheduled.
