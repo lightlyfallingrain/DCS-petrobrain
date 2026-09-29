@@ -120,6 +120,31 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   the SRTM-resolution question (X-B26) much less pressing. The probe times it at 1/50/200 rays per
   bridge call for exactly that reason.
 
+  **ANSWERED 2026-09-29, six flights. `land.isVisible` is terrain-only — it does NOT test
+  buildings or trees.** Forty rays fired deliberately through forty buildings whose positions came
+  from `world.searchObjects` itself, 60 m either side at 2 m AGL: **0 blocked, 40 clear**. The
+  controlled sweep agrees, 0/40 in both the ownship area and the desert control. Full results:
+  `aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md` Findings 12-14.
+
+  This reconciles with `Detection.lua` rather than contradicting it: `objects_LOS_test` and
+  `trees_LOS_test_T4` govern **ED's AI detection**, a different code path from the scripting API.
+
+  **So the hope above is dead** — `isVisible` sees exactly the bare terrain mesh we already see,
+  and routing occlusion through it would buy a bridge call and nothing else. X-B26 is not relieved.
+
+  **What it opens instead, and this is the better outcome:** we now have the raw material to do
+  occlusion *better* than DCS's own scripting API offers. `world.searchObjects` returns 590 objects
+  in a 600 m radius with positions and type names (denser and more authoritative than OSM
+  footprints), and world-model already holds 44,811 OSM landcover polygons for trees. The missing
+  piece is **extent** — scenery carries no dimensions (`getDesc` is
+  `life/_origin/category/typeName/displayName`, and `life` is hit points), so a type-name → size
+  table built once offline over a finite catalogue is what stands between here and a real occluder
+  layer. **That is a new workstream, not a tweak** — file it before starting it.
+
+  Costs settled across three flights: `getHeight` 0.8-1.1 us/point (a full 2,601-point M8 chunk is
+  2.0 ms), `isVisible` 10.6 us/ray. Scenery search is superlinear and is the one to watch: 126
+  objects at 300 m costs 1 ms, 590 at 600 m costs **18 ms** — keep it at or below 300 m.
+
 - [x] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** Done 2026-09-27. All three roles ran in worktrees, advisory-only as this item required;
   reports at `reviews/claude-setup-{review,performance,security}.md`. All HIGH/MEDIUM findings fixed
