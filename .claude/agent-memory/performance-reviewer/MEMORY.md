@@ -17,3 +17,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Cockpit-mask gate cost](project_cockpit_mask_gate_cost.md) — measured 1.44us/contact, 0.08ms/tick at 55 contacts for the sortie-2026-09-26 observability gate; non-issue at 1Hz.
 - [Optic-policy dict-copy cost](project_optic_policy_dict_copy_cost.md) — measured 0.08/0.45/1.46 ms/call at 55/300/1000 contacts for decide()'s unpruned-map copies; non-issue at this project's scale.
 - [Contact ingest/association unmeasured](project_contact_ingest_association_unmeasured.md) — ingest+tick microbenchmark didn't finish in minutes at 55x500; ingest itself untouched by sortie-2026-09-26-fixes but worth a dedicated future pass.
+- [Group-reporting cohesion scale](project_group_reporting_cohesion_scale.md) — measured O(n^2) _cluster_contacts: 0.6ms@52, 8.4ms@200, 54ms@500, 879ms@2000; needs 300-400+ contacts to matter.

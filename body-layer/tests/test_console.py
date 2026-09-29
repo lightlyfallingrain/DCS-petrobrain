@@ -109,6 +109,30 @@ def test_show_command_usage_message_with_no_argument() -> None:
     assert console.handle_line("show", now_sim=0.0) == ["usage: show <id>"]
 
 
+def test_show_command_includes_group_line_for_a_cohering_trio() -> None:
+    """`plans/group-reporting/plan.md` Stage 2 -- `"group"` is inspectable
+    via `show <id>` once a `Contact` belongs to one, before it is ever
+    spoken (Stage 3)."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0),
+            _observation(obs_id="OBS_3", t_sim=0.0, bearing_deg=2.0),
+        ],
+        now_sim=0.0,
+    )
+    store.tick(now_sim=0.0)
+    console = Console(store=store)
+
+    contact_id = store.contacts[0].id
+    lines = console.handle_line(f"show {contact_id}", now_sim=0.0)
+
+    group_lines = [line for line in lines if line.strip().startswith("group:")]
+    assert len(group_lines) == 1
+    assert "member_count" in group_lines[0]
+
+
 def test_history_command_usage_message_with_no_argument() -> None:
     console = Console(store=ContactStore())
     assert console.handle_line("history", now_sim=0.0) == ["usage: history <id>"]

@@ -113,3 +113,8 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Verify a reviewer's suggested test mechanism](feedback_regression_test_verify_mechanism_not_just_hypothesis.md) — read both code paths first.
 - [Worktree branch behind main](feedback_worktree_branch_behind_main.md) — check worktree's own branch vs main; ff-merge, never reset --hard.
 - [Missed-AAA LOS tolerance](project_missed_aaa_los_tolerance.md) — real mechanism/calibration commit split; tolerance cost can depend on consumer's tactics, not just data error.
+- [Group-reporting sparse-scene backstop](project_group_reporting_sparse_scene_backstop.md) — n=2 cohesion tautology fix; two lookalike test workarounds resolved oppositely.
+- [Group-reporting Stages 1-3](project_group_reporting_stage1_3.md) — plan named collision `render_group_report`; exact per-class counts.
+- [Don't improvise scope for plan framing](feedback_dont_improvise_scope_to_satisfy_plan_framing.md) — flag the tension, don't wire into next stage's territory.
+- [Group-reporting Stage 4](project_group_reporting_stage4.md) — mid-task course corrections invert dispatch; sparse-scene cohesion always groups any 2 contacts.
+- [Group-reporting unit-width backstop](project_group_reporting_unit_width_backstop.md) — borrow currency not constant; mechanism/calibration split isn't always zero-diff; profile_for/OP_* quirk.

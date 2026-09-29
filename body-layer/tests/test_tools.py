@@ -1041,3 +1041,44 @@ def test_cancel_task_reaches_an_already_succeeded_task_and_removes_its_area() ->
 
     assert get_task_status(tasks, task.id).status == "cancelled"  # type: ignore[union-attr]
     assert list_areas(store) == []
+
+
+def test_group_fact_absent_when_contact_belongs_to_no_group() -> None:
+    """`plans/group-reporting/plan.md` Stage 2 -- absent-not-null, same
+    convention as `"cardinality"`/`"motion"`."""
+    store = _store_with_one_contact()
+    store.tick(now_sim=0.0)
+
+    result = describe_contact(store, store.contacts[0].id, now_sim=0.0)
+    assert result is not None
+    assert "group" not in result["facts"]
+
+
+def test_group_fact_present_for_a_cohering_trio() -> None:
+    """Three observations one degree apart in bearing, same range, cohere
+    into one `belief.groups.Group` once `tick()` reconciles -- each
+    member's own `facts["group"]` names that group and lists all three
+    member ids."""
+    store = ContactStore()
+    store.ingest(
+        [
+            _observation(obs_id="OBS_1", t_sim=0.0, bearing_deg=0.0),
+            _observation(obs_id="OBS_2", t_sim=0.0, bearing_deg=1.0),
+            _observation(obs_id="OBS_3", t_sim=0.0, bearing_deg=2.0),
+        ],
+        now_sim=0.0,
+    )
+    assert len(store.contacts) == 3
+    store.tick(now_sim=0.0)
+
+    contact_ids = sorted(c.id for c in store.contacts)
+    for contact_id in contact_ids:
+        result = describe_contact(store, contact_id, now_sim=0.0)
+        assert result is not None
+        group_facts = result["facts"]["group"]
+        assert isinstance(group_facts, dict)
+        assert group_facts["member_count"] == 3
+        assert group_facts["member_contact_ids"] == contact_ids
+        group = store.group_for_contact(contact_id)
+        assert group is not None
+        assert group_facts["group_id"] == group.id
