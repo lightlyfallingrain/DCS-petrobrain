@@ -54,6 +54,52 @@ physical world (a ray either crosses geometry or it doesn't), not information ab
 identity or position that he could not otherwise derive; this project's no-omniscience invariant is
 about identity/position/interpretation, and this plan touches none of those.
 
+### CORRECTION 2 (user, 2026-09-29) — LOS is computed collector-side from TRUE positions, and belief never computes it at all
+
+The correction below got the conclusion right and the mechanism wrong. It proposed the engagement
+term ask point-to-point using the contact's **believed** position, and called preserving that error
+a feature. **The user rejected that too, and the reasoning is the one that settles the whole
+design:**
+
+> *"Whether we can see a target, LOS or no LOS, is a world state **fact**. It is not a belief. Our
+> belief about a unit's location is belief and can be wrong. It in no way affects LOS, it is a
+> property of the simulated world, a 'physical' fact even though simulated. LOS **must use** the
+> unit's **factual** location and our ownship's **factual** location. Belief is in a layer above
+> all this."*
+>
+> *"--> bake 'LOS / no-LOS' boolean into unit data transmitted from collector. Then belief system
+> can use that information without doing its own bogus calculations."*
+
+**Why the believed-position version was not merely different but wrong.** A line of sight to a
+point where nothing stands is not a preserved error, it is a fabricated answer to a question about
+empty space. The ray either clears real geometry between two real points or it does not. Asking
+about a believed position produces a verdict that corresponds to no physical fact at all — and it
+would have read as principled, which is what makes it worth recording rather than quietly fixing.
+
+**The design, then:**
+
+1. **The collector computes LOS per unit**, true ownship position to true unit position, batched
+   through the mission bridge in one call at the settled cadence. Ownship truth it already has from
+   telemetry; unit truth it already has from `/world_objects/latest`.
+2. **The boolean ships as a field on the unit data** — the same feed, the same join, no second
+   channel and no new staleness class beyond the feed's own.
+3. **Perception consumes it as a gate input** at `visibility.check_visibility` gate 4, replacing
+   that gate's own terrain computation. This is pre-boundary, where identity legitimately exists.
+4. **Belief never computes LOS.** The observed LOS state rides into the `Percept` and is carried on
+   the `Contact` as a last-known property, exactly as classification, cardinality and motion already
+   are. `belief/contacts.py::tick`'s engagement term **reads** that stored value instead of calling
+   `line_of_sight_clear` at all.
+
+Point 4 is the load-bearing one for an implementer: it is not "belief calls a different LOS
+function", it is **belief stops calling one**. The pattern is already the project's own — perception
+observes, belief remembers, nothing downstream re-derives. A contact that has not been observed
+recently carries a stale LOS flag for the same reason it carries a stale classification, and the
+existing decay/certainty machinery is where that is expressed.
+
+**What this leaves of world-model's `line_of_sight_clear`:** the offline and test path, unchanged
+and still first-class — Mission Interpreter enrichment, the replay harness, and every test that must
+run with no DCS and no collector (`plans/body-layer/plan.md` §2). It stops being the live path.
+
 ### CORRECTION (user, 2026-09-29): both call sites use DCS LOS — the obstacle was the join key, not belief
 
 The section below concludes that `belief/contacts.py::tick`'s engagement term "keeps calling
