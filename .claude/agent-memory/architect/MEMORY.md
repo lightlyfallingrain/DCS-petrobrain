@@ -57,3 +57,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Amend plans when the ground shifts](feedback_amend_plans_when_ground_shifts.md) — amend unimplemented plans in place, say what forced it, reuse the branch's existing damper patterns.
 - [BR-1 brain layer design](project_br1_brain_layer_design.md) — measured: reasoning tokens not model size set latency; code owns ambiguity, model must quote its evidence; BrainClient was already async.
 - [Sortie 2026-09-26 fixes](project_sortie_2026_09_26_fixes.md) — gate lives in tick's spontaneous-only block (Decision 3); Fix C's audio-adapter seam didn't exist; coverage sized out separately.
+- [DCS-driven LOS design](project_dcs_driven_los_design.md) — no-omniscience splits where a live LOS feed can land; the cited bug already had a shipped fix; unit_name is the join-key precedent.
