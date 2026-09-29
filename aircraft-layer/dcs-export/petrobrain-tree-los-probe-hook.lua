@@ -151,10 +151,20 @@ return "OK|" .. table.concat(keys, " ")
 --: Geometry is not plausible-looking, it is provable, taken from
 --: `world-model`'s own elevation grid on this box:
 --:
---:   - **RIDGE**: A(-179912, 368559) h=1143 -> B(-173912, 368559) h=1200,
---:     6 km apart, with a crest between them at **h=2198** -- standing
---:     **998 m above the higher endpoint**. A sightline at 2 m AGL is buried
---:     under a kilometre of rock; no grid error survives that margin.
+--:   - **RIDGE**: A(341088, 167559) h=1689 -> B(341088, 173559) h=1595,
+--:     6 km apart, profile 1689/1875/2133/**2615**/2229/1837/1595 -- a crest
+--:     standing **926 m above the higher endpoint**. A sightline at 2 m AGL
+--:     is buried under most of a kilometre of rock; no grid error survives
+--:     that margin.
+--:
+--:     **The first attempt at this fired at the wrong place.** The grid is
+--:     indexed `x = origin_x + row*spacing`, `z = origin_z + col*spacing`
+--:     (`store/reader.py:sample_grid`), and the site search had row and col
+--:     swapped -- so the 2026-09-29 20:09 flight aimed at gentle hills and
+--:     DCS reported the line blocked by only **4 m**, not the ~1000 m
+--:     intended. SEGMENT still returned 0 there, but a 4 m margin against a
+--:     call that might carry a tolerance is not the decisive test this was
+--:     supposed to be. These coordinates are the corrected ones.
 --:   - **FLAT**: A(166088, -115441) -> B(172088, -115441), the same 6 km,
 --:     profile 763/762/762/762/763/763/763 m -- a **1 m** spread. The
 --:     control, which must come back empty.
@@ -210,6 +220,68 @@ return string.format(
         az,
         bx,
         bz
+    )
+end
+
+--: A dense fan from the aircraft, to close the one real weakness in the
+--: forest result.
+--:
+--: The forest sites were aimed using OSM polygons, and OSM forest is not
+--: proof of DCS trees. If DCS simply has no trees at those coordinates then
+--: "nothing above ground" is vacuous rather than a negative, and the probe
+--: cannot tell those two apart on its own -- `getIP` is the thing under
+--: test, so using it to confirm the trees are there would be circular.
+--:
+--: **The pilot breaks the circle.** He parks where he can *see* trees, this
+--: fires 24 azimuths x 2 heights out to 150 m, and reports the largest
+--: intercept standing above local ground. Visual confirmation plus a null
+--: result is a real negative; without it the forest sites only say "nothing
+--: was found where OSM claims forest".
+--:
+--: Two heights because the failure modes differ: 3 m is trunk height, where
+--: a ray also risks clipping undulating ground, and 12 m is mid-canopy,
+--: clear of terrain but squarely in the crowns.
+local function ownshipFanCode(x, z)
+    return string.format(
+        [[
+local cx, cz = %f, %f
+local okG, gy = pcall(land.getHeight, { x = cx, y = cz })
+if not okG or gy == nil then return "ERR|getHeight failed" end
+local out = {}
+for _, eye in ipairs({ 3, 12 }) do
+    local maxDelta, above4, hits, misses = 0, 0, 0, 0
+    for i = 1, 24 do
+        local ang = (i - 1) * 2 * math.pi / 24
+        local tx = cx + math.cos(ang) * 150
+        local tz = cz + math.sin(ang) * 150
+        local okT, ty = pcall(land.getHeight, { x = tx, y = tz })
+        if okT and ty then
+            local from = { x = cx, y = gy + eye, z = cz }
+            local dx, dy, dz = tx - cx, (ty + eye) - (gy + eye), tz - cz
+            local dl = math.sqrt(dx * dx + dy * dy + dz * dz)
+            local okI, ip = pcall(land.getIP, from,
+                { x = dx / dl, y = dy / dl, z = dz / dl }, 160)
+            if okI and ip ~= nil then
+                hits = hits + 1
+                local okH, g2 = pcall(land.getHeight, { x = ip.x, y = ip.z })
+                if okH and g2 then
+                    local d = ip.y - g2
+                    if d > maxDelta then maxDelta = d end
+                    if d > 4.0 then above4 = above4 + 1 end
+                end
+            else
+                misses = misses + 1
+            end
+        end
+    end
+    out[#out + 1] = string.format(
+        "eye%%dm: ipHits=%%d/24 noHit=%%d ABOVE_GROUND_gt4m=%%d maxDelta=%%.1fm",
+        eye, hits, misses, above4, maxDelta)
+end
+return "groundY=" .. string.format("%%.1f", gy) .. " | " .. table.concat(out, " | ")
+]],
+        x,
+        z
     )
 end
 
@@ -402,13 +474,16 @@ function petrobrainTreeLos.onSimulationFrame()
 
     if stepIndex == 1 then
         run("land.SurfaceType", SURFACETYPE_CODE)
+        if probeX ~= nil then
+            run("OWNSHIP_DENSE_FAN_park_where_you_see_trees", ownshipFanCode(probeX, probeZ))
+        end
         return
     end
 
     if stepIndex == 2 then
         run(
-            "SEGMENT_vs_TERRAIN_ridge_crest+998m",
-            terrainSegmentCode(-179912.0, 368559.0, -173912.0, 368559.0)
+            "SEGMENT_vs_TERRAIN_ridge_crest+926m",
+            terrainSegmentCode(341088.0, 167559.0, 341088.0, 173559.0)
         )
         return
     end
