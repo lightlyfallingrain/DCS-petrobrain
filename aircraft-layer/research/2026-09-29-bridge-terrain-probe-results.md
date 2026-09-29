@@ -394,6 +394,43 @@ before.**
   subtracted, and trimmed repeats with the peak still logged.
 - **Resolves with:** `petrobrain-segment-cost-probe-hook.lua` (deployed), which does all three.
 
+**21. A SEGMENT search costs ~8.7 µs — cheaper than the terrain-only call it replaces.**
+
+- **evidence: reproduced-locally, baseline subtracted, two rungs agreeing** — flight 10.
+
+  | N searches | steady | peak | µs/search | rays hitting scenery |
+  |---|---|---|---|---|
+  | 0 (baseline) | 0.125 ms | 1.00 ms | — | — |
+  | 20 | 0.125 ms | 1.00 ms | *(baseline-dominated)* | 5/20 |
+  | 100 | 1.000 ms | 2.00 ms | **8.8** | 28/100 |
+  | 200 | 1.875 ms | 3.00 ms | **8.7** | 57/200 |
+
+- The N=20 rung is at the baseline floor and carries no information; the figure comes from the two
+  larger rungs, **which agree to within 0.1 µs**. That agreement is the check Finding 20's method
+  was built to make possible.
+- **`land.isVisible` costs 10.6 µs/ray and sees only terrain. A SEGMENT search costs 8.7 µs and
+  sees buildings in 3D.** The building-aware call is *cheaper* than the terrain-only one.
+- **200 sightlines with full building occlusion: 1.9 ms**, i.e. ~1% duty cycle at 5 Hz.
+- Hit rates are sane rather than degenerate — ~28% of 2 km rays from 30 m AGL down to ground level
+  clip a building near a town, which is what a town looks like.
+
+### The whole answer, assembled
+
+The user's question was: *"is there any DCS function call that would give us LOS with buildings and
+trees taken into account?"* Ten flights later:
+
+| occluder | source | cost | status |
+|---|---|---|---|
+| **terrain** | our own elevation grid, or `land.profile` (1 call vs 20+ `getHeight`) | 0.9 µs/point | works today |
+| **buildings** | `world.searchObjects` + `VolumeType.SEGMENT`, true 3D | **8.7 µs/sightline** | **proven, not built** |
+| **trees** | OSM `landcover` polygons — world-model already holds **44,811** | already local | **no DCS route exists** |
+
+- **`land.isVisible` is a dead end** and should not be used: terrain-only, and dearer than the
+  call that does more.
+- **Trees have no DCS route at all.** They are not scenery objects, so no search of any volume
+  will find them. OSM landcover is not a fallback here, it is the only source.
+- **What remains is build work, not research** — filed as `X-B28`.
+
 ### Reproducible Test
 
 Re-fly with the fixed probe (deployed). Extract with:
