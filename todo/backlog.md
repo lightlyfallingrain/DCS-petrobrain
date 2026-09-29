@@ -637,6 +637,25 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   committing to a probing design, not after.** Investigator pass; the DCS install is on the Windows
   box, and `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` inventories it.
 
+  **ANSWERED 2026-09-29 on the Windows box: both routes work; take the probe.** Two measurements,
+  neither of which existed when this item was written:
+
+  - **The bridge is cheap** — 568 units, mean 1.99 ms, p99 8 ms at 1 Hz, ~2.6 µs per item
+    (`aircraft-layer/research/2026-09-29-bridge-call-cost-at-scale.md`). "Its throughput is still
+    unmeasured" above is no longer true, and the frame-rate risk this item ascribes to probing is
+    the one thing still open, not the throughput.
+  - **The file route is real but unfinished** — `Syria.surface5` does encode elevation, confirmed
+    129/129 against DCS ground truth against a 71/129 null control, with a working index walker and
+    a correct geo-reference (`world-model/research/2026-09-29-surface5-elevation-confirmed.md`).
+    But only a per-tile min/max envelope was decoded; per-node heights need the `Pbase` payload
+    located inside 30 GB of undocumented container, still the 1–2 week bet M7 estimated.
+
+  So the standing preference for DCS-native extraction is **not** decisive here: it would buy a
+  fortnight's decode to obtain what `land.getHeight` already returns exactly, for ~2 ms, live.
+  **Recommend closing as "probe", with `.surface5` parked as a known-good fallback** should the
+  elevation-cost probe (deployed, awaiting a sortie) come back expensive. Leaving `[ ]` pending
+  that probe's number and the user's call.
+
 - [>] **X-B27 — Topology: body-layer and world-model stay together, on the Mac for now, Windows
   eventually. DECIDED 2026-09-29, deferred as work.** User: *"I will keep body and world layers on
   Mac for now, development is much easier that way. The eventual setup will run them on windows."*

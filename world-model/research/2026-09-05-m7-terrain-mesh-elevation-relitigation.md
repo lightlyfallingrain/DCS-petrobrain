@@ -4,6 +4,15 @@
 **DCS version:** 2.9.29.27278 (per M0), findings below are read of already-captured live-installation bytes, not a fresh probe run this session
 **Theatre:** Syria
 
+> **SUPERSEDED IN PART, 2026-09-29 — Finding 5 is now CONFIRMED, not inferred.**
+> `Syria.surface5` does encode elevation: 129/129 real `land.getHeight` samples fall strictly
+> inside the y-range of their smallest containing tile, against a 71/129 null control, with
+> `world = tile_origin + local_bbox` as the geo-reference. The single-byte-offset magnitude match
+> this note rested on was right. **What is still open is the part this note called the hard part**
+> — per-node values remain undecoded. See
+> `world-model/research/2026-09-29-surface5-elevation-confirmed.md`, which also recommends
+> *not* pursuing the decode, on effort/value grounds rather than feasibility ones.
+
 ### Question
 
 M4 (`2026-09-03-m4-elevation-recon.md`) and a follow-on M5 pass
