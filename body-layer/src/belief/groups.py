@@ -30,6 +30,32 @@ under this model -- mechanism and calibration are kept in this one small
 file precisely so retuning it later is a single, attributable,
 uncalibrated-constant commit, not a mechanism change.
 
+**The relative-gap test is tautological at exactly two tracked contacts,
+and `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` exists only to cover that one
+degenerate size.** With two contacts in the whole store, each is
+mathematically the other's *sole* candidate nearest neighbour -- there is
+no third point to draw a genuinely different distance from -- so the
+"local median nearest-neighbour gap" always equals their own mutual
+separation exactly, and the cohesion threshold (`GROUP_PROXIMITY_GAP_
+RATIO` times that gap) is always some multiple of the very distance it is
+being compared against. The two contacts cohere regardless of how far
+apart they actually are (confirmed directly at 500 km --
+`plans/group-reporting/implementation.md`'s Notable Discoveries, found
+once `GROUP_REPORTING_MIN_MEMBERS` dropped to 2 and made this size
+reachable at all). At three or more tracked contacts this does not
+happen -- at least one contact's nearest-neighbour distance is drawn from
+a genuinely different pair, so the median is not anchored to the specific
+gap being tested, and the relative rule is exactly the figure-ground
+behaviour the module docstring above describes (see `test_sparse_desert_
+group_can_span_a_wide_gap`, unaffected by the backstop). So the backstop
+applies *only* when the whole tracked set has exactly two contacts, never
+as a general radius, and dense-scene cohesion is provably unchanged. This
+commit introduces the mechanism at a value (`math.inf`) that changes no
+behaviour at all -- `min(threshold, math.inf)` is always `threshold` --
+so it is verifiable as a pure mechanism change before a follow-up commit
+sets the actual number; see that commit's own docstring update for the
+calibration reasoning.
+
 **`GROUP_REPORTING_MIN_MEMBERS` (2) is a deliberately different constant
 from `perception.group_salience.GROUP_MIN_MEMBERS` (3), not a renamed copy
 of it, and the two must never be made to agree by accident.** This module
@@ -107,6 +133,17 @@ GROUP_PROXIMITY_GAP_RATIO: Final[float] = 3.0
 #: one group, spoken as a "pair".
 GROUP_REPORTING_MIN_MEMBERS: Final[int] = 2
 
+#: Absolute cap on member gap, applied only at exactly two tracked
+#: contacts, where the relative test is tautological -- see module
+#: docstring. `math.inf` here is a pure-mechanism placeholder that changes
+#: no behaviour; a follow-up commit sets the calibrated value.
+GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M: Final[float] = math.inf
+
+#: Below this many tracked contacts, the "local median nearest-neighbour
+#: gap" has no third point to draw a genuinely different distance from --
+#: see module docstring's tautology argument.
+_MIN_CONTACTS_FOR_MEANINGFUL_MEDIAN: Final[int] = 3
+
 _GROUP_ID_PREFIX: Final[str] = "GROUP"
 
 
@@ -151,11 +188,14 @@ def _cluster_contacts(
     min_members: int,
 ) -> list[frozenset[str]]:
     """Single-link union-find over `contact.position.x`/`.z`, cohesion
-    threshold `gap_ratio * median(nearest-neighbour gap)` -- see module
-    docstring. Clusters smaller than `min_members` are dropped entirely
-    (never returned as a pair or a singleton); a total contact count below
-    `min_members` short-circuits with no distance computation at all, since
-    no cluster meeting the floor is possible either way.
+    threshold `gap_ratio * median(nearest-neighbour gap)`, capped by
+    `GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M` when there are fewer than
+    `_MIN_CONTACTS_FOR_MEANINGFUL_MEDIAN` tracked contacts -- see module
+    docstring for why that size is tautological. Clusters smaller than
+    `min_members` are dropped entirely (never returned as a pair or a
+    singleton); a total contact count below `min_members` short-circuits
+    with no distance computation at all, since no cluster meeting the
+    floor is possible either way.
 
     O(n^2) in the number of currently tracked contacts (same cost shape
     `perception.clustering`/`perception.group_salience` already pay) --
@@ -178,6 +218,10 @@ def _cluster_contacts(
         nn_gaps.append(best)
     median_gap = statistics.median(nn_gaps)
     threshold = gap_ratio * median_gap
+    if n < _MIN_CONTACTS_FOR_MEANINGFUL_MEDIAN:
+        # Tautological at this size -- see module docstring. Cap at the
+        # absolute backstop rather than trusting the relative threshold.
+        threshold = min(threshold, GROUP_PROXIMITY_ABSOLUTE_BACKSTOP_M)
 
     parent = list(range(n))
 
