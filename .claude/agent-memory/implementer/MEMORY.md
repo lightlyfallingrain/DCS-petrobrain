@@ -118,3 +118,4 @@ Write directly to this directory — it already exists, no need to create it or 
 - [Don't improvise scope for plan framing](feedback_dont_improvise_scope_to_satisfy_plan_framing.md) — flag the tension, don't wire into next stage's territory.
 - [Group-reporting Stage 4](project_group_reporting_stage4.md) — mid-task course corrections invert dispatch; sparse-scene cohesion always groups any 2 contacts.
 - [Group-reporting unit-width backstop](project_group_reporting_unit_width_backstop.md) — borrow currency not constant; mechanism/calibration split isn't always zero-diff; profile_for/OP_* quirk.
+- [Terrain feature probing Stage 1-2](project_terrain_feature_probing_stage1_2.md) — checkerboard ceiling is spacing-invariant; plan's fine/coarse split didn't survive real-data sweep.
