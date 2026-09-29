@@ -144,6 +144,71 @@ important finding here.**
   warm ladders** (`getHeightCOLD` probes a patch 4 km from the last one every repeat;
   `getHeightWARM` re-probes one patch) so the two regimes are measured rather than averaged.
 
+**8. Flight 4 (complete run) — the cost answers, and they are good.**
+
+- **evidence: reproduced-locally** — `dcs.log` 13:57:54 → 13:58:38, full plan, no abort.
+
+  | N points | WARM (same patch) | COLD (patch 4 km on) | warm µs/pt | cold µs/pt |
+  |---|---|---|---|---|
+  | 500 | 0.125 ms | 0.250 ms | 0.25 | 0.50 |
+  | 2601 | 2.250 ms | 2.500 ms | **0.87** | **0.96** |
+
+- **`land.getHeight` costs ~0.9 µs per point, and cold is indistinguishable from warm.** A full
+  M8 probe chunk — 2,601 points at 100 m spacing — is **2.25 ms**. That is the number the whole
+  live-terrain-sampling design was waiting for, and it is cheap.
+- **`land.isVisible` costs ~10 µs per ray**: 200 rays in 2.0 ms. A per-poll detectability gate
+  over 200 candidates would cost 2 ms at 5 Hz, ~1% duty cycle.
+- **Finding 7's cold/warm hypothesis is refuted at 4 km stride** — the ladders were built to
+  separate the regimes and found no separation. The expensive events are elsewhere (Finding 9),
+  and calling it "cold terrain" was too coarse.
+
+**9. The stutter is first-touch of a *distant region* or *unused subsystem*, paid once — not a
+per-point cost.**
+
+- **evidence: reproduced-locally + the user's observation** (*"It does stutter a bit, shorter than
+  first flight, but still noticeable"*).
+- The only expensive calls in an otherwise sub-millisecond run: **`getIP` first use, 17 ms**;
+  **`occlusion_desert` first chunk, 30 ms** (Deir ez-Zor, ~400 km from the aircraft, never
+  touched). `occlusion_urban`'s first chunk, local: **1 ms**.
+- `known_points` — eight theatre-scattered locations — cost **31 ms as one call when it ran first**
+  (flight 3) and **median 0 ms, peak 5 ms as eight calls running last** (flight 4), after ~45 s of
+  other terrain work. So the penalty is not "eight scattered points"; it is being the first thing
+  to touch that machinery.
+- **Design consequence, and it is favourable**: an ownship-following probe bubble samples ground
+  *adjacent* to ground it just sampled. It pays this once at mission start, and again only when the
+  aircraft reaches genuinely new terrain — not per chunk, and not per point.
+
+**10. `isVisible` and `getIP` look terrain-only — they do not appear to test buildings or trees.**
+
+- **evidence: reproduced-locally, two independent lines, with one confound still open**.
+- **Occlusion sweep, 40 pairs per area:**
+
+  | area | terrain-clear but `isVisible`-blocked | both clear | both blocked | terrain-blocked but visible |
+  |---|---|---|---|---|
+  | ownship (town/forest/mountains) | **1** | 26 | 13 | 0 |
+  | Deir ez-Zor (desert control) | **0** | 27 | 13 | 0 |
+
+  The urban-minus-desert gap is **1 in 40** — within the sampling noise the control exists to
+  expose. If buildings and trees blocked `isVisible`, the ownship area should be markedly higher.
+- **`getIP` corroborates independently.** Solving all eight rays for the implied ownship ground
+  height under a pure-terrain model (`G = y − 2 + 0.02·d`) gives **119.5, 119.6, 119.9, 119.9,
+  119.5, 120.2, 120.3, 119.8** — a **0.8 m spread across distances from 24 m to 1,788 m**. A ray
+  that clipped a 5–20 m building would be metres out. None is.
+- **The confound that stops this being final:** 40 random pairs in a 3 km box mostly miss a town
+  occupying a small part of it, so "no gap" is not yet distinguishable from "no sightline crossed
+  a building". **Resolved by the `through_buildings` step added after this flight**, which asks
+  `world.searchObjects` where the buildings are and fires a ray through each one, 60 m either
+  side at 2 m AGL. Nothing to interpret: blocked or clear.
+
+**11. Scenery objects carry no extent — position and type name only.**
+
+- **evidence: reproduced-locally** — full `getDesc()` dump:
+  `life=20 | _origin= | category=4 | typeName=POWER_TRANS_LINE_BIG | displayName=`.
+- No bounding box, no dimensions. So using scenery as LOS occluders needs a **type-name → size
+  table** built once offline. The type names are a finite catalogue
+  (`SYRIA_BLOCK_BUILDING_01..05`, `SYRIA_HOUSE_03/08`, `SYRIA_CITY_HOUSE_02`, …), so this is
+  tedious rather than hard — but it is work that did not exist in the plan.
+
 ### Reproducible Test
 
 Re-fly with the fixed probe (deployed). Extract with:
