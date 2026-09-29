@@ -91,6 +91,108 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   during it** — if the answer is terrain-only, that slice's LOS design collapses and the
   statistical model has to cover every channel instead.
 
+  **WIDENED 2026-09-29 (user), and the probe is now written and deployed.** User: *"we could also
+  check if it is possible to get data for trees and buildings from DCS. That would be valuable for
+  LOS, if we can get that data."* That is a second question alongside the original one, and the
+  two have different answers in prospect:
+
+  - **Test it per ray** — `land.isVisible` / `land.getIP`, DCS answering "can A see B" including
+    whatever it counts as occluding. A query, not data.
+  - **Extract it as data** — `world.searchObjects(Object.Category.SCENERY, …)` for buildings, into
+    the world model as ordinary `StoredFeature` rows. Trees are almost certainly not scenery
+    objects (terrain-baked), so for them the per-ray test is likely the only route.
+
+  **Read from the install, 2026-09-29:** `Scripts/AI/Detection.lua`'s `visual_detection` sets
+  `objects_LOS_test = true`, `trees_LOS_test = false`, `trees_LOS_test_T4 = true`, and every
+  installed theatre is Terrain-4 — so **ED's AI** does test buildings and trees. That says nothing
+  about the scripting API, which is native (nothing in `Scripts/` defines `land.isVisible`; only
+  `ScriptingSystem.lua`'s `class(SceneryObject, Object)`), so it can only be measured live.
+
+  `aircraft-layer/dcs-export/petrobrain-elevation-cost-probe-hook.lua` (deployed) answers all of
+  it on the next sortie, with a **desert control** — the same 40-pair terrain-only-vs-`isVisible`
+  comparison run over Mezzeh and over Deir ez-Zor, because terrain-sampling error appears in both
+  and subtracts out while buildings and trees do not. A near-zero urban-minus-desert gap means
+  `isVisible` is terrain-only and this item's 9K113 half collapses, which is why the control is
+  there rather than assumed away.
+
+  **If `isVisible` is cheap and does see objects, the prize is larger than this item assumed**: it
+  could replace our elevation-grid LOS outright rather than supplement it, which would also make
+  the SRTM-resolution question (X-B26) much less pressing. The probe times it at 1/50/200 rays per
+  bridge call for exactly that reason.
+
+  **ANSWERED 2026-09-29, six flights. `land.isVisible` is terrain-only — it does NOT test
+  buildings or trees.** Forty rays fired deliberately through forty buildings whose positions came
+  from `world.searchObjects` itself, 60 m either side at 2 m AGL: **0 blocked, 40 clear**. The
+  controlled sweep agrees, 0/40 in both the ownship area and the desert control. Full results:
+  `aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md` Findings 12-14.
+
+  This reconciles with `Detection.lua` rather than contradicting it: `objects_LOS_test` and
+  `trees_LOS_test_T4` govern **ED's AI detection**, a different code path from the scripting API.
+
+  **So the hope above is dead** — `isVisible` sees exactly the bare terrain mesh we already see,
+  and routing occlusion through it would buy a bridge call and nothing else. X-B26 is not relieved.
+
+  **What it opens instead, and this is the better outcome:** we now have the raw material to do
+  occlusion *better* than DCS's own scripting API offers. `world.searchObjects` returns 590 objects
+  in a 600 m radius with positions and type names (denser and more authoritative than OSM
+  footprints), and world-model already holds 44,811 OSM landcover polygons for trees. The missing
+  piece is **extent** — scenery carries no dimensions (`getDesc` is
+  `life/_origin/category/typeName/displayName`, and `life` is hit points), so a type-name → size
+  table built once offline over a finite catalogue is what stands between here and a real occluder
+  layer. **That is a new workstream, not a tweak** — file it before starting it.
+
+  Costs settled across three flights: `getHeight` 0.8-1.1 us/point (a full 2,601-point M8 chunk is
+  2.0 ms), `isVisible` 10.6 us/ray. Scenery search is superlinear and is the one to watch: 126
+  objects at 300 m costs 1 ms, 590 at 600 m costs **18 ms** — keep it at or below 300 m.
+
+  **FULLY CLOSED 2026-09-29 after ten flights — and the answer turned positive on a different
+  call.** The user asked whether *any* DCS call accounts for buildings and trees. Dumping the live
+  API surface (rather than answering from memory or the wiki) named
+  `world.VolumeType.SEGMENT`, and it works:
+
+  - **A SEGMENT volume search returns the buildings the sightline passes through**, with an
+    open-ground control returning zero — so it intersects rather than merely proximity-matches.
+  - **It is a true 3D test**: 6 hits at 2 m AGL, **0 at 15 m and above**, and 2 on a realistic
+    200 m-to-2 m slant. Flying *over* a town is not blocked; looking *down through* it is.
+  - **8.7 us per sightline** — *cheaper* than `land.isVisible`'s 10.6 us, which sees only terrain.
+    200 candidates with full building occlusion cost 1.9 ms, ~1% duty at 5 Hz.
+  - **No type-name → size table needed** — DCS does the intersection.
+
+  So `land.isVisible` is a dead end (terrain-only *and* dearer), and **trees have no DCS route at
+  all** — they are not scenery objects, so no volume search will ever find them. OSM landcover is
+  not a fallback for trees, it is the only source. Full results:
+  `aircraft-layer/research/2026-09-29-bridge-terrain-probe-results.md` Findings 15-21.
+
+  What remains is build work, not research — see `X-B31` (renumbered from X-B28 at merge:
+  the Mac had independently filed X-B28 the same day, and ids are never reused).
+
+- [ ] **X-B31 — Build the occluder layer: buildings from DCS, trees from OSM.** Falls out of X-B4,
+  2026-09-29, and is build work with the research already done rather than a question.
+
+  Today `query/line_of_sight.py` samples bare terrain and nothing else, so Petrovich sees through
+  towns and forests. Three sources are now in hand and each has a measured cost:
+
+  | occluder | source | cost |
+  |---|---|---|
+  | terrain | today's elevation grid, or `land.profile` (one call vs 20+ `getHeight`) | 0.9 us/point |
+  | buildings | `world.searchObjects` + `VolumeType.SEGMENT`, true 3D, no size table | 8.7 us/sightline |
+  | trees | OSM `landcover` polygons — world-model already holds 44,811 | already local |
+
+  **The architectural question this raises, and it is not small:** buildings are only reachable
+  from the *Windows* box through the mission-scripting bridge, while `line_of_sight_clear` runs
+  in-process on the Mac inside body-layer's 5 Hz perception loop. A per-candidate LOS check would
+  have to cross the LAN. That collides with X-B27's topology decision and with
+  `plans/pb1-perception-logger/plan.md` decision 3 ("same box always"). **Resolve the topology
+  before designing the call**, not after — the measured 8.7 us is a loopback figure and says
+  nothing about a LAN round trip per candidate per poll.
+
+  Cheapest first slice, if one is wanted before the topology moves: **trees only**, entirely
+  Mac-side, since the OSM polygons are already in the store and need no bridge at all. That would
+  close the forest half of the missed-AAA class of defect without touching the seam.
+
+  **Do not start before `X-B26`'s SRTM-resolution question is settled** — both change
+  `line_of_sight_clear`, and doing them in either order separately means touching it twice.
+
 - [x] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** Done 2026-09-27. All three roles ran in worktrees, advisory-only as this item required;
   reports at `reviews/claude-setup-{review,performance,security}.md`. All HIGH/MEDIUM findings fixed
@@ -637,6 +739,25 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   committing to a probing design, not after.** Investigator pass; the DCS install is on the Windows
   box, and `world-model/data/raw/dcs/2026-09-02/DCS-files.txt` inventories it.
 
+  **ANSWERED 2026-09-29 on the Windows box: both routes work; take the probe.** Two measurements,
+  neither of which existed when this item was written:
+
+  - **The bridge is cheap** — 568 units, mean 1.99 ms, p99 8 ms at 1 Hz, ~2.6 µs per item
+    (`aircraft-layer/research/2026-09-29-bridge-call-cost-at-scale.md`). "Its throughput is still
+    unmeasured" above is no longer true, and the frame-rate risk this item ascribes to probing is
+    the one thing still open, not the throughput.
+  - **The file route is real but unfinished** — `Syria.surface5` does encode elevation, confirmed
+    129/129 against DCS ground truth against a 71/129 null control, with a working index walker and
+    a correct geo-reference (`world-model/research/2026-09-29-surface5-elevation-confirmed.md`).
+    But only a per-tile min/max envelope was decoded; per-node heights need the `Pbase` payload
+    located inside 30 GB of undocumented container, still the 1–2 week bet M7 estimated.
+
+  So the standing preference for DCS-native extraction is **not** decisive here: it would buy a
+  fortnight's decode to obtain what `land.getHeight` already returns exactly, for ~2 ms, live.
+  **Recommend closing as "probe", with `.surface5` parked as a known-good fallback** should the
+  elevation-cost probe (deployed, awaiting a sortie) come back expensive. Leaving `[ ]` pending
+  that probe's number and the user's call.
+
 - [>] **X-B27 — Topology: body-layer and world-model stay together, on the Mac for now, Windows
   eventually. DECIDED 2026-09-29, deferred as work.** User: *"I will keep body and world layers on
   Mac for now, development is much easier that way. The eventual setup will run them on windows."*
@@ -693,7 +814,22 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   The both-on-Windows route does not need it at all, because the LOS call never leaves the process.
   On that route this item becomes a deployment/packaging task, not a performance investigation.
 
-- [ ] **X-B28 — LOS must read the probe grid; SRTM stays coarse as the floor. DECIDED 2026-09-29.**
+- [>] **X-B28 — LOS must read the probe grid; SRTM stays coarse as the floor. DECIDED 2026-09-29,
+  then SUPERSEDED the same day by X-B29.** Kept because the reasoning is still the record of how the
+  decision moved, and because the elevation grid itself is not superseded -- only its role in line
+  of sight.
+
+  **What changed:** the user chose DCS-driven LOS (X-B29). Line of sight now comes from DCS itself,
+  so it no longer depends on the fineness of our own terrain model at all, and the probe-grid
+  wiring below stops being the critical path. His own framing of what the grid is still for:
+  *"what we need it for is knowledge of the land formations. Where the ridges, valleys etc are. That
+  is important information, but since LOS now is not dependent on finegrained terrain model, this
+  moves to a lower priority. We do still need it, but maybe we can relax the grid spacings. To be
+  redesigned."*
+
+  So: the grid survives with a different job (land formations, `describe_position`, offline Mission
+  Interpreter enrichment), a lower priority, and spacing that should be redesigned around *that*
+  purpose rather than around line of sight. The original text follows.
   User, after the Windows-box session relayed its terrain findings: *"LOS calculations **must** use the
   probed refined grid, that is the whole point. Flight over unprobed terrain would automatically probe
   it. Therefore finer grid would always exist. Fine grid SRTM cost/value is low."*
