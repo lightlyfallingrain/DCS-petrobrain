@@ -54,6 +54,48 @@ physical world (a ray either crosses geometry or it doesn't), not information ab
 identity or position that he could not otherwise derive; this project's no-omniscience invariant is
 about identity/position/interpretation, and this plan touches none of those.
 
+### CORRECTION (user, 2026-09-29): both call sites use DCS LOS — the obstacle was the join key, not belief
+
+The section below concludes that `belief/contacts.py::tick`'s engagement term "keeps calling
+world-model's offline primitive forever, unaffected by this plan", because a `Contact` structurally
+cannot carry a DCS object id. **The user rejected that conclusion, and he is right:**
+
+> *"No. With cheap access to DCS calculated LOS, that is the world truth and we must use that. LOS
+> is not a question of belief, it is a property of the DCS world state. If LOS exists and other
+> detection criteria pass, we can see it."*
+
+**What the analysis below actually established, and what it wrongly generalised.** The real
+obstacle is narrower than "belief cannot consume this": it is that a feed **keyed by DCS unit
+name** has no key the engagement term can join on. That much is true. But line of sight does not
+have to be asked per unit — `land.isVisible` and the `SEGMENT` search both take **coordinates, not
+unit handles**. So the engagement term asks exactly what it asks today, point to point, with the
+contact's *believed* position as the endpoint; only the terrain and occluder source underneath
+changes.
+
+**So there are two query shapes on one wire, not two mechanisms:**
+
+| call site | endpoint | keyed by |
+|---|---|---|
+| `visibility.check_visibility` gate 4 | the candidate's true position (pre-boundary, already holds it) | DCS unit, or coordinates — either works |
+| `contacts.tick` engagement term | the contact's **believed** position | our own contact id, never a DCS one |
+
+**The no-omniscience boundary holds in both directions, and is worth stating explicitly because
+this is the seam where it would be easiest to lose.** We send a position we already believe; DCS
+returns a geometric fact about a ray. Nothing comes back that we did not already have — no
+identity, no true position, no existence claim about anything we had not already posited.
+
+**And one property to preserve deliberately rather than treat as a defect:** when the believed
+position is wrong, the point-to-point query returns the LOS answer *for that wrong point*. That is
+correct. Petrovich checks whether he can see where he **thinks** the thing is, which is what a crew
+member does — the error is preserved rather than laundered by asking about the real unit instead.
+
+**What this changes in the staging below:** the engagement term is no longer out of scope by
+invariant. It is a second consumer of the same source, and whether it lands in the same stage as
+the detection gate or a following one is an ordinary sequencing decision, not a structural one.
+The rest of the section below stands as written — its rejection of per-candidate round trips, and
+its argument for letting DCS answer terrain and buildings together on one sightline rather than
+mixing provenances, are unaffected.
+
 ### Where the verdict is computed, and the finding that decides it
 
 **Only the perception-layer gate can consume a live, DCS-object-keyed verdict — the belief-layer
@@ -222,6 +264,13 @@ is a real finding rather than a formality.
 trees ride a parallel investigation rather than blocking it. But if the probes come back positive,
 the tree verdict joins the same batched sightline call rather than becoming a second mechanism —
 which is an argument for settling the probes before Stage 1's wire format is frozen.
+
+**Fallback settled in advance (user, 2026-09-29):** *"If there's no way for tree aware LOS, then
+we'll take the statistical model instead."* So the probes are not a gate — a negative result
+selects the OSM-landcover transmission model rather than leaving trees unhandled, and the sparse /
+linear-treeline case above is then a known, accepted limitation of that model rather than an
+unsolved problem. Worth recording that the decision was taken *before* the result, so a negative
+does not get relitigated as a failure.
 
 ### Trees
 
