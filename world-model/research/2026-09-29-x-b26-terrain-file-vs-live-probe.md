@@ -6,6 +6,15 @@ live DCS access from this machine)
 **Theatre:** Syria (primary), cross-checked against Afghanistan/Caucasus/Kola/Mariana Islands for
 generalization
 
+> **ANSWERED THE SAME DAY, on the Windows box.** This note was written without live DCS access and
+> treats the live probe as the working assumption for want of prior art. Both halves have since been
+> measured: the bridge costs ~2 ms at 568 units
+> (`aircraft-layer/research/2026-09-29-bridge-call-cost-at-scale.md`) and `.surface5` is confirmed to
+> carry elevation but only decodes to a per-tile envelope
+> (`world-model/research/2026-09-29-surface5-elevation-confirmed.md`). The conclusion — probe, not
+> files — survives, but for the opposite reason to the one recorded here: not absence of prior art,
+> but a cheap bridge against an expensive remaining decode.
+
 ### Question
 
 X-B26 (`todo/backlog.md`): does DCS ship a readable, sufficiently fine elevation source in its
