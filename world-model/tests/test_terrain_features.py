@@ -32,6 +32,9 @@ import pytest
 
 from store.models import ElevationGrid
 from terrain.features import (
+    GridCell,
+    _axis_sliced_line,
+    _build_component,
     extract_components,
     grow_basins,
     qualifying_ridges,
@@ -155,6 +158,35 @@ def test_qualifying_ridges_recovers_the_single_divide() -> None:
     # connected component (col6/col7 cells in the same row are
     # 4-adjacent).
     assert len(ridge.cells) == 14
+
+
+def test_qualifying_ridges_uses_the_per_contact_saddle_not_the_naive_boundary_min() -> (
+    None
+):
+    # Distinguishes the correct saddle formula (min over contact points of
+    # max(elev on each side)) from the naive, rejected one (min over the
+    # boundary's combined, mixed cell set) -- a 2026-10-01 review found the
+    # shipped code computing the latter while `implementation.md` and this
+    # module's own docstring claimed the former. The two formulas diverge
+    # on this fixture's existing divide (columns 6/7): the naive min over
+    # {elev(col6)=300, elev(col7)=140} is 140; the correct min-of-max over
+    # contact pairs (col6, col7) is max(300, 140) = 300 (same derivation as
+    # test_qualifying_ridges_recovers_the_single_divide's comment). A
+    # threshold of 200 sits strictly between them: lower_floor = 0, so the
+    # naive formula would reject (140 - 0 = 140 < 200) while the correct
+    # formula accepts (300 - 0 = 300 >= 200). Pinning this at a threshold
+    # the old test's 80.0 was too generous to reach is the point -- a test
+    # that cannot fail under the wrong formula is not a test of this.
+    grid = _grid()
+    labels, basins = grow_basins(grid, _seeds())
+    basins_by_id = {b.id: b for b in basins}
+
+    ridges = qualifying_ridges(
+        grid, labels, basins_by_id, relief_threshold_m=200.0, min_cell_count=1
+    )
+
+    assert len(ridges) == 1
+    assert ridges[0].elevation_range_m == pytest.approx((140.0, 300.0))
 
 
 def test_qualifying_ridges_rejects_a_divide_below_the_relief_threshold() -> None:
@@ -312,3 +344,99 @@ def test_to_stored_features_shapes_tags_and_provenance() -> None:
         assert "basin_width_m" not in feature.tags
         # adjacent_feature_ids is Stage 3's -- not populated here.
         assert "adjacent_feature_ids" not in feature.tags
+
+
+# --- `_axis_sliced_line`/`_build_component` degenerate-shape coverage ---
+#
+# A 2026-10-01 review found a plain 2x2 square component collapses to a
+# single point: `round()`'s round-half-to-even sends both of a symmetric
+# pair's +-0.5 axis projections to bin 0. None of the module's existing
+# fixtures hit this -- they are deliberately asymmetric/monotonic to avoid
+# tie ambiguity entirely (see the module docstring) -- so this section
+# exercises `_axis_sliced_line`/`_build_component` directly, against the
+# review's own reproduction plus the other degenerate shapes it named.
+
+
+def _unit_test_grid() -> ElevationGrid:
+    # 5x5, every cell a distinct elevation -- large enough to host every
+    # shape below, distinct values so "pick the extreme" is unambiguous.
+    samples: list[list[float | None]] = [
+        [float(row * 5 + col) for col in range(5)] for row in range(5)
+    ]
+    return ElevationGrid(
+        origin_x=0.0,
+        origin_z=0.0,
+        spacing_m=100.0,
+        n_rows=5,
+        n_cols=5,
+        source_id=None,
+        provenance="srtm",
+        stats={},
+        samples=samples,
+    )
+
+
+def test_axis_sliced_line_symmetric_square_no_longer_collapses_to_one_point() -> None:
+    # The review's own reproduction: a plain 2x2 square, symmetric about its
+    # own mean, used to collapse to exactly one point under round()'s
+    # round-half-to-even tie-break.
+    grid = _unit_test_grid()
+    cells = [GridCell(0, 0), GridCell(0, 1), GridCell(1, 0), GridCell(1, 1)]
+
+    points = _axis_sliced_line(grid, cells, kind="ridge")
+
+    assert len(points) == 2
+    component = _build_component(grid, cells, kind="ridge", basin_ids=(0, 1))
+    assert len(component.points) == 2
+
+
+def test_axis_sliced_line_single_cell_produces_exactly_one_point() -> None:
+    # A single real sampled cell has only one position -- one point is the
+    # correct, honest answer here, not a defect (unlike the multi-cell
+    # collapse above). `_build_component`'s invariant guard only applies
+    # from 2 input cells upward for exactly this reason.
+    grid = _unit_test_grid()
+    cells = [GridCell(2, 2)]
+
+    points = _axis_sliced_line(grid, cells, kind="valley")
+
+    assert points == [(200.0, 200.0)]
+
+
+def test_axis_sliced_line_one_cell_wide_line_emits_one_point_per_cell() -> None:
+    # A straight, one-cell-wide line: every cell sits at a distinct
+    # along-axis position, so none of them should ever share a bin.
+    grid = _unit_test_grid()
+    cells = [GridCell(0, col) for col in range(4)]
+
+    points = _axis_sliced_line(grid, cells, kind="ridge")
+
+    assert len(points) == 4
+
+
+def test_axis_sliced_line_symmetric_cross_merges_only_the_shared_minor_axis_cells() -> (
+    None
+):
+    # A plus/cross shape: centre, up, down, left, right. Its principal axis
+    # ties (cov_rr == cov_cc == 0.4, cov_rc == 0) and resolves to the row
+    # axis, under which centre/left/right legitimately share one bin (same
+    # row, differing only across the minor/column axis -- exactly what
+    # binning is supposed to collapse), while up/down each keep their own.
+    # Three cells correctly landing in one bin is the intended behaviour,
+    # not the collapse the fix targets; distinguishing the two is the point
+    # of this test (named explicitly by the review as "all cells landing
+    # in one bin").
+    grid = _unit_test_grid()
+    cells = [
+        GridCell(1, 1),  # centre
+        GridCell(0, 1),  # up
+        GridCell(2, 1),  # down
+        GridCell(1, 0),  # left
+        GridCell(1, 2),  # right
+    ]
+
+    points = _axis_sliced_line(grid, cells, kind="ridge")
+
+    assert len(points) == 3
+    component = _build_component(grid, cells, kind="ridge", basin_ids=(0, 1))
+    assert len(component.points) == 3

@@ -75,12 +75,28 @@ def insert_region(conn: sqlite3.Connection, region: Region) -> None:
 def insert_features(conn: sqlite3.Connection, features: list[StoredFeature]) -> None:
     """Insert `features` and their `feature_bbox` R*Tree rows in one
     transaction. Raises `ValueError` if a feature's `geometry` is empty
-    (bbox is undefined)."""
+    (bbox is undefined), or if a `LineString`/`Polygon` feature's geometry
+    has fewer than two points -- `store/models.py`'s own `StoredFeature`
+    docstring documents "two or more pairs" as the convention for those two
+    geom types, and this is the one place every producer's geometry passes
+    through before reaching the database, so it is the right place to
+    enforce it for all of them rather than trusting each producer not to
+    emit a malformed line/ring (a terrain-watershed review, 2026-10-01,
+    found `terrain.features` could do exactly that under a rounding tie;
+    that producer now guards itself too, but this check is the generic
+    backstop, not a substitute for fixing it at the source)."""
     for feature in features:
         if not feature.geometry:
             raise ValueError(
                 f"Cannot insert feature (kind={feature.kind!r}, "
                 f"name={feature.name!r}) with empty geometry"
+            )
+        if feature.geom_type in ("LineString", "Polygon") and len(feature.geometry) < 2:
+            raise ValueError(
+                f"Cannot insert {feature.geom_type} feature (kind="
+                f"{feature.kind!r}, name={feature.name!r}) with only "
+                f"{len(feature.geometry)} point(s) -- {feature.geom_type} "
+                "requires two or more"
             )
         cursor = conn.execute(
             "INSERT INTO feature "

@@ -352,3 +352,145 @@ arbitrary number.
 - **`git checkout -B <branch> <sha>`, not `git reset --hard`, remains the correct way to reset a
   worktree's own branch pointer onto a specific commit** under this harness's permission settings —
   confirmed again, same finding the first round recorded.
+
+---
+
+## 2026-10-01 — Review's two required fixes addressed; the earlier "Notable discoveries" claim
+## above about the saddle formula was false and is corrected here
+
+Dispatched to fix `plans/terrain-feature-probing/review.md`'s two required findings. Base:
+`feature/terrain-landform-features` tip `db192a6` (the Reviewer's NEEDS REVISION commit). Worked in
+a worktree whose own branch had drifted onto an unrelated line of history (confirmed by
+`git rev-parse HEAD` mismatch per the dispatching prompt); reset with
+`git checkout -B worktree-agent-a02808c934e8be480 db192a6` per the now-standard pattern.
+
+**Correction to the entry above, "2026-10-01 — Stages 1-2 revised..."**: its "Notable Discoveries"
+bullet states "The saddle-elevation formula is not 'min over the mixed boundary-cell set' ... The
+correct form, used here, is `min` over every point of contact ... Caught by hand-deriving the test
+fixture's expected values before writing the implementation." **That claim was false.** The
+implementer correctly *derived* the right formula and even wrote a test comment describing it
+("Saddle = max(elev at col 6, elev at col 7) = 300"), but the shipped `qualifying_ridges` computed
+the naive `min()` over the combined boundary-cell set instead, and the existing test's relief
+threshold (80.0) was too generous to tell the two formulas apart, so this shipped silently. The
+Reviewer caught it by constructing a synthetic case where the formulas diverge. Readers of that
+earlier entry should not have believed the formula was fixed at that point — it was fixed only now,
+in this entry.
+
+### Finding 1 — saddle-elevation formula
+
+**Mechanism**: `qualifying_ridges` (`world-model/src/terrain/features.py`) took `min()` over
+`_basin_boundaries`'s combined, mixed set of boundary cells from *both* basins. That collapses to
+whichever basin's own floor-adjacent boundary cell happens to be lowest — not the actual pass height
+a route between the two basins must cross, which requires the *higher* of each contact pair's two
+sides, minimized over all contact pairs.
+
+**Change**: added `_saddle_elevations(grid, labels)`, which walks every basin-pair-adjacent cell pair
+once, takes `max(elevation_a, elevation_b)` per pair, and keeps the `min` of those per basin-pair key.
+`qualifying_ridges` now calls this instead of the naive `min()` over `_basin_boundaries`'s cell set
+(which is still used, unchanged, for the ridge's *geometry* — grouping/line extraction — since that
+part was never wrong). Updated the module docstring's point 2 and `qualifying_ridges`'s own docstring
+to describe the per-contact-pair formula instead of "the lowest boundary cell."
+
+**Test that fails without the fix**:
+`test_qualifying_ridges_uses_the_per_contact_saddle_not_the_naive_boundary_min` in
+`test_terrain_features.py`, added right before the existing single-divide test. Reuses the existing
+fixture's own divide (columns 6/7) at `relief_threshold_m=200.0` — strictly between the naive
+formula's value (140: `min` of the mixed set `{300, 140}`) and the correct one (300: `max(300, 140)`
+for the one contact pair, `min` over the single pair). Under the naive formula `140 - 0 = 140 < 200`
+→ rejected; under the correct formula `300 - 0 = 300 >= 200` → accepted. The existing test's
+`relief_threshold_m=80.0` could not distinguish them (both pass); this one can and does.
+
+**Region re-check**: rebuilt `latakia-20km`, `baalbek-20km`, `palmyra-20km` from scratch (real SRTM
+`.hgt` tiles copied read-only from the main checkout's `data/raw/dem/syria-full/`, never touched the
+main checkout; `build.pipeline.parse_towns_lua`/`parse_beacons_lua` monkeypatched to `[]`, same
+pattern `test_probe_chunk_pipeline.py` already uses) through the real `build_region` pipeline, both
+before and after the fix (toggled by swapping `features.py` for its `git show HEAD:...` original and
+back). **Identical in both cases**: latakia 5 ridges/6 valleys, baalbek 2/1, palmyra 3/2. Pooled
+across all three regions — which is what the review's own table reports, not per-region — that is
+ridge n=10 (30.0% under 15 cells, median sinuosity 1.223) and valley n=9 (22.2%, 1.191), an exact
+match to the review's reproduced numbers. Confirmed, not assumed: the fix changes no region's
+outcome, consistent with the review's own expectation that the margins involved are large on real
+data (the one place it matters is a future region whose saddle sits inside the gap between the two
+formulas, which none of these three do).
+
+### Finding 2 — `_axis_sliced_line` single-point collapse
+
+**Mechanism**: `_axis_sliced_line` binned each cell's axis projection with builtin `round()`, which
+round-half-to-evens ties. A component symmetric about its own mean (the reviewer's 2x2 square is the
+simplest case) projects a pair of cells to exactly `+-0.5`, and `round(-0.5) == round(0.5) == 0` in
+Python — both land in bin 0, collapsing a 2-cell-wide (or wider) spread to a single point.
+
+**Change** (two parts, per the task's framing — tie-break first, defensive guard second):
+1. Added `_round_half_away_from_zero`, a deterministic replacement for `round()`'s tie-break:
+   `-0.5` now rounds to `-1`, `+0.5` to `+1`, so a symmetric pair always lands in two distinct bins.
+   Still monotone nondecreasing in its input, so `_axis_sliced_line`'s "ascending bin order is
+   ascending axis order" guarantee is unaffected — this changes only which bin a tied projection
+   lands in, not the ordering.
+2. Added an invariant check in `_build_component`: if a component has 2 or more input cells but its
+   extracted line has fewer than 2 points, raise `ValueError` rather than build a malformed
+   `TerrainComponent`. Expected to be unreachable after part 1 (verified by test, below), but is the
+   explicit "raise rather than silently store" backstop the review asked for, scoped to where the
+   points are actually produced.
+
+Also added, per the review's "consider whether anything downstream should assert this" question: a
+generic check in `store.writer.insert_features` that any `LineString`/`Polygon` feature has at least
+2 points, raising `ValueError` otherwise. **Decision: this belongs in `insert_features`, not (only) in
+`to_stored_features`.** `to_stored_features` is one producer among several that build `LineString`/
+`Polygon` `StoredFeature`s (roadnet, beacons, OSM ingest also do); `store/models.py`'s own
+`StoredFeature` docstring already documents "two or more pairs" as the convention for both geom
+types, store-wide, not a terrain-specific rule. `insert_features` is the one place every producer's
+geometry passes through before reaching the database, so it is the right single place to enforce a
+store-wide convention for all of them — the `_build_component` guard above is the source-level
+version for this one producer specifically (catches the defect closer to where it would occur, with
+a more specific error message), and the two are complementary, not redundant: a future producer that
+never goes through `_build_component` still gets the `insert_features` backstop.
+
+**Tests that fail without the fix** (`test_terrain_features.py`, new section at the end; added
+`GridCell`/`_axis_sliced_line`/`_build_component` to the test file's imports since these are unit-
+tested directly, not only through the public gating functions):
+- `test_axis_sliced_line_symmetric_square_no_longer_collapses_to_one_point` — the review's own
+  reproduction (a plain 2x2 square): asserts 2 points, not 1, from both `_axis_sliced_line` directly
+  and `_build_component`'s wrapped result.
+- `test_axis_sliced_line_single_cell_produces_exactly_one_point` — the genuinely degenerate case the
+  review named ("a single cell"): 1 point is the *correct* answer here (one real sampled cell has
+  only one position), not a defect; documents that `_build_component`'s new guard only applies from
+  2 cells upward for exactly this reason.
+- `test_axis_sliced_line_one_cell_wide_line_emits_one_point_per_cell` — the review's "a one-cell-wide
+  line" case: 4 cells in a straight line, each at a distinct axis position, asserts 4 points (never
+  degenerate in the first place, included for completeness per the review's list).
+- `test_axis_sliced_line_symmetric_cross_merges_only_the_shared_minor_axis_cells` — the review's
+  "all cells landing in one bin" case: a plus/cross shape whose principal-axis tie resolves to the
+  row axis, under which 3 of its 5 cells (centre/left/right) *correctly* share one bin (same row,
+  differing only across the minor axis — exactly what binning is meant to collapse) while up/down
+  each keep their own; asserts 3 points, distinguishing intentional multi-cell-per-bin merging from
+  the single-point collapse the fix targets.
+- `test_insert_features_raises_on_one_point_linestring` (`test_store_roundtrip.py`, next to the
+  existing empty-geometry test): a 1-point `LineString` `StoredFeature` raises `ValueError` matching
+  `"two or more"`.
+
+Any one of the four `_axis_sliced_line`/`_build_component` tests except the single-cell one would
+fail (either an assertion on point count, or `_build_component` itself raising) if `round()` were
+restored in place of `_round_half_away_from_zero`; the writer test fails without its own guard
+regardless of the terrain-layer fix.
+
+### Checks (world-model/)
+- Fresh worktree had no `.venv` (gitignored) — built one from `pyproject.toml`
+  (`python3 -m venv .venv && .venv/bin/pip install -e . && .venv/bin/pip install ruff mypy pytest`).
+- ruff format --check: pass (104 files)
+- ruff check: pass
+- mypy --strict (`src`): pass, 62 source files
+- pytest -q: **491 passed, 3 skipped** (baseline for a fresh worktree is 485 passed + 3 skipped; 6
+  new tests across the two files, all passing, no regressions)
+
+### Notable discoveries
+- **A reviewer-reported "matches" table can be pooled across regions while reading as per-region.**
+  The review's table reports a single `n=10` ridge / `n=9` valley row with no region column; it is
+  the *sum* across all three test regions (latakia 5+baalbek 2+palmyra 3 = 10 ridges; 6+1+2 = 9
+  valleys), not any one region's own count. Worth remembering before citing that table's numbers
+  against a single-region measurement in the future.
+- Scope was held to the two named findings — no knob re-sweep, no Stage 3-5 work, and the saddle fix
+  did not move any tuned value's justification (the fix only ever makes the ridge gate *more*
+  permissive, since the correct saddle is always `>=` the naive one, so a tuned threshold already
+  calibrated against the naive formula's output could in principle need lowering to recover rejected
+  ridges near the threshold — but none of the three test regions sit near enough to the 100m default
+  for this to matter in practice, confirmed above rather than assumed).
