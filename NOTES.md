@@ -605,3 +605,33 @@ two functions that must agree (2026-09-19).
   the design against them directly (not the inferred rules) reversed one branch (leader change:
   full → delta) and found the indefinite-article defect, since every worked example renders class
   nouns bare (`plans/group-cohesion-redesign/plan.md` §4, `explore-notes-delta-taxonomy.md`).
+- **The risk named in a plan is not necessarily the risk that dominates — profile the whole
+  pipeline before optimising the step everyone is worried about.** The geomorphons plan flagged
+  Zhang-Suen thinning as "the main technical risk... the thing that resolves full-theatre
+  feasibility," on the reasonable-sounding theory that a per-pixel Python loop over a theatre-scale
+  raster would be slow. Measured (`cProfile` on a real tile): thinning was 0.5-1.4% of per-tile
+  time. The actual dominant cost — 92% of per-tile time, unflagged by anyone until profiled — was
+  the Chaikin-smoothing deviation check's O(line_length²) full-polyline scan, invisible from reading
+  the plan because nothing in the design discussion mentioned it as expensive. A plan's own risk
+  assessment is a hypothesis, not a profiling result, even when the hypothesis sounds obviously
+  right (`plans/landform-geomorphons/performance.md`).
+- **A render used as evidence a change preserved behaviour is only evidence for the code paths it
+  actually exercises — check what it calls, not just that its output looks the same.** The
+  performance fix's own report noted that `tools/inspect_terrain.py`'s unchanged, byte-identical
+  acceptance render proves classification and tracing are untouched, but that tool never calls
+  `_smooth_for_storage` or `ingest_terrain` at all — so it says nothing about whether the Chaikin
+  deviation-check rewrite preserved geometry, which is exactly the part that changed. The real
+  evidence for that claim was a separate, explicit old-vs-new smoothed-geometry comparison run over
+  real traced lines. The implementer caught and disclosed this gap in its own report rather than
+  letting the unchanged render imply more than it proved (`plans/landform-geomorphons/
+  implementation.md`; independently re-run by Reviewer round 3 on different tiles, zero
+  mismatches).
+- **On this project, a detector's output is accepted by looking at it, not by its metrics.** The
+  geomorphons detector is the third attempt at ridge/valley extraction, after two were rejected on
+  sight (a per-cell curvature classifier, then a marker-controlled watershed) despite both having
+  internally-consistent metrics and passing review. The user's own description of what changed his
+  mind was a side-by-side rendered comparison on one real ridge, not a number: watershed drainage
+  broke the crest at every saddle, geomorphons kept it whole. Any future terrain/perception work
+  whose correctness is fundamentally a matter of "does this look right to a pilot" should budget
+  for a rendered comparison early, before investing in tuning metrics that a correct-looking render
+  might make moot (`world-model/ROADMAP.md`'s `WM-B6` entry, decision dated 2026-10-01).
