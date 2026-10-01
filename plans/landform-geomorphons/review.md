@@ -228,3 +228,120 @@ test fail and the other stay green, restored byte-identical) rather than taken o
 implementer's report. The performance-figure re-marking was checked against `git log --follow`
 and the historical commit's own code, not just read as plausible. The sentinel-assertion strength
 was checked against an adjacent test's own zero-features assertion on the same fixture shape.
+
+### Round 3 — Review of the Performance change request (`b4d38cf`)
+
+Branch `feature/landform-geomorphons`, tip `e154255` (verified via `git rev-parse HEAD` immediately
+after checkout — matched). Range `c39ec08..e154255`, three commits: the fix (`b4d38cf`), a plan-doc
+update (`75df2c0`), and an agent-memory commit (`e154255`). In scope: `b4d38cf` only, per the task —
+`plans/landform-geomorphons/performance.md`'s two findings (unbounded whole-theatre memory
+accumulation; O(N²) Chaikin deviation check), re-entering the loop as a Security/Performance change
+request per `AGENTS.md`. Round 1 and Round 2's own verdicts are not reopened.
+
+**Checks, freshly built `.venv` from `world-model/pyproject.toml` (numpy 2.4.6, scipy 1.18.1,
+matching `performance.md`/`implementation.md`'s own environment):**
+- `ruff format --check src tests` — 116 files already formatted
+- `ruff check src tests` — all checks passed
+- `mypy --strict src` (run from inside `world-model/`) — no issues, 71 source files
+- `pytest tests -q` — **510 passed, 3 skipped** — matches the claimed 509 baseline + 1 new
+  streaming-contract test exactly
+
+**The deviation-check safety argument — verified on the code, not the prose.** The claim
+(`_chaikin_smooth_with_support`'s docstring) is that checking a window ⊆ the full original polyline
+can only report a distance ≥ the true whole-polyline minimum, never less. This holds **regardless of
+how precise the window is** — `distance_point_polyline` takes a `min()` over candidate segments, and
+removing candidates from a `min()` can only raise or preserve its value, never lower it. So the
+safety property does not actually depend on the window being "construction-exact" the way the
+docstring frames it; it depends only on the window being a *subset* of the real original points,
+which it structurally is (`lo`/`hi` are always derived from `(i, i)`-seeded indices via `min`/`max`
+merges, so they can never exceed `[0, len(points)-1]`). Checked the merge step itself
+(`new_support[i] = (min(lo_i, lo_{i+1}), max(hi_i, hi_{i+1}))`) against the actual Chaikin formula
+(`0.75/0.25` convex combinations of exactly two consecutive parents, matching `_chaikin_smooth`'s own
+unmodified formula line-for-line) — the window is a safe superset of each point's true support, which
+is sufficient. Confirmed `geometry.distance_point_polyline` degrades correctly to point-to-point
+distance for a single-point window (`lo == hi`, e.g. at a line's pinned endpoints) rather than
+raising — no off-by-one or empty-slice hazard at the boundary.
+
+**Independently re-derived the empirical claim, on different tiles than the implementer used.**
+Wrote a standalone script (not reusing `implementation.md`'s own comparison code) that traces real
+ridge/valley lines from 3 real Syria SRTM tiles (`N28E030`, `N28E031`, `N28E032` — deliberately
+excluding `N35E036`, the tile named in `performance.md`/`implementation.md`) via the actual
+`terrain.geomorphons`/`terrain.skeleton`/`terrain.features.component_from_trace` pipeline, then ran
+both the old (`_chaikin_smooth` + full-polyline check) and new (`_chaikin_smooth_with_support` +
+windowed check) deviation logic on every traced line and compared decisions directly:
+
+- **45,578 lines checked, 422,511 original points — zero geometry divergences, zero accept/reject
+  mismatches.** (Larger sample than the implementer's own 588 + 11,104, on tiles the implementer
+  didn't use.) `new_smoothed == old_smoothed` held on every line (expected — same formula), and the
+  windowed vs. full-scan accept/fallback decision never once differed.
+
+**Re-measured the memory claim directly, real data, not re-run the implementer's script.** Ran the
+actual `ingest_terrain()` (not a standalone simulation) over 6 real tiles with an
+`on_tile_features` callback that discards each tile's features immediately (mirroring
+`pipeline.py`'s `_flush_terrain_tile`), tracking `resource.getrusage().ru_maxrss` after each tile
+with `gc.collect()` first. **Corrected for the macOS bytes-not-KB unit** (this project's own
+`reference_macos_ru_maxrss_unit_bytes.md` agent-memory, which documents exactly this pitfall and
+which the implementer evidently hit and fixed while taking their own measurement): peak RSS went
+768.9 MB → 1136.9 MB → 1400.2 MB → **1400.2 MB (flat) → 1400.2 MB (flat) → 1527.9 MB** across
+7,032 → 25,000 → 43,139 → 54,210 → 69,374 → 91,605 cumulative features. The plateau-then-small-bump
+pattern (flat across three consecutive tiles despite rising cumulative count, then a bump sized to
+the next tile's own feature count) is the signature the fix claims: bounded by the current tile's
+size, not by cumulative theatre total. `performance.md`'s own old-code table shows ~2.33 GB at a
+comparable ~93K cumulative-feature mark — this run holds at ~1.5 GB at ~92K, consistent with (if not
+numerically identical to, different tile sample and baseline interpreter RSS) the claimed fix.
+Confirmed no second accumulating structure: `insert_features` loops over its argument and returns
+`None`; `_flush_terrain_tile`'s only retained state across calls is `report.feature_counts`, a
+`dict[str, int]` of small integer counters, not feature objects.
+
+**Transactional behaviour.** Traced the actual chain: `store.writer.open_for_build` unconditionally
+`unlink()`s `db_path` before recreating it (confirmed by reading the function, not taking the
+commit message's word for it) — so a half-finished `build_region` run leaves a deleted-then-partial
+file that the *next* `open_for_build` call deletes again before writing anything, meaning nothing
+ever treats a partially-written base store as "the build" by construction, not by convention. The
+per-tile `insert_features` calls in `_flush_terrain_tile` match the exact pattern already used by
+the OSM streaming stage's `_flush_nodes`/`_flush_ways`/`_flush_areas` (same file, same `conn`,
+same "commit per call" shape) — this is not a new tradeoff invented for terrain, it is the stage
+adopting the convention its siblings already use. Terrain-cache resumability (`terrain_cache/`,
+`write_tile_features`/`mark_build_complete`) is untouched by this diff and was already per-tile
+before this fix, so nothing about it changed.
+
+**Streaming-contract test.** Read `test_ingest_terrain_streams_one_call_per_tile_not_one_theatre_wide_call`
+directly: it asserts `len(calls) == 2` for a 2-tile fresh build and `len(warm_calls) == 2` for the
+same build re-run warm (cache hit). A reversion to a single theatre-wide call (the old
+`cache_features.extend(...)` + one final callback, or simply calling `on_tile_features` once with
+the full accumulated list at the end) would make `len(calls) == 1`, failing this assertion
+immediately — the test is not vacuous, it pins the exact mechanism the fix changed.
+
+**Acceptance window / geometry-unchanged claim.** Confirmed `tools/inspect_terrain.py` never imports
+`build.ingest_terrain` or calls `terrain.features._smooth_for_storage` (`grep` over the file) — so
+the unchanged 299/289-line, byte-identical-PNG render is real but only proves classification/tracing
+are untouched, exactly as `implementation.md` discloses. The actual evidence for "stored geometry
+unchanged" is the old-vs-new smoothed-geometry comparison above, which this review re-derived
+independently rather than accepting on report.
+
+**Scope check.** `git diff --stat c39ec08..e154255` touches exactly `world-model/src/build/
+ingest_terrain.py`, `world-model/src/build/pipeline.py`, `world-model/src/terrain/features.py`,
+`world-model/tests/test_ingest_terrain.py`, plus the plan doc and two agent-memory files — matches
+`performance.md`'s two findings one-for-one, nothing broader. No debug code, no leftover TODOs, no
+stray prints in the diff.
+
+### Verdict
+
+APPROVED. Both performance findings are fixed correctly, within scope, and the fixes' own safety/
+correctness claims hold up under independent re-derivation (different tiles, different tool, unit
+bug caught and corrected) rather than merely reading as plausible. No required fixes. Ready for the
+remaining pre-merge gate (Definition of Done) per standing user authority to proceed and merge.
+
+### Round 3 Review Confidence
+
+Full read of the one-commit diff (`b4d38cf`) plus the safety-argument reasoning on
+`_chaikin_smooth_with_support`/`_smooth_for_storage`. All four verification commands re-run from a
+freshly built `.venv`, matching claimed figures exactly (510/3). The two headline empirical claims
+(deviation-check equivalence, bounded memory) were **re-derived independently** rather than accepted
+from `implementation.md`'s own numbers: a standalone script against three real SRTM tiles the
+implementer's own report didn't use (45,578 lines, zero mismatches), and a direct re-run of the real
+`ingest_terrain()` over six real tiles with its own RSS tracking (correcting for the macOS
+`ru_maxrss` unit pitfall this project's own agent-memory already documents). No part of this review
+depended on real-data figures that could not be regenerated from a fresh worktree — the gitignored
+`data/raw/dem/syria-full` was read read-only from the main checkout's filesystem path, never
+modified, no full-theatre build run.
