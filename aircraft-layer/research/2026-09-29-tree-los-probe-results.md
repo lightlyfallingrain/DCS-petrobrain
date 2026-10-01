@@ -22,12 +22,13 @@
 scenery. So `clear = building_clear and terrain_clear` in `plans/dcs-driven-los/plan.md` is
 correct, and its Stage 3 does not collapse.
 
-**3. But DCS's own tree placement data is on disk, and it is not OSM.** `Mods/terrains/<Theatre>/
-surfaceDetails/` carries a vegetation table in the **same columnar grammar already cracked for
-`.surface5`** — 276,924 records for Syria with position, orientation, seed and species index. You
-cannot *call* DCS's tree-LOS, but you may be able to reconstruct its input and run the test
-locally. **Finding 10** has the layout, the one unknown that could sink it, and the effort. Filed
-as `X-B32`; investigation continues.
+**3. DCS's own per-tree placement IS on disk — and it is behind the one wall this project has
+already hit twice.** Trees live in `Syria.surface5` as per-node `Trees` sections, each with a
+`Pbase` position array and an `assetIndex` into a readable 2,665-entry asset-name table.
+**8,789 such sections in the first 150 MB alone.** But the position payload cannot be addressed:
+the field table's `offset` is not file-absolute, and the container is a recursive quadtree whose
+payload addressing defeated the elevation decode in exactly the same way. **Finding 10** has the
+full layout and corrects an earlier wrong turn of mine. Filed as `X-B32`.
 
 **What that means for the design:** terrain and buildings come from DCS (measured, cheap, exact).
 Trees come from **either** OSM `landcover` — 44,811 polygons world-model already holds, a
@@ -208,55 +209,80 @@ measurement rather than on absence of evidence.
 detection output and model perception ourselves. So this route is not merely unavailable — it is
 also against the grain of the design.
 
-**10. DCS ships its vegetation placement as data, in a container this project has already
-decoded. This is the live lead.**
+**10. Where DCS's trees actually are — and why they are still out of reach. (Investigated
+2026-10-01, in answer to "what would it take to call the compiled tree-aware LOS?")**
 
-- **evidence: reproduced-locally (parsed on this box, 2026-10-01)** — **source:**
-  `Mods/terrains/Syria/surfaceDetails/`.
-- The directory was missed in every earlier pass because the search terms were about *LOS*, not
-  about vegetation as a data layer. It holds:
-  - **`Trees.StructTable.sht`** — **plain Lua text**, declaring 13 species (`ItalianCypress`,
-    `Juniperus`, `Orange`, `Palm1`, `PineItalian1/2`, `Platan`, `Salsola`, `Snakeweed`,
-    `Anabasis_setifera`, `Mandal2`, …) with `life = 20`, `classname = "lStandartStructure"`,
-    `positioning = "ONLYHEIGTH"`, `rotation = "VERTICAL"`.
-  - 11 `.ref` files — the per-species models.
-  - **`Syria.sd5`**, 8,863,144 bytes, header **`landscape4::SurfaceDetails5File`** — the **same
-    self-describing columnar grammar** as `Syria.surface5`, which
-    `world-model/tools/probe_surface5_elevation.py` already walks.
+**The answer to the question asked: you cannot call it.** No scripting binding exists. Reaching the
+compiled test would mean native injection into the DCS process — hooking the binary — which is
+against the EULA, broken by every update, and not a route. What follows is about rebuilding its
+*input* instead.
 
-- **The field table parses cleanly and self-consistently:**
+**10a. A wrong turn, recorded because it would otherwise be repeated.**
+`Mods/terrains/Syria/surfaceDetails/Syria.sd5` (8.86 MB, `landscape4::SurfaceDetails5File`) parses
+perfectly in the known columnar grammar — **276,924 records**, columns `P` (12 B), `AXISX` (8 B),
+`SEED` (4 B), `reference` (4 B), `splatlayer` (4 B), all agreeing, file size reproduced exactly. I
+reported it as the tree data. **It is not.** Its splat-layer list names only
+`grass_01_anabasis_setifera`, `grass_dry_01_snakeweed`, and `big_stone`/`gray_stone`/`brown_stone`
+variants — **ground clutter: grass, two desert shrubs, three rock types**. No tree species appear
+in it, and `reference` resolves to exactly those five. `.sd5` is the scatter layer for pebbles and
+weeds.
 
-  | column | type | elem size | count (bytes) | records |
+The sibling `.ref` files are likewise not placements: each is `landscape4::lReferenceFile` with
+`P`/`N`/`diffuseTexCoord`/`lodTransition`/`tangent`/`TRI` and a `Speedtree5.1` tag — **the mesh of
+one tree**, 8 to 54 vertices at the coarsest LOD. `Trees.StructTable.sht` is a plain-Lua *type*
+declaration (`life = 20`, `positioning = "ONLYHEIGTH"`, `rotation = "VERTICAL"`). Three files that
+look like tree data and none of them is.
+
+**10b. The trees are in `Syria.surface5`, named and counted.**
+
+- **evidence: reproduced-locally** — `Trees` occurs **8,789 times** as a length-validated field name
+  in the first 150 MB, against 82,097 `Splat` and 6 `forest`.
+- Each surface node carries a `Trees` section under a `Simple5.1` shader with:
+
+  | field | type | elem | example count | records |
   |---|---|---|---|---|
-  | `P` | 2 | 12 | 3,323,088 | 276,924 |
-  | `AXISX` | 1 | 8 | 2,215,392 | 276,924 |
-  | `SEED` | 0 | 4 | 1,107,696 | 276,924 |
-  | `reference` | 4 | 4 | 1,107,696 | 276,924 |
-  | `splatlayer` | 4 | 4 | 1,107,696 | 276,924 |
+  | `Pbase` | 2 | 12 B (3×float32) | 3,900 / 4,152 | **325 / 346 positions** |
+  | `assetIndex` | 4 | — | — | per-instance model selector |
+  | `baseIndex`, `parametricUVW`, `offset`, `materialParamsIndex` | | 4 B | 24–32 | 6–8 |
 
-  All five agree exactly at **276,924 records**, offsets are contiguous
-  (`0 → 0x32b4d0 → 0x5482b0 → 0x6569a0 → 0x765090`), and 276,924 × 32 bytes + a 1,576-byte header
-  reproduces the file size. The decode is not in doubt.
+- **`assetIndex` resolves against a readable table.** At ~**0x085e88xx (140.3 MB)**, immediately
+  after the last descriptor, sits an alphabetical **2,665-entry asset-name table** — road and rail
+  junction geometry, `pier`, `hangar_gate_rails_01`, and vehicles (`hilux`, `honda`,
+  `hyundai_accent`) alongside the vegetation. **Six tree species are instanced in Syria:**
+  `italiancypress`, `juniperus`, `mandal2`, `palm`, `pineitalian2`, `platan` (plus
+  `mandal2_terraces`, `field_grass`).
+- At ~330 positions per section and 8,789 sections in 150 MB, the full descriptor region implies
+  **millions of individual tree positions**. This is per-tree placement, not patch seeds — better
+  than the bar the user set.
 
-- **THE UNKNOWN THAT COULD SINK IT: `P` is normalised, not world coordinates.** Sampled values are
-  all in **[0, 1] with y = 0** — tile-local fractions. **The tile mapping is not in this file**, and
-  without it there are 276,924 offsets with no idea where they sit. That is the thing to find.
-- **A second caution, pointing the same way:** 276,924 records over Syria's ~545,000 km² is
-  **0.5 per km²** — far too sparse to be individual trees. Together with a `SEED` column, these are
-  almost certainly **vegetation patch seeds** that the engine expands procedurally. So even with the
-  mapping, the likely yield is patch centres and extents, not trunks.
-- **That may still clear the bar.** The user's requirement is explicitly *"We don't need to know
-  individual tree placement... but need to know if they block LOS."* Patch centres with extents are
-  a **discrete** occluder, which is the thing OSM polygons cannot be.
-- **Effort.** The container grammar is already decoded and this file is **3,400× smaller** than
-  `.surface5`, whose node index fell in an afternoon. The remaining work is: find the tile mapping
-  (the real risk — hours, or a dead end); resolve `reference` → crown radius/height per species
-  (from the `.ref` models, or measured once in-game, or approximated per species); index spatially
-  (world-model already has R*Tree); then LOS is our own cylinder intersection along the sightline,
-  computed locally and offline — **no bridge, no per-call cost, available to the Mission Interpreter
-  as well as in flight**.
-- `reference` shows only **5 distinct values** in a sample against 13 declared species, so either
-  Syria uses a subset or the index means something else. Unresolved, and cheap to settle.
+**10c. THE BLOCKER, and it is the same one as before.**
+
+- The field table's `offset` **is not a file offset**. `Trees.Pbase` in the first node states
+  `0x8ebd0` (585 KB); the bytes there are another node's field declarations (`offset`,
+  `assetIndex`, `HardSplat5.2`), not position data. Offsets grow with node index but at no constant
+  ratio — consistent with the recursive LOD quadtree the format is.
+- Reading `Pbase` at that offset yields values like `-1.7e38` and `2.3e20`. Treating the end of the
+  descriptor region (**0x85d2616, 140.322 MB**) as a data base, and several neighbouring
+  candidates, yields degenerate clouds (all values 0, or 0–4) — not positions.
+- **This is precisely where the elevation decode stalled** (`world-model/research/
+  2026-09-29-surface5-elevation-confirmed.md` Finding 5: *"the u64 that follows the field name does
+  not resolve to a file offset holding position data"*). Two independent attempts, two different
+  payloads, the same wall.
+
+**10d. What that does to the effort estimate.**
+
+My earlier framing — *"3,400× smaller than `.surface5`, whose index fell in an afternoon"* — was
+based on the wrong file and is **withdrawn**. The tree data is *inside* `.surface5`, so the work is
+the **full 30 GB container decode** that M7 estimated at **1–2 weeks with a real chance of stalling
+on an undocumented scheme partway through**. It has now stalled at the same point twice. The
+descriptor layer is thoroughly understood; the payload addressing is not, and nothing learned in
+this pass moved it.
+
+**So the position is: the data exists, is named, is counted, and is per-tree — and is behind a
+decode that has already defeated two attempts.** OSM landcover remains the shipping answer. This is
+worth reopening only if someone wants to spend a fortnight on payload addressing, and the honest
+read is that it should be driven by the *elevation* need (which would benefit identically) rather
+than by trees.
 
 ### The weakness in Finding 2, stated plainly
 
