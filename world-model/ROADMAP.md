@@ -593,13 +593,24 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     floor is worse for an absolute height on an open slope, and *better* for the relational
     question anything here actually asks — is this unit above or below that ridge, at its foot or on
     its crest.
-  - **The real limit is flat ground.** Structure lines exist only where there is structure: a
-    desert plain or a wide valley floor produces no ridges and no valleys, so interpolation has no
-    anchors there and the method degenerates exactly where it looks easiest. Whatever covers that
-    case — a very coarse elevation mesh, coastline-as-sea-level, scattered anchor points — has to be
-    decided as part of the design rather than discovered when a Palmyra callout returns nothing.
-    Flat ground is also where a coarse mesh is cheapest and most accurate, so a hybrid is the
-    likely answer.
+  - **Flat ground: the caveat was raised here and then mostly withdrawn, 2026-10-01, at the user's
+    question "where do we need flat ground elevation and why?".** Two answers, and both deflate it.
+
+    *Nobody reads it.* `body-layer/src/perception/geometry.py::elevation_at` is the only consumer of
+    `describe_position`'s point elevation anywhere in the subprojects, and it has **no production
+    callers** — only its own test. LOS moves to DCS, contact enrichment uses the unit's own
+    DCS-reported `altitude_m`, and Mission Interpreter never reads the field. So "elevation on flat
+    ground" is not currently a question anything asks.
+
+    *And where it is flat, the error is small because it is flat.* Interpolating from distant
+    anchors over low-gradient ground is cheap in error terms; the degeneracy is largely
+    self-correcting. The residual case is two flat areas at genuinely different heights — a plateau
+    above a plain — and the boundary between them is an escarpment, which **is** a structure line,
+    so the anchors exist exactly where the height changes.
+
+    Keep as an open design point rather than a blocker: if a consumer ever does need absolute
+    elevation over featureless ground, a very coarse mesh is cheap and accurate precisely there.
+    Do not let it hold up dropping the grid.
 
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
