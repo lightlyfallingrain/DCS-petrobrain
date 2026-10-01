@@ -37,6 +37,21 @@ other low-threat classes since that would be the architect inventing a judgment,
 one. See [[feedback_scope_only_whats_actually_said]] if that memory exists, else: a user statement
 about one specific class is not a license to generalize the policy to a category.
 
+**Revision (second pass, same day): `op_class` is a threat-bucket vocabulary, not a system-topology
+one — don't key an installation/kind-coherence rule on it alone.** `OP_SRSAM` mixes a genuine
+multi-component fixed site (`"s-125"`, SA-3: separate radar + launcher revetments) with four
+single-vehicle systems (`"osa"` SA-8, `"strela-10"` SA-13, `"strela-1"` SA-9, `"tor 9a331"`/
+`"chap_torm2"` SA-15, each its own radar+launcher on one vehicle). The first draft's
+`AIR_DEFENSE_INSTALLATION_CLASSES: frozenset[str]` (an `op_class`-keyed set) would have merged an
+Osa and an S-125 launcher 400m apart as "one installation" — found only by re-reading
+`object_model.py`'s actual keyword table line-by-line, not by trusting the op_class names. Fix: a
+second, orthogonal `installation_component: bool` field, authored per keyword entry, separate from
+`op_class`. When a rule needs "is this a site-component" use the new field; when it needs "is this
+air-defence at all" (e.g. a disclosure rule's "more air defence is always news"), `op_class` bucket
+membership is still right — the lesson is which question is being asked, not which field to avoid.
+S-75/SA-2 also has no keyword entry at all (falls back to `DEFAULT_OP_CLASS`) — a pre-existing gap,
+not something to assume covered.
+
 **Delta re-report: the redundancy is narrower than "any change re-speaks everything."**
 `CONTACT_CLASSIFICATION_CHANGED` already fires per grouped member individually (confirmed from
 `belief/callouts.py`'s own docstring — only `CONTACT_DETECTED`/`CONTACT_REACQUIRED` are filtered for
