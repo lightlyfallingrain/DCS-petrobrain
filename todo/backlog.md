@@ -913,44 +913,41 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   round trip, rather than waiting on X-B27's eventual topology. X-B29 above may make the point moot
   by batching the call anyway.
 
-- [~] **X-B32 — DCS ships its own tree placement as data: decode `surfaceDetails/<Theatre>.sd5`.**
-  Found 2026-10-01 on the Windows box while answering the user's question *"what would it take to
-  access the compiled tree aware LOS and call it between point A and B?"*. **In progress** —
-  investigation continuing on that box.
+- [>] **X-B32 — DCS's per-tree placement is in `Syria.surface5`, behind the payload-addressing wall.
+  DEFERRED 2026-10-01, same day it was opened.** Investigated on the Windows box in answer to the
+  user's question *"what would it take to access the compiled tree aware LOS and call it between
+  point A and B?"*. Full detail:
+  `aircraft-layer/research/2026-09-29-tree-los-probe-results.md` Finding 10.
 
-  **The answer to that question was: you cannot call it, but you may be able to rebuild its
-  input.** No scripting binding exists; the engine's tree-aware paths are compiled, and Petrovich's
-  own verdict is an audio file. Reaching the compiled test would need native injection into the
-  DCS process — against the EULA, broken by every update, not a route. Full reasoning:
-  `aircraft-layer/research/2026-09-29-tree-los-probe-results.md` Findings 8–10.
+  **The question's own answer: you cannot call it.** No scripting binding exists; reaching the
+  compiled test needs native injection into the DCS process — against the EULA, broken by every
+  update, not a route. The rest is about rebuilding its input.
 
-  **What is on disk**, missed by every earlier pass because the search terms were about LOS rather
-  than vegetation-as-data — `Mods/terrains/Syria/surfaceDetails/`:
+  **What was found.** Trees live in `Syria.surface5` as per-node `Trees` sections — **8,789 in the
+  first 150 MB** — each with a `Pbase` array of ~325–346 twelve-byte positions and an `assetIndex`
+  into a **readable 2,665-entry asset-name table at 140.3 MB**. Syria instances six species:
+  `italiancypress`, `juniperus`, `mandal2`, `palm`, `pineitalian2`, `platan`. Extrapolated, that is
+  **millions of individual tree positions** — better than the patch-centres outcome hoped for, and
+  comfortably past the user's bar of "need to know if they block LOS".
 
-  - `Trees.StructTable.sht` — **plain Lua**, 13 species with `life`, `positioning`, `rotation`.
-  - 11 `.ref` per-species models.
-  - `Syria.sd5`, 8.86 MB, `landscape4::SurfaceDetails5File` — **the same columnar grammar already
-    decoded for `.surface5`**. **276,924 records**, columns `P` (12 B, 3×float32), `AXISX` (8 B),
-    `SEED` (4 B), `reference` (4 B, species index), `splatlayer` (4 B). All five columns agree on
-    the record count, offsets are contiguous, and the arithmetic reproduces the file size exactly.
+  **Why it is deferred anyway.** The field table's `offset` is not a file offset: `Trees.Pbase`
+  states 585 KB and the bytes there are another node's field declarations. Offsets grow with node
+  index at no constant ratio — the recursive LOD quadtree. Candidate data bases, including the
+  exact end of the descriptor region (0x85d2616), give degenerate clouds. **This is the same wall
+  the elevation decode hit** (`world-model/research/2026-09-29-surface5-elevation-confirmed.md`
+  Finding 5). Two attempts, two payloads, one blocker.
 
-  **The one unknown that could sink it:** `P` is **normalised [0,1] with y = 0** — tile-local
-  fractions, and the tile mapping is not in this file. Without it there are 276,924 offsets and no
-  idea where they are. Second caution pointing the same way: 0.5 records per km² is far too sparse
-  for individual trees, so with a `SEED` column these are probably **patch seeds** expanded
-  procedurally by the engine — likely yielding patch centres and extents rather than trunks.
+  **Correction worth keeping, because the wrong turn is re-walkable.**
+  `surfaceDetails/Syria.sd5` parses perfectly — 276,924 records — and is **ground clutter, not
+  trees**: its splat layers are grass, two desert shrubs and three rock types. The sibling `.ref`
+  files are **SpeedTree meshes of a single tree**, not placements. Three files that look like tree
+  data; none is.
 
-  **That may still be enough**, because the user's bar is explicit: *"We don't need to know
-  individual tree placement... but need to know if they block LOS."* Patch centres with extents are
-  a **discrete** occluder, which is precisely what an OSM polygon cannot be — a probability over a
-  polygon cannot say "this sightline is blocked and the one ten metres left is not", which is the
-  treeline-along-a-road case a Mi-24P meets constantly.
+  **Effort, revised.** The earlier "3,400× smaller, an afternoon" estimate was based on the wrong
+  file and is withdrawn. The work is the **full 30 GB `.surface5` payload decode** — M7's 1–2 weeks
+  with a real chance of stalling, now having stalled twice at the same point.
 
-  **If it resolves, it beats OSM on every axis that matters here**: DCS-native rather than a
-  third-party approximation, discrete rather than statistical, offline rather than over the bridge,
-  no per-call cost, and available to the Mission Interpreter pre-mission as well as in flight.
-  **If it does not**, OSM landcover remains the fallback and nothing is lost but the spike.
-
-  Order of work: find the tile mapping; resolve `reference` → crown radius/height; spatial index
-  (world-model already has R*Tree); then LOS is our own cylinder intersection along the sightline,
-  the same shape as the proven SEGMENT building test but computed locally.
+  **Reopen only if** someone takes on payload addressing deliberately — and the honest read is that
+  it should be driven by the **elevation** need, which benefits identically and has a live defect
+  behind it, rather than by trees. OSM landcover remains the shipping answer for trees and nothing
+  is blocked on this.
