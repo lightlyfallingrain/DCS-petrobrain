@@ -15,6 +15,19 @@ This is the same shape NOTES.md's `ACT_FLOOR`/match_ratio entry and the shutdown
 describe from earlier features — this is at least the 2nd/3rd occurrence of "verify a
 threshold/window widening by running the real adjacent subsystem end to end, not by inspection."
 
+**4th occurrence, a related but distinct mechanism (terrain-feature-probing, 2026-10-01):**
+`core_fraction` was tuned to 0.1 while the valley geometry-extraction step had a real zigzag defect
+— the tuning was unknowingly compensating for that defect, not expressing the intended tradeoff.
+Fixing the geometry step changed the sinuosity at that *same* 0.1 value with no retune at all
+(3.57 → 1.17), and a proper re-sweep against the fixed geometry then found a materially better
+point (0.3) the broken geometry could never have reached. This is not "widening across several
+Reviewer rounds because each fix was locally correct" (the pattern above) — it is "a tuning value
+settled against a known-defective adjacent step is provisional, and inheriting it across a fix to
+that step without re-sweeping is a trap," caught here by `implementation.md`'s own log, not by
+Reviewer. Related enough to file alongside this pattern (both are "a tuned parameter's apparent
+stability can be an artifact of something else nearby"), different enough to track separately if
+it recurs again rather than conflating the two mechanisms.
+
 **Why this matters at DoD stage**: when a plan or fix widens what a fixed set/threshold/window
 accepts, do not treat a single review round's approval as strong evidence the widening is safe —
 check whether the review log shows the fix was reproduced against a live run of the adjacent

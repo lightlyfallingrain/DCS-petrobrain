@@ -551,3 +551,41 @@ two functions that must agree (2026-09-19).
   simulated world (grouping, salience, disclosure), show a concrete proposal early and expect the
   first answer to move it, rather than iterating internally first (`plans/group-reporting/
   explore-notes.md`, 2026-09-28/29).
+
+- **A tuning value chosen to compensate for a known-defective adjacent step is not stable once
+  that step is fixed, and retuning it blind (without re-checking against the fixed step) can land
+  on the same compensating value for the wrong reason.** The terrain-watershed valley geometry had
+  a real defect (zigzag line extraction inflating sinuosity), and the first tuning round picked
+  `core_fraction=0.1` specifically because widening it exposed more of that zigzag — the knob was
+  compensating for the bug, not expressing the intended tradeoff. Fixing the geometry step first
+  dropped sinuosity from 3.57 to 1.17 at that *same* 0.1 value with no retune at all, then a proper
+  re-sweep against the fixed geometry found a better point (0.3) the old geometry could never have
+  reached without a sinuosity penalty. Lesson: when a parameter's "best" value was set while a
+  known adjacent defect was still present, treat that value as provisional and re-sweep after the
+  fix lands, rather than inheriting it — a value that happens to look stable across a fix can still
+  be compensating for the wrong thing (`plans/terrain-feature-probing/implementation.md`, second
+  round, 2026-10-01).
+
+- **A hand-built test fixture that is uniformly asymmetric/monotonic "to avoid tie-breaking
+  ambiguity" is a documented design choice that doubles as a blind spot for exactly the bug class
+  it was built to avoid.** Every fixture in `test_terrain_features.py` was deliberately constructed
+  strictly monotonic specifically so axis-projection tie-breaks never occur — a reasonable choice
+  for keeping the tests' expected values easy to hand-derive — but it also meant no test in the
+  suite could ever exercise `_axis_sliced_line`'s `round()`-half-to-even tie-break, which collapsed
+  a legitimate symmetric 4-cell component to a single point. The Reviewer found it only by
+  constructing a new, deliberately symmetric case outside the existing fixture family. Lesson: when
+  a fixture docstring says it avoids a class of input "to keep this simple/unambiguous," that is a
+  flag to add one separate fixture that does the opposite, not a reason to trust the simple ones
+  cover the mechanism (`plans/terrain-feature-probing/review.md`, round 1, 2026-10-01).
+
+- **A plan's stated reason for scoping a dependency can be wrong even when the scoping decision
+  itself is still correct — measure before repeating the justification, not just the conclusion.**
+  The terrain-watershed plan scoped numpy/scipy to smoothing and extremum detection on the
+  reasoning that basin growth and geometry extraction were "not the bottleneck." Measured: the
+  numpy-scoped stages are under 5% of the terrain pipeline's runtime; the stdlib basin-growth/
+  geometry stages are over 95%. The stated reasoning was backwards from what the measurement
+  showed, but the conclusion (don't vectorize the inherently-serial priority-flood) still held for
+  an unrelated reason (it doesn't vectorize, and the absolute cost is cheap regardless). A
+  plausible-sounding justification that happens to produce the right answer is not evidence the
+  reasoning was sound — it is worth measuring even when nobody doubts the conclusion
+  (`plans/terrain-feature-probing/performance.md`, 2026-10-01).

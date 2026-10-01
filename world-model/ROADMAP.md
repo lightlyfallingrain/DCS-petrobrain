@@ -24,6 +24,20 @@ sortie actually exercises it, and say which one.
   show it happening). Also carries `--detection-trace` and the two optional live-terrain-probing
   reads (`land.getHeight`, `bridge_call_ms`) riding along on the same sortie.
 
+- [ ] **`feature/terrain-landform-features` — marker-controlled watershed replaces the M6
+  curvature ridge/valley detector (Stages 1-2 only, merged pending user build), unbuilt at
+  full-theatre scale.** DoD-passed on three 20 km test regions' real SRTM data
+  (`latakia-20km`/`baalbek-20km`/`palmyra-20km`, independently reproduced twice by Reviewer) and a
+  synthetic-grid performance measurement at real theatre shape — **never run against the real
+  `syria-full` theatre**, which only the user can build (gitignored raw data, project execution-
+  boundary rule). Card: `docs/acceptance/2026-10-01-terrain-landform-build.md` /
+  https://claude.ai/artifact/AKXxX4R4R5a3tcztsR2qJC — no flight needed, a desk/Windows-box build
+  and inspection. Settles two things a 20 km fixture cannot: whether the real theatre's ridge/
+  valley counts collapse from the old 11,749/11,477 the way the pooled region prediction (30%/22%
+  under 15 cells, sinuosity ~1.22/1.19) suggests, and whether the Bekaa-exclusion/Palmyra-ridges
+  behaviour that motivated this whole redesign holds at `--near Baalbek`/`--near Palmyra` against
+  the real store rather than a hand-picked test window.
+
 - [x] **M0 — Repo + research notebook.** Scaffold done. DCS version + Syria theatre presence recorded in `research/`.
 - [x] **M1 — One coordinate.** Prove DCS x/z ↔ lat/lon for Syria against a known real-world control point. Measure error. Done: `src/coordinates/` (pyproj-based, theatre-agnostic), three real-world ARP control points (Damascus, Latakia, Beirut), measured residual ~1.0-1.3km (DCS terrain-art placement error, not transform error). See `research/2026-09-03-m1-coordinate-transform-verification.md`.
 - [x] **M2 — Raster understanding.** Read Syria's `RasterCharts`: tile hierarchy, dimensions, scales, registration. Render a known DCS coordinate onto the raster. Done: `src/raster/` (Pillow-based DDS loader + empirical x/z-arithmetic registration, `confidence="provisional"`), `tools/inspect_raster.py` (`scan`/`mark` diagnostic CLI), control-point + held-out-point tests. Registration fitted against Sivas/Kahramanmaras/Hama/Erzincan; independently validated against held-out Gemerek (~129m x-axis, ~5.5km z-axis residual). Scope note: this raster is scanned real-world cartography (Turkish JOG-A-class chart), not DCS-rendered geometry — feeds only the F10 paper-map mode; provenance-taxonomy follow-up still open, see `plans/m2-raster-understanding/plan.md` "Decisions Requiring User Input". `level` tile-suffix semantics (`-2`/`-1`/`00`/`01`) remain unresolved, no sample beyond `"00"`. See `research/2026-09-03-m2-rastercharts-recon.md`.
