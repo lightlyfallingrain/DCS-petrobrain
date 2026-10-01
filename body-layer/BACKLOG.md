@@ -786,8 +786,17 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   well after BL-4.
 
 
-- [ ] **BL-B23 — `ContactStore` is never pruned, so clustering cost grows with every contact ever
-  seen.** Found by the Performance Reviewer during the group-cohesion pass (2026-10-01), and
+- [x] **BL-B23 — `ContactStore` is never pruned, so clustering cost grows with every contact ever
+  seen.** Fixed `fix/contact-store-pruning` (2026-10-02, `plans/contact-store-pruning/
+  implementation.md`): `ContactStore.tick`'s eighth block now filters its `reconcile` input to
+  `belief.decay.certainty_of(contact, now_sim) != "lost"` — the existing lifecycle ladder, no new
+  field — rather than passing the full historical `_contacts` set. `_contacts` itself is untouched
+  (a `lost` contact stays full memory, still answerable by `describe_contact`); only clustering's
+  input is filtered. Re-measured at the same scale sweep: `GroupStore.reconcile` alone still costs
+  0.15-403 ms across 22-1200 *total* contacts (confirms the old number), but `ContactStore.tick()`
+  end to end, given 20 live contacts plus up to 1200 total (the rest long-lost), now costs
+  0.15-1.4 ms flat — clustering cost tracks the live picture, not sortie length. Found by the
+  Performance Reviewer during the group-cohesion pass (2026-10-01), and
   **pre-existing** — `fix/group-undermerging` only added a few per-pair dict lookups on top of a
   growth path group-reporting Stage 2 already created. `ContactStore._contacts` has no delete path
   anywhere in the class, and `tick()` passes `list(self._contacts.values())` to

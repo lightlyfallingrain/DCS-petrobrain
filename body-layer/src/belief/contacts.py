@@ -1065,6 +1065,35 @@ class ContactStore:
         (Stage 3) needs each member's already-current attention/threat
         state to render from.
 
+        **`reconcile`'s input is filtered to not-`lost` contacts** (`BL-B23`,
+        `body-layer/BACKLOG.md`, found by the Performance Reviewer during
+        `plans/group-cohesion-redesign/performance.md`): `_cluster_contacts`
+        is O(n^2) in whatever it is handed, and `self._contacts` has no
+        delete path at all, so passing it the full historical set makes
+        clustering cost scale with **total objects ever folded over the
+        sortie**, not with how many are actually out there right now --
+        measured there at 70-180 ms/tick for the 500-800-contact band a
+        long mission plausibly accumulates. The fix is **not** to prune
+        `_contacts` (a `lost` contact is still memory Petrovich should
+        have -- `describe_contact`/`get_contact_history` must keep
+        answering for it); it is to keep a `lost` contact out of
+        *clustering* specifically, the one O(n^2) consumer, via the exact
+        same `belief.decay.certainty_of` ladder the first block above
+        already computes `current_certainty` from -- no new timestamp, no
+        new per-contact field. Re-admission is automatic, not a special
+        case: `certainty_of` is a pure function of `now_sim - contact.
+        last_seen_sim`, so a contact `ingest` reobserves this same poll
+        (which runs before `tick`, see `logger.Runner.run_once`) already
+        reads `elapsed_s == 0` here and is included again, with no memory
+        of ever having been excluded. Group *coherence* across a member's
+        exclusion needs no extra code either: `GroupStore.reconcile`
+        already recomputes every cluster from scratch each call and
+        reconciles by majority-member-overlap (its own docstring) -- a
+        `Group` missing a now-excluded member simply reconciles to a
+        smaller cluster (same id, if still >= `GROUP_REPORTING_MIN_
+        MEMBERS`) or is dropped (if not), exactly as it already handles any
+        other membership change.
+
         Driven purely by `now_sim`, never wall clock -- calling `tick`
         repeatedly with the same `now_sim` is idempotent after the first
         call (no repeated events), since both snapshots are already up to
@@ -1406,7 +1435,18 @@ class ContactStore:
         # every contact's attention (and this call's engagement) state is
         # already current, since a group's own rendering (Stage 3) needs
         # each member's up-to-date attention/threat to lead the line with.
-        self._groups.reconcile(list(self._contacts.values()), now_sim)
+        #
+        # `BL-B23`: filtered to not-`lost` contacts -- see this method's
+        # own docstring above for why this is the right exclusion
+        # (clustering input only) rather than pruning `_contacts` itself.
+        self._groups.reconcile(
+            [
+                contact
+                for contact in self._contacts.values()
+                if certainty_of(contact, now_sim) != "lost"
+            ],
+            now_sim,
+        )
 
     @staticmethod
     def _cooldown_elapsed(contact: Contact, kind: EventKind, now_sim: float) -> bool:
