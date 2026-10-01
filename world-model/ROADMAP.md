@@ -485,18 +485,30 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
   Two corrections to the storage half of the argument, neither fatal to it:
 
-  - **The elevation grid cannot be removed outright.** `query.line_of_sight.line_of_sight_clear`
-    samples it directly, point by point along the sightline — deleting it breaks LOS, which is a
-    shipped consumer. What the proposal removes is the need to ingest a *finer* grid, which is real:
-    nobody has to store a 250 m or 100 m mesh to get fine features.
-  - **The storage saving is smaller than it looks.** Measured on the real `syria-full.sqlite`
-    (608 MB): `grid_sample` is **49 MB**, while `feature` is **576 MB**. The elevation grid is ~8 %
-    of the store; OSM features are the bulk. So this is worth doing for **quality**, not for disk.
+  - **Correction, 2026-10-01 (user): LOS is not a reason to keep the elevation grid.** This entry
+    first claimed `query.line_of_sight.line_of_sight_clear` pins the grid in place. That is
+    superseded by `plans/dcs-driven-los/plan.md` — DCS answers line of sight directly (terrain +
+    buildings, collector-side, true position to true position), and the world model's own LOS
+    primitive is *"way too imprecise exactly because of the sparse grid"* (user's words). So the
+    grid's remaining consumers are elevation lookups in `describe_position` and the landform
+    detection itself — and if detection moves to native SRTM, the case for storing any elevation
+    mesh gets thinner rather than stronger. Re-check what still reads `sample_grid` before
+    assuming it must stay.
+  - **The storage saving is still smaller than it looks.** Measured on the real
+    `syria-full.sqlite` (608 MB): `grid_sample` is **49 MB**, while `feature` is **576 MB**. The
+    elevation grid is ~8 % of the store; OSM features are the bulk. Dropping it is defensible on
+    its own terms once nothing reads it — but the reason to do this work is **quality**, not disk.
 
   What this does not answer, and must not be assumed away: the user's judgement was that the
   *output* is wrong, and a human eye reading a hillshade is doing the detection that the code has
   to do by itself. Native resolution supplies the signal; it does not supply the algorithm. The
   sparse-valleys-in-steep-terrain finding above is still unexplained and is the most likely root.
+
+  **And the algorithm is explicitly in scope when this reopens** (user, 2026-10-01): *"Ridge/valley
+  detection algorithm can and should be refined if it does not produce correct results. Or
+  swapped/rewritten completely."* The marker-controlled watershed is not protected by having been
+  built — a future attempt should weigh replacing it against refining it on the evidence, not
+  inherit it.
 
   Memory is the practical constraint and has a known shape: the spike measured ~38 GB extrapolated
   at 100 m theatre-wide, from nested Python lists and a per-cell dict in `grow_basins`. **Tile-wise
