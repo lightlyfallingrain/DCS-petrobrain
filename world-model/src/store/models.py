@@ -71,22 +71,16 @@ class StoredFeature:
     Any future non-OSM producer of holed polygons must reuse `inner_rings`
     with this exact shape, not invent a second convention.
 
-    **Reserved on `ridge`/`valley` rows** (terrain-feature-probing,
-    `terrain.features`'s marker-controlled-watershed mechanism, Stage 1/3):
+    **Reserved on `ridge`/`valley` rows** (`terrain.features`'s geomorphons
+    mechanism, `landform-geomorphons` plan -- superseded the retired
+    marker-controlled-watershed mechanism, which reserved this same key
+    off a now-deleted basin-adjacency structure):
     - `adjacent_feature_ids`: `list[int]` -- the neighbouring valley/ridge
-      feature ids across a shared qualifying divide ("next valley" = across
-      exactly one divide). Computed for free as a side effect of basin
-      growth (`terrain.features.grow_basins`'s basin-adjacency structure,
-      carried forward as `TerrainComponent.basin_ids`), not a separate
-      geometric nearest-neighbour pass. **Not yet populated** -- this is
-      Stage 3's, not Stage 1/2's; documented here now because the seam
-      (basin id -> stored feature id, once ids are assigned at insert
-      time) is otherwise easy to design away later.
-    - `basin_width_m`: `float`, valley rows only -- the width gate's own
-      measured minor-principal-axis extent of the basin's low-elevation
-      core (`terrain.features.qualifying_valleys`), kept for
-      inspectability/debugging of that gate, not currently read by any
-      consumer.
+      feature ids a pilot would reach next (e.g. "next valley over"). **Not
+      yet populated** -- this is a later stage's (`plans/landform-
+      geomorphons/plan.md`'s "Stage 3-5" scope note), not this mechanism's;
+      documented here now so the key stays reserved rather than redefined
+      by whichever later producer first needs it.
     """
 
     kind: str

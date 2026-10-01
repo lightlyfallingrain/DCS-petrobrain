@@ -707,6 +707,64 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
     elevation over featureless ground, a very coarse mesh is cheap and accurate precisely there.
     Do not let it hold up dropping the grid.
 
+  **Implementation status — detection + caching + pipeline wiring built, `[~]` in progress
+  (`feature/landform-geomorphons`, `plans/landform-geomorphons/plan.md`/`implementation.md`).**
+  Everything this plan scoped (Stages A-F) is in place: vectorised geomorphons classification
+  (`terrain/geomorphons.py`), vectorised Zhang-Suen thinning + the ported junction-walking tracer
+  (`terrain/skeleton.py`), vectorised DCS-lattice resampling (`terrain/resample.py`), per-SRTM-tile
+  margin/clip tiling with the resumable cache built in from the first pass (`terrain_cache/`,
+  `build/ingest_terrain.py`), and `build/pipeline.py`'s terrain stage rewired off `srtm_tile_paths`
+  directly rather than the stored grid. The watershed-era `terrain/curvature.py` and its
+  basin/divide machinery in `terrain/features.py` are deleted; the elevation grid itself is
+  untouched, per this plan's own scope note.
+
+  **Reproduction against the accepted coastal-hills render is close but not exact, and is reported
+  rather than tuned to match** (per the task's own instruction): 299 ridge / 289 valley lines,
+  longest ridge 7.18 km / longest valley 7.70 km, against the accepted 312 / 273 and 8.3 km / 6.5 km.
+  One real discrepancy was found and fixed during reproduction — the plan cited `min_cells=3` from
+  the *naive* spike's own default; the actual reference implementation
+  (`tools/spike_junction_walk.py`) defaults to `4`, and using `4` closed most of the gap (`3` gives
+  448/418). The residual ~4-6% gap is unexplained (thinning was checked bit-for-bit against the
+  reference pixel loop and matches exactly), most likely environment/data drift between this
+  session's `data/raw/dem/syria-full` and whatever the original interactive spike session held, not
+  a mechanism defect — the render (`data/renders/coastal-hills-geomorphons.png`) still shows the
+  qualitative result the user accepted: continuous multi-kilometre crests through junctions, not
+  fragmented stubs. See `plans/landform-geomorphons/implementation.md` for the full numbers.
+
+  **One real plan-vs-reference-implementation discrepancy, now documented in `terrain/skeleton.py`
+  itself**: the plan's design decision 5 described the junction-walk as "pair up incident branches
+  by direction, greedy by smallest angular deviation" — an idealised description written before the
+  actual reference code was located. What the ported code actually does is order-dependent: every
+  degree-!=-2 node (endpoint *and* junction alike) walks into its own unused neighbours, and a
+  junction's edges go to whichever walk reaches them first. On a real, dense skeleton a long
+  approach chain usually wins that race (hence the multi-kilometre crests); on an **isolated**
+  synthetic junction with no approach chain, it does not, and the junction splits into N stubs
+  instead. Verified with synthetic fixtures (straight line, spur, 4-arm X) in `tests/test_skeleton.py`.
+
+  **One discovered gap outside this plan's own scope, also handled rather than left broken**: M8's
+  `build.pipeline.add_probe_chunk` called the now-deleted `ingest_terrain_chunk` for chunk-scoped
+  ridge/valley extraction. Geomorphons' processing unit is a whole SRTM tile with a multi-kilometre
+  margin, not a 5 km probe chunk, and this plan did not design a chunk-scoped equivalent. Chunk-scoped
+  terrain extraction is removed from `add_probe_chunk` (grid/surface-type chunk ingestion is
+  unaffected); `ProbeChunkReport.terrain_stats`/`terrain_skipped` are kept for shape compatibility
+  but always come back `None`/`True` now. The old mechanism's own docstring already called the
+  chunk-scoped case a degenerate, non-crashing one, so this is a narrowing of real behaviour, not a
+  regression.
+
+  **Not yet checked by this implementation pass**: Stage D's own two-adjacent-tile seam test (no
+  tile boundary was exercised against real SRTM data beyond the single-tile reproduction above) and
+  Stage E's kill-mid-build resume test against a real interrupted process (the cache's resumability
+  was verified via direct unit tests in `tests/test_ingest_terrain.py`/`test_terrain_cache.py`, not
+  a literal process-kill). **Stage G (the full-theatre build) is the user's own run, per the
+  project's standing execution boundary** — not run here. Run command (mirrors the existing
+  `RUN.md`/`tools/build_world_model.py` pattern, `--srtm-dir` already wired to the new stage):
+
+  ```sh
+  world-model/.venv/bin/python world-model/tools/build_world_model.py syria-full \
+      --towns <path/to/towns.lua> --beacons <path/to/beacons.lua> \
+      --routes <path/to/Syria.routes> --srtm-dir <path/to/hgt_tiles/>
+  ```
+
 - **Multi-theatre support (Afghanistan, Caucasus, Kola, others) — needed soonish, not yet scoped.**
   Raised 2026-09-13. Architecture already generalizes (`THEATRE_PROJECTIONS`/`REGIONS` are
   per-theatre registries, not per-theatre code forks) — this is "add entries + verify," not a
