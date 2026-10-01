@@ -118,3 +118,4 @@ was. Rebuilt 2026-09-21 from the files themselves.
 - [Rendered English assertions too weak](feedback_rendered_english_assertions_too_weak.md) — negative-shape test assertions ("not startswith X") miss grammar/nonsense defects; run the string and read it.
 - [Group cohesion redesign review needs revision](project_group_cohesion_redesign_review_needs_revision.md) — NEEDS REVISION; article bug + mixed-differentiated "A ground and a truck." both confirmed by running code, not reading.
 - [Group undermerging fix round2 approved](project_group_undermerging_fix_round2_approved.md) — article removal correct (mechanism, not exception-growth); "a couple of" kept article is a real distinct idiom, not a missed case.
+- [Landform geomorphons review](project_landform_geomorphons_review.md) — APPROVED W/ MINOR FIXES; cross-process PYTHONHASHSEED determinism check, stale-named-doc-pointer gap, misleadingly-named test for an unexercised (but correct) resumability mechanism.
