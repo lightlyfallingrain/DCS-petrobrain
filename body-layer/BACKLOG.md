@@ -821,3 +821,26 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   which `ContactStore` accumulates**. Whoever measures this backlog item should not assume the
   bubble changed the baseline; it will only start doing so once `NAKED_EYE_RANGE_CAP_M` and
   `PLAYER_BUBBLE_RADIUS_M` diverge (9K113 sight).
+
+- [ ] **BL-B24 — Two close contacts can become ambiguous reacquisition candidates for each other
+  after a long gap.** Found 2026-10-02 while fixing `BL-B23`, **pre-existing and not introduced by
+  it**; the Reviewer recommended filing it for discoverability rather than leaving it only in a
+  plan's "Notable Discoveries" and two test docstrings.
+
+  `association_over_time`'s gate inflates with elapsed time since a contact was last seen — correct
+  in itself, since a unit unobserved for two minutes could genuinely have moved. But two contacts
+  roughly 17 m apart, both reacquired in the same poll after a 120 s+ gap, each fall inside the
+  other's inflated gate. The plain spatial gate then has two candidates for one observation, and
+  `ingest`'s anti-guessing rule treats "2+ candidates" as ambiguous — the same shape as
+  `plans/contact-duplication-ambiguity-runaway/`, with elapsed-time inflation as the trigger rather
+  than range-scaled sigma.
+
+  Real traffic routes around it: naked-eye and hybrid observations both carry
+  `continues_observation_id`, which resolves the pairing without consulting the spatial gate, and
+  `BL-B23`'s own tests use that path for the same reason. So this is reachable mainly where an
+  observation arrives *without* a continuation id. Worth establishing when that actually happens
+  before sizing a fix — if it never does in production, the honest outcome is a test and a comment,
+  not a change to the gate.
+
+  Note the existing lost-and-reacquired test only ever exercised a single contact, which is why
+  this had no coverage until a two-contact fixture was written.
