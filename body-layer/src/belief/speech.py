@@ -1039,33 +1039,30 @@ def _classification_key(facts: dict[str, object]) -> tuple[object, object]:
     return (classification.get("value"), classification.get("level"))
 
 
-#: Vowel-initial entries in the sayable class vocabulary (`_OP_CLASS_
-#: DISPLAY`'s values, after `_respell_for_tts`) that need `"an"` rather than
-#: `"a"`. Checked against the whole vocabulary a count==1 composition phrase
-#: can hold: `_OP_CLASS_DISPLAY`'s nine class words (`"armor"`, `"truck"`,
-#: `"infantry"`, `"short range SAM"`, `"medium range SAM"`, `"long range
-#: SAM"`, `"AAA"` -> respelled `"triple A"`, `"ship"`, `"group"`), plus
-#: `_unit_type_display`'s `type`-level pass-through of a raw DCS reporting
-#: name or designation string (`"T-72"`, `"ZSU-23-4 Shilka"`, `"Mi-8"` ->
-#: respelled `"M I 8"`, ...). Only `"armor"` and `"infantry"` are
-#: vowel-initial; everything else here, including the respelled forms,
-#: starts with a consonant sound.
+#: `plans/group-undermerging/review.md`'s Finding 1 fix (2026-10-01,
+#: superseding a same-day fix that corrected `"a armor"` to `"an armor"`
+#: instead of removing the article). `"Armor"` is a mass noun -- it takes
+#: no indefinite article in any form, so `"an armor"` is not English
+#: either, and patching the vowel mismatch while keeping the article was
+#: fixing the wrong half of the bug.
 #:
-#: An explicit set rather than a first-letter-is-a-vowel rule, deliberately:
-#: a blanket rule is a claim about English phonetics in general, and this
-#: vocabulary already has at least one word (`"unit"`, `_identification_
-#: lead`'s fallback) where the vowel *letter* does not match the consonant
-#: *sound* ("a unit", not "an unit"). An enumerable set over a known, small,
-#: tested vocabulary is honest about what it actually checks; a phonetic
-#: rule would silently mis-handle the next word like `"unit"` that gets
-#: added to this table.
-_VOWEL_INITIAL_CLASS_WORDS: Final = frozenset({"armor", "infantry"})
-
-
-def _with_indefinite_article(word: str) -> str:
-    """`"a {word}"` / `"an {word}"`, for a count==1 composition phrase --
-    see `_VOWEL_INITIAL_CLASS_WORDS` for which words take `"an"` and why."""
-    return f"an {word}" if word.lower() in _VOWEL_INITIAL_CLASS_WORDS else f"a {word}"
+#: The real fix is to drop the article for every class/type word a
+#: count==1 composition phrase can hold, mass noun or not, and this
+#: matches this module's own existing convention rather than inventing a
+#: new one: every other singular rendering in this file -- `_contact_
+#: report_text`'s own single-contact line, `_identification_lead`'s
+#: `"armor 11 o'clock..."` -- already speaks a bare class/type noun with
+#: no leading article. So does every one of the user's own worked
+#: examples (`plans/group-cohesion-redesign/explore-notes-delta-
+#: taxonomy.md`): `"AAA in the group"`, `"Shilka and zsu"`, `"SRSAM,
+#: Shilka, armor 2 o'clock 2.5 km"` -- count nouns (`"Shilka"`, `"zsu"`)
+#: appear exactly as bare as mass nouns (`"AAA"`, `"armor"`) in a
+#: composition list; the one article in that file, `"there's a zsu"`, sits
+#: in a different sentence frame (an existential singular announcement),
+#: not a composition clause, so it is not evidence for treating count
+#: nouns differently here. There is accordingly no count-noun/mass-noun
+#: split to maintain in this function at all -- removing `_with_
+#: indefinite_article` rather than growing it.
 
 
 #: `_classification_level`'s undifferentiated levels, named here too so
@@ -1149,7 +1146,7 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
         value, level = key
         count = counts[key]
         if count == 1:
-            phrases.append(_with_indefinite_article(_unit_type_display(value, level)))
+            phrases.append(_unit_type_display(value, level))
         elif count in _SPOKEN_NUMBERS:
             phrases.append(
                 f"{_SPOKEN_NUMBERS[count]} {_plural_unit_type_display(value, level)}"
@@ -1560,8 +1557,9 @@ def render_group_disclosure(
       (`"Three T-72s"`), unchanged by this stage.
     - **Differentiated but mixed** (a real classification exists, but not
       every member shares it): `_group_composition_clause` as before --
-      `"A tank and a truck"` already names each member exactly once, with
-      no quantity word to pick between at all.
+      `"Armor and truck"` already names each member exactly once, with
+      no quantity word to pick between at all and no indefinite article
+      on either (`plans/group-undermerging/review.md` Finding 1).
 
     A sentence never reaches for both "pair" and "a couple of" together,
     because the classification specificity that selects one rules out the
