@@ -146,3 +146,92 @@ mypy errors against every existing caller, unrelated to this change.
   explicitly invited correcting against the real vocabulary. `perception.object_model`'s actual
   `op_class` string for gun-based AAA (ZU-23) is `"OP_ZU23"` — `"OP_ZU"` does not exist in that
   module's vocabulary. Used `OP_ZU23`.
+
+---
+
+### Fix round: `plans/group-cohesion-redesign/review.md`'s two Required Fixes (2026-10-01)
+
+Branch `fix/group-undermerging`, review base tip `3d7d51c`, this fix round's tip is the sha reported
+in the handoff below. Both findings were in what Petrovich actually says, not in the taxonomy logic.
+
+**Finding 1 — hard-coded `"a"`.** `_group_composition_clause`'s count==1 branch unconditionally
+built `f"a {_unit_type_display(...)}"`, which is wrong for `_OP_CLASS_DISPLAY`'s two vowel-initial
+entries (`"armor"`, `"infantry"`): `"a armor"`, `"a infantry"`. Added `_with_indefinite_article` plus
+an explicit two-word exception set, `_VOWEL_INITIAL_CLASS_WORDS = {"armor", "infantry"}`, rather than
+a first-letter-is-a-vowel rule — chosen deliberately (documented in the set's own comment) because a
+phonetic rule is a claim about English in general, and this vocabulary already has at least one word
+(`"unit"`, `_identification_lead`'s own fallback, not reachable from this branch today but real
+vocabulary elsewhere in the same file) where the vowel letter does not match a consonant sound; an
+enumerable set over a known, tested, small vocabulary is honest about what it actually checks.
+Checked the whole count==1-reachable vocabulary by hand (all nine `_OP_CLASS_DISPLAY` values plus
+the `type`-level raw-string/respelled pass-through) — only those two words are vowel-initial;
+`"AAA"` respells to `"triple A"` (consonant) before this branch ever sees it, so no further case
+needed fixing.
+
+**Finding 2 — undifferentiated members rendered as their own noun phrase.** `_render_full_group_
+composition`'s `elif differentiated:` branch called `_group_composition_clause` over *every* member
+fact, including still-`presence`/`unknown` ones. `_unit_type_display(None, "presence")` returns
+`"ground"` (an internal fallback word, never meant to be spoken as a noun), which the per-key
+groupby then counted and rendered exactly like a real class — `"a ground and a truck"` for a
+2-member group with one differentiated and one undifferentiated member. Fixed inside `_group_
+composition_clause` itself (not just at this one call site, so `_render_full_group_composition`'s
+leading-member `rest` composition — line ~1277, which could carry the identical mix — is covered
+too): undifferentiated members (`presence`/`unknown` level, the same levels `_is_differentiated`
+already tests) are now counted separately and folded into one trailing phrase via a new `_undiff
+erentiated_phrase` helper, matched against the user's own worked examples
+(`plans/group-cohesion-redesign/explore-notes-delta-taxonomy.md`): one such member reads as
+`"something"`, more than one as a spoken-number count of `"contacts"` (`"two contacts"`, etc.),
+mirroring `_plural_unit_type_display`'s existing presence-level fallback for the plural case. Where
+the member is the *only* one in the composition this would violate `_group_composition_clause`'s
+pre-existing "do not call with only undifferentiated members" precondition — left as a defensive
+`assert`, since every real caller (`_render_full_group_composition`'s `elif differentiated:` branch,
+and the membership-delta branch's `delta_members`, which already filters presence/unknown out before
+calling) guarantees at least one differentiated member reaches this function.
+
+Both fixes together: `"a truck and something"` for the 2-member mixed-differentiation case the
+review reproduced (was `"a ground and a truck"`), `"an armor, in the group."` / `"an armor and a
+truck."` for the two now-corrected test assertions (were `"A armor..."`).
+
+**Finding 3 (optional, done).** `tests/test_crew_console.py::test_report_speaks_a_persisted_group_
+through_render_group_disclosure` named and called `render_group_disclosure` directly while
+production routes "report" through `render_group_full_disclosure`, passing only because its group
+had never been spoken (where the two functions coincide). Renamed to `..._through_render_group_
+full_disclosure`, switched its own assertion to call the real renderer, and added a second test,
+`test_report_speaks_an_already_spoken_group_in_full`, which marks the group spoken first (so `render_
+group_disclosure` demonstrably goes silent on an unchanged group, proving the taxonomy gate is
+actually armed) and confirms `"report"` still names the full roster regardless — the regression case
+the original test gave no coverage for.
+
+**The test-quality lesson, applied.** `test_render_group_disclosure_first_differentiation_is_full_
+once` was the test that should have caught Finding 2 and did not, because its only assertions were
+negative-shape conditions (`"in" not in speech.text or "o'clock group" not in speech.text`, `not
+speech.text.startswith("Now leading")`) that ruled out *other* branches' shapes without ever
+checking this branch's own content. Rewrote it to assert the actual string
+(`"A truck and something."`). Grepped the rest of `test_speech.py` for the same shape
+(`not in speech.text` / `speech.text.startswith(...)` as a sole or primary assertion): the other
+hits (`"CONTACT_1" not in speech.text"`/`"CONTACT_2" not in speech.text"` at line ~212, checking the
+no-omniscience invariant that ids are never spoken; `startswith("BMP-2, ")`/`startswith("armor
+")`/`startswith("unit ")`/`startswith("Group, ")` elsewhere) are each a real positive assertion on
+content that matters for that test, not a workaround standing in for an uninspected branch — none of
+them share the defect this one did, so none needed changing.
+
+#### Checks (body-layer/, this fix round)
+
+- `ruff format --check src tests`: pass (113 files already formatted)
+- `ruff check src tests`: pass
+- `mypy src` (strict): pass, `Success: no issues found in 53 source files`
+- `pytest tests -q`: pass, `1367 passed, 4 xfailed` (one test added net: the stale integration test
+  was renamed in place and one new test added alongside it; baseline going in was `1366 passed,
+  4 xfailed`)
+
+#### Notable discoveries, this fix round
+
+- The membership-delta branch (`render_group_disclosure`'s `elif delta_members:`) was already safe
+  from Finding 2 by construction — it filters `presence`/`unknown`-level facts out of `delta_members`
+  *before* calling `_group_composition_clause` (line ~1530), so it never needed the undifferentiated-
+  aggregation fix itself. Fixing the shared function rather than only the one broken call site still
+  mattered: `_render_full_group_composition`'s leading-member `rest` path (the `"Danger, {type}. Also
+  {composition}"` branch) builds its own `rest` from *all* non-leading members with no such filter,
+  so it carried the identical latent defect with no test yet exercising the mixed case — now covered
+  by construction rather than by a new test aimed at that specific branch, since the fix lives one
+  level below both call sites.
