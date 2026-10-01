@@ -26,10 +26,23 @@ from here on stays stdlib, per the plan's point 3:
    ("kilometres wide flat bottom... meaningless in the Mi-24 flight profile
    scale").
 4. **Geometry extraction reuses `_connected_components`/`_principal_axis`
-   unchanged** (point 6), now operating over `GridCell` (a bare
-   `(row, col)` pair) rather than `curvature.CellCurvature` -- there is no
-   per-cell curvature value or classification left to carry, since basin
-   membership, not a per-cell test, is what group cells now.
+   for grouping and axis direction, but not for the line itself.** The
+   original plan's point 6 called for reusing the old per-cell
+   projection-sort unchanged; a second implementation round withdrew that
+   instruction after `research/2026-10-01-terrain-feature-probing-watershed-
+   sweep.md` identified it as the actual source of the valley-sinuosity
+   defect (83% under 15 cells, median sinuosity 3.57 against a 2.21
+   baseline) -- sorting a 2D blob's cells by projection onto its own major
+   axis zigzags across the minor axis whenever the blob is wider than one
+   cell, and the zigzag gets worse, not better, as cell count grows.
+   `_build_component` now slices a component's cells into bins one cell
+   wide along the major axis and emits one point per occupied bin -- the
+   bin's own elevation-extreme cell (highest for a ridge crest, lowest for
+   a valley floor) -- which is monotone in the axis coordinate by
+   construction and cannot zigzag. `GridCell` (a bare `(row, col)` pair)
+   replaces `curvature.CellCurvature` as the generic carrier, since there
+   is no per-cell curvature value or classification left to carry, basin
+   membership rather than a per-cell test being what groups cells now.
 
 `to_stored_features` is unchanged in shape: same `StoredFeature` geometry
 convention, `provenance = {"geometry": "dcs_derived"}`, `confidence =
@@ -74,12 +87,28 @@ DEFAULT_WIDTH_CEILING_M = 2500.0
 # Fraction of a basin's own relief (floor to rim) its "core" -- the
 # low-elevation body a pilot would actually call the valley, as opposed to
 # the basin's full extent which reaches all the way up to the surrounding
-# divide crest -- is allowed to span. Lowered from an initial 0.5 guess to
-# 0.1 after the sweep showed 0.5 pulls in cells more than halfway up a
-# basin's own flanks (still a legitimate slope, not a valley floor by the
-# user's own "between hills" framing) and measurably worsens both
-# fragmentation and sinuosity versus a tighter core. See the sweep note.
-DEFAULT_VALLEY_CORE_FRACTION = 0.1
+# divide crest -- is allowed to span.
+#
+# First settled at 0.1 (2026-10-01) while `_build_component` still
+# sorted a basin's own core cells by projection onto their major axis --
+# under that geometry step, a wider core (larger fraction) spread further
+# across the minor axis and made sinuosity measurably worse, so 0.1 traded
+# away fragmentation to protect sinuosity. The second implementation round
+# replaced that projection-sort with the axis-sliced-line extraction
+# documented on `_axis_sliced_line` (one point per along-axis slice,
+# monotone by construction), which does not zigzag regardless of how wide
+# the input is. That removed the trade: re-swept at 0.1-0.5 against the
+# same three regions, sinuosity stays ~1.1-1.4 at every value (the
+# mechanism's own fix, not this knob's), while fragmentation keeps
+# improving up to 0.3 (83% -> 22% of valleys under 15 cells) and degrades
+# past it (0.4: 25%, 0.5: 33%) as the core starts pulling in cells from a
+# basin's flank rather than its floor. Re-verified the Bekaa still fails
+# the width gate by 3.6-6x at every core_fraction tested (9.0-15.2 km
+# against the 2.5 km ceiling, wider than the single value measured during
+# the first sweep) -- raising this knob widens a basin's core, so the
+# exclusion margin was re-checked, not assumed to carry over. See the
+# sweep note's "Second implementation round" section.
+DEFAULT_VALLEY_CORE_FRACTION = 0.3
 
 
 @dataclass(frozen=True)
@@ -339,6 +368,58 @@ def _basin_boundaries(
     return boundaries
 
 
+def _axis_sliced_line(
+    grid: ElevationGrid, cells: list[GridCell], kind: str
+) -> list[tuple[float, float]]:
+    """One point per 1-cell-wide slice of `cells` along their own principal
+    axis, replacing the old per-cell projection-sort (see the module
+    docstring's point 4). A cell's projection onto the unit-norm axis has
+    cell-index units, so binning at a width of 1 groups exactly the cells
+    that sit at the same position along the axis, collapsing whatever
+    spread they have across the minor axis into a single representative
+    per bin -- the structural fix for zigzag, independent of any
+    downstream tuning.
+
+    The representative is the bin's own elevation-extreme sampled cell --
+    highest for a `ridge` (the actual crest), lowest for a `valley` (the
+    actual floor) -- never a centroid or any other fabricated position:
+    every emitted point is a real sampled grid cell, per this module's
+    "honest polyline through actual sampled grid points" standard
+    (`plans/m6-terrain-semantics/plan.md`), now restated for a mechanism
+    that samples one real cell per axis-slice rather than one per input
+    cell. Bins are visited in ascending axis order, so the result is
+    monotone in the axis coordinate by construction and cannot zigzag.
+    """
+    axis_row, axis_col = _principal_axis(cells)
+    mean_row = sum(c.row for c in cells) / len(cells)
+    mean_col = sum(c.col for c in cells) / len(cells)
+
+    pick_highest = kind != "valley"
+    bins: dict[int, GridCell] = {}
+    bin_elevations: dict[int, float] = {}
+    for cell in cells:
+        elevation = grid.samples[cell.row][cell.col]
+        if elevation is None:
+            continue
+        bin_index = round(
+            (cell.row - mean_row) * axis_row + (cell.col - mean_col) * axis_col
+        )
+        current = bin_elevations.get(bin_index)
+        if current is None or (
+            elevation > current if pick_highest else elevation < current
+        ):
+            bins[bin_index] = cell
+            bin_elevations[bin_index] = elevation
+
+    return [
+        (
+            grid.origin_x + bins[bin_index].row * grid.spacing_m,
+            grid.origin_z + bins[bin_index].col * grid.spacing_m,
+        )
+        for bin_index in sorted(bins)
+    ]
+
+
 def _build_component(
     grid: ElevationGrid,
     cells: list[GridCell],
@@ -346,29 +427,19 @@ def _build_component(
     basin_ids: tuple[int, ...],
     width_m: float | None = None,
 ) -> TerrainComponent:
-    axis_row, axis_col = _principal_axis(cells)
-    mean_row = sum(c.row for c in cells) / len(cells)
-    mean_col = sum(c.col for c in cells) / len(cells)
-    ordered = sorted(
-        cells,
-        key=lambda c: (c.row - mean_row) * axis_row + (c.col - mean_col) * axis_col,
-    )
-
-    points = [
-        (grid.origin_x + c.row * grid.spacing_m, grid.origin_z + c.col * grid.spacing_m)
-        for c in ordered
-    ]
     sampled_elevations = [
         elevation
-        for c in ordered
+        for c in cells
         if (elevation := grid.samples[c.row][c.col]) is not None
     ]
     if not sampled_elevations:
         raise ValueError(
-            f"{kind} component at cells {[(c.row, c.col) for c in ordered]} has no "
+            f"{kind} component at cells {[(c.row, c.col) for c in cells]} has no "
             "sampled elevation -- inconsistent with basin/boundary cell sets "
             "always being built from already-sampled grid cells"
         )
+
+    points = _axis_sliced_line(grid, cells, kind)
 
     if len(points) >= 2 and points[0] != points[-1]:
         dx = points[-1][0] - points[0][0]
@@ -379,7 +450,7 @@ def _build_component(
 
     return TerrainComponent(
         kind=kind,
-        cells=ordered,
+        cells=cells,
         points=points,
         elevation_range_m=(min(sampled_elevations), max(sampled_elevations)),
         orientation_deg=orientation_deg,

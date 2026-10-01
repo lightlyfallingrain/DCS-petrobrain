@@ -96,29 +96,116 @@ _VALLEY_CHUNK_POINTS = [
 ]
 
 
+# Second implementation round (terrain-feature-probing, watershed
+# mechanism): `_VALLEY_CHUNK_POINTS`'s 3x3 fixture produces zero basins
+# worth naming once gated by the production watershed defaults
+# (`DEFAULT_SMOOTHING_WINDOW_CELLS = 3`) -- a landform-scale smoothing
+# window that is already most of a 3x3 grid flattens it into one basin
+# with no qualifying divide, confirmed (not assumed) by hand-running
+# `add_probe_chunk` over this fixture before writing a replacement. A
+# chunk window large enough to host a genuine divide needs considerably
+# more real relief than the 9-point fixture above provides, so this test
+# gets its own, larger one rather than reusing `_VALLEY_CHUNK_POINTS`.
+#
+# A strictly monotonic double-V profile (descend to a floor, climb to a
+# ridge, descend to a second floor, climb again) -- the same shape
+# `test_terrain_features.py`'s fixture uses, chosen for the same reason:
+# no secondary dip for `curvature.find_basin_seeds`'s automatic regional-
+# minimum search to latch onto, which a non-monotonic profile risks
+# (tried and discarded: a profile with a secondary wiggle fragmented into
+# 4+ basins instead of 2). `_RIDGE_CHUNK_COLS` is replicated across every
+# row, same as that fixture, for a uniform-along-z structure that keeps
+# every basin's low-elevation core a clean rectangular block.
+#
+# `_RIDGE_CHUNK_SIZE_M` (2000, not 1800) is deliberately wider than the
+# 19-point profile's own 0-1800 m span: `store.chunks.chunk_bounds` is
+# half-open (`[ix*size, (ix+1)*size)`), so a profile spanning exactly
+# 0-1800 at a 1800 m chunk size would place its own rightmost point
+# (x=1800) in the *next* chunk, tripping `ingest_probe.ingest_probe_chunk`'s
+# "outside chunk" guard -- confirmed by hitting that guard before widening
+# the chunk.
+_RIDGE_CHUNK_COLS = [
+    400.0,
+    350.0,
+    300.0,
+    250.0,
+    200.0,
+    150.0,
+    100.0,
+    50.0,
+    0.0,
+    50.0,
+    100.0,
+    150.0,
+    300.0,
+    150.0,
+    100.0,
+    50.0,
+    0.0,
+    50.0,
+    100.0,
+]
+_RIDGE_CHUNK_SIZE_M = 2000.0
+_RIDGE_PROBE_SPACING_M = 100.0
+_RIDGE_CHUNK_CENTER = (900.0, 900.0)
+
+# Border-interaction artefact, confirmed by hand before picking this
+# value: `probe_store.reader.load_chunk_elevation_window`'s 1-cell border
+# is unprobed (`None`) on every side of this fixture's single chunk, and
+# `curvature.smooth_grid`'s gap-aware averaging produces a handful of
+# small spurious regional minima right at that real/`None` interface
+# (<=25 cells each) alongside the two genuine basins (90+ cells each).
+# This is the mechanism-level version of the gap `probe_store/reader.py`'s
+# own docstring already documents ("no equivalent chunk-isolation
+# guarantee") -- real, not a bug in this fixture, and not this plan's to
+# fix (M8/`add_probe_chunk` is out of scope, same as the first
+# implementation round's own "Discovered gap" found). A `min_cell_count`
+# comfortably above the artefact sizes (used here, well under the real
+# basins' own core sizes) filters them without touching the genuine
+# divide -- verified by hand-running the full `add_probe_chunk` pipeline
+# at several values (6/15/20/26) before picking 20: the result is stable
+# across all of 15-26, so 20 is not a narrow, accidental pass.
+_RIDGE_MIN_CELL_COUNT = 20
+
+
+def _write_ridge_chunk_fixture(path: Path) -> None:
+    points = [
+        (float(col) * _RIDGE_PROBE_SPACING_M, float(row) * _RIDGE_PROBE_SPACING_M, elev)
+        for row in range(len(_RIDGE_CHUNK_COLS))
+        for col, elev in enumerate(_RIDGE_CHUNK_COLS)
+    ]
+    _write_probe_fixture(path, points)
+
+
 def test_add_probe_chunk_ingests_grids_and_terrain_features(tmp_path: Path) -> None:
     base_path = _build_base(tmp_path)
     probe_output = tmp_path / "chunk.jsonl"
-    _write_probe_fixture(probe_output, _VALLEY_CHUNK_POINTS)
+    _write_ridge_chunk_fixture(probe_output)
 
-    chunk_ix, chunk_iz = chunk_index_for(1100.0, 1100.0, chunk_size_m=_CHUNK_SIZE_M)
+    chunk_ix, chunk_iz = chunk_index_for(
+        *_RIDGE_CHUNK_CENTER, chunk_size_m=_RIDGE_CHUNK_SIZE_M
+    )
     report = add_probe_chunk(
         base_path,
         probe_output,
         chunk_ix,
         chunk_iz,
-        chunk_size_m=_CHUNK_SIZE_M,
-        probe_spacing_m=_PROBE_SPACING_M,
-        min_cell_count=1,
+        chunk_size_m=_RIDGE_CHUNK_SIZE_M,
+        probe_spacing_m=_RIDGE_PROBE_SPACING_M,
+        min_cell_count=_RIDGE_MIN_CELL_COUNT,
     )
 
     assert report.chunk_ix == chunk_ix
     assert report.chunk_iz == chunk_iz
-    assert report.probe_stats.points_received == 9
+    assert report.probe_stats.points_received == len(_RIDGE_CHUNK_COLS) ** 2
     assert report.terrain_skipped is False
     assert report.terrain_stats is not None
-    assert report.terrain_stats.valley_feature_count == 1
-    assert report.terrain_stats.ridge_feature_count == 0
+    # One ridge divides two basins into two qualifying valleys -- the
+    # watershed mechanism's structural shape for a genuine divide, not an
+    # arbitrary count (see the fixture comment above for how this was
+    # confirmed rather than assumed).
+    assert report.terrain_stats.ridge_feature_count == 1
+    assert report.terrain_stats.valley_feature_count == 2
 
     probe_path = probe_store_path(base_path)
     assert probe_path.exists()
@@ -127,12 +214,13 @@ def test_add_probe_chunk_ingests_grids_and_terrain_features(tmp_path: Path) -> N
         probe_path,
         "Syria",
         SCHEMA_VERSION,
-        chunk_size_m=_CHUNK_SIZE_M,
-        probe_spacing_m=_PROBE_SPACING_M,
+        chunk_size_m=_RIDGE_CHUNK_SIZE_M,
+        probe_spacing_m=_RIDGE_PROBE_SPACING_M,
     )
     try:
-        assert sample_probe_grid(probe_conn, "elevation", 1100.0, 1100.0) == -190.0
-        assert sample_probe_grid(probe_conn, "surface_type", 1100.0, 1100.0) == 1.0
+        # Column 8 (x=800) is the first valley's own floor, elevation 0.
+        assert sample_probe_grid(probe_conn, "elevation", 800.0, 800.0) == 0.0
+        assert sample_probe_grid(probe_conn, "surface_type", 800.0, 800.0) == 1.0
         assert (
             chunk_status(probe_conn, "elevation", chunk_ix, chunk_iz)
             == ChunkStatus.QUERIED_WITH_DATA
@@ -145,11 +233,12 @@ def test_add_probe_chunk_ingests_grids_and_terrain_features(tmp_path: Path) -> N
             chunk_status(probe_conn, "valley", chunk_ix, chunk_iz)
             == ChunkStatus.QUERIED_WITH_DATA
         )
-        # No ridge in this fixture -- the kind stays its own tri-state,
-        # never conflated with valley's coverage for the same chunk.
+        # Unlike the old per-cell classifier, this fixture's divide
+        # genuinely produces a qualifying ridge too -- both kinds are
+        # `QUERIED_WITH_DATA`, not one real and one void.
         assert (
             chunk_status(probe_conn, "ridge", chunk_ix, chunk_iz)
-            == ChunkStatus.QUERIED_VOID
+            == ChunkStatus.QUERIED_WITH_DATA
         )
     finally:
         probe_conn.close()
