@@ -947,7 +947,13 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
   file and is withdrawn. The work is the **full 30 GB `.surface5` payload decode** — M7's 1–2 weeks
   with a real chance of stalling, now having stalled twice at the same point.
 
-  **Reopen only if** someone takes on payload addressing deliberately — and the honest read is that
-  it should be driven by the **elevation** need, which benefits identically and has a live defect
-  behind it, rather than by trees. OSM landcover remains the shipping answer for trees and nothing
-  is blocked on this.
+  **Reopen only if** someone takes on payload addressing deliberately — and then cost it as a
+  **terrain-elevation** project that happens to yield trees, not the reverse. The reason is
+  survival rather than sequencing: **trees have a working fallback and elevation does not.** OSM
+  landcover ships today; the missed-AAA class has nothing behind it. A fortnight-long decode
+  justified by the half that already has an alternative is the one that gets dropped at the
+  midpoint, leaving the decode half-done — worse than either finishing it or never starting.
+
+  **The transferable finding is the wall, not either negative:** two attempts from two unrelated
+  payloads reached the identical blocker. That is what stops a third person spending an afternoon
+  rediscovering it. OSM landcover remains the shipping answer for trees; nothing is blocked.

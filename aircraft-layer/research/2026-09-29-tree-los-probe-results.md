@@ -279,10 +279,19 @@ descriptor layer is thoroughly understood; the payload addressing is not, and no
 this pass moved it.
 
 **So the position is: the data exists, is named, is counted, and is per-tree — and is behind a
-decode that has already defeated two attempts.** OSM landcover remains the shipping answer. This is
-worth reopening only if someone wants to spend a fortnight on payload addressing, and the honest
-read is that it should be driven by the *elevation* need (which would benefit identically) rather
-than by trees.
+decode that has already defeated two attempts.** OSM landcover remains the shipping answer.
+
+**If this is ever reopened, cost it as a terrain-elevation project that happens to yield trees, not
+the reverse.** The same payload addressing unlocks both. The reason for the direction is not
+sequencing but survival: **trees have a working fallback and elevation does not.** OSM landcover
+ships today; the missed-AAA class has nothing behind it. A fortnight-long decode justified by the
+half that already has an alternative is the one that gets dropped at the midpoint — leaving the
+decode half-done, which is worse than either finishing it or never starting.
+
+**The transferable finding is the wall itself, not either negative.** Two attempts, from two
+unrelated payloads (elevation node anchors, then tree instance positions), reached the identical
+blocker: the field table's `offset` does not address the payload. That is worth more than either
+individual result, because it is what stops a third person spending an afternoon rediscovering it.
 
 ### The weakness in Finding 2, stated plainly
 
