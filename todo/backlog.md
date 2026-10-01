@@ -44,7 +44,8 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
 ### Added 2026-09-25 (user)
 
-- [ ] **X-B4 — Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**
+- [x] **X-B4 — Probe whether DCS's own `land.isVisible` / `land.getIP` tests trees, and what a call costs.**
+  **CLOSED 2026-10-01** (merge `306ae05`) — answered in full, including the tree half. Details below.
   User direction, 2026-09-25, arising from the vegetation-model decision recorded in
   `body-layer/ROADMAP.md` ("Detection under real world conditions", factor 1). **Gates the 9K113
   half of that decision and nothing else** — the statistical model for naked eye and binoculars
@@ -192,6 +193,15 @@ renumbered, `[x]` items included (root `CLAUDE.md`, "Backlog Management").
 
   **Do not start before `X-B26`'s SRTM-resolution question is settled** — both change
   `line_of_sight_clear`, and doing them in either order separately means touching it twice.
+
+  **The "trees from OSM" row is settled rather than assumed, as of 2026-10-01** (merge `306ae05`).
+  It was the fallback pending an answer; it is now the measured answer. **No DCS call gives
+  tree-aware line of sight** — `isVisible`, `getIP`, `searchObjects` at any volume and
+  `getSurfaceType` are all terrain/scenery only, tested against vehicles the pilot placed inside
+  canopy. The engine has the capability but it is compiled and Petrovich's own verdict is an audio
+  file. DCS's per-tree placement does exist on disk, and is deferred behind the `.surface5`
+  payload-addressing wall (`X-B32`). Full reasoning:
+  `aircraft-layer/research/2026-09-29-tree-los-probe-results.md`.
 
 - [x] **X-B5 — Run Reviewer, Performance Reviewer and Security on this repo's Claude configuration
   itself.** Done 2026-09-27. All three roles ran in worktrees, advisory-only as this item required;
