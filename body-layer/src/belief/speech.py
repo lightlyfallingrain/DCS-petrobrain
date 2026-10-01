@@ -1039,7 +1039,7 @@ def _classification_key(facts: dict[str, object]) -> tuple[object, object]:
     return (classification.get("value"), classification.get("level"))
 
 
-#: `plans/group-undermerging/review.md`'s Finding 1 fix (2026-10-01,
+#: `plans/group-cohesion-redesign/review.md`'s Finding 1 fix (2026-10-01,
 #: superseding a same-day fix that corrected `"a armor"` to `"an armor"`
 #: instead of removing the article). `"Armor"` is a mass noun -- it takes
 #: no indefinite article in any form, so `"an armor"` is not English
@@ -1075,7 +1075,7 @@ _UNDIFFERENTIATED_LEVELS: Final = ("presence", "unknown")
 def _undifferentiated_phrase(count: int) -> str:
     """How `_group_composition_clause` names member(s) with no class/type
     yet, aggregated into one phrase rather than one `"a ground"` per member
-    (the Finding 2 fix, `plans/group-undermerging/review.md`) -- the user's
+    (the Finding 2 fix, `plans/group-cohesion-redesign/review.md`) -- the user's
     own worked examples are the specification: *"SAM and something"* for a
     single undifferentiated member alongside a known one, *"a couple of
     contacts"* / *"two contacts"* for more than one. A lone member is
@@ -1112,7 +1112,7 @@ def _group_composition_clause(member_facts: Sequence[dict[str, object]]) -> str:
 
     **Undifferentiated (`presence`/`unknown` level) members are aggregated
     into one trailing phrase, never counted as their own noun phrase per
-    member.** This was a real defect (`plans/group-undermerging/review.md`
+    member.** This was a real defect (`plans/group-cohesion-redesign/review.md`
     Finding 2): calling `_unit_type_display(None, "presence")` per member
     and composing it like a real class produced `"a ground and a truck"`
     for a 2-member group with one undifferentiated member -- `"ground"` is
@@ -1559,7 +1559,7 @@ def render_group_disclosure(
       every member shares it): `_group_composition_clause` as before --
       `"Armor and truck"` already names each member exactly once, with
       no quantity word to pick between at all and no indefinite article
-      on either (`plans/group-undermerging/review.md` Finding 1).
+      on either (`plans/group-cohesion-redesign/review.md` Finding 1).
 
     A sentence never reaches for both "pair" and "a couple of" together,
     because the classification specificity that selects one rules out the

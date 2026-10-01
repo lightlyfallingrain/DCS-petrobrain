@@ -1274,7 +1274,7 @@ def _cohering_group_store(
 
 def test_group_composition_clause_singular_is_bare_noun() -> None:
     """No indefinite article on a count==1 member (`plans/
-    group-undermerging/review.md` Finding 1) -- matches every other
+    group-cohesion-redesign/review.md` Finding 1) -- matches every other
     singular rendering in this module and the user's own worked examples
     ("AAA in the group", "Shilka and zsu")."""
     facts = [{"classification": {"value": "OP_TRUCK", "level": "class"}}]
@@ -1455,7 +1455,7 @@ def test_render_group_disclosure_mixed_pair_uses_the_composition_clause() -> Non
     clause` already names each member exactly once (`"Armor and truck"`),
     which is unambiguous without a quantity word, matching the
     "differentiated but mixed" rung of the same ladder. No indefinite
-    article on either noun (`plans/group-undermerging/review.md`
+    article on either noun (`plans/group-cohesion-redesign/review.md`
     Finding 1) -- "armor" is a mass noun and takes none in any form, and
     this module's own singular vocabulary never uses one for a count noun
     either (`_contact_report_text`'s single-contact line, the user's own
@@ -1580,7 +1580,7 @@ def test_render_group_disclosure_first_differentiation_is_full_once() -> None:
     could not fail on nonsense output, and did not: it passed unchanged
     while this exact scenario (one differentiated, one still-`presence`
     member) rendered `"A ground and a truck."` (`plans/
-    group-undermerging/review.md` Finding 2) until `_group_composition_
+    group-cohesion-redesign/review.md` Finding 2) until `_group_composition_
     clause` was fixed to aggregate undifferentiated members instead of
     treating `_unit_type_display`'s `"ground"` fallback as a real noun
     phrase."""
@@ -1613,7 +1613,7 @@ def test_render_group_disclosure_first_differentiation_is_full_once() -> None:
     # member leads, the still-undifferentiated member is "something"
     # (matching the user's own "SAM and something" example), not a
     # counted noun phrase of its own. No indefinite article on "truck"
-    # either (`plans/group-undermerging/review.md` Finding 1).
+    # either (`plans/group-cohesion-redesign/review.md` Finding 1).
     assert speech.text == "Truck and something."
 
 

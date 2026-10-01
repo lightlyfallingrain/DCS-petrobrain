@@ -2803,7 +2803,7 @@ def test_report_speaks_a_persisted_group_through_render_group_full_disclosure(
 
     Named and checked against `render_group_full_disclosure`, not `render_
     group_disclosure` -- that was this test's own staleness (`plans/
-    group-undermerging/review.md`, Optional Refinement): production code
+    group-cohesion-redesign/review.md`, Optional Refinement): production code
     was changed to call `render_group_full_disclosure` for this path, but
     this test still named and called `render_group_disclosure` directly,
     and passed only because the group here has never been spoken, where

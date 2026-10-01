@@ -75,10 +75,4 @@ threat-leading) are unchanged and were already asserted by the tests above.
   not evidence of correct wording when the wording itself was never independently checked
   against the specification (the user's own worked utterances) — only against whatever the
   implementation happened to produce at write time.
-- **`plans/group-undermerging/review.md` does not exist and never has** (`git log --all` on the
-  path returns nothing), despite being cited as the source of "Finding 1"/"Finding 2" in several
-  docstrings and comments already in this file before this round (`_undifferentiated_phrase`,
-  the `OutgoingSpeech.content_signature` entry, and the previous round's own commit message).
-  Either the review was conducted but its document was never committed, or the citation was
-  aspirational. Flagging rather than fixing — writing that review document is Reviewer's job, not
-  Implementer's, and I did not want to fabricate review content to make the citation resolve.
+- **Citation path corrected, 2026-10-01.** Code comments and test docstrings from the two fix rounds cited `plans/group-undermerging/review.md`, which does not exist. The review they mean is `plans/group-cohesion-redesign/review.md` — same findings, the other plan directory. The implementer was right to flag it rather than invent the file; the references now point at the real one.
